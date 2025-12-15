@@ -716,7 +716,6 @@
 
 ### Student Tags Catalog (2025-11)
 - Tenant tag definitions live in the tenant `Settings` row keyed `student_tags` (JSONB array of `{ id, name }`).
-  - Other system (TutTiud): stored under tenant schema `tuttiud`.
 - Backend: `GET /api/settings/student-tags` returns the catalog for any org member; `POST /api/settings/student-tags` appends a tag (admin/owner only) and regenerates the row via Supabase upsert.
 - Frontend: use `useStudentTags()` (`src/features/students/hooks/useStudentTags.js`) to load/create tags and render `StudentTagsField.jsx` for the dropdown + admin-only creation modal in student forms.
 - Tag normalization helpers live in `src/features/students/utils/tags.js`; reuse `normalizeTagIdsForWrite` and `buildTagDisplayList` whenever sending or displaying student tags to keep the uuid[] contract authoritative.
@@ -725,14 +724,12 @@
   - Edit existing tag names (updates propagate to all tagged students via settings catalog)
   - Delete tags with confirmation guard; deletion removes tag from catalog and all student rows via `/api/students-remove-tag`
   - Backend may use a tenant-side `remove_tag_from_students(tag_uuid)` PostgreSQL function for efficient bulk removal with fallback to manual iteration
-    - Other system (TutTiud): implemented as `tuttiud.remove_tag_from_students(tag_uuid)`.
   - Tag deletion is permanent; confirmation dialog warns users that operation cannot be undone
   - Full RTL support with proper Hebrew text alignment and flex-row-reverse layouts
 
 ### Instructor Types and Document Management (2025-11)
 - **Instructor Types**: Similar to student tags, instructors can be categorized by type (e.g., "Therapist", "Volunteer", "Staff")
   - Tenant type definitions live in the tenant `Settings` row keyed `instructor_types` (JSONB array of `{ id, name }`)
-    - Other system (TutTiud): stored under tenant schema `tuttiud`.
   - **Database schema**: `Instructors.instructor_types` (uuid array) column added in setup script. The legacy `Instructors.files` (jsonb) column is **DEPRECATED** and no longer created on fresh deployments.
   - Frontend hook: `useInstructorTypes()` (`src/features/instructors/hooks/useInstructorTypes.js`) provides load/create/update/delete operations
   - Management UI: **Unified `TagsManager.jsx`** in Settings manages both student tags and instructor types via mode toggle

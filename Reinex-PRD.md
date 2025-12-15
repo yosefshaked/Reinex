@@ -70,8 +70,7 @@ Billing (future)
 All tenants authenticate here.
 
 1.2 Tenant DB (Per Organization)
-Future direction: All business logic + data under public schema.
-Legacy schema tuttiud remains accessible but will be merged into public in later refactors.
+All business logic + data live under the tenant `public` schema.
 
 2. Core Domain: Lessons & Scheduling
 2.1 Weekly Lesson Templates

@@ -196,8 +196,8 @@ function DesktopNavigation({ navItems = [], onSignOut, onOpenSessionModal }) {
         <div className="flex flex-col gap-md px-lg pt-lg">
           <Link to="/dashboard" className="flex items-center justify-end gap-sm text-right flex-row-reverse">
             <div className="space-y-1">
-              <p className="text-sm font-semibold text-foreground">תותיעוד</p>
-              <p className="text-xs text-neutral-500">פלטפורמת תלמידים</p>
+              <p className="text-sm font-semibold text-foreground">Reinex</p>
+              <p className="text-xs text-neutral-500">ניהול וארגון</p>
             </div>
             <div className="flex items-center justify-center">
               <OrgLogo />

@@ -219,11 +219,11 @@ function generatePdfHtml(student, sessions, formConfig, logoUrl, customLogoUrl) 
   const logoSection = customLogoUrl
     ? `
       <div class="header-logos">
-        <img src="${escapeHtml(logoUrl)}" alt="TutTiud" class="logo" />
+        <img src="${escapeHtml(logoUrl)}" alt="Reinex" class="logo" />
         <img src="${escapeHtml(customLogoUrl)}" alt="Organization Logo" class="logo" />
       </div>
     `
-    : `<img src="${escapeHtml(logoUrl)}" alt="TutTiud" class="logo-single" />`;
+    : `<img src="${escapeHtml(logoUrl)}" alt="Reinex" class="logo-single" />`;
 
   return `
 <!DOCTYPE html>
@@ -457,7 +457,7 @@ function generatePdfHtml(student, sessions, formConfig, logoUrl, customLogoUrl) 
   </div>
   
   <div class="footer">
-    <p>מסמך זה נוצר באמצעות מערכת TutTiud לניהול רישומי מפגשים</p>
+    <p>מסמך זה נוצר באמצעות מערכת Reinex לניהול רישומי מפגשים</p>
   </div>
 </body>
 </html>

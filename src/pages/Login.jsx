@@ -151,7 +151,7 @@ export default function Login() {
         <div className="flex items-center justify-center gap-3">
           <ShieldCheck className="w-10 h-10" />
           <div className="text-center">
-            <p className="text-sm text-blue-100">תותיעוד • פלטפורמת ניהול עובדים</p>
+            <p className="text-sm text-blue-100">Reinex • פלטפורמת ניהול</p>
             <h1 className="text-2xl font-bold">כניסה לחשבון</h1>
           </div>
         </div>

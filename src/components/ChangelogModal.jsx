@@ -1525,14 +1525,14 @@ export default function ChangelogModal({ open, onClose }) {
                   color: '#1e293b',
                   lineHeight: 1.4
                 }}>
-                  🎉 השקת תותיעוד - מערכת ניהול תלמידים ומפגשים
+                  🎉 השקת Reinex - מערכת ניהול תלמידים ומפגשים
                 </h3>
               </header>
 
               {expandedVersions['1.0.0'] && (
               <section style={{ paddingRight: '16px' }}>
                 <p style={{ margin: '0 0 16px', color: '#475569', lineHeight: 1.6 }}>
-                  ברוכים הבאים למערכת תותיעוד! פלטפורמה מקצועית לניהול תלמידים, תיעוד מפגשים ומעקב אחר התקדמות.
+                  ברוכים הבאים למערכת Reinex! פלטפורמה מקצועית לניהול תלמידים, תיעוד מפגשים ומעקב אחר התקדמות.
                 </p>
 
                 <h4 style={{ fontWeight: 600, fontSize: 16, margin: '16px 0 8px', color: '#334155' }}>
