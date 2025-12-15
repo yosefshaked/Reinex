@@ -1,0 +1,275 @@
+/* Modern Calendar Styles - Professional 2025 Design */
+
+.modern-calendar-wrapper {
+  --calendar-bg: hsl(var(--background));
+  --calendar-surface: hsl(var(--surface));
+  --calendar-border: hsl(var(--border));
+  --calendar-muted: hsl(var(--muted));
+  --calendar-foreground: hsl(var(--foreground));
+  --calendar-primary: hsl(var(--primary));
+  
+  direction: rtl;
+  font-family: 'Nunito', system-ui, sans-serif;
+}
+
+/* Override default React Big Calendar styles with modern design */
+.modern-calendar-wrapper .rbc-calendar {
+  background: var(--calendar-surface);
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+}
+
+/* Modern Toolbar */
+.modern-calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--calendar-surface);
+  border-bottom: 1px solid var(--calendar-border);
+  flex-wrap: wrap;
+}
+
+.toolbar-navigation {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.toolbar-label {
+  flex: 1;
+  text-align: center;
+}
+
+.toolbar-views {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: hsl(var(--muted) / 0.4);
+  border-radius: 9999px;
+  border: 1px solid hsl(var(--border) / 0.6);
+}
+
+/* Week/Day View Header - Full Date Display */
+.modern-calendar-wrapper .rbc-header {
+  background: var(--calendar-muted);
+  border-bottom: 2px solid var(--calendar-border);
+  padding: 1rem 0.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--calendar-foreground);
+  min-height: 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.modern-calendar-wrapper .rbc-today {
+  background-color: hsl(var(--primary) / 0.05);
+}
+
+.modern-calendar-wrapper .rbc-header.rbc-today {
+  background: var(--calendar-primary);
+  color: white;
+}
+
+/* Time Gutter (left column with times) */
+.modern-calendar-wrapper .rbc-time-gutter {
+  background: var(--calendar-surface);
+  border-left: 1px solid var(--calendar-border);
+}
+
+.modern-calendar-wrapper .rbc-time-slot {
+  border-top: 1px solid hsl(var(--border) / 0.3);
+  min-height: 44px;
+}
+
+.modern-calendar-wrapper .rbc-label {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  padding-right: 0.5rem;
+  text-align: right;
+}
+
+/* Day Columns */
+.modern-calendar-wrapper .rbc-day-slot {
+  background: var(--calendar-bg);
+  border-right: 1px solid var(--calendar-border);
+}
+
+.modern-calendar-wrapper .rbc-time-column {
+  background: var(--calendar-bg);
+}
+
+/* Modern Event Styling - Prevent Overlap */
+.modern-calendar-wrapper .rbc-event {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0.5rem;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  /* Prevent overlap - force each event to take its own space */
+  position: relative !important;
+}
+
+.modern-calendar-wrapper .rbc-event:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-1px);
+  z-index: 10;
+}
+
+.modern-calendar-wrapper .rbc-event:focus {
+  outline: 2px solid var(--calendar-primary);
+  outline-offset: 2px;
+  z-index: 10;
+}
+
+/* Force events to stack side-by-side, not overlap */
+.modern-calendar-wrapper .rbc-events-container {
+  margin: 0 !important;
+}
+
+.modern-calendar-wrapper .rbc-event-content {
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.modern-event-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  height: 100%;
+  border-radius: 0.5rem;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.event-student-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-status-icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+  opacity: 0.9;
+}
+
+/* Event Labels (time display) */
+.modern-calendar-wrapper .rbc-event-label {
+  display: none; /* Hide default time label for cleaner look */
+}
+
+/* Selected Event */
+.modern-calendar-wrapper .rbc-selected {
+  box-shadow: 0 0 0 2px white, 0 0 0 4px var(--calendar-primary);
+}
+
+/* Time Indicator (current time line) */
+.modern-calendar-wrapper .rbc-current-time-indicator {
+  background-color: var(--calendar-primary);
+  height: 2px;
+}
+
+.modern-calendar-wrapper .rbc-current-time-indicator::before {
+  content: '';
+  position: absolute;
+  right: -6px;
+  top: -5px;
+  width: 12px;
+  height: 12px;
+  background-color: var(--calendar-primary);
+  border-radius: 50%;
+  border: 2px solid white;
+}
+
+/* Overlapping Events */
+.modern-calendar-wrapper .rbc-events-container {
+  margin-right: 0;
+}
+
+.modern-calendar-wrapper .rbc-event-content {
+  overflow: hidden;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .modern-calendar-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .toolbar-label {
+    order: -1;
+    text-align: center;
+    margin-bottom: 0.5rem;
+  }
+  
+  .toolbar-navigation {
+    justify-content: center;
+  }
+  
+  .toolbar-views {
+    justify-content: center;
+  }
+  
+  .modern-calendar-wrapper .rbc-time-slot {
+    min-height: 40px;
+  }
+  
+  .modern-event-content {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.7rem;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .modern-calendar-wrapper .rbc-calendar {
+    box-shadow: 0 1px 3px 0 rgb(255 255 255 / 0.05);
+  }
+  
+  .modern-calendar-wrapper .rbc-event {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+  
+  .modern-calendar-wrapper .rbc-event:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* Custom scrollbar for calendar */
+.modern-calendar-wrapper .rbc-time-content {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted)) transparent;
+}
+
+.modern-calendar-wrapper .rbc-time-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modern-calendar-wrapper .rbc-time-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modern-calendar-wrapper .rbc-time-content::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted));
+  border-radius: 4px;
+}
+
+.modern-calendar-wrapper .rbc-time-content::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground));
+}

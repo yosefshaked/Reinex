@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 100" role="img" aria-labelledby="title desc">
+  <title id="title">לוגו תותיעוד</title>
+  <desc id="desc">לוגו אופקי זמני של תותיעוד</desc>
+  <defs>
+    <linearGradient id="tuttiud-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1d4ed8" />
+      <stop offset="50%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#0ea5e9" />
+    </linearGradient>
+  </defs>
+  <rect x="0" y="10" width="320" height="80" rx="20" fill="#f8fafc" />
+  <rect x="8" y="18" width="304" height="64" rx="16" fill="url(#tuttiud-gradient)" />
+  <text
+    x="160"
+    y="60"
+    font-family="'Segoe UI', 'Alef', sans-serif"
+    font-size="42"
+    font-weight="700"
+    text-anchor="middle"
+    fill="#ffffff"
+  >TutTiud</text>
+</svg>

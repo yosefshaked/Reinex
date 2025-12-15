@@ -1,0 +1,94 @@
+TutTiud Proprietary Source-Available License
+
+Copyright (c) 2025 Shaked Yossef (ThePCRunners)
+All rights reserved.
+
+1. PURPOSE AND SCOPE
+   This repository is made publicly accessible solely for code review, transparency, and 
+   security evaluation. Public availability does NOT constitute a grant of any rights to 
+   use, deploy, modify, or distribute the software for any purpose without the express 
+   written permission of the copyright owner.
+
+2. VIEWING RIGHTS ONLY (No Use Rights)
+   - You may view, read, and clone this repository for personal code review and evaluation.
+   - You may NOT use, run, execute, deploy, or incorporate this software (in whole or in part) 
+     in any production, development, testing, or internal business environment.
+   - You may NOT provide this software as a service (SaaS) or offer it to others in any form.
+   - You may NOT use this software for commercial purposes or profit-generating activities.
+
+3. NO REDISTRIBUTION OR DERIVATIVES
+   - You may NOT redistribute, sublicense, or publish this software or any portion of it.
+   - You may NOT create, use, or distribute derivative works or modified versions without 
+     explicit written permission from the copyright owner.
+   - Private modifications for non-commercial, non-profitable purposes require prior written 
+     permission and are subject to the attribution requirements below.
+
+4. PERMISSION-BASED USE
+   If you wish to use this software (including modified versions) for any purpose:
+   a) You MUST obtain explicit, written permission from the copyright owner.
+   b) Any granted permission is subject to mandatory attribution requirements:
+      - You MUST include "Based on: TutTiud by ThePCRunners" in a visible location 
+        within your application (e.g., footer, about page, credits section).
+      - You MUST include attribution in your Terms of Service or other publicly 
+        accessible documentation.
+   c) Permission, if granted, may include additional terms, fees, or restrictions.
+
+5. COMMERCIAL AND INTERNAL USE PROHIBITED
+   - Commercial use, internal business use, for-profit use, resale, hosting, and 
+     software-as-a-service (SaaS) are PROHIBITED without the owner's prior written permission.
+   - "Internal business use" includes use within a company, organization, or entity 
+     for any internal purpose, regardless of whether profit is generated.
+
+6. CONTRIBUTIONS
+   If you submit code, documentation, bug reports, or other materials ("Contributions"), 
+   you agree to license those Contributions to the copyright owner on a perpetual, 
+   worldwide, irrevocable, royalty-free, non-exclusive basis for use, modification, and 
+   incorporation into this project. You represent that you have the legal right to make 
+   such Contributions.
+
+7. NO TRADEMARK OR BRANDING RIGHTS
+   This license does not grant permission to use the project's name ("TutTiud"), 
+   trade names, trademarks, service marks, logos, or branding elements. Use of these 
+   requires separate written permission.
+
+8. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, 
+   INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR 
+   PURPOSE, TITLE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS 
+   BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+   TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE 
+   OR OTHER DEALINGS IN THE SOFTWARE.
+
+9. LIMITATION OF LIABILITY
+   TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE COPYRIGHT OWNER SHALL NOT BE LIABLE FOR 
+   ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT 
+   NOT LIMITED TO LOSS OF PROFITS, DATA, OR USE, ARISING OUT OF OR RELATED TO THIS 
+   LICENSE OR THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+10. TERMINATION
+    Any breach of this License automatically terminates your rights under this License. 
+    Upon termination, you MUST immediately:
+    - Cease all use of the software
+    - Destroy or delete all copies in your possession or control
+    - Cease any distribution or provision of the software to others
+
+11. GOVERNING LAW AND JURISDICTION
+    This License shall be governed by and construed in accordance with the laws of 
+    Israel, without regard to conflict of law principles. 
+    Any disputes arising under this License shall be resolved in the courts of Israel.
+
+12. CONTACT FOR PERMISSIONS AND LICENSING
+    To request permission for use, modification, distribution, commercial licensing, 
+    or any other rights not granted herein, contact:
+    
+    Shaked Yossef (ThePCRunners)
+    shaked@thepcrunners.com
+
+13. ENTIRE AGREEMENT
+    This License constitutes the entire agreement between you and the copyright owner 
+    concerning the software and supersedes all prior agreements or understandings, 
+    whether written or oral.
+
+NOTE: This is a proprietary, source-available license. It is NOT an OSI-approved open-source 
+license. The source code is visible for transparency, but no usage rights are granted without 
+explicit written permission from the copyright owner.

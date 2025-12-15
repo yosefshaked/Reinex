@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resource Timeline Week View Demo - TutTiud</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+            direction: rtl;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: #1a1a1a;
+            color: white;
+            padding: 20px 30px;
+            border-bottom: 3px solid #3b82f6;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 30px;
+            border-bottom: 1px solid #e5e5e5;
+            background: #fafafa;
+        }
+
+        .toolbar button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .toolbar button:hover {
+            background: #2563eb;
+        }
+
+        .toolbar .week-label {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .timeline {
+            overflow-x: auto;
+            padding: 20px 0;
+        }
+
+        .timeline-inner {
+            min-width: 1200px;
+            padding: 0 30px;
+        }
+
+        /* Time header row */
+        .time-header {
+            display: flex;
+            border-bottom: 2px solid #333;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+        }
+
+        .instructor-label {
+            width: 180px;
+            flex-shrink: 0;
+            font-weight: 700;
+            font-size: 14px;
+            color: #333;
+            padding-right: 15px;
+        }
+
+        .time-columns {
+            flex: 1;
+            display: flex;
+        }
+
+        .day-column {
+            flex: 1;
+            min-width: 200px;
+            border-right: 1px solid #ddd;
+        }
+
+        .day-column:last-child {
+            border-right: none;
+        }
+
+        .day-name {
+            font-weight: 600;
+            font-size: 13px;
+            color: #666;
+            text-align: center;
+            margin-bottom: 5px;
+        }
+
+        .day-date {
+            font-size: 11px;
+            color: #999;
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .hours {
+            display: flex;
+            border-top: 1px solid #eee;
+            padding-top: 5px;
+        }
+
+        .hour-slot {
+            flex: 1;
+            text-align: center;
+            font-size: 10px;
+            color: #aaa;
+            border-right: 1px solid #f0f0f0;
+        }
+
+        .hour-slot:first-child {
+            border-right: none;
+        }
+
+        /* Instructor row */
+        .instructor-row {
+            display: flex;
+            border-bottom: 1px solid #eee;
+            padding: 12px 0;
+            transition: background 0.2s;
+        }
+
+        .instructor-row:hover {
+            background: #f9f9f9;
+        }
+
+        .instructor-name {
+            width: 180px;
+            flex-shrink: 0;
+            padding-right: 15px;
+        }
+
+        .instructor-name-text {
+            font-weight: 600;
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 3px;
+        }
+
+        .instructor-count {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .timeline-lane {
+            flex: 1;
+            position: relative;
+            min-height: 50px;
+            display: flex;
+        }
+
+        .day-lane {
+            flex: 1;
+            position: relative;
+            border-right: 1px solid #eee;
+        }
+
+        .day-lane:last-child {
+            border-right: none;
+        }
+
+        /* Hour grid lines within each day */
+        .hour-grid {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+        }
+
+        .hour-line {
+            flex: 1;
+            border-right: 1px solid #f5f5f5;
+        }
+
+        .hour-line:last-child {
+            border-right: none;
+        }
+
+        /* Session chips */
+        .session {
+            position: absolute;
+            top: 5px;
+            height: 36px;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 12px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
+        .session:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            z-index: 10;
+        }
+
+        .session.completed {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            border: 2px solid #047857;
+        }
+
+        .session.missing {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            border: 2px solid #b91c1c;
+        }
+
+        .session.upcoming {
+            background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
+            color: white;
+            border: 2px solid #475569;
+        }
+
+        .session-icon {
+            font-size: 14px;
+        }
+
+        .session-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            padding: 20px;
+            border-top: 2px solid #e5e5e5;
+            background: #fafafa;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .legend-box {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            border: 2px solid;
+        }
+
+        .legend-box.completed {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border-color: #047857;
+        }
+
+        .legend-box.missing {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            border-color: #b91c1c;
+        }
+
+        .legend-box.upcoming {
+            background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
+            border-color: #475569;
+        }
+
+        .note {
+            background: #fffbeb;
+            border: 2px solid #fbbf24;
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin: 20px 30px;
+            font-size: 14px;
+            color: #92400e;
+        }
+
+        .note strong {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 15px;
+            color: #78350f;
+        }
+
+        .note ul {
+            margin-top: 10px;
+            padding-right: 20px;
+        }
+
+        .note li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>תצוגת ציר זמן שבועי - דמו</h1>
+            <p>דוגמה לתצוגה מפורטת של לוח שבועי עם משאבים (מדריכים)</p>
+        </div>
+
+        <div class="toolbar">
+            <button>← שבוע קודם</button>
+            <div class="week-label">09.11.2025 - 15.11.2025</div>
+            <button>שבוע הבא →</button>
+        </div>
+
+        <div class="note">
+            <strong>💡 זוהי דמו של תצוגת Week Resource Timeline</strong>
+            <p>
+                תצוגה זו מציגה את כל השבוע (5 ימים) במבט אחד. כל מדריך מקבל שורה משלו, 
+                והשיעורים מוצגים כפסי זמן מדויקים לפי השעה.
+            </p>
+            <ul>
+                <li>✅ <strong>יתרונות:</strong> מבט כולל על כל השבוע, זיהוי מהיר של פערים, תכנון קיבולת</li>
+                <li>⚠️ <strong>אתגרים:</strong> דורש גלילה אופקית ארוכה (40+ עמודות שעות), יכול להיות צפוף עם הרבה מדריכים</li>
+                <li>📱 <strong>מובייל:</strong> מתאים רק למצב landscape (מסך אופקי)</li>
+            </ul>
+        </div>
+
+        <div class="timeline">
+            <div class="timeline-inner">
+                <!-- Time Header -->
+                <div class="time-header">
+                    <div class="instructor-label">מדריך</div>
+                    <div class="time-columns">
+                        <!-- Monday -->
+                        <div class="day-column">
+                            <div class="day-name">יום ראשון</div>
+                            <div class="day-date">09.11</div>
+                            <div class="hours">
+                                <div class="hour-slot">08:00</div>
+                                <div class="hour-slot">09:00</div>
+                                <div class="hour-slot">10:00</div>
+                                <div class="hour-slot">11:00</div>
+                                <div class="hour-slot">12:00</div>
+                                <div class="hour-slot">13:00</div>
+                                <div class="hour-slot">14:00</div>
+                                <div class="hour-slot">15:00</div>
+                            </div>
+                        </div>
+                        <!-- Tuesday -->
+                        <div class="day-column">
+                            <div class="day-name">יום שני</div>
+                            <div class="day-date">10.11</div>
+                            <div class="hours">
+                                <div class="hour-slot">08:00</div>
+                                <div class="hour-slot">09:00</div>
+                                <div class="hour-slot">10:00</div>
+                                <div class="hour-slot">11:00</div>
+                                <div class="hour-slot">12:00</div>
+                                <div class="hour-slot">13:00</div>
+                                <div class="hour-slot">14:00</div>
+                                <div class="hour-slot">15:00</div>
+                            </div>
+                        </div>
+                        <!-- Wednesday -->
+                        <div class="day-column">
+                            <div class="day-name">יום שלישי</div>
+                            <div class="day-date">11.11</div>
+                            <div class="hours">
+                                <div class="hour-slot">08:00</div>
+                                <div class="hour-slot">09:00</div>
+                                <div class="hour-slot">10:00</div>
+                                <div class="hour-slot">11:00</div>
+                                <div class="hour-slot">12:00</div>
+                                <div class="hour-slot">13:00</div>
+                                <div class="hour-slot">14:00</div>
+                                <div class="hour-slot">15:00</div>
+                            </div>
+                        </div>
+                        <!-- Thursday -->
+                        <div class="day-column">
+                            <div class="day-name">יום רביעי</div>
+                            <div class="day-date">12.11</div>
+                            <div class="hours">
+                                <div class="hour-slot">08:00</div>
+                                <div class="hour-slot">09:00</div>
+                                <div class="hour-slot">10:00</div>
+                                <div class="hour-slot">11:00</div>
+                                <div class="hour-slot">12:00</div>
+                                <div class="hour-slot">13:00</div>
+                                <div class="hour-slot">14:00</div>
+                                <div class="hour-slot">15:00</div>
+                            </div>
+                        </div>
+                        <!-- Friday -->
+                        <div class="day-column">
+                            <div class="day-name">יום חמישי</div>
+                            <div class="day-date">13.11</div>
+                            <div class="hours">
+                                <div class="hour-slot">08:00</div>
+                                <div class="hour-slot">09:00</div>
+                                <div class="hour-slot">10:00</div>
+                                <div class="hour-slot">11:00</div>
+                                <div class="hour-slot">12:00</div>
+                                <div class="hour-slot">13:00</div>
+                                <div class="hour-slot">14:00</div>
+                                <div class="hour-slot">15:00</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Instructor 1: גיל אברהם -->
+                <div class="instructor-row">
+                    <div class="instructor-name">
+                        <div class="instructor-name-text">גיל אברהם</div>
+                        <div class="instructor-count">18 שיעורים השבוע</div>
+                    </div>
+                    <div class="timeline-lane">
+                        <!-- Monday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session completed" style="left: 0%; width: 11%; top: 5px;" title="08:00 - דני כהן">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">דני כהן</span>
+                            </div>
+                            <div class="session missing" style="left: 12.5%; width: 11%; top: 5px;" title="09:00 - מיכל ברק">
+                                <span class="session-icon">✗</span>
+                                <span class="session-name">מיכל ברק</span>
+                            </div>
+                            <div class="session completed" style="left: 25%; width: 11%; top: 5px;" title="10:00 - יוסי שקד">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">יוסי שקד</span>
+                            </div>
+                            <div class="session completed" style="left: 50%; width: 11%; top: 5px;" title="12:00 - רונית לוי">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">רונית לוי</span>
+                            </div>
+                        </div>
+                        <!-- Tuesday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session completed" style="left: 12.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">אלון רביב</span>
+                            </div>
+                            <div class="session missing" style="left: 25%; width: 11%; top: 5px;">
+                                <span class="session-icon">✗</span>
+                                <span class="session-name">דנה כהן</span>
+                            </div>
+                            <div class="session upcoming" style="left: 75%; width: 11%; top: 5px;">
+                                <span class="session-icon">⚠</span>
+                                <span class="session-name">רון אביב</span>
+                            </div>
+                        </div>
+                        <!-- Wednesday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session completed" style="left: 0%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">ליאור גבע</span>
+                            </div>
+                            <div class="session completed" style="left: 37.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">תמר שמש</span>
+                            </div>
+                            <div class="session completed" style="left: 62.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">עידו מור</span>
+                            </div>
+                        </div>
+                        <!-- Thursday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session missing" style="left: 12.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">✗</span>
+                                <span class="session-name">נועה ברון</span>
+                            </div>
+                            <div class="session completed" style="left: 50%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">אורי כץ</span>
+                            </div>
+                        </div>
+                        <!-- Friday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session upcoming" style="left: 0%; width: 11%; top: 5px;">
+                                <span class="session-icon">⚠</span>
+                                <span class="session-name">שי לב</span>
+                            </div>
+                            <div class="session upcoming" style="left: 25%; width: 11%; top: 5px;">
+                                <span class="session-icon">⚠</span>
+                                <span class="session-name">מאיה דור</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Instructor 2: שרה כהן -->
+                <div class="instructor-row">
+                    <div class="instructor-name">
+                        <div class="instructor-name-text">שרה כהן</div>
+                        <div class="instructor-count">15 שיעורים השבוע</div>
+                    </div>
+                    <div class="timeline-lane">
+                        <!-- Monday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session completed" style="left: 25%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">אביב גולן</span>
+                            </div>
+                            <div class="session completed" style="left: 37.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">יעל ברוך</span>
+                            </div>
+                            <div class="session missing" style="left: 62.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">✗</span>
+                                <span class="session-name">רועי פרץ</span>
+                            </div>
+                        </div>
+                        <!-- Tuesday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session completed" style="left: 0%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">גל חן</span>
+                            </div>
+                            <div class="session completed" style="left: 50%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">אדיר מילר</span>
+                            </div>
+                        </div>
+                        <!-- Wednesday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session missing" style="left: 12.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">✗</span>
+                                <span class="session-name">לי אשכול</span>
+                            </div>
+                            <div class="session missing" style="left: 25%; width: 11%; top: 5px;">
+                                <span class="session-icon">✗</span>
+                                <span class="session-name">נדב זהר</span>
+                            </div>
+                            <div class="session completed" style="left: 75%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">מור שחר</span>
+                            </div>
+                        </div>
+                        <!-- Thursday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session completed" style="left: 0%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">שחר נוי</span>
+                            </div>
+                            <div class="session completed" style="left: 37.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">בר עוז</span>
+                            </div>
+                        </div>
+                        <!-- Friday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session upcoming" style="left: 12.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">⚠</span>
+                                <span class="session-name">רוני אלון</span>
+                            </div>
+                            <div class="session upcoming" style="left: 37.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">⚠</span>
+                                <span class="session-name">טל ים</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Instructor 3: דוד לוי -->
+                <div class="instructor-row">
+                    <div class="instructor-name">
+                        <div class="instructor-name-text">דוד לוי</div>
+                        <div class="instructor-count">12 שיעורים השבוע</div>
+                    </div>
+                    <div class="timeline-lane">
+                        <!-- Monday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session completed" style="left: 12.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">איתי כהן</span>
+                            </div>
+                            <div class="session completed" style="left: 50%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">נוי דוד</span>
+                            </div>
+                        </div>
+                        <!-- Tuesday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session missing" style="left: 37.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">✗</span>
+                                <span class="session-name">חן גור</span>
+                            </div>
+                            <div class="session completed" style="left: 62.5%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">עדן שלו</span>
+                            </div>
+                        </div>
+                        <!-- Wednesday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session completed" style="left: 0%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">עומר רז</span>
+                            </div>
+                            <div class="session missing" style="left: 25%; width: 11%; top: 5px;">
+                                <span class="session-icon">✗</span>
+                                <span class="session-name">שני בר</span>
+                            </div>
+                            <div class="session completed" style="left: 50%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">אופק דן</span>
+                            </div>
+                        </div>
+                        <!-- Thursday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session completed" style="left: 25%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">רות מור</span>
+                            </div>
+                            <div class="session completed" style="left: 75%; width: 11%; top: 5px;">
+                                <span class="session-icon">✓</span>
+                                <span class="session-name">איל כהן</span>
+                            </div>
+                        </div>
+                        <!-- Friday -->
+                        <div class="day-lane">
+                            <div class="hour-grid">
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                                <div class="hour-line"></div>
+                            </div>
+                            <div class="session upcoming" style="left: 0%; width: 11%; top: 5px;">
+                                <span class="session-icon">⚠</span>
+                                <span class="session-name">עמית לוי</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-box completed"></div>
+                <span>✓ מתועד</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box missing"></div>
+                <span>✗ חסר תיעוד</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box upcoming"></div>
+                <span>⚠ קרוב</span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

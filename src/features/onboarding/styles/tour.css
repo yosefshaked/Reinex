@@ -1,0 +1,254 @@
+/* Custom tour styling for TutTiud */
+
+/* Root overlay container */
+.tt-tour-root {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+}
+
+/* SVG overlay with mask */
+.tt-tour-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+}
+
+/* Popover container */
+.tt-tour-popover {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: auto;
+  direction: rtl;
+  text-align: right;
+  max-width: 420px;
+  width: calc(100vw - 32px);
+}
+
+/* Card wrapper with shadow and background */
+.tt-tour-card {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25), 0 8px 16px rgba(0, 0, 0, 0.15);
+  padding: 24px;
+  position: relative;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+/* Close button - top left for RTL */
+.tt-tour-close {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  z-index: 10;
+  padding: 0;
+}
+
+.tt-tour-close:hover {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+.tt-tour-close:active {
+  background-color: #e5e7eb;
+  transform: scale(0.95);
+}
+
+/* Title */
+.tt-tour-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 12px;
+  padding-left: 40px; /* Space for close button */
+  line-height: 1.3;
+}
+
+/* Description */
+.tt-tour-desc {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #4b5563;
+  margin-bottom: 20px;
+}
+
+/* Footer container */
+.tt-tour-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Progress bar container */
+.tt-tour-progress {
+  height: 6px;
+  background-color: #e5e7eb;
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Progress bar fill */
+.tt-tour-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2563eb 0%, #3b82f6 100%);
+  border-radius: 3px;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 8px rgba(37, 99, 235, 0.4);
+}
+
+/* Action buttons container */
+.tt-tour-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-start;
+}
+
+/* Base button styles */
+.tt-tour-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 44px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Previous button */
+.tt-tour-prev {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+.tt-tour-prev:hover:not(:disabled) {
+  background-color: #e5e7eb;
+}
+
+.tt-tour-prev:active:not(:disabled) {
+  background-color: #d1d5db;
+  transform: scale(0.98);
+}
+
+.tt-tour-prev:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Next/Done button */
+.tt-tour-next {
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.tt-tour-next:hover {
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+  transform: translateY(-1px);
+}
+
+.tt-tour-next:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .tt-tour-popover {
+    max-width: calc(100vw - 24px);
+    width: calc(100vw - 24px);
+  }
+
+  .tt-tour-card {
+    padding: 20px;
+  }
+
+  .tt-tour-title {
+    font-size: 18px;
+    padding-left: 36px;
+  }
+
+  .tt-tour-desc {
+    font-size: 14px;
+    margin-bottom: 16px;
+  }
+
+  .tt-tour-close {
+    top: 12px;
+    left: 12px;
+    width: 28px;
+    height: 28px;
+    font-size: 24px;
+  }
+
+  .tt-tour-btn {
+    padding: 10px 20px;
+    font-size: 14px;
+  }
+
+  .tt-tour-actions {
+    gap: 10px;
+  }
+
+  .tt-tour-footer {
+    gap: 14px;
+  }
+}
+
+/* Dark mode support (if ever added) */
+@media (prefers-color-scheme: dark) {
+  .tt-tour-card {
+    background: #1f2937;
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .tt-tour-title {
+    color: #f9fafb;
+  }
+
+  .tt-tour-desc {
+    color: #d1d5db;
+  }
+
+  .tt-tour-close {
+    color: #9ca3af;
+  }
+
+  .tt-tour-close:hover {
+    background-color: #374151;
+    color: #e5e7eb;
+  }
+
+  .tt-tour-prev {
+    background-color: #374151;
+    color: #e5e7eb;
+  }
+
+  .tt-tour-prev:hover:not(:disabled) {
+    background-color: #4b5563;
+  }
+
+  .tt-tour-progress {
+    background-color: #374151;
+  }
+}
+

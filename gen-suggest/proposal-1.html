@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Weekly Heatmap – Proposal 1 (Refined Card Layout)</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Inter", "Assistant", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --card-bg: #ffffff;
+      --subtle-bg: #f7f7fb;
+      --border: #e3e8ef;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --accent-weak: #dbeafe;
+      --chip-green: #ecfdf3;
+      --chip-green-text: #047857;
+      --chip-amber: #fff7ed;
+      --chip-amber-text: #c2410c;
+      --chip-red: #fef2f2;
+      --chip-red-text: #b91c1c;
+      background: #edf2f7;
+    }
+    body {
+      margin: 0;
+      padding: 32px;
+      background: #edf2f7;
+      min-height: 100vh;
+    }
+    .dashboard-preview {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .widget {
+      background: var(--card-bg);
+      border-radius: 28px;
+      padding: 32px;
+      box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12);
+      border: 1px solid rgba(226, 232, 240, 0.9);
+    }
+    .widget-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      align-items: center;
+      margin-bottom: 32px;
+    }
+    .legend {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      background: var(--subtle-bg);
+      padding: 16px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .legend-chip {
+      width: 24px;
+      height: 24px;
+      border-radius: 8px;
+      border: 1px solid rgba(0,0,0,0.08);
+      flex-shrink: 0;
+    }
+    .legend-text {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.2;
+    }
+    .legend-text span {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .week-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-radius: 999px;
+      padding: 8px 16px;
+      border: 1px solid var(--border);
+      background: white;
+      font-weight: 600;
+    }
+    .week-controls button {
+      border: none;
+      background: var(--accent-weak);
+      color: var(--accent);
+      font-weight: 600;
+      border-radius: 999px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    .heatmap {
+      display: grid;
+      grid-template-columns: 120px repeat(7, 1fr);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      overflow: hidden;
+    }
+    .col-header {
+      background: var(--subtle-bg);
+      padding: 16px 12px;
+      text-align: center;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    .time-slot {
+      display: contents;
+    }
+    .time-label {
+      background: var(--subtle-bg);
+      border-right: 1px solid var(--border);
+      padding: 16px 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .cell {
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      min-height: 96px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .student-chip {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 10px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .student-chip span {
+      font-weight: 400;
+      color: var(--muted);
+    }
+    .chip-green { background: var(--chip-green); color: var(--chip-green-text); }
+    .chip-amber { background: var(--chip-amber); color: var(--chip-amber-text); }
+    .chip-red { background: var(--chip-red); color: var(--chip-red-text); }
+    .more {
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      padding: 6px;
+      border-radius: 999px;
+      background: var(--accent-weak);
+    }
+  </style>
+</head>
+<body>
+  <main class="dashboard-preview">
+    <section class="widget" aria-label="Weekly Compliance – Refined Card Layout">
+      <header class="widget-header">
+        <div class="legend">
+          <article class="legend-item">
+            <div class="legend-chip" style="background: linear-gradient(120deg,#8b5cf6,#ec4899);"></div>
+            <div class="legend-text">
+              <strong>Instructor A</strong>
+              <span>10 weekly sessions</span>
+            </div>
+          </article>
+          <article class="legend-item">
+            <div class="legend-chip" style="background: #14b8a6;"></div>
+            <div class="legend-text">
+              <strong>Instructor B</strong>
+              <span>8 weekly sessions</span>
+            </div>
+          </article>
+          <article class="legend-item">
+            <div class="legend-chip" style="background: #f59e0b;"></div>
+            <div class="legend-text">
+              <strong>Instructor C</strong>
+              <span>6 weekly sessions</span>
+            </div>
+          </article>
+        </div>
+        <div class="week-controls">
+          <button>&larr;</button>
+          10–16 Nov 2025
+          <button>&rarr;</button>
+        </div>
+      </header>
+      <section class="heatmap" role="table" aria-label="Session grid">
+        <div class="col-header"></div>
+        <div class="col-header">Sunday</div>
+        <div class="col-header">Monday</div>
+        <div class="col-header">Tuesday</div>
+        <div class="col-header">Wednesday</div>
+        <div class="col-header">Thursday</div>
+        <div class="col-header">Friday</div>
+        <div class="col-header">Saturday</div>
+
+        <div class="time-slot">
+          <div class="time-label">08:00</div>
+          <div class="cell">
+            <div class="student-chip chip-green">Ben Cohen <span>Math</span></div>
+            <div class="student-chip chip-green">Dana Levi <span>Reading</span></div>
+          </div>
+          <div class="cell">
+            <div class="student-chip chip-amber">Omer Azulay <span>Prep</span></div>
+            <div class="more">+3 more</div>
+          </div>
+          <div class="cell"></div>
+          <div class="cell">
+            <div class="student-chip chip-green">Noa Azulay <span>Science</span></div>
+          </div>
+          <div class="cell"></div>
+          <div class="cell">
+            <div class="student-chip chip-red">Ariel Levi <span>Missed</span></div>
+          </div>
+          <div class="cell"></div>
+        </div>
+
+        <div class="time-slot">
+          <div class="time-label">09:00</div>
+          <div class="cell"></div>
+          <div class="cell">
+            <div class="student-chip chip-green">Shira Dayan <span>Math</span></div>
+            <div class="student-chip chip-green">Maor Halevi <span>History</span></div>
+          </div>
+          <div class="cell"></div>
+          <div class="cell">
+            <div class="student-chip chip-amber">Ronit Azulay <span>Follow-up</span></div>
+          </div>
+          <div class="cell"></div>
+          <div class="cell"></div>
+          <div class="cell"></div>
+        </div>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# robots.txt for TutTiud
+User-agent: *
+Disallow: /api/
+Disallow: /admin/
+Disallow: /test/
+Disallow: /scripts/
+Disallow: /issues/
+Disallow: /CHANGELOG.md
+Disallow: /README.md
+Disallow: /staticwebapp.config.json
