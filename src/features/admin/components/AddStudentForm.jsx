@@ -17,6 +17,7 @@ import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
 import { useStudentNameSuggestions, useNationalIdGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
 import { useInstructors, useServices } from '@/hooks/useOrgData.js';
+import { buildDisplayName } from '@/lib/person-name.js';
 
 export default function AddStudentForm({ 
   onSubmit, 
@@ -185,7 +186,9 @@ export default function AddStudentForm({
                 {suggestions.map((match) => (
                   <li key={match.id} className="flex items-center justify-between gap-2">
                     <div className="space-y-0.5">
-                      <div className="font-semibold text-neutral-900">{match.name}</div>
+                      <div className="font-semibold text-neutral-900">
+                        {buildDisplayName({ ...match, fallback: match.name }) || 'ללא שם'}
+                      </div>
                       <div className="text-xs text-neutral-600">מספר זהות: {match.national_id || '—'} | סטטוס: {match.is_active === false ? 'לא פעיל' : 'פעיל'}</div>
                     </div>
                     <Link
@@ -218,7 +221,9 @@ export default function AddStudentForm({
             <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 space-y-2" role="alert">
               <p className="font-semibold">מספר זהות זה כבר קיים.</p>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <span>כדי למנוע כפילויות, עברו לפרופיל של {duplicate.name}.</span>
+                <span>
+                  כדי למנוע כפילויות, עברו לפרופיל של {buildDisplayName({ ...duplicate, fallback: duplicate.name }) || 'ללא שם'}.
+                </span>
                 <Link
                   to={`/students/${duplicate.id}`}
                   className="inline-flex items-center justify-center rounded-md bg-red-600 px-3 py-1.5 text-white shadow hover:bg-red-700"

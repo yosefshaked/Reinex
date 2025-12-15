@@ -8,11 +8,13 @@ function ensureDataClient(client) {
 async function defaultRunDiagnostics({ dataClient, signal }) {
   const client = ensureDataClient(dataClient);
   const options = signal ? { signal } : undefined;
-  const { data, error } = await client.rpc('tuttiud.setup_assistant_diagnostics', {}, options);
-  if (error) {
-    throw error;
+
+  const publicResult = await client.schema('public').rpc('setup_assistant_diagnostics', {}, options);
+  if (!publicResult.error) {
+    return Array.isArray(publicResult.data) ? publicResult.data : [];
   }
-  return Array.isArray(data) ? data : [];
+
+  throw publicResult.error;
 }
 
 export async function verifyOrgConnection(options, { runDiagnostics = defaultRunDiagnostics } = {}) {

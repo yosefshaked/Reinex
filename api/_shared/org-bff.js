@@ -207,9 +207,15 @@ export function decryptDedicatedKey(payload, keyBuffer) {
   }
 }
 
-export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey }) {
+export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey, schema = 'public' }) {
   if (!supabaseUrl || !anonKey || !dedicatedKey) {
     throw new Error('Missing tenant connection parameters.');
+  }
+
+  const normalizedSchema = normalizeString(schema) || 'public';
+  const allowedSchemas = new Set(['public']);
+  if (!allowedSchemas.has(normalizedSchema)) {
+    throw new Error('Invalid tenant schema.');
   }
 
   return createClient(supabaseUrl, anonKey, {
@@ -224,7 +230,7 @@ export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey }) {
       },
     },
     db: {
-      schema: 'tuttiud',
+      schema: normalizedSchema,
     },
   });
 }
@@ -250,7 +256,13 @@ export function mapConnectionError(error) {
   return buildTenantError(message, status);
 }
 
-export async function resolveTenantClient(context, supabase, env, orgId) {
+export async function resolveTenantClient(context, supabase, env, orgId, options = undefined) {
+  const normalizedSchema = normalizeString(options?.schema) || 'public';
+  const allowedSchemas = new Set(['public']);
+  if (!allowedSchemas.has(normalizedSchema)) {
+    return { error: buildTenantError('invalid_tenant_schema', 400) };
+  }
+
   const connectionResult = await fetchOrgConnection(supabase, orgId);
   if (connectionResult.error) {
     return { error: mapConnectionError(connectionResult.error) };
@@ -274,10 +286,15 @@ export async function resolveTenantClient(context, supabase, env, orgId) {
       supabaseUrl: connectionResult.supabaseUrl,
       anonKey: connectionResult.anonKey,
       dedicatedKey,
+      schema: normalizedSchema,
     });
     return { client: tenantClient };
   } catch (clientError) {
     context.log?.error?.('tenant connection failed to create client', { message: clientError?.message });
     return { error: buildTenantError('failed_to_connect_tenant') };
   }
+}
+
+export function resolveTenantPublicClient(context, supabase, env, orgId) {
+  return resolveTenantClient(context, supabase, env, orgId, { schema: 'public' });
 }

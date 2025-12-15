@@ -7,7 +7,7 @@ function LogoPlaceholder() {
     <div className="flex h-12 w-12 items-center justify-center rounded-2xl overflow-hidden bg-white">
       <img 
         src="/icon.svg" 
-        alt="TutTiud" 
+        alt="Reinex" 
         className="h-full w-full object-contain p-1"
       />
     </div>

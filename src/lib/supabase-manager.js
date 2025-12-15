@@ -94,6 +94,11 @@ export function createDataClient(orgConfig) {
   const { supabaseUrl, supabaseAnonKey } = normalizeCredentials(orgConfig);
   const orgId =
     orgConfig?.id ?? orgConfig?.orgId ?? orgConfig?.organization_id ?? orgConfig?.organizationId ?? null;
+  const tenantSchema =
+    orgConfig?.tenant_schema ??
+    orgConfig?.tenantSchema ??
+    orgConfig?.schema ??
+    'public';
 
   if (!supabaseUrl || !supabaseAnonKey) {
     console.error('[DataClient] Cannot create data client without URL and Key for org:', orgId);
@@ -111,7 +116,7 @@ export function createDataClient(orgConfig) {
     },
     // Always target the tenant schema for data access
     db: {
-      schema: 'tuttiud',
+      schema: tenantSchema,
     },
   });
 }

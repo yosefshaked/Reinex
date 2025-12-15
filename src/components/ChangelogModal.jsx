@@ -1477,7 +1477,7 @@ export default function ChangelogModal({ open, onClose }) {
             </article>
           </li>
 
-          {/* 1.0.0 - TutTiud Launch */}
+          {/* 1.0.0 - Reinex Launch */}
           <li dir="rtl" style={{ marginBottom: 0, textAlign: 'right' }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header 

@@ -18,6 +18,7 @@ import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';
 import { assignLooseSession, createAndAssignLooseSession } from '@/features/sessions/api/loose-sessions.js';
 import { mapLooseSessionError } from '@/lib/error-mapping.js';
 import AddStudentForm from '@/features/admin/components/AddStudentForm.jsx';
+import { buildDisplayName } from '@/lib/person-name.js';
 
 const DAY_NAMES = ['', 'ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
@@ -366,7 +367,9 @@ export default function BulkResolvePendingReportsDialog({
                     <SelectContent className="max-h-[250px] sm:max-h-[300px]">
                       {filteredStudents.map((student) => (
                         <SelectItem key={student.id} value={student.id} className="text-right">
-                          <span className="block truncate">{student.name || 'ללא שם'}</span>
+                          <span className="block truncate">
+                            {buildDisplayName({ ...student, fallback: student.name }) || 'ללא שם'}
+                          </span>
                           {student.contact_name && <span className="text-xs text-neutral-500"> ({student.contact_name})</span>}
                         </SelectItem>
                       ))}
@@ -501,7 +504,7 @@ export default function BulkResolvePendingReportsDialog({
                 )}
               </div>
 
-              <div className="flex flex-col-reverse sm:flex-row gap-2 sm:flex-row-reverse">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row-reverse">
                 <Button
                   onClick={handleAssignExisting}
                   disabled={!selectedStudentId || isProcessing}

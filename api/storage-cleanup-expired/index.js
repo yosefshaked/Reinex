@@ -106,7 +106,7 @@ export default async function (context) {
             await supabase.rpc('log_audit_event', {
               p_org_id: orgId,
               p_user_id: '00000000-0000-0000-0000-000000000000', // System user
-              p_user_email: 'system@tuttiud.com',
+              p_user_email: 'system@reinex.app',
               p_user_role: 'system_admin',
               p_action_type: AUDIT_ACTIONS.STORAGE_FILES_DELETED,
               p_action_category: AUDIT_CATEGORIES.STORAGE,

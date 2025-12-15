@@ -3,7 +3,7 @@
  * Uses sessionStorage to remember filters when navigating between pages within a session
  */
 
-const STORAGE_PREFIX = 'tuttiud:student-filters';
+const STORAGE_PREFIX = 'reinex:student-filters';
 
 /**
  * Get storage key for a specific organization and page

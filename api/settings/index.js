@@ -18,6 +18,8 @@ import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit
 const SETTINGS_DIAGNOSTIC_CHECKS = new Set([
   'Table "Settings" exists',
   'RLS enabled on "Settings"',
+  'Policy "Allow full access to authenticated users on Settings" exists',
+  // Backward-compat naming (if a tenant has an older diagnostics function)
   'Policy "Allow full access to authenticated users on Settings" on "Settings" exists',
 ]);
 
@@ -49,7 +51,8 @@ function isSchemaOrPolicyError(error) {
 
 async function verifySettingsInfrastructure(context, tenantClient) {
   const { data, error } = await tenantClient
-    .rpc('tuttiud.setup_assistant_diagnostics');
+    .schema('public')
+    .rpc('setup_assistant_diagnostics');
 
   if (error) {
     context.log?.error?.('settings diagnostics failed', { message: error.message });
@@ -59,7 +62,7 @@ async function verifySettingsInfrastructure(context, tenantClient) {
         message: 'settings_schema_unverified',
         reason: 'diagnostics_failed',
         hint: 'Make sure the tenant setup SQL has been applied. If only the metadata column is missing, you can run the idempotent SQL in sql_hint.',
-        sql_hint: 'ALTER TABLE tuttiud."Settings" ADD COLUMN IF NOT EXISTS metadata jsonb;'
+        sql_hint: 'ALTER TABLE public."Settings" ADD COLUMN IF NOT EXISTS metadata jsonb;'
       },
     };
   }
@@ -80,7 +83,7 @@ async function verifySettingsInfrastructure(context, tenantClient) {
           details: entry.details,
         })),
         hint: 'Make sure the tenant setup SQL has been applied. If only the metadata column is missing, you can run the idempotent SQL in sql_hint.',
-        sql_hint: 'ALTER TABLE tuttiud."Settings" ADD COLUMN IF NOT EXISTS metadata jsonb;'
+        sql_hint: 'ALTER TABLE public."Settings" ADD COLUMN IF NOT EXISTS metadata jsonb;'
       },
     };
   }

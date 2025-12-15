@@ -63,8 +63,8 @@ export default function LandingPage() {
         <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container mx-auto flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
             <div className="flex items-center gap-2">
-              <img src="/icon.svg" alt="TutTiud" className="h-8 w-8" />
-              <span className="text-xl font-bold text-primary">TutTiud</span>
+              <img src="/icon.svg" alt="Reinex" className="h-8 w-8" />
+              <span className="text-xl font-bold text-primary">Reinex</span>
             </div>
             <Button onClick={() => navigate('/login')} className="gap-2">
               <span>כניסה למערכת</span>
@@ -81,7 +81,7 @@ export default function LandingPage() {
             <span className="text-primary">חכמה ויעילה</span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg text-neutral-600 sm:text-xl">
-            TutTiud היא הפלטפורמה המתקדמת לניהול תלמידים, תיעוד מפגשים ומעקב אחר התקדמות.
+            Reinex היא הפלטפורמה המתקדמת לניהול תלמידים, תיעוד מפגשים ומעקב אחר התקדמות.
             כל מה שצוות ההדרכה שלכם צריך, במקום אחד.
           </p>
           <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:justify-center">
@@ -252,7 +252,7 @@ export default function LandingPage() {
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center">
             <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-              למה לבחור ב-TutTiud?
+              למה לבחור ב-Reinex?
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-lg text-neutral-600">
               הצטרפו לארגונים שכבר משתמשים במערכת שלנו
@@ -298,8 +298,8 @@ export default function LandingPage() {
       <footer className="border-t bg-neutral-50 py-8">
         <div className="container mx-auto px-4 text-center sm:px-6 lg:px-8">
           <div className="flex items-center justify-center gap-2 text-neutral-600">
-            <img src="/icon.svg" alt="TutTiud" className="h-6 w-6" />
-            <span className="font-semibold">TutTiud</span>
+            <img src="/icon.svg" alt="Reinex" className="h-6 w-6" />
+            <span className="font-semibold">Reinex</span>
             <span className="text-neutral-400">•</span>
             <span className="text-sm">מערכת ניהול מפגשים מתקדמת</span>
           </div>
@@ -315,7 +315,7 @@ export default function LandingPage() {
             </a>
           </div>
           <p className="mt-4 text-sm text-neutral-500">
-            © {new Date().getFullYear()} TutTiud ThePCRunners. כל הזכויות שמורות.
+            © {new Date().getFullYear()} Reinex ThePCRunners. כל הזכויות שמורות.
           </p>
         </div>
       </footer>

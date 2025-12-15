@@ -67,17 +67,20 @@ describe('verifyOrgConnection', () => {
   it('calls the diagnostics runner and reports success', async () => {
     const calls = [];
     const fakeClient = {
-      rpc: async (...args) => {
-        calls.push(args);
-        return { data: [{ success: true }], error: null };
-      },
+      schema: (schemaName) => ({
+        rpc: async (...args) => {
+          calls.push([schemaName, ...args]);
+          return { data: [{ success: true }], error: null };
+        },
+      }),
     };
 
     const result = await verifyOrgConnection({ dataClient: fakeClient });
 
     assert.strictEqual(calls.length, 1);
-    const [fnName] = calls[0];
-    assert.strictEqual(fnName, 'tuttiud.setup_assistant_diagnostics');
+    const [schemaName, fnName] = calls[0];
+    assert.strictEqual(schemaName, 'public');
+    assert.strictEqual(fnName, 'setup_assistant_diagnostics');
     assert.deepEqual(result, { ok: true, diagnostics: [{ success: true }] });
   });
 

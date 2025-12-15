@@ -244,7 +244,7 @@
   - `exportTenantData(tenantClient, orgId)`: queries all tenant tables (Students, Instructors, SessionRecords, Settings), returns manifest v1.0
   - `validateBackupManifest(manifest)`: checks version/schema compatibility
   - `restoreTenantData(tenantClient, manifest, options)`: transactional restore with optional `clearExisting` flag in dependency order
-- Backup manifests are JSON with structure: `{ version: '1.0', schema_version: 'tuttiud_v1', org_id, created_at, metadata: { total_records }, tables: [{ name, records }] }`
+- Backup manifests are JSON with structure: `{ version: '1.0', schema_version: 'tenant_v1', org_id, created_at, metadata: { total_records }, tables: [{ name, records }] }`
 - Password generation: System auto-generates a human-friendly product-key style password (e.g., ABCD-EF12-3456-7890-ABCD, ~80-bit entropy). The user must save it from the response to decrypt later.
 - Cooldown enforcement: checks `org_settings.backup_history` array for last successful backup within 7 days; 429 response includes `next_allowed_at` and `days_remaining`. Can be bypassed once by setting `permissions.backup_cooldown_override = true` in control DB; the flag is automatically reset to `false` after a successful backup.
 - Audit trail: all backup/restore operations appended to `org_settings.backup_history` JSONB array (last 100 entries kept) with type, status, timestamp, initiated_by, size_bytes/records_restored, error_message.
@@ -272,14 +272,14 @@
   - Disabled state shown with message "לוגו מותאם אישית אינו זמין. נא לפנות לתמיכה" when `logo_enabled = false`.
   - Accepts public image URLs (PNG, JPG, SVG, GIF, etc.).
   - Stores logo URL as plain text in control DB (no file upload, references external images).
-- Global display: `OrgLogo.jsx` component fetches and displays custom logo in AppShell header (desktop sidebar + mobile header). Falls back to TutTiud logo (`/icon.svg`) when no logo is set.
+- Global display: `OrgLogo.jsx` component fetches and displays custom logo in AppShell header (desktop sidebar + mobile header). Falls back to the default app logo (`/icon.svg`) when no logo is set.
 - Logo refresh: Component refetches when `activeOrgId` changes, ensuring correct logo displays after org switch.
 - Logo sizing: Uses `object-contain` with white background padding to ensure logos fit nicely in all display locations (48px container).
 
 ### Cross-System Storage Configuration (2025-11)
 - **Storage profile** is a cross-system capability stored in `org_settings.storage_profile` (control DB).
   - Supports two modes: **BYOS** (Bring Your Own Storage) and **Managed Storage**
-  - System-agnostic design: reusable by TutTiud, Farm Management System, and future systems
+  - System-agnostic design: reusable across products and future systems
 - **BYOS credentials encryption** (`api/_shared/storage-encryption.js`):
   - Encrypts `access_key_id` and `secret_access_key` before storing in database
   - Uses AES-256-GCM authenticated encryption (same as tenant credentials)
@@ -299,7 +299,7 @@
   - `validateByosCredentials(byosConfig)` - validates S3-compatible provider credentials
   - `validateManagedConfig(managedConfig)` - validates managed storage namespace
   - `normalizeStorageProfile(rawProfile)` - normalizes and sanitizes input, outputs snake_case credentials
-  - No TutTiud-specific logic; pure cross-system validation
+  - No product-specific logic; pure cross-system validation
 - **API endpoints**:
   - `/api/user-context` now includes `storage_profile` in organization data (credentials stripped for non-admin)
   - `/api/org-settings/storage` (GET/POST/DELETE/PATCH) manages storage profile
@@ -340,7 +340,7 @@
 - File restrictions communicated to users via blue info box with bullet points (10MB, allowed types, Hebrew filenames supported)
 
 ### Polymorphic Documents Table Architecture (2025-11)
-- **Schema**: Centralized `tuttiud.Documents` table is the **source of truth** for all file metadata. Legacy JSON columns (`Students.files`, `Instructors.files`, `Settings.org_documents`) have been fully deprecated and removed.
+- **Schema**: Centralized `Documents` table (in the active tenant schema) is the **source of truth** for all file metadata. Legacy JSON columns (`Students.files`, `Instructors.files`, `Settings.org_documents`) have been fully deprecated and removed.
 - **API Endpoint**: `/api/documents` is the unified endpoint for all document operations (GET/POST/PUT/DELETE). Legacy endpoints have been removed.
 - **Discriminator pattern**: `entity_type` ('student'|'instructor'|'organization') + `entity_id` (UUID) identifies which entity owns each document.
 - **Columns**: id (UUID PK), entity_type (text), entity_id (UUID), name, original_name, relevant_date, expiration_date, resolved, url, path, storage_provider, uploaded_at, uploaded_by, definition_id, definition_name, size, type, hash, metadata (JSONB).
@@ -433,7 +433,7 @@
   - Validates admin/owner role and permission before processing
   - Generates Hebrew/RTL-ready PDF with student info, session history, and custom branding
   - Uses Puppeteer with `@sparticuz/chromium` for serverless Azure Functions deployment
-  - Co-branding: Always displays TutTiud logo; optionally includes custom org logo if `permissions.can_use_custom_logo_on_exports = true`
+  - Co-branding: Always displays the default app logo; optionally includes custom org logo if `permissions.can_use_custom_logo_on_exports = true`
   - File naming: `[Student_Name]_Records_[Date].pdf`
   - Resource management: Browser instance always closed in finally block to prevent memory leaks
 - Permissions added to `scripts/control-db-permissions-table.sql`:
@@ -568,7 +568,7 @@
   discover recurring issues so future AI coding passes avoid regressions.
 
 ## Notes
-- Instructors are managed in the tenant `tuttiud."Instructors"` table. Records are not deleted; set `is_active=false` to disable. Clients should hide inactive instructors from selection.
+- Legacy note: older iterations referenced non-`public` tenant schemas. Reinex tenants are `public`-schema only; do not reference any other tenant schema.
 - Student creation requires selecting an active instructor. If a student's assigned instructor is later disabled, surfaces a warning in the roster and prompts reassignment; historical reports remain attributed via `assigned_instructor_id`.
 - `/api/instructors` returns only active instructors by default. Use `include_inactive=true` to fetch disabled ones for admin UIs.
 - WorkSessions inserts should omit `id` so the database can generate it; include `id` only when updating existing records.
@@ -597,11 +597,10 @@
   - Control DB schema: Run `scripts/control-db-invitation-expiry.sql` to deploy the RPC functions (`get_auth_otp_expiry_seconds` and `calculate_invitation_expiry`).
   - Permission registry: `invitation_expiry_seconds` (integer, default null) in `permission_registry` table allows global customization without modifying Supabase auth settings.
   - Clients can still explicitly provide `expiresAt`/`expires_at` in the POST request body to override automatic calculation.
-- `/api/settings` surfaces HTTP 424 (`settings_schema_incomplete` / `settings_schema_unverified`) when `tuttiud.setup_assistant_diagnostics()` reports missing tenant tables or policies, and the response includes the failing diagnostic rows so admins rerun the setup script instead of retrying blindly.
+- `/api/settings` surfaces HTTP 424 (`settings_schema_incomplete` / `settings_schema_unverified`) when `public.setup_assistant_diagnostics()` reports missing tenant tables or policies, and the response includes the failing diagnostic rows so admins rerun the setup script instead of retrying blindly.
 - Invitation completion emails land on `/#/complete-registration` with `token_hash` (Supabase invite) and `invitation_token` (control-plane token). The page must display the invited email, wait for the user to click the manual confirmation button, then call `supabase.auth.verifyOtp({ type: 'invite', token_hash })` before redirecting to `/#/accept-invite` while forwarding the original `invitation_token`.
 - The `/components/pages/AcceptInvitePage.jsx` route requires an authenticated session, reloads invitation status via `/api/invitations/token/:token`, blocks mismatched accounts until they sign out, and surfaces state-specific UI (pending actions, accepted success CTA, or invalid-link notice) while wiring accept/decline buttons to the secure `/api/invitations/:id/(accept|decline)` endpoints.
-- TutTiud rebranding placeholder assets live in `public/icon.svg`, `public/icon.ico`, and `public/vite.svg` until final design delivery.
-- `tuttiud.setup_assistant_diagnostics()` now validates schema, RLS, policies, and indexes. Keep `SETUP_SQL_SCRIPT` (v2.4) as the source of truth when extending onboarding checks.
+- `public.setup_assistant_diagnostics()` validates schema, RLS, policies, and indexes. Keep `SETUP_SQL_SCRIPT` as the source of truth when extending onboarding checks.
 - Shared BFF utilities for tenant access (`api/_shared/org-bff.js`) centralize org membership, encryption, and tenant client creation. Reuse them when building new `/api/*` handlers.
 - Admin UI is migrating to feature slices. Place admin-only components under `src/features/admin/components/` and mount full pages from `src/features/admin/pages/`. Reusable primitives still belong in `src/components/ui`.
 - The refreshed design system lives in `tailwind.config.js` (Nunito typography, primary/neutral/status palettes, spacing tokens) with base primitives in `src/components/ui/{Button,Card,Input,PageLayout}.jsx`. Prefer these when creating new mobile-first UI.
@@ -716,7 +715,8 @@
 - Settings page adds `StudentVisibilitySettings.jsx` (eye-off card) so admins control the instructor flag through `fetchSettingsValue`/`upsertSetting`. Keep the copy bilingual and honor API permission checks when extending the card.
 
 ### Student Tags Catalog (2025-11)
-- Tenant tag definitions live in the `tuttiud."Settings"` row keyed `student_tags` (JSONB array of `{ id, name }`).
+- Tenant tag definitions live in the tenant `Settings` row keyed `student_tags` (JSONB array of `{ id, name }`).
+  - Other system (TutTiud): stored under tenant schema `tuttiud`.
 - Backend: `GET /api/settings/student-tags` returns the catalog for any org member; `POST /api/settings/student-tags` appends a tag (admin/owner only) and regenerates the row via Supabase upsert.
 - Frontend: use `useStudentTags()` (`src/features/students/hooks/useStudentTags.js`) to load/create tags and render `StudentTagsField.jsx` for the dropdown + admin-only creation modal in student forms.
 - Tag normalization helpers live in `src/features/students/utils/tags.js`; reuse `normalizeTagIdsForWrite` and `buildTagDisplayList` whenever sending or displaying student tags to keep the uuid[] contract authoritative.
@@ -724,13 +724,15 @@
   - Create new tags with duplicate name validation
   - Edit existing tag names (updates propagate to all tagged students via settings catalog)
   - Delete tags with confirmation guard; deletion removes tag from catalog and all student rows via `/api/students-remove-tag`
-  - Backend uses `tuttiud.remove_tag_from_students(tag_uuid)` PostgreSQL function for efficient bulk removal with fallback to manual iteration
+  - Backend may use a tenant-side `remove_tag_from_students(tag_uuid)` PostgreSQL function for efficient bulk removal with fallback to manual iteration
+    - Other system (TutTiud): implemented as `tuttiud.remove_tag_from_students(tag_uuid)`.
   - Tag deletion is permanent; confirmation dialog warns users that operation cannot be undone
   - Full RTL support with proper Hebrew text alignment and flex-row-reverse layouts
 
 ### Instructor Types and Document Management (2025-11)
 - **Instructor Types**: Similar to student tags, instructors can be categorized by type (e.g., "Therapist", "Volunteer", "Staff")
-  - Tenant type definitions live in `tuttiud."Settings"` row keyed `instructor_types` (JSONB array of `{ id, name }`)
+  - Tenant type definitions live in the tenant `Settings` row keyed `instructor_types` (JSONB array of `{ id, name }`)
+    - Other system (TutTiud): stored under tenant schema `tuttiud`.
   - **Database schema**: `Instructors.instructor_types` (uuid array) column added in setup script. The legacy `Instructors.files` (jsonb) column is **DEPRECATED** and no longer created on fresh deployments.
   - Frontend hook: `useInstructorTypes()` (`src/features/instructors/hooks/useInstructorTypes.js`) provides load/create/update/delete operations
   - Management UI: **Unified `TagsManager.jsx`** in Settings manages both student tags and instructor types via mode toggle
@@ -954,8 +956,8 @@
     - Automatic redirects ensure existing bookmarks/links continue working
 
 ### Tenant schema policy
-- All tenant database access must use the `tuttiud` schema. Do not query the `public` schema from this app.
-- Supabase tenant clients must set `db: { schema: 'tuttiud' }`. Existing endpoints that used default schema have been updated accordingly.
+- Reinex tenant-domain tables live in the tenant `public` schema.
+- Supabase tenant clients must set `db: { schema: 'public' }` per request/context (selected centrally in `api/_shared/org-bff.js`).
 
 ### Legacy: WorkSessions vs SessionRecords
 - WorkSessions is a legacy construct kept temporarily for compatibility with existing import and payroll flows.

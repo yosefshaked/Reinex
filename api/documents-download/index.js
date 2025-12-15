@@ -115,7 +115,7 @@ export default async function handler(context, req) {
     context.log?.info?.('[DOCUMENTS-DOWNLOAD] Fetching document from Documents table', {
       document_id,
       table: 'Documents',
-      schema: 'tuttiud'
+      schema: 'public'
     });
 
     const { data: document, error: fetchError } = await tenantClient

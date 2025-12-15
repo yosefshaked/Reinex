@@ -406,7 +406,7 @@ export default function StorageSettingsCard({ session, orgId }) {
                 <div className="flex-1">
                   <div className="font-semibold mb-1">אחסון מנוהל</div>
                   <p className="text-sm text-slate-600">
-                    נאחסן בצורה מאובטחת על ידי TutTiud
+                    נאחסן בצורה מאובטחת על ידי Reinex
                   </p>
                   {!canUseManaged && (
                     <Badge variant="secondary" className="mt-2">לא זמין בחבילה שלך</Badge>
@@ -457,7 +457,7 @@ export default function StorageSettingsCard({ session, orgId }) {
             <div>
               <div className="font-semibold text-emerald-900 mb-1">נאחסן בצורה מאובטחת</div>
               <p className="text-sm text-emerald-700">
-                הקבצים שלך יישמרו באופן מאובטח במערכת TutTiud ללא צורך בהגדרות נוספות.
+                הקבצים שלך יישמרו באופן מאובטח במערכת Reinex ללא צורך בהגדרות נוספות.
               </p>
             </div>
           </div>

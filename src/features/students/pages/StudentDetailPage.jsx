@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Loader2, ArrowRight, ChevronDown, ChevronUp, Pencil, Download, FileUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { buildDisplayName } from '@/lib/person-name.js';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -648,7 +649,8 @@ export default function StudentDetailPage() {
     try {
       const blob = await exportStudentPdf(studentId, activeOrgId);
       // Generate filename with date (sanitization happens in backend)
-      const safeName = student.name
+      const studentDisplayName = buildDisplayName({ ...student, fallback: student.name });
+      const safeName = (studentDisplayName || 'student')
         .replace(/[^א-תa-zA-Z0-9\s-]/g, '')
         .trim()
         .replace(/\s+/g, '_');
@@ -863,7 +865,7 @@ export default function StudentDetailPage() {
               <div className="space-y-1">
                 <dt className="text-xs font-medium text-neutral-500 sm:text-sm">שם התלמיד</dt>
                 <dd className="flex flex-wrap items-center gap-2 font-semibold text-foreground">
-                  <span>{student.name}</span>
+                  <span>{buildDisplayName({ ...student, fallback: student.name }) || 'ללא שם'}</span>
                   {student?.is_active === false ? (
                     <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
                       לא פעיל

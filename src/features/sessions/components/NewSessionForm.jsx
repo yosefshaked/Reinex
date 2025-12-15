@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils.js';
 import DayOfWeekSelect from '@/components/ui/DayOfWeekSelect.jsx';
 import PreanswersPickerDialog from './PreanswersPickerDialog.jsx';
 import { useLooseReportNameSuggestions } from '@/features/sessions/hooks/useLooseReportNameSuggestions.js';
+import { buildDisplayName } from '@/lib/person-name.js';
 
 export default function NewSessionForm({
   students = [],
@@ -576,9 +577,10 @@ export default function NewSessionForm({
             <SelectContent className="max-h-[300px]">
               {filteredStudents.map((student) => {
                 const schedule = describeSchedule(student?.default_day_of_week, student?.default_session_time);
+                const studentDisplayName = buildDisplayName({ ...student, fallback: student.name });
                 return (
                   <SelectItem key={student.id} value={student.id}>
-                    {student.name || 'ללא שם'} — {schedule}
+                    {studentDisplayName || 'ללא שם'} — {schedule}
                   </SelectItem>
                 );
               })}
@@ -633,7 +635,9 @@ export default function NewSessionForm({
                           className="w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-md bg-white hover:bg-muted border border-transparent hover:border-border transition-all text-right group"
                           disabled={isSubmitting}
                         >
-                          <span className="font-medium text-foreground group-hover:text-primary">{student.name}</span>
+                          <span className="font-medium text-foreground group-hover:text-primary">
+                            {buildDisplayName({ ...student, fallback: student.name }) || 'ללא שם'}
+                          </span>
                           <div className="flex items-center gap-2">
                             {student.is_active ? (
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-success/10 text-success border border-success/20">

@@ -1,6 +1,6 @@
 {
-  "name": "tuttiud-app",
-  "description": "TutTiud Session Reports Management System",
+  "name": "reinex-app",
+  "description": "Reinex Management System",
   "author": "Shaked Yossef",
   "main": "electron.cjs",
   "private": true,
@@ -77,7 +77,7 @@
   },
   "build": {
     "appId": "com.HavatTut.salaryapp",
-    "productName": "TutTiud - תותיעוד",
+    "productName": "Reinex",
     "files": [
       "dist/**/*",
       "electron.cjs",

@@ -29,6 +29,7 @@ import { saveFilterState, loadFilterState } from '@/features/students/utils/filt
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
 import MyPendingReportsCard from '@/features/sessions/components/MyPendingReportsCard.jsx';
+import { buildDisplayName } from '@/lib/person-name.js';
 
 export default function StudentsPage() {
   const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
@@ -652,6 +653,10 @@ export default function StudentsPage() {
                       const missingNationalId = !student.national_id?.trim();
                       const summary = complianceSummary[student.id] || {};
                       const hasExpiredDocs = summary.expiredDocuments > 0;
+                      const studentDisplayName = buildDisplayName({
+                        ...student,
+                        fallback: student.name,
+                      });
 
                       return (
                         <TableRow key={student.id}>
@@ -661,7 +666,7 @@ export default function StudentsPage() {
                                 to={`/students/${student.id}`}
                                 className="font-medium text-primary hover:underline"
                               >
-                                {student.name}
+                                {studentDisplayName || 'ללא שם'}
                               </Link>
                               {isInactive && (
                                 <Badge variant="secondary" className="w-fit bg-neutral-200 text-neutral-700">

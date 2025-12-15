@@ -664,8 +664,15 @@ export default async function (context, req) {
     }
   }
 
-  // Use TutTiud logo URL from environment or default
-  const tuttiudLogoUrl = env.VITE_TUTTIUD_LOGO_URL || env.TUTTIUD_LOGO_URL || 'https://tuttiud.thepcrunners.com/icon.png';
+  // Use Reinex logo URL from environment or default (keep legacy TutTiud env var fallbacks)
+  const appLogoUrl =
+    env.VITE_REINEX_LOGO_URL ||
+    env.REINEX_LOGO_URL ||
+    env.VITE_TUTTIUD_LOGO_URL ||
+    env.TUTTIUD_LOGO_URL ||
+    env.VITE_PUBLIC_APP_LOGO_URL ||
+    env.PUBLIC_APP_LOGO_URL ||
+    'https://reinex.thepcrunners.com/icon.png';
 
   // Generate PDF
   let browser;
@@ -680,7 +687,7 @@ export default async function (context, req) {
     });
 
   const page = await browser.newPage();
-  const html = generatePdfHtml(student, sessions, formConfig, tuttiudLogoUrl, customLogoUrl);
+  const html = generatePdfHtml(student, sessions, formConfig, appLogoUrl, customLogoUrl);
     
     await page.setContent(html, { waitUntil: 'networkidle0' });
     

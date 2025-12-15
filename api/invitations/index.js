@@ -186,7 +186,7 @@ function resolveSiteBaseHref(context, req) {
   if (typeof xfHost === 'string' && xfHost) {
     return `${proto}://${xfHost}`;
   }
-  return 'https://tuttiud.thepcrunners.com';
+  return 'https://reinex.thepcrunners.com';
 }
 
 function normalizeExpirationInput(value) {

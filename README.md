@@ -1,6 +1,6 @@
-# Tuttiud Student Support Platform
+# Reinex
 
-Tuttiud is a Vite + React application for managing instructors, students, and instructional session records. Supabase provides tenant data storage while Azure Functions guard every privileged operation.
+Reinex is a Vite + React application backed by Azure Functions and Supabase. It is multi-tenant: each organization connects to its own tenant database, and all privileged operations are gated through `/api/*` endpoints.
 
 ## 🚀 MVP priorities
 
@@ -13,14 +13,11 @@ The refactored codebase focuses on four launch stories:
 
 ## 🧭 Onboarding checklist
 
-The onboarding wizard (`Settings → Supabase Setup`) leads every new organization through three steps:
+Reinex tenant-domain tables live in the tenant database `public` schema.
 
-1. **Run the canonical SQL** – copy the script exported from [`src/lib/setup-sql.js`](src/lib/setup-sql.js) into the Supabase SQL editor and execute it. Version 2.4 adds the `metadata` jsonb column to the `Settings` table for auxiliary configuration storage; version 2.5 adds `SessionRecords.is_legacy` (boolean, default `false`) and registers the `can_reupload_legacy_reports` permission in the control-plane registry for future legacy import flows.
-2. **Paste the dedicated key** – grab the `APP_DEDICATED_KEY` JWT produced by the script and drop it into the wizard.
-3. **Validate & store** – the wizard runs `tuttiud.setup_assistant_diagnostics()` (schema/RLS/policy/index checks), encrypts the JWT through `/api/save-org-credentials`, and the API now persists `dedicated_key_saved_at`, `verified_at`, and `setup_completed` before the UI records verification and unlocks the rest of the app.
-   - If the diagnostics still flag missing tables or policies, `/api/settings` answers with HTTP 424 (`settings_schema_incomplete` / `settings_schema_unverified`) and echoes the failing checks so admins can rerun the SQL script before retrying writes.
-
-All states (loading, error, success) are surfaced inline with accessible messages (`aria-live`). The wizard can be reopened at any time to re-run diagnostics or rotate the key.
+1. **Run the canonical tenant setup SQL** – use the script exported from [`src/lib/setup-sql.js`](src/lib/setup-sql.js) (also shown in the in-app Setup Assistant) and execute it in the tenant Supabase SQL editor.
+2. **Paste the dedicated key** – use the Supabase JWT (dedicated key) produced by the setup script.
+3. **Validate & store** – the setup flow stores the key through `/api/save-org-credentials` and marks the organization connection as verified.
 
 ## 🔑 Key UI behavior
 
@@ -40,7 +37,8 @@ All states (loading, error, success) are surfaced inline with accessible message
 - **Reports navigation state** – the "דוחות" link is intentionally disabled (with a tooltip) until reporting ships, preventing dead ends in the main navigation.
 - **Feature-sliced admin components** live in `src/features/admin/components/`. Each component is scoped to the admin feature (forms, modals) while shared primitives stay in `src/components/ui`.
 - **Org context** (`src/org/OrgContext.jsx`) stores the encrypted dedicated key timestamp (`dedicated_key_saved_at`) and still toggles `setup_completed` after verification, complementing the server-side persistence added to `/api/save-org-credentials`.
-- **Runtime verification helpers** (`src/runtime/verification.js`) expose `verifyOrgConnection({ dataClient })` which runs `tuttiud.setup_assistant_diagnostics()` and returns the diagnostic rows for custom UI messaging.
+- **Runtime verification helpers** (`src/runtime/verification.js`) expose `verifyOrgConnection({ dataClient })` for tenant connectivity checks.
+   - `verifyOrgConnection` runs `public.setup_assistant_diagnostics()` and returns diagnostic rows for custom UI messaging.
 - Feature modules (students, instructors, sessions) must load data exclusively through secure `/api/*` endpoints. The frontend never uses the dedicated JWT directly.
 - **Legacy import workflow (Phase 2 UI):** Admin/Owner users see an "ייבוא דוחות היסטוריים" button on `StudentDetailPage`. The dialog enforces a backup warning, asks whether the CSV matches the current session questionnaire, and renders either dropdown-based mappings against `session_form_config` or custom text fields with a required session-date column. It now also captures the service context either once for all rows or via a dedicated service column in the CSV. If a legacy import already exists and `can_reupload_legacy_reports` is false, the entry point is disabled.
 - **Legacy import backend:** `/api/students/{id}/legacy-import` is now available for admins/owners. It checks `can_reupload_legacy_reports`, clears prior `is_legacy` rows when allowed, and ingests CSV text (`csv_text` + mapping payload) to create new `SessionRecords` flagged as legacy. Imports can set `service_context` globally or map it from a CSV column; blank values are persisted as no service.

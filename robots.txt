@@ -1,4 +1,4 @@
-# robots.txt for TutTiud
+# robots.txt for Reinex
 User-agent: *
 Disallow: /api/
 Disallow: /admin/
