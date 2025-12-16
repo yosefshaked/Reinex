@@ -377,6 +377,36 @@ export function OrgProvider({ children }) {
       return;
     }
 
+    const localConnection = orgConnections.get(orgId);
+    if (localConnection?.supabaseUrl && localConnection?.supabaseAnonKey) {
+      setActiveOrgConfig((current) => {
+        const normalized = {
+          orgId,
+          supabaseUrl: localConnection.supabaseUrl,
+          supabaseAnonKey: localConnection.supabaseAnonKey,
+          source: 'user-context',
+        };
+
+        if (
+          current &&
+          current.orgId === normalized.orgId &&
+          current.supabaseUrl === normalized.supabaseUrl &&
+          current.supabaseAnonKey === normalized.supabaseAnonKey
+        ) {
+          return current;
+        }
+
+        return normalized;
+      });
+      setSupabaseActiveOrg({
+        id: orgId,
+        supabase_url: localConnection.supabaseUrl,
+        supabase_anon_key: localConnection.supabaseAnonKey,
+      });
+      setConfigStatus('success');
+      return;
+    }
+
     if (!authClient) {
       setActiveOrgConfig(null);
       setConfigStatus('idle');
@@ -423,6 +453,7 @@ export function OrgProvider({ children }) {
           orgId,
           supabaseUrl: config.supabaseUrl,
           supabaseAnonKey: config.supabaseAnonKey,
+          source: config.source || 'org-api',
         };
 
         if (
@@ -477,7 +508,7 @@ export function OrgProvider({ children }) {
       setConfigStatus('error');
       setSupabaseActiveOrg(null);
     }
-  }, [authClient, setSupabaseActiveOrg]);
+  }, [authClient, orgConnections, setSupabaseActiveOrg]);
 
   const determineStatus = useCallback(
     (orgList) => {

@@ -165,10 +165,19 @@ function RiskBadge({ riskLevel }) {
 }
 
 export default function SetupAssistant() {
-  const { activeOrg, recordVerification } = useOrg();
+  const {
+    activeOrg,
+    activeOrgHasConnection,
+    updateConnection,
+    activeOrgConnection,
+    recordVerification,
+  } = useOrg();
   const { authClient, dataClient, loading, session } = useSupabase();
   const role = useUserRole();
   const isAdmin = role === 'admin' || role === 'owner';
+  const [supabaseUrlInput, setSupabaseUrlInput] = useState('');
+  const [supabaseAnonKeyInput, setSupabaseAnonKeyInput] = useState('');
+  const [connectionSaving, setConnectionSaving] = useState(false);
   const [appKey, setAppKey] = useState('');
   const [isPasting, setIsPasting] = useState(false);
   const [validationState, setValidationState] = useState(VALIDATION_STATES.idle);
@@ -189,6 +198,18 @@ export default function SetupAssistant() {
   useEffect(() => {
     setSavedAt(activeOrg?.dedicated_key_saved_at || null);
   }, [activeOrg?.dedicated_key_saved_at]);
+
+  useEffect(() => {
+    if (!activeOrgConnection) {
+      return;
+    }
+
+    const nextUrl = typeof activeOrgConnection.supabaseUrl === 'string' ? activeOrgConnection.supabaseUrl : '';
+    const nextKey = typeof activeOrgConnection.supabaseAnonKey === 'string' ? activeOrgConnection.supabaseAnonKey : '';
+
+    setSupabaseUrlInput((current) => (current ? current : nextUrl));
+    setSupabaseAnonKeyInput((current) => (current ? current : nextKey));
+  }, [activeOrgConnection]);
 
   const supabaseReady = useMemo(() => !loading && Boolean(authClient) && Boolean(session), [authClient, loading, session]);
 
@@ -439,6 +460,37 @@ export default function SetupAssistant() {
     }
   };
 
+  const handleSaveSupabaseConnection = async () => {
+    if (!activeOrg?.id) {
+      toast.error('בחרו ארגון פעיל לפני שמירה.');
+      return;
+    }
+
+    if (!isAdmin) {
+      toast.error('אין הרשאה.');
+      return;
+    }
+
+    const supabaseUrl = supabaseUrlInput.trim();
+    const supabaseAnonKey = supabaseAnonKeyInput.trim();
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      toast.error('יש להזין Supabase URL ו-anon key.');
+      return;
+    }
+
+    setConnectionSaving(true);
+    try {
+      await updateConnection(activeOrg.id, { supabaseUrl, supabaseAnonKey });
+      toast.success('פרטי Supabase נשמרו.');
+    } catch (error) {
+      const normalized = asError(error);
+      toast.error(normalized?.message || 'שמירת פרטי Supabase נכשלה.');
+    } finally {
+      setConnectionSaving(false);
+    }
+  };
+
   const renderValidationStatus = () => {
     if (validationState === VALIDATION_STATES.success) {
       return (
@@ -506,6 +558,57 @@ export default function SetupAssistant() {
       <CardContent className="space-y-8 p-6">
         <StepSection
           number={1}
+          title="חיבור Supabase"
+          description="הזינו את ה-URL וה-anon key של פרויקט Supabase שישמש את הנתונים של הארגון."
+        >
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="reinex-supabase-url">Supabase URL</Label>
+              <Input
+                id="reinex-supabase-url"
+                dir="ltr"
+                value={supabaseUrlInput}
+                onChange={(event) => setSupabaseUrlInput(event.target.value)}
+                placeholder="https://xxxxx.supabase.co"
+                autoComplete="off"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="reinex-supabase-anon-key">Supabase anon key</Label>
+              <Input
+                id="reinex-supabase-anon-key"
+                dir="ltr"
+                type="password"
+                value={supabaseAnonKeyInput}
+                onChange={(event) => setSupabaseAnonKeyInput(event.target.value)}
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                autoComplete="off"
+              />
+              <p className="text-xs text-slate-500">
+                הערכים נשמרים ב-control DB תחת org_settings ומשמשים ליצירת dataClient עבור הארגון.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                onClick={handleSaveSupabaseConnection}
+                disabled={connectionSaving || !isAdmin}
+                className="gap-2"
+              >
+                {connectionSaving ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
+                {connectionSaving ? 'שומר…' : 'שמור פרטי Supabase'}
+              </Button>
+              <Badge className={activeOrgHasConnection ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-amber-100 text-amber-800 border border-amber-200'}>
+                {activeOrgHasConnection ? 'חיבור פעיל' : 'אין חיבור'}
+              </Badge>
+            </div>
+          </div>
+        </StepSection>
+
+        <StepSection
+          number={2}
           title="הכנת בסיס הנתונים"
           description="הריצו את הסקריפט הקנוני ב-Supabase כדי ליצור את הסכימה והמדיניות עבור Reinex."
         >
@@ -525,7 +628,7 @@ export default function SetupAssistant() {
         </StepSection>
 
         <StepSection
-          number={2}
+          number={3}
           title="הדבקת המפתח הייעודי"
           description="הדביקו כאן את ה-JWT שנוצר בסוף הסקריפט ושמרו אותו בצורה מאובטחת."
         >
@@ -559,7 +662,7 @@ export default function SetupAssistant() {
         </StepSection>
 
         <StepSection
-          number={3}
+          number={4}
           title="אימות ושמירה"
           description="נריץ את public.setup_assistant_diagnostics(), נשמור את המפתח ונאפשר גישה לאפליקציה."
           statusBadge={validationBadge}
@@ -582,7 +685,7 @@ export default function SetupAssistant() {
         </StepSection>
 
         <StepSection
-          number={4}
+          number={5}
           title="תיקוני סכימה (Drift)"
           description="לאחר שהחיבור נשמר, ניתן לזהות סטייה מה-SSOT ולהחיל תיקונים בטוחים מתוך האפליקציה."
           statusBadge={schemaHasDrift ? <Badge className="bg-amber-100 text-amber-800 border border-amber-200">זוהתה סטייה</Badge> : <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200">מסונכרן</Badge>}
