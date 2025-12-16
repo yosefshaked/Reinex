@@ -1,12 +1,48 @@
 export const SETUP_SQL_SCRIPT = String.raw`-- =================================================================
 -- Reinex Tenant Database Setup Script (SSOT)
+-- Version: Aligned with Reinex-PRD.md (Therapeutic Riding & Clinic Management System)
 -- =================================================================
 --
--- Notes:
--- - Tenant schema is "public".
--- - Safe/idempotent patterns are used throughout.
--- - Optional compatibility patches are conditional (do not assume other systems exist).
--- - The final SELECT prints a dedicated JWT key; replace the placeholder secret first.
+-- This script implements the complete Reinex domain as described in the PRD:
+-- 1. Lessons & Scheduling (Templates, Instances, Overrides, Participants)
+-- 2. Students & Guardians (with medical flags, onboarding forms, OTP security)
+-- 3. Forms & Submissions (with alert rules, visibility rules, OTP metadata)
+-- 4. Commitments & Consumption (prepaid packages, HMO support)
+-- 5. Waiting List (with priority, preferences, conflict detection)
+-- 6. Instructors & Payroll (Employees, Services, RateHistory, LessonEarnings, LeaveBalances, WorkSessions)
+-- 7. Settings (cross-feature configuration)
+-- 8. Documents (polymorphic file storage)
+--
+-- Design Notes:
+-- - Tenant schema is "public" (product-agnostic, no tuttiud references).
+-- - Idempotent DDL: CREATE TABLE/COLUMN IF NOT EXISTS, INSERT...ON CONFLICT DO NOTHING.
+-- - Supports weekly generation engine with template versioning and undo capability.
+-- - Supports partial attendance (group lessons) via lesson_participants per student per instance.
+-- - Supports service-per-student pricing overrides and HMO-specific rules via metadata.
+-- - RLS enabled on all tables; uniform policies for authenticated users.
+-- - Final SELECT prints a dedicated JWT key; replace the placeholder secret first.
+--
+-- Patch Notes (2025-12-15):
+-- - Removed Documents.entity_type CHECK constraint (validation in UI layer)
+-- - Removed redundant ALTER TABLE ADD COLUMN id statements (id already in CREATE TABLE)
+-- - Added lesson_instances.applied_override_id for override traceability
+-- - Added operational columns to lesson_participants (attendance/documentation tracking)
+-- - Added version/published_at/archived_at to forms for lifecycle management
+-- - Added submitted_by_guardian_id/source/locked_at to form_submissions
+-- - Added expires_at index to otp_challenges
+-- - Fixed RLS policy generation to handle quoted table names (Employees, Services, etc)
+--
+-- Principle — Lesson Overrides (LOCKED):
+-- - Use a single explicit table: public.lesson_template_overrides as the SSOT for template-level, date-specific overrides (cancel/modify).
+-- - lesson_instances.applied_override_id MUST reference lesson_template_overrides when an override is applied.
+-- - Do NOT replace overrides with lesson_instances.metadata or scattered columns.
+-- - Instance-level audit fields may exist for UI visibility, but they do NOT replace lesson_template_overrides.
+--
+-- Safety Guardrails (SSOT authoring):
+-- - Do NOT drop/remove any table (especially lesson_template_overrides) unless explicitly approved.
+-- - Do NOT drop columns, rename columns, change column types, or remove SSOT constraints/policies.
+-- - Do NOT “simplify” by moving SSOT data into metadata JSON.
+-- - Destructive changes are forbidden unless the user explicitly types: "ALLOW DESTRUCTIVE CHANGES".
 -- =================================================================
 
 CREATE SCHEMA IF NOT EXISTS extensions;
@@ -14,10 +50,20 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "pgjwt" WITH SCHEMA extensions;
 
 -- =================================================================
--- Tenant Public Domain Tables (Product-Agnostic)
+-- Roles and Users (Create before policies reference them)
 -- =================================================================
 
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_user') THEN
+    CREATE ROLE app_user;
+  END IF;
+END
+$$;
+
+-- =================================================================
+-- Tenant Public Domain Tables (Product-Agnostic)
+-- =================================================================
 
 -- -----------------------------------------------------------------
 -- public.students (SSOT)
@@ -27,7 +73,7 @@ CREATE TABLE IF NOT EXISTS public.students (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   first_name text NOT NULL,
   middle_name text NULL,
-  last_name text NULL,
+  last_name text NOT NULL,
   date_of_birth date NULL,
   notes_internal text NULL,
   default_notification_method text NOT NULL DEFAULT 'whatsapp',
@@ -41,7 +87,6 @@ CREATE TABLE IF NOT EXISTS public.students (
 );
 
 ALTER TABLE public.students
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS first_name text,
   ADD COLUMN IF NOT EXISTS middle_name text,
   ADD COLUMN IF NOT EXISTS last_name text,
@@ -55,6 +100,20 @@ ALTER TABLE public.students
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS updated_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.students ALTER COLUMN first_name SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.students ALTER COLUMN last_name SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
 
 DO $$
 BEGIN
@@ -95,7 +154,6 @@ CREATE TABLE IF NOT EXISTS public.guardians (
 );
 
 ALTER TABLE public.guardians
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS first_name text,
   ADD COLUMN IF NOT EXISTS middle_name text,
   ADD COLUMN IF NOT EXISTS last_name text,
@@ -103,6 +161,13 @@ ALTER TABLE public.guardians
   ADD COLUMN IF NOT EXISTS email text,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.guardians ALTER COLUMN first_name SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
 
 CREATE INDEX IF NOT EXISTS guardians_name_idx
   ON public.guardians (first_name, last_name);
@@ -121,7 +186,6 @@ CREATE TABLE IF NOT EXISTS public.student_guardians (
 );
 
 ALTER TABLE public.student_guardians
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS guardian_id uuid,
   ADD COLUMN IF NOT EXISTS relationship text,
@@ -165,35 +229,191 @@ CREATE INDEX IF NOT EXISTS student_guardians_student_id_idx
   ON public.student_guardians (student_id);
 
 -- -----------------------------------------------------------------
--- public.Employees (shared table) - canonical name fields
+-- public.Employees (complete table with payroll fields)
 -- -----------------------------------------------------------------
 
+CREATE TABLE IF NOT EXISTS public."Employees" (
+  "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+  "name" text NOT NULL,
+  "employee_id" text NOT NULL,
+  "employee_type" text,
+  "current_rate" numeric,
+  "phone" text,
+  "email" text,
+  "start_date" date,
+  "is_active" boolean DEFAULT true,
+  "notes" text,
+  "working_days" jsonb,
+  "annual_leave_days" numeric DEFAULT 12,
+  "leave_pay_method" text,
+  "leave_fixed_day_rate" numeric,
+  "employment_scope" text,
+  "metadata" jsonb,
+  CONSTRAINT "Employees_pkey" PRIMARY KEY ("id")
+);
+
+ALTER TABLE public."Employees"
+  ADD COLUMN IF NOT EXISTS "name" text,
+  ADD COLUMN IF NOT EXISTS "employee_id" text,
+  ADD COLUMN IF NOT EXISTS "employee_type" text,
+  ADD COLUMN IF NOT EXISTS "current_rate" numeric,
+  ADD COLUMN IF NOT EXISTS "phone" text,
+  ADD COLUMN IF NOT EXISTS "email" text,
+  ADD COLUMN IF NOT EXISTS "start_date" date,
+  ADD COLUMN IF NOT EXISTS "is_active" boolean,
+  ADD COLUMN IF NOT EXISTS "notes" text,
+  ADD COLUMN IF NOT EXISTS "working_days" jsonb,
+  ADD COLUMN IF NOT EXISTS "annual_leave_days" numeric,
+  ADD COLUMN IF NOT EXISTS "leave_pay_method" text,
+  ADD COLUMN IF NOT EXISTS "leave_fixed_day_rate" numeric,
+  ADD COLUMN IF NOT EXISTS "employment_scope" text,
+  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
+
+-- Add canonical name fields for future use
+ALTER TABLE public."Employees"
+  ADD COLUMN IF NOT EXISTS "first_name" text,
+  ADD COLUMN IF NOT EXISTS "middle_name" text,
+  ADD COLUMN IF NOT EXISTS "last_name" text;
+
+CREATE INDEX IF NOT EXISTS "Employees_name_idx" ON public."Employees" ("first_name", "last_name");
+
+-- -----------------------------------------------------------------
+-- public.Services (service catalog)
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public."Services" (
+  "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+  "name" text NOT NULL,
+  "duration_minutes" bigint,
+  "payment_model" text,
+  "color" text,
+  "metadata" jsonb,
+  CONSTRAINT "Services_pkey" PRIMARY KEY ("id")
+);
+
+ALTER TABLE public."Services"
+  ADD COLUMN IF NOT EXISTS "name" text,
+  ADD COLUMN IF NOT EXISTS "duration_minutes" bigint,
+  ADD COLUMN IF NOT EXISTS "payment_model" text,
+  ADD COLUMN IF NOT EXISTS "color" text,
+  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
+
+-- Seed the generic, non-deletable service for general rates
+INSERT INTO public."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata")
+VALUES ('00000000-0000-0000-0000-000000000000', 'תעריף כללי *לא למחוק או לשנות*', NULL, 'fixed_rate', '#84CC16', NULL)
+ON CONFLICT DO NOTHING;
+
+-- -----------------------------------------------------------------
+-- public.RateHistory (rate tracking per employee/service/date)
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public."RateHistory" (
+  "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+  "rate" numeric NOT NULL,
+  "effective_date" date NOT NULL,
+  "notes" text,
+  "employee_id" uuid NOT NULL,
+  "service_id" uuid,
+  "metadata" jsonb,
+  CONSTRAINT "RateHistory_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "RateHistory_employee_id_fkey" FOREIGN KEY ("employee_id") REFERENCES public."Employees"("id"),
+  CONSTRAINT "RateHistory_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES public."Services"("id")
+);
+
+ALTER TABLE public."RateHistory"
+  ADD COLUMN IF NOT EXISTS "rate" numeric,
+  ADD COLUMN IF NOT EXISTS "effective_date" date,
+  ADD COLUMN IF NOT EXISTS "notes" text,
+  ADD COLUMN IF NOT EXISTS "employee_id" uuid,
+  ADD COLUMN IF NOT EXISTS "service_id" uuid,
+  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
+
+-- Add unique constraint to prevent duplicates per employee/service/effective_date
 DO $$
 BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_name = 'Employees'
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'RateHistory_employee_service_effective_date_key'
   ) THEN
-    EXECUTE 'ALTER TABLE public."Employees" ADD COLUMN IF NOT EXISTS "first_name" text';
-    EXECUTE 'ALTER TABLE public."Employees" ADD COLUMN IF NOT EXISTS "middle_name" text';
-    EXECUTE 'ALTER TABLE public."Employees" ADD COLUMN IF NOT EXISTS "last_name" text';
-    EXECUTE 'CREATE INDEX IF NOT EXISTS "Employees_name_idx" ON public."Employees" ("first_name", "last_name")';
-    EXECUTE 'COMMENT ON COLUMN public."Employees"."name" IS ''Legacy display name (non-canonical). Prefer first_name/middle_name/last_name.''';
-  ELSIF EXISTS (
-    SELECT 1
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_name = 'employees'
-  ) THEN
-    EXECUTE 'ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS first_name text';
-    EXECUTE 'ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS middle_name text';
-    EXECUTE 'ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS last_name text';
-    EXECUTE 'CREATE INDEX IF NOT EXISTS employees_name_idx ON public.employees (first_name, last_name)';
-    EXECUTE 'COMMENT ON COLUMN public.employees.name IS ''Legacy display name (non-canonical). Prefer first_name/middle_name/last_name.''';
+    ALTER TABLE public."RateHistory"
+      ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
+      UNIQUE (employee_id, service_id, effective_date);
   END IF;
-END $$;
+END;
+$$;
+
+-- -----------------------------------------------------------------
+-- public.WorkSessions (work/leave tracking)
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public."WorkSessions" (
+  "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+  "employee_id" uuid NOT NULL,
+  "service_id" uuid,
+  "date" date NOT NULL,
+  "session_type" text,
+  "hours" numeric,
+  "sessions_count" bigint,
+  "students_count" bigint,
+  "rate_used" numeric,
+  "total_payment" numeric,
+  "notes" text,
+  "created_at" timestamptz DEFAULT now(),
+  "entry_type" text NOT NULL DEFAULT 'hours',
+  "payable" boolean,
+  "metadata" jsonb,
+  "deleted" boolean NOT NULL DEFAULT false,
+  "deleted_at" timestamptz,
+  CONSTRAINT "WorkSessions_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "WorkSessions_employee_id_fkey" FOREIGN KEY ("employee_id") REFERENCES public."Employees"("id"),
+  CONSTRAINT "WorkSessions_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES public."Services"("id")
+);
+
+ALTER TABLE public."WorkSessions"
+  ADD COLUMN IF NOT EXISTS "employee_id" uuid,
+  ADD COLUMN IF NOT EXISTS "service_id" uuid,
+  ADD COLUMN IF NOT EXISTS "date" date,
+  ADD COLUMN IF NOT EXISTS "session_type" text,
+  ADD COLUMN IF NOT EXISTS "hours" numeric,
+  ADD COLUMN IF NOT EXISTS "sessions_count" bigint,
+  ADD COLUMN IF NOT EXISTS "students_count" bigint,
+  ADD COLUMN IF NOT EXISTS "rate_used" numeric,
+  ADD COLUMN IF NOT EXISTS "total_payment" numeric,
+  ADD COLUMN IF NOT EXISTS "notes" text,
+  ADD COLUMN IF NOT EXISTS "created_at" timestamptz,
+  ADD COLUMN IF NOT EXISTS "entry_type" text,
+  ADD COLUMN IF NOT EXISTS "payable" boolean,
+  ADD COLUMN IF NOT EXISTS "metadata" jsonb,
+  ADD COLUMN IF NOT EXISTS "deleted" boolean,
+  ADD COLUMN IF NOT EXISTS "deleted_at" timestamptz;
+
+-- -----------------------------------------------------------------
+-- public.LeaveBalances (leave allocation and usage ledger)
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public."LeaveBalances" (
+  "id" bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  "employee_id" uuid NOT NULL,
+  "leave_type" text NOT NULL,
+  "balance" numeric NOT NULL DEFAULT 0,
+  "effective_date" date NOT NULL,
+  "notes" text,
+  "work_session_id" uuid,
+  "metadata" jsonb,
+  CONSTRAINT "LeaveBalances_employee_id_fkey" FOREIGN KEY ("employee_id") REFERENCES public."Employees"("id"),
+  CONSTRAINT "LeaveBalances_work_session_id_fkey" FOREIGN KEY ("work_session_id") REFERENCES public."WorkSessions"("id") ON DELETE SET NULL
+);
+
+ALTER TABLE public."LeaveBalances"
+  ADD COLUMN IF NOT EXISTS "created_at" timestamptz,
+  ADD COLUMN IF NOT EXISTS "employee_id" uuid,
+  ADD COLUMN IF NOT EXISTS "leave_type" text,
+  ADD COLUMN IF NOT EXISTS "balance" numeric,
+  ADD COLUMN IF NOT EXISTS "effective_date" date,
+  ADD COLUMN IF NOT EXISTS "notes" text,
+  ADD COLUMN IF NOT EXISTS "work_session_id" uuid,
+  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
 
 -- -----------------------------------------------------------------
 -- public.instructor_profiles
@@ -212,6 +432,16 @@ ALTER TABLE public.instructor_profiles
   ADD COLUMN IF NOT EXISTS break_time_minutes int,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
+DO $$
+BEGIN
+  ALTER TABLE public.instructor_profiles
+    ADD CONSTRAINT instructor_profiles_employee_id_fkey
+    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
 -- -----------------------------------------------------------------
 -- public.instructor_service_capabilities
 -- -----------------------------------------------------------------
@@ -226,12 +456,31 @@ CREATE TABLE IF NOT EXISTS public.instructor_service_capabilities (
 );
 
 ALTER TABLE public.instructor_service_capabilities
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS max_students int,
   ADD COLUMN IF NOT EXISTS base_rate numeric,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.instructor_service_capabilities
+    ADD CONSTRAINT instructor_service_capabilities_employee_id_fkey
+    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.instructor_service_capabilities
+    ADD CONSTRAINT instructor_service_capabilities_service_id_fkey
+    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS instructor_service_capabilities_employee_service_uidx
   ON public.instructor_service_capabilities (employee_id, service_id);
@@ -265,7 +514,6 @@ CREATE TABLE IF NOT EXISTS public.lesson_templates (
 );
 
 ALTER TABLE public.lesson_templates
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS instructor_employee_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
@@ -289,6 +537,26 @@ BEGIN
   ALTER TABLE public.lesson_templates
     ADD CONSTRAINT lesson_templates_student_id_fkey
     FOREIGN KEY (student_id) REFERENCES public.students(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_templates
+    ADD CONSTRAINT lesson_templates_instructor_employee_id_fkey
+    FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_templates
+    ADD CONSTRAINT lesson_templates_service_id_fkey
+    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -336,7 +604,6 @@ CREATE TABLE IF NOT EXISTS public.lesson_template_overrides (
 );
 
 ALTER TABLE public.lesson_template_overrides
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS template_id uuid,
   ADD COLUMN IF NOT EXISTS target_date date,
   ADD COLUMN IF NOT EXISTS override_type text,
@@ -353,6 +620,26 @@ BEGIN
   ALTER TABLE public.lesson_template_overrides
     ADD CONSTRAINT lesson_template_overrides_template_id_fkey
     FOREIGN KEY (template_id) REFERENCES public.lesson_templates(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_template_overrides
+    ADD CONSTRAINT lesson_template_overrides_new_instructor_employee_id_fkey
+    FOREIGN KEY (new_instructor_employee_id) REFERENCES public."Employees"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_template_overrides
+    ADD CONSTRAINT lesson_template_overrides_new_service_id_fkey
+    FOREIGN KEY (new_service_id) REFERENCES public."Services"(id);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -381,6 +668,7 @@ CREATE INDEX IF NOT EXISTS lesson_template_overrides_target_date_idx
 CREATE TABLE IF NOT EXISTS public.lesson_instances (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   template_id uuid NULL,
+  applied_override_id uuid NULL,
   datetime_start timestamptz NOT NULL,
   duration_minutes int NOT NULL,
   instructor_employee_id uuid NOT NULL,
@@ -394,8 +682,8 @@ CREATE TABLE IF NOT EXISTS public.lesson_instances (
 );
 
 ALTER TABLE public.lesson_instances
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS template_id uuid,
+  ADD COLUMN IF NOT EXISTS applied_override_id uuid,
   ADD COLUMN IF NOT EXISTS datetime_start timestamptz,
   ADD COLUMN IF NOT EXISTS duration_minutes int,
   ADD COLUMN IF NOT EXISTS instructor_employee_id uuid,
@@ -412,6 +700,36 @@ BEGIN
   ALTER TABLE public.lesson_instances
     ADD CONSTRAINT lesson_instances_template_id_fkey
     FOREIGN KEY (template_id) REFERENCES public.lesson_templates(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_instances
+    ADD CONSTRAINT lesson_instances_instructor_employee_id_fkey
+    FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_instances
+    ADD CONSTRAINT lesson_instances_service_id_fkey
+    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_instances
+    ADD CONSTRAINT lesson_instances_applied_override_id_fkey
+    FOREIGN KEY (applied_override_id) REFERENCES public.lesson_template_overrides(id);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -449,6 +767,7 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS lesson_instances_datetime_start_idx ON public.lesson_instances (datetime_start);
 CREATE INDEX IF NOT EXISTS lesson_instances_instructor_datetime_idx ON public.lesson_instances (instructor_employee_id, datetime_start);
+CREATE INDEX IF NOT EXISTS lesson_instances_applied_override_id_idx ON public.lesson_instances (applied_override_id) WHERE applied_override_id IS NOT NULL;
 
 -- -----------------------------------------------------------------
 -- public.lesson_participants
@@ -463,11 +782,15 @@ CREATE TABLE IF NOT EXISTS public.lesson_participants (
   pricing_breakdown jsonb NULL,
   commitment_id uuid NULL,
   documentation_ref jsonb NULL,
+  attendance_confirmed_at timestamptz NULL,
+  attendance_confirmed_by uuid NULL,
+  documented_at timestamptz NULL,
+  documented_by uuid NULL,
+  locked_at timestamptz NULL,
   metadata jsonb NULL
 );
 
 ALTER TABLE public.lesson_participants
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS participant_status text,
@@ -475,6 +798,11 @@ ALTER TABLE public.lesson_participants
   ADD COLUMN IF NOT EXISTS pricing_breakdown jsonb,
   ADD COLUMN IF NOT EXISTS commitment_id uuid,
   ADD COLUMN IF NOT EXISTS documentation_ref jsonb,
+  ADD COLUMN IF NOT EXISTS attendance_confirmed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS attendance_confirmed_by uuid,
+  ADD COLUMN IF NOT EXISTS documented_at timestamptz,
+  ADD COLUMN IF NOT EXISTS documented_by uuid,
+  ADD COLUMN IF NOT EXISTS locked_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
 DO $$
@@ -500,6 +828,16 @@ END $$;
 DO $$
 BEGIN
   ALTER TABLE public.lesson_participants
+    ADD CONSTRAINT lesson_participants_commitment_id_fkey
+    FOREIGN KEY (commitment_id) REFERENCES public.commitments(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_participants
     ADD CONSTRAINT lesson_participants_participant_status_check
     CHECK (participant_status IN ('scheduled','attended','cancelled_student','cancelled_clinic','no_show'));
 EXCEPTION
@@ -512,6 +850,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS lesson_participants_instance_student_uidx
 
 CREATE INDEX IF NOT EXISTS lesson_participants_student_id_idx
   ON public.lesson_participants (student_id);
+
+CREATE INDEX IF NOT EXISTS lesson_participants_locked_at_idx
+  ON public.lesson_participants (locked_at) WHERE locked_at IS NOT NULL;
 
 -- -----------------------------------------------------------------
 -- public.commitments
@@ -528,7 +869,6 @@ CREATE TABLE IF NOT EXISTS public.commitments (
 );
 
 ALTER TABLE public.commitments
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS total_amount numeric,
@@ -541,6 +881,16 @@ BEGIN
   ALTER TABLE public.commitments
     ADD CONSTRAINT commitments_student_id_fkey
     FOREIGN KEY (student_id) REFERENCES public.students(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.commitments
+    ADD CONSTRAINT commitments_service_id_fkey
+    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -562,7 +912,6 @@ CREATE TABLE IF NOT EXISTS public.consumption_entries (
 );
 
 ALTER TABLE public.consumption_entries
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
   ADD COLUMN IF NOT EXISTS commitment_id uuid,
   ADD COLUMN IF NOT EXISTS amount_charged numeric,
@@ -621,7 +970,6 @@ CREATE TABLE IF NOT EXISTS public.lesson_earnings (
 );
 
 ALTER TABLE public.lesson_earnings
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
   ADD COLUMN IF NOT EXISTS rate_used numeric,
@@ -633,8 +981,28 @@ ALTER TABLE public.lesson_earnings
 DO $$
 BEGIN
   ALTER TABLE public.lesson_earnings
+    ADD CONSTRAINT lesson_earnings_employee_id_fkey
+    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_earnings
     ADD CONSTRAINT lesson_earnings_lesson_instance_id_fkey
     FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_earnings
+    ADD CONSTRAINT lesson_earnings_work_session_id_fkey
+    FOREIGN KEY (work_session_id) REFERENCES public."WorkSessions"(id);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -657,21 +1025,30 @@ CREATE TABLE IF NOT EXISTS public.forms (
   form_schema jsonb NOT NULL,
   alert_rules jsonb NULL,
   visibility_rules jsonb NULL,
+  version int NOT NULL DEFAULT 1,
+  published_at timestamptz NULL,
+  archived_at timestamptz NULL,
   created_by uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  is_active boolean NOT NULL DEFAULT true
+  is_active boolean NOT NULL DEFAULT true,
+  metadata jsonb NULL
 );
 
 ALTER TABLE public.forms
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS name text,
   ADD COLUMN IF NOT EXISTS description text,
   ADD COLUMN IF NOT EXISTS form_schema jsonb,
   ADD COLUMN IF NOT EXISTS alert_rules jsonb,
   ADD COLUMN IF NOT EXISTS visibility_rules jsonb,
+  ADD COLUMN IF NOT EXISTS version int,
+  ADD COLUMN IF NOT EXISTS published_at timestamptz,
+  ADD COLUMN IF NOT EXISTS archived_at timestamptz,
   ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS is_active boolean;
+  ADD COLUMN IF NOT EXISTS is_active boolean,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
 CREATE INDEX IF NOT EXISTS forms_is_active_idx ON public.forms (is_active);
 
@@ -686,20 +1063,27 @@ CREATE TABLE IF NOT EXISTS public.form_submissions (
   answers jsonb NOT NULL,
   alert_flags jsonb NULL,
   otp_metadata jsonb NOT NULL,
+  submitted_by_guardian_id uuid NULL,
+  source text NULL,
   submitted_at timestamptz NOT NULL DEFAULT now(),
   reviewed_by uuid NULL,
+  reviewed_at timestamptz NULL,
+  locked_at timestamptz NULL,
   metadata jsonb NULL
 );
 
 ALTER TABLE public.form_submissions
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS form_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS answers jsonb,
   ADD COLUMN IF NOT EXISTS alert_flags jsonb,
   ADD COLUMN IF NOT EXISTS otp_metadata jsonb,
+  ADD COLUMN IF NOT EXISTS submitted_by_guardian_id uuid,
+  ADD COLUMN IF NOT EXISTS source text,
   ADD COLUMN IF NOT EXISTS submitted_at timestamptz,
   ADD COLUMN IF NOT EXISTS reviewed_by uuid,
+  ADD COLUMN IF NOT EXISTS reviewed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS locked_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
 DO $$
@@ -722,11 +1106,34 @@ EXCEPTION
     NULL;
 END $$;
 
+DO $$
+BEGIN
+  ALTER TABLE public.form_submissions
+    ADD CONSTRAINT form_submissions_submitted_by_guardian_id_fkey
+    FOREIGN KEY (submitted_by_guardian_id) REFERENCES public.guardians(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.form_submissions
+    ADD CONSTRAINT form_submissions_source_check
+    CHECK (source IN ('web','whatsapp','internal','email','sms') OR source IS NULL);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
 CREATE INDEX IF NOT EXISTS form_submissions_form_id_idx
   ON public.form_submissions (form_id);
 
 CREATE INDEX IF NOT EXISTS form_submissions_student_id_idx
   ON public.form_submissions (student_id);
+
+CREATE INDEX IF NOT EXISTS form_submissions_submitted_by_guardian_id_idx
+  ON public.form_submissions (submitted_by_guardian_id) WHERE submitted_by_guardian_id IS NOT NULL;
 
 -- -----------------------------------------------------------------
 -- public.otp_challenges
@@ -747,7 +1154,6 @@ CREATE TABLE IF NOT EXISTS public.otp_challenges (
 );
 
 ALTER TABLE public.otp_challenges
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS channel text,
   ADD COLUMN IF NOT EXISTS destination text,
@@ -795,6 +1201,9 @@ CREATE INDEX IF NOT EXISTS otp_challenges_student_id_idx
 CREATE INDEX IF NOT EXISTS otp_challenges_status_idx
   ON public.otp_challenges (status);
 
+CREATE INDEX IF NOT EXISTS otp_challenges_expires_at_idx
+  ON public.otp_challenges (expires_at);
+
 -- -----------------------------------------------------------------
 -- public.waiting_list_entries
 -- -----------------------------------------------------------------
@@ -816,7 +1225,6 @@ CREATE TABLE IF NOT EXISTS public.waiting_list_entries (
 );
 
 ALTER TABLE public.waiting_list_entries
-  ADD COLUMN IF NOT EXISTS id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS desired_service_id uuid,
   ADD COLUMN IF NOT EXISTS preferred_days int[],
@@ -835,6 +1243,16 @@ BEGIN
   ALTER TABLE public.waiting_list_entries
     ADD CONSTRAINT waiting_list_entries_student_id_fkey
     FOREIGN KEY (student_id) REFERENCES public.students(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.waiting_list_entries
+    ADD CONSTRAINT waiting_list_entries_desired_service_id_fkey
+    FOREIGN KEY (desired_service_id) REFERENCES public."Services"(id);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -864,11 +1282,15 @@ CREATE TABLE IF NOT EXISTS public."Settings" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   "key" text NOT NULL UNIQUE,
   "settings_value" jsonb NOT NULL,
-  "metadata" jsonb
+  "metadata" jsonb,
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_at" timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE public."Settings"
-  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
+  ADD COLUMN IF NOT EXISTS "metadata" jsonb,
+  ADD COLUMN IF NOT EXISTS "created_at" timestamptz,
+  ADD COLUMN IF NOT EXISTS "updated_at" timestamptz;
 
 -- -----------------------------------------------------------------
 -- public."Documents" (polymorphic file metadata)
@@ -876,7 +1298,7 @@ ALTER TABLE public."Settings"
 
 CREATE TABLE IF NOT EXISTS public."Documents" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-  "entity_type" text NOT NULL CHECK ("entity_type" IN ('student', 'instructor', 'organization')),
+  "entity_type" text NOT NULL,
   "entity_id" uuid NOT NULL,
   "name" text NOT NULL,
   "original_name" text NOT NULL,
@@ -899,6 +1321,25 @@ CREATE TABLE IF NOT EXISTS public."Documents" (
 ALTER TABLE public."Documents"
   ADD COLUMN IF NOT EXISTS "metadata" jsonb;
 
+-- Drop entity_type CHECK constraint if it exists (moved to UI validation)
+DO $$
+DECLARE
+  constraint_name text;
+BEGIN
+  SELECT con.conname INTO constraint_name
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+  WHERE nsp.nspname = 'public'
+    AND rel.relname = 'Documents'
+    AND con.contype = 'c'
+    AND pg_get_constraintdef(con.oid) LIKE '%entity_type%';
+
+  IF constraint_name IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE public."Documents" DROP CONSTRAINT IF EXISTS ' || quote_ident(constraint_name);
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS "Documents_entity_idx" ON public."Documents" ("entity_type", "entity_id");
 CREATE INDEX IF NOT EXISTS "Documents_uploaded_at_idx" ON public."Documents" ("uploaded_at");
 CREATE INDEX IF NOT EXISTS "Documents_expiration_idx" ON public."Documents" ("expiration_date") WHERE "expiration_date" IS NOT NULL;
@@ -908,9 +1349,22 @@ CREATE INDEX IF NOT EXISTS "Documents_hash_idx" ON public."Documents" ("hash") W
 -- Tenant Public Domain Tables — RLS + Diagnostics
 -- =================================================================
 
+-- Add indexes for payroll tables
+CREATE INDEX IF NOT EXISTS "RateHistory_employee_service_idx" ON public."RateHistory" ("employee_id", "service_id", "effective_date");
+CREATE INDEX IF NOT EXISTS "LeaveBalances_employee_date_idx" ON public."LeaveBalances" ("employee_id", "effective_date");
+CREATE INDEX IF NOT EXISTS "WorkSessions_employee_date_idx" ON public."WorkSessions" ("employee_id", "date");
+CREATE INDEX IF NOT EXISTS "WorkSessions_service_idx" ON public."WorkSessions" ("service_id");
+CREATE INDEX IF NOT EXISTS "WorkSessions_deleted_idx" ON public."WorkSessions" ("deleted") WHERE "deleted" = true;
+
+-- Enable RLS on all tables (both domain and payroll)
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.guardians ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.student_guardians ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public."Employees" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public."Services" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public."RateHistory" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public."WorkSessions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public."LeaveBalances" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instructor_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instructor_service_capabilities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_templates ENABLE ROW LEVEL SECURITY;
@@ -930,11 +1384,17 @@ ALTER TABLE public."Documents" ENABLE ROW LEVEL SECURITY;
 DO $$
 DECLARE
   tbl text;
+  policy_name text;
 BEGIN
   FOREACH tbl IN ARRAY ARRAY[
     'students',
     'guardians',
     'student_guardians',
+    'Employees',
+    'Services',
+    'RateHistory',
+    'WorkSessions',
+    'LeaveBalances',
     'instructor_profiles',
     'instructor_service_capabilities',
     'lesson_templates',
@@ -952,32 +1412,24 @@ BEGIN
     'Documents'
   ]
   LOOP
-    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I',
-      'Allow full access to authenticated users on ' || tbl,
-      tbl
-    );
-
-    EXECUTE format(
-      'CREATE POLICY %I ON public.%I FOR ALL TO authenticated, app_user USING (true) WITH CHECK (true)',
-      'Allow full access to authenticated users on ' || tbl,
-      tbl
-    );
+    policy_name := 'Allow full access to authenticated users on ' || tbl;
+    
+    EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl);
+    
+    EXECUTE 'CREATE POLICY ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl) || ' FOR ALL TO authenticated, app_user USING (true) WITH CHECK (true)';
   END LOOP;
 END $$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_user') THEN
-    CREATE ROLE app_user;
-  END IF;
-END
-$$;
 
 GRANT USAGE ON SCHEMA public TO app_user;
 
 GRANT ALL ON TABLE public.students TO app_user;
 GRANT ALL ON TABLE public.guardians TO app_user;
 GRANT ALL ON TABLE public.student_guardians TO app_user;
+GRANT ALL ON TABLE public."Employees" TO app_user;
+GRANT ALL ON TABLE public."Services" TO app_user;
+GRANT ALL ON TABLE public."RateHistory" TO app_user;
+GRANT ALL ON TABLE public."WorkSessions" TO app_user;
+GRANT ALL ON TABLE public."LeaveBalances" TO app_user;
 GRANT ALL ON TABLE public.instructor_profiles TO app_user;
 GRANT ALL ON TABLE public.instructor_service_capabilities TO app_user;
 GRANT ALL ON TABLE public.lesson_templates TO app_user;
@@ -1012,6 +1464,11 @@ DECLARE
     'students',
     'guardians',
     'student_guardians',
+    'Employees',
+    'Services',
+    'RateHistory',
+    'WorkSessions',
+    'LeaveBalances',
     'instructor_profiles',
     'instructor_service_capabilities',
     'lesson_templates',
@@ -1077,6 +1534,255 @@ BEGIN
   END LOOP;
 END;
 $$;
+
+-- =================================================================
+-- Schema Drift Detection & Patch Engine (Bootstrap RPCs)
+-- =================================================================
+-- These functions enable:
+-- - Introspection of tenant schema via JSON
+-- - Preflight SELECT queries
+-- - Execution of SAFE schema patch statements (and optionally destructive when explicitly confirmed)
+--
+-- Security model:
+-- - EXECUTE is granted ONLY to the database role service_role.
+-- - SAFE mode rejects destructive keywords and only allows a strict allow-list of statement patterns.
+
+CREATE OR REPLACE FUNCTION public.schema_introspection_v1()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  result jsonb;
+BEGIN
+  result := jsonb_build_object(
+    'generated_at', NOW(),
+    'schema', 'public',
+    'tables', (
+      SELECT COALESCE(jsonb_agg(
+        jsonb_build_object(
+          'name', c.relname,
+          'columns', (
+            SELECT COALESCE(jsonb_agg(
+              jsonb_build_object(
+                'name', a.attname,
+                'type', pg_catalog.format_type(a.atttypid, a.atttypmod),
+                'nullable', NOT a.attnotnull,
+                'default', pg_get_expr(ad.adbin, ad.adrelid)
+              ) ORDER BY a.attnum
+            ), '[]'::jsonb)
+            FROM pg_attribute a
+            LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+            WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+          ),
+          'primary_key', (
+            SELECT COALESCE(jsonb_agg(att.attname ORDER BY ord.ordinality), '[]'::jsonb)
+            FROM pg_index i
+            JOIN unnest(i.indkey) WITH ORDINALITY AS ord(attnum, ordinality) ON TRUE
+            JOIN pg_attribute att ON att.attrelid = c.oid AND att.attnum = ord.attnum
+            WHERE i.indrelid = c.oid AND i.indisprimary
+          )
+        )
+      ), '[]'::jsonb)
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r'
+    ),
+    'indexes', (
+      SELECT COALESCE(jsonb_agg(
+        jsonb_build_object(
+          'table', tablename,
+          'name', indexname,
+          'definition', indexdef
+        )
+      ), '[]'::jsonb)
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+    ),
+    'constraints', (
+      SELECT COALESCE(jsonb_agg(
+        jsonb_build_object(
+          'table', cls.relname,
+          'name', con.conname,
+          'type', con.contype,
+          'definition', pg_get_constraintdef(con.oid)
+        )
+      ), '[]'::jsonb)
+      FROM pg_constraint con
+      JOIN pg_class cls ON cls.oid = con.conrelid
+      JOIN pg_namespace n ON n.oid = cls.relnamespace
+      WHERE n.nspname = 'public'
+    ),
+    'rls', (
+      SELECT COALESCE(jsonb_agg(
+        jsonb_build_object(
+          'table', c.relname,
+          'enabled', c.relrowsecurity
+        )
+      ), '[]'::jsonb)
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r'
+    ),
+    'policies', (
+      SELECT COALESCE(jsonb_agg(
+        jsonb_build_object(
+          'table', p.tablename,
+          'name', p.policyname,
+          'command', p.cmd,
+          'roles', p.roles,
+          'using', p.qual,
+          'check', p.with_check
+        )
+      ), '[]'::jsonb)
+      FROM pg_policies p
+      WHERE p.schemaname = 'public'
+    ),
+    'views', (
+      SELECT COALESCE(jsonb_agg(
+        jsonb_build_object(
+          'name', c.relname,
+          'definition', pg_get_viewdef(c.oid, true)
+        )
+      ), '[]'::jsonb)
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'v'
+    ),
+    'extensions', (
+      SELECT COALESCE(jsonb_agg(
+        jsonb_build_object(
+          'name', extname,
+          'schema', n.nspname,
+          'version', extversion
+        )
+      ), '[]'::jsonb)
+      FROM pg_extension e
+      JOIN pg_namespace n ON n.oid = e.extnamespace
+    )
+  );
+
+  RETURN result;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.schema_run_selects_v1(queries text[])
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  q text;
+  row jsonb;
+  results jsonb := '[]'::jsonb;
+  upper_q text;
+  result_row record;
+BEGIN
+  IF queries IS NULL OR array_length(queries, 1) IS NULL THEN
+    RETURN results;
+  END IF;
+
+  FOREACH q IN ARRAY queries LOOP
+    upper_q := upper(trim(coalesce(q, '')));
+    IF upper_q = '' THEN
+      CONTINUE;
+    END IF;
+    IF position(';' in q) > 0 THEN
+      RAISE EXCEPTION 'query_contains_semicolon';
+    END IF;
+    IF NOT upper_q LIKE 'SELECT%' THEN
+      RAISE EXCEPTION 'only_select_allowed';
+    END IF;
+
+    BEGIN
+      EXECUTE q INTO result_row;
+      row := jsonb_build_object('query', q, 'ok', true, 'result', to_jsonb(result_row));
+    EXCEPTION WHEN OTHERS THEN
+      row := jsonb_build_object('query', q, 'ok', false, 'error', SQLERRM);
+    END;
+
+    results := results || jsonb_build_array(row);
+  END LOOP;
+
+  RETURN results;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.schema_execute_statements_v1(
+  statements text[],
+  allow_destructive boolean DEFAULT false,
+  confirmation_phrase text DEFAULT null
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  stmt text;
+  upper_stmt text;
+  row jsonb;
+  results jsonb := '[]'::jsonb;
+  safe_ok boolean;
+BEGIN
+  IF statements IS NULL OR array_length(statements, 1) IS NULL THEN
+    RETURN results;
+  END IF;
+
+  IF allow_destructive THEN
+    IF confirmation_phrase IS DISTINCT FROM 'ALLOW DESTRUCTIVE CHANGES' THEN
+      RAISE EXCEPTION 'destructive_confirmation_required';
+    END IF;
+  END IF;
+
+  FOREACH stmt IN ARRAY statements LOOP
+    upper_stmt := upper(trim(coalesce(stmt, '')));
+    IF upper_stmt = '' THEN
+      CONTINUE;
+    END IF;
+
+    IF NOT allow_destructive THEN
+      safe_ok := (
+        upper_stmt LIKE 'CREATE TABLE IF NOT EXISTS %' OR
+        upper_stmt LIKE 'ALTER TABLE % ADD COLUMN IF NOT EXISTS %' OR
+        upper_stmt LIKE 'CREATE INDEX IF NOT EXISTS %' OR
+        upper_stmt LIKE 'CREATE UNIQUE INDEX IF NOT EXISTS %' OR
+        upper_stmt LIKE 'ALTER TABLE % ENABLE ROW LEVEL SECURITY%' OR
+        upper_stmt LIKE 'CREATE POLICY %' OR
+        upper_stmt LIKE 'ALTER TABLE % ADD CONSTRAINT %' OR
+        upper_stmt LIKE 'CREATE EXTENSION IF NOT EXISTS %' OR
+        upper_stmt LIKE 'CREATE OR REPLACE VIEW %'
+      );
+
+      IF NOT safe_ok THEN
+        RAISE EXCEPTION 'statement_not_allowed_in_safe_mode';
+      END IF;
+
+      IF upper_stmt LIKE '%DROP %' OR upper_stmt LIKE '%RENAME %' OR upper_stmt LIKE '%ALTER COLUMN % TYPE %' THEN
+        RAISE EXCEPTION 'statement_contains_destructive_keywords';
+      END IF;
+    END IF;
+
+    BEGIN
+      EXECUTE stmt;
+      row := jsonb_build_object('statement', stmt, 'ok', true);
+    EXCEPTION WHEN OTHERS THEN
+      row := jsonb_build_object('statement', stmt, 'ok', false, 'error', SQLERRM);
+    END;
+
+    results := results || jsonb_build_array(row);
+  END LOOP;
+
+  RETURN jsonb_build_object('statements', results);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.schema_introspection_v1() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.schema_run_selects_v1(text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.schema_execute_statements_v1(text[], boolean, text) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION public.schema_introspection_v1() TO service_role;
+GRANT EXECUTE ON FUNCTION public.schema_run_selects_v1(text[]) TO service_role;
+GRANT EXECUTE ON FUNCTION public.schema_execute_statements_v1(text[], boolean, text) TO service_role;
 
 SELECT extensions.sign(
   json_build_object(

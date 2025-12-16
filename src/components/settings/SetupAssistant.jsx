@@ -1,20 +1,32 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { SETUP_SQL_SCRIPT } from '@/lib/setup-sql.js';
 import { asError } from '@/lib/error-utils.js';
+import { useUserRole } from '@/features/onboarding/hooks/useUserRole.js';
+import {
+  applySchemaDestructive,
+  applySchemaSafe,
+  createSchemaPlan,
+  runSchemaPreflight,
+} from '@/features/admin/api/schema-migrations.js';
 import {
   AlertCircle,
   CheckCircle2,
   ClipboardCopy,
   Loader2,
 } from 'lucide-react';
+
+const REQUIRED_DESTRUCTIVE_PHRASE = 'ALLOW DESTRUCTIVE CHANGES';
 
 const VALIDATION_STATES = {
   idle: 'idle',
@@ -128,9 +140,35 @@ function DiagnosticsList({ diagnostics }) {
   );
 }
 
+function RiskBadge({ riskLevel }) {
+  if (riskLevel === 'SAFE') {
+    return (
+      <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200">
+        בטוח
+      </Badge>
+    );
+  }
+
+  if (riskLevel === 'CAUTION') {
+    return (
+      <Badge className="bg-amber-100 text-amber-800 border border-amber-200">
+        זהיר
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge className="bg-red-100 text-red-700 border border-red-200">
+      מסוכן
+    </Badge>
+  );
+}
+
 export default function SetupAssistant() {
   const { activeOrg, recordVerification } = useOrg();
   const { authClient, dataClient, loading, session } = useSupabase();
+  const role = useUserRole();
+  const isAdmin = role === 'admin' || role === 'owner';
   const [appKey, setAppKey] = useState('');
   const [isPasting, setIsPasting] = useState(false);
   const [validationState, setValidationState] = useState(VALIDATION_STATES.idle);
@@ -139,11 +177,135 @@ export default function SetupAssistant() {
   const [savingState, setSavingState] = useState('idle');
   const [savedAt, setSavedAt] = useState(activeOrg?.dedicated_key_saved_at || null);
 
+  const [schemaSimpleMode, setSchemaSimpleMode] = useState(true);
+  const [schemaPlan, setSchemaPlan] = useState(null);
+  const [schemaPlanLoading, setSchemaPlanLoading] = useState(false);
+  const [schemaPreflightLoading, setSchemaPreflightLoading] = useState(false);
+  const [schemaApplySafeLoading, setSchemaApplySafeLoading] = useState(false);
+  const [schemaApplyDangerLoading, setSchemaApplyDangerLoading] = useState(false);
+  const [schemaDangerChecked, setSchemaDangerChecked] = useState(false);
+  const [schemaDangerPhrase, setSchemaDangerPhrase] = useState('');
+
   useEffect(() => {
     setSavedAt(activeOrg?.dedicated_key_saved_at || null);
   }, [activeOrg?.dedicated_key_saved_at]);
 
   const supabaseReady = useMemo(() => !loading && Boolean(authClient) && Boolean(session), [authClient, loading, session]);
+
+  const tenantId = activeOrg?.id || null;
+  const schemaPlanId = schemaPlan?.plan_id || null;
+  const schemaSafeCount = schemaPlan?.summary_counts?.SAFE ?? 0;
+  const schemaCautionCount = schemaPlan?.summary_counts?.CAUTION ?? 0;
+  const schemaDestructiveCount = schemaPlan?.summary_counts?.DESTRUCTIVE ?? 0;
+  const schemaHasDrift = Boolean(schemaSafeCount || schemaCautionCount || schemaDestructiveCount);
+
+  const handleGenerateSchemaPlan = useCallback(async () => {
+    if (!tenantId) {
+      toast.error('בחרו ארגון פעיל לפני יצירת תכנית שינויים.');
+      return;
+    }
+    if (!isAdmin) {
+      toast.error('אין הרשאה.');
+      return;
+    }
+    if (!savedAt) {
+      toast.error('לפני תיקוני סכימה יש להשלים שמירה של המפתח הייעודי (שלב 3).');
+      return;
+    }
+
+    setSchemaPlanLoading(true);
+    try {
+      const res = await createSchemaPlan(tenantId);
+      setSchemaPlan(res);
+      toast.success('נוצרה תכנית שינויים לסכימה');
+    } catch (error) {
+      const message = error?.data?.message || error?.message || 'שגיאה ביצירת תכנית';
+      const bootstrap = error?.data?.bootstrap_sql;
+      if (bootstrap) {
+        setSchemaPlan({
+          error: message,
+          bootstrap_sql: bootstrap,
+          hint: error?.data?.hint,
+        });
+      }
+      toast.error(message);
+    } finally {
+      setSchemaPlanLoading(false);
+    }
+  }, [tenantId, isAdmin, savedAt]);
+
+  const handleRunSchemaPreflight = useCallback(async () => {
+    if (!tenantId || !schemaPlanId) {
+      toast.error('צרו תכנית שינויים לפני בדיקות מקדימות.');
+      return;
+    }
+
+    setSchemaPreflightLoading(true);
+    try {
+      const res = await runSchemaPreflight(tenantId, schemaPlanId);
+      setSchemaPlan((prev) => ({
+        ...prev,
+        preflight_results: res.preflight_results,
+      }));
+      toast.success('בדיקות מקדימות הושלמו');
+    } catch (error) {
+      const bootstrap = error?.data?.bootstrap_sql;
+      if (bootstrap) {
+        setSchemaPlan((prev) => ({
+          ...prev,
+          bootstrap_sql: bootstrap,
+          hint: error?.data?.hint,
+        }));
+      }
+      toast.error(error?.message || 'בדיקות מקדימות נכשלו');
+    } finally {
+      setSchemaPreflightLoading(false);
+    }
+  }, [tenantId, schemaPlanId]);
+
+  const handleApplySchemaSafe = useCallback(async () => {
+    if (!tenantId || !schemaPlanId) {
+      toast.error('צרו תכנית שינויים לפני החלה.');
+      return;
+    }
+
+    setSchemaApplySafeLoading(true);
+    try {
+      const res = await applySchemaSafe(tenantId, schemaPlanId);
+      setSchemaPlan((prev) => ({ ...prev, apply_result: res }));
+      toast.success('שינויים בטוחים הוחלו');
+    } catch (error) {
+      const bootstrap = error?.data?.bootstrap_sql;
+      if (bootstrap) {
+        setSchemaPlan((prev) => ({
+          ...prev,
+          bootstrap_sql: bootstrap,
+          hint: error?.data?.hint,
+        }));
+      }
+      toast.error(error?.message || 'החלת שינויים בטוחים נכשלה');
+    } finally {
+      setSchemaApplySafeLoading(false);
+    }
+  }, [tenantId, schemaPlanId]);
+
+  const handleApplySchemaDestructive = useCallback(async () => {
+    if (!tenantId || !schemaPlanId) {
+      toast.error('צרו תכנית שינויים לפני החלה.');
+      return;
+    }
+
+    setSchemaApplyDangerLoading(true);
+    try {
+      const res = await applySchemaDestructive(tenantId, schemaPlanId, schemaDangerPhrase);
+      setSchemaPlan((prev) => ({ ...prev, apply_result: res }));
+      toast.success('שינויים מסוכנים הוחלו');
+    } catch (error) {
+      toast.error(error?.message || 'החלת שינויים מסוכנים נכשלה');
+    } finally {
+      setSchemaApplyDangerLoading(false);
+    }
+  }, [tenantId, schemaPlanId, schemaDangerPhrase]);
 
   const handlePasteFromClipboard = async () => {
     try {
@@ -416,6 +578,192 @@ export default function SetupAssistant() {
               </Button>
             </div>
             <DiagnosticsList diagnostics={diagnostics} />
+          </div>
+        </StepSection>
+
+        <StepSection
+          number={4}
+          title="תיקוני סכימה (Drift)"
+          description="לאחר שהחיבור נשמר, ניתן לזהות סטייה מה-SSOT ולהחיל תיקונים בטוחים מתוך האפליקציה."
+          statusBadge={schemaHasDrift ? <Badge className="bg-amber-100 text-amber-800 border border-amber-200">זוהתה סטייה</Badge> : <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200">מסונכרן</Badge>}
+        >
+          {!isAdmin ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              זמין למנהלים בלבד.
+            </div>
+          ) : null}
+
+          {!savedAt ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              לפני תיקוני סכימה יש להשלים את שלב 3 (שמירת המפתח הייעודי).
+            </div>
+          ) : null}
+
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-slate-700">הסבר פשוט</span>
+                <Switch
+                  checked={schemaSimpleMode}
+                  onCheckedChange={setSchemaSimpleMode}
+                  aria-label="הסבר פשוט לתיקוני סכימה"
+                />
+              </div>
+              {tenantId ? (
+                <Button asChild variant="outline" size="sm">
+                  <Link to={`/tenants/${tenantId}/settings/schema`}>פתח במסך מלא</Link>
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                onClick={handleGenerateSchemaPlan}
+                disabled={!isAdmin || !savedAt || schemaPlanLoading}
+                className="gap-2"
+              >
+                {schemaPlanLoading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
+                {schemaPlanLoading ? 'בודק…' : 'צור תכנית שינויים'}
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleRunSchemaPreflight}
+                disabled={!schemaPlanId || schemaPreflightLoading}
+              >
+                {schemaPreflightLoading ? 'בודק…' : 'בדיקות מקדימות'}
+              </Button>
+
+              <Button
+                type="button"
+                onClick={handleApplySchemaSafe}
+                disabled={!schemaPlanId || schemaApplySafeLoading || schemaSafeCount === 0}
+              >
+                {schemaApplySafeLoading ? 'מחיל…' : 'החל שינויים בטוחים'}
+              </Button>
+            </div>
+
+            {schemaPlan?.bootstrap_sql ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                <p className="font-medium text-slate-900">נדרש Bootstrap</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {schemaPlan?.hint || 'יש להריץ את ה-SQL הבא פעם אחת ב-Supabase SQL Editor ואז לנסות שוב.'}
+                </p>
+                <div className="mt-3">
+                  <CodeBlock
+                    title="Bootstrap SQL"
+                    code={schemaPlan.bootstrap_sql}
+                    ariaLabel="העתק Bootstrap SQL"
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {schemaPlan?.summary_counts ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200">בטוח: {schemaSafeCount}</Badge>
+                <Badge className="bg-amber-100 text-amber-800 border border-amber-200">זהיר: {schemaCautionCount}</Badge>
+                <Badge className="bg-red-100 text-red-700 border border-red-200">מסוכן: {schemaDestructiveCount}</Badge>
+              </div>
+            ) : null}
+
+            {schemaPlan?.patch_sql_safe ? (
+              <CodeBlock
+                title="SQL לתיקונים בטוחים"
+                code={schemaPlan.patch_sql_safe}
+                ariaLabel="העתק SQL לתיקונים בטוחים"
+              />
+            ) : null}
+
+            {Array.isArray(schemaPlan?.changes) && schemaPlan.changes.length ? (
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-slate-800">שינויים שנמצאו</p>
+                <div className="space-y-2">
+                  {schemaPlan.changes.map((change) => (
+                    <details key={change.change_id} className="rounded-xl border border-slate-200 bg-white p-3">
+                      <summary className="cursor-pointer list-none">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex items-center gap-2">
+                            <RiskBadge riskLevel={change.risk_level} />
+                            <span className="text-sm font-medium text-slate-900">{change.title}</span>
+                          </div>
+                          <span className="text-xs text-slate-500">{change.category}/{change.action}</span>
+                        </div>
+                      </summary>
+                      <div className="mt-2 space-y-2">
+                        {schemaSimpleMode ? (
+                          <p className="text-sm text-slate-700">{change.reason}</p>
+                        ) : null}
+                        {!schemaSimpleMode ? (
+                          <CodeBlock
+                            title="SQL Preview"
+                            code={change.sql_preview || ''}
+                            ariaLabel="העתק SQL preview"
+                          />
+                        ) : null}
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {schemaPlan?.manual_steps ? (
+              <CodeBlock
+                title="שלבים ידניים (Markdown)"
+                code={schemaPlan.manual_steps}
+                ariaLabel="העתק שלבים ידניים"
+              />
+            ) : null}
+
+            {(schemaCautionCount > 0 || schemaDestructiveCount > 0) ? (
+              <div className="space-y-3 rounded-xl border border-red-200 bg-red-50 p-4">
+                <p className="text-sm font-medium text-red-900">שינויים מסוכנים</p>
+                <p className="text-sm text-red-800">
+                  החלה מסוכנת דורשת אישור מפורש. הקלידו בדיוק את הביטוי הבא.
+                </p>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    id="schema-danger-check"
+                    type="checkbox"
+                    checked={schemaDangerChecked}
+                    onChange={(e) => setSchemaDangerChecked(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  <label htmlFor="schema-danger-check" className="text-sm text-red-900">
+                    אני מבין/ה שזה עלול להשפיע על נתונים
+                  </label>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="schema-danger-phrase">הקלידו בדיוק:</Label>
+                  <Input
+                    id="schema-danger-phrase"
+                    dir="ltr"
+                    value={schemaDangerPhrase}
+                    onChange={(e) => setSchemaDangerPhrase(e.target.value)}
+                    placeholder={REQUIRED_DESTRUCTIVE_PHRASE}
+                  />
+                </div>
+
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={
+                    !schemaPlanId
+                    || schemaApplyDangerLoading
+                    || !schemaDangerChecked
+                    || schemaDangerPhrase !== REQUIRED_DESTRUCTIVE_PHRASE
+                  }
+                  onClick={handleApplySchemaDestructive}
+                >
+                  {schemaApplyDangerLoading ? 'מחיל…' : 'החל שינויים מסוכנים'}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </StepSection>
       </CardContent>

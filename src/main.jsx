@@ -23,6 +23,7 @@ import { OrgProvider } from './org/OrgContext.jsx';
 import OrgSelection from './pages/OrgSelection.jsx';
 import LandingPage from './pages/LandingPage.jsx';
 import PendingReportsPage from './features/sessions/pages/PendingReportsPage.jsx';
+import TenantSchemaPage from './features/admin/pages/TenantSchemaPage.jsx';
 import { bootstrapSupabaseCallback } from './auth/bootstrapSupabaseCallback.js';
 
 bootstrapSupabaseCallback();
@@ -57,6 +58,7 @@ function App({ config = null }) {
                     <Route path="/admin/pending-reports" element={<Navigate to="/pending-reports" replace />} />
                     <Route path="/students/:id" element={<StudentDetailPage />} />
                     <Route path="/Settings" element={<Settings />} />
+                    <Route path="/tenants/:tenantId/settings/schema" element={<TenantSchemaPage />} />
                     <Route path="/diagnostics" element={<Diagnostics />} />
                   </Route>
                 </Route>
