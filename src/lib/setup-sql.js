@@ -828,16 +828,6 @@ END $$;
 DO $$
 BEGIN
   ALTER TABLE public.lesson_participants
-    ADD CONSTRAINT lesson_participants_commitment_id_fkey
-    FOREIGN KEY (commitment_id) REFERENCES public.commitments(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_participants
     ADD CONSTRAINT lesson_participants_participant_status_check
     CHECK (participant_status IN ('scheduled','attended','cancelled_student','cancelled_clinic','no_show'));
 EXCEPTION
@@ -897,6 +887,16 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS commitments_student_id_idx ON public.commitments (student_id);
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_participants
+    ADD CONSTRAINT lesson_participants_commitment_id_fkey
+    FOREIGN KEY (commitment_id) REFERENCES public.commitments(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
 
 -- -----------------------------------------------------------------
 -- public.consumption_entries
