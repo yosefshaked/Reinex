@@ -174,7 +174,9 @@ export default function SetupAssistant() {
   } = useOrg();
   const { authClient, dataClient, loading, session } = useSupabase();
   const role = useUserRole();
-  const isAdmin = role === 'admin' || role === 'owner';
+  const membershipRole = activeOrg?.membership?.role ?? null;
+  const isAdminMembership = membershipRole === 'admin' || membershipRole === 'owner';
+  const isAdmin = isAdminMembership || role === 'admin' || role === 'owner';
   const [supabaseUrlInput, setSupabaseUrlInput] = useState('');
   const [supabaseAnonKeyInput, setSupabaseAnonKeyInput] = useState('');
   const [connectionSaving, setConnectionSaving] = useState(false);
@@ -466,7 +468,7 @@ export default function SetupAssistant() {
       return;
     }
 
-    if (!isAdmin) {
+    if (!isAdminMembership) {
       toast.error('אין הרשאה.');
       return;
     }
@@ -594,7 +596,7 @@ export default function SetupAssistant() {
               <Button
                 type="button"
                 onClick={handleSaveSupabaseConnection}
-                disabled={connectionSaving || !isAdmin}
+                disabled={connectionSaving || !isAdminMembership}
                 className="gap-2"
               >
                 {connectionSaving ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
