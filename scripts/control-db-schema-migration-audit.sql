@@ -34,7 +34,27 @@ CREATE TABLE IF NOT EXISTS public.schema_migration_audit (
 CREATE INDEX IF NOT EXISTS schema_migration_audit_tenant_created_idx
   ON public.schema_migration_audit (tenant_id, created_at DESC);
 
-ALTER TABLE public.schema_migration_audit ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  ALTER TABLE public.schema_migration_audit
+    ADD CONSTRAINT schema_migration_audit_tenant_id_fkey
+    FOREIGN KEY (tenant_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.schema_migration_audit
+    ADD CONSTRAINT schema_migration_audit_approved_by_user_id_fkey
+    FOREIGN KEY (approved_by_user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.schema_migration_audit ENABLE ROW LEVEL SECURITY;
+EXCEPTION WHEN others THEN NULL;
+END $$;
 
 DROP POLICY IF EXISTS "Allow service role access on schema_migration_audit" ON public.schema_migration_audit;
 CREATE POLICY "Allow service role access on schema_migration_audit"
