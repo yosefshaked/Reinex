@@ -1412,7 +1412,8 @@ BEGIN
     'Documents'
   ]
   LOOP
-    policy_name := 'Allow full access to authenticated users on ' || tbl;
+    -- Postgres identifiers are limited to 63 bytes; long policy names are silently truncated.
+    policy_name := left('Allow full access to authenticated users on ' || tbl, 63);
     
     EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl);
     
@@ -1432,7 +1433,7 @@ BEGIN
     'waiting_list_entries'
   ]
   LOOP
-    policy_name := 'Allow full access to authenticated users on ' || tbl;
+    policy_name := left('Allow full access to authenticated users on ' || tbl, 63);
     EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl);
     EXECUTE 'CREATE POLICY ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl) || ' FOR ALL TO authenticated, app_user USING (true) WITH CHECK (true)';
   END LOOP;
@@ -1505,6 +1506,7 @@ DECLARE
   ];
   table_name text;
   expected_policy_prefix text;
+  expected_policy_name text;
 BEGIN
   success := EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'public');
   check_name := 'Schema "public" exists';
@@ -1539,15 +1541,24 @@ BEGIN
 
   FOREACH table_name IN ARRAY required_tables LOOP
     expected_policy_prefix := 'Allow full access to authenticated users on ' || table_name;
+    expected_policy_name := left(expected_policy_prefix, 63);
     success := EXISTS(
       SELECT 1
       FROM pg_policies p
       WHERE p.schemaname = 'public'
         AND p.tablename = table_name
-        AND p.policyname = expected_policy_prefix
+        AND p.policyname = expected_policy_name
     );
     check_name := 'Policy "' || expected_policy_prefix || '" exists';
-    details := CASE WHEN success THEN 'OK' ELSE 'Policy ' || expected_policy_prefix || ' is missing.' END;
+    details := CASE
+      WHEN success THEN
+        CASE
+          WHEN expected_policy_name = expected_policy_prefix THEN 'OK'
+          ELSE 'OK (stored as "' || expected_policy_name || '" due to 63-char identifier limit)'
+        END
+      ELSE
+        'Policy ' || expected_policy_prefix || ' is missing.'
+    END;
     RETURN NEXT;
   END LOOP;
 END;

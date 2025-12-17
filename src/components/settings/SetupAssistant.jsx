@@ -186,7 +186,8 @@ BEGIN
     ${sanitized.map((name) => `'${name}'`).join(',\n    ')}
   ]
   LOOP
-    policy_name := 'Allow full access to authenticated users on ' || tbl;
+    -- Postgres identifiers are limited to 63 bytes; long policy names are silently truncated.
+    policy_name := left('Allow full access to authenticated users on ' || tbl, 63);
 
     -- Enable RLS (safe to rerun)
     EXECUTE 'ALTER TABLE public.' || quote_ident(tbl) || ' ENABLE ROW LEVEL SECURITY';
