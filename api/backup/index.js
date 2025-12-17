@@ -236,7 +236,7 @@ export default async function backup(context, req) {
     context.log?.info?.('backup: completed', { orgId, sizeBytes: encrypted.length });
 
     // Return encrypted file with password
-    const filename = `tuttiud-backup-${orgId}-${new Date().toISOString().split('T')[0]}.enc`;
+    const filename = `reinex-backup-${orgId}-${new Date().toISOString().split('T')[0]}.enc`;
     return respond(context, 200, {
       message: 'backup_completed',
       password, // Auto-generated password the user MUST save

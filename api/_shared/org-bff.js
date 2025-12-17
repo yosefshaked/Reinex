@@ -64,9 +64,11 @@ export function isAdminRole(role) {
 export async function ensureMembership(supabase, orgId, userId) {
   const { data, error } = await supabase
     .from('org_memberships')
-    .select('role')
+    .select('role, created_at')
     .eq('org_id', orgId)
     .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) {

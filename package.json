@@ -16,6 +16,7 @@
     "lint:fix": "eslint . --fix",
     "validate:api": "node scripts/validate-api-endpoints.js",
     "test:validator": "node scripts/test-validator.js",
+    "test:schema-migrations": "node scripts/test-schema-migrations.js",
     "preview": "vite preview",
     "electron:dev": "concurrently -k -s first \"npm run dev\" \"wait-on http://localhost:5173 && set ELECTRON_START_URL=http://localhost:5173 && electron .\"",
     "electron:build": "npm run build && electron-builder"

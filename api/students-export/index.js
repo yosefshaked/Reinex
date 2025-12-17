@@ -664,7 +664,7 @@ export default async function (context, req) {
     }
   }
 
-  // Use Reinex logo URL from environment or default (keep legacy TutTiud env var fallbacks)
+  // Use Reinex logo URL from environment or default (legacy env var fallbacks for migration)
   const appLogoUrl =
     env.VITE_REINEX_LOGO_URL ||
     env.REINEX_LOGO_URL ||
