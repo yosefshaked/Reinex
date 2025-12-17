@@ -140,6 +140,65 @@ function DiagnosticsList({ diagnostics }) {
   );
 }
 
+function extractMissingPolicyTables(diagnostics) {
+  if (!Array.isArray(diagnostics) || diagnostics.length === 0) {
+    return [];
+  }
+
+  const tables = new Set();
+  const policyRegex = /^Policy "Allow full access to authenticated users on (.+)" exists$/;
+
+  for (const item of diagnostics) {
+    if (!item || item.success === true) {
+      continue;
+    }
+
+    const checkName = typeof item.check_name === 'string' ? item.check_name : '';
+    const match = checkName.match(policyRegex);
+    if (!match) {
+      continue;
+    }
+
+    const tableName = match[1];
+    if (tableName) {
+      tables.add(tableName);
+    }
+  }
+
+  return Array.from(tables);
+}
+
+function buildMissingPoliciesFixSql(tableNames) {
+  if (!Array.isArray(tableNames) || tableNames.length === 0) {
+    return '';
+  }
+
+  const sanitized = tableNames
+    .map((name) => String(name).replaceAll("'", "''"))
+    .filter(Boolean);
+
+  return `DO $$
+DECLARE
+  tbl text;
+  policy_name text;
+BEGIN
+  FOREACH tbl IN ARRAY ARRAY[
+    ${sanitized.map((name) => `'${name}'`).join(',\n    ')}
+  ]
+  LOOP
+    policy_name := 'Allow full access to authenticated users on ' || tbl;
+
+    -- Enable RLS (safe to rerun)
+    EXECUTE 'ALTER TABLE public.' || quote_ident(tbl) || ' ENABLE ROW LEVEL SECURITY';
+
+    -- Recreate the expected policy (idempotent)
+    EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl);
+    EXECUTE 'CREATE POLICY ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl)
+         || ' FOR ALL TO authenticated, app_user USING (true) WITH CHECK (true)';
+  END LOOP;
+END $$;`;
+}
+
 function RiskBadge({ riskLevel }) {
   if (riskLevel === 'SAFE') {
     return (
@@ -221,6 +280,12 @@ export default function SetupAssistant() {
   const schemaCautionCount = schemaPlan?.summary_counts?.CAUTION ?? 0;
   const schemaDestructiveCount = schemaPlan?.summary_counts?.DESTRUCTIVE ?? 0;
   const schemaHasDrift = Boolean(schemaSafeCount || schemaCautionCount || schemaDestructiveCount);
+
+  const missingPolicyTables = useMemo(() => extractMissingPolicyTables(diagnostics), [diagnostics]);
+  const missingPoliciesFixSql = useMemo(
+    () => buildMissingPoliciesFixSql(missingPolicyTables),
+    [missingPolicyTables]
+  );
 
   const handleGenerateSchemaPlan = useCallback(async () => {
     if (!tenantId) {
@@ -683,6 +748,22 @@ export default function SetupAssistant() {
               </Button>
             </div>
             <DiagnosticsList diagnostics={diagnostics} />
+
+            {missingPolicyTables.length > 0 ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+                <div className="text-sm font-medium text-amber-900">
+                  נמצאו מדיניות RLS חסרות
+                </div>
+                <p className="text-xs text-amber-800">
+                  העתיקו והריצו את ה-SQL הבא ב-Supabase SQL Editor של בסיס הנתונים של הארגון כדי ליצור את המדיניות החסרות בלבד.
+                </p>
+                <CodeBlock
+                  title="SQL לתיקון מדיניות חסרות"
+                  code={missingPoliciesFixSql}
+                  ariaLabel="העתק SQL לתיקון מדיניות RLS חסרות"
+                />
+              </div>
+            ) : null}
           </div>
         </StepSection>
 

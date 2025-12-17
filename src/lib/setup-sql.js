@@ -1420,6 +1420,24 @@ BEGIN
   END LOOP;
 END $$;
 
+-- Safety net: ensure key policies exist even if a prior run missed them
+DO $$
+DECLARE
+  tbl text;
+  policy_name text;
+BEGIN
+  FOREACH tbl IN ARRAY ARRAY[
+    'instructor_service_capabilities',
+    'lesson_template_overrides',
+    'waiting_list_entries'
+  ]
+  LOOP
+    policy_name := 'Allow full access to authenticated users on ' || tbl;
+    EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl);
+    EXECUTE 'CREATE POLICY ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl) || ' FOR ALL TO authenticated, app_user USING (true) WITH CHECK (true)';
+  END LOOP;
+END $$;
+
 GRANT USAGE ON SCHEMA public TO app_user;
 
 GRANT ALL ON TABLE public.students TO app_user;
