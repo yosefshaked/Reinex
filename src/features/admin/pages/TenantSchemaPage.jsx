@@ -72,9 +72,24 @@ function summarizePlainBullets(change) {
 
 export default function TenantSchemaPage() {
   const { tenantId } = useParams();
-  const { activeOrgId } = useOrg();
+  const { activeOrgId, organizations, activeOrg } = useOrg();
   const role = useUserRole();
-  const isAdmin = role === 'admin' || role === 'owner';
+
+  const controlPlaneOrg = React.useMemo(() => {
+    if (!tenantId) {
+      return null;
+    }
+    if (activeOrg?.id === tenantId) {
+      return activeOrg;
+    }
+    return Array.isArray(organizations)
+      ? organizations.find((org) => org?.id === tenantId) || null
+      : null;
+  }, [activeOrg, organizations, tenantId]);
+
+  const membershipRole = controlPlaneOrg?.membership?.role ?? null;
+  const isAdminMembership = membershipRole === 'admin' || membershipRole === 'owner';
+  const isAdmin = isAdminMembership || role === 'admin' || role === 'owner';
 
   const [simpleMode, setSimpleMode] = React.useState(true);
   const [expandedIds, setExpandedIds] = React.useState(() => new Set());
