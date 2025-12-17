@@ -1,5 +1,5 @@
 import React from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, Copy, RefreshCcw, ShieldAlert, ShieldCheck, Wrench } from 'lucide-react';
 
 import PageLayout from '@/components/ui/PageLayout.jsx';
@@ -71,21 +71,32 @@ function summarizePlainBullets(change) {
 }
 
 export default function TenantSchemaPage() {
-  const { tenantId } = useParams();
+  const navigate = useNavigate();
+  const { tenantId: routeTenantId } = useParams();
   const { activeOrgId, organizations, activeOrg } = useOrg();
   const role = useUserRole();
 
+  const legacyMatchesActive = Boolean(routeTenantId && activeOrgId && routeTenantId === activeOrgId);
+  const tenantMismatch = Boolean(activeOrgId && routeTenantId && activeOrgId !== routeTenantId);
+  const effectiveTenantId = routeTenantId || activeOrgId || null;
+
+  React.useEffect(() => {
+    if (legacyMatchesActive) {
+      navigate('/settings/schema', { replace: true });
+    }
+  }, [legacyMatchesActive, navigate]);
+
   const controlPlaneOrg = React.useMemo(() => {
-    if (!tenantId) {
+    if (!effectiveTenantId) {
       return null;
     }
-    if (activeOrg?.id === tenantId) {
+    if (activeOrg?.id === effectiveTenantId) {
       return activeOrg;
     }
     return Array.isArray(organizations)
-      ? organizations.find((org) => org?.id === tenantId) || null
+      ? organizations.find((org) => org?.id === effectiveTenantId) || null
       : null;
-  }, [activeOrg, organizations, tenantId]);
+  }, [activeOrg, organizations, effectiveTenantId]);
 
   const membershipRole = controlPlaneOrg?.membership?.role ?? null;
   const isAdminMembership = membershipRole === 'admin' || membershipRole === 'owner';
@@ -107,23 +118,21 @@ export default function TenantSchemaPage() {
   const [history, setHistory] = React.useState([]);
   const [historyLoading, setHistoryLoading] = React.useState(false);
 
-  const tenantMismatch = activeOrgId && tenantId && activeOrgId !== tenantId;
-
   const refreshHistory = React.useCallback(async () => {
-    if (!tenantId || !isAdmin) {
+    if (!effectiveTenantId || !isAdmin || tenantMismatch || legacyMatchesActive) {
       return;
     }
 
     setHistoryLoading(true);
     try {
-      const res = await fetchSchemaHistory(tenantId);
+      const res = await fetchSchemaHistory(effectiveTenantId);
       setHistory(Array.isArray(res?.history) ? res.history : []);
     } catch (error) {
       toast.error(error?.message || 'שגיאה בטעינת היסטוריה');
     } finally {
       setHistoryLoading(false);
     }
-  }, [tenantId, isAdmin]);
+  }, [effectiveTenantId, isAdmin, tenantMismatch, legacyMatchesActive]);
 
   React.useEffect(() => {
     refreshHistory();
@@ -142,12 +151,12 @@ export default function TenantSchemaPage() {
   }, []);
 
   const handleGeneratePlan = React.useCallback(async () => {
-    if (!tenantId) {
+    if (!effectiveTenantId || tenantMismatch || legacyMatchesActive) {
       return;
     }
     setPlanLoading(true);
     try {
-      const res = await createSchemaPlan(tenantId);
+      const res = await createSchemaPlan(effectiveTenantId);
       setPlan(res);
       toast.success('נוצרה תכנית שינויים');
       await refreshHistory();
@@ -165,16 +174,16 @@ export default function TenantSchemaPage() {
     } finally {
       setPlanLoading(false);
     }
-  }, [tenantId, refreshHistory]);
+  }, [effectiveTenantId, refreshHistory, tenantMismatch, legacyMatchesActive]);
 
   const handleRunPreflight = React.useCallback(async () => {
-    if (!tenantId || !plan?.plan_id) {
+    if (!effectiveTenantId || tenantMismatch || legacyMatchesActive || !plan?.plan_id) {
       return;
     }
 
     setPreflightLoading(true);
     try {
-      const res = await runSchemaPreflight(tenantId, plan.plan_id);
+      const res = await runSchemaPreflight(effectiveTenantId, plan.plan_id);
       setPlan((prev) => ({
         ...prev,
         preflight_results: res.preflight_results,
@@ -193,16 +202,16 @@ export default function TenantSchemaPage() {
     } finally {
       setPreflightLoading(false);
     }
-  }, [tenantId, plan?.plan_id]);
+  }, [effectiveTenantId, tenantMismatch, legacyMatchesActive, plan?.plan_id]);
 
   const handleApplySafe = React.useCallback(async () => {
-    if (!tenantId || !plan?.plan_id) {
+    if (!effectiveTenantId || tenantMismatch || legacyMatchesActive || !plan?.plan_id) {
       return;
     }
 
     setApplySafeLoading(true);
     try {
-      const res = await applySchemaSafe(tenantId, plan.plan_id);
+      const res = await applySchemaSafe(effectiveTenantId, plan.plan_id);
       toast.success('שינויים בטוחים הוחלו');
       setPlan((prev) => ({ ...prev, apply_result: res }));
       await refreshHistory();
@@ -219,16 +228,16 @@ export default function TenantSchemaPage() {
     } finally {
       setApplySafeLoading(false);
     }
-  }, [tenantId, plan?.plan_id, refreshHistory]);
+  }, [effectiveTenantId, tenantMismatch, legacyMatchesActive, plan?.plan_id, refreshHistory]);
 
   const handleApplyDestructive = React.useCallback(async () => {
-    if (!tenantId || !plan?.plan_id) {
+    if (!effectiveTenantId || tenantMismatch || legacyMatchesActive || !plan?.plan_id) {
       return;
     }
 
     setApplyDangerLoading(true);
     try {
-      const res = await applySchemaDestructive(tenantId, plan.plan_id, dangerPhrase);
+      const res = await applySchemaDestructive(effectiveTenantId, plan.plan_id, dangerPhrase);
       toast.success('שינויים מסוכנים הוחלו');
       setPlan((prev) => ({ ...prev, apply_result: res }));
       await refreshHistory();
@@ -237,13 +246,56 @@ export default function TenantSchemaPage() {
     } finally {
       setApplyDangerLoading(false);
     }
-  }, [tenantId, plan?.plan_id, dangerPhrase, refreshHistory]);
+  }, [effectiveTenantId, tenantMismatch, legacyMatchesActive, plan?.plan_id, dangerPhrase, refreshHistory]);
 
   const safeCount = plan?.summary_counts?.SAFE ?? 0;
   const cautionCount = plan?.summary_counts?.CAUTION ?? 0;
   const destructiveCount = plan?.summary_counts?.DESTRUCTIVE ?? 0;
 
   const driftDetected = Boolean(safeCount || cautionCount || destructiveCount);
+
+  if (!effectiveTenantId) {
+    return (
+      <PageLayout title="סנכרון סכימה" dir="rtl">
+        <div className="mx-auto max-w-4xl space-y-lg" dir="rtl">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-right">אין ארגון פעיל</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-sm text-right text-sm text-neutral-600">
+              <p>בחר/י ארגון כדי להמשיך.</p>
+              <Link className="text-primary underline" to="/select-org">בחר ארגון</Link>
+            </CardContent>
+          </Card>
+        </div>
+      </PageLayout>
+    );
+  }
+
+  if (tenantMismatch) {
+    return (
+      <PageLayout title="סנכרון סכימה" dir="rtl">
+        <div className="mx-auto max-w-4xl space-y-lg" dir="rtl">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-right">ארגון לא תואם</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-sm text-right text-sm text-neutral-600">
+              <p>הארגון שנבחר באפליקציה שונה מהקישור.</p>
+              <div className="flex flex-row-reverse gap-sm">
+                <Button asChild variant="outline" size="sm">
+                  <Link to="/settings/schema">פתח לפי הארגון הפעיל</Link>
+                </Button>
+                <Button asChild variant="outline" size="sm">
+                  <Link to="/select-org">בחר ארגון מחדש</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </PageLayout>
+    );
+  }
 
   return (
     <PageLayout title="סנכרון סכימה" dir="rtl">
@@ -255,18 +307,6 @@ export default function TenantSchemaPage() {
             </CardHeader>
             <CardContent className="text-right text-sm text-neutral-600">
               עמוד זה זמין למנהלים בלבד.
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {tenantMismatch ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-right">ארגון לא תואם</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-sm text-right text-sm text-neutral-600">
-              <p>הארגון שנבחר באפליקציה שונה מהקישור.</p>
-              <Link className="text-primary underline" to="/select-org">בחר ארגון מחדש</Link>
             </CardContent>
           </Card>
         ) : null}
@@ -292,7 +332,7 @@ export default function TenantSchemaPage() {
               <Button
                 type="button"
                 onClick={handleGeneratePlan}
-                disabled={!isAdmin || tenantMismatch || planLoading}
+                disabled={!isAdmin || planLoading}
               >
                 <RefreshCcw className="ml-2 h-4 w-4" aria-hidden="true" />
                 {planLoading ? 'בודק…' : 'צור תכנית שינויים'}

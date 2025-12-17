@@ -58,6 +58,7 @@ function App({ config = null }) {
                     <Route path="/admin/pending-reports" element={<Navigate to="/pending-reports" replace />} />
                     <Route path="/students/:id" element={<StudentDetailPage />} />
                     <Route path="/Settings" element={<Settings />} />
+                    <Route path="/settings/schema" element={<TenantSchemaPage />} />
                     <Route path="/tenants/:tenantId/settings/schema" element={<TenantSchemaPage />} />
                     <Route path="/diagnostics" element={<Diagnostics />} />
                   </Route>

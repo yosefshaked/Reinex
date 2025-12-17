@@ -798,7 +798,7 @@ export default function SetupAssistant() {
               </div>
               {tenantId ? (
                 <Button asChild variant="outline" size="sm">
-                  <Link to={`/tenants/${tenantId}/settings/schema`}>פתח במסך מלא</Link>
+                  <Link to="/settings/schema">פתח במסך מלא</Link>
                 </Button>
               ) : null}
             </div>
