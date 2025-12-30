@@ -178,12 +178,23 @@ async function authenticatedFetch(path, { params, session: _session, accessToken
   }
 
   if (!response.ok) {
-    const message = payload?.message || 'An API error occurred';
+    const message = payload?.message || payload?.error || payload?.code || 'An API error occurred';
     const error = new Error(message);
+    error.status = response.status;
+    error.url = normalizedPath;
     void _session; void _accessToken;
     if (payload) {
       error.data = payload;
     }
+
+    // eslint-disable-next-line no-console
+    console.error('[OrgContext] API request failed', {
+      url: normalizedPath,
+      method: rest?.method || 'GET',
+      status: response.status,
+      payload,
+    });
+
     throw error;
   }
 
