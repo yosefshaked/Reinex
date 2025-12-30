@@ -1,0 +1,49 @@
+/* eslint-env node */
+import { resolveBearerAuthorization } from '../_shared/http.js';
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import {
+  ensureMembership,
+  readEnv,
+  respond,
+  resolveOrgId,
+  resolveTenantPublicClient,
+} from '../_shared/org-bff.js';
+
+export default async function (context, req) {
+  const env = readEnv(context);
+  const adminConfig = readSupabaseAdminConfig(env);
+  const supabase = createSupabaseAdminClient(adminConfig);
+
+  const authorization = resolveBearerAuthorization(req);
+  const orgId = resolveOrgId(req);
+
+  if (!authorization?.token) {
+    return respond(context, 401, { error: 'missing_auth' });
+  }
+
+  if (!orgId) {
+    return respond(context, 400, { error: 'missing_org_id' });
+  }
+
+  const membership = await ensureMembership(supabase, authorization.token, orgId);
+  if (!membership) {
+    return respond(context, 403, { error: 'forbidden' });
+  }
+
+  const { client: tenantClient, error: tenantError } = await resolveTenantPublicClient(context, supabase, env, orgId);
+  if (tenantError) {
+    return respond(context, tenantError.status, tenantError.body);
+  }
+
+  const { data, error } = await tenantClient
+    .from('Employees')
+    .select('*')
+    .order('first_name');
+
+  if (error) {
+    context.log.error('Failed to fetch instructors', error);
+    return respond(context, 500, { error: 'database_error' });
+  }
+
+  return respond(context, 200, { data });
+}
