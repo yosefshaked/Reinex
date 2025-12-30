@@ -212,6 +212,35 @@ export function decryptDedicatedKey(payload, keyBuffer) {
   }
 }
 
+function normalizeDecryptedJwt(value) {
+  const trimmed = normalizeString(value);
+  if (!trimmed) {
+    return '';
+  }
+
+  // Common copy/paste artifacts: quoted strings or an embedded Bearer prefix.
+  let candidate = trimmed;
+  if ((candidate.startsWith('"') && candidate.endsWith('"')) || (candidate.startsWith("'") && candidate.endsWith("'"))) {
+    candidate = candidate.slice(1, -1).trim();
+  }
+
+  if (candidate.toLowerCase().startsWith('bearer ')) {
+    candidate = candidate.slice(7).trim();
+  }
+
+  return candidate;
+}
+
+function looksLikeJwt(token) {
+  const normalized = normalizeString(token);
+  if (!normalized) {
+    return false;
+  }
+
+  const parts = normalized.split('.');
+  return parts.length === 3 && parts.every(Boolean);
+}
+
 export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey, schema = 'public' }) {
   if (!supabaseUrl || !anonKey || !dedicatedKey) {
     throw new Error('Missing tenant connection parameters.');
@@ -283,9 +312,20 @@ export async function resolveTenantClient(context, supabase, env, orgId, options
     return { error: buildTenantError('encryption_not_configured') };
   }
 
-  const dedicatedKey = decryptDedicatedKey(connectionResult.encryptedKey, encryptionKey);
+  const decrypted = decryptDedicatedKey(connectionResult.encryptedKey, encryptionKey);
+  const dedicatedKey = normalizeDecryptedJwt(decrypted);
+
   if (!dedicatedKey) {
     return { error: buildTenantError('failed_to_decrypt_key') };
+  }
+
+  if (!looksLikeJwt(dedicatedKey)) {
+    context.log?.warn?.('tenant connection dedicated key does not look like a JWT', {
+      orgId,
+      length: dedicatedKey.length,
+      segments: dedicatedKey.split('.').length,
+    });
+    return { error: buildTenantError('dedicated_key_malformed', 428) };
   }
 
   try {
