@@ -104,7 +104,10 @@ export async function fetchOrgConnection(supabase, orgId) {
     return { error: orgError };
   }
 
-  if (!settings || !settings.supabase_url || !settings.anon_key) {
+  const supabaseUrl = normalizeString(settings?.supabase_url);
+  const anonKey = normalizeString(settings?.anon_key);
+
+  if (!supabaseUrl || !anonKey) {
     return { error: new Error('missing_connection_settings') };
   }
 
@@ -113,8 +116,8 @@ export async function fetchOrgConnection(supabase, orgId) {
   }
 
   return {
-    supabaseUrl: settings.supabase_url,
-    anonKey: settings.anon_key,
+    supabaseUrl,
+    anonKey,
     encryptedKey: organization.dedicated_key_encrypted,
   };
 }

@@ -223,7 +223,7 @@ export default async function (context, req) {
   if (!isAppUserJwt(dedicatedKey)) {
     return respond(context, 400, {
       error: 'invalid_tenant_dedicated_key',
-      message: 'Invalid dedicated key. Expected the tenant dedicated app_user JWT (payload role=app_user).',
+      message: 'Invalid dedicated key. Expected the tenant dedicated app_user JWT (payload role=app_user). Generate it from the tenant setup SQL SSOT output (the final SELECT that prints "APP_DEDICATED_KEY").',
     });
   }
 
