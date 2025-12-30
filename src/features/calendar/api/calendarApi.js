@@ -4,36 +4,26 @@ import { authenticatedFetch } from '@/lib/api-client.js';
  * Fetch all instructors (Employees) from the public schema
  */
 export async function fetchInstructors(orgId, { signal } = {}) {
-  const response = await authenticatedFetch('/api/instructors', {
+  const payload = await authenticatedFetch('/api/instructors', {
     method: 'GET',
     params: { org_id: orgId },
     signal,
   });
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch instructors: ${response.status}`);
-  }
-
-  const json = await response.json();
-  return json.data || [];
+  return payload?.data || [];
 }
 
 /**
  * Fetch all services from the public schema
  */
 export async function fetchServices(orgId, { signal } = {}) {
-  const response = await authenticatedFetch('/api/services', {
+  const payload = await authenticatedFetch('/api/services', {
     method: 'GET',
     params: { org_id: orgId },
     signal,
   });
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch services: ${response.status}`);
-  }
-
-  const json = await response.json();
-  return json.data || [];
+  return payload?.data || [];
 }
 
 /**
@@ -42,13 +32,13 @@ export async function fetchServices(orgId, { signal } = {}) {
  * @param {string|Date} endDate - End date (YYYY-MM-DD or Date object)
  */
 export async function fetchDailyLessons(orgId, startDate, endDate, { signal } = {}) {
-  // Normalize dates to YYYY-MM-DD strings
+  // Normalize dates to ISO strings (backend can filter timestamptz accurately)
   const formatDate = (date) => {
     if (typeof date === 'string') {
       return date;
     }
     if (date instanceof Date) {
-      return date.toISOString().split('T')[0];
+      return date.toISOString();
     }
     return String(date);
   };
@@ -56,7 +46,7 @@ export async function fetchDailyLessons(orgId, startDate, endDate, { signal } = 
   const start = formatDate(startDate);
   const end = formatDate(endDate);
 
-  const response = await authenticatedFetch('/api/lessons', {
+  const payload = await authenticatedFetch('/api/lessons', {
     method: 'GET',
     params: { 
       org_id: orgId,
@@ -66,10 +56,5 @@ export async function fetchDailyLessons(orgId, startDate, endDate, { signal } = 
     signal,
   });
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch lessons: ${response.status}`);
-  }
-
-  const json = await response.json();
-  return json.data || [];
+  return payload?.data || [];
 }

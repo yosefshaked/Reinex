@@ -84,7 +84,7 @@ export default function DailyCalendar({ instructors = [], lessons = [], currentD
             key={instructor.id}
             className="flex-1 min-w-[120px] border-l border-border p-2 text-center text-sm font-medium text-neutral-700"
           >
-            {instructor.first_name} {instructor.last_name}
+            {instructor.full_name || instructor.name || `${instructor.first_name || ''} ${instructor.last_name || ''}`.trim() || instructor.email || instructor.id}
           </div>
         ))}
       </div>
