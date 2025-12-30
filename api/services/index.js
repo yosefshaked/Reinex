@@ -25,7 +25,14 @@ export default async function (context, req) {
     return respond(context, 400, { error: 'missing_org_id' });
   }
 
-  const membership = await ensureMembership(supabase, authorization.token, orgId);
+  const authResult = await supabase.auth.getUser(authorization.token);
+  if (authResult.error || !authResult.data?.user?.id) {
+    return respond(context, 401, { error: 'invalid_token' });
+  }
+
+  const userId = authResult.data.user.id;
+
+  const membership = await ensureMembership(supabase, orgId, userId);
   if (!membership) {
     return respond(context, 403, { error: 'forbidden' });
   }

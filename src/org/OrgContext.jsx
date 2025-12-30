@@ -230,9 +230,14 @@ export function OrgProvider({ children }) {
   }, []);
   const loadingRef = useRef(false);
   const lastUserIdRef = useRef(null);
+  const ensuredEmployeeByOrgRef = useRef(new Set());
   const configRequestRef = useRef(0);
   const tenantClientReady = Boolean(dataClient);
   const hasRuntimeConfig = Boolean(runtimeConfig?.supabaseUrl && runtimeConfig?.supabaseAnonKey);
+
+  useEffect(() => {
+    ensuredEmployeeByOrgRef.current = new Set();
+  }, [user?.id]);
 
   useEffect(() => {
     orgConnectionsRef.current = orgConnections;
@@ -668,6 +673,45 @@ export function OrgProvider({ children }) {
     if (!activeOrgId) return;
     void fetchOrgRuntimeConfig(activeOrgId);
   }, [activeOrgId, fetchOrgRuntimeConfig]);
+
+  useEffect(() => {
+    if (!activeOrgId) return;
+    if (!session) return;
+
+    const connection = orgConnectionsRef.current?.get?.(activeOrgId) || null;
+    if (!connection?.supabaseUrl || !connection?.supabaseAnonKey) {
+      return;
+    }
+
+    if (ensuredEmployeeByOrgRef.current.has(activeOrgId)) {
+      return;
+    }
+
+    ensuredEmployeeByOrgRef.current.add(activeOrgId);
+    const abortController = new AbortController();
+
+    const run = async () => {
+      try {
+        await authenticatedFetch('employees-me', {
+          method: 'POST',
+          params: { org_id: activeOrgId },
+          body: {},
+          signal: abortController.signal,
+        });
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          return;
+        }
+        console.warn('[OrgProvider] Failed to ensure employee profile', error);
+      }
+    };
+
+    run();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [activeOrgId, session]);
 
   const selectOrg = useCallback(
     async (orgId) => {
