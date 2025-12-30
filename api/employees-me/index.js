@@ -113,7 +113,7 @@ function pickEmployeeWriteFields(input, fallback = {}) {
   const name = normalizeString(input?.name) || normalizeString(fallback?.name);
   const employeeId = normalizeString(input?.employee_id ?? input?.employeeId) || normalizeString(fallback?.employee_id);
 
-  if (name) result.name = name;
+  if (name) result['name'] = name;
   if (employeeId) result.employee_id = employeeId;
 
   const phone = normalizeString(input?.phone);
