@@ -10,6 +10,57 @@ import {
   parseRequestBody,
 } from '../_shared/org-bff.js';
 
+function classifyTenantDbError(error, { resource, operation } = {}) {
+  const message = typeof error?.message === 'string' ? error.message : null;
+  const code = typeof error?.code === 'string' ? error.code : null;
+  const details = typeof error?.details === 'string' ? error.details : null;
+  const hint = typeof error?.hint === 'string' ? error.hint : null;
+
+  const text = `${code || ''} ${message || ''} ${details || ''}`.toLowerCase();
+  const looksLikeMissingTable =
+    code === '42P01' ||
+    code === 'PGRST205' ||
+    text.includes('schema cache') ||
+    text.includes('does not exist') ||
+    text.includes('could not find the table');
+
+  const looksLikeMissingRelationship =
+    text.includes('relationship') && (text.includes('could not find') || text.includes('no relationship'));
+
+  if (looksLikeMissingTable || looksLikeMissingRelationship) {
+    return {
+      status: 424,
+      body: {
+        error: 'schema_upgrade_required',
+        message: 'Tenant scheduling schema is missing or incomplete.',
+        details: {
+          resource: resource || null,
+          operation: operation || null,
+          code,
+          message,
+          details,
+          hint,
+        },
+      },
+    };
+  }
+
+  return {
+    status: 500,
+    body: {
+      error: 'database_error',
+      message: message || 'Tenant database query failed.',
+      details: {
+        resource: resource || null,
+        operation: operation || null,
+        code,
+        details,
+        hint,
+      },
+    },
+  };
+}
+
 async function handleGet(context, tenantClient, req) {
   const { startDate, endDate } = req.query;
 
@@ -17,22 +68,54 @@ async function handleGet(context, tenantClient, req) {
     return respond(context, 400, { error: 'missing_date_range' });
   }
 
-  const { data, error } = await tenantClient
+  const { data: instances, error } = await tenantClient
     .from('lesson_instances')
-    .select(`
-      *,
-      lesson_participants (*)
-    `)
+    .select('*')
     .gte('datetime_start', startDate)
     .lte('datetime_start', endDate)
     .order('datetime_start');
 
   if (error) {
     context.log.error('Failed to fetch lesson instances', error);
-    return respond(context, 500, { error: 'database_error' });
+    const classified = classifyTenantDbError(error, { resource: 'lesson_instances', operation: 'select' });
+    return respond(context, classified.status, classified.body);
   }
 
-  return respond(context, 200, { data });
+  const instanceIds = Array.isArray(instances) ? instances.map((row) => row?.id).filter(Boolean) : [];
+  if (instanceIds.length === 0) {
+    return respond(context, 200, { data: [] });
+  }
+
+  const { data: participants, error: participantsError } = await tenantClient
+    .from('lesson_participants')
+    .select('*')
+    .in('lesson_instance_id', instanceIds);
+
+  if (participantsError) {
+    context.log.error('Failed to fetch lesson participants', participantsError);
+    const classified = classifyTenantDbError(participantsError, { resource: 'lesson_participants', operation: 'select' });
+    // Degrade gracefully: return instances without participants, but include warning details.
+    return respond(context, 200, {
+      data: instances.map((row) => ({ ...row, lesson_participants: [] })),
+      warning: classified.body,
+    });
+  }
+
+  const byInstanceId = new Map();
+  for (const participant of Array.isArray(participants) ? participants : []) {
+    const key = participant?.lesson_instance_id;
+    if (!key) continue;
+    const bucket = byInstanceId.get(key) || [];
+    bucket.push(participant);
+    byInstanceId.set(key, bucket);
+  }
+
+  const result = instances.map((row) => ({
+    ...row,
+    lesson_participants: byInstanceId.get(row.id) || [],
+  }));
+
+  return respond(context, 200, { data: result });
 }
 
 async function handlePost(context, tenantClient, req) {
@@ -52,7 +135,8 @@ async function handlePost(context, tenantClient, req) {
 
   if (instanceError) {
     context.log.error('Failed to create lesson instance', instanceError);
-    return respond(context, 500, { error: 'database_error_instance' });
+    const classified = classifyTenantDbError(instanceError, { resource: 'lesson_instances', operation: 'insert' });
+    return respond(context, classified.status, { ...classified.body, error: 'database_error_instance' });
   }
 
   // Insert participants if any
@@ -70,25 +154,36 @@ async function handlePost(context, tenantClient, req) {
       context.log.error('Failed to create lesson participants', participantsError);
       // Note: In a real production scenario, we might want to rollback the instance creation here
       // or use a stored procedure for atomicity.
-      return respond(context, 500, { error: 'database_error_participants', instanceId: instance.id });
+      const classified = classifyTenantDbError(participantsError, { resource: 'lesson_participants', operation: 'insert' });
+      return respond(context, classified.status, {
+        ...classified.body,
+        error: 'database_error_participants',
+        instanceId: instance.id,
+      });
     }
   }
 
-  // Fetch complete object to return
-  const { data: result, error: fetchError } = await tenantClient
+  // Fetch complete object to return (manual join to avoid FK relationship dependency)
+  const { data: freshInstance, error: fetchError } = await tenantClient
     .from('lesson_instances')
-    .select(`
-      *,
-      lesson_participants (*)
-    `)
+    .select('*')
     .eq('id', instance.id)
-    .single();
+    .maybeSingle();
 
-  if (fetchError) {
-     return respond(context, 200, { data: instance, warning: 'failed_to_fetch_complete_object' });
+  if (fetchError || !freshInstance) {
+    return respond(context, 201, { data: { ...instance, lesson_participants: [] }, warning: 'failed_to_fetch_complete_object' });
   }
 
-  return respond(context, 201, { data: result });
+  const { data: freshParticipants, error: participantsFetchError } = await tenantClient
+    .from('lesson_participants')
+    .select('*')
+    .eq('lesson_instance_id', instance.id);
+
+  if (participantsFetchError) {
+    return respond(context, 201, { data: { ...freshInstance, lesson_participants: [] }, warning: 'failed_to_fetch_participants' });
+  }
+
+  return respond(context, 201, { data: { ...freshInstance, lesson_participants: freshParticipants || [] } });
 }
 
 async function handlePut(context, tenantClient, req) {
@@ -108,7 +203,8 @@ async function handlePut(context, tenantClient, req) {
 
   if (error) {
     context.log.error('Failed to update lesson instance', error);
-    return respond(context, 500, { error: 'database_error' });
+    const classified = classifyTenantDbError(error, { resource: 'lesson_instances', operation: 'update' });
+    return respond(context, classified.status, classified.body);
   }
 
   return respond(context, 200, { data });

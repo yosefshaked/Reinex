@@ -11,6 +11,69 @@ import {
   resolveTenantPublicClient,
 } from '../_shared/org-bff.js';
 
+function classifyTenantDbError(error, { resource, operation } = {}) {
+  const message = typeof error?.message === 'string' ? error.message : null;
+  const code = typeof error?.code === 'string' ? error.code : null;
+  const details = typeof error?.details === 'string' ? error.details : null;
+  const hint = typeof error?.hint === 'string' ? error.hint : null;
+
+  const text = `${code || ''} ${message || ''} ${details || ''}`.toLowerCase();
+  const looksLikeMissingTable =
+    code === '42P01' ||
+    code === 'PGRST205' ||
+    text.includes('schema cache') ||
+    text.includes('does not exist') ||
+    text.includes('could not find the table');
+
+  if (looksLikeMissingTable) {
+    return {
+      status: 424,
+      body: {
+        error: 'schema_upgrade_required',
+        message: 'Tenant scheduling schema is missing or incomplete.',
+        details: {
+          resource: resource || null,
+          operation: operation || null,
+          code,
+          message,
+          details,
+          hint,
+        },
+      },
+    };
+  }
+
+  return {
+    status: 500,
+    body: {
+      error: 'database_error',
+      message: message || 'Tenant database query failed.',
+      details: {
+        resource: resource || null,
+        operation: operation || null,
+        code,
+        details,
+        hint,
+      },
+    },
+  };
+}
+
+function isMissingTenantTableError(error) {
+  const message = typeof error?.message === 'string' ? error.message : '';
+  const code = typeof error?.code === 'string' ? error.code : '';
+  const details = typeof error?.details === 'string' ? error.details : '';
+  const text = `${code} ${message} ${details}`.toLowerCase();
+
+  return (
+    code === '42P01' ||
+    code === 'PGRST205' ||
+    text.includes('schema cache') ||
+    text.includes('does not exist') ||
+    text.includes('could not find the table')
+  );
+}
+
 function buildSuggestedEmployee(user) {
   const email = normalizeString(user?.email);
   const meta = user?.user_metadata && typeof user.user_metadata === 'object' ? user.user_metadata : {};
@@ -64,7 +127,11 @@ function buildDefaultEmployeeId(userId) {
 }
 
 async function loadEmployeeById(tenantClient, id) {
-  return tenantClient.from('Employees').select('*').eq('id', id).maybeSingle();
+  let result = await tenantClient.from('Employees').select('*').eq('id', id).maybeSingle();
+  if (result.error && isMissingTenantTableError(result.error)) {
+    result = await tenantClient.from('employees').select('*').eq('id', id).maybeSingle();
+  }
+  return result;
 }
 
 export default async function (context, req) {
@@ -107,7 +174,8 @@ export default async function (context, req) {
     const { data: existing, error: readError } = await loadEmployeeById(tenantClient, userId);
     if (readError) {
       context.log.error('Failed to load employee profile', readError);
-      return respond(context, 500, { error: 'database_error' });
+      const classified = classifyTenantDbError(readError, { resource: 'Employees', operation: 'select' });
+      return respond(context, classified.status, classified.body);
     }
 
     if (!existing) {
@@ -132,7 +200,8 @@ export default async function (context, req) {
   const { data: existing, error: existingError } = await loadEmployeeById(tenantClient, userId);
   if (existingError) {
     context.log.error('Failed to check employee profile', existingError);
-    return respond(context, 500, { error: 'database_error' });
+    const classified = classifyTenantDbError(existingError, { resource: 'Employees', operation: 'select' });
+    return respond(context, classified.status, classified.body);
   }
 
   if (!existing) {
@@ -157,15 +226,24 @@ export default async function (context, req) {
       is_active: true,
     };
 
-    const { data: created, error: createError } = await tenantClient
+    let { data: created, error: createError } = await tenantClient
       .from('Employees')
       .insert(insertPayload)
       .select('*')
       .single();
 
+    if (createError && isMissingTenantTableError(createError)) {
+      ({ data: created, error: createError } = await tenantClient
+        .from('employees')
+        .insert(insertPayload)
+        .select('*')
+        .single());
+    }
+
     if (createError) {
       context.log.error('Failed to create employee profile', createError);
-      return respond(context, 500, { error: 'database_error' });
+      const classified = classifyTenantDbError(createError, { resource: 'Employees', operation: 'insert' });
+      return respond(context, classified.status, classified.body);
     }
 
     return respond(context, 201, { exists: true, data: created, created: true });
@@ -178,16 +256,26 @@ export default async function (context, req) {
     return respond(context, 200, { exists: true, data: existing, updated: false });
   }
 
-  const { data: updated, error: updateError } = await tenantClient
+  let { data: updated, error: updateError } = await tenantClient
     .from('Employees')
     .update(updateCandidate)
     .eq('id', userId)
     .select('*')
     .single();
 
+  if (updateError && isMissingTenantTableError(updateError)) {
+    ({ data: updated, error: updateError } = await tenantClient
+      .from('employees')
+      .update(updateCandidate)
+      .eq('id', userId)
+      .select('*')
+      .single());
+  }
+
   if (updateError) {
     context.log.error('Failed to update employee profile', updateError);
-    return respond(context, 500, { error: 'database_error' });
+    const classified = classifyTenantDbError(updateError, { resource: 'Employees', operation: 'update' });
+    return respond(context, classified.status, classified.body);
   }
 
   return respond(context, 200, { exists: true, data: updated, updated: true });
