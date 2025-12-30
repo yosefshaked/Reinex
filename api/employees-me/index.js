@@ -22,7 +22,7 @@ function classifyTenantDbError(error, { resource, operation } = {}) {
       status: 428,
       body: {
         error: 'invalid_tenant_dedicated_key',
-        message: 'Tenant API rejected the dedicated key. Ensure the stored dedicated key is the tenant Supabase service_role key (not the control DB key).',
+        message: 'Tenant API rejected the dedicated key. Ensure the stored dedicated key is the tenant app_user JWT (not the control DB key / not an access_token / not an anon key).',
         details: {
           resource: resource || null,
           operation: operation || null,
