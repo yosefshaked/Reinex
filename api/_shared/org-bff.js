@@ -220,16 +220,17 @@ export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey, schema 
     throw new Error('Invalid tenant schema.');
   }
 
-  return createClient(supabaseUrl, anonKey, {
+  // IMPORTANT: `createClient(url, key)` key is sent as the `apikey` header and is also used
+  // as the default bearer token when no user session exists.
+  //
+  // For tenant access we must use the dedicated (service) key consistently; mixing
+  // `apikey = anonKey` with `Authorization = dedicatedKey` can cause PostgREST JWT
+  // verification failures (e.g. PGRST301 "No suitable key or wrong key type").
+  return createClient(supabaseUrl, dedicatedKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
       detectSessionInUrl: false,
-    },
-    global: {
-      headers: {
-        Authorization: `Bearer ${dedicatedKey}`,
-      },
     },
     db: {
       schema: normalizedSchema,

@@ -15,6 +15,23 @@ function classifyTenantDbError(error, { resource } = {}) {
   const details = typeof error?.details === 'string' ? error.details : null;
   const hint = typeof error?.hint === 'string' ? error.hint : null;
 
+  if (code === 'PGRST301') {
+    return {
+      status: 428,
+      body: {
+        error: 'invalid_tenant_dedicated_key',
+        message: 'Tenant API rejected the dedicated key. Ensure the stored dedicated key is the tenant Supabase service_role key (not the control DB key).',
+        details: {
+          resource: resource || null,
+          code,
+          message,
+          details,
+          hint,
+        },
+      },
+    };
+  }
+
   const text = `${code || ''} ${message || ''} ${details || ''}`.toLowerCase();
   const looksLikeMissingTable =
     code === '42P01' ||
