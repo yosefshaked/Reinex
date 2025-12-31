@@ -95,7 +95,6 @@ export async function fetchOrgConnection(supabase, orgId) {
       .eq('id', orgId)
       .maybeSingle(),
   ]);
-}
 
   if (settingsError) {
     return { error: settingsError };
@@ -105,9 +104,8 @@ export async function fetchOrgConnection(supabase, orgId) {
     return { error: orgError };
   }
 
-  if (!settings || !settings.supabase_url || !settings.anon_key) {
-  const supabaseUrl = normalizeString(settings?.supabase_url);
-  const anonKey = normalizeString(settings?.anon_key);
+  const supabaseUrl = normalizeTenantUrl(settings?.supabase_url);
+  const anonKey = normalizeTenantApiKey(settings?.anon_key);
 
   if (!supabaseUrl || !anonKey) {
     return { error: new Error('missing_connection_settings') };
@@ -332,6 +330,19 @@ function decodeJwtUnsafe(token) {
   };
 }
 
+function jwtShapeInfo(token) {
+  const normalized = normalizeString(token);
+  if (!normalized) {
+    return { length: 0, segments: 0, segmentLengths: [] };
+  }
+  const parts = normalized.split('.');
+  return {
+    length: normalized.length,
+    segments: parts.length,
+    segmentLengths: parts.map((part) => part.length),
+  };
+}
+
 export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey, schema = 'public' }) {
   if (!supabaseUrl || !anonKey || !dedicatedKey) {
     throw new Error('Missing tenant connection parameters.');
@@ -421,6 +432,7 @@ export async function resolveTenantClient(context, supabase, env, orgId, options
 
   if (isDebugTenantAuthEnabled(env)) {
     const { header, payload } = decodeJwtUnsafe(dedicatedKey);
+    const shape = jwtShapeInfo(dedicatedKey);
     context.log?.warn?.('[DEBUG] tenant auth material (redacted)', {
       orgId,
       tenantUrl: tokenPreview(connectionResult.supabaseUrl),
@@ -428,6 +440,7 @@ export async function resolveTenantClient(context, supabase, env, orgId, options
       anonKeySha256: sha256Hex(connectionResult.anonKey),
       dedicatedKeyPreview: tokenPreview(dedicatedKey),
       dedicatedKeySha256: sha256Hex(dedicatedKey),
+      dedicatedKeyShape: shape,
       jwtHeader: header,
       jwtPayload: payload,
     });
