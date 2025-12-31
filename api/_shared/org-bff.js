@@ -102,7 +102,14 @@ export async function fetchOrgConnection(supabase, orgId) {
     return { error: orgError };
   }
 
+<<<<<<< Updated upstream
   if (!settings || !settings.supabase_url || !settings.anon_key) {
+=======
+  const supabaseUrl = normalizeTenantUrl(settings?.supabase_url);
+  const anonKey = normalizeTenantApiKey(settings?.anon_key);
+
+  if (!supabaseUrl || !anonKey) {
+>>>>>>> Stashed changes
     return { error: new Error('missing_connection_settings') };
   }
 
@@ -207,6 +214,127 @@ export function decryptDedicatedKey(payload, keyBuffer) {
   }
 }
 
+<<<<<<< Updated upstream
+=======
+function normalizeDecryptedJwt(value) {
+  const trimmed = normalizeString(value);
+  if (!trimmed) {
+    return '';
+  }
+
+  // Common copy/paste artifacts: quoted strings or an embedded Bearer prefix.
+  let candidate = trimmed;
+  if ((candidate.startsWith('"') && candidate.endsWith('"')) || (candidate.startsWith("'") && candidate.endsWith("'"))) {
+    candidate = candidate.slice(1, -1).trim();
+  }
+
+  if (candidate.toLowerCase().startsWith('bearer ')) {
+    candidate = candidate.slice(7).trim();
+  }
+
+  return candidate;
+}
+
+function normalizeTenantApiKey(value) {
+  // org_settings.anon_key is often copy/pasted and can include quotes or a Bearer prefix.
+  const trimmed = normalizeString(value);
+  if (!trimmed) {
+    return '';
+  }
+
+  let candidate = trimmed;
+  if ((candidate.startsWith('"') && candidate.endsWith('"')) || (candidate.startsWith("'") && candidate.endsWith("'"))) {
+    candidate = candidate.slice(1, -1).trim();
+  }
+
+  if (candidate.toLowerCase().startsWith('bearer ')) {
+    candidate = candidate.slice(7).trim();
+  }
+
+  return candidate;
+}
+
+function normalizeTenantUrl(value) {
+  const trimmed = normalizeString(value);
+  if (!trimmed) {
+    return '';
+  }
+
+  let candidate = trimmed;
+  if ((candidate.startsWith('"') && candidate.endsWith('"')) || (candidate.startsWith("'") && candidate.endsWith("'"))) {
+    candidate = candidate.slice(1, -1).trim();
+  }
+
+  // Avoid subtle double-slash issues.
+  candidate = candidate.endsWith('/') ? candidate.slice(0, -1) : candidate;
+  return candidate;
+}
+
+function looksLikeJwt(token) {
+  const normalized = normalizeString(token);
+  if (!normalized) {
+    return false;
+  }
+
+  const parts = normalized.split('.');
+  return parts.length === 3 && parts.every(Boolean);
+}
+
+function isDebugTenantAuthEnabled(env) {
+  const raw = normalizeString(env?.APP_DEBUG_TENANT_AUTH ?? env?.DEBUG_TENANT_AUTH ?? env?.DEBUG_TENANT_KEYS);
+  if (!raw) {
+    return false;
+  }
+  const normalized = raw.toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function tokenPreview(token) {
+  const normalized = normalizeString(token);
+  if (!normalized) {
+    return '';
+  }
+
+  if (normalized.length <= 24) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 12)}…${normalized.slice(-12)}`;
+}
+
+function sha256Hex(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return '';
+  }
+  return createHash('sha256').update(normalized).digest('hex');
+}
+
+function decodeJwtPart(part) {
+  try {
+    const base64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const jsonText = Buffer.from(padded, 'base64').toString('utf8');
+    const parsed = JSON.parse(jsonText);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeJwtUnsafe(token) {
+  const normalized = normalizeString(token);
+  const parts = normalized.split('.');
+  if (parts.length !== 3) {
+    return { header: null, payload: null };
+  }
+  return {
+    header: decodeJwtPart(parts[0]),
+    payload: decodeJwtPart(parts[1]),
+  };
+}
+
+>>>>>>> Stashed changes
 export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey, schema = 'public' }) {
   if (!supabaseUrl || !anonKey || !dedicatedKey) {
     throw new Error('Missing tenant connection parameters.');
