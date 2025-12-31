@@ -36,6 +36,12 @@ function buildNavItems(role) {
       tourKey: "dashboard",
     },
     {
+      label: "לוח שנה",
+      to: "/calendar",
+      icon: Calendar,
+      tourKey: "calendar",
+    },
+    {
       label: "תלמידים",
       to: "/students-list",
       icon: Users,

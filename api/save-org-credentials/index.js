@@ -27,6 +27,40 @@ function normalizeString(value) {
   return value.trim();
 }
 
+function stripBearerPrefix(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return '';
+  }
+  return normalized.toLowerCase().startsWith('bearer ')
+    ? normalized.slice(7).trim()
+    : normalized;
+}
+
+function decodeJwtPayload(token) {
+  const normalized = stripBearerPrefix(token);
+  const parts = normalized.split('.');
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  try {
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const jsonText = Buffer.from(padded, 'base64').toString('utf8');
+    const payload = JSON.parse(jsonText);
+    return payload && typeof payload === 'object' ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function isAppUserJwt(token) {
+  const payload = decodeJwtPayload(token);
+  const role = typeof payload?.role === 'string' ? payload.role : '';
+  return role === 'app_user';
+}
+
 function parseRequestBody(req) {
   if (req?.body && typeof req.body === 'object') {
     return req.body;
@@ -174,7 +208,7 @@ export default async function (context, req) {
   const userId = authResult.data.user.id;
   const body = parseRequestBody(req);
   const orgId = normalizeString(body.org_id || body.orgId);
-  const dedicatedKey = normalizeString(body.dedicated_key || body.dedicatedKey);
+  const dedicatedKey = stripBearerPrefix(body.dedicated_key || body.dedicatedKey);
 
   if (!orgId || !isValidOrgId(orgId)) {
     return respond(context, 400, { message: 'invalid org id' });
@@ -182,6 +216,15 @@ export default async function (context, req) {
 
   if (!dedicatedKey) {
     return respond(context, 400, { message: 'missing dedicated key' });
+  }
+
+  // Guardrail: this must be the TENANT project's dedicated "app_user" JWT.
+  // Pasting an access_token/anon key/control-plane token will later cause tenant PostgREST 401/PGRST301 failures.
+  if (!isAppUserJwt(dedicatedKey)) {
+    return respond(context, 400, {
+      error: 'invalid_tenant_dedicated_key',
+      message: 'Invalid dedicated key. Expected the tenant dedicated app_user JWT (payload role=app_user). Generate it from the tenant setup SQL SSOT output (the final SELECT that prints "APP_DEDICATED_KEY").',
+    });
   }
 
   const membershipResult = await supabase
