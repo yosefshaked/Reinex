@@ -1,6 +1,6 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Link, NavLink, Outlet, useLocation, matchPath } from "react-router-dom"
-import { Plus, LayoutDashboard, Users, BarChart3, Settings, LogOut, Megaphone } from "lucide-react"
+import { Plus, LayoutDashboard, Users, BarChart3, Settings, LogOut, Megaphone, CalendarDays } from "lucide-react"
 import { Toaster, toast } from "sonner"
 
 import OrgConfigBanner from "@/components/OrgConfigBanner.jsx"
@@ -40,6 +40,12 @@ function buildNavItems(role) {
       to: "/students-list",
       icon: Users,
       tourKey: isAdminRole ? "admin-students" : "my-students",
+    },
+    {
+      label: "לוח שנה",
+      to: "/calendar",
+      icon: CalendarDays,
+      tourKey: "calendar",
     },
     {
       label: "דוחות",
