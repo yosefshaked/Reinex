@@ -64,9 +64,11 @@ export function isAdminRole(role) {
 export async function ensureMembership(supabase, orgId, userId) {
   const { data, error } = await supabase
     .from('org_memberships')
-    .select('role')
+    .select('role, created_at')
     .eq('org_id', orgId)
     .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) {
@@ -102,14 +104,11 @@ export async function fetchOrgConnection(supabase, orgId) {
     return { error: orgError };
   }
 
-<<<<<<< Updated upstream
   if (!settings || !settings.supabase_url || !settings.anon_key) {
-=======
-  const supabaseUrl = normalizeTenantUrl(settings?.supabase_url);
-  const anonKey = normalizeTenantApiKey(settings?.anon_key);
+  const supabaseUrl = normalizeString(settings?.supabase_url);
+  const anonKey = normalizeString(settings?.anon_key);
 
   if (!supabaseUrl || !anonKey) {
->>>>>>> Stashed changes
     return { error: new Error('missing_connection_settings') };
   }
 
@@ -118,8 +117,8 @@ export async function fetchOrgConnection(supabase, orgId) {
   }
 
   return {
-    supabaseUrl: settings.supabase_url,
-    anonKey: settings.anon_key,
+    supabaseUrl,
+    anonKey,
     encryptedKey: organization.dedicated_key_encrypted,
   };
 }
@@ -214,8 +213,6 @@ export function decryptDedicatedKey(payload, keyBuffer) {
   }
 }
 
-<<<<<<< Updated upstream
-=======
 function normalizeDecryptedJwt(value) {
   const trimmed = normalizeString(value);
   if (!trimmed) {
@@ -334,7 +331,6 @@ function decodeJwtUnsafe(token) {
   };
 }
 
->>>>>>> Stashed changes
 export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey, schema = 'public' }) {
   if (!supabaseUrl || !anonKey || !dedicatedKey) {
     throw new Error('Missing tenant connection parameters.');
@@ -346,6 +342,8 @@ export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey, schema 
     throw new Error('Invalid tenant schema.');
   }
 
+  // Tenant access uses an "app_user" JWT as Authorization with the tenant project's anon key.
+  // This keeps RLS enforced while still allowing the BFF to access the tenant schema.
   return createClient(supabaseUrl, anonKey, {
     auth: {
       persistSession: false,
@@ -404,9 +402,34 @@ export async function resolveTenantClient(context, supabase, env, orgId, options
     return { error: buildTenantError('encryption_not_configured') };
   }
 
-  const dedicatedKey = decryptDedicatedKey(connectionResult.encryptedKey, encryptionKey);
+  const decrypted = decryptDedicatedKey(connectionResult.encryptedKey, encryptionKey);
+  const dedicatedKey = normalizeDecryptedJwt(decrypted);
+
   if (!dedicatedKey) {
     return { error: buildTenantError('failed_to_decrypt_key') };
+  }
+
+  if (!looksLikeJwt(dedicatedKey)) {
+    context.log?.warn?.('tenant connection dedicated key does not look like a JWT', {
+      orgId,
+      length: dedicatedKey.length,
+      segments: dedicatedKey.split('.').length,
+    });
+    return { error: buildTenantError('dedicated_key_malformed', 428) };
+  }
+
+  if (isDebugTenantAuthEnabled(env)) {
+    const { header, payload } = decodeJwtUnsafe(dedicatedKey);
+    context.log?.warn?.('[DEBUG] tenant auth material (redacted)', {
+      orgId,
+      tenantUrl: tokenPreview(connectionResult.supabaseUrl),
+      anonKeyPreview: tokenPreview(connectionResult.anonKey),
+      anonKeySha256: sha256Hex(connectionResult.anonKey),
+      dedicatedKeyPreview: tokenPreview(dedicatedKey),
+      dedicatedKeySha256: sha256Hex(dedicatedKey),
+      jwtHeader: header,
+      jwtPayload: payload,
+    });
   }
 
   try {

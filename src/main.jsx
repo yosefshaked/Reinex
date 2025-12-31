@@ -23,6 +23,8 @@ import { OrgProvider } from './org/OrgContext.jsx';
 import OrgSelection from './pages/OrgSelection.jsx';
 import LandingPage from './pages/LandingPage.jsx';
 import PendingReportsPage from './features/sessions/pages/PendingReportsPage.jsx';
+import TenantSchemaPage from './features/admin/pages/TenantSchemaPage.jsx';
+import CalendarPage from './features/calendar/pages/CalendarPage.jsx';
 import { bootstrapSupabaseCallback } from './auth/bootstrapSupabaseCallback.js';
 
 bootstrapSupabaseCallback();
@@ -49,6 +51,7 @@ function App({ config = null }) {
                     {/* הגדרת כל העמודים */}
                     <Route path="/dashboard" element={<DashboardPage />} />
                     <Route path="/Dashboard" element={<Navigate to="/dashboard" replace />} />
+                    <Route path="/calendar" element={<CalendarPage />} />
                     <Route path="/Employees" element={<Navigate to="/students-list" replace />} />
                     <Route path="/students-list" element={<StudentsPage />} />
                     <Route path="/admin/students" element={<Navigate to="/students-list" replace />} />
@@ -57,6 +60,8 @@ function App({ config = null }) {
                     <Route path="/admin/pending-reports" element={<Navigate to="/pending-reports" replace />} />
                     <Route path="/students/:id" element={<StudentDetailPage />} />
                     <Route path="/Settings" element={<Settings />} />
+                    <Route path="/settings/schema" element={<TenantSchemaPage />} />
+                    <Route path="/tenants/:tenantId/settings/schema" element={<TenantSchemaPage />} />
                     <Route path="/diagnostics" element={<Diagnostics />} />
                   </Route>
                 </Route>
