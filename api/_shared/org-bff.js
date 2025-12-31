@@ -330,6 +330,12 @@ function decodeJwtUnsafe(token) {
   };
 }
 
+function jwtRole(token) {
+  const { payload } = decodeJwtUnsafe(token);
+  const role = payload?.role;
+  return typeof role === 'string' ? role : null;
+}
+
 function jwtShapeInfo(token) {
   const normalized = normalizeString(token);
   if (!normalized) {
@@ -406,6 +412,16 @@ export async function resolveTenantClient(context, supabase, env, orgId, options
     return { error: mapConnectionError(connectionResult.error) };
   }
 
+  // PostgREST expects the project's anon/service key as `apikey`.
+  // In our setup, `connectionResult.anonKey` must be the tenant project's anon key (or service_role key).
+  if (!looksLikeJwt(connectionResult.anonKey)) {
+    context.log?.warn?.('tenant connection anon key does not look like a JWT', {
+      orgId,
+      length: String(connectionResult.anonKey ?? '').length,
+    });
+    return { error: buildTenantError('tenant_anon_key_malformed', 428) };
+  }
+
   const encryptionSecret = resolveEncryptionSecret(env);
   const encryptionKey = deriveEncryptionKey(encryptionSecret);
 
@@ -431,6 +447,8 @@ export async function resolveTenantClient(context, supabase, env, orgId, options
   }
 
   if (isDebugTenantAuthEnabled(env)) {
+    const anonRole = jwtRole(connectionResult.anonKey);
+    const anonDecoded = decodeJwtUnsafe(connectionResult.anonKey);
     const { header, payload } = decodeJwtUnsafe(dedicatedKey);
     const shape = jwtShapeInfo(dedicatedKey);
     context.log?.warn?.('[DEBUG] tenant auth material (redacted)', {
@@ -438,12 +456,22 @@ export async function resolveTenantClient(context, supabase, env, orgId, options
       tenantUrl: tokenPreview(connectionResult.supabaseUrl),
       anonKeyPreview: tokenPreview(connectionResult.anonKey),
       anonKeySha256: sha256Hex(connectionResult.anonKey),
+      anonKeyRole: anonRole,
+      anonJwtHeader: anonDecoded.header,
+      anonJwtPayload: anonDecoded.payload,
       dedicatedKeyPreview: tokenPreview(dedicatedKey),
       dedicatedKeySha256: sha256Hex(dedicatedKey),
       dedicatedKeyShape: shape,
       jwtHeader: header,
       jwtPayload: payload,
     });
+  }
+
+  // Guardrail: apikey must not be an app_user token.
+  // If someone accidentally stores the dedicated key in org_settings.anon_key, PostgREST returns PGRST301.
+  const anonRole = jwtRole(connectionResult.anonKey);
+  if (anonRole && anonRole !== 'anon' && anonRole !== 'service_role') {
+    context.log?.warn?.('tenant anon key role is unexpected', { orgId, role: anonRole });
   }
 
   try {
