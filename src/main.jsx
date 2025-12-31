@@ -23,8 +23,8 @@ import { OrgProvider } from './org/OrgContext.jsx';
 import OrgSelection from './pages/OrgSelection.jsx';
 import LandingPage from './pages/LandingPage.jsx';
 import PendingReportsPage from './features/sessions/pages/PendingReportsPage.jsx';
-import TenantSchemaPage from './features/admin/pages/TenantSchemaPage.jsx';
 import CalendarPage from './features/calendar/pages/CalendarPage.jsx';
+import TenantSchemaPage from './features/admin/pages/TenantSchemaPage.jsx';
 import { bootstrapSupabaseCallback } from './auth/bootstrapSupabaseCallback.js';
 
 bootstrapSupabaseCallback();

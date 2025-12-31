@@ -38,7 +38,7 @@ function calculateLessonPosition(datetimeStart, durationMinutes, startHour = 8) 
  * Daily Calendar Component
  * Renders a day view with instructors as columns and lessons as positioned blocks
  */
-export default function DailyCalendar({ instructors = [], lessons = [], currentDate }) {
+export default function DailyCalendar({ instructors = [], lessons = [] }) {
   const timeSlots = useMemo(() => generateTimeSlots(8, 20), []);
   
   // Group lessons by instructor

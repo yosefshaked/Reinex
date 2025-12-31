@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { fetchInstructors, fetchServices, fetchDailyLessons } from '../api/calendarApi.js';
+import { fetchInstructors, fetchDailyLessons } from '../api/calendarApi.js';
 import DailyCalendar from '../components/DailyCalendar.jsx';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Button } from '@/components/ui/button.jsx';
@@ -36,7 +36,6 @@ export default function CalendarPage() {
   const { activeOrgId } = useOrg();
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [instructors, setInstructors] = useState([]);
-  const [services, setServices] = useState([]);
   const [lessons, setLessons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -56,12 +55,10 @@ export default function CalendarPage() {
 
     Promise.all([
       fetchInstructors(activeOrgId, { signal: abortController.signal }),
-      fetchServices(activeOrgId, { signal: abortController.signal }),
       fetchDailyLessons(activeOrgId, start, end, { signal: abortController.signal }),
     ])
-      .then(([instructorsData, servicesData, lessonsData]) => {
+      .then(([instructorsData, lessonsData]) => {
         setInstructors(instructorsData);
-        setServices(servicesData);
         setLessons(lessonsData);
         setLoading(false);
       })
@@ -171,7 +168,6 @@ export default function CalendarPage() {
         <DailyCalendar
           instructors={instructors}
           lessons={lessons}
-          currentDate={currentDate}
         />
       </div>
     </PageLayout>
