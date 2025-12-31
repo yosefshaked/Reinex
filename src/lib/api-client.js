@@ -87,12 +87,23 @@ export async function authenticatedFetch(path, { session: _session, accessToken:
   }
 
   if (!response.ok) {
-    const message = payload?.message || 'An API error occurred';
+    const message = payload?.message || payload?.error || payload?.code || 'An API error occurred';
+
     const error = new Error(message);
     error.status = response.status;
+    error.url = url;
     if (payload) {
       error.data = payload;
     }
+
+    // eslint-disable-next-line no-console
+    console.error('[api-client] Request failed', {
+      url,
+      method: rest?.method || 'GET',
+      status: response.status,
+      payload,
+    });
+
     throw error;
   }
 
@@ -142,14 +153,17 @@ export async function authenticatedFetchBlob(path, { session: _session, accessTo
     try {
       const text = await response.text();
       const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === 'object' && typeof parsed.message === 'string') {
-        message = parsed.message;
+      if (parsed && typeof parsed === 'object') {
+        message = parsed.message || parsed.error || parsed.code || message;
       }
     } catch {
       // Ignore parse errors
     }
     const error = new Error(message);
     error.status = response.status;
+    error.url = url;
+    // eslint-disable-next-line no-console
+    console.error('[api-client] Blob request failed', { url, status: response.status, message });
     throw error;
   }
 
@@ -200,8 +214,8 @@ export async function authenticatedFetchText(path, { session: _session, accessTo
     let message = 'An API error occurred';
     try {
       const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === 'object' && typeof parsed.message === 'string') {
-        message = parsed.message;
+      if (parsed && typeof parsed === 'object') {
+        message = parsed.message || parsed.error || parsed.code || message;
       }
     } catch {
       // ignore JSON parsing failures
@@ -209,6 +223,9 @@ export async function authenticatedFetchText(path, { session: _session, accessTo
 
     const error = new Error(message);
     error.status = response.status;
+    error.url = url;
+    // eslint-disable-next-line no-console
+    console.error('[api-client] Text request failed', { url, status: response.status, message });
     throw error;
   }
 
