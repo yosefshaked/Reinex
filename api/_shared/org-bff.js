@@ -95,6 +95,7 @@ export async function fetchOrgConnection(supabase, orgId) {
       .eq('id', orgId)
       .maybeSingle(),
   ]);
+}
 
   if (settingsError) {
     return { error: settingsError };
