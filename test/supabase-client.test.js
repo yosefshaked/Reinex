@@ -77,7 +77,7 @@ describe('verifyOrgConnection', () => {
 
     assert.strictEqual(calls.length, 1);
     const [fnName] = calls[0];
-    assert.strictEqual(fnName, 'public.setup_assistant_diagnostics');
+    assert.strictEqual(fnName, 'setup_assistant_diagnostics');
     assert.deepEqual(result, { ok: true, diagnostics: [{ success: true }] });
   });
 

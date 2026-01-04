@@ -49,7 +49,7 @@ function isSchemaOrPolicyError(error) {
 
 async function verifySettingsInfrastructure(context, tenantClient) {
   const { data, error } = await tenantClient
-    .rpc('public.setup_assistant_diagnostics');
+    .rpc('setup_assistant_diagnostics');
 
   if (error) {
     context.log?.error?.('settings diagnostics failed', { message: error.message });
