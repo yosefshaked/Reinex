@@ -156,6 +156,7 @@ export default function AppShell({ children }) {
       <AccessibilityProvider>
       <div ref={shellRef} className="flex min-h-screen bg-background text-foreground overflow-x-hidden" dir="rtl">
         <SkipLink />
+        <Sidebar hidden={isSidebarHidden} onToggleHidden={() => setIsSidebarHidden((prev) => !prev)} />
         <div className="relative flex min-h-screen flex-1 flex-col pb-[88px] md:h-screen md:pb-0">
           <header
             ref={headerRef}
@@ -224,8 +225,6 @@ export default function AppShell({ children }) {
             )}
           </main>
         </div>
-
-        <Sidebar hidden={isSidebarHidden} onToggleHidden={() => setIsSidebarHidden((prev) => !prev)} />
         <MobileNav />
         <WelcomeTour />
         <CustomTourRenderer />
