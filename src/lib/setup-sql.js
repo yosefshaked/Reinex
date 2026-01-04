@@ -248,6 +248,7 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
   "leave_pay_method" text,
   "leave_fixed_day_rate" numeric,
   "employment_scope" text,
+  "instructor_types" uuid[],
   "metadata" jsonb,
   CONSTRAINT "Employees_pkey" PRIMARY KEY ("id")
 );
@@ -267,6 +268,7 @@ ALTER TABLE public."Employees"
   ADD COLUMN IF NOT EXISTS "leave_pay_method" text,
   ADD COLUMN IF NOT EXISTS "leave_fixed_day_rate" numeric,
   ADD COLUMN IF NOT EXISTS "employment_scope" text,
+  ADD COLUMN IF NOT EXISTS "instructor_types" uuid[],
   ADD COLUMN IF NOT EXISTS "metadata" jsonb;
 
 -- Add canonical name fields for future use
@@ -675,6 +677,10 @@ CREATE TABLE IF NOT EXISTS public.lesson_instances (
   service_id uuid NOT NULL,
   status text NOT NULL,
   documentation_status text NOT NULL DEFAULT 'undocumented',
+  is_closed boolean NOT NULL DEFAULT false,
+  closed_reason text NULL,
+  closed_by uuid NULL,
+  closed_at timestamptz NULL,
   created_source text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -690,6 +696,10 @@ ALTER TABLE public.lesson_instances
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS status text,
   ADD COLUMN IF NOT EXISTS documentation_status text,
+  ADD COLUMN IF NOT EXISTS is_closed boolean,
+  ADD COLUMN IF NOT EXISTS closed_reason text,
+  ADD COLUMN IF NOT EXISTS closed_by uuid,
+  ADD COLUMN IF NOT EXISTS closed_at timestamptz,
   ADD COLUMN IF NOT EXISTS created_source text,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS updated_at timestamptz,
@@ -782,6 +792,8 @@ CREATE TABLE IF NOT EXISTS public.lesson_participants (
   pricing_breakdown jsonb NULL,
   commitment_id uuid NULL,
   documentation_ref jsonb NULL,
+  reminder_sent boolean NOT NULL DEFAULT false,
+  reminder_seen boolean NOT NULL DEFAULT false,
   attendance_confirmed_at timestamptz NULL,
   attendance_confirmed_by uuid NULL,
   documented_at timestamptz NULL,
@@ -798,6 +810,8 @@ ALTER TABLE public.lesson_participants
   ADD COLUMN IF NOT EXISTS pricing_breakdown jsonb,
   ADD COLUMN IF NOT EXISTS commitment_id uuid,
   ADD COLUMN IF NOT EXISTS documentation_ref jsonb,
+  ADD COLUMN IF NOT EXISTS reminder_sent boolean,
+  ADD COLUMN IF NOT EXISTS reminder_seen boolean,
   ADD COLUMN IF NOT EXISTS attendance_confirmed_at timestamptz,
   ADD COLUMN IF NOT EXISTS attendance_confirmed_by uuid,
   ADD COLUMN IF NOT EXISTS documented_at timestamptz,
@@ -1816,8 +1830,6 @@ GRANT EXECUTE ON FUNCTION public.schema_execute_statements_v1(text[], boolean, t
 SELECT extensions.sign(
   json_build_object(
     'role', 'app_user',
-    'iss', 'supabase',
-    'aud', 'authenticated',
     'exp', (EXTRACT(EPOCH FROM (NOW() + INTERVAL '5 year')))::integer,
     'iat', (EXTRACT(EPOCH FROM NOW()))::integer
   ),

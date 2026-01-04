@@ -29,7 +29,6 @@ import { saveFilterState, loadFilterState } from '@/features/students/utils/filt
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
 import MyPendingReportsCard from '@/features/sessions/components/MyPendingReportsCard.jsx';
-import { buildDisplayName } from '@/lib/person-name.js';
 
 export default function StudentsPage() {
   const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
@@ -421,18 +420,20 @@ export default function StudentsPage() {
     setIsCreatingStudent(true);
     setCreateError('');
 
+    // AddStudentForm submits camelCase; keep snake_case compatibility as well.
     const body = {
       org_id: activeOrgId,
       name: formData.name,
-      assigned_instructor_id: formData.assigned_instructor_id,
+      assigned_instructor_id: formData.assigned_instructor_id ?? formData.assignedInstructorId,
       tags: normalizeTagIdsForWrite(formData.tags),
-      default_service: formData.default_service || '',
-      default_day_of_week: formData.default_day_of_week,
-      default_session_time: formData.default_session_time || '',
-      national_id: formData.national_id?.trim() || '',
-      contact_name: formData.contact_name?.trim() || '',
-      contact_phone: formData.contact_phone?.trim() || '',
-      notes: formData.notes?.trim() || '',
+      default_service: formData.default_service ?? formData.defaultService ?? '',
+      default_day_of_week: formData.default_day_of_week ?? formData.defaultDayOfWeek,
+      default_session_time: formData.default_session_time ?? formData.defaultSessionTime ?? '',
+      national_id: (formData.national_id ?? formData.nationalId ?? '').trim(),
+      contact_name: (formData.contact_name ?? formData.contactName ?? '').trim(),
+      contact_phone: (formData.contact_phone ?? formData.contactPhone ?? '').trim(),
+      notes: (formData.notes ?? '').trim(),
+      is_active: formData.is_active ?? formData.isActive,
     };
 
     try {
@@ -446,11 +447,21 @@ export default function StudentsPage() {
       await refreshRoster();
       setIsAddDialogOpen(false);
     } catch (error) {
-      console.error('Failed to create student:', error);
+      const apiMessage = error?.data?.message || error?.message;
+      const apiCode = error?.data?.error || error?.data?.code || error?.code;
+      console.error('[students-list][POST] Failed to create student', {
+        status: error?.status,
+        code: apiCode,
+        message: apiMessage,
+      });
       let message = 'הוספת תלמיד נכשלה.';
-      if (error?.code === 'national_id_duplicate') {
+      if (apiCode === 'national_id_duplicate' || apiMessage === 'duplicate_national_id') {
         message = 'תעודת זהות קיימת כבר במערכת.';
-      } else if (error?.code === 'schema_upgrade_required') {
+      } else if (apiMessage === 'missing national id') {
+        message = 'יש להזין מספר זהות.';
+      } else if (apiMessage === 'invalid national id') {
+        message = 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
+      } else if (apiCode === 'schema_upgrade_required') {
         message = 'נדרשת שדרוג לסכמת מסד הנתונים.';
       }
       setCreateError(message);
@@ -495,11 +506,19 @@ export default function StudentsPage() {
       await refreshRoster();
       handleEditModalClose();
     } catch (error) {
-      console.error('Failed to update student:', error);
+      const apiMessage = error?.data?.message || error?.message;
+      const apiCode = error?.data?.error || error?.data?.code || error?.code;
+      console.error('[students-list][PUT] Failed to update student', {
+        status: error?.status,
+        code: apiCode,
+        message: apiMessage,
+      });
       let message = 'עדכון פרטי התלמיד נכשל.';
-      if (error?.code === 'national_id_duplicate') {
+      if (apiCode === 'national_id_duplicate' || apiMessage === 'duplicate_national_id') {
         message = 'תעודת זהות קיימת כבר במערכת.';
-      } else if (error?.code === 'schema_upgrade_required') {
+      } else if (apiMessage === 'invalid national id') {
+        message = 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
+      } else if (apiCode === 'schema_upgrade_required') {
         message = 'נדרשת שדרוג לסכמת מסד הנתונים.';
       }
       setUpdateError(message);
@@ -653,10 +672,6 @@ export default function StudentsPage() {
                       const missingNationalId = !student.national_id?.trim();
                       const summary = complianceSummary[student.id] || {};
                       const hasExpiredDocs = summary.expiredDocuments > 0;
-                      const studentDisplayName = buildDisplayName({
-                        ...student,
-                        fallback: student.name,
-                      });
 
                       return (
                         <TableRow key={student.id}>
@@ -666,7 +681,7 @@ export default function StudentsPage() {
                                 to={`/students/${student.id}`}
                                 className="font-medium text-primary hover:underline"
                               >
-                                {studentDisplayName || 'ללא שם'}
+                                {student.name}
                               </Link>
                               {isInactive && (
                                 <Badge variant="secondary" className="w-fit bg-neutral-200 text-neutral-700">
@@ -754,10 +769,10 @@ export default function StudentsPage() {
             }}
             footer={
               <AddStudentFormFooter
-                isCreating={isCreatingStudent}
-                isSubmitDisabled={addSubmitDisabled}
+                isSubmitting={isCreatingStudent}
+                disableSubmit={addSubmitDisabled}
                 onCancel={() => setIsAddDialogOpen(false)}
-                onSubmitClick={() => {
+                onSubmit={() => {
                   document.getElementById('add-student-form')?.requestSubmit();
                 }}
               />
@@ -767,20 +782,24 @@ export default function StudentsPage() {
               <DialogTitle>הוספת תלמיד חדש</DialogTitle>
             </DialogHeader>
             <AddStudentForm
-              formId="add-student-form"
-              instructors={instructors}
-              tagOptions={tagOptions}
               onSubmit={handleAddSubmit}
+              onCancel={() => setIsAddDialogOpen(false)}
+              isSubmitting={isCreatingStudent}
+              error={createError}
               onSubmitDisabledChange={setAddSubmitDisabled}
               renderFooterOutside
-              openSelectCountRef={openSelectCountRef}
-              isClosingSelectRef={isClosingSelectRef}
+              onSelectOpenChange={(open) => {
+                if (open) {
+                  openSelectCountRef.current++;
+                } else {
+                  isClosingSelectRef.current = true;
+                  setTimeout(() => {
+                    openSelectCountRef.current = Math.max(0, openSelectCountRef.current - 1);
+                    isClosingSelectRef.current = false;
+                  }, 100);
+                }
+              }}
             />
-            {createError && (
-              <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-                {createError}
-              </div>
-            )}
           </DialogContent>
         </Dialog>
       )}
@@ -788,11 +807,10 @@ export default function StudentsPage() {
       {/* Admin-only: Edit Student Modal */}
       {isAdmin && studentForEdit && (
         <EditStudentModal
+          open={Boolean(studentForEdit)}
           student={studentForEdit}
-          instructors={instructors}
-          tagOptions={tagOptions}
-          isUpdating={isUpdatingStudent}
-          updateError={updateError}
+          isSubmitting={isUpdatingStudent}
+          error={updateError}
           onClose={handleEditModalClose}
           onSubmit={handleEditSubmit}
         />

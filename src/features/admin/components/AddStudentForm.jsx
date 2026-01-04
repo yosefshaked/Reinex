@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
@@ -17,7 +17,26 @@ import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
 import { useStudentNameSuggestions, useNationalIdGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
 import { useInstructors, useServices } from '@/hooks/useOrgData.js';
-import { buildDisplayName } from '@/lib/person-name.js';
+
+const EMPTY_INITIAL_VALUES = Object.freeze({});
+const NATIONAL_ID_PATTERN = /^\d{5,12}$/;
+
+function buildInitialValuesKey(initialValues) {
+  const value = initialValues && typeof initialValues === 'object' ? initialValues : EMPTY_INITIAL_VALUES;
+  return [
+    value.name ?? '',
+    value.nationalId ?? '',
+    value.contactName ?? '',
+    value.contactPhone ?? '',
+    value.assignedInstructorId ?? '',
+    value.defaultService ?? '',
+    value.defaultDayOfWeek ?? '',
+    value.defaultSessionTime ?? '',
+    value.notes ?? '',
+    value.tagId ?? '',
+    value.isActive === false ? '0' : '1',
+  ].join('|');
+}
 
 export default function AddStudentForm({ 
   onSubmit, 
@@ -27,22 +46,54 @@ export default function AddStudentForm({
   renderFooterOutside = false,
   onSelectOpenChange, // Mobile fix: callback for Select open/close tracking
   onSubmitDisabledChange = () => {},
-  initialValues = {},
+  initialValues = EMPTY_INITIAL_VALUES,
 }) {
-  const initialState = useMemo(() => ({ ...createStudentFormState(), ...initialValues }), [initialValues]);
+  // Avoid infinite rerenders when callers pass a new object literal each render (or when defaulting to `{}`)
+  const initialValuesKey = useMemo(() => buildInitialValuesKey(initialValues), [initialValues]);
+
+  const stableInitialValuesRef = useRef(EMPTY_INITIAL_VALUES);
+  const stableInitialValuesKeyRef = useRef('');
+  if (stableInitialValuesKeyRef.current !== initialValuesKey) {
+    stableInitialValuesKeyRef.current = initialValuesKey;
+    stableInitialValuesRef.current = initialValues && typeof initialValues === 'object'
+      ? initialValues
+      : EMPTY_INITIAL_VALUES;
+  }
+
+  const initialStateRef = useRef(null);
+  const initialStateKeyRef = useRef('');
+  if (initialStateKeyRef.current !== initialValuesKey) {
+    initialStateKeyRef.current = initialValuesKey;
+    initialStateRef.current = { ...createStudentFormState(), ...stableInitialValuesRef.current };
+  }
+
+  const initialState = initialStateRef.current;
   const [values, setValues] = useState(() => initialState);
   const [touched, setTouched] = useState({});
-  const { services, loadingServices } = useServices();
-  const { instructors, loadingInstructors } = useInstructors();
+  
+  const { services = [], loadingServices } = useServices();
+  const { instructors = [], loadingInstructors } = useInstructors();
+
+  // Normalize instructors to avoid runtime errors when the hook is still initializing
+  const safeInstructors = useMemo(() => {
+    return Array.isArray(instructors) ? instructors : [];
+  }, [instructors]);
 
   const { suggestions, loading: searchingNames } = useStudentNameSuggestions(values.name);
   const { duplicate, loading: checkingNationalId, error: nationalIdError } = useNationalIdGuard(values.nationalId);
 
+  const trimmedNationalId = values.nationalId.trim();
+  const isNationalIdFormatValid = useMemo(() => {
+    if (!trimmedNationalId) return true;
+    return NATIONAL_ID_PATTERN.test(trimmedNationalId);
+  }, [trimmedNationalId]);
+
   const preventSubmitReason = useMemo(() => {
     if (duplicate) return 'duplicate';
     if (nationalIdError) return 'error';
+    if (!isNationalIdFormatValid) return 'invalid_national_id';
     return '';
-  }, [duplicate, nationalIdError]);
+  }, [duplicate, nationalIdError, isNationalIdFormatValid]);
 
   useEffect(() => {
     onSubmitDisabledChange(Boolean(preventSubmitReason) || isSubmitting);
@@ -107,14 +158,18 @@ export default function AddStudentForm({
     const trimmedName = values.name.trim();
     const trimmedContactName = values.contactName.trim();
     const trimmedContactPhone = values.contactPhone.trim();
-    const trimmedNationalId = values.nationalId.trim();
+    const trimmedNationalIdInner = values.nationalId.trim();
 
     if (duplicate || nationalIdError) {
       return;
     }
 
-    if (!trimmedName || !trimmedNationalId || !trimmedContactName || !trimmedContactPhone ||
+    if (!trimmedName || !trimmedNationalIdInner || !trimmedContactName || !trimmedContactPhone ||
         !values.assignedInstructorId || !values.defaultDayOfWeek || !values.defaultSessionTime) {
+      return;
+    }
+
+    if (!NATIONAL_ID_PATTERN.test(trimmedNationalIdInner)) {
       return;
     }
 
@@ -124,7 +179,7 @@ export default function AddStudentForm({
 
     onSubmit({
       name: trimmedName,
-      nationalId: trimmedNationalId,
+      nationalId: trimmedNationalIdInner,
       contactName: trimmedContactName,
       contactPhone: trimmedContactPhone,
       assignedInstructorId: values.assignedInstructorId,
@@ -137,7 +192,6 @@ export default function AddStudentForm({
     });
   };
 
-  const trimmedNationalId = values.nationalId.trim();
   const showNameError = touched.name && !values.name.trim();
   const nationalIdErrorMessage = (() => {
     // Avoid double-surfacing duplicates; detailed banner handles it
@@ -145,6 +199,9 @@ export default function AddStudentForm({
     if (nationalIdError) return nationalIdError;
     if (error === 'duplicate_national_id') return '';
     if (touched.nationalId && !trimmedNationalId) return 'יש להזין מספר זהות.';
+    if (touched.nationalId && trimmedNationalId && !isNationalIdFormatValid) {
+      return 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
+    }
     return '';
   })();
   const showContactNameError = touched.contactName && !values.contactName.trim();
@@ -152,6 +209,15 @@ export default function AddStudentForm({
   const showInstructorError = touched.assignedInstructorId && !values.assignedInstructorId;
   const showDayError = touched.defaultDayOfWeek && !values.defaultDayOfWeek;
   const showTimeError = touched.defaultSessionTime && !values.defaultSessionTime;
+  const noInstructorsAvailable = !loadingInstructors && safeInstructors.length === 0;
+
+  // Memoize instructor options to prevent re-render issues with Radix Select
+  const instructorOptions = useMemo(() => {
+    return safeInstructors.filter(inst => inst?.id).map((inst) => ({
+      value: inst.id,
+      label: inst.name?.trim() || inst.email?.trim() || inst.id,
+    }));
+  }, [safeInstructors]);
 
   return (
     <form id="add-student-form" onSubmit={handleSubmit} className="space-y-5" dir="rtl">
@@ -186,9 +252,7 @@ export default function AddStudentForm({
                 {suggestions.map((match) => (
                   <li key={match.id} className="flex items-center justify-between gap-2">
                     <div className="space-y-0.5">
-                      <div className="font-semibold text-neutral-900">
-                        {buildDisplayName({ ...match, fallback: match.name }) || 'ללא שם'}
-                      </div>
+                      <div className="font-semibold text-neutral-900">{match.name}</div>
                       <div className="text-xs text-neutral-600">מספר זהות: {match.national_id || '—'} | סטטוס: {match.is_active === false ? 'לא פעיל' : 'פעיל'}</div>
                     </div>
                     <Link
@@ -221,9 +285,7 @@ export default function AddStudentForm({
             <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 space-y-2" role="alert">
               <p className="font-semibold">מספר זהות זה כבר קיים.</p>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <span>
-                  כדי למנוע כפילויות, עברו לפרופיל של {buildDisplayName({ ...duplicate, fallback: duplicate.name }) || 'ללא שם'}.
-                </span>
+                <span>כדי למנוע כפילויות, עברו לפרופיל של {duplicate.name}.</span>
                 <Link
                   to={`/students/${duplicate.id}`}
                   className="inline-flex items-center justify-center rounded-md bg-red-600 px-3 py-1.5 text-white shadow hover:bg-red-700"
@@ -234,23 +296,31 @@ export default function AddStudentForm({
             </div>
           )}
 
-          <SelectField
-            id="assigned-instructor"
-            name="assignedInstructorId"
-            label="מדריך משויך"
-            value={values.assignedInstructorId}
-            onChange={(value) => handleSelectChange('assignedInstructorId', value)}
-            onOpenChange={onSelectOpenChange}
-            options={instructors.map((inst) => ({
-              value: inst.id,
-              label: inst.name || inst.email || inst.id,
-            }))}
-            placeholder={loadingInstructors ? 'טוען...' : 'בחר מדריך'}
-            required
-            disabled={isSubmitting || loadingInstructors}
-            description="מוצגים רק מדריכים פעילים."
-            error={showInstructorError ? 'יש לבחור מדריך.' : ''}
-          />
+          {loadingInstructors ? (
+            <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700" role="status">
+              טוען רשימת מדריכים...
+            </div>
+          ) : noInstructorsAvailable ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" role="alert">
+              <p className="font-semibold">לא נמצאו מדריכים פעילים.</p>
+              <p>יש ליצור מדריך חדש בלשונית צוות/מדריכים ואז לחזור להוספת תלמיד.</p>
+            </div>
+          ) : (
+            <SelectField
+              id="assigned-instructor"
+              name="assignedInstructorId"
+              label="מדריך משויך"
+              value={values.assignedInstructorId}
+              onChange={(value) => handleSelectChange('assignedInstructorId', value)}
+              onOpenChange={onSelectOpenChange}
+              options={instructorOptions}
+              placeholder="בחר מדריך"
+              required
+              disabled={isSubmitting}
+              description="מוצגים רק מדריכים פעילים."
+              error={showInstructorError ? 'יש לבחור מדריך.' : ''}
+            />
+          )}
 
           <TextField
             id="contact-name"
@@ -338,12 +408,6 @@ export default function AddStudentForm({
         </div>
       </div>
 
-      {error && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 text-right" role="alert">
-          {error}
-        </div>
-      )}
-
       {!renderFooterOutside && (
         <div className="border-t -mx-4 sm:-mx-6 mt-6 pt-3 sm:pt-4 px-4 sm:px-6">
           <div className="flex flex-col gap-2 sm:flex-row-reverse sm:justify-end">
@@ -368,7 +432,7 @@ export default function AddStudentForm({
 export function AddStudentFormFooter({ onSubmit, onCancel, isSubmitting = false, disableSubmit = false }) {
   return (
     <div className="flex flex-col gap-2 sm:flex-row-reverse sm:justify-end">
-      <Button onClick={onSubmit} disabled={isSubmitting || disableSubmit} className="gap-2 shadow-md hover:shadow-lg transition-shadow">
+      <Button type="button" onClick={onSubmit} disabled={isSubmitting || disableSubmit} className="gap-2 shadow-md hover:shadow-lg transition-shadow">
         {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
         שמירת תלמיד חדש
       </Button>

@@ -136,6 +136,7 @@ function buildStudentPayload(body) {
 function buildStudentUpdates(body) {
   const updates = {};
   let hasAny = false;
+  let intakeNotes;
 
   if (Object.prototype.hasOwnProperty.call(body, 'name')) {
     const studentName = normalizeString(body.name);
@@ -260,6 +261,20 @@ function buildStudentUpdates(body) {
   }
 
   if (
+    Object.prototype.hasOwnProperty.call(body, 'intake_notes') ||
+    Object.prototype.hasOwnProperty.call(body, 'intakeNotes')
+  ) {
+    const { value, valid } = coerceOptionalText(
+      Object.prototype.hasOwnProperty.call(body, 'intake_notes') ? body.intake_notes : body.intakeNotes,
+    );
+    if (!valid) {
+      return { error: 'invalid_notes' };
+    }
+    intakeNotes = value;
+    hasAny = true;
+  }
+
+  if (
     Object.prototype.hasOwnProperty.call(body, 'national_id') ||
     Object.prototype.hasOwnProperty.call(body, 'nationalId')
   ) {
@@ -277,7 +292,7 @@ function buildStudentUpdates(body) {
     return { error: 'missing_updates' };
   }
 
-  return { updates };
+  return { updates, intakeNotes };
 }
 
 function determineStatusFilter(query, canViewInactive = true) {
@@ -417,6 +432,8 @@ export default async function handler(context, req) {
     } else if (statusFilter === 'inactive') {
       builder = builder.eq('is_active', false);
     }
+
+    builder = builder.or('metadata->intake_dismissal->>active.is.null,metadata->intake_dismissal->>active.neq.true');
 
     const { data, error } = await builder;
 
@@ -626,6 +643,15 @@ export default async function handler(context, req) {
     ...normalizedUpdates.updates,
     metadata: updatedMetadata,
   };
+
+  if (Object.prototype.hasOwnProperty.call(normalizedUpdates, 'intakeNotes')) {
+    updatesWithMetadata.metadata = {
+      ...updatedMetadata,
+      intake_notes: normalizedUpdates.intakeNotes,
+      intake_notes_updated_at: new Date().toISOString(),
+      intake_notes_updated_by: userId,
+    };
+  }
 
   const { data, error } = await tenantClient
     .from('Students')

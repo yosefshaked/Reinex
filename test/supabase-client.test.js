@@ -67,20 +67,17 @@ describe('verifyOrgConnection', () => {
   it('calls the diagnostics runner and reports success', async () => {
     const calls = [];
     const fakeClient = {
-      schema: (schemaName) => ({
-        rpc: async (...args) => {
-          calls.push([schemaName, ...args]);
-          return { data: [{ success: true }], error: null };
-        },
-      }),
+      rpc: async (...args) => {
+        calls.push(args);
+        return { data: [{ success: true }], error: null };
+      },
     };
 
     const result = await verifyOrgConnection({ dataClient: fakeClient });
 
     assert.strictEqual(calls.length, 1);
-    const [schemaName, fnName] = calls[0];
-    assert.strictEqual(schemaName, 'public');
-    assert.strictEqual(fnName, 'setup_assistant_diagnostics');
+    const [fnName] = calls[0];
+    assert.strictEqual(fnName, 'public.setup_assistant_diagnostics');
     assert.deepEqual(result, { ok: true, diagnostics: [{ success: true }] });
   });
 

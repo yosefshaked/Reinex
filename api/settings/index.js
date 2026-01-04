@@ -18,8 +18,6 @@ import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit
 const SETTINGS_DIAGNOSTIC_CHECKS = new Set([
   'Table "Settings" exists',
   'RLS enabled on "Settings"',
-  'Policy "Allow full access to authenticated users on Settings" exists',
-  // Backward-compat naming (if a tenant has an older diagnostics function)
   'Policy "Allow full access to authenticated users on Settings" on "Settings" exists',
 ]);
 
@@ -51,8 +49,7 @@ function isSchemaOrPolicyError(error) {
 
 async function verifySettingsInfrastructure(context, tenantClient) {
   const { data, error } = await tenantClient
-    .schema('public')
-    .rpc('setup_assistant_diagnostics');
+    .rpc('public.setup_assistant_diagnostics');
 
   if (error) {
     context.log?.error?.('settings diagnostics failed', { message: error.message });

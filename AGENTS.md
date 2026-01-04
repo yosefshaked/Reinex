@@ -1,4 +1,21 @@
-# AGENTS
+# AGENTS (Reinex)
+
+This repo started as a duplication of TutTiud. The content below contains many TutTiud-specific notes.
+
+The rules in this **Reinex section override everything below**.
+
+## Reinex Non‑Negotiables
+- Tenant DB schema is **public only**.
+- Control DB is shared with TutTiud (organizations/memberships/auth).
+- Do **not** use "reinex" in API route names; routes must be domain-based.
+- Instructors (non-admin) can only access their own lessons/students; admin/owner can access all.
+
+## Azure Functions (CRITICAL)
+- Always set `context.res` before returning (use `respond()` helper).
+- Always extract JWT via `resolveBearerAuthorization()`.
+- `supabase.auth.getUser(token)` returns `{ data, error }` and user is `result.data.user`.
+
+## Legacy notes (Tuttiud) — DO NOT FOLLOW
 
 ## Code Style
 - Use 2 spaces for indentation.
@@ -119,6 +136,14 @@
 - `/api/weekly-compliance` powers the dashboard widget with aggregated schedules, legend entries, and dynamic hour ranges. Frontend work should consume its payload instead of duplicating aggregation logic.
 - Weekly compliance status logic: `/api/weekly-compliance` marks undocumented sessions scheduled for the current day as `missing`; only future days are returned as `upcoming`.
 - Daily compliance status logic: `/api/daily-compliance` also marks undocumented sessions scheduled for today (UTC) as `missing`; `upcoming` applies strictly to future dates.
+- Intake approvals now require an assigned instructor: admins assign the intake (and optional contact details/notes) in the dashboard queue before the assigned instructor confirms reading the intake.
+- Admins can dismiss accidental intake submissions through `/api/intake/dismiss`, which clears `needs_intake_approval` and logs `metadata.intake_dismissal.active=true`.
+- Admins can restore dismissed intakes through `/api/intake/restore`, which reopens the queue entry and marks `metadata.intake_dismissal.active=false`.
+- `/api/students-list` always filters out dismissed intakes; use `/api/intake/dismissed` to load them for the intake queue.
+- Admins can merge intake submissions into existing students via `/api/students-merge`, selecting per-field values to keep.
+- `/api/students-merge` reattaches intake responses to the target student and stores any previous target intake payload in `metadata.intake_merge_backup`.
+- `/api/students-merge` deletes the source student row and stores full source/target snapshots in `metadata.merge_backup` for recovery.
+- Intake instructor notes are stored in `Students.metadata.intake_notes` so the main `notes` field remains for student-level notes.
 - Add any important information learned into this AGENTS.md file.
 	- If global lint is run across the entire repo, there are legacy violations unrelated to recent changes; follow the workflow and lint only the files you touched in a PR. Address broader lint cleanup in a dedicated maintenance pass.
 	- When preserving a function signature for temporarily disabled exports, mark intentionally unused parameters as used with `void param;` (and/or prefix with `_`) to satisfy `no-unused-vars` without altering the public API.
@@ -244,7 +269,7 @@
   - `exportTenantData(tenantClient, orgId)`: queries all tenant tables (Students, Instructors, SessionRecords, Settings), returns manifest v1.0
   - `validateBackupManifest(manifest)`: checks version/schema compatibility
   - `restoreTenantData(tenantClient, manifest, options)`: transactional restore with optional `clearExisting` flag in dependency order
-- Backup manifests are JSON with structure: `{ version: '1.0', schema_version: 'tenant_v1', org_id, created_at, metadata: { total_records }, tables: [{ name, records }] }`
+- Backup manifests are JSON with structure: `{ version: '1.0', schema_version: 'tuttiud_v1', org_id, created_at, metadata: { total_records }, tables: [{ name, records }] }`
 - Password generation: System auto-generates a human-friendly product-key style password (e.g., ABCD-EF12-3456-7890-ABCD, ~80-bit entropy). The user must save it from the response to decrypt later.
 - Cooldown enforcement: checks `org_settings.backup_history` array for last successful backup within 7 days; 429 response includes `next_allowed_at` and `days_remaining`. Can be bypassed once by setting `permissions.backup_cooldown_override = true` in control DB; the flag is automatically reset to `false` after a successful backup.
 - Audit trail: all backup/restore operations appended to `org_settings.backup_history` JSONB array (last 100 entries kept) with type, status, timestamp, initiated_by, size_bytes/records_restored, error_message.
@@ -272,14 +297,14 @@
   - Disabled state shown with message "לוגו מותאם אישית אינו זמין. נא לפנות לתמיכה" when `logo_enabled = false`.
   - Accepts public image URLs (PNG, JPG, SVG, GIF, etc.).
   - Stores logo URL as plain text in control DB (no file upload, references external images).
-- Global display: `OrgLogo.jsx` component fetches and displays custom logo in AppShell header (desktop sidebar + mobile header). Falls back to the default app logo (`/icon.svg`) when no logo is set.
+- Global display: `OrgLogo.jsx` component fetches and displays custom logo in AppShell header (desktop sidebar + mobile header). Falls back to TutTiud logo (`/icon.svg`) when no logo is set.
 - Logo refresh: Component refetches when `activeOrgId` changes, ensuring correct logo displays after org switch.
 - Logo sizing: Uses `object-contain` with white background padding to ensure logos fit nicely in all display locations (48px container).
 
 ### Cross-System Storage Configuration (2025-11)
 - **Storage profile** is a cross-system capability stored in `org_settings.storage_profile` (control DB).
   - Supports two modes: **BYOS** (Bring Your Own Storage) and **Managed Storage**
-  - System-agnostic design: reusable across products and future systems
+  - System-agnostic design: reusable by TutTiud, Farm Management System, and future systems
 - **BYOS credentials encryption** (`api/_shared/storage-encryption.js`):
   - Encrypts `access_key_id` and `secret_access_key` before storing in database
   - Uses AES-256-GCM authenticated encryption (same as tenant credentials)
@@ -299,7 +324,7 @@
   - `validateByosCredentials(byosConfig)` - validates S3-compatible provider credentials
   - `validateManagedConfig(managedConfig)` - validates managed storage namespace
   - `normalizeStorageProfile(rawProfile)` - normalizes and sanitizes input, outputs snake_case credentials
-  - No product-specific logic; pure cross-system validation
+  - No TutTiud-specific logic; pure cross-system validation
 - **API endpoints**:
   - `/api/user-context` now includes `storage_profile` in organization data (credentials stripped for non-admin)
   - `/api/org-settings/storage` (GET/POST/DELETE/PATCH) manages storage profile
@@ -340,7 +365,7 @@
 - File restrictions communicated to users via blue info box with bullet points (10MB, allowed types, Hebrew filenames supported)
 
 ### Polymorphic Documents Table Architecture (2025-11)
-- **Schema**: Centralized `Documents` table (in the active tenant schema) is the **source of truth** for all file metadata. Legacy JSON columns (`Students.files`, `Instructors.files`, `Settings.org_documents`) have been fully deprecated and removed.
+- **Schema**: Centralized `tuttiud.Documents` table is the **source of truth** for all file metadata. Legacy JSON columns (`Students.files`, `Instructors.files`, `Settings.org_documents`) have been fully deprecated and removed.
 - **API Endpoint**: `/api/documents` is the unified endpoint for all document operations (GET/POST/PUT/DELETE). Legacy endpoints have been removed.
 - **Discriminator pattern**: `entity_type` ('student'|'instructor'|'organization') + `entity_id` (UUID) identifies which entity owns each document.
 - **Columns**: id (UUID PK), entity_type (text), entity_id (UUID), name, original_name, relevant_date, expiration_date, resolved, url, path, storage_provider, uploaded_at, uploaded_by, definition_id, definition_name, size, type, hash, metadata (JSONB).
@@ -433,7 +458,7 @@
   - Validates admin/owner role and permission before processing
   - Generates Hebrew/RTL-ready PDF with student info, session history, and custom branding
   - Uses Puppeteer with `@sparticuz/chromium` for serverless Azure Functions deployment
-  - Co-branding: Always displays the default app logo; optionally includes custom org logo if `permissions.can_use_custom_logo_on_exports = true`
+  - Co-branding: Always displays TutTiud logo; optionally includes custom org logo if `permissions.can_use_custom_logo_on_exports = true`
   - File naming: `[Student_Name]_Records_[Date].pdf`
   - Resource management: Browser instance always closed in finally block to prevent memory leaks
 - Permissions added to `scripts/control-db-permissions-table.sql`:
@@ -568,7 +593,7 @@
   discover recurring issues so future AI coding passes avoid regressions.
 
 ## Notes
-- Legacy note: older iterations referenced non-`public` tenant schemas. Reinex tenants are `public`-schema only; do not reference any other tenant schema.
+- Instructors are managed in the tenant `tuttiud."Instructors"` table. Records are not deleted; set `is_active=false` to disable. Clients should hide inactive instructors from selection.
 - Student creation requires selecting an active instructor. If a student's assigned instructor is later disabled, surfaces a warning in the roster and prompts reassignment; historical reports remain attributed via `assigned_instructor_id`.
 - `/api/instructors` returns only active instructors by default. Use `include_inactive=true` to fetch disabled ones for admin UIs.
 - WorkSessions inserts should omit `id` so the database can generate it; include `id` only when updating existing records.
@@ -597,10 +622,11 @@
   - Control DB schema: Run `scripts/control-db-invitation-expiry.sql` to deploy the RPC functions (`get_auth_otp_expiry_seconds` and `calculate_invitation_expiry`).
   - Permission registry: `invitation_expiry_seconds` (integer, default null) in `permission_registry` table allows global customization without modifying Supabase auth settings.
   - Clients can still explicitly provide `expiresAt`/`expires_at` in the POST request body to override automatic calculation.
-- `/api/settings` surfaces HTTP 424 (`settings_schema_incomplete` / `settings_schema_unverified`) when `public.setup_assistant_diagnostics()` reports missing tenant tables or policies, and the response includes the failing diagnostic rows so admins rerun the setup script instead of retrying blindly.
+- `/api/settings` surfaces HTTP 424 (`settings_schema_incomplete` / `settings_schema_unverified`) when `tuttiud.setup_assistant_diagnostics()` reports missing tenant tables or policies, and the response includes the failing diagnostic rows so admins rerun the setup script instead of retrying blindly.
 - Invitation completion emails land on `/#/complete-registration` with `token_hash` (Supabase invite) and `invitation_token` (control-plane token). The page must display the invited email, wait for the user to click the manual confirmation button, then call `supabase.auth.verifyOtp({ type: 'invite', token_hash })` before redirecting to `/#/accept-invite` while forwarding the original `invitation_token`.
 - The `/components/pages/AcceptInvitePage.jsx` route requires an authenticated session, reloads invitation status via `/api/invitations/token/:token`, blocks mismatched accounts until they sign out, and surfaces state-specific UI (pending actions, accepted success CTA, or invalid-link notice) while wiring accept/decline buttons to the secure `/api/invitations/:id/(accept|decline)` endpoints.
-- `public.setup_assistant_diagnostics()` validates schema, RLS, policies, and indexes. Keep `SETUP_SQL_SCRIPT` as the source of truth when extending onboarding checks.
+- TutTiud rebranding placeholder assets live in `public/icon.svg`, `public/icon.ico`, and `public/vite.svg` until final design delivery.
+- `tuttiud.setup_assistant_diagnostics()` now validates schema, RLS, policies, and indexes. Keep `SETUP_SQL_SCRIPT` (v2.4) as the source of truth when extending onboarding checks.
 - Shared BFF utilities for tenant access (`api/_shared/org-bff.js`) centralize org membership, encryption, and tenant client creation. Reuse them when building new `/api/*` handlers.
 - Admin UI is migrating to feature slices. Place admin-only components under `src/features/admin/components/` and mount full pages from `src/features/admin/pages/`. Reusable primitives still belong in `src/components/ui`.
 - The refreshed design system lives in `tailwind.config.js` (Nunito typography, primary/neutral/status palettes, spacing tokens) with base primitives in `src/components/ui/{Button,Card,Input,PageLayout}.jsx`. Prefer these when creating new mobile-first UI.
@@ -715,7 +741,7 @@
 - Settings page adds `StudentVisibilitySettings.jsx` (eye-off card) so admins control the instructor flag through `fetchSettingsValue`/`upsertSetting`. Keep the copy bilingual and honor API permission checks when extending the card.
 
 ### Student Tags Catalog (2025-11)
-- Tenant tag definitions live in the tenant `Settings` row keyed `student_tags` (JSONB array of `{ id, name }`).
+- Tenant tag definitions live in the `tuttiud."Settings"` row keyed `student_tags` (JSONB array of `{ id, name }`).
 - Backend: `GET /api/settings/student-tags` returns the catalog for any org member; `POST /api/settings/student-tags` appends a tag (admin/owner only) and regenerates the row via Supabase upsert.
 - Frontend: use `useStudentTags()` (`src/features/students/hooks/useStudentTags.js`) to load/create tags and render `StudentTagsField.jsx` for the dropdown + admin-only creation modal in student forms.
 - Tag normalization helpers live in `src/features/students/utils/tags.js`; reuse `normalizeTagIdsForWrite` and `buildTagDisplayList` whenever sending or displaying student tags to keep the uuid[] contract authoritative.
@@ -723,13 +749,13 @@
   - Create new tags with duplicate name validation
   - Edit existing tag names (updates propagate to all tagged students via settings catalog)
   - Delete tags with confirmation guard; deletion removes tag from catalog and all student rows via `/api/students-remove-tag`
-  - Backend may use a tenant-side `remove_tag_from_students(tag_uuid)` PostgreSQL function for efficient bulk removal with fallback to manual iteration
+  - Backend uses `tuttiud.remove_tag_from_students(tag_uuid)` PostgreSQL function for efficient bulk removal with fallback to manual iteration
   - Tag deletion is permanent; confirmation dialog warns users that operation cannot be undone
   - Full RTL support with proper Hebrew text alignment and flex-row-reverse layouts
 
 ### Instructor Types and Document Management (2025-11)
 - **Instructor Types**: Similar to student tags, instructors can be categorized by type (e.g., "Therapist", "Volunteer", "Staff")
-  - Tenant type definitions live in the tenant `Settings` row keyed `instructor_types` (JSONB array of `{ id, name }`)
+  - Tenant type definitions live in `tuttiud."Settings"` row keyed `instructor_types` (JSONB array of `{ id, name }`)
   - **Database schema**: `Instructors.instructor_types` (uuid array) column added in setup script. The legacy `Instructors.files` (jsonb) column is **DEPRECATED** and no longer created on fresh deployments.
   - Frontend hook: `useInstructorTypes()` (`src/features/instructors/hooks/useInstructorTypes.js`) provides load/create/update/delete operations
   - Management UI: **Unified `TagsManager.jsx`** in Settings manages both student tags and instructor types via mode toggle
@@ -952,9 +978,9 @@
     - Filter state preserved separately for admin/instructor modes
     - Automatic redirects ensure existing bookmarks/links continue working
 
-### Tenant schema policy
-- Reinex tenant-domain tables live in the tenant `public` schema.
-- Supabase tenant clients must set `db: { schema: 'public' }` per request/context (selected centrally in `api/_shared/org-bff.js`).
+### Tenant schema policy (Reinex)
+- All tenant database access must use the `public` schema.
+- Supabase tenant clients must set `db: { schema: 'public' }`.
 
 ### Legacy: WorkSessions vs SessionRecords
 - WorkSessions is a legacy construct kept temporarily for compatibility with existing import and payroll flows.
@@ -1074,3 +1100,22 @@
 - **Radix UI dependencies**: Uses `@radix-ui/react-dropdown-menu` for menu and `@radix-ui/react-checkbox` for filter selection and preview
 - **API client helper**: `authenticatedFetchBlob()` in `lib/api-client.js` preserves UTF-8 BOM and binary encoding for CSV downloads
 - **Comprehensive QA documentation**: See `docs/student-data-maintenance-qa.md` for full test plan covering all scenarios, edge cases, and validation rules
+
+### Intake Bridge (2025-12)
+- **Settings keys** (tenant DB `tuttiud."Settings"`):
+  - `intake_field_mapping` stores the Microsoft Forms → Tuttiud field mapping.
+  - `intake_important_fields` stores the Hebrew question labels to surface in quick views.
+  - `intake_display_labels` stores the manually imported dictionary for form question IDs (legacy; not used with HTML parsing).
+  - `external_intake_secret` stores the shared secret expected in the `x-intake-secret` header.
+- **Database columns** (tenant DB `tuttiud."Students"`):
+  - `intake_responses` jsonb stores `{ current, history }` intake payloads.
+  - `intake_responses.current.intake_html_source` preserves the original HTML summary for rendering on the student profile.
+  - `needs_intake_approval` boolean flags pending intake reviews.
+- **API endpoints**:
+  - `POST /api/intake` is public (Power Automate) and requires `x-org-id` plus `x-intake-secret` before inserting/updating student intake data. The request provides `html_content` which is parsed into Hebrew question/answer pairs.
+  - `POST /api/intake/approve` requires Supabase auth; admins can approve any student, members only their assigned students. Updates `needs_intake_approval=false`, appends `metadata.last_approval`, and stores agreement metadata under `metadata.last_approval.agreement`.
+- **Frontend**:
+  - `IntakeSettingsCard.jsx` in Settings allows admins to manage mappings and rotate secrets.
+  - `IntakeReviewQueue.jsx` on the dashboard surfaces pending intake approvals, keeps student cards collapsed by default, and requires an agreement confirmation before calling `/api/intake/approve`.
+  - The dashboard intake widget uses a half-page scorecard summary with large-number tiles for new (unassigned) vs existing (assigned) pending students, stays visible with loading/error/empty states, and opens the detailed queue in a modal when clicking a tile or "פתח תור" (matching filters applied).
+  - The "assigned to me" shortcut appears only for admins who are also instructors (non-admin instructors see a single combined queue, and non-instructor admins cannot be assigned).

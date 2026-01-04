@@ -80,11 +80,11 @@ export async function decryptBackup(encryptedData, password) {
  * @returns {Promise<object>} - Backup manifest
  */
 export async function exportTenantData(tenantClient, orgId) {
-  // Only include tables that actually exist in the public schema
+  // Only include tables that actually exist in the tuttiud schema
   const tables = ['Students', 'Instructors', 'SessionRecords', 'Settings'];
   const manifest = {
     version: '1.0',
-    schema_version: 'public_v1',
+    schema_version: 'tuttiud_v1',
     org_id: orgId,
     exported_at: new Date().toISOString(),
     tables: {},
@@ -129,7 +129,7 @@ export function validateBackupManifest(manifest) {
     return { valid: false, error: 'missing_required_fields' };
   }
 
-  if (manifest.schema_version !== 'public_v1') {
+  if (manifest.schema_version !== 'tuttiud_v1') {
     return { valid: false, error: 'unsupported_schema_version' };
   }
 

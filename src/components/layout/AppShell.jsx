@@ -1,6 +1,6 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Link, NavLink, Outlet, useLocation, matchPath } from "react-router-dom"
-import { Plus, LayoutDashboard, Users, BarChart3, Settings, LogOut, Megaphone, CalendarDays } from "lucide-react"
+import { Plus, LayoutDashboard, Users, BarChart3, Settings, LogOut, Megaphone } from "lucide-react"
 import { Toaster, toast } from "sonner"
 
 import OrgConfigBanner from "@/components/OrgConfigBanner.jsx"
@@ -40,12 +40,6 @@ function buildNavItems(role) {
       to: "/students-list",
       icon: Users,
       tourKey: isAdminRole ? "admin-students" : "my-students",
-    },
-    {
-      label: "לוח שנה",
-      to: "/calendar",
-      icon: CalendarDays,
-      tourKey: "calendar",
     },
     {
       label: "דוחות",
@@ -202,8 +196,8 @@ function DesktopNavigation({ navItems = [], onSignOut, onOpenSessionModal }) {
         <div className="flex flex-col gap-md px-lg pt-lg">
           <Link to="/dashboard" className="flex items-center justify-end gap-sm text-right flex-row-reverse">
             <div className="space-y-1">
-              <p className="text-sm font-semibold text-foreground">Reinex</p>
-              <p className="text-xs text-neutral-500">ניהול וארגון</p>
+              <p className="text-sm font-semibold text-foreground">תותיעוד</p>
+              <p className="text-xs text-neutral-500">פלטפורמת תלמידים</p>
             </div>
             <div className="flex items-center justify-center">
               <OrgLogo />

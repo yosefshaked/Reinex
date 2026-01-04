@@ -3,13 +3,13 @@ import { useParams, Link } from 'react-router-dom';
 import { Loader2, ArrowRight, ChevronDown, ChevronUp, Pencil, Download, FileUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { buildDisplayName } from '@/lib/person-name.js';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { fetchSettings } from '@/features/settings/api/settings.js';
 import { useInstructors, useServices } from '@/hooks/useOrgData.js';
 import { describeSchedule, formatDefaultTime } from '@/features/students/utils/schedule.js';
 import { ensureSessionFormFallback, parseSessionFormConfig } from '@/features/sessions/utils/form-config.js';
@@ -24,6 +24,7 @@ import { normalizeTagIdsForWrite, normalizeTagCatalog, buildTagDisplayList } fro
 import { exportStudentPdf, downloadPdfBlob } from '@/api/students-export.js';
 import LegacyImportModal from '@/features/students/components/LegacyImportModal.jsx';
 import StudentDocumentsSection from '@/features/students/components/StudentDocumentsSection.jsx';
+import StudentIntakeCard from '@/features/students/components/StudentIntakeCard.jsx';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',
@@ -167,6 +168,7 @@ export default function StudentDetailPage() {
   const [studentState, setStudentState] = useState(REQUEST_STATE.idle);
   const [studentError, setStudentError] = useState('');
   const [student, setStudent] = useState(null);
+  const [importantFields, setImportantFields] = useState([]);
 
   const [sessionState, setSessionState] = useState(REQUEST_STATE.idle);
   const [sessionError, setSessionError] = useState('');
@@ -206,6 +208,37 @@ export default function StudentDetailPage() {
       !supabaseLoading
     );
   }, [studentId, activeOrgId, activeOrgHasConnection, tenantClientReady, supabaseLoading]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadImportantFields = async () => {
+      if (!canFetch || !session || !activeOrgId) {
+        return;
+      }
+      try {
+        const settings = await fetchSettings({ session, orgId: activeOrgId });
+        if (!isMounted) {
+          return;
+        }
+        const fields = Array.isArray(settings?.intake_important_fields)
+          ? settings.intake_important_fields
+          : [];
+        setImportantFields(fields);
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+        setImportantFields([]);
+      }
+    };
+
+    loadImportantFields();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [canFetch, session, activeOrgId]);
 
   const { instructors } = useInstructors({ enabled: canFetch });
   const { services, loadingServices, servicesError, refetchServices } = useServices({ enabled: canFetch });
@@ -649,8 +682,7 @@ export default function StudentDetailPage() {
     try {
       const blob = await exportStudentPdf(studentId, activeOrgId);
       // Generate filename with date (sanitization happens in backend)
-      const studentDisplayName = buildDisplayName({ ...student, fallback: student.name });
-      const safeName = (studentDisplayName || 'student')
+      const safeName = student.name
         .replace(/[^א-תa-zA-Z0-9\s-]/g, '')
         .trim()
         .replace(/\s+/g, '_');
@@ -721,6 +753,9 @@ export default function StudentDetailPage() {
   const contactInfo = student?.contact_info || '';
   const nationalId = student?.national_id || '';
   const notes = typeof student?.notes === 'string' ? student.notes.trim() : '';
+  const intakeNotes = typeof student?.metadata?.intake_notes === 'string'
+    ? student.metadata.intake_notes.trim()
+    : '';
   const defaultService = student?.default_service || 'לא הוגדר';
   const scheduleDescription = describeSchedule(student?.default_day_of_week, student?.default_session_time);
   const tagDisplayList = buildTagDisplayList(student?.tags, tagCatalog);
@@ -865,7 +900,7 @@ export default function StudentDetailPage() {
               <div className="space-y-1">
                 <dt className="text-xs font-medium text-neutral-500 sm:text-sm">שם התלמיד</dt>
                 <dd className="flex flex-wrap items-center gap-2 font-semibold text-foreground">
-                  <span>{buildDisplayName({ ...student, fallback: student.name }) || 'ללא שם'}</span>
+                  <span>{student.name}</span>
                   {student?.is_active === false ? (
                     <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
                       לא פעיל
@@ -923,6 +958,12 @@ export default function StudentDetailPage() {
                   <dd className="whitespace-pre-wrap break-words text-foreground">{notes}</dd>
                 </div>
               ) : null}
+              {intakeNotes ? (
+                <div className="space-y-1 col-span-2 lg:col-span-3 rounded-md border border-amber-200 bg-amber-50 p-3">
+                  <dt className="text-xs font-medium text-amber-700 sm:text-sm">הערות קליטה למדריך</dt>
+                  <dd className="whitespace-pre-wrap break-words text-amber-900">{intakeNotes}</dd>
+                </div>
+              ) : null}
               {hasStudentTags ? (
                 <div className="space-y-1 col-span-2 lg:col-span-3">
                   <dt className="text-xs font-medium text-neutral-500 sm:text-sm">תגיות</dt>
@@ -957,6 +998,8 @@ export default function StudentDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <StudentIntakeCard intakeResponses={student?.intake_responses} importantFields={importantFields} />
 
       {/* Documents Section */}
       <StudentDocumentsSection

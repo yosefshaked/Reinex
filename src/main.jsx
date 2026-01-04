@@ -23,14 +23,33 @@ import { OrgProvider } from './org/OrgContext.jsx';
 import OrgSelection from './pages/OrgSelection.jsx';
 import LandingPage from './pages/LandingPage.jsx';
 import PendingReportsPage from './features/sessions/pages/PendingReportsPage.jsx';
-import CalendarPage from './features/calendar/pages/CalendarPage.jsx';
-import TenantSchemaPage from './features/admin/pages/TenantSchemaPage.jsx';
 import { bootstrapSupabaseCallback } from './auth/bootstrapSupabaseCallback.js';
 
 bootstrapSupabaseCallback();
 
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  // Intentionally avoid console logging here to prevent accidental data leaks.
+  componentDidCatch() {}
+
+  render() {
+    // Keep UX minimal; this boundary exists primarily for logging.
+    if (this.state.hasError) {
+      return null;
+    }
+    return this.props.children;
+  }
+}
+
 function App({ config = null }) {
-  console.log('[DEBUG 4] App component rendering.');
   return (
     <RuntimeConfigProvider config={config}>
       <SupabaseProvider>
@@ -51,7 +70,6 @@ function App({ config = null }) {
                     {/* הגדרת כל העמודים */}
                     <Route path="/dashboard" element={<DashboardPage />} />
                     <Route path="/Dashboard" element={<Navigate to="/dashboard" replace />} />
-                    <Route path="/calendar" element={<CalendarPage />} />
                     <Route path="/Employees" element={<Navigate to="/students-list" replace />} />
                     <Route path="/students-list" element={<StudentsPage />} />
                     <Route path="/admin/students" element={<Navigate to="/students-list" replace />} />
@@ -60,8 +78,6 @@ function App({ config = null }) {
                     <Route path="/admin/pending-reports" element={<Navigate to="/pending-reports" replace />} />
                     <Route path="/students/:id" element={<StudentDetailPage />} />
                     <Route path="/Settings" element={<Settings />} />
-                    <Route path="/settings/schema" element={<TenantSchemaPage />} />
-                    <Route path="/tenants/:tenantId/settings/schema" element={<TenantSchemaPage />} />
                     <Route path="/diagnostics" element={<Diagnostics />} />
                   </Route>
                 </Route>
@@ -77,22 +93,19 @@ function App({ config = null }) {
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function renderApp(config = null) {
-  console.log('[DEBUG 1] Bootstrap: startApp() called.');
   if (!isAuthClientInitialized()) {
     throw new Error(
       'renderApp was invoked before initializeAuthClient completed. Ensure bootstrap initializes Supabase first.'
     );
   }
 
-  console.log('[DEBUG 2] Bootstrap: Config fetched. Initializing auth client...');
-
   const root = ReactDOM.createRoot(document.getElementById('root'));
-
-  console.log('[DEBUG 3] Bootstrap: Auth client initialized. Rendering App...');
 
   root.render(
     <React.StrictMode>
-      <App config={config} />
+      <AppErrorBoundary>
+        <App config={config} />
+      </AppErrorBoundary>
     </React.StrictMode>,
   );
 }
