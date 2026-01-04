@@ -187,7 +187,7 @@ export default function SetupAssistant() {
     setSavingState('saving');
 
     try {
-      const { data, error } = await dataClient.rpc('public.setup_assistant_diagnostics');
+      const { data, error } = await dataClient.rpc('setup_assistant_diagnostics');
       if (error) {
         throw error;
       }
@@ -305,7 +305,7 @@ export default function SetupAssistant() {
 
     return (
       <p className="text-sm text-slate-600">
-        לאחר הרצת הסקריפט והדבקת המפתח, לחץ על "שמור ואמת" כדי להבטיח שהפונקציה public.setup_assistant_diagnostics() זמינה והמבנה תקין.
+        לאחר הרצת הסקריפט והדבקת המפתח, לחץ על "שמור ואמת" כדי להבטיח שהפונקציה setup_assistant_diagnostics() זמינה והמבנה תקין.
       </p>
     );
   };
@@ -397,7 +397,7 @@ export default function SetupAssistant() {
         <StepSection
           number={3}
           title="אימות ושמירה"
-          description="נריץ את public.setup_assistant_diagnostics(), נשמור את המפתח ונאפשר גישה לאפליקציה."
+          description="נריץ את setup_assistant_diagnostics(), נשמור את המפתח ונאפשר גישה לאפליקציה."
           statusBadge={validationBadge}
         >
           <div className="space-y-4">
