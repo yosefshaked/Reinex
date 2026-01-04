@@ -1816,6 +1816,8 @@ GRANT EXECUTE ON FUNCTION public.schema_execute_statements_v1(text[], boolean, t
 SELECT extensions.sign(
   json_build_object(
     'role', 'app_user',
+    'iss', 'supabase',
+    'aud', 'authenticated',
     'exp', (EXTRACT(EPOCH FROM (NOW() + INTERVAL '5 year')))::integer,
     'iat', (EXTRACT(EPOCH FROM NOW()))::integer
   ),

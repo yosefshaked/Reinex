@@ -412,6 +412,15 @@ export async function resolveTenantClient(context, supabase, env, orgId, options
     return { error: mapConnectionError(connectionResult.error) };
   }
 
+  // Attach request-scoped diagnostics (safe fields only).
+  // Endpoints can include this in error responses to prove which roles/shapes were used.
+  context.__tenantAuthDiagnostics = {
+    orgId,
+    anonKeyShape: jwtShapeInfo(connectionResult.anonKey),
+    anonKeyRole: jwtRole(connectionResult.anonKey),
+    tenantUrlPreview: tokenPreview(connectionResult.supabaseUrl),
+  };
+
   // PostgREST expects the project's anon/service key as `apikey`.
   // In our setup, `connectionResult.anonKey` must be the tenant project's anon key (or service_role key).
   if (!looksLikeJwt(connectionResult.anonKey)) {
@@ -446,11 +455,24 @@ export async function resolveTenantClient(context, supabase, env, orgId, options
     return { error: buildTenantError('dedicated_key_malformed', 428) };
   }
 
+  context.__tenantAuthDiagnostics = {
+    ...context.__tenantAuthDiagnostics,
+    dedicatedKeyShape: jwtShapeInfo(dedicatedKey),
+    dedicatedKeyRole: jwtRole(dedicatedKey),
+  };
+
   if (isDebugTenantAuthEnabled(env)) {
     const anonRole = jwtRole(connectionResult.anonKey);
     const anonDecoded = decodeJwtUnsafe(connectionResult.anonKey);
     const { header, payload } = decodeJwtUnsafe(dedicatedKey);
     const shape = jwtShapeInfo(dedicatedKey);
+
+    context.__tenantAuthDiagnostics = {
+      ...context.__tenantAuthDiagnostics,
+      anonKeySha256: sha256Hex(connectionResult.anonKey),
+      dedicatedKeySha256: sha256Hex(dedicatedKey),
+    };
+
     context.log?.warn?.('[DEBUG] tenant auth material (redacted)', {
       orgId,
       tenantUrl: tokenPreview(connectionResult.supabaseUrl),
