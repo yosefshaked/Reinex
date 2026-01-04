@@ -196,7 +196,7 @@ export default function BulkResolvePendingReportsDialog({
         const result = await createAndAssignLooseSession({
           sessionId: report.id,
           name: studentData.name,
-          nationalId: studentData.nationalId,
+          identityNumber: studentData.identityNumber,
           assignedInstructorId: studentData.assignedInstructorId,
           defaultService: studentData.defaultService || null,
           orgId: activeOrgId,

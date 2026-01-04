@@ -337,8 +337,9 @@ export default function StudentsPage() {
       result = result.filter((s) => {
         const name = (s.name || '').toLowerCase();
         const phone = (s.contact_phone || '').toLowerCase();
-        const nationalId = (s.national_id || '').toLowerCase();
-        return name.includes(query) || phone.includes(query) || nationalId.includes(query);
+        const identityNumber = (s.identity_number || s.national_id || '').toLowerCase();
+        const studentPhone = (s.phone || '').toLowerCase();
+        return name.includes(query) || phone.includes(query) || studentPhone.includes(query) || identityNumber.includes(query);
       });
     }
 
@@ -429,7 +430,9 @@ export default function StudentsPage() {
       default_service: formData.default_service ?? formData.defaultService ?? '',
       default_day_of_week: formData.default_day_of_week ?? formData.defaultDayOfWeek,
       default_session_time: formData.default_session_time ?? formData.defaultSessionTime ?? '',
-      national_id: (formData.national_id ?? formData.nationalId ?? '').trim(),
+      identity_number: (formData.identity_number ?? formData.identityNumber ?? '').trim(),
+      phone: (formData.phone ?? '').trim(),
+      email: (formData.email ?? '').trim(),
       contact_name: (formData.contact_name ?? formData.contactName ?? '').trim(),
       contact_phone: (formData.contact_phone ?? formData.contactPhone ?? '').trim(),
       notes: (formData.notes ?? '').trim(),
@@ -455,7 +458,7 @@ export default function StudentsPage() {
         message: apiMessage,
       });
       let message = 'הוספת תלמיד נכשלה.';
-      if (apiCode === 'national_id_duplicate' || apiMessage === 'duplicate_national_id') {
+      if (apiCode === 'identity_number_duplicate' || apiMessage === 'duplicate_identity_number') {
         message = 'תעודת זהות קיימת כבר במערכת.';
       } else if (apiMessage === 'missing national id') {
         message = 'יש להזין מספר זהות.';
@@ -514,7 +517,7 @@ export default function StudentsPage() {
         message: apiMessage,
       });
       let message = 'עדכון פרטי התלמיד נכשל.';
-      if (apiCode === 'national_id_duplicate' || apiMessage === 'duplicate_national_id') {
+      if (apiCode === 'identity_number_duplicate' || apiMessage === 'duplicate_identity_number') {
         message = 'תעודת זהות קיימת כבר במערכת.';
       } else if (apiMessage === 'invalid national id') {
         message = 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
@@ -669,7 +672,7 @@ export default function StudentsPage() {
                     {filteredStudents.map((student) => {
                       const instructor = isAdmin ? instructorMap.get(student.assigned_instructor_id) : null;
                       const isInactive = student.is_active === false;
-                      const missingNationalId = !student.national_id?.trim();
+                      const missingIdentityNumber = !(student.identity_number || student.national_id)?.trim();
                       const summary = complianceSummary[student.id] || {};
                       const hasExpiredDocs = summary.expiredDocuments > 0;
 
@@ -688,7 +691,7 @@ export default function StudentsPage() {
                                   לא פעיל
                                 </Badge>
                               )}
-                              {missingNationalId && (
+                              {missingIdentityNumber && (
                                 <Badge variant="destructive" className="w-fit gap-1">
                                   <AlertCircle className="h-3 w-3" />
                                   <span>חסרה תעודת זהות</span>

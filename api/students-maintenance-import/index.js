@@ -272,8 +272,9 @@ export default async function handler(context, req) {
 
   // Fetch all instructors for name matching
   const { data: instructors, error: instructorsError } = await tenantClient
-    .from('Instructors')
-    .select('id, name, email, is_active');
+    .from('Employees')
+    .select('id, name, email, is_active, employee_type')
+    .or('employee_type.is.null,employee_type.eq.instructor');
 
   if (instructorsError) {
     context.log?.error?.('students-maintenance-import failed to fetch instructors', { message: instructorsError.message, orgId });
@@ -338,7 +339,7 @@ export default async function handler(context, req) {
   let existingStudents = [];
   if (validIds.length > 0) {
     const { data, error: fetchError } = await tenantClient
-      .from('Students')
+      .from('students')
       .select('*')
       .in('id', validIds);
 
@@ -677,7 +678,7 @@ export default async function handler(context, req) {
 
   if (nationalIdsToCheck.length) {
     const { data: conflicts, error: nationalLookupError } = await tenantClient
-      .from('Students')
+      .from('students')
       .select('id, name, national_id')
       .in('national_id', nationalIdsToCheck);
 
@@ -767,7 +768,7 @@ export default async function handler(context, req) {
     const payload = { ...updates, metadata: updatedMetadata };
 
     const { error: updateError } = await tenantClient
-      .from('Students')
+      .from('students')
       .update(payload)
       .eq('id', studentId);
 

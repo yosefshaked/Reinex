@@ -64,7 +64,7 @@ async function ensureNationalIdAvailable(tenantClient, nationalId, { excludeIds 
     return { ok: true };
   }
 
-  let query = tenantClient.from('Students').select('id').eq('national_id', nationalId);
+  let query = tenantClient.from('students').select('id').eq('national_id', nationalId);
   for (const id of excludeIds) {
     query = query.neq('id', id);
   }
@@ -152,7 +152,7 @@ export default async function handler(context, req) {
   }
 
   const { data: sourceStudent, error: sourceError } = await tenantClient
-    .from('Students')
+    .from('students')
     .select('*')
     .eq('id', sourceStudentId)
     .maybeSingle();
@@ -171,7 +171,7 @@ export default async function handler(context, req) {
   }
 
   const { data: targetStudent, error: targetError } = await tenantClient
-    .from('Students')
+    .from('students')
     .select('*')
     .eq('id', targetStudentId)
     .maybeSingle();
@@ -270,7 +270,7 @@ export default async function handler(context, req) {
   }
 
   const { data: updatedTarget, error: updateError } = await tenantClient
-    .from('Students')
+    .from('students')
     .update(updates)
     .eq('id', targetStudentId)
     .select()
@@ -286,7 +286,7 @@ export default async function handler(context, req) {
   }
 
   const { data: deletedSource, error: sourceDeleteError } = await tenantClient
-    .from('Students')
+    .from('students')
     .delete()
     .eq('id', sourceStudentId)
     .select()

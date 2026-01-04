@@ -747,9 +747,9 @@ export default function IntakeReviewQueue() {
     }
     return candidates.filter((student) => {
       const name = (student.name || '').toLowerCase();
-      const nationalId = (student.national_id || '').toLowerCase();
+      const identityNumber = (student.identity_number || student.national_id || '').toLowerCase();
       const phone = (student.contact_phone || '').toLowerCase();
-      return name.includes(query) || nationalId.includes(query) || phone.includes(query);
+      return name.includes(query) || identityNumber.includes(query) || phone.includes(query);
     }).slice(0, 10);
   }, [allStudents, mergeSearch, mergeSource]);
 
@@ -1013,7 +1013,7 @@ export default function IntakeReviewQueue() {
                           <dl className="flex flex-col gap-3 text-sm text-slate-700 sm:flex-row sm:flex-wrap sm:items-center">
                             <div className="flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1">
                               <dt className="font-medium text-slate-500">מספר זהות</dt>
-                              <dd className="font-semibold text-slate-800">{student.national_id || 'לא צוין'}</dd>
+                              <dd className="font-semibold text-slate-800">{student.identity_number || student.national_id || 'לא צוין'}</dd>
                             </div>
                             <div className="flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1">
                               <dt className="font-medium text-slate-500">שם איש קשר</dt>
@@ -1404,7 +1404,7 @@ export default function IntakeReviewQueue() {
                       >
                         <span>{candidate.name || 'תלמיד ללא שם'}</span>
                         <span className="text-xs text-slate-500">
-                          {candidate.national_id || 'ללא ת״ז'}
+                          {candidate.identity_number || candidate.national_id || 'ללא ת״ז'}
                         </span>
                       </button>
                     ))
@@ -1418,12 +1418,12 @@ export default function IntakeReviewQueue() {
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                       <p className="text-xs font-semibold text-slate-500">קליטה חדשה</p>
                       <p className="text-sm font-semibold text-slate-900">{mergeSource.name || 'לא צוין'}</p>
-                      <p className="text-xs text-slate-600">{mergeSource.national_id || 'ללא ת״ז'}</p>
+                      <p className="text-xs text-slate-600">{mergeSource.identity_number || mergeSource.national_id || 'ללא ת״ז'}</p>
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-white p-3">
                       <p className="text-xs font-semibold text-slate-500">תלמיד יעד</p>
                       <p className="text-sm font-semibold text-slate-900">{mergeTarget.name || 'לא צוין'}</p>
-                      <p className="text-xs text-slate-600">{mergeTarget.national_id || 'ללא ת״ז'}</p>
+                      <p className="text-xs text-slate-600">{mergeTarget.identity_number || mergeTarget.national_id || 'ללא ת״ז'}</p>
                     </div>
                   </div>
 

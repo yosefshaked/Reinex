@@ -70,10 +70,13 @@ function App({ config = null }) {
                     {/* הגדרת כל העמודים */}
                     <Route path="/dashboard" element={<DashboardPage />} />
                     <Route path="/Dashboard" element={<Navigate to="/dashboard" replace />} />
+                    <Route path="/calendar" element={<DashboardPage />} />
                     <Route path="/Employees" element={<Navigate to="/students-list" replace />} />
                     <Route path="/students-list" element={<StudentsPage />} />
                     <Route path="/admin/students" element={<Navigate to="/students-list" replace />} />
                     <Route path="/my-students" element={<Navigate to="/students-list" replace />} />
+                    <Route path="/instructors" element={<Navigate to="/Settings" replace />} />
+                    <Route path="/financials" element={<Navigate to="/Settings" replace />} />
                     <Route path="/pending-reports" element={<PendingReportsPage />} />
                     <Route path="/admin/pending-reports" element={<Navigate to="/pending-reports" replace />} />
                     <Route path="/students/:id" element={<StudentDetailPage />} />

@@ -69,7 +69,7 @@ export function useStudentNameSuggestions(nameInput, { excludeStudentId } = {}) 
   return { suggestions, loading, error };
 }
 
-export function useNationalIdGuard(nationalIdInput, { excludeStudentId } = {}) {
+export function useIdentityNumberGuard(identityNumberInput, { excludeStudentId } = {}) {
   const { session } = useAuth();
   const { activeOrgId } = useOrg();
   const [duplicate, setDuplicate] = useState(null);
@@ -91,9 +91,9 @@ export function useNationalIdGuard(nationalIdInput, { excludeStudentId } = {}) {
       return undefined;
     }
 
-    const trimmed = typeof nationalIdInput === 'string' ? nationalIdInput.trim() : '';
+    const trimmed = typeof identityNumberInput === 'string' ? identityNumberInput.trim() : '';
     console.log('[useNationalIdGuard] Input changed', {
-      raw: nationalIdInput,
+      raw: identityNumberInput,
       trimmed,
       isEmpty: !trimmed,
       excludeStudentId: excludeStudentId || 'none',
@@ -115,13 +115,13 @@ export function useNationalIdGuard(nationalIdInput, { excludeStudentId } = {}) {
     debounceRef.current = window.setTimeout(async () => {
       try {
         const searchParams = buildQueryParams(activeOrgId, {
-          national_id: trimmed,
+          identity_number: trimmed,
           exclude_id: excludeStudentId,
         });
         const url = `students-check-id?${searchParams.toString()}`;
         console.log('[useNationalIdGuard] Calling API', {
           url,
-          nationalId: trimmed,
+          identityNumber: trimmed,
           excludeStudentId: excludeStudentId || 'none',
           orgId: activeOrgId,
         });
@@ -165,7 +165,7 @@ export function useNationalIdGuard(nationalIdInput, { excludeStudentId } = {}) {
           error: err,
           message: err?.message,
           status: err?.status,
-          nationalId: trimmed,
+          identityNumber: trimmed,
         });
         setDuplicate(null);
         lastDuplicateIdRef.current = '';
@@ -181,7 +181,12 @@ export function useNationalIdGuard(nationalIdInput, { excludeStudentId } = {}) {
         window.clearTimeout(debounceRef.current);
       }
     };
-  }, [nationalIdInput, session, activeOrgId, excludeStudentId]);
+  }, [identityNumberInput, session, activeOrgId, excludeStudentId]);
 
   return { duplicate, loading, error };
+}
+
+// Backward-compatible export name
+export function useNationalIdGuard(nationalIdInput, options) {
+  return useIdentityNumberGuard(nationalIdInput, options);
 }

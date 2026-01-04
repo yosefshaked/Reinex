@@ -114,7 +114,7 @@ export default async function handler(context, req) {
   }
 
   const { data: students, error: studentsError } = await tenantClient
-    .from('Students')
+    .from('students')
     .select(
       'id, name, national_id, contact_name, contact_phone, assigned_instructor_id, default_service, default_day_of_week, default_session_time, notes, tags, is_active',
     )
@@ -133,8 +133,9 @@ export default async function handler(context, req) {
   });
 
   const { data: instructors, error: instructorsError } = await tenantClient
-    .from('Instructors')
-    .select('id, name, email, is_active');
+    .from('Employees')
+    .select('id, name, email, is_active, employee_type')
+    .or('employee_type.is.null,employee_type.eq.instructor');
 
   if (instructorsError) {
     context.log?.error?.('students-maintenance-export failed to fetch instructors', { message: instructorsError.message, orgId });

@@ -172,7 +172,7 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
       await createAndAssignLooseSession({
         sessionId: report.id,
         name: studentPayload.name,
-        nationalId: studentPayload.nationalId,
+        identityNumber: studentPayload.identityNumber,
         assignedInstructorId: studentPayload.assignedInstructorId,
         defaultService: studentPayload.defaultService,
         orgId: activeOrgId,

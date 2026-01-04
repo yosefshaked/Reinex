@@ -649,7 +649,9 @@ export default function StudentDetailPage() {
       const body = {
         org_id: activeOrgId,
         name: payload.name,
-        national_id: payload.nationalId || null,
+        identity_number: payload.identityNumber || null,
+        phone: payload.phone || null,
+        email: payload.email || null,
         contact_name: payload.contactName,
         contact_phone: payload.contactPhone,
         assigned_instructor_id: payload.assignedInstructorId,
@@ -751,7 +753,7 @@ export default function StudentDetailPage() {
   const contactName = student?.contact_name || 'לא סופק';
   const contactPhone = student?.contact_phone || '';
   const contactInfo = student?.contact_info || '';
-  const nationalId = student?.national_id || '';
+  const identityNumber = student?.identity_number || student?.national_id || '';
   const notes = typeof student?.notes === 'string' ? student.notes.trim() : '';
   const intakeNotes = typeof student?.metadata?.intake_notes === 'string'
     ? student.metadata.intake_notes.trim()
@@ -908,10 +910,10 @@ export default function StudentDetailPage() {
                   ) : null}
                 </dd>
               </div>
-              {nationalId ? (
+              {identityNumber ? (
                 <div className="space-y-1">
                   <dt className="text-xs font-medium text-neutral-500 sm:text-sm">מספר זהות</dt>
-                  <dd className="text-foreground">{nationalId}</dd>
+                  <dd className="text-foreground">{identityNumber}</dd>
                 </div>
               ) : null}
               <div className="space-y-1">

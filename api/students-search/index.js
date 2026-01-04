@@ -89,8 +89,8 @@ export default async function (context, req) {
 
   // Build query with role-based filtering
   let builder = tenantClient
-    .from('Students')
-    .select('id, name, national_id, is_active, assigned_instructor_id');
+    .from('students')
+    .select('id, name, identity_number, phone, email, is_active, assigned_instructor_id');
 
   // Member instructors can only see their assigned students
   if (!isAdminRole(role)) {

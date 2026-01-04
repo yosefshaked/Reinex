@@ -7,7 +7,7 @@ import { CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp } from 'luci
 
 const FIELD_LABELS = {
   name: 'שם',
-  national_id: 'תעודת זהות',
+  identity_number: 'תעודת זהות',
   contact_name: 'שם איש קשר',
   contact_phone: 'טלפון איש קשר',
   assigned_instructor_id: 'מדריך משויך',

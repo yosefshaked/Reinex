@@ -70,7 +70,7 @@ export default async function (context, req) {
 
   // Fallback: manually update affected students using service key
   const { data: students, error: fetchError } = await tenantClient
-    .from('Students')
+    .from('students')
     .select('id, tags')
     .contains('tags', [tagId]);
 
@@ -86,7 +86,7 @@ export default async function (context, req) {
   const failures = [];
   for (const student of students) {
     const updatedTags = (student.tags || []).filter((id) => id !== tagId);
-    const { error } = await tenantClient.from('Students').update({ tags: updatedTags }).eq('id', student.id);
+    const { error } = await tenantClient.from('students').update({ tags: updatedTags }).eq('id', student.id);
     if (error) {
       failures.push({ student_id: student.id, message: error.message });
     } else {

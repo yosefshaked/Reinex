@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS public.students (
   first_name text NOT NULL,
   middle_name text NULL,
   last_name text NOT NULL,
+  identity_number text NULL,
+  phone text NULL,
+  email text NULL,
   date_of_birth date NULL,
   notes_internal text NULL,
   default_notification_method text NOT NULL DEFAULT 'whatsapp',
@@ -90,6 +93,9 @@ ALTER TABLE public.students
   ADD COLUMN IF NOT EXISTS first_name text,
   ADD COLUMN IF NOT EXISTS middle_name text,
   ADD COLUMN IF NOT EXISTS last_name text,
+  ADD COLUMN IF NOT EXISTS identity_number text,
+  ADD COLUMN IF NOT EXISTS phone text,
+  ADD COLUMN IF NOT EXISTS email text,
   ADD COLUMN IF NOT EXISTS date_of_birth date,
   ADD COLUMN IF NOT EXISTS notes_internal text,
   ADD COLUMN IF NOT EXISTS default_notification_method text,
@@ -137,6 +143,15 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS students_is_active_idx ON public.students (is_active);
 CREATE INDEX IF NOT EXISTS students_name_idx ON public.students (first_name, last_name);
+
+DO $$
+BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS students_identity_number_unique_idx
+    ON public.students (identity_number)
+    WHERE identity_number IS NOT NULL AND identity_number <> '';
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
 
 -- -----------------------------------------------------------------
 -- public.guardians

@@ -16,10 +16,11 @@ import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit
 import {
   coerceBooleanFlag,
   coerceDayOfWeek,
-  coerceNationalId,
+  coerceIdentityNumber,
   coerceOptionalText,
   coerceSessionTime,
   coerceTags,
+  coerceEmail,
   validateAssignedInstructor,
   validateIsraeliPhone,
 } from '../_shared/student-validation.js';
@@ -36,12 +37,16 @@ function extractStudentId(context, req, body) {
   return '';
 }
 
-async function findStudentByNationalId(tenantClient, nationalId, { excludeId } = {}) {
-  if (!nationalId) {
+async function findStudentByIdentityNumber(tenantClient, identityNumber, { excludeId } = {}) {
+  if (!identityNumber) {
     return { data: null, error: null };
   }
 
-  let query = tenantClient.from('Students').select('id, name, is_active, national_id').eq('national_id', nationalId).limit(1);
+  let query = tenantClient
+    .from('students')
+    .select('id, name, is_active, identity_number')
+    .eq('identity_number', identityNumber)
+    .limit(1);
 
   if (excludeId) {
     query = query.neq('id', excludeId);
@@ -51,10 +56,44 @@ async function findStudentByNationalId(tenantClient, nationalId, { excludeId } =
   return { data, error };
 }
 
+function splitFullName(fullName) {
+  const normalized = normalizeString(fullName);
+  if (!normalized) {
+    return { first_name: null, middle_name: null, last_name: null, name: '' };
+  }
+
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  if (tokens.length === 1) {
+    const only = tokens[0];
+    return { first_name: only, middle_name: null, last_name: only, name: normalized };
+  }
+
+  const first = tokens[0];
+  const last = tokens[tokens.length - 1];
+  const middle = tokens.length > 2 ? tokens.slice(1, -1).join(' ') : null;
+
+  return {
+    first_name: first,
+    middle_name: middle,
+    last_name: last,
+    name: normalized,
+  };
+}
+
 function buildStudentPayload(body) {
   const name = normalizeString(body?.name);
   if (!name) {
     return { error: 'missing_name' };
+  }
+
+  const phoneResult = validateIsraeliPhone(body?.phone);
+  if (!phoneResult.valid) {
+    return { error: 'invalid_phone' };
+  }
+
+  const emailResult = coerceEmail(body?.email);
+  if (!emailResult.valid) {
+    return { error: 'invalid_email' };
   }
 
   const rawInstructor = body?.assigned_instructor_id ?? body?.assignedInstructorId ?? null;
@@ -106,20 +145,24 @@ function buildStudentPayload(body) {
 
   const isActiveValue = isActiveResult.provided ? Boolean(isActiveResult.value) : true;
 
-  const nationalIdResult = coerceNationalId(body?.national_id ?? body?.nationalId);
-  if (!nationalIdResult.valid) {
-    return { error: 'invalid_national_id' };
+  // New canonical field: identity_number (legacy callers may still send national_id)
+  const identityCandidate = body?.identity_number ?? body?.identityNumber ?? body?.national_id ?? body?.nationalId;
+  const identityNumberResult = coerceIdentityNumber(identityCandidate);
+  if (!identityNumberResult.valid) {
+    return { error: 'invalid_identity_number' };
   }
-  
-  // National ID is required
-  if (!nationalIdResult.value) {
-    return { error: 'missing_national_id' };
+
+  // Identity number is required
+  if (!identityNumberResult.value) {
+    return { error: 'missing_identity_number' };
   }
 
   return {
     payload: {
       name,
-      national_id: nationalIdResult.value,
+      identity_number: identityNumberResult.value,
+      phone: phoneResult.value,
+      email: emailResult.value,
       contact_name: contactNameResult.value,
       contact_phone: contactPhoneResult.value,
       assigned_instructor_id: instructorId,
@@ -193,6 +236,24 @@ function buildStudentUpdates(body) {
       return { error: 'invalid_contact_phone' };
     }
     updates.contact_phone = value;
+    hasAny = true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'phone')) {
+    const { value, valid } = validateIsraeliPhone(body.phone);
+    if (!valid) {
+      return { error: 'invalid_phone' };
+    }
+    updates.phone = value;
+    hasAny = true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'email')) {
+    const { value, valid } = coerceEmail(body.email);
+    if (!valid) {
+      return { error: 'invalid_email' };
+    }
+    updates.email = value;
     hasAny = true;
   }
 
@@ -275,16 +336,25 @@ function buildStudentUpdates(body) {
   }
 
   if (
+    Object.prototype.hasOwnProperty.call(body, 'identity_number') ||
+    Object.prototype.hasOwnProperty.call(body, 'identityNumber') ||
     Object.prototype.hasOwnProperty.call(body, 'national_id') ||
     Object.prototype.hasOwnProperty.call(body, 'nationalId')
   ) {
-    const { value, valid } = coerceNationalId(
-      Object.prototype.hasOwnProperty.call(body, 'national_id') ? body.national_id : body.nationalId,
-    );
+    const source =
+      Object.prototype.hasOwnProperty.call(body, 'identity_number')
+        ? body.identity_number
+        : Object.prototype.hasOwnProperty.call(body, 'identityNumber')
+          ? body.identityNumber
+          : Object.prototype.hasOwnProperty.call(body, 'national_id')
+            ? body.national_id
+            : body.nationalId;
+
+    const { value, valid } = coerceIdentityNumber(source);
     if (!valid) {
-      return { error: 'invalid_national_id' };
+      return { error: 'invalid_identity_number' };
     }
-    updates.national_id = value;
+    updates.identity_number = value;
     hasAny = true;
   }
 
@@ -406,7 +476,7 @@ export default async function handler(context, req) {
     }
 
     let builder = tenantClient
-      .from('Students')
+      .from('students')
       .select('*')
       .order('name', { ascending: true });
 
@@ -457,10 +527,14 @@ export default async function handler(context, req) {
       const message =
         normalized.error === 'missing_name'
           ? 'missing student name'
-          : normalized.error === 'missing_national_id'
-            ? 'missing national id'
-          : normalized.error === 'invalid_national_id'
-            ? 'invalid national id'
+          : normalized.error === 'missing_identity_number'
+            ? 'missing identity number'
+          : normalized.error === 'invalid_identity_number'
+            ? 'invalid identity number'
+          : normalized.error === 'invalid_phone'
+            ? 'invalid phone'
+          : normalized.error === 'invalid_email'
+            ? 'invalid email'
             : normalized.error === 'invalid_assigned_instructor'
               ? 'invalid assigned instructor id'
               : normalized.error === 'invalid_contact_name'
@@ -483,19 +557,19 @@ export default async function handler(context, req) {
       return respond(context, 400, { message });
     }
 
-    if (normalized.payload.national_id) {
-      const { data: existingByNationalId, error: nationalIdLookupError } = await findStudentByNationalId(
+    if (normalized.payload.identity_number) {
+      const { data: existingByIdentityNumber, error: identityLookupError } = await findStudentByIdentityNumber(
         tenantClient,
-        normalized.payload.national_id,
+        normalized.payload.identity_number,
       );
 
-      if (nationalIdLookupError) {
-        context.log?.error?.('students-list failed to check national id uniqueness', { message: nationalIdLookupError.message });
-        return respond(context, 500, { message: 'failed_to_validate_national_id' });
+      if (identityLookupError) {
+        context.log?.error?.('students-list failed to check identity number uniqueness', { message: identityLookupError.message });
+        return respond(context, 500, { message: 'failed_to_validate_identity_number' });
       }
 
-      if (existingByNationalId) {
-        return respond(context, 409, { message: 'duplicate_national_id', student: existingByNationalId });
+      if (existingByIdentityNumber) {
+        return respond(context, 409, { message: 'duplicate_identity_number', student: existingByIdentityNumber });
       }
     }
 
@@ -508,11 +582,12 @@ export default async function handler(context, req) {
 
     const recordToInsert = {
       ...normalized.payload,
+      ...splitFullName(normalized.payload.name),
       metadata,
     };
 
     const { data, error } = await tenantClient
-      .from('Students')
+      .from('students')
       .insert([recordToInsert])
       .select()
       .single();
@@ -552,8 +627,12 @@ export default async function handler(context, req) {
     const updateMessage =
       normalizedUpdates.error === 'missing_updates'
         ? 'no updatable fields provided'
-        : normalizedUpdates.error === 'invalid_national_id'
-          ? 'invalid national id'
+        : normalizedUpdates.error === 'invalid_identity_number'
+          ? 'invalid identity number'
+        : normalizedUpdates.error === 'invalid_phone'
+          ? 'invalid phone'
+        : normalizedUpdates.error === 'invalid_email'
+          ? 'invalid email'
         : normalizedUpdates.error === 'invalid_name'
           ? 'invalid name'
           : normalizedUpdates.error === 'invalid_assigned_instructor'
@@ -580,7 +659,7 @@ export default async function handler(context, req) {
 
   // Fetch existing student to compare changes and preserve metadata
   const { data: existingStudent, error: fetchError } = await tenantClient
-    .from('Students')
+    .from('students')
     .select('*')
     .eq('id', studentId)
     .maybeSingle();
@@ -594,24 +673,24 @@ export default async function handler(context, req) {
     return respond(context, 404, { message: 'student_not_found' });
   }
 
-  if (Object.prototype.hasOwnProperty.call(normalizedUpdates.updates, 'national_id')) {
-    const desiredNationalId = normalizedUpdates.updates.national_id;
+  if (Object.prototype.hasOwnProperty.call(normalizedUpdates.updates, 'identity_number')) {
+    const desiredIdentityNumber = normalizedUpdates.updates.identity_number;
 
-    if (desiredNationalId) {
-      const { data: conflict, error: lookupError } = await findStudentByNationalId(tenantClient, desiredNationalId, {
+    if (desiredIdentityNumber) {
+      const { data: conflict, error: lookupError } = await findStudentByIdentityNumber(tenantClient, desiredIdentityNumber, {
         excludeId: studentId,
       });
 
       if (lookupError) {
-        context.log?.error?.('students-list failed to validate national id on update', {
+        context.log?.error?.('students-list failed to validate identity number on update', {
           message: lookupError.message,
           studentId,
         });
-        return respond(context, 500, { message: 'failed_to_validate_national_id' });
+        return respond(context, 500, { message: 'failed_to_validate_identity_number' });
       }
 
       if (conflict) {
-        return respond(context, 409, { message: 'duplicate_national_id', student: conflict });
+        return respond(context, 409, { message: 'duplicate_identity_number', student: conflict });
       }
     }
   }
@@ -644,6 +723,10 @@ export default async function handler(context, req) {
     metadata: updatedMetadata,
   };
 
+  if (Object.prototype.hasOwnProperty.call(normalizedUpdates.updates, 'name')) {
+    Object.assign(updatesWithMetadata, splitFullName(normalizedUpdates.updates.name));
+  }
+
   if (Object.prototype.hasOwnProperty.call(normalizedUpdates, 'intakeNotes')) {
     updatesWithMetadata.metadata = {
       ...updatedMetadata,
@@ -654,7 +737,7 @@ export default async function handler(context, req) {
   }
 
   const { data, error } = await tenantClient
-    .from('Students')
+    .from('students')
     .update(updatesWithMetadata)
     .eq('id', studentId)
     .select()

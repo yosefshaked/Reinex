@@ -17,8 +17,10 @@ import { validateIsraeliPhone } from '@/components/ui/helpers/phone';
 import StudentTagsField from './StudentTagsField.jsx';
 import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
-import { useStudentNameSuggestions, useNationalIdGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
+import { useStudentNameSuggestions, useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
 import { useInstructors, useServices } from '@/hooks/useOrgData.js';
+
+const IDENTITY_NUMBER_PATTERN = /^\d{5,12}$/;
 
 export default function EditStudentForm({ 
   student, 
@@ -47,15 +49,22 @@ export default function EditStudentForm({
   const { suggestions, loading: searchingNames } = useStudentNameSuggestions(values.name, {
     excludeStudentId,
   });
-  const { duplicate, loading: checkingNationalId, error: nationalIdError } = useNationalIdGuard(values.nationalId, {
+  const { duplicate, loading: checkingIdentityNumber, error: identityNumberError } = useIdentityNumberGuard(values.identityNumber, {
     excludeStudentId,
   });
 
+  const trimmedIdentityNumber = values.identityNumber.trim();
+  const isIdentityNumberFormatValid = useMemo(() => {
+    if (!trimmedIdentityNumber) return true;
+    return IDENTITY_NUMBER_PATTERN.test(trimmedIdentityNumber);
+  }, [trimmedIdentityNumber]);
+
   const preventSubmitReason = useMemo(() => {
     if (duplicate) return 'duplicate';
-    if (nationalIdError) return 'error';
+    if (identityNumberError) return 'error';
+    if (!isIdentityNumberFormatValid) return 'invalid_identity_number';
     return '';
-  }, [duplicate, nationalIdError]);
+  }, [duplicate, identityNumberError, isIdentityNumberFormatValid]);
 
   useEffect(() => {
     onSubmitDisabledChange(Boolean(preventSubmitReason) || isSubmitting);
@@ -106,7 +115,9 @@ export default function EditStudentForm({
 
     const newTouched = {
       name: true,
-      nationalId: true,
+      identityNumber: true,
+      phone: true,
+      email: true,
       contactName: true,
       contactPhone: true,
       assignedInstructorId: true,
@@ -118,14 +129,18 @@ export default function EditStudentForm({
     const trimmedName = values.name.trim();
     const trimmedContactName = values.contactName.trim();
     const trimmedContactPhone = values.contactPhone.trim();
-    const trimmedNationalId = values.nationalId.trim();
+    const trimmedIdentityNumberInner = values.identityNumber.trim();
 
-    if (duplicate || nationalIdError) {
+    if (duplicate || identityNumberError) {
       return;
     }
 
-    if (!trimmedName || !trimmedNationalId || !trimmedContactName || !trimmedContactPhone || 
+    if (!trimmedName || !trimmedIdentityNumberInner || 
         !values.assignedInstructorId || !values.defaultDayOfWeek || !values.defaultSessionTime) {
+      return;
+    }
+
+    if (!IDENTITY_NUMBER_PATTERN.test(trimmedIdentityNumberInner)) {
       return;
     }
 
@@ -136,9 +151,11 @@ export default function EditStudentForm({
     onSubmit({
       id: student?.id,
       name: trimmedName,
-      nationalId: trimmedNationalId,
-      contactName: trimmedContactName,
-      contactPhone: trimmedContactPhone,
+      identityNumber: trimmedIdentityNumberInner,
+      phone: values.phone.trim() || null,
+      email: values.email.trim() || null,
+      contactName: trimmedContactName || null,
+      contactPhone: trimmedContactPhone || null,
       assignedInstructorId: values.assignedInstructorId,
       defaultService: values.defaultService || null,
       defaultDayOfWeek: values.defaultDayOfWeek,
@@ -149,16 +166,19 @@ export default function EditStudentForm({
     });
   };
 
-  const trimmedNationalId = values.nationalId.trim();
   const showNameError = touched.name && !values.name.trim();
-  const nationalIdErrorMessage = (() => {
+  const identityNumberErrorMessage = (() => {
     if (duplicate) return '';
-    if (nationalIdError) return nationalIdError;
-    if (touched.nationalId && !trimmedNationalId) return 'יש להזין מספר זהות.';
+    if (identityNumberError) return identityNumberError;
+    if (error === 'duplicate_identity_number') return '';
+    if (touched.identityNumber && !trimmedIdentityNumber) return 'יש להזין מספר זהות.';
+    if (touched.identityNumber && trimmedIdentityNumber && !isIdentityNumberFormatValid) {
+      return 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
+    }
     return '';
   })();
-  const showContactNameError = touched.contactName && !values.contactName.trim();
-  const showContactPhoneError = touched.contactPhone && (!values.contactPhone.trim() || !validateIsraeliPhone(values.contactPhone));
+  const showContactNameError = false;
+  const showContactPhoneError = touched.contactPhone && values.contactPhone.trim() && !validateIsraeliPhone(values.contactPhone);
   const showInstructorError = touched.assignedInstructorId && !values.assignedInstructorId;
   const showDayError = touched.defaultDayOfWeek && !values.defaultDayOfWeek;
   const showTimeError = touched.defaultSessionTime && !values.defaultSessionTime;
@@ -201,7 +221,7 @@ export default function EditStudentForm({
                   <li key={match.id} className="flex items-center justify-between gap-2">
                     <div className="space-y-0.5">
                       <div className="font-semibold text-neutral-900">{match.name}</div>
-                      <div className="text-xs text-neutral-600">מספר זהות: {match.national_id || '—'} | סטטוס: {match.is_active === false ? 'לא פעיל' : 'פעיל'}</div>
+                      <div className="text-xs text-neutral-600">מספר זהות: {match.identity_number || match.national_id || '—'} | סטטוס: {match.is_active === false ? 'לא פעיל' : 'פעיל'}</div>
                     </div>
                     <Link
                       to={`/students/${match.id}`}
@@ -216,17 +236,17 @@ export default function EditStudentForm({
           )}
 
           <TextField
-            id="national-id"
-            name="nationalId"
+            id="identity-number"
+            name="identityNumber"
             label="מספר זהות"
-            value={values.nationalId}
+            value={values.identityNumber}
             onChange={handleChange}
             onBlur={handleBlur}
             placeholder="הקלד מספר זהות למניעת כפילויות"
             disabled={isSubmitting}
             required
-            error={nationalIdErrorMessage}
-            description={checkingNationalId ? 'בודק כפילויות...' : ''}
+            error={identityNumberErrorMessage}
+            description={checkingIdentityNumber ? 'בודק כפילויות...' : ''}
           />
 
           {duplicate && (
@@ -271,14 +291,37 @@ export default function EditStudentForm({
           )}
 
           <TextField
+            id="phone"
+            name="phone"
+            label="טלפון (תלמיד)"
+            value={values.phone}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            required={false}
+            disabled={isSubmitting}
+          />
+
+          <TextField
+            id="email"
+            name="email"
+            label="אימייל (תלמיד)"
+            type="email"
+            value={values.email}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            required={false}
+            disabled={isSubmitting}
+          />
+
+          <TextField
             id="contact-name"
             name="contactName"
             label="שם איש קשר"
             value={values.contactName}
             onChange={handleChange}
             onBlur={handleBlur}
-            required
-            placeholder="שם הורה או אפוטרופוס"
+            required={false}
+            placeholder="שם הורה או אפוטרופוס (אופציונלי)"
             disabled={isSubmitting}
             error={showContactNameError ? 'יש להזין שם איש קשר.' : ''}
           />
@@ -290,7 +333,7 @@ export default function EditStudentForm({
             value={values.contactPhone}
             onChange={handleChange}
             onBlur={handleBlur}
-            required
+            required={false}
             disabled={isSubmitting}
             error={showContactPhoneError ? 'יש להזין מספר טלפון ישראלי תקין.' : ''}
           />
@@ -322,16 +365,16 @@ export default function EditStudentForm({
               disabled={isSubmitting}
               error={showDayError ? 'יש לבחור יום.' : ''}
             />
-
             <TimeField
-              id="default-time"
+              id="default-session-time"
               name="defaultSessionTime"
-              label="שעת מפגש קבועה"
+              label="שעה קבועה"
               value={values.defaultSessionTime}
               onChange={(value) => handleSelectChange('defaultSessionTime', value)}
-              disabled={isSubmitting}
               required
+              disabled={isSubmitting}
               error={showTimeError ? 'יש לבחור שעה.' : ''}
+              placeholder="HH:MM"
             />
           </div>
 
