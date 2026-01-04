@@ -1821,7 +1821,7 @@ SELECT extensions.sign(
     'exp', (EXTRACT(EPOCH FROM (NOW() + INTERVAL '5 year')))::integer,
     'iat', (EXTRACT(EPOCH FROM NOW()))::integer
   ),
-  'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE'
+  current_setting('app.settings.jwt_secret')
 ) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";
 `;
 
