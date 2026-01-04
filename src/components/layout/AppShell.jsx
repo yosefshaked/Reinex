@@ -1,6 +1,6 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Outlet } from "react-router-dom"
-import { Megaphone, LogOut } from "lucide-react"
+import { Megaphone, LogOut, PanelRightOpen, PanelRightClose } from "lucide-react"
 import { Toaster, toast } from "sonner"
 
 import OrgConfigBanner from "@/components/OrgConfigBanner.jsx"
@@ -25,12 +25,21 @@ export default function AppShell({ children }) {
   const { signOut } = useAuth()
   const { activeOrg } = useOrg()
   const [isChangelogOpen, setIsChangelogOpen] = useState(false)
+  const [isSidebarHidden, setIsSidebarHidden] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem('app:sidebarHidden') === 'true'
+  })
   const [sessionModalState, setSessionModalState] = useState({
     isOpen: false,
     studentId: '',
     studentStatus: 'active',
     onCreated: null,
   })
+
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('app:sidebarHidden', isSidebarHidden ? 'true' : 'false')
+  }, [isSidebarHidden])
 
   const openSessionModal = useCallback((options = {}) => {
     const { studentId = '', studentStatus = 'active', onCreated = null } = options
@@ -145,10 +154,8 @@ export default function AppShell({ children }) {
   return (
     <SessionModalContext.Provider value={sessionModalContextValue}>
       <AccessibilityProvider>
-      <div ref={shellRef} className="flex min-h-screen bg-background text-foreground overflow-x-hidden flex-row-reverse" dir="rtl">
+      <div ref={shellRef} className="flex min-h-screen bg-background text-foreground overflow-x-hidden" dir="rtl">
         <SkipLink />
-        <Sidebar />
-
         <div className="relative flex min-h-screen flex-1 flex-col pb-[88px] md:h-screen md:pb-0">
           <header
             ref={headerRef}
@@ -156,6 +163,18 @@ export default function AppShell({ children }) {
           >
             <div className="flex items-center justify-between gap-xs">
               <div className="flex items-center gap-xs sm:gap-sm">
+                <button
+                  type="button"
+                  onClick={() => setIsSidebarHidden((prev) => !prev)}
+                  className="hidden md:inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-border bg-surface p-2 text-neutral-600 transition hover:bg-neutral-100"
+                  aria-label={isSidebarHidden ? 'הצג סרגל צד' : 'הסתר סרגל צד'}
+                >
+                  {isSidebarHidden ? (
+                    <PanelRightOpen className="h-5 w-5" aria-hidden="true" />
+                  ) : (
+                    <PanelRightClose className="h-5 w-5" aria-hidden="true" />
+                  )}
+                </button>
                 <OrgLogo />
                 <button
                   type="button"
@@ -205,6 +224,8 @@ export default function AppShell({ children }) {
             )}
           </main>
         </div>
+
+        <Sidebar hidden={isSidebarHidden} onToggleHidden={() => setIsSidebarHidden((prev) => !prev)} />
         <MobileNav />
         <WelcomeTour />
         <CustomTourRenderer />

@@ -27,7 +27,7 @@ const PRIMARY_ITEMS = [
 ];
 
 const DRAWER_ITEMS = [
-  { key: 'instructors', label: 'מדריכים', to: '/instructors', icon: UserCog },
+  { key: 'employees', label: 'עובדים', to: '/employees', icon: UserCog },
   { key: 'financials', label: 'כספים', to: '/financials', icon: Coins },
   { key: 'settings', label: 'הגדרות', to: '/Settings', icon: Settings },
 ];

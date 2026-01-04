@@ -4,6 +4,9 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
 import AppShell from './components/layout/AppShell.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
+import CalendarPage from './pages/CalendarPage.jsx';
+import EmployeesPage from './pages/EmployeesPage.jsx';
+import FinancialsPage from './pages/FinancialsPage.jsx';
 import StudentsPage from './features/students/pages/StudentsPage.jsx';
 import StudentDetailPage from './features/students/pages/StudentDetailPage.jsx';
 import Settings from './pages/Settings.jsx';
@@ -70,13 +73,14 @@ function App({ config = null }) {
                     {/* הגדרת כל העמודים */}
                     <Route path="/dashboard" element={<DashboardPage />} />
                     <Route path="/Dashboard" element={<Navigate to="/dashboard" replace />} />
-                    <Route path="/calendar" element={<DashboardPage />} />
-                    <Route path="/Employees" element={<Navigate to="/students-list" replace />} />
+                    <Route path="/calendar" element={<CalendarPage />} />
+                    <Route path="/employees" element={<EmployeesPage />} />
+                    <Route path="/Employees" element={<Navigate to="/employees" replace />} />
                     <Route path="/students-list" element={<StudentsPage />} />
                     <Route path="/admin/students" element={<Navigate to="/students-list" replace />} />
                     <Route path="/my-students" element={<Navigate to="/students-list" replace />} />
-                    <Route path="/instructors" element={<Navigate to="/Settings" replace />} />
-                    <Route path="/financials" element={<Navigate to="/Settings" replace />} />
+                    <Route path="/instructors" element={<Navigate to="/employees" replace />} />
+                    <Route path="/financials" element={<FinancialsPage />} />
                     <Route path="/pending-reports" element={<PendingReportsPage />} />
                     <Route path="/admin/pending-reports" element={<Navigate to="/pending-reports" replace />} />
                     <Route path="/students/:id" element={<StudentDetailPage />} />
