@@ -781,7 +781,7 @@ export default function ChangelogModal({ open, onClose }) {
                   color: '#334155'
                 }}>
                   <li style={{ marginBottom: '6px' }}>
-                    <strong>עיצוב מחודש:</strong> חלון ניהול מדריכים עבר שדרוג ושיפור במבנה (מנהלים בלבד)
+                    <strong>עיצוב מחודש:</strong> עמוד ניהול עובדים עבר שדרוג ושיפור במבנה (מנהלים בלבד)
                   </li>
                 </ul>
               </section>
