@@ -71,7 +71,7 @@ export default async function handler(context, req) {
 
     // Create test file content (lightweight JSON)
     const testFileName = `test-connection-${orgId}-${Date.now()}.txt`;
-    const testContent = `Reinex Storage Connection Test\nOrganization: ${orgId}\nTimestamp: ${new Date().toISOString()}`;
+    const testContent = `TutTiud Storage Connection Test\nOrganization: ${orgId}\nTimestamp: ${new Date().toISOString()}`;
     const testBuffer = Buffer.from(testContent, 'utf-8');
 
     // Build test path

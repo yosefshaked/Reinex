@@ -13,6 +13,8 @@ const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,6})?)?(?:Z|
 const ISRAELI_PHONE_PATTERN = /^(?:0(?:5[0-9]|[2-4|8-9][0-9])-?\d{7}|(?:\+?972-?)?5[0-9]-?\d{7})$/;
 const NATIONAL_ID_PATTERN = /^\d{5,12}$/;
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function validateIsraeliPhone(value) {
   if (value === null || value === undefined) {
     return { value: null, valid: true };
@@ -71,6 +73,32 @@ export function coerceNationalId(raw) {
   }
 
   return { value: null, valid: false, provided: true };
+}
+
+export function coerceIdentityNumber(raw) {
+  // Identity number semantics are identical to legacy national_id for now.
+  return coerceNationalId(raw);
+}
+
+export function coerceEmail(raw) {
+  if (raw === null || raw === undefined) {
+    return { value: null, valid: true };
+  }
+
+  if (typeof raw !== 'string') {
+    return { value: null, valid: false };
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return { value: null, valid: true };
+  }
+
+  if (EMAIL_PATTERN.test(trimmed)) {
+    return { value: trimmed, valid: true };
+  }
+
+  return { value: null, valid: false };
 }
 
 export function coerceOptionalText(value) {

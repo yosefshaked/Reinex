@@ -89,7 +89,6 @@ function resolvePasswordResetRedirectUrl() {
 }
 
 export function AuthProvider({ children }) {
-  console.log('[DEBUG 6] AuthProvider rendering.');
   const { authClient, session: supabaseSession, loading } = useSupabase();
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);

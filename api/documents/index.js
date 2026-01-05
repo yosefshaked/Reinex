@@ -227,17 +227,25 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
       // Get entity name for file naming (cache after first lookup)
       if (entityName === null) {
         if (entityType === 'student') {
-          const { data: student, error: studentError } = await tenantClient.from('Students').select('name').eq('id', entityId).single();
+          const { data: student, error: studentError } = await tenantClient.from('students').select('name').eq('id', entityId).single();
           if (studentError) {
             console.error('Failed to fetch student name:', { entityId, error: studentError.message });
           }
           entityName = student?.name || 'Unknown';
         } else if (entityType === 'instructor') {
-          const { data: instructor, error: instructorError } = await tenantClient.from('Instructors').select('name').eq('id', entityId).single();
+          const { data: instructor, error: instructorError } = await tenantClient
+            .from('Employees')
+            .select('name, employee_type')
+            .eq('id', entityId)
+            .maybeSingle();
           if (instructorError) {
             console.error('Failed to fetch instructor name:', { entityId, error: instructorError.message });
           }
-          entityName = instructor?.name || 'Unknown';
+          if (!instructor || (instructor.employee_type && instructor.employee_type !== 'instructor')) {
+            entityName = 'Unknown';
+          } else {
+            entityName = instructor?.name || 'Unknown';
+          }
         } else {
           entityName = '';
         }
