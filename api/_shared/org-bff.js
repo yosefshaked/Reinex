@@ -266,8 +266,17 @@ export async function resolveTenantClient(context, supabase, env, orgId) {
 
   const dedicatedKey = decryptDedicatedKey(connectionResult.encryptedKey, encryptionKey);
   if (!dedicatedKey) {
+    context.log?.error?.('[DEBUG] Decryption failed completely');
     return { error: buildTenantError('failed_to_decrypt_key') };
   }
+
+  // DEBUG LOG 3: Show first/last 4 chars after decryption (students-list)
+  context.log?.('[DEBUG] Students-list decrypted credentials', {
+    first4: dedicatedKey.substring(0, 4),
+    last4: dedicatedKey.substring(dedicatedKey.length - 4),
+    totalLength: dedicatedKey.length,
+    isJWT: dedicatedKey.startsWith('eyJ') && dedicatedKey.split('.').length === 3,
+  });
 
   try {
     const tenantClient = createTenantClient({

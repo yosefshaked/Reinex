@@ -209,6 +209,13 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
+  // DEBUG LOG 1: Show first/last 4 chars of JWT before encryption
+  context.log?.('[DEBUG] Setup wizard saving credentials', {
+    first4: dedicatedKey.substring(0, 4),
+    last4: dedicatedKey.substring(dedicatedKey.length - 4),
+    totalLength: dedicatedKey.length,
+  });
+
   const encryptedKey = encryptDedicatedKey(dedicatedKey, encryptionKey);
   const savedAt = new Date().toISOString();
 
