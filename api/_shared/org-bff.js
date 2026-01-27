@@ -212,7 +212,7 @@ export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey }) {
     throw new Error('Missing tenant connection parameters.');
   }
 
-  return createClient(supabaseUrl, anonKey, {
+  const client = createClient(supabaseUrl, anonKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
@@ -224,6 +224,11 @@ export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey }) {
       },
     },
   });
+
+  // Explicitly set schema to 'public' for Reinex (AGENTS.md line 8: "Tenant DB schema is **public only**")
+  // This is required for Postgres to properly resolve table references like 'students' 
+  // (lowercase, unquoted) alongside legacy tables like "Employees" (capital, quoted).
+  return client.schema('public');
 }
 
 export function resolveOrgId(req, body) {
