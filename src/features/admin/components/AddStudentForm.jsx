@@ -24,7 +24,9 @@ const IDENTITY_NUMBER_PATTERN = /^\d{5,12}$/;
 function buildInitialValuesKey(initialValues) {
   const value = initialValues && typeof initialValues === 'object' ? initialValues : EMPTY_INITIAL_VALUES;
   return [
-    value.name ?? '',
+    value.firstName ?? '',
+    value.middleName ?? '',
+    value.lastName ?? '',
     value.identityNumber ?? value.identity_number ?? value.nationalId ?? '',
     value.phone ?? '',
     value.email ?? '',
@@ -81,7 +83,6 @@ export default function AddStudentForm({
     return Array.isArray(instructors) ? instructors : [];
   }, [instructors]);
 
-  const { suggestions, loading: searchingNames } = useStudentNameSuggestions(values.name);
   const { duplicate, loading: checkingIdentityNumber, error: identityNumberError } = useIdentityNumberGuard(values.identityNumber);
 
   const trimmedIdentityNumber = values.identityNumber.trim();
@@ -147,7 +148,8 @@ export default function AddStudentForm({
     event.preventDefault();
 
     const newTouched = {
-      name: true,
+      firstName: true,
+      lastName: true,
       identityNumber: true,
       contactName: true,
       contactPhone: true,
@@ -159,7 +161,8 @@ export default function AddStudentForm({
     };
     setTouched(newTouched);
 
-    const trimmedName = values.name.trim();
+    const trimmedFirstName = values.firstName.trim();
+    const trimmedLastName = values.lastName.trim();
     const trimmedContactName = values.contactName.trim();
     const trimmedContactPhone = values.contactPhone.trim();
     const trimmedIdentityNumberInner = values.identityNumber.trim();
@@ -168,7 +171,7 @@ export default function AddStudentForm({
       return;
     }
 
-    if (!trimmedName || !trimmedIdentityNumberInner ||
+    if (!trimmedFirstName || !trimmedLastName || !trimmedIdentityNumberInner ||
         !values.assignedInstructorId || !values.defaultDayOfWeek || !values.defaultSessionTime) {
       return;
     }
@@ -182,7 +185,9 @@ export default function AddStudentForm({
     }
 
     onSubmit({
-      name: trimmedName,
+      firstName: trimmedFirstName,
+      middleName: values.middleName.trim() || null,
+      lastName: trimmedLastName,
       identityNumber: trimmedIdentityNumberInner,
       phone: values.phone.trim() || null,
       email: values.email.trim() || null,
@@ -198,7 +203,8 @@ export default function AddStudentForm({
     });
   };
 
-  const showNameError = touched.name && !values.name.trim();
+  const showFirstNameError = touched.firstName && !values.firstName.trim();
+  const showLastNameError = touched.lastName && !values.lastName.trim();
   const identityNumberErrorMessage = (() => {
     // Avoid double-surfacing duplicates; detailed banner handles it
     if (duplicate) return '';
@@ -236,42 +242,41 @@ export default function AddStudentForm({
       <div className="space-y-5 divide-y divide-border">
         <div className="space-y-5 py-1">
           <TextField
-            id="student-name"
-            name="name"
-            label="שם התלמיד"
-            value={values.name}
+            id="student-first-name"
+            name="firstName"
+            label="שם פרטי"
+            value={values.firstName}
             onChange={handleChange}
             onBlur={handleBlur}
             required
-            placeholder="הקלד את שם התלמיד"
+            placeholder="הקלד שם פרטי"
             disabled={isSubmitting}
-            error={showNameError ? 'יש להזין שם תלמיד.' : ''}
+            error={showFirstNameError ? 'יש להזין שם פרטי.' : ''}
           />
 
-          {suggestions.length > 0 && (
-            <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-800 space-y-2" role="note">
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-medium">האם אחד מהם התלמיד שאתם מחפשים?</p>
-                {searchingNames && <Loader2 className="h-4 w-4 animate-spin text-neutral-500" aria-hidden="true" />}
-              </div>
-              <ul className="space-y-1">
-                {suggestions.map((match) => (
-                  <li key={match.id} className="flex items-center justify-between gap-2">
-                    <div className="space-y-0.5">
-                      <div className="font-semibold text-neutral-900">{match.name}</div>
-                      <div className="text-xs text-neutral-600">מספר זהות: {match.identity_number || match.national_id || '—'} | סטטוס: {match.is_active === false ? 'לא פעיל' : 'פעיל'}</div>
-                    </div>
-                    <Link
-                      to={`/students/${match.id}`}
-                      className="text-primary text-xs font-medium underline underline-offset-2 hover:text-primary/80"
-                    >
-                      מעבר לפרופיל
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <TextField
+            id="student-middle-name"
+            name="middleName"
+            label="שם אמצעי"
+            value={values.middleName}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            placeholder="הקלד שם אמצעי (אופציונלי)"
+            disabled={isSubmitting}
+          />
+
+          <TextField
+            id="student-last-name"
+            name="lastName"
+            label="שם משפחה"
+            value={values.lastName}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            required
+            placeholder="הקלד שם משפחה"
+            disabled={isSubmitting}
+            error={showLastNameError ? 'יש להזין שם משפחה.' : ''}
+          />
 
           <TextField
             id="identity-number"

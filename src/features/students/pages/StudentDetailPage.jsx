@@ -25,6 +25,7 @@ import { exportStudentPdf, downloadPdfBlob } from '@/api/students-export.js';
 import LegacyImportModal from '@/features/students/components/LegacyImportModal.jsx';
 import StudentDocumentsSection from '@/features/students/components/StudentDocumentsSection.jsx';
 import StudentIntakeCard from '@/features/students/components/StudentIntakeCard.jsx';
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',
@@ -684,7 +685,7 @@ export default function StudentDetailPage() {
     try {
       const blob = await exportStudentPdf(studentId, activeOrgId);
       // Generate filename with date (sanitization happens in backend)
-      const safeName = student.name
+      const safeName = formatStudentName(student)
         .replace(/[^א-תa-zA-Z0-9\s-]/g, '')
         .trim()
         .replace(/\s+/g, '_');
@@ -902,7 +903,7 @@ export default function StudentDetailPage() {
               <div className="space-y-1">
                 <dt className="text-xs font-medium text-neutral-500 sm:text-sm">שם התלמיד</dt>
                 <dd className="flex flex-wrap items-center gap-2 font-semibold text-foreground">
-                  <span>{student.name}</span>
+                  <span>{formatStudentName(student)}</span>
                   {student?.is_active === false ? (
                     <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
                       לא פעיל

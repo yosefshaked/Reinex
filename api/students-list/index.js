@@ -44,7 +44,7 @@ async function findStudentByIdentityNumber(tenantClient, identityNumber, { exclu
 
   let query = tenantClient
     .from('students')
-    .select('id, name, is_active, identity_number')
+    .select('id, first_name, last_name, is_active, identity_number')
     .eq('identity_number', identityNumber)
     .limit(1);
 
@@ -56,34 +56,18 @@ async function findStudentByIdentityNumber(tenantClient, identityNumber, { exclu
   return { data, error };
 }
 
-function splitFullName(fullName) {
-  const normalized = normalizeString(fullName);
-  if (!normalized) {
-    return { first_name: null, middle_name: null, last_name: null, name: '' };
-  }
-
-  const tokens = normalized.split(/\s+/).filter(Boolean);
-  if (tokens.length === 1) {
-    const only = tokens[0];
-    return { first_name: only, middle_name: null, last_name: only, name: normalized };
-  }
-
-  const first = tokens[0];
-  const last = tokens[tokens.length - 1];
-  const middle = tokens.length > 2 ? tokens.slice(1, -1).join(' ') : null;
-
-  return {
-    first_name: first,
-    middle_name: middle,
-    last_name: last,
-    name: normalized,
-  };
-}
+// Removed splitFullName - users now provide first_name, middle_name, last_name directly
 
 function buildStudentPayload(body) {
-  const name = normalizeString(body?.name);
-  if (!name) {
-    return { error: 'missing_name' };
+  const firstName = normalizeString(body?.first_name ?? body?.firstName);
+  const middleName = normalizeString(body?.middle_name ?? body?.middleName);
+  const lastName = normalizeString(body?.last_name ?? body?.lastName);
+
+  if (!firstName) {
+    return { error: 'missing_first_name' };
+  }
+  if (!lastName) {
+    return { error: 'missing_last_name' };
   }
 
   const phoneResult = validateIsraeliPhone(body?.phone);
@@ -145,7 +129,6 @@ function buildStudentPayload(body) {
 
   const isActiveValue = isActiveResult.provided ? Boolean(isActiveResult.value) : true;
 
-  // New canonical field: identity_number (legacy callers may still send national_id)
   const identityCandidate = body?.identity_number ?? body?.identityNumber ?? body?.national_id ?? body?.nationalId;
   const identityNumberResult = coerceIdentityNumber(identityCandidate);
   if (!identityNumberResult.valid) {
@@ -159,7 +142,9 @@ function buildStudentPayload(body) {
 
   return {
     payload: {
-      name,
+      first_name: firstName,
+      middle_name: middleName || null,
+      last_name: lastName,
       identity_number: identityNumberResult.value,
       phone: phoneResult.value,
       email: emailResult.value,
@@ -181,12 +166,27 @@ function buildStudentUpdates(body) {
   let hasAny = false;
   let intakeNotes;
 
-  if (Object.prototype.hasOwnProperty.call(body, 'name')) {
-    const studentName = normalizeString(body.name);
-    if (!studentName) {
-      return { error: 'invalid_name' };
+  if (Object.prototype.hasOwnProperty.call(body, 'first_name') || Object.prototype.hasOwnProperty.call(body, 'firstName')) {
+    const firstName = normalizeString(body.first_name ?? body.firstName);
+    if (!firstName) {
+      return { error: 'invalid_first_name' };
     }
-    updates['name'] = studentName;
+    updates['first_name'] = firstName;
+    hasAny = true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'middle_name') || Object.prototype.hasOwnProperty.call(body, 'middleName')) {
+    const middleName = normalizeString(body.middle_name ?? body.middleName);
+    updates['middle_name'] = middleName || null;
+    hasAny = true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'last_name') || Object.prototype.hasOwnProperty.call(body, 'lastName')) {
+    const lastName = normalizeString(body.last_name ?? body.lastName);
+    if (!lastName) {
+      return { error: 'invalid_last_name' };
+    }
+    updates['last_name'] = lastName;
     hasAny = true;
   }
 
@@ -478,7 +478,7 @@ export default async function handler(context, req) {
     let builder = tenantClient
       .from('students')
       .select('*')
-      .order('name', { ascending: true });
+      .order('first_name', { ascending: true });
 
     // Non-admin users (instructors) can only see their assigned students
     if (!isAdmin) {
@@ -582,7 +582,6 @@ export default async function handler(context, req) {
 
     const recordToInsert = {
       ...normalized.payload,
-      ...splitFullName(normalized.payload.name),
       metadata,
     };
 
@@ -608,7 +607,7 @@ export default async function handler(context, req) {
       resourceType: 'student',
       resourceId: data.id,
       details: {
-        student_name: data.name,
+        student_name: `${data.first_name} ${data.last_name}`.trim(),
         assigned_instructor_id: data.assigned_instructor_id,
       },
     });
@@ -723,10 +722,6 @@ export default async function handler(context, req) {
     metadata: updatedMetadata,
   };
 
-  if (Object.prototype.hasOwnProperty.call(normalizedUpdates.updates, 'name')) {
-    Object.assign(updatesWithMetadata, splitFullName(normalizedUpdates.updates.name));
-  }
-
   if (Object.prototype.hasOwnProperty.call(normalizedUpdates, 'intakeNotes')) {
     updatesWithMetadata.metadata = {
       ...updatedMetadata,
@@ -764,7 +759,7 @@ export default async function handler(context, req) {
     resourceId: studentId,
     details: {
       updated_fields: changedFields,
-      student_name: data.name,
+      student_name: `${data.first_name} ${data.last_name}`.trim(),
     },
   });
 

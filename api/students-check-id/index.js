@@ -106,7 +106,7 @@ export default async function (context, req) {
 
   let query = tenantClient
     .from('students')
-    .select('id, name, identity_number, is_active')
+    .select('id, first_name, last_name, identity_number, is_active')
     .eq('identity_number', identityNumber)
     .limit(1);
 
@@ -142,7 +142,8 @@ export default async function (context, req) {
     excludeId: excludeId || 'none',
     duplicateStudent: {
       id: data.id,
-      name: data.name,
+      first_name: data.first_name,
+      last_name: data.last_name,
       is_active: data.is_active,
     },
     result: 'exists=true',

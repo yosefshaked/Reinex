@@ -29,6 +29,7 @@ import { saveFilterState, loadFilterState } from '@/features/students/utils/filt
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
 import MyPendingReportsCard from '@/features/sessions/components/MyPendingReportsCard.jsx';
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
 
 export default function StudentsPage() {
   const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
@@ -684,7 +685,7 @@ export default function StudentsPage() {
                                 to={`/students/${student.id}`}
                                 className="font-medium text-primary hover:underline"
                               >
-                                {student.name}
+                                {formatStudentName(student)}
                               </Link>
                               {isInactive && (
                                 <Badge variant="secondary" className="w-fit bg-neutral-200 text-neutral-700">

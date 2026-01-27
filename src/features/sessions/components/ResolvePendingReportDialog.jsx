@@ -385,7 +385,7 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
                   <SelectContent className="max-h-[250px] sm:max-h-[300px]">
                     {filteredStudents.map((student) => (
                       <SelectItem key={student.id} value={student.id} className="text-right">
-                        <span className="block truncate">{student.name || 'ללא שם'}</span>
+                        <span className="block truncate">{formatStudentName(student) || 'ללא שם'}</span>
                         {student.contact_name && <span className="text-xs text-neutral-500"> ({student.contact_name})</span>}
                       </SelectItem>
                     ))}

@@ -90,7 +90,7 @@ export default async function (context, req) {
   // Build query with role-based filtering
   let builder = tenantClient
     .from('students')
-    .select('id, name, identity_number, phone, email, is_active, assigned_instructor_id');
+    .select('id, first_name, last_name, identity_number, phone, email, is_active, assigned_instructor_id');
 
   // Member instructors can only see their assigned students
   if (!isAdminRole(role)) {
@@ -99,8 +99,8 @@ export default async function (context, req) {
   // Admins see all students (no filter needed)
 
   const { data, error } = await builder
-    .ilike('name', `%${query}%`)
-    .order('name', { ascending: true })
+    .or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%`)
+    .order('first_name', { ascending: true })
     .limit(8);
 
   if (error) {

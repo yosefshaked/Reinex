@@ -26,6 +26,7 @@ import { isAdminRole, normalizeMembershipRole } from '@/features/students/utils/
 import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';
 import { buildTagDisplayList } from '@/features/students/utils/tags.js';
 import { Trash2 } from 'lucide-react';
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
 
 const APPROVAL_AGREEMENT_TEXT = 'אני מאשר/ת שקראתי את האינטייק של התלמיד/ה וביצעתי שיחת קליטה עם האפוטרופוס.';
 
@@ -746,7 +747,7 @@ export default function IntakeReviewQueue() {
       return candidates.slice(0, 10);
     }
     return candidates.filter((student) => {
-      const name = (student.name || '').toLowerCase();
+      const name = formatStudentName(student).toLowerCase();
       const identityNumber = (student.identity_number || student.national_id || '').toLowerCase();
       const phone = (student.contact_phone || '').toLowerCase();
       return name.includes(query) || identityNumber.includes(query) || phone.includes(query);
@@ -1005,7 +1006,7 @@ export default function IntakeReviewQueue() {
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                         <div className="space-y-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-base font-semibold text-slate-900">{student.name}</p>
+                            <p className="text-base font-semibold text-slate-900">{formatStudentName(student)}</p>
                             <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
                               {needsAssignment ? 'דורש שיוך מדריך' : 'מוכן לאישור מדריך'}
                             </span>
@@ -1170,7 +1171,7 @@ export default function IntakeReviewQueue() {
                           <div key={student.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                               <div className="space-y-1">
-                                <p className="text-sm font-semibold text-slate-900">{student.name}</p>
+                                <p className="text-sm font-semibold text-slate-900">{formatStudentName(student)}</p>
                                 <p className="text-xs text-slate-600">
                                   {dismissedAt ? `הוסר בתאריך ${dismissedAt}` : 'הוסר מהתור'}
                                 </p>
@@ -1292,8 +1293,8 @@ export default function IntakeReviewQueue() {
           <AlertDialogHeader>
             <AlertDialogTitle>אישור קליטה</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmStudent?.name
-                ? `לפני אישור קליטה עבור ${confirmStudent.name}, יש לאשר את הצהרת ההסכמה.`
+              {confirmStudent
+                ? `לפני אישור קליטה עבור ${formatStudentName(confirmStudent)}, יש לאשר את הצהרת ההסכמה.`
                 : 'לפני אישור קליטה יש לאשר את הצהרת ההסכמה.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
