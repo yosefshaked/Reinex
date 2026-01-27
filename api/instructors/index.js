@@ -109,14 +109,54 @@ export default async function (context, req) {
       builder = builder.eq('id', userId);
     }
 
-    const { data, error } = await builder;
+    const { data: employees, error } = await builder;
 
     if (error) {
       context.log?.error?.('instructors failed to fetch roster', { message: error.message });
       return respond(context, 500, { message: 'failed_to_load_instructors' });
     }
 
-    return respond(context, 200, Array.isArray(data) ? data : []);
+    if (!Array.isArray(employees) || employees.length === 0) {
+      return respond(context, 200, []);
+    }
+
+    // Fetch overlay data: instructor_profiles
+    const employeeIds = employees.map(e => e.id);
+    const { data: profiles } = await tenantClient
+      .from('instructor_profiles')
+      .select('employee_id, working_days, break_time_minutes, metadata')
+      .in('employee_id', employeeIds);
+
+    // Fetch overlay data: instructor_service_capabilities
+    const { data: capabilities } = await tenantClient
+      .from('instructor_service_capabilities')
+      .select('employee_id, service_id, max_students, base_rate, metadata')
+      .in('employee_id', employeeIds);
+
+    // Build maps for efficient lookup
+    const profilesMap = new Map();
+    if (Array.isArray(profiles)) {
+      profiles.forEach(p => profilesMap.set(p.employee_id, p));
+    }
+
+    const capabilitiesMap = new Map();
+    if (Array.isArray(capabilities)) {
+      capabilities.forEach(c => {
+        if (!capabilitiesMap.has(c.employee_id)) {
+          capabilitiesMap.set(c.employee_id, []);
+        }
+        capabilitiesMap.get(c.employee_id).push(c);
+      });
+    }
+
+    // Merge overlay data into employees
+    const enriched = employees.map(emp => ({
+      ...emp,
+      instructor_profile: profilesMap.get(emp.id) || null,
+      service_capabilities: capabilitiesMap.get(emp.id) || [],
+    }));
+
+    return respond(context, 200, enriched);
   }
 
   if (method === 'POST') {
@@ -197,6 +237,19 @@ export default async function (context, req) {
     if (error) {
       context.log?.error?.('instructors failed to upsert instructor', { message: error.message });
       return respond(context, 500, { message: 'failed_to_save_instructor' });
+    }
+
+    // Create instructor_profile if overlay data provided
+    if (body?.working_days || body?.break_time_minutes) {
+      const profilePayload = {
+        employee_id: data.id,
+      };
+      if (body.working_days) profilePayload.working_days = body.working_days;
+      if (body.break_time_minutes) profilePayload.break_time_minutes = body.break_time_minutes;
+
+      await tenantClient
+        .from('instructor_profiles')
+        .upsert(profilePayload, { onConflict: 'employee_id' });
     }
 
     // Audit log: instructor created

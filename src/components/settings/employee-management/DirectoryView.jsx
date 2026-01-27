@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar.jsx';
-import { Loader2, UserPlus, UserX, RotateCcw, Check, ChevronDown } from 'lucide-react';
+import { Loader2, UserPlus, UserX, RotateCcw, Check, ChevronDown, MailPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client';
 import { useInstructorTypes } from '@/features/instructors/hooks/useInstructorTypes.js';
@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { useInstructors } from '@/hooks/useOrgData.js';
+import InviteUserDialog from './InviteUserDialog.jsx';
 
 const REQUEST = { idle: 'idle', loading: 'loading', error: 'error' };
 const SAVE = { idle: 'idle', saving: 'saving', error: 'error' };
@@ -24,6 +25,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
   const [loadState, setLoadState] = useState(REQUEST.idle);
   const [loadError, setLoadError] = useState('');
   const [saveState, setSaveState] = useState(SAVE.idle);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
 
   const { typeOptions, loadTypes } = useInstructorTypes();
   const { instructors, loadingInstructors, instructorsError, refetchInstructors } = useInstructors({
@@ -189,20 +191,33 @@ export default function DirectoryView({ session, orgId, canLoad }) {
   }
 
   return (
-    <Tabs defaultValue="active" className="w-full" dir="rtl">
-      <TabsList className="grid w-full grid-cols-3 mb-4 h-auto">
-        <TabsTrigger value="active" className="flex-col gap-1 py-2 whitespace-normal break-words">
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xs sm:text-sm text-center">עובדים פעילים</span>
-            <Badge variant="secondary" className="text-xs sm:mr-2">{activeInstructors.length}</Badge>
-          </div>
-        </TabsTrigger>
-        <TabsTrigger value="inactive" className="flex-col gap-1 py-2 whitespace-normal break-words">
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xs sm:text-sm text-center">עובדים מושבתים</span>
-            <Badge variant="secondary" className="text-xs sm:mr-2">{inactiveInstructors.length}</Badge>
-          </div>
-        </TabsTrigger>
+    <div className="space-y-4" dir="rtl">
+      {/* Header with Invite Button */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex-1">
+          <h3 className="text-lg font-semibold text-slate-900">מדריך עובדים</h3>
+          <p className="text-sm text-slate-600">נהל עובדים והזמן משתמשים חדשים לארגון</p>
+        </div>
+        <Button onClick={() => setShowInviteDialog(true)} size="sm">
+          <MailPlus className="mr-2 h-4 w-4" />
+          הזמן משתמש
+        </Button>
+      </div>
+
+      <Tabs defaultValue="active" className="w-full" dir="rtl">
+        <TabsList className="grid w-full grid-cols-3 mb-4 h-auto">
+          <TabsTrigger value="active" className="flex-col gap-1 py-2 whitespace-normal break-words">
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-xs sm:text-sm text-center">עובדים פעילים</span>
+              <Badge variant="secondary" className="text-xs sm:mr-2">{activeInstructors.length}</Badge>
+            </div>
+          </TabsTrigger>
+          <TabsTrigger value="inactive" className="flex-col gap-1 py-2 whitespace-normal break-words">
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-xs sm:text-sm text-center">עובדים מושבתים</span>
+              <Badge variant="secondary" className="text-xs sm:mr-2">{inactiveInstructors.length}</Badge>
+            </div>
+          </TabsTrigger>
         <TabsTrigger value="members" className="flex-col gap-1 py-2 whitespace-normal break-words">
           <div className="flex flex-col items-center gap-1">
             <span className="text-xs sm:text-sm text-center">חברי ארגון</span>
@@ -418,5 +433,18 @@ export default function DirectoryView({ session, orgId, canLoad }) {
         )}
       </TabsContent>
     </Tabs>
+
+      {/* Invite Dialog */}
+      <InviteUserDialog
+        open={showInviteDialog}
+        onOpenChange={setShowInviteDialog}
+        activeOrgId={orgId}
+        session={session}
+        onInviteSent={() => {
+          // Refresh directory after invitation sent
+          void loadDirectory();
+        }}
+      />
+    </div>
   );
 }

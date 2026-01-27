@@ -229,7 +229,10 @@ export function validateInstructorCreate(body) {
     return { error: 'missing_user_id' };
   }
 
-  const name = normalizeString(body?.name) || '';
+  // Support both camelCase and snake_case for name fields
+  const firstName = normalizeString(body?.first_name || body?.firstName) || '';
+  const middleName = normalizeString(body?.middle_name || body?.middleName) || '';
+  const lastName = normalizeString(body?.last_name || body?.lastName) || '';
   const emailRaw = normalizeString(body?.email).toLowerCase();
   const email = emailRaw ? (isEmail(emailRaw) ? emailRaw : null) : '';
   const phoneRaw = normalizeString(body?.phone);
@@ -242,7 +245,9 @@ export function validateInstructorCreate(body) {
   return {
     userId,
     // empty strings mean "not provided"; nulls mean "provided but invalid"
-    name,
+    firstName,
+    middleName,
+    lastName,
     email,
     phone,
     notes: notesResult.value,
@@ -280,9 +285,25 @@ export function validateInstructorUpdate(body, orgPermissions = {}) {
     return normalized;
   };
 
-  if (Object.prototype.hasOwnProperty.call(body, 'name')) {
-    const v = normalizeString(body.name);
-    updates['name'] = v || null;
+  if (Object.prototype.hasOwnProperty.call(body, 'first_name') || Object.prototype.hasOwnProperty.call(body, 'firstName')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'first_name') ? body.first_name : body.firstName
+    );
+    updates['first_name'] = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'middle_name') || Object.prototype.hasOwnProperty.call(body, 'middleName')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'middle_name') ? body.middle_name : body.middleName
+    );
+    updates['middle_name'] = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'last_name') || Object.prototype.hasOwnProperty.call(body, 'lastName')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'last_name') ? body.last_name : body.lastName
+    );
+    updates['last_name'] = v || null;
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'email')) {
