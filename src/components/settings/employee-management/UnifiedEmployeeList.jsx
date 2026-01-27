@@ -167,14 +167,16 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad, viewMode 
             <UserPlus className="mr-2 h-4 w-4" />
             עובד חדש
           </Button>
-          <Button
-            onClick={() => onViewModeChange?.('unlinked')}
-            size="sm"
-            variant={viewMode === 'unlinked' ? 'default' : 'outline'}
-          >
-            <Users className="mr-2 h-4 w-4" />
-            חברי ארגון ללא עובד
-          </Button>
+          {viewMode !== 'unlinked' && (
+            <Button
+              onClick={() => onViewModeChange?.('unlinked')}
+              size="sm"
+              variant="outline"
+            >
+              <Users className="mr-2 h-4 w-4" />
+              חברי ארגון ללא עובד
+            </Button>
+          )}
           {viewMode === 'unlinked' && (
             <Button
               onClick={() => onViewModeChange?.('employees')}
