@@ -80,10 +80,11 @@ export default async function (context, req) {
   }
 
   if (method === 'GET') {
+    // Use a minimal projection to avoid 400s on tenants missing legacy name columns
     const colorResult = await ensureInstructorColors(tenantClient, {
       context,
       table: 'Employees',
-      columns: 'id, name, metadata',
+      columns: 'id, metadata',
     });
     if (colorResult?.error) {
       context.log?.error?.('instructors failed to ensure color assignments', { message: colorResult.error.message });
@@ -91,30 +92,32 @@ export default async function (context, req) {
 
     const includeInactive = normalizeString(req?.query?.include_inactive).toLowerCase() === 'true';
 
-    let builder = tenantClient
-      .from('Employees')
-      .select('id, user_id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
-      .order('first_name', { ascending: true });
+    const buildRosterQuery = () => {
+      let query = tenantClient
+        .from('Employees')
+        .select('id, user_id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
+        .order('first_name', { ascending: true });
 
-    // Keep the /instructors contract scoped to instructor employees.
-    // We treat NULL as instructor as well to ease incremental migrations.
-    builder = builder.or('employee_type.is.null,employee_type.eq.instructor');
+      if (!includeInactive) {
+        query = query.eq('is_active', true);
+      }
 
-    if (!includeInactive) {
-      builder = builder.eq('is_active', true);
-    }
+      // Non-admin users can only fetch their own instructor record by user_id
+      if (!isAdmin) {
+        query = query.eq('user_id', userId);
+      }
 
-    // Non-admin users can only fetch their own instructor record by user_id
-    if (!isAdmin) {
-      builder = builder.eq('user_id', userId);
-    }
+      return query;
+    };
 
-    const { data: employees, error } = await builder;
+    const rosterResult = await buildRosterQuery();
 
-    if (error) {
-      context.log?.error?.('instructors failed to fetch roster', { message: error.message });
+    if (rosterResult.error) {
+      context.log?.error?.('instructors failed to fetch roster', { message: rosterResult.error.message });
       return respond(context, 500, { message: 'failed_to_load_instructors' });
     }
+
+    const employees = rosterResult.data;
 
     if (!Array.isArray(employees) || employees.length === 0) {
       return respond(context, 200, []);
