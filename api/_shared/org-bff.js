@@ -223,9 +223,6 @@ export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey }) {
         Authorization: `Bearer ${dedicatedKey}`,
       },
     },
-    db: {
-      schema: 'public',
-    },
   });
 }
 
@@ -290,3 +287,4 @@ export async function resolveTenantClient(context, supabase, env, orgId) {
     return { error: buildTenantError('failed_to_connect_tenant') };
   }
 }
+  
