@@ -372,6 +372,56 @@ export default async function (context, req) {
       return respond(context, 404, { message: 'instructor_not_found' });
     }
 
+    // Handle instructor_profile updates (working_days, break_time_minutes)
+    if (body.working_days !== undefined || body.break_time_minutes !== undefined) {
+      const profilePayload = { employee_id: instructorId };
+      if (body.working_days !== undefined) profilePayload.working_days = body.working_days;
+      if (body.break_time_minutes !== undefined) profilePayload.break_time_minutes = body.break_time_minutes;
+
+      const { error: profileError } = await tenantClient
+        .from('instructor_profiles')
+        .upsert(profilePayload, { onConflict: 'employee_id' });
+
+      if (profileError) {
+        context.log?.error?.('instructors failed to upsert instructor_profile', { message: profileError.message, instructorId });
+        return respond(context, 500, { message: 'failed_to_update_instructor_profile' });
+      }
+    }
+
+    // Handle service_capabilities updates
+    if (body.service_capabilities !== undefined) {
+      // Delete existing capabilities
+      const { error: deleteError } = await tenantClient
+        .from('instructor_service_capabilities')
+        .delete()
+        .eq('employee_id', instructorId);
+
+      if (deleteError) {
+        context.log?.error?.('instructors failed to delete existing service_capabilities', { message: deleteError.message, instructorId });
+        return respond(context, 500, { message: 'failed_to_delete_service_capabilities' });
+      }
+
+      // Insert new capabilities (if any provided)
+      if (Array.isArray(body.service_capabilities) && body.service_capabilities.length > 0) {
+        const capabilitiesWithEmployeeId = body.service_capabilities.map(cap => ({
+          employee_id: instructorId,
+          service_id: cap.service_id,
+          max_students: cap.max_students || 1,
+          base_rate: cap.base_rate || 0,
+          metadata: cap.metadata || {},
+        }));
+
+        const { error: insertError } = await tenantClient
+          .from('instructor_service_capabilities')
+          .insert(capabilitiesWithEmployeeId);
+
+        if (insertError) {
+          context.log?.error?.('instructors failed to insert service_capabilities', { message: insertError.message, instructorId });
+          return respond(context, 500, { message: 'failed_to_insert_service_capabilities' });
+        }
+      }
+    }
+
     // Audit log: instructor updated
     await logAuditEvent(supabase, {
       orgId,

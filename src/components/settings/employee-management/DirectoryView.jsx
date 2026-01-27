@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar.jsx';
-import { Loader2, UserPlus, UserX, RotateCcw, Check, ChevronDown, MailPlus } from 'lucide-react';
+import { Loader2, UserPlus, UserX, RotateCcw, Check, ChevronDown, MailPlus, Settings, Briefcase } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client';
 import { useInstructorTypes } from '@/features/instructors/hooks/useInstructorTypes.js';
@@ -16,6 +16,8 @@ import {
 import { cn } from '@/lib/utils';
 import { useInstructors } from '@/hooks/useOrgData.js';
 import InviteUserDialog from './InviteUserDialog.jsx';
+import EditInstructorProfileDialog from './EditInstructorProfileDialog.jsx';
+import EditServiceCapabilitiesDialog from './EditServiceCapabilitiesDialog.jsx';
 
 const REQUEST = { idle: 'idle', loading: 'loading', error: 'error' };
 const SAVE = { idle: 'idle', saving: 'saving', error: 'error' };
@@ -26,6 +28,9 @@ export default function DirectoryView({ session, orgId, canLoad }) {
   const [loadError, setLoadError] = useState('');
   const [saveState, setSaveState] = useState(SAVE.idle);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [showProfileDialog, setShowProfileDialog] = useState(false);
+  const [showCapabilitiesDialog, setShowCapabilitiesDialog] = useState(false);
+  const [editingInstructor, setEditingInstructor] = useState(null);
 
   const { typeOptions, loadTypes } = useInstructorTypes();
   const { instructors, loadingInstructors, instructorsError, refetchInstructors } = useInstructors({
@@ -87,6 +92,16 @@ export default function DirectoryView({ session, orgId, canLoad }) {
     } finally {
       setSaveState(SAVE.idle);
     }
+  };
+
+  const handleEditProfile = (instructor) => {
+    setEditingInstructor(instructor);
+    setShowProfileDialog(true);
+  };
+
+  const handleEditCapabilities = (instructor) => {
+    setEditingInstructor(instructor);
+    setShowCapabilitiesDialog(true);
   };
 
   const handleDeactivate = async (instructor) => {
@@ -329,16 +344,40 @@ export default function DirectoryView({ session, orgId, canLoad }) {
                     </div>
                   </div>
 
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDeactivate(instructor)}
-                    disabled={isSaving}
-                    className="gap-2 h-10 w-full sm:w-auto"
-                  >
-                    <UserX className="h-4 w-4" />
-                    <span>השבת</span>
-                  </Button>
+                  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleEditProfile(instructor)}
+                      disabled={isSaving}
+                      className="gap-2 h-10"
+                    >
+                      <Settings className="h-4 w-4" />
+                      <span>פרופיל</span>
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleEditCapabilities(instructor)}
+                      disabled={isSaving}
+                      className="gap-2 h-10"
+                    >
+                      <Briefcase className="h-4 w-4" />
+                      <span>שירותים</span>
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDeactivate(instructor)}
+                      disabled={isSaving}
+                      className="gap-2 h-10"
+                    >
+                      <UserX className="h-4 w-4" />
+                      <span>השבת</span>
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -443,6 +482,30 @@ export default function DirectoryView({ session, orgId, canLoad }) {
         onInviteSent={() => {
           // Refresh directory after invitation sent
           void loadDirectory();
+        }}
+      />
+
+      {/* Profile Dialog */}
+      <EditInstructorProfileDialog
+        open={showProfileDialog}
+        onOpenChange={setShowProfileDialog}
+        instructor={editingInstructor}
+        orgId={orgId}
+        session={session}
+        onSaved={() => {
+          void refetchInstructors();
+        }}
+      />
+
+      {/* Service Capabilities Dialog */}
+      <EditServiceCapabilitiesDialog
+        open={showCapabilitiesDialog}
+        onOpenChange={setShowCapabilitiesDialog}
+        instructor={editingInstructor}
+        orgId={orgId}
+        session={session}
+        onSaved={() => {
+          void refetchInstructors();
         }}
       />
     </div>
