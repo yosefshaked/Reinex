@@ -153,7 +153,8 @@ function useOrgDataResource({
       const url = `${path}${queryString ? `?${queryString}` : ''}`;
       const payload = await authenticatedFetch(url, { session });
       const mapped = stableMapResponse(payload);
-      const normalized = Array.isArray(mapped) ? mapped : [];
+      // Keep objects as-is (e.g., { employees, unlinked_members }); normalize only primitives
+      const normalized = Array.isArray(mapped) ? mapped : (typeof mapped === 'object' && mapped !== null ? mapped : []);
       setData(normalized);
     } catch (err) {
       if (err?.name === 'AbortError') {
@@ -199,6 +200,13 @@ export function useInstructors(options = {}) {
   // API returns either an array (legacy) or an object { employees, unlinked_members }
   const instructors = Array.isArray(data) ? data : (data?.employees || []);
   const unlinkedMembers = Array.isArray(data?.unlinked_members) ? data.unlinked_members : [];
+
+  // Debug logging
+  if (includeUnlinked) {
+    console.log('[useInstructors] includeUnlinked=true, data:', data);
+    console.log('[useInstructors] instructors:', instructors);
+    console.log('[useInstructors] unlinkedMembers:', unlinkedMembers);
+  }
 
   return {
     instructors,
