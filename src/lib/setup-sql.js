@@ -250,7 +250,9 @@ CREATE INDEX IF NOT EXISTS student_guardians_student_id_idx
 CREATE TABLE IF NOT EXISTS public."Employees" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "user_id" uuid,
-  "name" text NOT NULL,
+  "first_name" text NOT NULL,
+  "middle_name" text,
+  "last_name" text,
   "employee_id" text NOT NULL,
   "employee_type" text,
   "current_rate" numeric,
@@ -271,7 +273,9 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
 
 ALTER TABLE public."Employees"
   ADD COLUMN IF NOT EXISTS "user_id" uuid,
-  ADD COLUMN IF NOT EXISTS "name" text,
+  ADD COLUMN IF NOT EXISTS "first_name" text,
+  ADD COLUMN IF NOT EXISTS "middle_name" text,
+  ADD COLUMN IF NOT EXISTS "last_name" text,
   ADD COLUMN IF NOT EXISTS "employee_id" text,
   ADD COLUMN IF NOT EXISTS "employee_type" text,
   ADD COLUMN IF NOT EXISTS "current_rate" numeric,
@@ -287,12 +291,6 @@ ALTER TABLE public."Employees"
   ADD COLUMN IF NOT EXISTS "employment_scope" text,
   ADD COLUMN IF NOT EXISTS "instructor_types" uuid[],
   ADD COLUMN IF NOT EXISTS "metadata" jsonb;
-
--- Add canonical name fields for future use
-ALTER TABLE public."Employees"
-  ADD COLUMN IF NOT EXISTS "first_name" text,
-  ADD COLUMN IF NOT EXISTS "middle_name" text,
-  ADD COLUMN IF NOT EXISTS "last_name" text;
 
 CREATE INDEX IF NOT EXISTS "Employees_name_idx" ON public."Employees" ("first_name", "last_name");
 CREATE INDEX IF NOT EXISTS "Employees_user_id_idx" ON public."Employees" ("user_id");

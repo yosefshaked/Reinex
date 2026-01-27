@@ -165,9 +165,9 @@ export default async function (context, req) {
       if (!isMemberRole(role)) {
         // Admin without specified instructor - must be an instructor themselves
         const adminInstructorCheck = await tenantClient
-          .from('Instructors')
+          .from('Employees')
           .select('id, is_active')
-          .eq('id', normalizedUserId)
+          .eq('user_id', normalizedUserId)
           .maybeSingle();
 
         if (adminInstructorCheck.error) {
@@ -190,9 +190,9 @@ export default async function (context, req) {
 
   if (!sessionInstructorId && !isMemberRole(role) && normalizedUserId) {
     const instructorLookup = await tenantClient
-      .from('Instructors')
+      .from('Employees')
       .select('id, is_active')
-      .eq('id', normalizedUserId)
+      .eq('user_id', normalizedUserId)
       .maybeSingle();
 
     if (instructorLookup.error) {
@@ -208,7 +208,7 @@ export default async function (context, req) {
   // For loose reports, or when attributing to the acting user, ensure the instructor exists to avoid FK errors
   if (sessionInstructorId && (isLoose || sessionInstructorId === normalizedUserId)) {
     const instructorCheck = await tenantClient
-      .from('Instructors')
+      .from('Employees')
       .select('id')
       .eq('id', sessionInstructorId)
       .maybeSingle();
