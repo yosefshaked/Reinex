@@ -91,11 +91,18 @@ export default async function (context, req) {
     }
 
     const includeInactive = normalizeString(req?.query?.include_inactive).toLowerCase() === 'true';
+    const includeUnlinkedMembers = normalizeString(req?.query?.include_unlinked_members).toLowerCase() === 'true';
 
-    const buildRosterQuery = () => {
+    const buildRosterQuery = (includeInstructorTypes = true) => {
+      // Start with base columns that should always exist
+      const baseColumns = 'id, user_id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata';
+      const selectColumns = includeInstructorTypes 
+        ? `${baseColumns}, instructor_types`
+        : baseColumns;
+
       let query = tenantClient
         .from('Employees')
-        .select('id, user_id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
+        .select(selectColumns)
         .order('first_name', { ascending: true });
 
       if (!includeInactive) {
@@ -110,7 +117,13 @@ export default async function (context, req) {
       return query;
     };
 
-    const rosterResult = await buildRosterQuery();
+    let rosterResult = await buildRosterQuery(true);
+
+    // If instructor_types column doesn't exist (42703), retry without it for backward compatibility
+    if (rosterResult.error && rosterResult.error?.code === '42703') {
+      context.log?.warn?.('instructors fallback: instructor_types column missing, retrying without it');
+      rosterResult = await buildRosterQuery(false);
+    }
 
     if (rosterResult.error) {
       context.log?.error?.('instructors failed to fetch roster', { message: rosterResult.error.message });
@@ -158,6 +171,52 @@ export default async function (context, req) {
       instructor_profile: profilesMap.get(emp.id) || null,
       service_capabilities: capabilitiesMap.get(emp.id) || [],
     }));
+
+    // Optionally surface org members who do not have an employee row yet (admin only)
+    if (includeUnlinkedMembers) {
+      if (!isAdmin) {
+        return respond(context, 403, { message: 'forbidden' });
+      }
+
+      const employeeUserIds = new Set(enriched.map(e => e.user_id).filter(Boolean));
+
+      const { data: memberships, error: membershipError } = await supabase
+        .from('org_memberships')
+        .select('user_id, role')
+        .eq('org_id', orgId);
+
+      if (membershipError) {
+        context.log?.error?.('instructors failed to load org memberships', { message: membershipError.message });
+        return respond(context, 500, { message: 'failed_to_load_org_members' });
+      }
+
+      const missingMembers = (memberships || []).filter(m => !employeeUserIds.has(m.user_id));
+      let profiles = [];
+
+      if (missingMembers.length) {
+        const memberIds = missingMembers.map(m => m.user_id);
+        const { data: profileRows, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, full_name, email')
+          .in('id', memberIds);
+
+        if (profileError) {
+          context.log?.warn?.('instructors failed to load profiles for missing members', { message: profileError.message });
+        } else {
+          profiles = profileRows || [];
+        }
+      }
+
+      const profileMap = new Map(profiles.map(p => [p.id, p]));
+
+      const unlinkedMembers = missingMembers.map(m => ({
+        user_id: m.user_id,
+        role: m.role,
+        profile: profileMap.get(m.user_id) || null,
+      }));
+
+      return respond(context, 200, { employees: enriched, unlinked_members: unlinkedMembers });
+    }
 
     return respond(context, 200, enriched);
   }

@@ -180,8 +180,11 @@ function useOrgDataResource({
 }
 
 export function useInstructors(options = {}) {
-  const { includeInactive = false, enabled = true, orgId, session, resetOnDisable = true } = options;
-  const params = useMemo(() => ({ include_inactive: includeInactive ? 'true' : undefined }), [includeInactive]);
+  const { includeInactive = false, includeUnlinked = false, enabled = true, orgId, session, resetOnDisable = true } = options;
+  const params = useMemo(() => ({
+    include_inactive: includeInactive ? 'true' : undefined,
+    include_unlinked_members: includeUnlinked ? 'true' : undefined,
+  }), [includeInactive, includeUnlinked]);
 
   const { data, loading, error, refetch } = useOrgDataResource({
     resource: 'instructors',
@@ -193,8 +196,13 @@ export function useInstructors(options = {}) {
     params,
   });
 
+  // API returns either an array (legacy) or an object { employees, unlinked_members }
+  const instructors = Array.isArray(data) ? data : (data?.employees || []);
+  const unlinkedMembers = Array.isArray(data?.unlinked_members) ? data.unlinked_members : [];
+
   return {
-    instructors: data,
+    instructors,
+    unlinkedMembers,
     loadingInstructors: loading,
     instructorsError: error,
     refetchInstructors: refetch,
