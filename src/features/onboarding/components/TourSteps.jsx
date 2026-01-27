@@ -32,7 +32,7 @@ export const adminTourSteps = [
   {
     element: 'body',
     popover: {
-      title: 'ברוכים הבאים לתותיעוד! 👋',
+      title: 'ברוכים הבאים לריינקס! 👋',
       description: 'מערכת לניהול ותיעוד מפגשים עם תלמידים. בואו נעשה סיור קצר כדי להכיר את התכונות העיקריות.',
       side: 'over',
       align: 'center',
@@ -89,7 +89,7 @@ export const memberTourSteps = [
   {
     element: 'body',
     popover: {
-      title: 'ברוכים הבאים לתותיעוד! 👋',
+      title: 'ברוכים הבאים לריינקס! 👋',
       description: 'מערכת לתיעוד ומעקב אחר המפגשים שלכם עם תלמידים. בואו נעשה סיור קצר כדי להכיר את המערכת.',
       side: 'over',
       align: 'center',

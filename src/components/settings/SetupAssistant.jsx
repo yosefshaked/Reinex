@@ -343,7 +343,7 @@ export default function SetupAssistant() {
         <StepSection
           number={1}
           title="הכנת בסיס הנתונים"
-          description="הריצו את הסקריפט הקנוני ב-Supabase כדי ליצור את הסכימה והמדיניות עבור תותיעוד."
+          description="הריצו את הסקריפט הקנוני ב-Supabase כדי ליצור את הסכימה והמדיניות עבור ריינקס."
         >
           <div className="space-y-4 text-sm text-slate-600">
             <p>
@@ -352,7 +352,7 @@ export default function SetupAssistant() {
             <CodeBlock
               title="סקריפט ההקמה הקנוני"
               code={SETUP_SQL_SCRIPT}
-              ariaLabel="העתק את סקריפט ההקמה של תותיעוד"
+              ariaLabel="העתק את סקריפט ההקמה של ריינקס"
             />
             <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
               בסוף ההרצה תופיע תוצאה בשם "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)". העתקו אותה – נשתמש בה בשלב הבא.

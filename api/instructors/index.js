@@ -93,8 +93,8 @@ export default async function (context, req) {
 
     let builder = tenantClient
       .from('Employees')
-      .select('id, name, email, phone, is_active, notes, metadata, instructor_types')
-      .order('name', { ascending: true });
+      .select('id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
+      .order('first_name', { ascending: true });
 
     // Keep the /instructors contract scoped to instructor employees.
     // We treat NULL as instructor as well to ease incremental migrations.
@@ -150,7 +150,9 @@ export default async function (context, req) {
     }
 
     // Fetch profile defaults if name/email not provided
-    const providedName = validation.name;
+    const providedFirstName = validation.firstName;
+    const providedMiddleName = validation.middleName;
+    const providedLastName = validation.lastName;
     const providedEmail = validation.email;
     const providedPhone = validation.phone;
     const notes = validation.notes;
@@ -169,9 +171,16 @@ export default async function (context, req) {
       // Intentionally ignore profile fetch errors; fallback to provided values.
     }
 
+    // Split profile name if we need fallback for first/last
+    const nameParts = profileName ? profileName.split(' ') : [];
+    const fallbackFirst = nameParts[0] || providedEmail || profileEmail || 'משתמש';
+    const fallbackLast = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+
     const insertPayload = {
       id: targetUserId,
-      name: providedName || profileName || providedEmail || profileEmail || targetUserId,
+      first_name: providedFirstName || fallbackFirst,
+      middle_name: providedMiddleName || (nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : null),
+      last_name: providedLastName || fallbackLast || targetUserId,
       email: providedEmail || profileEmail || null,
       phone: providedPhone || null,
       notes: notes || null,
@@ -182,7 +191,7 @@ export default async function (context, req) {
     const { data, error } = await tenantClient
       .from('Employees')
       .upsert(insertPayload, { onConflict: 'id' })
-      .select('id, name, email, phone, is_active, notes, metadata, instructor_types')
+      .select('id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
       .single();
 
     if (error) {
@@ -201,7 +210,7 @@ export default async function (context, req) {
       resourceType: 'instructor',
       resourceId: data.id,
       details: {
-        instructor_name: data.name,
+        instructor_name: `${data.first_name} ${data.last_name}`.trim(),
         instructor_email: data.email,
       },
     });
@@ -298,7 +307,7 @@ export default async function (context, req) {
       .from('Employees')
       .update(updates)
       .eq('id', instructorId)
-      .select('id, name, email, phone, is_active, notes, metadata, instructor_types')
+      .select('id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
       .maybeSingle();
 
     if (error) {
@@ -322,7 +331,7 @@ export default async function (context, req) {
       resourceId: instructorId,
       details: {
         updated_fields: changedFields,
-        instructor_name: data.name,
+        instructor_name: `${data.first_name} ${data.last_name}`.trim(),
       },
     });
 
