@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useInstructors } from '@/hooks/useOrgData.js';
 import InviteUserDialog from './InviteUserDialog.jsx';
+import CreateManualInstructorDialog from './CreateManualInstructorDialog.jsx';
 import EditInstructorProfileDialog from './EditInstructorProfileDialog.jsx';
 import EditServiceCapabilitiesDialog from './EditServiceCapabilitiesDialog.jsx';
 
@@ -28,6 +29,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
   const [loadError, setLoadError] = useState('');
   const [saveState, setSaveState] = useState(SAVE.idle);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [showManualDialog, setShowManualDialog] = useState(false);
   const [showProfileDialog, setShowProfileDialog] = useState(false);
   const [showCapabilitiesDialog, setShowCapabilitiesDialog] = useState(false);
   const [editingInstructor, setEditingInstructor] = useState(null);
@@ -213,10 +215,16 @@ export default function DirectoryView({ session, orgId, canLoad }) {
           <h3 className="text-lg font-semibold text-slate-900">מדריך עובדים</h3>
           <p className="text-sm text-slate-600">נהל עובדים והזמן משתמשים חדשים לארגון</p>
         </div>
-        <Button onClick={() => setShowInviteDialog(true)} size="sm">
-          <MailPlus className="mr-2 h-4 w-4" />
-          הזמן משתמש
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setShowManualDialog(true)} size="sm" variant="outline">
+            <UserPlus className="mr-2 h-4 w-4" />
+            הוסף ידני
+          </Button>
+          <Button onClick={() => setShowInviteDialog(true)} size="sm">
+            <MailPlus className="mr-2 h-4 w-4" />
+            הזמן משתמש
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="active" className="w-full" dir="rtl">
@@ -482,6 +490,17 @@ export default function DirectoryView({ session, orgId, canLoad }) {
         onInviteSent={() => {
           // Refresh directory after invitation sent
           void loadDirectory();
+        }}
+      />
+
+      {/* Manual Instructor Dialog */}
+      <CreateManualInstructorDialog
+        open={showManualDialog}
+        onOpenChange={setShowManualDialog}
+        orgId={orgId}
+        session={session}
+        onSuccess={() => {
+          void refetchInstructors();
         }}
       />
 

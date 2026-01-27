@@ -225,14 +225,22 @@ const PHONE_PATTERN = /^[0-9+\-()\s]{6,20}$/;
 
 export function validateInstructorCreate(body) {
   const userId = normalizeString(body?.user_id || body?.userId);
-  if (!isUUID(userId)) {
-    return { error: 'missing_user_id' };
+  const isManual = !userId;
+
+  if (userId && !isUUID(userId)) {
+    return { error: 'invalid_user_id' };
   }
 
   // Support both camelCase and snake_case for name fields
   const firstName = normalizeString(body?.first_name || body?.firstName) || '';
   const middleName = normalizeString(body?.middle_name || body?.middleName) || '';
   const lastName = normalizeString(body?.last_name || body?.lastName) || '';
+
+  // For manual employees, name is required
+  if (isManual && !firstName) {
+    return { error: 'first_name_required_for_manual_employee' };
+  }
+
   const emailRaw = normalizeString(body?.email).toLowerCase();
   const email = emailRaw ? (isEmail(emailRaw) ? emailRaw : null) : '';
   const phoneRaw = normalizeString(body?.phone);
@@ -243,7 +251,8 @@ export function validateInstructorCreate(body) {
   }
 
   return {
-    userId,
+    userId, // null for manual
+    isManual,
     // empty strings mean "not provided"; nulls mean "provided but invalid"
     firstName,
     middleName,

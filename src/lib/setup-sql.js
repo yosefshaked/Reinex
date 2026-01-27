@@ -249,6 +249,7 @@ CREATE INDEX IF NOT EXISTS student_guardians_student_id_idx
 
 CREATE TABLE IF NOT EXISTS public."Employees" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+  "user_id" uuid,
   "name" text NOT NULL,
   "employee_id" text NOT NULL,
   "employee_type" text,
@@ -269,6 +270,7 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
 );
 
 ALTER TABLE public."Employees"
+  ADD COLUMN IF NOT EXISTS "user_id" uuid,
   ADD COLUMN IF NOT EXISTS "name" text,
   ADD COLUMN IF NOT EXISTS "employee_id" text,
   ADD COLUMN IF NOT EXISTS "employee_type" text,
@@ -293,6 +295,7 @@ ALTER TABLE public."Employees"
   ADD COLUMN IF NOT EXISTS "last_name" text;
 
 CREATE INDEX IF NOT EXISTS "Employees_name_idx" ON public."Employees" ("first_name", "last_name");
+CREATE INDEX IF NOT EXISTS "Employees_user_id_idx" ON public."Employees" ("user_id");
 
 -- -----------------------------------------------------------------
 -- public.Services (service catalog)

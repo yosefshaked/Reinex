@@ -93,7 +93,7 @@ export default async function (context, req) {
 
     let builder = tenantClient
       .from('Employees')
-      .select('id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
+      .select('id, user_id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
       .order('first_name', { ascending: true });
 
     // Keep the /instructors contract scoped to instructor employees.
@@ -104,9 +104,9 @@ export default async function (context, req) {
       builder = builder.eq('is_active', true);
     }
 
-    // Non-admin users can only fetch their own instructor record
+    // Non-admin users can only fetch their own instructor record by user_id
     if (!isAdmin) {
-      builder = builder.eq('id', userId);
+      builder = builder.eq('user_id', userId);
     }
 
     const { data: employees, error } = await builder;
@@ -171,22 +171,25 @@ export default async function (context, req) {
     }
 
     const targetUserId = validation.userId;
+    const isManual = validation.isManual;
 
-    // Verify target user is a member of the org in control DB
-    const { data: membership, error: membershipError } = await supabase
-      .from('org_memberships')
-      .select('user_id')
-      .eq('org_id', orgId)
-      .eq('user_id', targetUserId)
-      .maybeSingle();
+    if (!isManual) {
+      // Verify target user is a member of the org in control DB
+      const { data: membership, error: membershipError } = await supabase
+        .from('org_memberships')
+        .select('user_id')
+        .eq('org_id', orgId)
+        .eq('user_id', targetUserId)
+        .maybeSingle();
 
-    if (membershipError) {
-      context.log?.error?.('instructors failed to verify target membership', { message: membershipError.message });
-      return respond(context, 500, { message: 'failed_to_verify_target_membership' });
-    }
+      if (membershipError) {
+        context.log?.error?.('instructors failed to verify target membership', { message: membershipError.message });
+        return respond(context, 500, { message: 'failed_to_verify_target_membership' });
+      }
 
-    if (!membership) {
-      return respond(context, 400, { message: 'user_not_in_organization' });
+      if (!membership) {
+        return respond(context, 400, { message: 'user_not_in_organization' });
+      }
     }
 
     // Fetch profile defaults if name/email not provided
@@ -199,16 +202,19 @@ export default async function (context, req) {
 
     let profileName = '';
     let profileEmail = '';
-    try {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id, email, full_name')
-        .eq('id', targetUserId)
-        .maybeSingle();
-      profileName = normalizeString(profile?.full_name);
-      profileEmail = normalizeString(profile?.email).toLowerCase();
-    } catch {
-      // Intentionally ignore profile fetch errors; fallback to provided values.
+    
+    if (!isManual) {
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id, email, full_name')
+          .eq('id', targetUserId)
+          .maybeSingle();
+        profileName = normalizeString(profile?.full_name);
+        profileEmail = normalizeString(profile?.email).toLowerCase();
+      } catch {
+        // Intentionally ignore profile fetch errors; fallback to provided values.
+      }
     }
 
     // Split profile name if we need fallback for first/last
@@ -217,10 +223,10 @@ export default async function (context, req) {
     const fallbackLast = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
 
     const insertPayload = {
-      id: targetUserId,
+      ...( !isManual && { user_id: targetUserId } ),
       first_name: providedFirstName || fallbackFirst,
       middle_name: providedMiddleName || (nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : null),
-      last_name: providedLastName || fallbackLast || targetUserId,
+      last_name: providedLastName || fallbackLast || (isManual ? '' : targetUserId),
       email: providedEmail || profileEmail || null,
       phone: providedPhone || null,
       notes: notes || null,
@@ -230,8 +236,8 @@ export default async function (context, req) {
 
     const { data, error } = await tenantClient
       .from('Employees')
-      .upsert(insertPayload, { onConflict: 'id' })
-      .select('id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
+      .insert(insertPayload)
+      .select('id, user_id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
       .single();
 
     if (error) {
