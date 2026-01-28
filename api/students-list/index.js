@@ -15,14 +15,17 @@ import {
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import {
   coerceBooleanFlag,
-  coerceDayOfWeek,
   coerceIdentityNumber,
   coerceOptionalText,
-  coerceSessionTime,
   coerceTags,
   coerceEmail,
   validateAssignedInstructor,
   validateIsraeliPhone,
+  coerceOptionalDate,
+  coerceNotificationMethod,
+  coerceOptionalNumeric,
+  coerceOptionalJsonb,
+  coerceOnboardingStatus,
 } from '../_shared/student-validation.js';
 
 function extractStudentId(context, req, body) {
@@ -70,7 +73,27 @@ function buildStudentPayload(body) {
     return { error: 'missing_last_name' };
   }
 
+  // Assigned Instructor (Optional - for waitlist management)
+  const rawInstructor = body?.assigned_instructor_id ?? body?.assignedInstructorId ?? null;
+  const { value: instructorId, valid: instructorValid } = validateAssignedInstructor(rawInstructor);
+  if (!instructorValid) {
+    return { error: 'invalid_assigned_instructor' };
+  }
+
+  // Guardian ID (Optional) - Note: Using many-to-many relationship via student_guardians table
+  const guardianId = body?.guardian_id ?? body?.guardianId ?? null;
+  if (guardianId && typeof guardianId !== 'string') {
+    return { error: 'invalid_guardian_id' };
+  }
+  if (guardianId && !UUID_PATTERN.test(guardianId)) {
+    return { error: 'invalid_guardian_id' };
+  }
+
+  // Phone validation: required if no guardian
   const phoneResult = validateIsraeliPhone(body?.phone);
+  if (!guardianId && !phoneResult.value) {
+    return { error: 'phone_required_without_guardian' };
+  }
   if (!phoneResult.valid) {
     return { error: 'invalid_phone' };
   }
@@ -80,41 +103,44 @@ function buildStudentPayload(body) {
     return { error: 'invalid_email' };
   }
 
-  const rawInstructor = body?.assigned_instructor_id ?? body?.assignedInstructorId ?? null;
-  const { value: instructorId, valid } = validateAssignedInstructor(rawInstructor);
-
-  if (!valid) {
-    return { error: 'invalid_assigned_instructor' };
+  const identityCandidate = body?.identity_number ?? body?.identityNumber ?? body?.national_id ?? body?.nationalId;
+  const identityNumberResult = coerceIdentityNumber(identityCandidate);
+  if (!identityNumberResult.valid) {
+    return { error: 'invalid_identity_number' };
+  }
+  if (!identityNumberResult.value) {
+    return { error: 'missing_identity_number' };
   }
 
-  const contactNameResult = coerceOptionalText(body?.contact_name ?? body?.contactName);
-  if (!contactNameResult.valid) {
-    return { error: 'invalid_contact_name' };
+  // New Reinex fields
+  const dateOfBirthResult = coerceOptionalDate(body?.date_of_birth ?? body?.dateOfBirth);
+  if (!dateOfBirthResult.valid) {
+    return { error: 'invalid_date_of_birth' };
   }
 
-  const contactPhoneResult = validateIsraeliPhone(body?.contact_phone ?? body?.contactPhone);
-  if (!contactPhoneResult.valid) {
-    return { error: 'invalid_contact_phone' };
+  const notificationMethodResult = coerceNotificationMethod(body?.default_notification_method ?? body?.notificationMethod);
+  if (!notificationMethodResult.valid) {
+    return { error: 'invalid_notification_method' };
   }
 
-  const defaultServiceResult = coerceOptionalText(body?.default_service ?? body?.defaultService);
-  if (!defaultServiceResult.valid) {
-    return { error: 'invalid_default_service' };
+  const specialRateResult = coerceOptionalNumeric(body?.special_rate ?? body?.specialRate);
+  if (!specialRateResult.valid) {
+    return { error: 'invalid_special_rate' };
   }
 
-  const dayResult = coerceDayOfWeek(body?.default_day_of_week ?? body?.defaultDayOfWeek);
-  if (!dayResult.valid) {
-    return { error: 'invalid_default_day' };
+  const medicalFlagsResult = coerceOptionalJsonb(body?.medical_flags ?? body?.medicalFlags);
+  if (!medicalFlagsResult.valid) {
+    return { error: 'invalid_medical_flags' };
   }
 
-  const sessionTimeResult = coerceSessionTime(body?.default_session_time ?? body?.defaultSessionTime);
-  if (!sessionTimeResult.valid) {
-    return { error: 'invalid_default_session_time' };
+  const onboardingStatusResult = coerceOnboardingStatus(body?.onboarding_status ?? body?.onboardingStatus);
+  if (!onboardingStatusResult.valid) {
+    return { error: 'invalid_onboarding_status' };
   }
 
-  const notesResult = coerceOptionalText(body?.notes);
-  if (!notesResult.valid) {
-    return { error: 'invalid_notes' };
+  const notesInternalResult = coerceOptionalText(body?.notes_internal ?? body?.notesInternal);
+  if (!notesInternalResult.valid) {
+    return { error: 'invalid_notes_internal' };
   }
 
   const tagsResult = coerceTags(body?.tags);
@@ -126,19 +152,7 @@ function buildStudentPayload(body) {
   if (!isActiveResult.valid) {
     return { error: 'invalid_is_active' };
   }
-
   const isActiveValue = isActiveResult.provided ? Boolean(isActiveResult.value) : true;
-
-  const identityCandidate = body?.identity_number ?? body?.identityNumber ?? body?.national_id ?? body?.nationalId;
-  const identityNumberResult = coerceIdentityNumber(identityCandidate);
-  if (!identityNumberResult.valid) {
-    return { error: 'invalid_identity_number' };
-  }
-
-  // Identity number is required
-  if (!identityNumberResult.value) {
-    return { error: 'missing_identity_number' };
-  }
 
   return {
     payload: {
@@ -146,18 +160,18 @@ function buildStudentPayload(body) {
       middle_name: middleName || null,
       last_name: lastName,
       identity_number: identityNumberResult.value,
+      date_of_birth: dateOfBirthResult.value,
+      assigned_instructor_id: instructorId,
       phone: phoneResult.value,
       email: emailResult.value,
-      contact_name: contactNameResult.value,
-      contact_phone: contactPhoneResult.value,
-      assigned_instructor_id: instructorId,
-      default_day_of_week: dayResult.value,
-      default_session_time: sessionTimeResult.value,
-      default_service: defaultServiceResult.value,
-      notes: notesResult.value,
-      tags: tagsResult.value,
+      default_notification_method: notificationMethodResult.value,
+      special_rate: specialRateResult.value,
+      medical_flags: medicalFlagsResult.value,
+      onboarding_status: onboardingStatusResult.value,
+      notes_internal: notesInternalResult.value,
       is_active: isActiveValue,
     },
+    guardianId: guardianId, // Return separately for student_guardians insertion
   };
 }
 
@@ -218,25 +232,13 @@ function buildStudentUpdates(body) {
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'contact_name') || Object.prototype.hasOwnProperty.call(body, 'contactName')) {
-    const { value, valid } = coerceOptionalText(
-      Object.prototype.hasOwnProperty.call(body, 'contact_name') ? body.contact_name : body.contactName,
-    );
-    if (!valid) {
-      return { error: 'invalid_contact_name' };
-    }
-    updates.contact_name = value;
-    hasAny = true;
+    // DEPRECATED: contact_name removed in Reinex - use guardians table instead
+    void 0; // No logging in helper function - warn in handler if needed
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'contact_phone') || Object.prototype.hasOwnProperty.call(body, 'contactPhone')) {
-    const { value, valid } = validateIsraeliPhone(
-      Object.prototype.hasOwnProperty.call(body, 'contact_phone') ? body.contact_phone : body.contactPhone,
-    );
-    if (!valid) {
-      return { error: 'invalid_contact_phone' };
-    }
-    updates.contact_phone = value;
-    hasAny = true;
+    // DEPRECATED: contact_phone removed in Reinex - use guardians table instead
+    void 0; // No logging in helper function - warn in handler if needed
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'phone')) {
@@ -257,37 +259,91 @@ function buildStudentUpdates(body) {
     hasAny = true;
   }
 
-  if (Object.prototype.hasOwnProperty.call(body, 'default_service') || Object.prototype.hasOwnProperty.call(body, 'defaultService')) {
-    const { value, valid } = coerceOptionalText(
-      Object.prototype.hasOwnProperty.call(body, 'default_service') ? body.default_service : body.defaultService,
+  // Date of birth
+  if (Object.prototype.hasOwnProperty.call(body, 'date_of_birth') || Object.prototype.hasOwnProperty.call(body, 'dateOfBirth')) {
+    const { value, valid } = coerceOptionalDate(
+      Object.prototype.hasOwnProperty.call(body, 'date_of_birth') ? body.date_of_birth : body.dateOfBirth
     );
     if (!valid) {
-      return { error: 'invalid_default_service' };
+      return { error: 'invalid_date_of_birth' };
     }
-    updates.default_service = value;
+    updates.date_of_birth = value;
     hasAny = true;
+  }
+
+  // Notification method
+  if (Object.prototype.hasOwnProperty.call(body, 'default_notification_method') || Object.prototype.hasOwnProperty.call(body, 'notificationMethod')) {
+    const { value, valid } = coerceNotificationMethod(
+      Object.prototype.hasOwnProperty.call(body, 'default_notification_method') ? body.default_notification_method : body.notificationMethod
+    );
+    if (!valid) {
+      return { error: 'invalid_notification_method' };
+    }
+    updates.default_notification_method = value;
+    hasAny = true;
+  }
+
+  // Special rate
+  if (Object.prototype.hasOwnProperty.call(body, 'special_rate') || Object.prototype.hasOwnProperty.call(body, 'specialRate')) {
+    const { value, valid } = coerceOptionalNumeric(
+      Object.prototype.hasOwnProperty.call(body, 'special_rate') ? body.special_rate : body.specialRate
+    );
+    if (!valid) {
+      return { error: 'invalid_special_rate' };
+    }
+    updates.special_rate = value;
+    hasAny = true;
+  }
+
+  // Medical flags
+  if (Object.prototype.hasOwnProperty.call(body, 'medical_flags') || Object.prototype.hasOwnProperty.call(body, 'medicalFlags')) {
+    const { value, valid } = coerceOptionalJsonb(
+      Object.prototype.hasOwnProperty.call(body, 'medical_flags') ? body.medical_flags : body.medicalFlags
+    );
+    if (!valid) {
+      return { error: 'invalid_medical_flags' };
+    }
+    updates.medical_flags = value;
+    hasAny = true;
+  }
+
+  // Onboarding status
+  if (Object.prototype.hasOwnProperty.call(body, 'onboarding_status') || Object.prototype.hasOwnProperty.call(body, 'onboardingStatus')) {
+    const { value, valid } = coerceOnboardingStatus(
+      Object.prototype.hasOwnProperty.call(body, 'onboarding_status') ? body.onboarding_status : body.onboardingStatus
+    );
+    if (!valid) {
+      return { error: 'invalid_onboarding_status' };
+    }
+    updates.onboarding_status = value;
+    hasAny = true;
+  }
+
+  // Internal notes (replaces old 'notes' field)
+  if (Object.prototype.hasOwnProperty.call(body, 'notes_internal') || Object.prototype.hasOwnProperty.call(body, 'notesInternal')) {
+    const { value, valid } = coerceOptionalText(
+      Object.prototype.hasOwnProperty.call(body, 'notes_internal') ? body.notes_internal : body.notesInternal
+    );
+    if (!valid) {
+      return { error: 'invalid_notes_internal' };
+    }
+    updates.notes_internal = value;
+    hasAny = true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'default_service') || Object.prototype.hasOwnProperty.call(body, 'defaultService')) {
+    // DEPRECATED: default_service moved to lesson_templates in Reinex
+    void 0; // No logging in helper function - warn in handler if needed
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'default_day_of_week') || Object.prototype.hasOwnProperty.call(body, 'defaultDayOfWeek')) {
-    const { value, valid } = coerceDayOfWeek(
-      Object.prototype.hasOwnProperty.call(body, 'default_day_of_week') ? body.default_day_of_week : body.defaultDayOfWeek,
-    );
-    if (!valid) {
-      return { error: 'invalid_default_day' };
-    }
-    updates.default_day_of_week = value;
-    hasAny = true;
+    // DEPRECATED: default_day_of_week moved to lesson_templates in Reinex
+    void 0; // No logging in helper function - warn in handler if needed
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'default_session_time') || Object.prototype.hasOwnProperty.call(body, 'defaultSessionTime')) {
-    const { value, valid } = coerceSessionTime(
-      Object.prototype.hasOwnProperty.call(body, 'default_session_time') ? body.default_session_time : body.defaultSessionTime,
-    );
-    if (!valid) {
-      return { error: 'invalid_default_session_time' };
-    }
-    updates.default_session_time = value;
-    hasAny = true;
+    // DEPRECATED: default_session_time moved to lesson_templates in Reinex
+    void 0; // No logging in helper function - warn in handler if needed
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'tags')) {
@@ -524,36 +580,57 @@ export default async function handler(context, req) {
   if (method === 'POST') {
     const normalized = buildStudentPayload(body);
     if (normalized.error) {
+      // Log the actual error code for debugging
+      context.log?.warn?.('students-list validation failed', { 
+        errorCode: normalized.error,
+        body: {
+          firstName: body?.firstName,
+          lastName: body?.lastName,
+          identityNumber: body?.identityNumber,
+          assignedInstructorId: body?.assignedInstructorId,
+          defaultDayOfWeek: body?.defaultDayOfWeek,
+          defaultSessionTime: body?.defaultSessionTime,
+        }
+      });
+      
       const message =
-        normalized.error === 'missing_name'
-          ? 'missing student name'
-          : normalized.error === 'missing_identity_number'
-            ? 'missing identity number'
-          : normalized.error === 'invalid_identity_number'
-            ? 'invalid identity number'
-          : normalized.error === 'invalid_phone'
-            ? 'invalid phone'
-          : normalized.error === 'invalid_email'
-            ? 'invalid email'
-            : normalized.error === 'invalid_assigned_instructor'
-              ? 'invalid assigned instructor id'
-              : normalized.error === 'invalid_contact_name'
-                ? 'invalid contact name'
-                : normalized.error === 'invalid_contact_phone'
-                  ? 'invalid contact phone'
-                  : normalized.error === 'invalid_default_service'
-                    ? 'invalid default service'
-                    : normalized.error === 'invalid_default_day'
-                      ? 'invalid default day of week'
-          : normalized.error === 'invalid_default_session_time'
-            ? 'invalid default session time'
-            : normalized.error === 'invalid_notes'
-              ? 'invalid notes'
-              : normalized.error === 'invalid_tags'
-                ? 'invalid tags'
-                : normalized.error === 'invalid_is_active'
-                  ? 'invalid is_active flag'
-                  : 'invalid payload';
+        normalized.error === 'missing_first_name'
+          ? 'missing first name'
+          : normalized.error === 'missing_last_name'
+            ? 'missing last name'
+          : normalized.error === 'missing_name'
+            ? 'missing student name'
+            : normalized.error === 'missing_identity_number'
+              ? 'missing identity number'
+              : normalized.error === 'invalid_identity_number'
+                ? 'invalid identity number'
+                : normalized.error === 'phone_required_without_guardian'
+                  ? 'phone required when no guardian is connected'
+                  : normalized.error === 'invalid_phone'
+                    ? 'invalid phone'
+                    : normalized.error === 'invalid_email'
+                      ? 'invalid email'
+                      : normalized.error === 'invalid_guardian_id'
+                        ? 'invalid guardian id'
+                        : normalized.error === 'invalid_assigned_instructor'
+                          ? 'invalid assigned instructor id'
+                          : normalized.error === 'invalid_date_of_birth'
+                            ? 'invalid date of birth'
+                            : normalized.error === 'invalid_notification_method'
+                              ? 'invalid notification method'
+                              : normalized.error === 'invalid_special_rate'
+                                ? 'invalid special rate'
+                                : normalized.error === 'invalid_medical_flags'
+                                  ? 'invalid medical flags'
+                                  : normalized.error === 'invalid_onboarding_status'
+                                    ? 'invalid onboarding status'
+                                    : normalized.error === 'invalid_notes_internal'
+                                      ? 'invalid internal notes'
+                                      : normalized.error === 'invalid_tags'
+                                        ? 'invalid tags'
+                                        : normalized.error === 'invalid_is_active'
+                                          ? 'invalid is_active flag'
+                                          : 'invalid payload';
       return respond(context, 400, { message });
     }
 
@@ -594,6 +671,28 @@ export default async function handler(context, req) {
     if (error) {
       context.log?.error?.('students-list failed to create student', { message: error.message });
       return respond(context, 500, { message: 'failed_to_create_student' });
+    }
+
+    // If guardian provided, create the relationship in student_guardians table
+    if (normalized.guardianId) {
+      const { error: relationError } = await tenantClient
+        .from('student_guardians')
+        .insert({
+          student_id: data.id,
+          guardian_id: normalized.guardianId,
+          relationship: 'parent', // Default relationship type
+          is_primary: true, // Mark as primary guardian
+        });
+
+      if (relationError) {
+        context.log?.error?.('students-list failed to create guardian relationship', {
+          message: relationError.message,
+          studentId: data.id,
+          guardianId: normalized.guardianId,
+        });
+        // Student created but guardian relation failed - log but don't fail the request
+        // The student can be edited later to add the guardian
+      }
     }
 
     // Audit log: student created

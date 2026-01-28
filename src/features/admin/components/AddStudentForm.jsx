@@ -6,17 +6,16 @@ import {
   TextField,
   TextAreaField,
   SelectField,
-  PhoneField,
-  DayOfWeekField,
-  ComboBoxField,
-  TimeField
+  PhoneField
 } from '@/components/ui/forms-ui';
 import { validateIsraeliPhone } from '@/components/ui/helpers/phone';
 import StudentTagsField from './StudentTagsField.jsx';
 import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
-import { useStudentNameSuggestions, useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
-import { useInstructors, useServices } from '@/hooks/useOrgData.js';
+import { useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
+import { useGuardians } from '@/hooks/useGuardians.js';
+import { useInstructors } from '@/hooks/useOrgData.js';
+import GuardianSelector from './GuardianSelector.jsx';
 
 const EMPTY_INITIAL_VALUES = Object.freeze({});
 const IDENTITY_NUMBER_PATTERN = /^\d{5,12}$/;
@@ -28,15 +27,16 @@ function buildInitialValuesKey(initialValues) {
     value.middleName ?? '',
     value.lastName ?? '',
     value.identityNumber ?? value.identity_number ?? value.nationalId ?? '',
+    value.dateOfBirth ?? '',
+    value.assignedInstructorId ?? '',
+    value.guardianId ?? '',
     value.phone ?? '',
     value.email ?? '',
-    value.contactName ?? '',
-    value.contactPhone ?? '',
-    value.assignedInstructorId ?? '',
-    value.defaultService ?? '',
-    value.defaultDayOfWeek ?? '',
-    value.defaultSessionTime ?? '',
-    value.notes ?? '',
+    value.notificationMethod ?? 'whatsapp',
+    value.specialRate ?? '',
+    value.medicalFlags ?? '',
+    value.onboardingStatus ?? 'not_started',
+    value.notesInternal ?? '',
     value.tagId ?? '',
     value.isActive === false ? '0' : '1',
   ].join('|');
@@ -52,6 +52,10 @@ export default function AddStudentForm({
   onSubmitDisabledChange = () => {},
   initialValues = EMPTY_INITIAL_VALUES,
 }) {
+  // Fetch guardians and instructors for selection
+  const { guardians, isLoading: loadingGuardians, createGuardian } = useGuardians();
+  const { instructors, isLoading: loadingInstructors } = useInstructors();
+
   // Avoid infinite rerenders when callers pass a new object literal each render (or when defaulting to `{}`)
   const initialValuesKey = useMemo(() => buildInitialValuesKey(initialValues), [initialValues]);
 
@@ -74,14 +78,6 @@ export default function AddStudentForm({
   const initialState = initialStateRef.current;
   const [values, setValues] = useState(() => initialState);
   const [touched, setTouched] = useState({});
-  
-  const { services = [], loadingServices } = useServices();
-  const { instructors = [], loadingInstructors } = useInstructors();
-
-  // Normalize instructors to avoid runtime errors when the hook is still initializing
-  const safeInstructors = useMemo(() => {
-    return Array.isArray(instructors) ? instructors : [];
-  }, [instructors]);
 
   const { duplicate, loading: checkingIdentityNumber, error: identityNumberError } = useIdentityNumberGuard(values.identityNumber);
 
@@ -91,12 +87,18 @@ export default function AddStudentForm({
     return IDENTITY_NUMBER_PATTERN.test(trimmedIdentityNumber);
   }, [trimmedIdentityNumber]);
 
+  // Phone validation: required if no guardian connected
+  const isPhoneRequired = !values.guardianId;
+  const phoneProvidedAndValid = values.phone.trim() && validateIsraeliPhone(values.phone);
+
   const preventSubmitReason = useMemo(() => {
     if (duplicate) return 'duplicate';
     if (identityNumberError) return 'error';
     if (!isIdentityNumberFormatValid) return 'invalid_identity_number';
+    // Phone required if no guardian
+    if (isPhoneRequired && !phoneProvidedAndValid) return 'phone_required';
     return '';
-  }, [duplicate, identityNumberError, isIdentityNumberFormatValid]);
+  }, [duplicate, identityNumberError, isIdentityNumberFormatValid, isPhoneRequired, phoneProvidedAndValid]);
 
   useEffect(() => {
     onSubmitDisabledChange(Boolean(preventSubmitReason) || isSubmitting);
@@ -151,28 +153,22 @@ export default function AddStudentForm({
       firstName: true,
       lastName: true,
       identityNumber: true,
-      contactName: true,
-      contactPhone: true,
+      guardianId: true,
       phone: true,
       email: true,
-      assignedInstructorId: true,
-      defaultDayOfWeek: true,
-      defaultSessionTime: true,
+      notificationMethod: true,
     };
     setTouched(newTouched);
 
     const trimmedFirstName = values.firstName.trim();
     const trimmedLastName = values.lastName.trim();
-    const trimmedContactName = values.contactName.trim();
-    const trimmedContactPhone = values.contactPhone.trim();
     const trimmedIdentityNumberInner = values.identityNumber.trim();
 
     if (duplicate || identityNumberError) {
       return;
     }
 
-    if (!trimmedFirstName || !trimmedLastName || !trimmedIdentityNumberInner ||
-        !values.assignedInstructorId || !values.defaultDayOfWeek || !values.defaultSessionTime) {
+    if (!trimmedFirstName || !trimmedLastName || !trimmedIdentityNumberInner) {
       return;
     }
 
@@ -180,7 +176,13 @@ export default function AddStudentForm({
       return;
     }
 
-    if (!validateIsraeliPhone(trimmedContactPhone)) {
+    // Phone required if no guardian
+    if (!values.guardianId && !values.phone.trim()) {
+      return;
+    }
+
+    // Validate phone if provided
+    if (values.phone.trim() && !validateIsraeliPhone(values.phone)) {
       return;
     }
 
@@ -189,15 +191,15 @@ export default function AddStudentForm({
       middleName: values.middleName.trim() || null,
       lastName: trimmedLastName,
       identityNumber: trimmedIdentityNumberInner,
+      dateOfBirth: values.dateOfBirth || null,
+      guardianId: values.guardianId || null,
       phone: values.phone.trim() || null,
       email: values.email.trim() || null,
-      contactName: trimmedContactName || null,
-      contactPhone: trimmedContactPhone || null,
-      assignedInstructorId: values.assignedInstructorId,
-      defaultService: values.defaultService || null,
-      defaultDayOfWeek: values.defaultDayOfWeek,
-      defaultSessionTime: values.defaultSessionTime,
-      notes: values.notes.trim() || null,
+      notificationMethod: values.notificationMethod || 'whatsapp',
+      specialRate: values.specialRate ? parseFloat(values.specialRate) : null,
+      medicalFlags: values.medicalFlags || null,
+      onboardingStatus: values.onboardingStatus || 'not_started',
+      notesInternal: values.notesInternal.trim() || null,
       tags: normalizeTagIdsForWrite(values.tagId),
       isActive: values.isActive !== false,
     });
@@ -216,20 +218,21 @@ export default function AddStudentForm({
     }
     return '';
   })();
-  const showContactNameError = false;
-  const showContactPhoneError = touched.contactPhone && values.contactPhone.trim() && !validateIsraeliPhone(values.contactPhone);
-  const showInstructorError = touched.assignedInstructorId && !values.assignedInstructorId;
-  const showDayError = touched.defaultDayOfWeek && !values.defaultDayOfWeek;
-  const showTimeError = touched.defaultSessionTime && !values.defaultSessionTime;
-  const noInstructorsAvailable = !loadingInstructors && safeInstructors.length === 0;
 
-  // Memoize instructor options to prevent re-render issues with Radix Select
-  const instructorOptions = useMemo(() => {
-    return safeInstructors.filter(inst => inst?.id).map((inst) => ({
-      value: inst.id,
-      label: inst.name?.trim() || inst.email?.trim() || inst.id,
-    }));
-  }, [safeInstructors]);
+  // Phone error: required if no guardian, or invalid format if provided
+  const showPhoneError = touched.phone && (
+    (!values.guardianId && !values.phone.trim()) || 
+    (values.phone.trim() && !validateIsraeliPhone(values.phone))
+  );
+  const phoneErrorMessage = (() => {
+    if (!values.guardianId && !values.phone.trim()) {
+      return 'יש להזין מספר טלפון או לשייך אפוטרופוס';
+    }
+    if (values.phone.trim() && !validateIsraeliPhone(values.phone)) {
+      return 'יש להזין מספר טלפון ישראלי תקין';
+    }
+    return '';
+  })();
 
   return (
     <form id="add-student-form" onSubmit={handleSubmit} className="space-y-5" dir="rtl">
@@ -307,6 +310,49 @@ export default function AddStudentForm({
             </div>
           )}
 
+          <SelectField
+            id="assigned-instructor"
+            name="assignedInstructorId"
+            label="מדריך מוקצה"
+            value={values.assignedInstructorId}
+            onChange={(value) => handleSelectChange('assignedInstructorId', value)}
+            onOpenChange={onSelectOpenChange}
+            options={[
+              { value: '', label: 'אין מדריך מוקצה (רשימת המתנה)' },
+              ...(instructors || []).map((instructor) => ({
+                value: instructor.id,
+                label: `${instructor.first_name}${instructor.middle_name ? ` ${instructor.middle_name}` : ''} ${instructor.last_name}`.trim(),
+              })),
+            ]}
+            placeholder="בחר מדריך"
+            required={false}
+            disabled={isSubmitting || loadingInstructors}
+            description="אופציונלי - ניתן להשאיר ריק לרשימת המתנה"
+          />
+
+          <TextField
+            id="date-of-birth"
+            name="dateOfBirth"
+            label="תאריך לידה"
+            type="date"
+            value={values.dateOfBirth}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            required={false}
+            disabled={isSubmitting}
+            description="אופציונלי - לצורך תכנון שירותים"
+          />
+
+          <GuardianSelector
+            value={values.guardianId}
+            onChange={(value) => handleSelectChange('guardianId', value)}
+            guardians={guardians}
+            isLoading={loadingGuardians}
+            disabled={isSubmitting}
+            onCreateGuardian={createGuardian}
+            onSelectOpenChange={onSelectOpenChange}
+          />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <PhoneField
               id="phone"
@@ -315,8 +361,13 @@ export default function AddStudentForm({
               value={values.phone}
               onChange={handleChange}
               onBlur={handleBlur}
-              required={false}
+              required={!values.guardianId}
               disabled={isSubmitting}
+              error={showPhoneError ? phoneErrorMessage : ''}
+              description={values.guardianId 
+                ? "אופציונלי - אפוטרופוס מחובר"
+                : "חובה - אין אפוטרופוס מחובר"
+              }
             />
 
             <TextField
@@ -329,100 +380,48 @@ export default function AddStudentForm({
               onBlur={handleBlur}
               required={false}
               disabled={isSubmitting}
+              description="אופציונלי"
             />
           </div>
 
-          {loadingInstructors ? (
-            <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700" role="status">
-              טוען רשימת מדריכים...
-            </div>
-          ) : noInstructorsAvailable ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" role="alert">
-              <p className="font-semibold">לא נמצאו מדריכים פעילים.</p>
-              <p>יש ליצור מדריך חדש בלשונית צוות/מדריכים ואז לחזור להוספת תלמיד.</p>
-            </div>
-          ) : (
-            <SelectField
-              id="assigned-instructor"
-              name="assignedInstructorId"
-              label="מדריך משויך"
-              value={values.assignedInstructorId}
-              onChange={(value) => handleSelectChange('assignedInstructorId', value)}
-              onOpenChange={onSelectOpenChange}
-              options={instructorOptions}
-              placeholder="בחר מדריך"
-              required
-              disabled={isSubmitting}
-              description="מוצגים רק מדריכים פעילים."
-              error={showInstructorError ? 'יש לבחור מדריך.' : ''}
-            />
-          )}
-
-          <TextField
-            id="contact-name"
-            name="contactName"
-            label="שם איש קשר"
-            value={values.contactName}
-            onChange={handleChange}
-            onBlur={handleBlur}
-            required={false}
-            placeholder="שם הורה או אפוטרופוס (אופציונלי)"
+          <SelectField
+            id="notification-method"
+            name="notificationMethod"
+            label="שיטת התראה מועדפת"
+            value={values.notificationMethod}
+            onChange={(value) => handleSelectChange('notificationMethod', value)}
+            onOpenChange={onSelectOpenChange}
+            options={[
+              { value: 'whatsapp', label: 'WhatsApp' },
+              { value: 'email', label: 'דואר אלקטרוני' },
+            ]}
+            placeholder="בחר שיטת התראה"
+            required
             disabled={isSubmitting}
-            error={showContactNameError ? 'יש להזין שם איש קשר.' : ''}
+            description="כיצד ישלח המערכת תזכורות ואישורים"
           />
 
-          <PhoneField
-            id="contact-phone"
-            name="contactPhone"
-            label="טלפון איש קשר"
-            value={values.contactPhone}
+          <TextField
+            id="special-rate"
+            name="specialRate"
+            label="תעריף מיוחד"
+            type="number"
+            step="0.01"
+            min="0"
+            value={values.specialRate}
             onChange={handleChange}
             onBlur={handleBlur}
             required={false}
             disabled={isSubmitting}
-            error={showContactPhoneError ? 'יש להזין מספר טלפון ישראלי תקין.' : ''}
+            description="אופציונלי - תעריף מיוחד לתלמיד זה (במקום תעריף ברירת מחדל)"
+            placeholder="0.00"
           />
         </div>
 
         <div className="space-y-5 py-4">
-
-          <ComboBoxField
-            id="default-service"
-            name="defaultService"
-            label="שירות ברירת מחדל"
-            value={values.defaultService}
-            onChange={(value) => handleSelectChange('defaultService', value)}
-            options={services}
-            placeholder={loadingServices ? 'טוען...' : 'בחרו מהרשימה או הקלידו שירות'}
-            disabled={isSubmitting || loadingServices}
-            dir="rtl"
-            emptyMessage="לא נמצאו שירותים תואמים"
-            description="ניתן להגדיר שירותים זמינים בעמוד ההגדרות."
-          />
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <DayOfWeekField
-              id="default-day"
-              name="defaultDayOfWeek"
-              label="יום קבוע"
-              value={values.defaultDayOfWeek}
-              onChange={(value) => handleSelectChange('defaultDayOfWeek', value)}
-              required
-              disabled={isSubmitting}
-              error={showDayError ? 'יש לבחור יום.' : ''}
-            />
-
-            <TimeField
-              id="default-session-time"
-              name="defaultSessionTime"
-              label="שעה קבועה"
-              value={values.defaultSessionTime}
-              onChange={(value) => handleSelectChange('defaultSessionTime', value)}
-              required
-              disabled={isSubmitting}
-              error={showTimeError ? 'יש לבחור שעה.' : ''}
-              placeholder="HH:MM"
-            />
+          <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+            <p className="font-semibold mb-1">הערה: שיבוץ שיעורים</p>
+            <p>אפשר לשבץ תלמיד לשיעורים קבועים דרך עמוד התלמיד לאחר היצירה, או דרך לוח השנה.</p>
           </div>
 
           <StudentTagsField
@@ -433,14 +432,15 @@ export default function AddStudentForm({
           />
 
           <TextAreaField
-            id="notes"
-            name="notes"
-            label="הערות"
-            value={values.notes}
+            id="notes-internal"
+            name="notesInternal"
+            label="הערות פנימיות"
+            value={values.notesInternal}
             onChange={handleChange}
-            placeholder="הערות נוספות על התלמיד"
+            placeholder="הערות פנימיות על התלמיד (לא נראות לאפוטרופוסים)"
             rows={3}
             disabled={isSubmitting}
+            description="הערות אלו מיועדות לצוות בלבד"
           />
         </div>
       </div>

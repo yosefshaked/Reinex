@@ -262,3 +262,134 @@ export function validateAssignedInstructor(candidate) {
   }
   return { value: null, valid: false };
 }
+
+/**
+ * Coerce optional date string (YYYY-MM-DD format)
+ * @param {*} raw 
+ * @returns {{ value: string | null, valid: boolean }}
+ */
+export function coerceOptionalDate(raw) {
+  if (raw === null || raw === undefined || raw === '') {
+    return { value: null, valid: true };
+  }
+  if (typeof raw !== 'string') {
+    return { value: null, valid: false };
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return { value: null, valid: true };
+  }
+  // Basic date format validation (YYYY-MM-DD)
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!datePattern.test(trimmed)) {
+    return { value: null, valid: false };
+  }
+  // Validate it's a real date
+  const date = new Date(trimmed);
+  if (isNaN(date.getTime())) {
+    return { value: null, valid: false };
+  }
+  return { value: trimmed, valid: true };
+}
+
+/**
+ * Coerce notification method (whatsapp or email)
+ * @param {*} raw 
+ * @returns {{ value: string, valid: boolean }}
+ */
+export function coerceNotificationMethod(raw) {
+  if (raw === null || raw === undefined || raw === '') {
+    return { value: 'whatsapp', valid: true }; // Default
+  }
+  if (typeof raw !== 'string') {
+    return { value: 'whatsapp', valid: false };
+  }
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === 'whatsapp' || trimmed === 'email') {
+    return { value: trimmed, valid: true };
+  }
+  return { value: 'whatsapp', valid: false };
+}
+
+/**
+ * Coerce optional numeric field (for special_rate, etc.)
+ * @param {*} raw 
+ * @returns {{ value: number | null, valid: boolean }}
+ */
+export function coerceOptionalNumeric(raw) {
+  if (raw === null || raw === undefined || raw === '') {
+    return { value: null, valid: true };
+  }
+  const num = parseFloat(raw);
+  if (isNaN(num)) {
+    return { value: null, valid: false };
+  }
+  return { value: num, valid: true };
+}
+
+/**
+ * Coerce optional JSONB field
+ * @param {*} raw 
+ * @returns {{ value: any | null, valid: boolean }}
+ */
+export function coerceOptionalJsonb(raw) {
+  if (raw === null || raw === undefined) {
+    return { value: null, valid: true };
+  }
+  // If it's already an object, return it
+  if (typeof raw === 'object') {
+    return { value: raw, valid: true };
+  }
+  // If it's a string, try to parse it
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return { value: null, valid: true };
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      return { value: parsed, valid: true };
+    } catch {
+      return { value: null, valid: false };
+    }
+  }
+  return { value: null, valid: false };
+}
+
+/**
+ * Coerce onboarding status enum
+ * @param {*} raw 
+ * @returns {{ value: string, valid: boolean }}
+ */
+export function coerceOnboardingStatus(raw) {
+  if (raw === null || raw === undefined || raw === '') {
+    return { value: 'not_started', valid: true }; // Default
+  }
+  if (typeof raw !== 'string') {
+    return { value: 'not_started', valid: false };
+  }
+  const trimmed = raw.trim().toLowerCase();
+  const validStatuses = ['not_started', 'in_progress', 'completed'];
+  if (validStatuses.includes(trimmed)) {
+    return { value: trimmed, valid: true };
+  }
+  return { value: 'not_started', valid: false };
+}
+
+/**
+ * Coerce optional email (alias for coerceEmail for consistency)
+ * @param {*} raw 
+ * @returns {{ value: string | null, valid: boolean }}
+ */
+export function coerceOptionalEmail(raw) {
+  return coerceEmail(raw);
+}
+
+/**
+ * Coerce optional string (consistent interface)
+ * @param {*} raw 
+ * @returns {{ value: string | null, valid: boolean }}
+ */
+export function coerceOptionalString(raw) {
+  return coerceOptionalText(raw);
+}
