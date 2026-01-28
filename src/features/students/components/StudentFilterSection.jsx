@@ -13,8 +13,10 @@ export function StudentFilterSection({
   onSearchChange,
   statusFilter,
   onStatusChange,
+  onStatusFilterChange,
   dayFilter,
   onDayChange,
+  onDayFilterChange,
   instructorFilterId,
   onInstructorFilterChange,
   tagFilter,
@@ -30,6 +32,10 @@ export function StudentFilterSection({
   showMyStudentsOption = false, // Show 'My Students' option in instructor dropdown for admin instructors
   currentUserId = null, // Current user ID for 'My Students' option
 }) {
+  // Normalize handler props for backward compatibility
+  const handleStatusChange = onStatusChange || onStatusFilterChange || (() => {});
+  const handleDayChange = onDayChange || onDayFilterChange || (() => {});
+
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   const hasAdvancedFilters = useMemo(() => {
@@ -84,7 +90,7 @@ export function StudentFilterSection({
               <label className="block text-xs font-medium text-neutral-600 text-right">
                 סטטוס
               </label>
-              <Select value={statusFilter} onValueChange={onStatusChange}>
+              <Select value={statusFilter} onValueChange={handleStatusChange}>
                 <SelectTrigger className="text-right">
                   <SelectValue />
                 </SelectTrigger>
@@ -104,7 +110,7 @@ export function StudentFilterSection({
             </label>
             <DayOfWeekSelect
               value={dayFilter}
-              onChange={onDayChange}
+              onChange={handleDayChange}
               placeholder="כל הימים"
             />
           </div>
@@ -124,7 +130,7 @@ export function StudentFilterSection({
                     <SelectItem value={currentUserId}>התלמידים שלי</SelectItem>
                   )}
                   <SelectItem value="all-instructors">כל המדריכים</SelectItem>
-                  {instructors.map((inst) => (
+                  {instructors.filter(inst => inst?.id).map((inst) => (
                     <SelectItem key={inst.id} value={inst.id}>
                       {inst.name || inst.email}
                     </SelectItem>

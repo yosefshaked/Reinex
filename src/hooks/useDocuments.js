@@ -19,11 +19,16 @@ export function useDocuments(entityType, entityId) {
    * Fetch documents for the entity
    */
   const fetchDocuments = useCallback(async () => {
-    if (!session?.access_token || !activeOrgId || !entityId) {
+    if (!entityId) {
+      setDocuments([]);
+      setLoading(false);
+      return;
+    }
+
+    if (!session?.access_token || !activeOrgId) {
       console.warn('[WARN-FRONTEND] useDocuments: Missing required context', {
         hasToken: !!session?.access_token,
-        hasOrgId: !!activeOrgId,
-        hasEntityId: !!entityId
+        hasOrgId: !!activeOrgId
       });
       setDocuments([]);
       setLoading(false);

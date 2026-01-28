@@ -83,11 +83,15 @@ function resolveNextIdentifier(used, generator) {
 
 export const INSTRUCTOR_COLOR_BANK = DEFAULT_COLOR_BANK;
 
-export async function ensureInstructorColors(tenantClient, { context, columns = 'id, metadata' } = {}) {
+export async function ensureInstructorColors(
+  tenantClient,
+  { context, columns = 'id, metadata', table = 'Instructors' } = {},
+) {
   const selectColumns = typeof columns === 'string' && columns.trim() ? columns : 'id, metadata';
+  const targetTable = typeof table === 'string' && table.trim() ? table.trim() : 'Instructors';
 
   let query = tenantClient
-    .from('Instructors')
+    .from(targetTable)
     .select(selectColumns);
 
   // The Instructors table does not guarantee a created_at column across tenants. When
@@ -144,7 +148,7 @@ export async function ensureInstructorColors(tenantClient, { context, columns = 
   if (updates.length) {
     for (const { instructor, metadata } of updates) {
       const { error: updateError } = await tenantClient
-        .from('Instructors')
+        .from(targetTable)
         .update({ metadata })
         .eq('id', instructor.id);
 
