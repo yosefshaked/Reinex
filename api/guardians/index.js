@@ -1,6 +1,6 @@
 import { respond, resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient } from '../_shared/supabase-admin.js';
-import { getTenantClient } from '../_shared/org-bff.js';
+import { resolveTenantClient, ensureMembership, readEnv } from '../_shared/org-bff.js';
 import { validateIsraeliPhone, coerceOptionalString, coerceOptionalEmail } from '../_shared/student-validation.js';
 
 /**
@@ -40,12 +40,21 @@ export default async function handler(context, req) {
     return respond(context, 400, { error: 'missing_org_id' });
   }
 
-  // Get tenant client
-  const tenantClient = await getTenantClient(supabase, orgId, userId);
-  if (!tenantClient) {
-    context.log.error('[guardians] Failed to get tenant client');
-    return respond(context, 403, { error: 'access_denied' });
+  // Verify user is a member of the organization
+  const role = await ensureMembership(supabase, orgId, userId);
+  if (!role) {
+    context.log.warn('[guardians] User not a member of organization', { userId, orgId });
+    return respond(context, 403, { error: 'not_a_member' });
   }
+
+  // Get tenant client
+  const env = readEnv(context);
+  const tenantResult = await resolveTenantClient(context, supabase, env, orgId);
+  if (tenantResult.error) {
+    context.log.error('[guardians] Failed to get tenant client', tenantResult.error);
+    return respond(context, 403, { error: 'access_denied', details: tenantResult.error.message });
+  }
+  const tenantClient = tenantResult.client;
 
   const method = req.method;
   const guardianId = context.bindingData?.id;
