@@ -1,5 +1,5 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
-import { createSupabaseAdminClient } from '../_shared/supabase-admin.js';
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { resolveTenantClient, ensureMembership, readEnv, respond } from '../_shared/org-bff.js';
 import { validateIsraeliPhone, coerceOptionalString, coerceOptionalEmail } from '../_shared/student-validation.js';
 
@@ -12,6 +12,15 @@ import { validateIsraeliPhone, coerceOptionalString, coerceOptionalEmail } from 
  * DELETE /api/guardians/:id      - Soft delete guardian
  */
 export default async function handler(context, req) {
+  // Read environment and get Supabase admin config
+  const env = readEnv(context);
+  const adminConfig = readSupabaseAdminConfig(env);
+
+  if (!adminConfig.supabaseUrl || !adminConfig.serviceRoleKey) {
+    context.log?.error?.('[guardians] Missing Supabase admin credentials');
+    return respond(context, 500, { error: 'server_misconfigured' });
+  }
+
   // Extract auth token
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
@@ -19,15 +28,20 @@ export default async function handler(context, req) {
   }
   const token = authorization.token;
 
-  // Create Supabase admin client for control DB
-  const supabase = await createSupabaseAdminClient();
-  if (!supabase) {
-    context.log.error('[guardians] Failed to create Supabase admin client');
-    return respond(context, 500, { error: 'server_configuration_error' });
-  }
+  // Create Supabase admin client for control DB with cache control
+  const supabase = createSupabaseAdminClient(adminConfig, {
+    global: { headers: { 'Cache-Control': 'no-store' } }
+  });
 
   // Verify user
-  const authResult = await supabase.auth.getUser(token);
+  let authResult;
+  try {
+    authResult = await supabase.auth.getUser(token);
+  } catch (authError) {
+    context.log?.error?.('guardians auth.getUser failed', { message: authError.message });
+    return respond(context, 401, { message: 'invalid_token' });
+  }
+
   if (authResult.error || !authResult.data?.user?.id) {
     context.log.warn('[guardians] Invalid token');
     return respond(context, 401, { error: 'invalid_token' });
@@ -41,20 +55,28 @@ export default async function handler(context, req) {
   }
 
   // Verify user is a member of the organization
-  const role = await ensureMembership(supabase, orgId, userId);
+  let role;
+  try {
+    role = await ensureMembership(supabase, orgId, userId);
+  } catch (membershipError) {
+    context.log?.error?.('guardians ensureMembership failed', {
+      message: membershipError.message,
+      userId,
+      orgId
+    });
+    return respond(context, 500, { message: 'failed_to_verify_membership' });
+  }
+
   if (!role) {
     context.log.warn('[guardians] User not a member of organization', { userId, orgId });
     return respond(context, 403, { error: 'not_a_member' });
   }
 
-  // Get tenant client
-  const env = readEnv(context);
-  const tenantResult = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantResult.error) {
-    context.log.error('[guardians] Failed to get tenant client', tenantResult.error);
-    return respond(context, 403, { error: 'access_denied', details: tenantResult.error.message });
+  // Get tenant client (env already loaded at top)
+  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
+  if (tenantError) {
+    return respond(context, tenantError.status, tenantError.body);
   }
-  const tenantClient = tenantResult.client;
 
   const method = req.method;
   const guardianId = context.bindingData?.id;
