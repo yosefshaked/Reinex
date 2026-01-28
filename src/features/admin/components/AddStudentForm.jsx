@@ -192,6 +192,7 @@ export default function AddStudentForm({
       lastName: trimmedLastName,
       identityNumber: trimmedIdentityNumberInner,
       dateOfBirth: values.dateOfBirth || null,
+      assignedInstructorId: values.assignedInstructorId || null,
       guardianId: values.guardianId || null,
       phone: values.phone.trim() || null,
       email: values.email.trim() || null,
@@ -314,21 +315,20 @@ export default function AddStudentForm({
             id="assigned-instructor"
             name="assignedInstructorId"
             label="מדריך מוקצה"
-            value={values.assignedInstructorId}
-            onChange={(value) => handleSelectChange('assignedInstructorId', value)}
+            value={values.assignedInstructorId || ''}
+            onChange={(value) => handleSelectChange('assignedInstructorId', value || null)}
             onOpenChange={onSelectOpenChange}
             options={[
-              { value: '', label: 'אין מדריך מוקצה (רשימת המתנה)' },
               ...(instructors || []).map((instructor) => ({
                 value: instructor.id,
                 label: `${instructor.first_name}${instructor.middle_name ? ` ${instructor.middle_name}` : ''} ${instructor.last_name}`.trim(),
               })),
             ]}
-            placeholder="בחר מדריך"
+            placeholder="אין מדריך מוקצה (רשימת המתנה)"
             required={false}
             disabled={isSubmitting || loadingInstructors}
             description="אופציונלי - ניתן להשאיר ריק לרשימת המתנה"
-          />
+          />  
 
           <TextField
             id="date-of-birth"
