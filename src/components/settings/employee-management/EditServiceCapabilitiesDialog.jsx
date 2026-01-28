@@ -21,6 +21,7 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
       setCapabilities(instructor.service_capabilities || []);
       loadServices();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, instructor]);
 
   const loadServices = async () => {

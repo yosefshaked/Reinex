@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { User, FileText, Activity, DollarSign } from 'lucide-react';
 
-export default function EmployeeDiagnosticsDialog({ open, onOpenChange, employee, orgId, session }) {
+export default function EmployeeDiagnosticsDialog({ open, onOpenChange, employee }) {
   if (!employee) return null;
 
   const fullName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
