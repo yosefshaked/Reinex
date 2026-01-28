@@ -15,6 +15,7 @@ const STEPS = {
 export default function EmployeeWizardDialog({ open, onOpenChange, orgId, session, onSuccess }) {
   const [step, setStep] = useState(STEPS.DETAILS);
   const [formData, setFormData] = useState({
+    employeeId: '',
     firstName: '',
     lastName: '',
     email: '',
@@ -26,7 +27,7 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
 
   const handleReset = () => {
     setStep(STEPS.DETAILS);
-    setFormData({ firstName: '', lastName: '', email: '', phone: '' });
+    setFormData({ employeeId: '', firstName: '', lastName: '', email: '', phone: '' });
     setInviteEmail('');
     setCreatedEmployeeId(null);
   };
@@ -36,6 +37,10 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
   };
 
   const handleCreateEmployee = async () => {
+    if (!formData.employeeId.trim()) {
+      toast.error('מספר מזהה (ת"ז / מספר עובד) הוא שדה חובה.');
+      return;
+    }
     if (!formData.firstName.trim()) {
       toast.error('שם פרטי הוא שדה חובה.');
       return;
@@ -48,6 +53,7 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
         method: 'POST',
         body: {
           org_id: orgId,
+          employee_id: formData.employeeId.trim(),
           first_name: formData.firstName.trim(),
           last_name: formData.lastName.trim() || undefined,
           email: formData.email.trim() || undefined,
@@ -117,6 +123,16 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={(e) => { e.preventDefault(); handleCreateEmployee(); }} className="space-y-4 py-2">
+              <TextField
+                id="employeeId"
+                label='מספר מזהה (ת"ז / מספר עובד)'
+                value={formData.employeeId}
+                onChange={handleChange('employeeId')}
+                required
+                disabled={isSubmitting}
+                description='הזן תעודת זהות או מספר עובד'
+              />
+              
               <div className="grid grid-cols-2 gap-4">
                 <TextField
                   id="firstName"

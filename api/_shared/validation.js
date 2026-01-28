@@ -250,6 +250,12 @@ export function validateInstructorCreate(body) {
     return { error: 'invalid_notes' };
   }
 
+  // employee_id is required (national ID or worker number)
+  const employeeId = normalizeString(body?.employee_id || body?.employeeId);
+  if (!employeeId) {
+    return { error: 'employee_id_required' };
+  }
+
   return {
     userId, // null for manual
     isManual,
@@ -260,6 +266,7 @@ export function validateInstructorCreate(body) {
     email,
     phone,
     notes: notesResult.value,
+    employeeId,
   };
 }
 

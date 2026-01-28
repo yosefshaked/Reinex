@@ -289,6 +289,7 @@ export default async function (context, req) {
       first_name: providedFirstName || fallbackFirst,
       middle_name: providedMiddleName || (nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : null),
       last_name: providedLastName || fallbackLast || (isManual ? '' : targetUserId),
+      employee_id: validation.employeeId,
       email: providedEmail || profileEmail || null,
       phone: providedPhone || null,
       notes: notes || null,
