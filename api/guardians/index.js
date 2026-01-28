@@ -1,6 +1,6 @@
-import { respond, resolveBearerAuthorization } from '../_shared/http.js';
+import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient } from '../_shared/supabase-admin.js';
-import { resolveTenantClient, ensureMembership, readEnv } from '../_shared/org-bff.js';
+import { resolveTenantClient, ensureMembership, readEnv, respond } from '../_shared/org-bff.js';
 import { validateIsraeliPhone, coerceOptionalString, coerceOptionalEmail } from '../_shared/student-validation.js';
 
 /**
