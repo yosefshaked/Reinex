@@ -422,22 +422,26 @@ export default function StudentsPage() {
     setIsCreatingStudent(true);
     setCreateError('');
 
-    // AddStudentForm submits camelCase; keep snake_case compatibility as well.
+    // AddStudentForm submits Reinex camelCase structure
     const body = {
       org_id: activeOrgId,
-      name: formData.name,
-      assigned_instructor_id: formData.assigned_instructor_id ?? formData.assignedInstructorId,
-      tags: normalizeTagIdsForWrite(formData.tags),
-      default_service: formData.default_service ?? formData.defaultService ?? '',
-      default_day_of_week: formData.default_day_of_week ?? formData.defaultDayOfWeek,
-      default_session_time: formData.default_session_time ?? formData.defaultSessionTime ?? '',
-      identity_number: (formData.identity_number ?? formData.identityNumber ?? '').trim(),
-      phone: (formData.phone ?? '').trim(),
-      email: (formData.email ?? '').trim(),
-      contact_name: (formData.contact_name ?? formData.contactName ?? '').trim(),
-      contact_phone: (formData.contact_phone ?? formData.contactPhone ?? '').trim(),
-      notes: (formData.notes ?? '').trim(),
-      is_active: formData.is_active ?? formData.isActive,
+      // Reinex structure: separate name fields
+      first_name: formData.firstName,
+      middle_name: formData.middleName,
+      last_name: formData.lastName,
+      identity_number: formData.identityNumber,
+      date_of_birth: formData.dateOfBirth,
+      assigned_instructor_id: formData.assignedInstructorId,
+      guardian_id: formData.guardianId,
+      phone: formData.phone,
+      email: formData.email,
+      default_notification_method: formData.notificationMethod,
+      special_rate: formData.specialRate,
+      medical_flags: formData.medicalFlags,
+      onboarding_status: formData.onboardingStatus,
+      notes_internal: formData.notesInternal,
+      tags: formData.tags,
+      is_active: formData.isActive,
     };
 
     try {
