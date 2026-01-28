@@ -9,7 +9,7 @@ import { validateIsraeliPhone, coerceOptionalString, coerceOptionalEmail } from 
  * GET    /api/guardians          - List all guardians for organization
  * POST   /api/guardians          - Create new guardian
  * PUT    /api/guardians/:id      - Update guardian
- * DELETE /api/guardians/:id      - Soft delete guardian
+ * DELETE /api/guardians/:id      - Delete guardian (requires no linked students)
  */
 export default async function handler(context, req) {
   // Read environment and get Supabase admin config
@@ -100,13 +100,12 @@ export default async function handler(context, req) {
 }
 
 /**
- * GET /api/guardians - List all active guardians
+ * GET /api/guardians - List all guardians
  */
 async function handleGet(context, tenantClient) {
   const { data, error } = await tenantClient
     .from('guardians')
     .select('*')
-    .eq('is_active', true)
     .order('last_name', { ascending: true })
     .order('first_name', { ascending: true });
 
@@ -152,7 +151,6 @@ async function handlePost(context, req, tenantClient, userId) {
     phone: phone,
     email: email,
     relationship: relationship,
-    is_active: true,
     metadata: {
       created_by: userId,
       created_at: new Date().toISOString(),
@@ -248,7 +246,7 @@ async function handlePut(context, req, tenantClient, guardianId, userId) {
 }
 
 /**
- * DELETE /api/guardians/:id - Soft delete guardian
+ * DELETE /api/guardians/:id - Delete guardian
  */
 async function handleDelete(context, tenantClient, guardianId) {
   // Check if guardian has students
@@ -256,7 +254,6 @@ async function handleDelete(context, tenantClient, guardianId) {
     .from('students')
     .select('id')
     .eq('guardian_id', guardianId)
-    .eq('is_active', true)
     .limit(1);
 
   if (checkError) {
@@ -267,14 +264,14 @@ async function handleDelete(context, tenantClient, guardianId) {
   if (students && students.length > 0) {
     return respond(context, 400, { 
       error: 'guardian_has_students', 
-      message: 'Cannot delete guardian with active students. Reassign students first.' 
+      message: 'Cannot delete guardian with students. Reassign students first.' 
     });
   }
 
-  // Soft delete
+  // Hard delete
   const { data, error } = await tenantClient
     .from('guardians')
-    .update({ is_active: false })
+    .delete()
     .eq('id', guardianId)
     .select()
     .single();
@@ -288,6 +285,6 @@ async function handleDelete(context, tenantClient, guardianId) {
     return respond(context, 404, { error: 'guardian_not_found' });
   }
 
-  context.log.info('[guardians/DELETE] Guardian soft-deleted:', guardianId);
+  context.log.info('[guardians/DELETE] Guardian deleted:', guardianId);
   return respond(context, 200, { success: true });
 }
