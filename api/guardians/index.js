@@ -125,15 +125,14 @@ async function handlePost(context, req, tenantClient, userId) {
 
   // Required fields
   const firstName = coerceOptionalString(body.first_name);
-  const lastName = coerceOptionalString(body.last_name);
   const phone = coerceOptionalString(body.phone);
 
-  if (!firstName || !lastName) {
-    return respond(context, 400, { error: 'missing_required_fields', message: 'First name and last name are required' });
+  if (!firstName) {
+    return respond(context, 400, { error: 'missing_required_fields', message: 'First name is required' });
   }
 
   if (!phone) {
-    return respond(context, 400, { error: 'missing_phone', message: 'Phone number is required' });
+    return respond(context, 400, { error: 'missing_phone', message: 'Phone number is required for guardians' });
   }
 
   // Validate phone
@@ -142,15 +141,16 @@ async function handlePost(context, req, tenantClient, userId) {
   }
 
   // Optional fields
+  const middleName = coerceOptionalString(body.middle_name);
+  const lastName = coerceOptionalString(body.last_name);
   const email = coerceOptionalEmail(body.email);
-  const relationship = coerceOptionalString(body.relationship);
 
   const payload = {
     first_name: firstName,
+    middle_name: middleName,
     last_name: lastName,
     phone: phone,
     email: email,
-    relationship: relationship,
     metadata: {
       created_by: userId,
       created_at: new Date().toISOString(),
@@ -179,7 +179,7 @@ async function handlePut(context, req, tenantClient, guardianId, userId) {
   const body = req.body || {};
   const updates = {};
 
-  // Allow updating name, phone, email, relationship
+  // Allow updating name, phone, email
   if (body.first_name !== undefined) {
     const firstName = coerceOptionalString(body.first_name);
     if (!firstName) {
@@ -188,18 +188,18 @@ async function handlePut(context, req, tenantClient, guardianId, userId) {
     updates.first_name = firstName;
   }
 
+  if (body.middle_name !== undefined) {
+    updates.middle_name = coerceOptionalString(body.middle_name);
+  }
+
   if (body.last_name !== undefined) {
-    const lastName = coerceOptionalString(body.last_name);
-    if (!lastName) {
-      return respond(context, 400, { error: 'invalid_last_name' });
-    }
-    updates.last_name = lastName;
+    updates.last_name = coerceOptionalString(body.last_name);
   }
 
   if (body.phone !== undefined) {
     const phone = coerceOptionalString(body.phone);
     if (!phone) {
-      return respond(context, 400, { error: 'phone_required' });
+      return respond(context, 400, { error: 'phone_required', message: 'Phone number cannot be empty' });
     }
     if (!validateIsraeliPhone(phone)) {
       return respond(context, 400, { error: 'invalid_phone' });
@@ -209,10 +209,6 @@ async function handlePut(context, req, tenantClient, guardianId, userId) {
 
   if (body.email !== undefined) {
     updates.email = coerceOptionalEmail(body.email);
-  }
-
-  if (body.relationship !== undefined) {
-    updates.relationship = coerceOptionalString(body.relationship);
   }
 
   if (Object.keys(updates).length === 0) {
@@ -249,9 +245,9 @@ async function handlePut(context, req, tenantClient, guardianId, userId) {
  * DELETE /api/guardians/:id - Delete guardian
  */
 async function handleDelete(context, tenantClient, guardianId) {
-  // Check if guardian has students
-  const { data: students, error: checkError } = await tenantClient
-    .from('students')
+  // Check if guardian has students (via junction table per PRD)
+  const { data: links, error: checkError } = await tenantClient
+    .from('student_guardians')
     .select('id')
     .eq('guardian_id', guardianId)
     .limit(1);
@@ -261,10 +257,10 @@ async function handleDelete(context, tenantClient, guardianId) {
     return respond(context, 500, { error: 'database_error' });
   }
 
-  if (students && students.length > 0) {
+  if (links && links.length > 0) {
     return respond(context, 400, { 
       error: 'guardian_has_students', 
-      message: 'Cannot delete guardian with students. Reassign students first.' 
+      message: 'Cannot delete guardian with students. Remove student links first.' 
     });
   }
 
