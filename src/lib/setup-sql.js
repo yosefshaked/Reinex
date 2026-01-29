@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS public.students (
   first_name text NOT NULL,
   middle_name text NULL,
   last_name text NOT NULL,
+  identity_number text NULL,
+  phone text NULL,
+  email text NULL,
   date_of_birth date NULL,
   notes_internal text NULL,
   default_notification_method text NOT NULL DEFAULT 'whatsapp',
@@ -90,6 +93,9 @@ ALTER TABLE public.students
   ADD COLUMN IF NOT EXISTS first_name text,
   ADD COLUMN IF NOT EXISTS middle_name text,
   ADD COLUMN IF NOT EXISTS last_name text,
+  ADD COLUMN IF NOT EXISTS identity_number text,
+  ADD COLUMN IF NOT EXISTS phone text,
+  ADD COLUMN IF NOT EXISTS email text,
   ADD COLUMN IF NOT EXISTS date_of_birth date,
   ADD COLUMN IF NOT EXISTS notes_internal text,
   ADD COLUMN IF NOT EXISTS default_notification_method text,
@@ -137,6 +143,15 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS students_is_active_idx ON public.students (is_active);
 CREATE INDEX IF NOT EXISTS students_name_idx ON public.students (first_name, last_name);
+
+DO $$
+BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS students_identity_number_unique_idx
+    ON public.students (identity_number)
+    WHERE identity_number IS NOT NULL AND identity_number <> '';
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
 
 -- -----------------------------------------------------------------
 -- public.guardians
@@ -234,7 +249,10 @@ CREATE INDEX IF NOT EXISTS student_guardians_student_id_idx
 
 CREATE TABLE IF NOT EXISTS public."Employees" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-  "name" text NOT NULL,
+  "user_id" uuid,
+  "first_name" text NOT NULL,
+  "middle_name" text,
+  "last_name" text,
   "employee_id" text NOT NULL,
   "employee_type" text,
   "current_rate" numeric,
@@ -248,12 +266,16 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
   "leave_pay_method" text,
   "leave_fixed_day_rate" numeric,
   "employment_scope" text,
+  "instructor_types" uuid[],
   "metadata" jsonb,
   CONSTRAINT "Employees_pkey" PRIMARY KEY ("id")
 );
 
 ALTER TABLE public."Employees"
-  ADD COLUMN IF NOT EXISTS "name" text,
+  ADD COLUMN IF NOT EXISTS "user_id" uuid,
+  ADD COLUMN IF NOT EXISTS "first_name" text,
+  ADD COLUMN IF NOT EXISTS "middle_name" text,
+  ADD COLUMN IF NOT EXISTS "last_name" text,
   ADD COLUMN IF NOT EXISTS "employee_id" text,
   ADD COLUMN IF NOT EXISTS "employee_type" text,
   ADD COLUMN IF NOT EXISTS "current_rate" numeric,
@@ -267,15 +289,11 @@ ALTER TABLE public."Employees"
   ADD COLUMN IF NOT EXISTS "leave_pay_method" text,
   ADD COLUMN IF NOT EXISTS "leave_fixed_day_rate" numeric,
   ADD COLUMN IF NOT EXISTS "employment_scope" text,
+  ADD COLUMN IF NOT EXISTS "instructor_types" uuid[],
   ADD COLUMN IF NOT EXISTS "metadata" jsonb;
 
--- Add canonical name fields for future use
-ALTER TABLE public."Employees"
-  ADD COLUMN IF NOT EXISTS "first_name" text,
-  ADD COLUMN IF NOT EXISTS "middle_name" text,
-  ADD COLUMN IF NOT EXISTS "last_name" text;
-
 CREATE INDEX IF NOT EXISTS "Employees_name_idx" ON public."Employees" ("first_name", "last_name");
+CREATE INDEX IF NOT EXISTS "Employees_user_id_idx" ON public."Employees" ("user_id");
 
 -- -----------------------------------------------------------------
 -- public.Services (service catalog)
@@ -675,6 +693,10 @@ CREATE TABLE IF NOT EXISTS public.lesson_instances (
   service_id uuid NOT NULL,
   status text NOT NULL,
   documentation_status text NOT NULL DEFAULT 'undocumented',
+  is_closed boolean NOT NULL DEFAULT false,
+  closed_reason text NULL,
+  closed_by uuid NULL,
+  closed_at timestamptz NULL,
   created_source text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -690,6 +712,10 @@ ALTER TABLE public.lesson_instances
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS status text,
   ADD COLUMN IF NOT EXISTS documentation_status text,
+  ADD COLUMN IF NOT EXISTS is_closed boolean,
+  ADD COLUMN IF NOT EXISTS closed_reason text,
+  ADD COLUMN IF NOT EXISTS closed_by uuid,
+  ADD COLUMN IF NOT EXISTS closed_at timestamptz,
   ADD COLUMN IF NOT EXISTS created_source text,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS updated_at timestamptz,
@@ -782,6 +808,8 @@ CREATE TABLE IF NOT EXISTS public.lesson_participants (
   pricing_breakdown jsonb NULL,
   commitment_id uuid NULL,
   documentation_ref jsonb NULL,
+  reminder_sent boolean NOT NULL DEFAULT false,
+  reminder_seen boolean NOT NULL DEFAULT false,
   attendance_confirmed_at timestamptz NULL,
   attendance_confirmed_by uuid NULL,
   documented_at timestamptz NULL,
@@ -798,6 +826,8 @@ ALTER TABLE public.lesson_participants
   ADD COLUMN IF NOT EXISTS pricing_breakdown jsonb,
   ADD COLUMN IF NOT EXISTS commitment_id uuid,
   ADD COLUMN IF NOT EXISTS documentation_ref jsonb,
+  ADD COLUMN IF NOT EXISTS reminder_sent boolean,
+  ADD COLUMN IF NOT EXISTS reminder_seen boolean,
   ADD COLUMN IF NOT EXISTS attendance_confirmed_at timestamptz,
   ADD COLUMN IF NOT EXISTS attendance_confirmed_by uuid,
   ADD COLUMN IF NOT EXISTS documented_at timestamptz,

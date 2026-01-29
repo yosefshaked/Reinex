@@ -36,6 +36,34 @@ export default function ComboBoxInput({
   const [query, setQuery] = React.useState(value);
   const lastCommittedRef = React.useRef(value);
 
+  const normalizedOptions = React.useMemo(() => {
+    const normalize = (opt) => {
+      if (opt === null || opt === undefined) return '';
+      if (typeof opt === 'string') return opt;
+      if (typeof opt === 'number' || typeof opt === 'boolean') return String(opt);
+      if (typeof opt === 'object') {
+        const candidate = opt.label ?? opt.name ?? opt.value;
+        if (candidate === null || candidate === undefined) return '';
+        return String(candidate);
+      }
+      return '';
+    };
+
+    const list = Array.isArray(options) ? options : [];
+    const normalized = list
+      .map(normalize)
+      .map((s) => String(s || '').trim())
+      .filter(Boolean);
+
+    // Keep order, drop duplicates
+    const seen = new Set();
+    return normalized.filter((item) => {
+      if (seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+  }, [options]);
+
   // Sync displayed text when value changes from outside
   React.useEffect(() => {
     setQuery(value);
@@ -54,9 +82,9 @@ export default function ComboBoxInput({
 
   const filtered = React.useMemo(() => {
     const q = String(query || '').toLowerCase().trim();
-    if (!q) return options;
-    return options.filter((opt) => String(opt).toLowerCase().includes(q));
-  }, [query, options]);
+    if (!q) return normalizedOptions;
+    return normalizedOptions.filter((opt) => opt.toLowerCase().includes(q));
+  }, [query, normalizedOptions]);
 
   const commit = (newValue) => {
     const trimmed = String(newValue || '').trim();
@@ -118,9 +146,9 @@ export default function ComboBoxInput({
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
         <ul id={`${id || name}-list`} role="listbox" className="py-1" dir={dir}>
-          {filtered.map((option) => (
+          {filtered.map((option, index) => (
             <li
-              key={option}
+              key={`${option}::${index}`}
               role="option"
               aria-selected={value === option}
               className="cursor-pointer select-none px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"

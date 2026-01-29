@@ -8,13 +8,11 @@ function ensureDataClient(client) {
 async function defaultRunDiagnostics({ dataClient, signal }) {
   const client = ensureDataClient(dataClient);
   const options = signal ? { signal } : undefined;
-
-  const publicResult = await client.schema('public').rpc('setup_assistant_diagnostics', {}, options);
-  if (!publicResult.error) {
-    return Array.isArray(publicResult.data) ? publicResult.data : [];
+  const { data, error } = await client.rpc('public.setup_assistant_diagnostics', {}, options);
+  if (error) {
+    throw error;
   }
-
-  throw publicResult.error;
+  return Array.isArray(data) ? data : [];
 }
 
 export async function verifyOrgConnection(options, { runDiagnostics = defaultRunDiagnostics } = {}) {

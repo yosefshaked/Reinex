@@ -17,6 +17,22 @@ async function resolveBearerToken() {
   return token;
 }
 
+function resolveTokenFromOverrides(session, accessToken) {
+  const overrideToken = typeof accessToken === 'string' && accessToken.trim()
+    ? accessToken.trim()
+    : null;
+  if (overrideToken) {
+    return { token: overrideToken, source: 'accessToken' };
+  }
+
+  const sessionToken = session?.access_token;
+  if (typeof sessionToken === 'string' && sessionToken.trim()) {
+    return { token: sessionToken.trim(), source: 'session' };
+  }
+
+  return { token: null, source: 'none' };
+}
+
 function createAuthorizationHeaders(customHeaders = {}, bearer, { includeJsonContentType = false } = {}) {
   const headers = includeJsonContentType
     ? { 'Content-Type': 'application/json', ...customHeaders }
@@ -32,8 +48,8 @@ function createAuthorizationHeaders(customHeaders = {}, bearer, { includeJsonCon
 }
 
 export async function authenticatedFetch(path, { session: _session, accessToken: _accessToken, ...options } = {}) {
-  void _session; void _accessToken;
-  const token = await resolveBearerToken();
+  const resolved = resolveTokenFromOverrides(_session, _accessToken);
+  const token = resolved.token || await resolveBearerToken();
   const bearer = `Bearer ${token}`;
 
   const { headers: customHeaders = {}, body, params, ...rest } = options;
@@ -87,23 +103,12 @@ export async function authenticatedFetch(path, { session: _session, accessToken:
   }
 
   if (!response.ok) {
-    const message = payload?.message || payload?.error || payload?.code || 'An API error occurred';
-
+    const message = payload?.message || 'An API error occurred';
     const error = new Error(message);
     error.status = response.status;
-    error.url = url;
     if (payload) {
       error.data = payload;
     }
-
-    // eslint-disable-next-line no-console
-    console.error('[api-client] Request failed', {
-      url,
-      method: rest?.method || 'GET',
-      status: response.status,
-      payload,
-    });
-
     throw error;
   }
 
@@ -111,8 +116,8 @@ export async function authenticatedFetch(path, { session: _session, accessToken:
 }
 
 export async function authenticatedFetchBlob(path, { session: _session, accessToken: _accessToken, ...options } = {}) {
-  void _session; void _accessToken;
-  const token = await resolveBearerToken();
+  const resolved = resolveTokenFromOverrides(_session, _accessToken);
+  const token = resolved.token || await resolveBearerToken();
   const bearer = `Bearer ${token}`;
 
   const { headers: customHeaders = {}, params, ...rest } = options;
@@ -153,17 +158,14 @@ export async function authenticatedFetchBlob(path, { session: _session, accessTo
     try {
       const text = await response.text();
       const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === 'object') {
-        message = parsed.message || parsed.error || parsed.code || message;
+      if (parsed && typeof parsed === 'object' && typeof parsed.message === 'string') {
+        message = parsed.message;
       }
     } catch {
       // Ignore parse errors
     }
     const error = new Error(message);
     error.status = response.status;
-    error.url = url;
-    // eslint-disable-next-line no-console
-    console.error('[api-client] Blob request failed', { url, status: response.status, message });
     throw error;
   }
 
@@ -171,8 +173,8 @@ export async function authenticatedFetchBlob(path, { session: _session, accessTo
 }
 
 export async function authenticatedFetchText(path, { session: _session, accessToken: _accessToken, ...options } = {}) {
-  void _session; void _accessToken;
-  const token = await resolveBearerToken();
+  const resolved = resolveTokenFromOverrides(_session, _accessToken);
+  const token = resolved.token || await resolveBearerToken();
   const bearer = `Bearer ${token}`;
 
   const { headers: customHeaders = {}, params, ...rest } = options;
@@ -214,8 +216,8 @@ export async function authenticatedFetchText(path, { session: _session, accessTo
     let message = 'An API error occurred';
     try {
       const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === 'object') {
-        message = parsed.message || parsed.error || parsed.code || message;
+      if (parsed && typeof parsed === 'object' && typeof parsed.message === 'string') {
+        message = parsed.message;
       }
     } catch {
       // ignore JSON parsing failures
@@ -223,9 +225,6 @@ export async function authenticatedFetchText(path, { session: _session, accessTo
 
     const error = new Error(message);
     error.status = response.status;
-    error.url = url;
-    // eslint-disable-next-line no-console
-    console.error('[api-client] Text request failed', { url, status: response.status, message });
     throw error;
   }
 

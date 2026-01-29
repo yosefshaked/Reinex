@@ -1,7 +1,7 @@
 # תיעוד פרויקט: פלטפורמת Tuttiud לתמיכת תלמידים
 
-**גרסה: 1.6.1**
-**עודכן לאחרונה: 2025-12-09**
+**גרסה: 1.6.2**
+**עודכן לאחרונה: 2025-12-15**
 
 > **מוסכמות מפתחים:** לפרטים על מבנה תיקיות, כללי שמות, דפוסי API וארגון לפי פיצ'רים – ראו [Conventions.md](./Conventions.md).
 
@@ -38,9 +38,9 @@ Tuttiud מאפשרת לצוותי הוראה לתאם שיעורים, לעקוב
 | טבלה | תפקיד | עמודות מרכזיות |
 | :--- | :---- | :------------- |
 | `tuttiud."Instructors"` | ספר מדריכים ארגוני. | `id` (uuid PK ששומר את `auth.users.id` ומנוהל ברמת האפליקציה), `name`, פרטי קשר, `is_active`, `metadata` (כולל `instructor_color` עבור צבע קבוע וייחודי) |
-| `tuttiud."Students"` | רשימת התלמידים של הארגון. | `id`, `name`, `national_id` (אופציונלי, נאכף ייחודיות באפליקציה), `contact_info`, `contact_name`, `contact_phone`, `assigned_instructor_id` (FK → `Instructors.id`), `default_day_of_week` (1 = יום ראשון, 7 = שבת), `default_session_time`, `default_service`, `is_active` (boolean, ברירת מחדל `true`), `tags`, `notes`, `metadata` |
+| `tuttiud."Students"` | רשימת התלמידים של הארגון. | `id`, `name`, `national_id` (אופציונלי, נאכף ייחודיות באפליקציה), `contact_info`, `contact_name`, `contact_phone`, `assigned_instructor_id` (FK → `Instructors.id`), `default_day_of_week` (1 = יום ראשון, 7 = שבת), `default_session_time`, `default_service`, `is_active` (boolean, ברירת מחדל `true`), `tags`, `notes`, `metadata`, `intake_responses` (היסטוריית קליטה חיצונית), `needs_intake_approval` (דגל לתור הקליטה) |
 | `tuttiud."SessionRecords"` | רישום קנוני של מפגשי הוראה. | `id`, `date`, `student_id` (FK ניתן לריק → `Students.id` עבור דיווחים לא משויכים), `instructor_id` (FK → `Instructors.id`), `service_context`, `content` (JSON של תשובות לפי שאלה), `deleted`, `is_legacy` (מסמן שורות עבר שיובאו), חותמות זמן, `metadata` (כולל `unassigned_details` עד לפתרון) |
-| `tuttiud."Settings"` | מאגר הגדרות JSON לכל טננט. | `id`, `key` (ייחודי), `settings_value` |
+| `tuttiud."Settings"` | מאגר הגדרות JSON לכל טננט. | `id`, `key` (ייחודי), `settings_value` (כולל `intake_field_mapping`, `intake_important_fields`, `intake_display_labels`, `external_intake_secret` ו-`student_tags`) |
 
 אינדקסים תומכים:
 
@@ -72,11 +72,17 @@ Tuttiud מאפשרת לצוותי הוראה לתאם שיעורים, לעקוב
 | נתיב | מתודה | קהל יעד | מטרה |
 | :--- | :---- | :------- | :---- |
 | `/api/instructors` | GET | מנהל/בעלים | קורא את `tuttiud."Instructors"` (ברירת מחדל: מדריכים פעילים) ומחזיר רשומות שמזוהות לפי מזהה המשתמש של Supabase (`id`). |
-| `/api/students-list` | GET | כל המשתמשים | נקודת קצה מאוחדת; מנהלים רואים את כל התלמידים, משתמשים רגילים מסוננים לפי `assigned_instructor_id`. מחזיר תלמידים פעילים כברירת מחדל (`status=active`), עם אפשרויות `status=inactive` ו-`status=all` ופרמטר תאימות `include_inactive=true`. התגובה מחזירה גם את הדגל `is_active` להצגת סטטוס. מחליף את `/api/students` ו-`/api/my-students` הישנים. |
+| `/api/students-list` | GET | כל המשתמשים | נקודת קצה מאוחדת; מנהלים רואים את כל התלמידים, משתמשים רגילים מסוננים לפי `assigned_instructor_id`. מחזיר תלמידים פעילים כברירת מחדל (`status=active`), עם אפשרויות `status=inactive` ו-`status=all` ופרמטר תאימות `include_inactive=true`. קליטות שהוסרו מסוננות תמיד. התגובה מחזירה גם את הדגל `is_active` להצגת סטטוס. מחליף את `/api/students` ו-`/api/my-students` הישנים. |
 | `/api/students-list` | POST | מנהל/בעלים | מוסיף תלמיד (שם + פרטי קשר, הגדרות ברירת מחדל ושיוך למדריך) ומחזיר את הרשומה שנוצרה. |
 | `/api/students-list/{studentId}` | PUT | מנהל/בעלים | מעדכן שדות תלמיד ניתנים לעריכה (שם, פרטי קשר, הגדרות ברירת מחדל, שיוך מדריך, `is_active`, תגיות, הערות) ומחזיר את הרשומה המעודכנת או 404. |
 | `/api/students-check-id` | GET | כל המשתמשים | בודק ייחודיות של מספר זהות, עם אפשרות להתעלם מתלמיד קיים בעת עריכה. מחזיר `{ exists, student }` כדי לחסום כפילויות ולספק קישור לפרופיל. |
 | `/api/students-search` | GET | מנהל/בעלים | חיפוש מטושטש לפי שם שמחזיר `{ id, name, national_id, is_active }` להצגת רמזי כפילות מתחת לשדה השם בטופס. |
+| `/api/intake` | POST | רובוט חיצוני | נקודת קצה ציבורית לקליטת טפסי Microsoft Forms דרך Power Automate. דורשת את הכותרות `x-org-id` ו-`x-intake-secret` (מאומת מול `external_intake_secret`), מפענחת `html_content` לזוגות שאלה/תשובה, ממפה שדות לפי `intake_field_mapping` וכותבת `intake_responses` + `needs_intake_approval`. |
+| `/api/intake/approve` | POST | מדריך | מאשר קליטה ממתינה ע\"י `needs_intake_approval=false` ורישום `metadata.last_approval` (זמן + מאשר + הסכמה). הקליטה חייבת להיות משויכת למדריך המאשר. |
+| `/api/intake/dismiss` | POST | מנהל/בעלים | מסיר קליטה מתור הקליטה ע\"י ניקוי `needs_intake_approval` ורישום `metadata.last_intake_dismissal`. |
+| `/api/intake/restore` | POST | מנהל/בעלים | משחזר קליטה שהוסרה ע\"י `needs_intake_approval=true` וסימון `metadata.intake_dismissal.active=false`. |
+| `/api/intake/dismissed` | GET | מנהל/בעלים | מחזיר קליטות שהוסרו כדי להציגן באזור השחזור של תור הקליטה. |
+| `/api/students-merge` | POST | מנהל/בעלים | ממזג קליטה לתלמיד קיים לפי בחירת שדות, מחבר את נתוני הקליטה לתלמיד היעד ומסמן את קליטת המקור כמוסרת. |
 | `/api/students/maintenance-export` | GET | מנהל/בעלים | מחזיר CSV עם `system_uuid`, שם, מספר זהות, פרטי קשר, שיוך מדריך, הגדרות ברירת מחדל, תגיות וסטטוס פעילות לצורך ניקוי נתונים. |
 | `/api/loose-sessions` | GET/POST | מנהל/בעלים | מציג רשימת דיווחים לא משויכים (`student_id IS NULL`) ומאפשר לפתור אותם ע"י שיוך לתלמיד קיים או יצירת תלמיד חדש; מסיר רק את `metadata.unassigned_details` ומשמר מטאדטה אחרת. |
 | `/api/students/maintenance-import` | POST | מנהל/בעלים | מקבל טקסט CSV מעודכן לפי `system_uuid`, מעדכן רק שדות שהשתנו, בודק ייחודיות מספר זהות בכל שורה ומול המאגר, ומחזיר דו"ח כשלונות פר שורה. |
@@ -136,6 +142,7 @@ Tuttiud מאפשרת לצוותי הוראה לתאם שיעורים, לעקוב
 
 - `SETUP_SQL_SCRIPT` הוא מקור האמת היחיד לסקריפט; ייבאו אותו לכל מקום שבו מציגים את הסקריפט.
 - הסקריפט מוסיף עתה את העמודה `Students.is_active boolean default true` ומשלים ערך `true` ברשומות קיימות. ההרצה חוזרת בטוחה הודות לשימוש עקבי ב-`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
+- גשר הקליטה (Intake Bridge) משתמש ב-`intake_field_mapping` וב-`external_intake_secret` מתוך `tuttiud.Settings`, ממפה לפי טקסט השאלה בעברית כפי שמופיע ב-HTML, שומר את ה-HTML המקורי ב-`intake_responses.intake_html_source`, והאישורים מתבצעים דרך `/api/intake/approve` כדי לשמור על בקרה ידנית עם הצהרת הסכמה. מנהלים משייכים מדריך ופרטים מתוך מודאל הדשבורד כדי שהמדריך המשויך יאשר את הקליטה, ויכולים להסיר קליטות שגויות דרך `/api/intake/dismiss` ולשחזר אותן דרך `/api/intake/restore`. בלוח הבקרה מוצג תקציר קליטה בסגנון Scorecard בחצי רוחב עמוד (חדשים/קיימים), ורשימת התור המלאה נפתחת במודאל עם כרטיסיות קליטה מתקפלות לצפייה מלאה.
 - `SessionRecords.student_id` הוא כעת NULLABLE כדי לאפשר דיווחי סשן לא משויכים. בעת כתיבה יש להוסיף את `metadata.unassigned_details` באופן אדיטיבי (בלי למחוק מפתחות קיימים) ולוודא שכל השאילתות/נקודות הקצה יודעות להתמודד עם `student_id` שווה NULL.
 - `verifyOrgConnection` (`src/runtime/verification.js`) מקבל כעת לקוח Supabase ומחזיר את מערך התוצאות כדי לרנדר סטטוס.
 - בעת השלמת האשף חובה לקרוא ל-`recordVerification(orgId, timestamp)` כדי לעדכן את `setup_completed` / `verified_at` ב-Control DB.

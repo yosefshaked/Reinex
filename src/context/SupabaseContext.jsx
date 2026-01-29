@@ -7,7 +7,6 @@ import { useRuntimeConfig } from '../runtime/RuntimeConfigContext.jsx';
 const SupabaseContext = createContext(undefined);
 
 export const SupabaseProvider = ({ children }) => {
-  console.log('[DEBUG 5] SupabaseProvider rendering.');
   const runtimeConfig = useRuntimeConfig();
   const [authClient, setAuthClient] = useState(null);
   const [session, setSession] = useState(null);
@@ -47,10 +46,7 @@ export const SupabaseProvider = ({ children }) => {
       try {
         const client = getAuthClient();
         setAuthClient((previous) => (previous === client ? previous : client));
-      } catch (error) {
-        if (import.meta?.env?.DEV) {
-          console.debug('[SupabaseProvider] auth client not ready yet', error);
-        }
+      } catch {
         setAuthClient(null);
         setSession(null);
         setLoading(true);
