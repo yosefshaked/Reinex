@@ -8,6 +8,7 @@ import {
   Menu,
   UserCog,
   ListChecks,
+  ClipboardList,
   Coins,
   Settings,
 } from 'lucide-react';
@@ -28,6 +29,7 @@ const PRIMARY_ITEMS = [
 ];
 
 const DRAWER_ITEMS = [
+  { key: 'waiting-list', label: 'רשימת המתנה', to: '/waiting-list', icon: ClipboardList },
   { key: 'employees', label: 'עובדים', to: '/employees', icon: UserCog },
   { key: 'services', label: 'שירותים', to: '/services', icon: ListChecks },
   { key: 'financials', label: 'כספים', to: '/financials', icon: Coins },

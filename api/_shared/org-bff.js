@@ -61,6 +61,18 @@ export function isAdminRole(role) {
   return normalized === 'admin' || normalized === 'owner';
 }
 
+export function isOfficeRole(role) {
+  if (!role) {
+    return false;
+  }
+  const normalized = String(role).trim().toLowerCase();
+  return normalized === 'office';
+}
+
+export function isAdminOrOffice(role) {
+  return isAdminRole(role) || isOfficeRole(role);
+}
+
 export async function ensureMembership(supabase, orgId, userId) {
   const { data, error } = await supabase
     .from('org_memberships')

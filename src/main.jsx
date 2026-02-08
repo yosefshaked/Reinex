@@ -11,6 +11,7 @@ import ServiceProfilePage from './pages/ServiceProfilePage.jsx';
 import FinancialsPage from './pages/FinancialsPage.jsx';
 import StudentsPage from './features/students/pages/StudentsPage.jsx';
 import StudentDetailPage from './features/students/pages/StudentDetailPage.jsx';
+import WaitingListPage from './features/waiting-list/pages/WaitingListPage.jsx';
 import Settings from './pages/Settings.jsx';
 import { RuntimeConfigProvider } from './runtime/RuntimeConfigContext.jsx';
 import { SupabaseProvider } from './context/SupabaseContext.jsx';
@@ -80,6 +81,7 @@ function App({ config = null }) {
                     <Route path="/Employees" element={<Navigate to="/employees" replace />} />
                     <Route path="/services" element={<ServicesPage />} />
                     <Route path="/services/:id" element={<ServiceProfilePage />} />
+                    <Route path="/waiting-list" element={<WaitingListPage />} />
                     <Route path="/students-list" element={<StudentsPage />} />
                     <Route path="/admin/students" element={<Navigate to="/students-list" replace />} />
                     <Route path="/my-students" element={<Navigate to="/students-list" replace />} />

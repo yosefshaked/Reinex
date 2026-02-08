@@ -5,6 +5,7 @@ import {
   UUID_PATTERN,
   ensureMembership,
   isAdminRole,
+  isAdminOrOffice,
   normalizeString,
   parseRequestBody,
   readEnv,
@@ -517,6 +518,7 @@ export default async function handler(context, req) {
   }
 
   const isAdmin = isAdminRole(role);
+  const canManageRoster = isAdminOrOffice(role);
 
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
   if (tenantError) {
@@ -528,7 +530,7 @@ export default async function handler(context, req) {
     let instructorsCanViewInactive = true; // Default for admins
     
     // Non-admin users need to check the setting
-    if (!isAdmin) {
+    if (!canManageRoster) {
       try {
         const { data: settingRow, error: settingError } = await tenantClient
           .from('Settings')
@@ -558,7 +560,7 @@ export default async function handler(context, req) {
     let instructorFilterId = '';
 
     // Non-admin users (instructors) can only see their assigned students via lesson_templates
-    if (!isAdmin) {
+    if (!canManageRoster) {
       instructorFilterId = userId;
     } else {
       // Admins can optionally filter by instructor
