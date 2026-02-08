@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Pencil } from 'lucide-react';
+import { Plus, Pencil, Clock } from 'lucide-react';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,7 @@ const DAYS_OF_WEEK = [
   { value: 3, label: 'רביעי', labelShort: 'ד' },
   { value: 4, label: 'חמישי', labelShort: 'ה' },
   { value: 5, label: 'שישי', labelShort: 'ו' },
+  { value: 6, label: 'שבת', labelShort: 'ש' },
 ];
 
 const STATUS_OPTIONS = [
@@ -564,79 +565,69 @@ export default function WaitingListPage() {
 
               <div className="space-y-3">
                 <Label className="block text-right">ימי זמינות</Label>
-                <div className="flex flex-wrap gap-2">
-                  {DAYS_OF_WEEK.map((day) => (
-                    <button
-                      key={day.value}
-                      type="button"
-                      onClick={() => togglePreferredDay(day.value)}
-                      className={cn(
-                        'flex flex-col items-center justify-center min-w-[3rem] h-[3rem] rounded-lg border-2 transition-colors',
-                        formValues.preferredDays.includes(day.value)
-                          ? 'bg-primary text-primary-foreground border-primary'
-                          : 'bg-background hover:bg-muted border-muted-foreground/20'
-                      )}
-                    >
-                      <span className="text-xs font-medium">{day.labelShort}</span>
-                      <span className="text-[0.65rem] opacity-80">{day.label}</span>
-                    </button>
-                  ))}
+                <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
+                  {DAYS_OF_WEEK.map((day) => {
+                    const ranges = formValues.preferredTimesByDay?.[day.value] || [];
+                    return (
+                      <div key={day.value} className="flex flex-col items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => togglePreferredDay(day.value)}
+                          className={cn(
+                            'flex flex-col items-center justify-center min-w-[3rem] h-[3rem] rounded-lg border-2 transition-colors',
+                            formValues.preferredDays.includes(day.value)
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'bg-background hover:bg-muted border-muted-foreground/20'
+                          )}
+                        >
+                          <span className="text-xs font-medium">{day.labelShort}</span>
+                          <span className="text-[0.65rem] opacity-80">{day.label}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => addPreferredTime(day.value)}
+                          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                        >
+                          <Clock className="h-3.5 w-3.5" />
+                          הוסף שעה
+                        </button>
+                        {ranges.length > 0 ? (
+                          <div className="w-full space-y-2">
+                            {ranges.map((range, index) => (
+                              <div key={`${day.value}-${index}`} className="flex items-center gap-2">
+                                <input
+                                  type="time"
+                                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                                  value={range.start}
+                                  onChange={(event) => updatePreferredTime(day.value, index, 'start', event.target.value)}
+                                />
+                                <span className="text-xs text-neutral-500">–</span>
+                                <input
+                                  type="time"
+                                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                                  value={range.end}
+                                  onChange={(event) => updatePreferredTime(day.value, index, 'end', event.target.value)}
+                                />
+                                <button
+                                  type="button"
+                                  className="text-xs text-neutral-500 hover:text-neutral-700"
+                                  onClick={() => removePreferredTime(day.value, index)}
+                                >
+                                  הסר
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
                 <p className="text-xs text-neutral-600">
                   {formValues.preferredDays.length === 0
                     ? 'לא נבחרו ימים.'
                     : `נבחרו ${formValues.preferredDays.length} ימים: ${formatPreferredDays(formValues.preferredDays)}`}
                 </p>
-              </div>
-
-              <div className="space-y-3">
-                <Label className="block text-right">זמני העדפה לפי יום</Label>
-                <div className="space-y-3">
-                  {DAYS_OF_WEEK.map((day) => {
-                    const ranges = formValues.preferredTimesByDay?.[day.value] || [];
-                    return (
-                      <div key={day.value} className="rounded-lg border border-border p-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">{day.label}</span>
-                          <Button type="button" variant="ghost" size="sm" onClick={() => addPreferredTime(day.value)}>
-                            הוספת טווח
-                          </Button>
-                        </div>
-                        {ranges.length === 0 ? (
-                          <p className="text-xs text-neutral-500 mt-2">לא הוגדרו טווחים.</p>
-                        ) : (
-                          <div className="mt-2 space-y-2">
-                            {ranges.map((range, index) => (
-                              <div key={`${day.value}-${index}`} className="flex flex-wrap items-center gap-2">
-                                <input
-                                  type="time"
-                                  className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                                  value={range.start}
-                                  onChange={(event) => updatePreferredTime(day.value, index, 'start', event.target.value)}
-                                />
-                                <span className="text-sm text-neutral-500">–</span>
-                                <input
-                                  type="time"
-                                  className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                                  value={range.end}
-                                  onChange={(event) => updatePreferredTime(day.value, index, 'end', event.target.value)}
-                                />
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => removePreferredTime(day.value, index)}
-                                >
-                                  הסר
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
                 <p className="text-xs text-neutral-500">אפשר להוסיף כמה טווחים לכל יום (לדוגמה: 14:00-16:00, 17:00-18:00).</p>
               </div>
 
