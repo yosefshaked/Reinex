@@ -191,7 +191,8 @@ if (decrypted.startsWith('eyJ')) {
         console.log(`⏰ Expiration: ${expDate.toISOString()}`);
         console.log(`   Status: ${expDate > now ? '✅ Valid' : '❌ Expired'}`);
       }
-    } catch (e) {
+    } catch (error) {
+      void error;
       console.log('   (Could not parse JWT structure)');
     }
   }

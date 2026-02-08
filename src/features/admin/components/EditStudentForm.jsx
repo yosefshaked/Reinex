@@ -19,7 +19,7 @@ import MedicalProviderField from './MedicalProviderField.jsx';
 import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
 import { useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
-import { useInstructors, useServices } from '@/hooks/useOrgData.js';
+import { useServices } from '@/hooks/useOrgData.js';
 
 const IDENTITY_NUMBER_PATTERN = /^\d{5,12}$/;
 
@@ -30,18 +30,11 @@ export default function EditStudentForm({
   isSubmitting = false, 
   error = '', 
   renderFooterOutside = false,
-  onSelectOpenChange, // Mobile fix: callback for Select open/close tracking
   onSubmitDisabledChange = () => {},
 }) {
   const [values, setValues] = useState(() => createStudentFormState(student));
   const [touched, setTouched] = useState({});
   const { services = [], loadingServices } = useServices();
-  const { instructors = [], loadingInstructors } = useInstructors();
-
-  // Normalize instructors to avoid runtime errors when the hook is still initializing
-  const safeInstructors = useMemo(() => {
-    return Array.isArray(instructors) ? instructors : [];
-  }, [instructors]);
   
   // Track the ID of the student currently being edited
   const currentStudentIdRef = useRef(student?.id);
@@ -119,7 +112,6 @@ export default function EditStudentForm({
       email: true,
       contactName: true,
       contactPhone: true,
-      assignedInstructorId: true,
       defaultDayOfWeek: true,
       defaultSessionTime: true,
     };
@@ -135,8 +127,8 @@ export default function EditStudentForm({
       return;
     }
 
-    if (!trimmedFirstName || !trimmedLastName || !trimmedIdentityNumberInner || 
-        !values.assignedInstructorId || !values.defaultDayOfWeek || !values.defaultSessionTime) {
+    if (!trimmedFirstName || !trimmedLastName || !trimmedIdentityNumberInner ||
+        !values.defaultDayOfWeek || !values.defaultSessionTime) {
       return;
     }
 
@@ -159,7 +151,6 @@ export default function EditStudentForm({
       medicalProvider: values.medicalProvider?.trim() || null,
       contactName: trimmedContactName || null,
       contactPhone: trimmedContactPhone || null,
-      assignedInstructorId: values.assignedInstructorId,
       defaultService: values.defaultService || null,
       defaultDayOfWeek: values.defaultDayOfWeek,
       defaultSessionTime: values.defaultSessionTime,
@@ -183,19 +174,9 @@ export default function EditStudentForm({
   })();
   const showContactNameError = false;
   const showContactPhoneError = touched.contactPhone && values.contactPhone.trim() && !validateIsraeliPhone(values.contactPhone);
-  const showInstructorError = touched.assignedInstructorId && !values.assignedInstructorId;
   const showDayError = touched.defaultDayOfWeek && !values.defaultDayOfWeek;
   const showTimeError = touched.defaultSessionTime && !values.defaultSessionTime;
   const isInactive = values.isActive === false;
-  const noInstructorsAvailable = !loadingInstructors && safeInstructors.length === 0;
-
-  // Memoize instructor options to prevent re-render issues with Radix Select
-  const instructorOptions = useMemo(() => {
-    return safeInstructors.filter(inst => inst?.id).map((inst) => ({
-      value: inst.id,
-      label: inst.name?.trim() || inst.email?.trim() || inst.id,
-    }));
-  }, [safeInstructors]);
 
   return (
     <form id="edit-student-form" onSubmit={handleSubmit} className="space-y-5" dir="rtl">
@@ -265,32 +246,6 @@ export default function EditStudentForm({
                 </Link>
               </div>
             </div>
-          )}
-
-          {loadingInstructors ? (
-            <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700" role="status">
-              טוען רשימת מדריכים...
-            </div>
-          ) : noInstructorsAvailable ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" role="alert">
-              <p className="font-semibold">לא נמצאו מדריכים פעילים.</p>
-              <p>יש ליצור מדריך חדש בלשונית צוות/מדריכים לפני עריכת תלמידים.</p>
-            </div>
-          ) : (
-            <SelectField
-              id="assigned-instructor"
-              name="assignedInstructorId"
-              label="מדריך משויך"
-              value={values.assignedInstructorId}
-              onChange={(value) => handleSelectChange('assignedInstructorId', value)}
-              onOpenChange={onSelectOpenChange}
-              options={instructorOptions}
-              placeholder="בחר מדריך"
-              required
-              disabled={isSubmitting}
-              description="מוצגים רק מדריכים פעילים."
-              error={showInstructorError ? 'יש לבחור מדריך.' : ''}
-            />
           )}
 
           <TextField

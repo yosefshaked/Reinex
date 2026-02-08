@@ -15,9 +15,6 @@ export function createStudentFormState(student) {
     identityNumber: student?.identity_number || student?.national_id || '',
     dateOfBirth: student?.date_of_birth || '',
     
-    // Instructor assignment (optional for waitlist)
-    assignedInstructorId: student?.assigned_instructor_id || '',
-    
     // Guardian (optional for independent students)
     guardianId: student?.guardian_id || '',
     guardianRelationship: student?.guardian_relationship || '',

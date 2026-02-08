@@ -50,7 +50,6 @@ export default function StudentsPage() {
   const [isMaintenanceOpen, setIsMaintenanceOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [dayFilter, setDayFilter] = useState(null);
-  const [instructorFilterId, setInstructorFilterId] = useState('');
   const [tagFilter, setTagFilter] = useState('');
   const [sortBy, setSortBy] = useState(STUDENT_SORT_OPTIONS.SCHEDULE); // Default sort by schedule
   const [statusFilter, setStatusFilter] = useState('active'); // 'active' | 'inactive' | 'all'
@@ -83,18 +82,9 @@ export default function StudentsPage() {
   const canFetchVisibility = canFetch && !isAdmin;
 
   const { instructors } = useInstructors({
-    enabled: canFetch && isAdmin, // Only admins need the full instructor list
+    enabled: canFetch && isAdmin,
     orgId: activeOrgId,
   });
-
-  const instructorMap = useMemo(() => {
-    return instructors.reduce((map, instructor) => {
-      if (instructor?.id) {
-        map.set(instructor.id, instructor);
-      }
-      return map;
-    }, new Map());
-  }, [instructors]);
 
   // Determine effective status for API call
   const effectiveStatus = isAdmin 
@@ -181,9 +171,8 @@ export default function StudentsPage() {
       if (savedFilters.sortBy !== undefined) setSortBy(savedFilters.sortBy);
       
       // Admin-only filters
-      if (isAdmin) {
-        if (savedFilters.instructorFilterId !== undefined) setInstructorFilterId(savedFilters.instructorFilterId);
-        if (savedFilters.statusFilter !== undefined) setStatusFilter(savedFilters.statusFilter);
+      if (isAdmin && savedFilters.statusFilter !== undefined) {
+        setStatusFilter(savedFilters.statusFilter);
       }
       // Instructor statusFilter will be restored after permission check
     }
@@ -278,23 +267,6 @@ export default function StudentsPage() {
     };
   }, [fetchPendingReportsCount]);
 
-  // Default the view for admins/owners who are also instructors to "mine" on first visit
-  useEffect(() => {
-    if (!isAdmin || !user || !Array.isArray(instructors) || instructors.length === 0 || !activeOrgId) return;
-    
-    // Check if this admin is also an instructor
-    const isInstructor = instructors.some((i) => i?.id === user.id);
-    if (!isInstructor) return;
-    
-    // Only set default if no saved 'admin' filter exists for this org at all (truly first visit)
-    const savedFilters = loadFilterState(activeOrgId, 'admin');
-    const isFirstVisit = !savedFilters || Object.keys(savedFilters).length === 0;
-    
-    if (isFirstVisit) {
-      setInstructorFilterId(user.id);
-    }
-  }, [isAdmin, user, instructors, activeOrgId]);
-
   // Save filter state whenever it changes
   useEffect(() => {
     if (activeOrgId) {
@@ -305,15 +277,10 @@ export default function StudentsPage() {
         sortBy,
         statusFilter,
       };
-      
-      // Admin-only filter
-      if (isAdmin) {
-        filterState.instructorFilterId = instructorFilterId;
-      }
-      
+
       saveFilterState(activeOrgId, filterMode, filterState);
     }
-  }, [activeOrgId, filterMode, isAdmin, searchQuery, dayFilter, instructorFilterId, tagFilter, sortBy, statusFilter]);
+  }, [activeOrgId, filterMode, isAdmin, searchQuery, dayFilter, tagFilter, sortBy, statusFilter]);
 
   // Client-side filtering and sorting - applied to all fetched students
   useEffect(() => {
@@ -349,11 +316,6 @@ export default function StudentsPage() {
       result = result.filter((s) => dayMatches(s.default_day_of_week, dayFilter));
     }
 
-    // Filter by instructor (admin only)
-    if (isAdmin && instructorFilterId) {
-      result = result.filter((s) => s.assigned_instructor_id === instructorFilterId);
-    }
-
     // Filter by tag
     if (tagFilter) {
       result = result.filter((s) => {
@@ -367,7 +329,7 @@ export default function StudentsPage() {
     result.sort(comparator);
 
     setFilteredStudents(result);
-  }, [students, isAdmin, statusFilter, searchQuery, dayFilter, instructorFilterId, tagFilter, sortBy, canViewInactive]);
+  }, [students, isAdmin, statusFilter, searchQuery, dayFilter, tagFilter, sortBy, canViewInactive]);
 
   const handleResetFilters = () => {
     setSearchQuery('');
@@ -376,10 +338,6 @@ export default function StudentsPage() {
     setSortBy(STUDENT_SORT_OPTIONS.SCHEDULE);
     setStatusFilter('active');
     
-    // Admin-only filter
-    if (isAdmin) {
-      setInstructorFilterId('');
-    }
   };
 
   // Check if any filters are active
@@ -391,11 +349,10 @@ export default function StudentsPage() {
     );
     
     if (isAdmin) {
-      return commonFilters || instructorFilterId !== '' || statusFilter !== 'active';
-    } else {
-      return commonFilters || (canViewInactive && statusFilter !== 'active');
+      return commonFilters || statusFilter !== 'active';
     }
-  }, [isAdmin, searchQuery, dayFilter, instructorFilterId, tagFilter, statusFilter, canViewInactive]);
+    return commonFilters || (canViewInactive && statusFilter !== 'active');
+  }, [isAdmin, searchQuery, dayFilter, tagFilter, statusFilter, canViewInactive]);
 
   const handleOpenAddDialog = () => {
     setCreateError('');
@@ -431,7 +388,6 @@ export default function StudentsPage() {
       last_name: formData.lastName,
       identity_number: formData.identityNumber,
       date_of_birth: formData.dateOfBirth,
-      assigned_instructor_id: formData.assignedInstructorId,
       guardian_id: formData.guardianId,
       guardian_relationship: formData.guardianRelationship,
       phone: formData.phone,
@@ -640,8 +596,6 @@ export default function StudentsPage() {
               onSearchChange={setSearchQuery}
               dayFilter={dayFilter}
               onDayFilterChange={setDayFilter}
-              instructorFilterId={instructorFilterId}
-              onInstructorFilterChange={setInstructorFilterId}
               tagFilter={tagFilter}
               onTagFilterChange={setTagFilter}
               statusFilter={statusFilter}
@@ -650,9 +604,8 @@ export default function StudentsPage() {
               onSortChange={setSortBy}
               hasActiveFilters={hasActiveFilters}
               onResetFilters={handleResetFilters}
-              instructors={instructors}
               tags={tagOptions}
-              showInstructorFilter={isAdmin}
+              showInstructorFilter={false}
               canViewInactive={isAdmin || canViewInactive}
             />
           </CardHeader>
@@ -670,14 +623,12 @@ export default function StudentsPage() {
                       <TableHead className="text-right">שם</TableHead>
                       <TableHead className="text-right">יום מפגש</TableHead>
                       <TableHead className="text-right">שעת מפגש</TableHead>
-                      {isAdmin && <TableHead className="text-right">מדריך</TableHead>}
                       <TableHead className="text-right">סטטוס</TableHead>
                       <TableHead className="text-right">פעולות</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredStudents.map((student) => {
-                      const instructor = isAdmin ? instructorMap.get(student.assigned_instructor_id) : null;
                       const isInactive = student.is_active === false;
                       const missingIdentityNumber = !(student.identity_number || student.national_id)?.trim();
                       const summary = complianceSummary[student.id] || {};
@@ -722,15 +673,6 @@ export default function StudentsPage() {
                               ? formatDefaultTime(student.default_session_time)
                               : '—'}
                           </TableCell>
-                          {isAdmin && (
-                            <TableCell className="text-right">
-                              {instructor ? (
-                                <span>{instructor.name || instructor.email}</span>
-                              ) : (
-                                <span className="text-amber-600">לא משוייך</span>
-                              )}
-                            </TableCell>
-                          )}
                           <TableCell className="text-right">
                             {isInactive ? (
                               <Badge variant="secondary">לא פעיל</Badge>

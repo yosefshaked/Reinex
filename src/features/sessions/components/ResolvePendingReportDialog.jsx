@@ -14,6 +14,7 @@ import { assignLooseSession, createAndAssignLooseSession } from '@/features/sess
 import AddStudentForm from '@/features/admin/components/AddStudentForm.jsx';
 import { mapLooseSessionError } from '@/lib/error-mapping.js';
 import { DAY_NAMES } from '@/features/students/utils/schedule.js';
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',

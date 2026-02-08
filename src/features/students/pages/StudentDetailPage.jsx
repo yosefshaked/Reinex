@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Loader2, ArrowRight, ChevronDown, ChevronUp, Pencil, Download, FileUp } from 'lucide-react';
+import { Loader2, ArrowRight, ChevronDown, ChevronUp, Pencil, Download, FileUp, CalendarClock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { fetchSettings } from '@/features/settings/api/settings.js';
 import { useInstructors, useServices } from '@/hooks/useOrgData.js';
-import { describeSchedule, formatDefaultTime } from '@/features/students/utils/schedule.js';
+import { describeSchedule } from '@/features/students/utils/schedule.js';
 import { ensureSessionFormFallback, parseSessionFormConfig } from '@/features/sessions/utils/form-config.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import { useSessionModal } from '@/features/sessions/context/SessionModalContext.jsx';
@@ -25,6 +25,7 @@ import { exportStudentPdf, downloadPdfBlob } from '@/api/students-export.js';
 import LegacyImportModal from '@/features/students/components/LegacyImportModal.jsx';
 import StudentDocumentsSection from '@/features/students/components/StudentDocumentsSection.jsx';
 import StudentIntakeCard from '@/features/students/components/StudentIntakeCard.jsx';
+import StudentScheduleDialog from '@/features/students/components/StudentScheduleDialog.jsx';
 import { formatStudentName } from '@/features/students/utils/name-utils.js';
 
 const REQUEST_STATE = Object.freeze({
@@ -159,6 +160,13 @@ function buildAnswerList(content, questions, { isLegacy = false } = {}) {
   return entries;
 }
 
+function formatEmployeeName(employee) {
+  if (!employee) return '';
+  if (employee.name) return employee.name;
+  const parts = [employee.first_name, employee.middle_name, employee.last_name].filter(Boolean);
+  return parts.join(' ').trim() || employee.email || '';
+}
+
 export default function StudentDetailPage() {
   const { id: studentIdParam } = useParams();
   const studentId = typeof studentIdParam === 'string' ? studentIdParam : '';
@@ -175,6 +183,18 @@ export default function StudentDetailPage() {
   const [sessionError, setSessionError] = useState('');
   const [sessions, setSessions] = useState([]);
   const [expandedById, setExpandedById] = useState({});
+
+  const [lessonTemplateState, setLessonTemplateState] = useState(REQUEST_STATE.idle);
+  const [lessonTemplateError, setLessonTemplateError] = useState('');
+  const [lessonTemplate, setLessonTemplate] = useState(null);
+
+  const [serviceCatalogState, setServiceCatalogState] = useState(REQUEST_STATE.idle);
+  const [serviceCatalogError, setServiceCatalogError] = useState('');
+  const [serviceCatalog, setServiceCatalog] = useState([]);
+
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [scheduleSaveError, setScheduleSaveError] = useState('');
 
   const [questionsState, setQuestionsState] = useState(REQUEST_STATE.idle);
   const [questionsError, setQuestionsError] = useState('');
@@ -244,6 +264,58 @@ export default function StudentDetailPage() {
   const { instructors } = useInstructors({ enabled: canFetch });
   const { services, loadingServices, servicesError, refetchServices } = useServices({ enabled: canFetch });
 
+  const loadServiceCatalog = useCallback(async () => {
+    if (!canFetch) {
+      return;
+    }
+
+    setServiceCatalogState(REQUEST_STATE.loading);
+    setServiceCatalogError('');
+
+    try {
+      const searchParams = new URLSearchParams();
+      if (activeOrgId) {
+        searchParams.set('org_id', activeOrgId);
+      }
+      const endpoint = searchParams.toString() ? `services?${searchParams.toString()}` : 'services';
+      const payload = await authenticatedFetch(endpoint, { session });
+      setServiceCatalog(Array.isArray(payload) ? payload : []);
+      setServiceCatalogState(REQUEST_STATE.idle);
+    } catch (error) {
+      console.error('Failed to load service catalog', error);
+      setServiceCatalog([]);
+      setServiceCatalogState(REQUEST_STATE.error);
+      setServiceCatalogError(error?.message || 'טעינת רשימת השירותים נכשלה.');
+    }
+  }, [canFetch, activeOrgId, session]);
+
+  const loadLessonTemplate = useCallback(async () => {
+    if (!canFetch || !studentId) {
+      return;
+    }
+
+    setLessonTemplateState(REQUEST_STATE.loading);
+    setLessonTemplateError('');
+
+    try {
+      const searchParams = new URLSearchParams({ student_id: studentId });
+      if (activeOrgId) {
+        searchParams.set('org_id', activeOrgId);
+      }
+      const endpoint = `lesson-templates?${searchParams.toString()}`;
+      const payload = await authenticatedFetch(endpoint, { session });
+      const templates = Array.isArray(payload) ? payload : [];
+      const activeTemplate = templates.find((entry) => entry?.is_active !== false) || templates[0] || null;
+      setLessonTemplate(activeTemplate);
+      setLessonTemplateState(REQUEST_STATE.idle);
+    } catch (error) {
+      console.error('Failed to load lesson templates', error);
+      setLessonTemplate(null);
+      setLessonTemplateState(REQUEST_STATE.error);
+      setLessonTemplateError(error?.message || 'טעינת תבנית הלו״ז נכשלה.');
+    }
+  }, [canFetch, studentId, activeOrgId, session]);
+
   const loadStudent = useCallback(async () => {
     if (!canFetch) {
       return;
@@ -290,6 +362,14 @@ export default function StudentDetailPage() {
       setStudentError(error?.message || 'טעינת פרטי התלמיד נכשלה.');
     }
   }, [canFetch, activeOrgId, membershipRole, studentId]);
+
+  useEffect(() => {
+    void loadServiceCatalog();
+  }, [loadServiceCatalog]);
+
+  useEffect(() => {
+    void loadLessonTemplate();
+  }, [loadLessonTemplate]);
 
   const loadQuestions = useCallback(async () => {
     if (!canFetch) {
@@ -385,6 +465,12 @@ export default function StudentDetailPage() {
       setSessionState(REQUEST_STATE.idle);
       setSessionError('');
       setSessions([]);
+      setLessonTemplateState(REQUEST_STATE.idle);
+      setLessonTemplateError('');
+      setLessonTemplate(null);
+      setServiceCatalogState(REQUEST_STATE.idle);
+      setServiceCatalogError('');
+      setServiceCatalog([]);
     }
   }, [canFetch, loadStudent, loadQuestions, loadSessions]);
 
@@ -455,6 +541,8 @@ export default function StudentDetailPage() {
   const isSessionsLoading = sessionState === REQUEST_STATE.loading;
   const sessionsLoadError = sessionState === REQUEST_STATE.error;
   const isServicesLoading = loadingServices;
+  const isLessonTemplateLoading = lessonTemplateState === REQUEST_STATE.loading;
+  const lessonTemplateLoadError = lessonTemplateState === REQUEST_STATE.error;
 
   const backDestination = isAdminRole(membershipRole) ? '/admin/students' : '/my-students';
   const canEdit = isAdminRole(membershipRole);
@@ -655,7 +743,6 @@ export default function StudentDetailPage() {
         email: payload.email || null,
         contact_name: payload.contactName,
         contact_phone: payload.contactPhone,
-        assigned_instructor_id: payload.assignedInstructorId,
         default_service: payload.defaultService,
         default_day_of_week: payload.defaultDayOfWeek,
         default_session_time: payload.defaultSessionTime,
@@ -700,6 +787,60 @@ export default function StudentDetailPage() {
       toast.error(message);
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleScheduleSubmit = async (payload) => {
+    if (!studentId || !activeOrgId) {
+      return;
+    }
+
+    setIsSavingSchedule(true);
+    setScheduleSaveError('');
+
+    const body = {
+      org_id: activeOrgId,
+      student_id: studentId,
+      instructor_employee_id: payload.instructorEmployeeId,
+      service_id: payload.serviceId,
+      day_of_week: payload.dayOfWeek,
+      time_of_day: payload.timeOfDay,
+      duration_minutes: payload.durationMinutes,
+      valid_from: payload.validFrom,
+      valid_until: payload.validUntil,
+    };
+
+    const endpoint = payload.templateId ? `lesson-templates/${payload.templateId}` : 'lesson-templates';
+    const method = payload.templateId ? 'PUT' : 'POST';
+
+    try {
+      await authenticatedFetch(endpoint, {
+        method,
+        body,
+        session,
+      });
+      toast.success('השיבוץ עודכן בהצלחה');
+      setScheduleDialogOpen(false);
+      await loadLessonTemplate();
+    } catch (error) {
+      console.error('Failed to save schedule', error);
+      const apiMessage = error?.data?.message || error?.message;
+      let message = 'שמירת השיבוץ נכשלה.';
+      if (apiMessage === 'invalid_instructor_id') {
+        message = 'יש לבחור מדריך תקין.';
+      } else if (apiMessage === 'invalid_day_of_week') {
+        message = 'יש לבחור יום תקין.';
+      } else if (apiMessage === 'invalid_time_of_day') {
+        message = 'יש לבחור שעה תקינה.';
+      } else if (apiMessage === 'invalid_duration_minutes') {
+        message = 'יש להזין משך תקין.';
+      } else if (apiMessage === 'invalid_valid_from') {
+        message = 'יש לבחור תאריך התחלה תקין.';
+      }
+      setScheduleSaveError(message);
+      toast.error(message);
+    } finally {
+      setIsSavingSchedule(false);
     }
   };
 
@@ -760,13 +901,25 @@ export default function StudentDetailPage() {
     ? student.metadata.intake_notes.trim()
     : '';
   const defaultService = student?.default_service || 'לא הוגדר';
-  const scheduleDescription = describeSchedule(student?.default_day_of_week, student?.default_session_time);
+  const templateDayOfWeek = typeof lessonTemplate?.day_of_week === 'number'
+    ? lessonTemplate.day_of_week + 1
+    : null;
+  const scheduleDescription = lessonTemplate
+    ? describeSchedule(templateDayOfWeek, lessonTemplate?.time_of_day)
+    : describeSchedule(student?.default_day_of_week, student?.default_session_time);
   const tagDisplayList = buildTagDisplayList(student?.tags, tagCatalog);
   const isTagsLoading = tagsState === REQUEST_STATE.loading;
   const tagsLoadError = tagsState === REQUEST_STATE.error;
-  
-  const assignedInstructor = instructors.find((inst) => inst?.id === student?.assigned_instructor_id);
-  const instructorName = assignedInstructor?.name || (student?.assigned_instructor_id ? 'מדריך לא זמין' : 'לא הוקצה מדריך');
+
+  const assignedInstructor = lessonTemplate?.instructor
+    || instructors.find((inst) => inst?.id === lessonTemplate?.instructor_employee_id);
+  const instructorName = assignedInstructor
+    ? formatEmployeeName(assignedInstructor)
+    : lessonTemplate?.instructor_employee_id
+      ? 'מדריך לא זמין'
+      : 'לא הוקצה מדריך';
+  const serviceName = lessonTemplate?.service?.name
+    || (lessonTemplate?.service_id ? 'שירות לא זמין' : defaultService);
 
   return (
     <>
@@ -857,6 +1010,20 @@ export default function StudentDetailPage() {
                 type="button"
                 className="self-start text-sm"
                 size="sm"
+                onClick={() => {
+                  setScheduleSaveError('');
+                  setScheduleDialogOpen(true);
+                }}
+                disabled={studentLoadError || isStudentLoading || !student}
+                variant="outline"
+              >
+                <CalendarClock className="h-4 w-4" />
+                <span className="ml-1">הגדרת שיבוץ</span>
+              </Button>
+              <Button
+                type="button"
+                className="self-start text-sm"
+                size="sm"
                 onClick={handleOpenEdit}
                 disabled={studentLoadError || isStudentLoading || !student}
                 variant="outline"
@@ -922,19 +1089,18 @@ export default function StudentDetailPage() {
                 <dd className="text-foreground">{instructorName}</dd>
               </div>
               <div className="space-y-1">
-                <dt className="text-xs font-medium text-neutral-500 sm:text-sm">שירות ברירת מחדל</dt>
-                <dd className="text-foreground">{defaultService}</dd>
+                <dt className="text-xs font-medium text-neutral-500 sm:text-sm">שירות</dt>
+                <dd className="text-foreground">{serviceName}</dd>
               </div>
               <div className="space-y-1">
                 <dt className="text-xs font-medium text-neutral-500 sm:text-sm">יום ושעה</dt>
                 <dd className="text-foreground">{scheduleDescription}</dd>
+                {isLessonTemplateLoading ? (
+                  <span className="text-xs text-neutral-500">טוען שיבוץ...</span>
+                ) : lessonTemplateLoadError ? (
+                  <span className="text-xs text-amber-700">{lessonTemplateError}</span>
+                ) : null}
               </div>
-              {student?.default_session_time ? (
-                <div className="space-y-1">
-                  <dt className="text-xs font-medium text-neutral-500 sm:text-sm">שעה</dt>
-                  <dd className="text-foreground">{formatDefaultTime(student.default_session_time)}</dd>
-                </div>
-              ) : null}
               <div className="space-y-1">
                 <dt className="text-xs font-medium text-neutral-500 sm:text-sm">שם איש קשר</dt>
                 <dd className="text-foreground">{contactName}</dd>
@@ -1116,6 +1282,20 @@ export default function StudentDetailPage() {
         )}
       </div>
     </div>
+    {canEdit && (
+      <StudentScheduleDialog
+        open={scheduleDialogOpen}
+        onOpenChange={setScheduleDialogOpen}
+        template={lessonTemplate}
+        instructors={instructors}
+        services={serviceCatalog}
+        servicesLoading={serviceCatalogState === REQUEST_STATE.loading}
+        servicesError={serviceCatalogError}
+        isSubmitting={isSavingSchedule}
+        error={scheduleSaveError}
+        onSubmit={handleScheduleSubmit}
+      />
+    )}
     <EditStudentModal
       open={Boolean(studentForEdit)}
       onClose={handleCloseEdit}

@@ -780,6 +780,8 @@ This is designed to be incremental and non-breaking.
   - students, guardians, student_guardians
   - instructors/services read wrappers
   - lesson_templates CRUD
+- Add UX scaffolding: !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  - Student lifecycle flow progress indicator (create → schedule/instructor → onboarding)
 - Risks:
   - Name collisions; mitigate by explicitly documenting the conflict and selecting an alternative domain-generic name (no product/system prefixes).
 

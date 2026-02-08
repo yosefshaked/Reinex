@@ -8,6 +8,7 @@ import { ComboBoxField, TimeField } from '@/components/ui/forms-ui';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { describeSchedule, dayMatches, includesDayQuery } from '@/features/students/utils/schedule.js';
 import { sortStudentsBySchedule } from '@/features/students/utils/sorting.js';
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
 import { cn } from '@/lib/utils.js';
 import DayOfWeekSelect from '@/components/ui/DayOfWeekSelect.jsx';
 import PreanswersPickerDialog from './PreanswersPickerDialog.jsx';

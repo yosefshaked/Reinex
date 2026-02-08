@@ -19,7 +19,6 @@ import {
   coerceOptionalText,
   coerceTags,
   coerceEmail,
-  validateAssignedInstructor,
   validateIsraeliPhone,
   coerceOptionalDate,
   coerceNotificationMethod,
@@ -59,6 +58,28 @@ async function findStudentByIdentityNumber(tenantClient, identityNumber, { exclu
   return { data, error };
 }
 
+async function fetchStudentIdsByInstructor(tenantClient, instructorEmployeeId) {
+  if (!instructorEmployeeId) {
+    return { studentIds: [], error: null };
+  }
+
+  const { data, error } = await tenantClient
+    .from('lesson_templates')
+    .select('student_id')
+    .eq('instructor_employee_id', instructorEmployeeId)
+    .eq('is_active', true);
+
+  if (error) {
+    return { studentIds: [], error };
+  }
+
+  const studentIds = Array.from(
+    new Set((data || []).map((row) => row.student_id).filter(Boolean)),
+  );
+
+  return { studentIds, error: null };
+}
+
 // Removed splitFullName - users now provide first_name, middle_name, last_name directly
 
 function buildStudentPayload(body) {
@@ -71,13 +92,6 @@ function buildStudentPayload(body) {
   }
   if (!lastName) {
     return { error: 'missing_last_name' };
-  }
-
-  // Assigned Instructor (Optional - for waitlist management)
-  const rawInstructor = body?.assigned_instructor_id ?? body?.assignedInstructorId ?? null;
-  const { value: instructorId, valid: instructorValid } = validateAssignedInstructor(rawInstructor);
-  if (!instructorValid) {
-    return { error: 'invalid_assigned_instructor' };
   }
 
   // Guardian ID (Optional) - Note: Using many-to-many relationship via student_guardians table
@@ -180,7 +194,6 @@ function buildStudentPayload(body) {
       last_name: lastName,
       identity_number: identityNumberResult.value,
       date_of_birth: dateOfBirthResult.value,
-      assigned_instructor_id: instructorId,
       phone: phoneResult.value,
       email: emailResult.value,
       medical_provider: medicalProviderResult.value,
@@ -224,33 +237,6 @@ function buildStudentUpdates(body) {
     }
     updates['last_name'] = lastName;
     hasAny = true;
-  }
-
-  if (
-    Object.prototype.hasOwnProperty.call(body, 'assigned_instructor_id') ||
-    Object.prototype.hasOwnProperty.call(body, 'assignedInstructorId')
-  ) {
-    const raw = Object.prototype.hasOwnProperty.call(body, 'assigned_instructor_id')
-      ? body.assigned_instructor_id
-      : body.assignedInstructorId;
-
-    if (raw === null) {
-      updates.assigned_instructor_id = null;
-      hasAny = true;
-    } else if (typeof raw === 'string') {
-      const trimmed = raw.trim();
-      if (!trimmed) {
-        updates.assigned_instructor_id = null;
-        hasAny = true;
-      } else if (UUID_PATTERN.test(trimmed)) {
-        updates.assigned_instructor_id = trimmed;
-        hasAny = true;
-      } else {
-        return { error: 'invalid_assigned_instructor' };
-      }
-    } else {
-      return { error: 'invalid_assigned_instructor' };
-    }
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'contact_name') || Object.prototype.hasOwnProperty.call(body, 'contactName')) {
@@ -569,9 +555,11 @@ export default async function handler(context, req) {
       .select('*')
       .order('first_name', { ascending: true });
 
-    // Non-admin users (instructors) can only see their assigned students
+    let instructorFilterId = '';
+
+    // Non-admin users (instructors) can only see their assigned students via lesson_templates
     if (!isAdmin) {
-      builder = builder.eq('assigned_instructor_id', userId);
+      instructorFilterId = userId;
     } else {
       // Admins can optionally filter by instructor
       const assignedInstructorId = normalizeString(req?.query?.assigned_instructor_id);
@@ -580,8 +568,29 @@ export default async function handler(context, req) {
         if (!UUID_PATTERN.test(assignedInstructorId)) {
           return respond(context, 400, { message: 'invalid_instructor_id_format' });
         }
-        builder = builder.eq('assigned_instructor_id', assignedInstructorId);
+        instructorFilterId = assignedInstructorId;
       }
+    }
+
+    if (instructorFilterId) {
+      const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(
+        tenantClient,
+        instructorFilterId,
+      );
+
+      if (lessonError) {
+        context.log?.error?.('students-list failed to fetch instructor lesson templates', {
+          message: lessonError.message,
+          instructorEmployeeId: instructorFilterId,
+        });
+        return respond(context, 500, { message: 'failed_to_load_students' });
+      }
+
+      if (!studentIds.length) {
+        return respond(context, 200, []);
+      }
+
+      builder = builder.in('id', studentIds);
     }
 
     // Status filter
@@ -620,7 +629,6 @@ export default async function handler(context, req) {
           firstName: body?.firstName,
           lastName: body?.lastName,
           identityNumber: body?.identityNumber,
-          assignedInstructorId: body?.assignedInstructorId,
           defaultDayOfWeek: body?.defaultDayOfWeek,
           defaultSessionTime: body?.defaultSessionTime,
         }
@@ -645,8 +653,6 @@ export default async function handler(context, req) {
                       ? 'invalid email'
                       : normalized.error === 'invalid_guardian_id'
                         ? 'invalid guardian id'
-                        : normalized.error === 'invalid_assigned_instructor'
-                          ? 'invalid assigned instructor id'
                           : normalized.error === 'invalid_date_of_birth'
                             ? 'invalid date of birth'
                             : normalized.error === 'invalid_notification_method'
@@ -740,7 +746,6 @@ export default async function handler(context, req) {
       resourceId: data.id,
       details: {
         student_name: `${data.first_name} ${data.last_name}`.trim(),
-        assigned_instructor_id: data.assigned_instructor_id,
       },
     });
 
@@ -766,16 +771,14 @@ export default async function handler(context, req) {
           ? 'invalid email'
         : normalizedUpdates.error === 'invalid_name'
           ? 'invalid name'
-          : normalizedUpdates.error === 'invalid_assigned_instructor'
-              ? 'invalid assigned instructor id'
-              : normalizedUpdates.error === 'invalid_contact_name'
-                ? 'invalid contact name'
-                : normalizedUpdates.error === 'invalid_contact_phone'
-                  ? 'invalid contact phone'
-                  : normalizedUpdates.error === 'invalid_default_service'
-                    ? 'invalid default service'
-                    : normalizedUpdates.error === 'invalid_default_day'
-                      ? 'invalid default day of week'
+          : normalizedUpdates.error === 'invalid_contact_name'
+            ? 'invalid contact name'
+            : normalizedUpdates.error === 'invalid_contact_phone'
+              ? 'invalid contact phone'
+              : normalizedUpdates.error === 'invalid_default_service'
+                ? 'invalid default service'
+                : normalizedUpdates.error === 'invalid_default_day'
+                  ? 'invalid default day of week'
           : normalizedUpdates.error === 'invalid_default_session_time'
             ? 'invalid default session time'
             : normalizedUpdates.error === 'invalid_notes'

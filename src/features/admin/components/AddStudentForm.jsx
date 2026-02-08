@@ -14,7 +14,6 @@ import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
 import { useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
 import { useGuardians } from '@/hooks/useGuardians.js';
-import { useInstructors } from '@/hooks/useOrgData.js';
 import GuardianSelector from './GuardianSelector.jsx';
 import MedicalProviderField from './MedicalProviderField.jsx';
 
@@ -29,7 +28,6 @@ function buildInitialValuesKey(initialValues) {
     value.lastName ?? '',
     value.identityNumber ?? value.identity_number ?? value.nationalId ?? '',
     value.dateOfBirth ?? '',
-    value.assignedInstructorId ?? '',
     value.guardianId ?? '',
     value.guardianRelationship ?? '',
     value.phone ?? '',
@@ -55,9 +53,8 @@ export default function AddStudentForm({
   onSubmitDisabledChange = () => {},
   initialValues = EMPTY_INITIAL_VALUES,
 }) {
-  // Fetch guardians and instructors for selection
+  // Fetch guardians for selection
   const { guardians, isLoading: loadingGuardians, createGuardian } = useGuardians();
-  const { instructors, isLoading: loadingInstructors } = useInstructors();
 
   // Avoid infinite rerenders when callers pass a new object literal each render (or when defaulting to `{}`)
   const initialValuesKey = useMemo(() => buildInitialValuesKey(initialValues), [initialValues]);
@@ -214,7 +211,6 @@ export default function AddStudentForm({
       lastName: trimmedLastName,
       identityNumber: trimmedIdentityNumberInner,
       dateOfBirth: values.dateOfBirth || null,
-      assignedInstructorId: values.assignedInstructorId || null,
       guardianId: values.guardianId || null,
       guardianRelationship: values.guardianRelationship || null,
       phone: values.phone.trim() || null,
@@ -335,25 +331,6 @@ export default function AddStudentForm({
               </div>
             </div>
           )}
-
-          <SelectField
-            id="assigned-instructor"
-            name="assignedInstructorId"
-            label="מדריך מוקצה"
-            value={values.assignedInstructorId || ''}
-            onChange={(value) => handleSelectChange('assignedInstructorId', value || null)}
-            onOpenChange={onSelectOpenChange}
-            options={[
-              ...(instructors || []).map((instructor) => ({
-                value: instructor.id,
-                label: `${instructor.first_name}${instructor.middle_name ? ` ${instructor.middle_name}` : ''} ${instructor.last_name}`.trim(),
-              })),
-            ]}
-            placeholder="אין מדריך מוקצה (רשימת המתנה)"
-            required={false}
-            disabled={isSubmitting || loadingInstructors}
-            description="אופציונלי - ניתן להשאיר ריק לרשימת המתנה"
-          />  
 
           <TextField
             id="date-of-birth"
