@@ -309,6 +309,7 @@ CREATE TABLE IF NOT EXISTS public."Services" (
   "duration_minutes" bigint,
   "payment_model" text,
   "color" text,
+  "is_active" boolean NOT NULL DEFAULT true,
   "metadata" jsonb,
   CONSTRAINT "Services_pkey" PRIMARY KEY ("id")
 );
@@ -318,6 +319,7 @@ ALTER TABLE public."Services"
   ADD COLUMN IF NOT EXISTS "duration_minutes" bigint,
   ADD COLUMN IF NOT EXISTS "payment_model" text,
   ADD COLUMN IF NOT EXISTS "color" text,
+  ADD COLUMN IF NOT EXISTS "is_active" boolean,
   ADD COLUMN IF NOT EXISTS "metadata" jsonb;
 
 -- Seed the generic, non-deletable service for general rates

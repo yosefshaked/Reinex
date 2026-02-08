@@ -50,6 +50,28 @@ function normalizeOptionalJson(value) {
   return { value, valid: true };
 }
 
+function normalizeOptionalBoolean(value) {
+  if (value === null || value === undefined || value === '') {
+    return { value: null, valid: true };
+  }
+  if (typeof value === 'boolean') {
+    return { value, valid: true };
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) {
+      return { value: true, valid: true };
+    }
+    if (['false', '0', 'no', 'off'].includes(normalized)) {
+      return { value: false, valid: true };
+    }
+  }
+  if (typeof value === 'number') {
+    return { value: value === 1, valid: true };
+  }
+  return { value: null, valid: false };
+}
+
 export default async function services(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
 
@@ -114,7 +136,7 @@ export default async function services(context, req) {
   if (method === 'GET') {
     const { data, error } = await tenantClient
       .from('Services')
-      .select('id, name, duration_minutes, payment_model, color, metadata')
+      .select('id, name, duration_minutes, payment_model, color, is_active, metadata')
       .order('name', { ascending: true });
 
     if (error) {
@@ -150,6 +172,11 @@ export default async function services(context, req) {
       return respond(context, 400, { message: 'invalid_color' });
     }
 
+    const isActiveResult = normalizeOptionalBoolean(body?.is_active ?? body?.isActive);
+    if (!isActiveResult.valid) {
+      return respond(context, 400, { message: 'invalid_is_active' });
+    }
+
     const metadataResult = normalizeOptionalJson(body?.metadata);
     if (!metadataResult.valid) {
       return respond(context, 400, { message: 'invalid_metadata' });
@@ -162,9 +189,10 @@ export default async function services(context, req) {
         duration_minutes: durationResult.value,
         payment_model: paymentModelResult.value,
         color: colorResult.value,
+        is_active: isActiveResult.value === null ? true : isActiveResult.value,
         metadata: metadataResult.value,
       })
-      .select('id, name, duration_minutes, payment_model, color, metadata')
+      .select('id, name, duration_minutes, payment_model, color, is_active, metadata')
       .single();
 
     if (error) {
@@ -223,6 +251,14 @@ export default async function services(context, req) {
       updates.metadata = metadataResult.value;
     }
 
+    if (Object.prototype.hasOwnProperty.call(body, 'is_active') || Object.prototype.hasOwnProperty.call(body, 'isActive')) {
+      const isActiveResult = normalizeOptionalBoolean(body?.is_active ?? body?.isActive);
+      if (!isActiveResult.valid || isActiveResult.value === null) {
+        return respond(context, 400, { message: 'invalid_is_active' });
+      }
+      updates.is_active = isActiveResult.value;
+    }
+
     if (Object.keys(updates).length === 0) {
       return respond(context, 400, { message: 'missing_updates' });
     }
@@ -231,7 +267,7 @@ export default async function services(context, req) {
       .from('Services')
       .update(updates)
       .eq('id', serviceId)
-      .select('id, name, duration_minutes, payment_model, color, metadata')
+      .select('id, name, duration_minutes, payment_model, color, is_active, metadata')
       .maybeSingle();
 
     if (error) {

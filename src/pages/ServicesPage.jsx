@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { TextField } from '@/components/ui/forms-ui';
+import { Switch } from '@/components/ui/switch';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -19,6 +20,7 @@ function buildInitialForm(service) {
     durationMinutes: service?.duration_minutes ?? '',
     paymentModel: service?.payment_model || '',
     color: service?.color || '#3b82f6',
+    isActive: service?.is_active ?? true,
   };
 }
 
@@ -34,6 +36,7 @@ export default function ServicesPage() {
   const [error, setError] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [toggleId, setToggleId] = useState('');
   const [formValues, setFormValues] = useState(buildInitialForm());
   const [touched, setTouched] = useState({});
 
@@ -114,6 +117,7 @@ export default function ServicesPage() {
       duration_minutes: durationNumber,
       payment_model: formValues.paymentModel.trim() || null,
       color: formValues.color || null,
+      is_active: formValues.isActive,
     };
 
     const endpoint = formValues.id ? `services/${formValues.id}` : 'services';
@@ -138,6 +142,27 @@ export default function ServicesPage() {
   const durationError = touched.durationMinutes && formValues.durationMinutes !== '' && (!Number.isFinite(Number(formValues.durationMinutes)) || Number(formValues.durationMinutes) <= 0)
     ? 'יש להזין משך תקין.'
     : '';
+
+  const handleToggleActive = async (service) => {
+    if (!service?.id) return;
+    setToggleId(service.id);
+    setError('');
+    try {
+      await authenticatedFetch(`services/${service.id}`, {
+        method: 'PUT',
+        session,
+        body: {
+          org_id: activeOrgId,
+          is_active: !service.is_active,
+        },
+      });
+      await loadServices();
+    } catch (err) {
+      setError(err?.message || 'עדכון סטטוס השירות נכשל.');
+    } finally {
+      setToggleId('');
+    }
+  };
 
   const headerActions = useMemo(() => {
     if (!isAdmin) {
@@ -209,6 +234,7 @@ export default function ServicesPage() {
                     <TableHead className="text-right">משך</TableHead>
                     <TableHead className="text-right">מודל תשלום</TableHead>
                     <TableHead className="text-right">צבע</TableHead>
+                    <TableHead className="text-right">סטטוס</TableHead>
                     <TableHead className="text-right">פעולות</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -235,12 +261,24 @@ export default function ServicesPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
+                        {service.is_active === false ? 'מושהה' : 'פעיל'}
+                      </TableCell>
+                      <TableCell className="text-right">
                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => openEditDialog(service)}
                         >
                           <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="ml-2"
+                          onClick={() => handleToggleActive(service)}
+                          disabled={toggleId === service.id}
+                        >
+                          {service.is_active === false ? 'הפעל' : 'השבת'}
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -314,6 +352,18 @@ export default function ServicesPage() {
               disabled={isSubmitting}
               description="אופציונלי"
             />
+
+            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2">
+              <div className="text-right">
+                <span className="block text-sm font-medium text-foreground">שירות פעיל</span>
+                <span className="text-xs text-neutral-500">אפשר להשבית שירות בלי למחוק אותו.</span>
+              </div>
+              <Switch
+                checked={formValues.isActive}
+                onCheckedChange={(checked) => setFormValues((prev) => ({ ...prev, isActive: checked }))}
+                disabled={isSubmitting}
+              />
+            </div>
 
             <div className="flex justify-between gap-2">
               <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} disabled={isSubmitting}>
