@@ -114,7 +114,46 @@ async function handleGet(context, tenantClient) {
     return respond(context, 500, { error: 'database_error', message: error.message });
   }
 
-  return respond(context, 200, { guardians: data || [] });
+  const guardians = data || [];
+  if (!guardians.length) {
+    return respond(context, 200, { guardians: [] });
+  }
+
+  const guardianIds = guardians.map(guardian => guardian.id);
+  const { data: links, error: linksError } = await tenantClient
+    .from('student_guardians')
+    .select('guardian_id, relationship, is_primary, students(id, first_name, last_name)')
+    .in('guardian_id', guardianIds);
+
+  if (linksError) {
+    context.log.error('[guardians/GET] student_guardians query error:', linksError);
+    return respond(context, 500, { error: 'database_error', message: linksError.message });
+  }
+
+  const linksByGuardian = new Map();
+  (links || []).forEach(link => {
+    if (!linksByGuardian.has(link.guardian_id)) {
+      linksByGuardian.set(link.guardian_id, []);
+    }
+    const student = link.students;
+    const studentName = student
+      ? `${student.first_name || ''} ${student.last_name || ''}`.trim()
+      : null;
+
+    linksByGuardian.get(link.guardian_id).push({
+      student_id: student?.id || null,
+      student_name: studentName,
+      relationship: link.relationship || null,
+      is_primary: Boolean(link.is_primary),
+    });
+  });
+
+  const enriched = guardians.map(guardian => ({
+    ...guardian,
+    linked_students: linksByGuardian.get(guardian.id) || [],
+  }));
+
+  return respond(context, 200, { guardians: enriched });
 }
 
 /**
@@ -124,33 +163,44 @@ async function handlePost(context, req, tenantClient, userId) {
   const body = req.body || {};
 
   // Required fields
-  const firstName = coerceOptionalString(body.first_name);
-  const phone = coerceOptionalString(body.phone);
+  const firstNameResult = coerceOptionalString(body.first_name);
+  const phoneResult = coerceOptionalString(body.phone);
 
-  if (!firstName) {
+  if (!firstNameResult.valid || !firstNameResult.value) {
     return respond(context, 400, { error: 'missing_required_fields', message: 'First name is required' });
   }
 
-  if (!phone) {
+  if (!phoneResult.valid || !phoneResult.value) {
     return respond(context, 400, { error: 'missing_phone', message: 'Phone number is required for guardians' });
   }
 
   // Validate phone
-  if (!validateIsraeliPhone(phone)) {
+  if (!validateIsraeliPhone(phoneResult.value)) {
     return respond(context, 400, { error: 'invalid_phone', message: 'Invalid Israeli phone number' });
   }
 
   // Optional fields
-  const middleName = coerceOptionalString(body.middle_name);
-  const lastName = coerceOptionalString(body.last_name);
-  const email = coerceOptionalEmail(body.email);
+  const middleNameResult = coerceOptionalString(body.middle_name);
+  if (!middleNameResult.valid) {
+    return respond(context, 400, { error: 'invalid_middle_name' });
+  }
+
+  const lastNameResult = coerceOptionalString(body.last_name);
+  if (!lastNameResult.valid) {
+    return respond(context, 400, { error: 'invalid_last_name' });
+  }
+
+  const emailResult = coerceOptionalEmail(body.email);
+  if (!emailResult.valid) {
+    return respond(context, 400, { error: 'invalid_email' });
+  }
 
   const payload = {
-    first_name: firstName,
-    middle_name: middleName,
-    last_name: lastName,
-    phone: phone,
-    email: email,
+    first_name: firstNameResult.value,
+    middle_name: middleNameResult.value,
+    last_name: lastNameResult.value,
+    phone: phoneResult.value,
+    email: emailResult.value,
     metadata: {
       created_by: userId,
       created_at: new Date().toISOString(),
@@ -181,34 +231,46 @@ async function handlePut(context, req, tenantClient, guardianId, userId) {
 
   // Allow updating name, phone, email
   if (body.first_name !== undefined) {
-    const firstName = coerceOptionalString(body.first_name);
-    if (!firstName) {
+    const firstNameResult = coerceOptionalString(body.first_name);
+    if (!firstNameResult.valid || !firstNameResult.value) {
       return respond(context, 400, { error: 'invalid_first_name' });
     }
-    updates.first_name = firstName;
+    updates.first_name = firstNameResult.value;
   }
 
   if (body.middle_name !== undefined) {
-    updates.middle_name = coerceOptionalString(body.middle_name);
+    const middleNameResult = coerceOptionalString(body.middle_name);
+    if (!middleNameResult.valid) {
+      return respond(context, 400, { error: 'invalid_middle_name' });
+    }
+    updates.middle_name = middleNameResult.value;
   }
 
   if (body.last_name !== undefined) {
-    updates.last_name = coerceOptionalString(body.last_name);
+    const lastNameResult = coerceOptionalString(body.last_name);
+    if (!lastNameResult.valid) {
+      return respond(context, 400, { error: 'invalid_last_name' });
+    }
+    updates.last_name = lastNameResult.value;
   }
 
   if (body.phone !== undefined) {
-    const phone = coerceOptionalString(body.phone);
-    if (!phone) {
+    const phoneResult = coerceOptionalString(body.phone);
+    if (!phoneResult.valid || !phoneResult.value) {
       return respond(context, 400, { error: 'phone_required', message: 'Phone number cannot be empty' });
     }
-    if (!validateIsraeliPhone(phone)) {
+    if (!validateIsraeliPhone(phoneResult.value)) {
       return respond(context, 400, { error: 'invalid_phone' });
     }
-    updates.phone = phone;
+    updates.phone = phoneResult.value;
   }
 
   if (body.email !== undefined) {
-    updates.email = coerceOptionalEmail(body.email);
+    const emailResult = coerceOptionalEmail(body.email);
+    if (!emailResult.valid) {
+      return respond(context, 400, { error: 'invalid_email' });
+    }
+    updates.email = emailResult.value;
   }
 
   if (Object.keys(updates).length === 0) {

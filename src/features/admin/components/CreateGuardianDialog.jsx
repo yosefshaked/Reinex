@@ -22,10 +22,10 @@ export default function CreateGuardianDialog({
 }) {
   const [formData, setFormData] = useState({
     firstName: '',
+    middleName: '',
     lastName: '',
     phone: '',
     email: '',
-    relationship: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -40,8 +40,8 @@ export default function CreateGuardianDialog({
     setError('');
 
     // Validation
-    if (!formData.firstName.trim() || !formData.lastName.trim()) {
-      setError('יש להזין שם פרטי ושם משפחה');
+    if (!formData.firstName.trim()) {
+      setError('יש להזין שם פרטי');
       return;
     }
 
@@ -60,19 +60,19 @@ export default function CreateGuardianDialog({
     try {
       const guardian = await onCreateGuardian({
         first_name: formData.firstName.trim(),
-        last_name: formData.lastName.trim(),
+        middle_name: formData.middleName.trim() || null,
+        last_name: formData.lastName.trim() || null,
         phone: formData.phone.trim(),
         email: formData.email.trim() || null,
-        relationship: formData.relationship.trim() || null,
       });
 
       // Reset form
       setFormData({
         firstName: '',
+        middleName: '',
         lastName: '',
         phone: '',
         email: '',
-        relationship: '',
       });
 
       onSuccess(guardian);
@@ -86,10 +86,10 @@ export default function CreateGuardianDialog({
   const handleCancel = () => {
     setFormData({
       firstName: '',
+      middleName: '',
       lastName: '',
       phone: '',
       email: '',
-      relationship: '',
     });
     setError('');
     onOpenChange(false);
@@ -124,14 +124,24 @@ export default function CreateGuardianDialog({
           />
 
           <TextField
+            id="guardian-middle-name"
+            name="middleName"
+            label="שם אמצעי"
+            value={formData.middleName}
+            onChange={handleChange}
+            required={false}
+            disabled={isSubmitting}
+            placeholder="הקלד שם אמצעי (אופציונלי)"
+          />
+
+          <TextField
             id="guardian-last-name"
             name="lastName"
             label="שם משפחה"
             value={formData.lastName}
             onChange={handleChange}
-            required
             disabled={isSubmitting}
-            placeholder="הקלד שם משפחה"
+            placeholder="הקלד שם משפחה (אופציונלי)"
           />
 
           <PhoneField
@@ -157,17 +167,6 @@ export default function CreateGuardianDialog({
             placeholder="אופציונלי"
           />
 
-          <TextField
-            id="guardian-relationship"
-            name="relationship"
-            label="קרבה משפחתית"
-            value={formData.relationship}
-            onChange={handleChange}
-            required={false}
-            disabled={isSubmitting}
-            placeholder="למשל: הורה, סבא/סבתא, אפוטרופוס חוקי"
-            description="אופציונלי"
-          />
 
           <div className="flex flex-col gap-2 sm:flex-row-reverse sm:justify-end pt-4">
             <Button type="submit" disabled={isSubmitting} className="gap-2">

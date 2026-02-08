@@ -82,11 +82,25 @@ function buildStudentPayload(body) {
 
   // Guardian ID (Optional) - Note: Using many-to-many relationship via student_guardians table
   const guardianId = body?.guardian_id ?? body?.guardianId ?? null;
+  const guardianRelationshipRaw = body?.guardian_relationship ?? body?.guardianRelationship ?? null;
   if (guardianId && typeof guardianId !== 'string') {
     return { error: 'invalid_guardian_id' };
   }
   if (guardianId && !UUID_PATTERN.test(guardianId)) {
     return { error: 'invalid_guardian_id' };
+  }
+
+  let guardianRelationship = null;
+  if (guardianId) {
+    if (typeof guardianRelationshipRaw !== 'string') {
+      return { error: 'guardian_relationship_required' };
+    }
+    const trimmed = guardianRelationshipRaw.trim();
+    const allowedRelationships = new Set(['father', 'mother', 'self', 'caretaker', 'other']);
+    if (!allowedRelationships.has(trimmed)) {
+      return { error: 'invalid_guardian_relationship' };
+    }
+    guardianRelationship = trimmed;
   }
 
   // Phone validation: required if no guardian
@@ -172,6 +186,7 @@ function buildStudentPayload(body) {
       is_active: isActiveValue,
     },
     guardianId: guardianId, // Return separately for student_guardians insertion
+    guardianRelationship: guardianRelationship,
   };
 }
 
@@ -680,7 +695,7 @@ export default async function handler(context, req) {
         .insert({
           student_id: data.id,
           guardian_id: normalized.guardianId,
-          relationship: 'parent', // Default relationship type
+          relationship: normalized.guardianRelationship,
           is_primary: true, // Mark as primary guardian
         });
 

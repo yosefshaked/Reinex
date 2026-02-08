@@ -20,6 +20,7 @@ export function createStudentFormState(student) {
     
     // Guardian (optional for independent students)
     guardianId: student?.guardian_id || '',
+    guardianRelationship: student?.guardian_relationship || '',
     
     // Contact (phone required if no guardian)
     phone: student?.phone || '',

@@ -433,6 +433,7 @@ export default function StudentsPage() {
       date_of_birth: formData.dateOfBirth,
       assigned_instructor_id: formData.assignedInstructorId,
       guardian_id: formData.guardianId,
+      guardian_relationship: formData.guardianRelationship,
       phone: formData.phone,
       email: formData.email,
       default_notification_method: formData.notificationMethod,

@@ -285,6 +285,7 @@ Indexes:
 - `student_id uuid NOT NULL REFERENCES public.students(id)`
 - `guardian_id uuid NOT NULL REFERENCES public.guardians(id)`
 - `relationship text NOT NULL CHECK (relationship IN ('father','mother','self','caretaker','other'))`
+  - **Required at link creation** (each student–guardian connection must include a relationship)
 - `is_primary boolean NOT NULL DEFAULT false`
 - `created_at timestamptz NOT NULL DEFAULT now()`
 

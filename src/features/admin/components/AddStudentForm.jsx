@@ -30,6 +30,7 @@ function buildInitialValuesKey(initialValues) {
     value.dateOfBirth ?? '',
     value.assignedInstructorId ?? '',
     value.guardianId ?? '',
+    value.guardianRelationship ?? '',
     value.phone ?? '',
     value.email ?? '',
     value.notificationMethod ?? 'whatsapp',
@@ -90,6 +91,8 @@ export default function AddStudentForm({
   // Phone validation: required if no guardian connected
   const isPhoneRequired = !values.guardianId;
   const phoneProvidedAndValid = values.phone.trim() && validateIsraeliPhone(values.phone);
+  const isGuardianRelationshipRequired = Boolean(values.guardianId);
+  const guardianRelationshipProvided = Boolean(values.guardianRelationship);
 
   const preventSubmitReason = useMemo(() => {
     if (duplicate) return 'duplicate';
@@ -97,8 +100,17 @@ export default function AddStudentForm({
     if (!isIdentityNumberFormatValid) return 'invalid_identity_number';
     // Phone required if no guardian
     if (isPhoneRequired && !phoneProvidedAndValid) return 'phone_required';
+    if (isGuardianRelationshipRequired && !guardianRelationshipProvided) return 'guardian_relationship_required';
     return '';
-  }, [duplicate, identityNumberError, isIdentityNumberFormatValid, isPhoneRequired, phoneProvidedAndValid]);
+  }, [
+    duplicate,
+    identityNumberError,
+    isIdentityNumberFormatValid,
+    isPhoneRequired,
+    phoneProvidedAndValid,
+    isGuardianRelationshipRequired,
+    guardianRelationshipProvided,
+  ]);
 
   useEffect(() => {
     onSubmitDisabledChange(Boolean(preventSubmitReason) || isSubmitting);
@@ -154,6 +166,7 @@ export default function AddStudentForm({
       lastName: true,
       identityNumber: true,
       guardianId: true,
+      guardianRelationship: true,
       phone: true,
       email: true,
       notificationMethod: true,
@@ -181,6 +194,10 @@ export default function AddStudentForm({
       return;
     }
 
+    if (values.guardianId && !values.guardianRelationship) {
+      return;
+    }
+
     // Validate phone if provided
     if (values.phone.trim() && !validateIsraeliPhone(values.phone)) {
       return;
@@ -194,6 +211,7 @@ export default function AddStudentForm({
       dateOfBirth: values.dateOfBirth || null,
       assignedInstructorId: values.assignedInstructorId || null,
       guardianId: values.guardianId || null,
+      guardianRelationship: values.guardianRelationship || null,
       phone: values.phone.trim() || null,
       email: values.email.trim() || null,
       notificationMethod: values.notificationMethod || 'whatsapp',
@@ -225,6 +243,7 @@ export default function AddStudentForm({
     (!values.guardianId && !values.phone.trim()) || 
     (values.phone.trim() && !validateIsraeliPhone(values.phone))
   );
+  const showGuardianRelationshipError = touched.guardianRelationship && values.guardianId && !values.guardianRelationship;
   const phoneErrorMessage = (() => {
     if (!values.guardianId && !values.phone.trim()) {
       return 'יש להזין מספר טלפון או לשייך אפוטרופוס';
@@ -345,13 +364,40 @@ export default function AddStudentForm({
 
           <GuardianSelector
             value={values.guardianId}
-            onChange={(value) => handleSelectChange('guardianId', value)}
+            onChange={(value) => {
+              handleSelectChange('guardianId', value);
+              if (!value) {
+                handleSelectChange('guardianRelationship', '');
+              }
+            }}
             guardians={guardians}
             isLoading={loadingGuardians}
             disabled={isSubmitting}
             onCreateGuardian={createGuardian}
             onSelectOpenChange={onSelectOpenChange}
           />
+
+          {values.guardianId && (
+            <SelectField
+              id="guardian-relationship"
+              name="guardianRelationship"
+              label="קרבה לאפוטרופוס"
+              value={values.guardianRelationship}
+              onChange={(value) => handleSelectChange('guardianRelationship', value)}
+              onOpenChange={onSelectOpenChange}
+              options={[
+                { value: 'father', label: 'אב' },
+                { value: 'mother', label: 'אם' },
+                { value: 'self', label: 'עצמי' },
+                { value: 'caretaker', label: 'מטפל' },
+                { value: 'other', label: 'אחר' },
+              ]}
+              placeholder="בחר קרבה"
+              required
+              disabled={isSubmitting}
+              error={showGuardianRelationshipError ? 'יש לבחור קרבה לאפוטרופוס.' : ''}
+            />
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <PhoneField
@@ -365,7 +411,7 @@ export default function AddStudentForm({
               disabled={isSubmitting}
               error={showPhoneError ? phoneErrorMessage : ''}
               description={values.guardianId 
-                ? "אופציונלי - אפוטרופוס מחובר"
+                ? "אופציונלי רק במידה ואפוטרופוס מחובר"
                 : "חובה - אין אפוטרופוס מחובר"
               }
             />
