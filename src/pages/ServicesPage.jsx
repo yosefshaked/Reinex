@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Pencil } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -214,7 +215,11 @@ export default function ServicesPage() {
                 <TableBody>
                   {services.map((service) => (
                     <TableRow key={service.id}>
-                      <TableCell className="text-right font-medium">{service.name}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        <Link to={`/services/${service.id}`} className="text-primary hover:underline">
+                          {service.name}
+                        </Link>
+                      </TableCell>
                       <TableCell className="text-right">
                         {service.duration_minutes ? `${service.duration_minutes} דק׳` : '—'}
                       </TableCell>
