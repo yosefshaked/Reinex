@@ -6,6 +6,7 @@ import AppShell from './components/layout/AppShell.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import CalendarPage from './pages/CalendarPage.jsx';
 import EmployeesPage from './pages/EmployeesPage.jsx';
+import ServicesPage from './pages/ServicesPage.jsx';
 import FinancialsPage from './pages/FinancialsPage.jsx';
 import StudentsPage from './features/students/pages/StudentsPage.jsx';
 import StudentDetailPage from './features/students/pages/StudentDetailPage.jsx';
@@ -76,6 +77,7 @@ function App({ config = null }) {
                     <Route path="/calendar" element={<CalendarPage />} />
                     <Route path="/employees" element={<EmployeesPage />} />
                     <Route path="/Employees" element={<Navigate to="/employees" replace />} />
+                    <Route path="/services" element={<ServicesPage />} />
                     <Route path="/students-list" element={<StudentsPage />} />
                     <Route path="/admin/students" element={<Navigate to="/students-list" replace />} />
                     <Route path="/my-students" element={<Navigate to="/students-list" replace />} />

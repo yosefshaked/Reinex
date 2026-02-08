@@ -7,6 +7,7 @@ import {
   Calendar,
   Users,
   UserCog,
+  ListChecks,
   Coins,
   Settings,
   Pin,
@@ -19,6 +20,7 @@ const NAV_ITEMS = [
   { key: 'calendar', label: 'יומן', to: '/calendar', icon: Calendar },
   { key: 'students', label: 'תלמידים', to: '/students-list', icon: Users },
   { key: 'employees', label: 'עובדים', to: '/employees', icon: UserCog },
+  { key: 'services', label: 'שירותים', to: '/services', icon: ListChecks },
   { key: 'financials', label: 'כספים', to: '/financials', icon: Coins },
   { key: 'settings', label: 'הגדרות', to: '/Settings', icon: Settings },
 ];

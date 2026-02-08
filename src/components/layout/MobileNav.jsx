@@ -7,6 +7,7 @@ import {
   Users,
   Menu,
   UserCog,
+  ListChecks,
   Coins,
   Settings,
 } from 'lucide-react';
@@ -28,6 +29,7 @@ const PRIMARY_ITEMS = [
 
 const DRAWER_ITEMS = [
   { key: 'employees', label: 'עובדים', to: '/employees', icon: UserCog },
+  { key: 'services', label: 'שירותים', to: '/services', icon: ListChecks },
   { key: 'financials', label: 'כספים', to: '/financials', icon: Coins },
   { key: 'settings', label: 'הגדרות', to: '/Settings', icon: Settings },
 ];
