@@ -50,6 +50,46 @@ function normalizePreferredDays(value) {
   return Array.from(unique).sort((a, b) => a - b);
 }
 
+function isValidTime(value) {
+  if (!value) return false;
+  const trimmed = String(value).trim();
+  if (!trimmed) return false;
+  const match = trimmed.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  return Boolean(match);
+}
+
+function normalizePreferredTimes(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const normalized = [];
+
+  for (const entry of value) {
+    const day = Number(entry?.day);
+    if (!Number.isInteger(day) || day < 0 || day > 6) {
+      continue;
+    }
+    const ranges = Array.isArray(entry?.ranges) ? entry.ranges : [];
+    const normalizedRanges = ranges
+      .map((range) => ({
+        start: typeof range?.start === 'string' ? range.start.trim() : '',
+        end: typeof range?.end === 'string' ? range.end.trim() : '',
+      }))
+      .filter((range) => isValidTime(range.start) && isValidTime(range.end));
+
+    if (normalizedRanges.length) {
+      normalized.push({ day, ranges: normalizedRanges });
+    }
+  }
+
+  return normalized.length ? normalized : [];
+}
+
 function normalizeBoolean(value, defaultValue = false) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') {
@@ -69,6 +109,7 @@ function buildWaitingListSelect() {
     'student_id',
     'desired_service_id',
     'preferred_days',
+    'preferred_times',
     'priority_flag',
     'notes',
     'status',
@@ -175,6 +216,7 @@ export default async function waitingList(context, req) {
     const studentId = normalizeUuid(body?.student_id || body?.studentId);
     const serviceId = normalizeUuid(body?.desired_service_id || body?.desiredServiceId || body?.service_id || body?.serviceId);
     const preferredDays = normalizePreferredDays(body?.preferred_days ?? body?.preferredDays);
+    const preferredTimes = normalizePreferredTimes(body?.preferred_times ?? body?.preferredTimes);
     const priorityFlag = normalizeBoolean(body?.priority_flag ?? body?.priorityFlag ?? body?.priority, false);
     const notes = normalizeString(body?.notes) || null;
     const rawStatus = normalizeString(body?.status);
@@ -196,6 +238,7 @@ export default async function waitingList(context, req) {
       student_id: studentId,
       desired_service_id: serviceId,
       preferred_days: preferredDays,
+      preferred_times: preferredTimes,
       priority_flag: priorityFlag,
       notes,
       status,
@@ -241,6 +284,11 @@ export default async function waitingList(context, req) {
   if ('preferred_days' in body || 'preferredDays' in body) {
     const preferredDays = normalizePreferredDays(body?.preferred_days ?? body?.preferredDays);
     updates.preferred_days = preferredDays;
+  }
+
+  if ('preferred_times' in body || 'preferredTimes' in body) {
+    const preferredTimes = normalizePreferredTimes(body?.preferred_times ?? body?.preferredTimes);
+    updates.preferred_times = preferredTimes;
   }
 
   if ('priority_flag' in body || 'priorityFlag' in body || 'priority' in body) {

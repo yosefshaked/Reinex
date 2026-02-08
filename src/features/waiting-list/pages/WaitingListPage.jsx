@@ -41,6 +41,8 @@ const STATUS_BADGE_VARIANTS = {
   closed: 'outline',
 };
 
+const EMPTY_RANGE = { start: '', end: '' };
+
 function buildStudentName(student) {
   if (!student) return '';
   const name = [student.first_name, student.middle_name, student.last_name]
@@ -68,6 +70,77 @@ function formatPreferredDays(days = []) {
     .join(', ');
 }
 
+function buildPreferredTimesMap(preferredTimes) {
+  const map = {};
+  if (!Array.isArray(preferredTimes)) {
+    return map;
+  }
+  preferredTimes.forEach((entry) => {
+    const day = Number(entry?.day);
+    if (!Number.isInteger(day) || day < 0 || day > 6) {
+      return;
+    }
+    const ranges = Array.isArray(entry?.ranges) ? entry.ranges : [];
+    const normalizedRanges = ranges
+      .map((range) => ({
+        start: typeof range?.start === 'string' ? range.start : '',
+        end: typeof range?.end === 'string' ? range.end : '',
+      }))
+      .filter((range) => range.start || range.end);
+    if (normalizedRanges.length) {
+      map[day] = normalizedRanges;
+    }
+  });
+  return map;
+}
+
+function serializePreferredTimes(preferredTimesByDay) {
+  if (!preferredTimesByDay || typeof preferredTimesByDay !== 'object') {
+    return [];
+  }
+
+  return Object.entries(preferredTimesByDay)
+    .map(([dayKey, ranges]) => {
+      const day = Number(dayKey);
+      if (!Number.isInteger(day) || day < 0 || day > 6) {
+        return null;
+      }
+      const normalizedRanges = Array.isArray(ranges)
+        ? ranges
+            .map((range) => ({
+              start: typeof range?.start === 'string' ? range.start.trim() : '',
+              end: typeof range?.end === 'string' ? range.end.trim() : '',
+            }))
+            .filter((range) => range.start && range.end)
+        : [];
+      if (!normalizedRanges.length) {
+        return null;
+      }
+      return { day, ranges: normalizedRanges };
+    })
+    .filter(Boolean);
+}
+
+function formatPreferredTimes(preferredTimes = []) {
+  if (!Array.isArray(preferredTimes) || preferredTimes.length === 0) {
+    return '—';
+  }
+  return preferredTimes
+    .map((entry) => {
+      const dayLabel = DAYS_OF_WEEK.find((day) => day.value === entry.day)?.labelShort;
+      if (!dayLabel || !Array.isArray(entry.ranges) || entry.ranges.length === 0) {
+        return null;
+      }
+      const ranges = entry.ranges
+        .map((range) => `${range.start}-${range.end}`)
+        .filter(Boolean)
+        .join(', ');
+      return ranges ? `${dayLabel}: ${ranges}` : null;
+    })
+    .filter(Boolean)
+    .join(' · ');
+}
+
 function buildInitialForm(entry, studentMap) {
   const studentOption = entry?.student_id && studentMap?.get(entry.student_id)
     ? studentMap.get(entry.student_id)
@@ -79,6 +152,7 @@ function buildInitialForm(entry, studentMap) {
     studentSearch: studentOption || '',
     serviceId: entry?.desired_service_id || '',
     preferredDays: Array.isArray(entry?.preferred_days) ? entry.preferred_days : [],
+    preferredTimesByDay: buildPreferredTimesMap(entry?.preferred_times),
     priorityFlag: Boolean(entry?.priority_flag),
     notes: entry?.notes || '',
     status: entry?.status || 'open',
@@ -223,6 +297,53 @@ export default function WaitingListPage() {
     });
   };
 
+  const addPreferredTime = (dayValue) => {
+    setFormValues((prev) => {
+      const currentRanges = prev.preferredTimesByDay?.[dayValue] || [];
+      const nextRanges = [...currentRanges, { ...EMPTY_RANGE }];
+      return {
+        ...prev,
+        preferredTimesByDay: {
+          ...prev.preferredTimesByDay,
+          [dayValue]: nextRanges,
+        },
+      };
+    });
+  };
+
+  const updatePreferredTime = (dayValue, index, field, value) => {
+    setFormValues((prev) => {
+      const currentRanges = prev.preferredTimesByDay?.[dayValue] || [];
+      const nextRanges = currentRanges.map((range, idx) => (
+        idx === index ? { ...range, [field]: value } : range
+      ));
+      return {
+        ...prev,
+        preferredTimesByDay: {
+          ...prev.preferredTimesByDay,
+          [dayValue]: nextRanges,
+        },
+      };
+    });
+  };
+
+  const removePreferredTime = (dayValue, index) => {
+    setFormValues((prev) => {
+      const currentRanges = prev.preferredTimesByDay?.[dayValue] || [];
+      const nextRanges = currentRanges.filter((_, idx) => idx !== index);
+      const nextPreferredTimes = { ...prev.preferredTimesByDay };
+      if (nextRanges.length) {
+        nextPreferredTimes[dayValue] = nextRanges;
+      } else {
+        delete nextPreferredTimes[dayValue];
+      }
+      return {
+        ...prev,
+        preferredTimesByDay: nextPreferredTimes,
+      };
+    });
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
@@ -244,6 +365,7 @@ export default function WaitingListPage() {
       student_id: formValues.studentId,
       desired_service_id: formValues.serviceId,
       preferred_days: formValues.preferredDays.length ? formValues.preferredDays : [],
+      preferred_times: serializePreferredTimes(formValues.preferredTimesByDay),
       priority_flag: formValues.priorityFlag,
       notes: formValues.notes.trim() || null,
       status: formValues.status,
@@ -353,6 +475,7 @@ export default function WaitingListPage() {
                     <TableHead className="text-right">תלמיד</TableHead>
                     <TableHead className="text-right">שירות מבוקש</TableHead>
                     <TableHead className="text-right">ימי זמינות</TableHead>
+                    <TableHead className="text-right">זמני העדפה</TableHead>
                     <TableHead className="text-right">עדיפות</TableHead>
                     <TableHead className="text-right">סטטוס</TableHead>
                     <TableHead className="text-right">הערות</TableHead>
@@ -375,6 +498,9 @@ export default function WaitingListPage() {
                         </TableCell>
                         <TableCell className="text-right">{entry.service?.name || '—'}</TableCell>
                         <TableCell className="text-right">{formatPreferredDays(entry.preferred_days)}</TableCell>
+                        <TableCell className="text-right text-sm text-neutral-600">
+                          {formatPreferredTimes(entry.preferred_times)}
+                        </TableCell>
                         <TableCell className="text-right">
                           {isPriority ? (
                             <Badge variant="destructive">דחוף</Badge>
@@ -461,6 +587,57 @@ export default function WaitingListPage() {
                     ? 'לא נבחרו ימים.'
                     : `נבחרו ${formValues.preferredDays.length} ימים: ${formatPreferredDays(formValues.preferredDays)}`}
                 </p>
+              </div>
+
+              <div className="space-y-3">
+                <Label className="block text-right">זמני העדפה לפי יום</Label>
+                <div className="space-y-3">
+                  {DAYS_OF_WEEK.map((day) => {
+                    const ranges = formValues.preferredTimesByDay?.[day.value] || [];
+                    return (
+                      <div key={day.value} className="rounded-lg border border-border p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">{day.label}</span>
+                          <Button type="button" variant="ghost" size="sm" onClick={() => addPreferredTime(day.value)}>
+                            הוספת טווח
+                          </Button>
+                        </div>
+                        {ranges.length === 0 ? (
+                          <p className="text-xs text-neutral-500 mt-2">לא הוגדרו טווחים.</p>
+                        ) : (
+                          <div className="mt-2 space-y-2">
+                            {ranges.map((range, index) => (
+                              <div key={`${day.value}-${index}`} className="flex flex-wrap items-center gap-2">
+                                <input
+                                  type="time"
+                                  className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                                  value={range.start}
+                                  onChange={(event) => updatePreferredTime(day.value, index, 'start', event.target.value)}
+                                />
+                                <span className="text-sm text-neutral-500">–</span>
+                                <input
+                                  type="time"
+                                  className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                                  value={range.end}
+                                  onChange={(event) => updatePreferredTime(day.value, index, 'end', event.target.value)}
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removePreferredTime(day.value, index)}
+                                >
+                                  הסר
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-neutral-500">אפשר להוסיף כמה טווחים לכל יום (לדוגמה: 14:00-16:00, 17:00-18:00).</p>
               </div>
 
               <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2">
