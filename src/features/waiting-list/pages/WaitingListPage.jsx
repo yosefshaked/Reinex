@@ -270,7 +270,7 @@ export default function WaitingListPage() {
   const studentError = touched.studentId && !formValues.studentId ? 'בחרו תלמיד מהרשימה.' : '';
   const serviceError = touched.serviceId && !formValues.serviceId ? 'בחרו שירות.' : '';
 
-  const headerActions = canManage ? (
+  const pageActions = canManage ? (
     <Button onClick={openCreateDialog} className="gap-2" size="sm">
       <Plus className="h-4 w-4" />
       רשומה חדשה
@@ -314,7 +314,7 @@ export default function WaitingListPage() {
   }
 
   return (
-    <PageLayout title="רשימת המתנה" description="ניהול תלמידים הממתינים לשיבוץ" headerActions={headerActions}>
+    <PageLayout title="רשימת המתנה" description="ניהול תלמידים הממתינים לשיבוץ" actions={pageActions}>
       <Card className="mb-4">
         <CardContent className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between" dir="rtl">

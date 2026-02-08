@@ -164,7 +164,7 @@ export default function ServicesPage() {
     }
   };
 
-  const headerActions = useMemo(() => {
+  const pageActions = useMemo(() => {
     if (!isAdmin) {
       return null;
     }
@@ -213,7 +213,7 @@ export default function ServicesPage() {
   }
 
   return (
-    <PageLayout title="שירותים" description="ניהול שירותים זמינים במערכת" headerActions={headerActions}>
+    <PageLayout title="שירותים" description="ניהול שירותים זמינים במערכת" actions={pageActions}>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">רשימת שירותים</CardTitle>
