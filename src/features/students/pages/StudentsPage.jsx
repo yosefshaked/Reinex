@@ -436,6 +436,7 @@ export default function StudentsPage() {
       guardian_relationship: formData.guardianRelationship,
       phone: formData.phone,
       email: formData.email,
+      medical_provider: formData.medicalProvider,
       default_notification_method: formData.notificationMethod,
       special_rate: formData.specialRate,
       medical_flags: formData.medicalFlags,

@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { SelectField, TextField } from '@/components/ui/forms-ui';
+import { TextField } from '@/components/ui/forms-ui';
+import FormField from '@/components/ui/forms-ui/FormField.jsx';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, Plus } from 'lucide-react';
 import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';
-
-const NONE_VALUE = '__none__';
 
 export default function StudentTagsField({ value, onChange, disabled = false, description }) {
   const { tagOptions, loadingTags, tagsError, loadTags, createTag, canManageTags } = useStudentTags();
@@ -31,9 +31,28 @@ export default function StudentTagsField({ value, onChange, disabled = false, de
     }
   }, [value, tagOptions, loadingTags]);
 
-  const handleSelectChange = useCallback((nextValue) => {
-    onChange(nextValue === NONE_VALUE ? '' : nextValue);
-  }, [onChange]);
+  const selectedTags = useMemo(() => {
+    if (Array.isArray(value)) {
+      return value.filter(Boolean);
+    }
+    if (typeof value === 'string' && value.trim()) {
+      return [value.trim()];
+    }
+    return [];
+  }, [value]);
+
+  const toggleTag = useCallback((tagId) => {
+    if (disabled) {
+      return;
+    }
+    const next = new Set(selectedTags);
+    if (next.has(tagId)) {
+      next.delete(tagId);
+    } else {
+      next.add(tagId);
+    }
+    onChange(Array.from(next));
+  }, [disabled, onChange, selectedTags]);
 
   const handleDialogToggle = useCallback((open) => {
     setIsDialogOpen(open);
@@ -67,7 +86,7 @@ export default function StudentTagsField({ value, onChange, disabled = false, de
       const updated = await loadTags();
       const resolvedId = createdId || updated.find((tag) => tag.name === trimmed)?.id || '';
       if (resolvedId) {
-        onChange(resolvedId);
+        onChange(Array.from(new Set([...selectedTags, resolvedId])));
       }
       setIsDialogOpen(false);
       setNewTagName('');
@@ -81,23 +100,12 @@ export default function StudentTagsField({ value, onChange, disabled = false, de
     } finally {
       setIsSavingTag(false);
     }
-  }, [createTag, loadTags, newTagName, onChange]);
+  }, [createTag, loadTags, newTagName, onChange, selectedTags]);
 
   const options = useMemo(() => {
-    const base = tagOptions.map((tag) => ({ value: tag.id, label: tag.name }));
-    
-    // Only show "deleted tag" if tags have finished loading and tag is still not found
-    if (!loadingTags && value && value !== NONE_VALUE && !tagOptions.some((tag) => tag.id === value)) {
-      base.push({ value, label: `${value.slice(0, 8)}... (תגית שנמחקה)` });
-    }
-    
-    return [
-      { value: NONE_VALUE, label: 'ללא תגית' },
-      ...base,
-    ];
-  }, [tagOptions, value, loadingTags]);
+    return tagOptions.map((tag) => ({ id: tag.id, name: tag.name }));
+  }, [tagOptions]);
 
-  const placeholder = loadingTags ? 'טוען תגיות...' : 'בחר תגית';
   const fieldDescription = useMemo(() => {
     if (tagsError) {
       return description || '';
@@ -133,17 +141,33 @@ export default function StudentTagsField({ value, onChange, disabled = false, de
   return (
     <div className="flex items-end gap-2">
       <div className="flex-1">
-        <SelectField
+        <FormField
           id="student-tags"
           label="תגיות"
-          value={value || NONE_VALUE}
-          onChange={handleSelectChange}
-          options={options}
-          placeholder={placeholder}
-          disabled={disabled || loadingTags}
           description={fieldDescription}
           error={tagsError}
-        />
+        >
+          <div className="rounded-md border border-input bg-background px-3 py-2">
+            {loadingTags ? (
+              <p className="text-sm text-muted-foreground">טוען תגיות...</p>
+            ) : options.length === 0 ? (
+              <p className="text-sm text-muted-foreground">אין תגיות זמינות.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {options.map((tag) => (
+                  <label key={tag.id} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={selectedTags.includes(tag.id)}
+                      onCheckedChange={() => toggleTag(tag.id)}
+                      disabled={disabled}
+                    />
+                    <span>{tag.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </FormField>
       </div>
       {canManageTags && (
         <Dialog open={isDialogOpen} onOpenChange={handleDialogToggle}>

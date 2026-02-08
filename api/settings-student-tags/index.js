@@ -146,7 +146,7 @@ export default async function (context, req) {
   if (method === 'GET') {
     try {
       const tags = await loadExistingTags(tenantClient);
-      return respond(context, 200, { tags }, { 'Cache-Control': 'private, max-age=120' });
+      return respond(context, 200, { tags }, { 'Cache-Control': 'no-store' });
     } catch (error) {
       context.log?.error?.('settings-student-tags: failed to load tags', { message: error?.message });
       return respond(context, 500, { message: 'failed_to_load_tags' });

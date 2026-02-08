@@ -33,12 +33,13 @@ function buildInitialValuesKey(initialValues) {
     value.guardianRelationship ?? '',
     value.phone ?? '',
     value.email ?? '',
+    value.medicalProvider ?? '',
     value.notificationMethod ?? 'whatsapp',
     value.specialRate ?? '',
     value.medicalFlags ?? '',
     value.onboardingStatus ?? 'not_started',
     value.notesInternal ?? '',
-    value.tagId ?? '',
+    Array.isArray(value.tags) ? value.tags.join(',') : '',
     value.isActive === false ? '0' : '1',
   ].join('|');
 }
@@ -74,6 +75,9 @@ export default function AddStudentForm({
   if (initialStateKeyRef.current !== initialValuesKey) {
     initialStateKeyRef.current = initialValuesKey;
     initialStateRef.current = { ...createStudentFormState(), ...stableInitialValuesRef.current };
+    if (!Array.isArray(initialStateRef.current.tags)) {
+      initialStateRef.current.tags = [];
+    }
   }
 
   const initialState = initialStateRef.current;
@@ -151,10 +155,10 @@ export default function AddStudentForm({
     }));
   };
 
-  const handleTagChange = useCallback((nextTagId) => {
+  const handleTagChange = useCallback((nextTags) => {
     setValues((previous) => ({
       ...previous,
-      tagId: nextTagId,
+      tags: nextTags,
     }));
   }, []);
 
@@ -214,12 +218,13 @@ export default function AddStudentForm({
       guardianRelationship: values.guardianRelationship || null,
       phone: values.phone.trim() || null,
       email: values.email.trim() || null,
+      medicalProvider: values.medicalProvider.trim() || null,
       notificationMethod: values.notificationMethod || 'whatsapp',
       specialRate: values.specialRate ? parseFloat(values.specialRate) : null,
       medicalFlags: values.medicalFlags || null,
       onboardingStatus: values.onboardingStatus || 'not_started',
       notesInternal: values.notesInternal.trim() || null,
-      tags: normalizeTagIdsForWrite(values.tagId),
+      tags: normalizeTagIdsForWrite(values.tags),
       isActive: values.isActive !== false,
     });
   };
@@ -430,6 +435,19 @@ export default function AddStudentForm({
             />
           </div>
 
+          <TextField
+            id="medical-provider"
+            name="medicalProvider"
+            label="קופת חולים"
+            value={values.medicalProvider}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            required={false}
+            disabled={isSubmitting}
+            placeholder="לדוגמה: כללית"
+            description="אופציונלי"
+          />
+
           <SelectField
             id="notification-method"
             name="notificationMethod"
@@ -471,7 +489,7 @@ export default function AddStudentForm({
           </div>
 
           <StudentTagsField
-            value={values.tagId}
+            value={values.tags}
             onChange={handleTagChange}
             disabled={isSubmitting}
             description="תגיות לסינון וארגון תלמידים."

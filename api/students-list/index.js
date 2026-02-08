@@ -157,6 +157,11 @@ function buildStudentPayload(body) {
     return { error: 'invalid_notes_internal' };
   }
 
+  const medicalProviderResult = coerceOptionalText(body?.medical_provider ?? body?.medicalProvider);
+  if (!medicalProviderResult.valid) {
+    return { error: 'invalid_medical_provider' };
+  }
+
   const tagsResult = coerceTags(body?.tags);
   if (!tagsResult.valid) {
     return { error: 'invalid_tags' };
@@ -178,9 +183,11 @@ function buildStudentPayload(body) {
       assigned_instructor_id: instructorId,
       phone: phoneResult.value,
       email: emailResult.value,
+      medical_provider: medicalProviderResult.value,
       default_notification_method: notificationMethodResult.value,
       special_rate: specialRateResult.value,
       medical_flags: medicalFlagsResult.value,
+      tags: tagsResult.value,
       onboarding_status: onboardingStatusResult.value,
       notes_internal: notesInternalResult.value,
       is_active: isActiveValue,
@@ -343,6 +350,17 @@ function buildStudentUpdates(body) {
       return { error: 'invalid_notes_internal' };
     }
     updates.notes_internal = value;
+    hasAny = true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'medical_provider') || Object.prototype.hasOwnProperty.call(body, 'medicalProvider')) {
+    const { value, valid } = coerceOptionalText(
+      Object.prototype.hasOwnProperty.call(body, 'medical_provider') ? body.medical_provider : body.medicalProvider
+    );
+    if (!valid) {
+      return { error: 'invalid_medical_provider' };
+    }
+    updates.medical_provider = value;
     hasAny = true;
   }
 

@@ -17,7 +17,7 @@ import { validateIsraeliPhone } from '@/components/ui/helpers/phone';
 import StudentTagsField from './StudentTagsField.jsx';
 import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
-import { useStudentNameSuggestions, useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
+import { useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
 import { useInstructors, useServices } from '@/hooks/useOrgData.js';
 
 const IDENTITY_NUMBER_PATTERN = /^\d{5,12}$/;
@@ -93,10 +93,10 @@ export default function EditStudentForm({
     setTouched((previous) => ({ ...previous, [name]: true }));
   }, []);
 
-  const handleTagChange = useCallback((nextTagId) => {
+  const handleTagChange = useCallback((nextTags) => {
     setValues((previous) => ({
       ...previous,
-      tagId: nextTagId,
+      tags: nextTags,
     }));
   }, []);
 
@@ -162,7 +162,7 @@ export default function EditStudentForm({
       defaultDayOfWeek: values.defaultDayOfWeek,
       defaultSessionTime: values.defaultSessionTime,
       notes: values.notes.trim() || null,
-      tags: normalizeTagIdsForWrite(values.tagId),
+      tags: normalizeTagIdsForWrite(values.tags),
       isActive: values.isActive !== false,
     });
   };
@@ -410,7 +410,7 @@ export default function EditStudentForm({
           </div>
 
           <StudentTagsField
-            value={values.tagId}
+            value={values.tags}
             onChange={handleTagChange}
             disabled={isSubmitting}
             description="תגיות לסינון וארגון תלמידים."

@@ -25,6 +25,9 @@ export function createStudentFormState(student) {
     // Contact (phone required if no guardian)
     phone: student?.phone || '',
     email: student?.email || '',
+
+    // Medical provider
+    medicalProvider: student?.medical_provider || '',
     
     // Reinex-specific fields
     notificationMethod: student?.default_notification_method || 'whatsapp',
@@ -37,6 +40,6 @@ export function createStudentFormState(student) {
     isActive: student?.is_active !== false,
     
     // Tags (kept for categorization)
-    tagId: Array.isArray(student?.tags) && student.tags.length > 0 ? student.tags[0] : '',
+    tags: Array.isArray(student?.tags) ? student.tags : [],
   };
 }
