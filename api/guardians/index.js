@@ -3,6 +3,16 @@ import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/s
 import { resolveTenantClient, ensureMembership, readEnv, respond } from '../_shared/org-bff.js';
 import { validateIsraeliPhone, coerceOptionalString, coerceOptionalEmail } from '../_shared/student-validation.js';
 
+function normalizeStoredText(value) {
+  if (value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'value')) {
+    return typeof value.value === 'string' ? value.value : value.value ?? null;
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  return value ?? null;
+}
+
 /**
  * Guardians API - Manage legal guardians/parents
  * 
@@ -114,7 +124,14 @@ async function handleGet(context, tenantClient) {
     return respond(context, 500, { error: 'database_error', message: error.message });
   }
 
-  const guardians = data || [];
+  const guardians = (data || []).map(guardian => ({
+    ...guardian,
+    first_name: normalizeStoredText(guardian.first_name),
+    middle_name: normalizeStoredText(guardian.middle_name),
+    last_name: normalizeStoredText(guardian.last_name),
+    phone: normalizeStoredText(guardian.phone),
+    email: normalizeStoredText(guardian.email),
+  }));
   if (!guardians.length) {
     return respond(context, 200, { guardians: [] });
   }
