@@ -15,6 +15,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { validateIsraeliPhone } from '@/components/ui/helpers/phone';
 import StudentTagsField from './StudentTagsField.jsx';
+import MedicalProviderField from './MedicalProviderField.jsx';
 import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
 import { useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
@@ -155,6 +156,7 @@ export default function EditStudentForm({
       identityNumber: trimmedIdentityNumberInner,
       phone: values.phone.trim() || null,
       email: values.email.trim() || null,
+      medicalProvider: values.medicalProvider?.trim() || null,
       contactName: trimmedContactName || null,
       contactPhone: trimmedContactPhone || null,
       assignedInstructorId: values.assignedInstructorId,
@@ -312,6 +314,13 @@ export default function EditStudentForm({
             onBlur={handleBlur}
             required={false}
             disabled={isSubmitting}
+          />
+
+          <MedicalProviderField
+            value={values.medicalProvider}
+            onChange={(nextValue) => handleSelectChange('medicalProvider', nextValue)}
+            disabled={isSubmitting}
+            description="אופציונלי"
           />
 
           <TextField

@@ -3,7 +3,13 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { TextField } from '@/components/ui/forms-ui';
 import FormField from '@/components/ui/forms-ui/FormField.jsx';
-import { Checkbox } from '@/components/ui/checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Loader2, Plus } from 'lucide-react';
 import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';
 
@@ -17,19 +23,6 @@ export default function StudentTagsField({ value, onChange, disabled = false, de
   useEffect(() => {
     void loadTags();
   }, [loadTags]);
-
-  useEffect(() => {
-    // Only check if tag exists AFTER tags have finished loading
-    if (loadingTags || !value) {
-      return;
-    }
-    const exists = tagOptions.some((tag) => tag.id === value);
-    if (!exists && tagOptions.length > 0) {
-      // Tag was deleted from catalog but still assigned to student
-      // Keep the value so user can see something is selected and choose to clear it
-      console.warn(`Tag "${value}" is assigned to student but not found in catalog`);
-    }
-  }, [value, tagOptions, loadingTags]);
 
   const selectedTags = useMemo(() => {
     if (Array.isArray(value)) {
@@ -53,6 +46,13 @@ export default function StudentTagsField({ value, onChange, disabled = false, de
     }
     onChange(Array.from(next));
   }, [disabled, onChange, selectedTags]);
+
+  const clearTags = useCallback(() => {
+    if (disabled) {
+      return;
+    }
+    onChange([]);
+  }, [disabled, onChange]);
 
   const handleDialogToggle = useCallback((open) => {
     setIsDialogOpen(open);
@@ -138,6 +138,16 @@ export default function StudentTagsField({ value, onChange, disabled = false, de
     </DialogFooter>
   );
 
+  const selectedLabels = useMemo(() => {
+    if (!selectedTags.length) {
+      return 'ללא תגיות';
+    }
+    const lookup = new Map(options.map((tag) => [tag.id, tag.name]));
+    return selectedTags
+      .map((tagId) => lookup.get(tagId) || tagId)
+      .join(', ');
+  }, [options, selectedTags]);
+
   return (
     <div className="flex items-end gap-2">
       <div className="flex-1">
@@ -147,26 +157,39 @@ export default function StudentTagsField({ value, onChange, disabled = false, de
           description={fieldDescription}
           error={tagsError}
         >
-          <div className="rounded-md border border-input bg-background px-3 py-2">
-            {loadingTags ? (
-              <p className="text-sm text-muted-foreground">טוען תגיות...</p>
-            ) : options.length === 0 ? (
-              <p className="text-sm text-muted-foreground">אין תגיות זמינות.</p>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {options.map((tag) => (
-                  <label key={tag.id} className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={selectedTags.includes(tag.id)}
-                      onCheckedChange={() => toggleTag(tag.id)}
-                      disabled={disabled}
-                    />
-                    <span>{tag.name}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-between"
+                disabled={disabled || loadingTags}
+              >
+                <span className="truncate">{loadingTags ? 'טוען תגיות...' : selectedLabels}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="min-w-[14rem]">
+              {options.length === 0 ? (
+                <DropdownMenuCheckboxItem checked={false} disabled>
+                  אין תגיות זמינות
+                </DropdownMenuCheckboxItem>
+              ) : (
+                options.map((tag) => (
+                  <DropdownMenuCheckboxItem
+                    key={tag.id}
+                    checked={selectedTags.includes(tag.id)}
+                    onCheckedChange={() => toggleTag(tag.id)}
+                  >
+                    {tag.name}
+                  </DropdownMenuCheckboxItem>
+                ))
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem checked={false} onCheckedChange={clearTags}>
+                נקה בחירה
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </FormField>
       </div>
       {canManageTags && (

@@ -16,6 +16,7 @@ import { useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDedupli
 import { useGuardians } from '@/hooks/useGuardians.js';
 import { useInstructors } from '@/hooks/useOrgData.js';
 import GuardianSelector from './GuardianSelector.jsx';
+import MedicalProviderField from './MedicalProviderField.jsx';
 
 const EMPTY_INITIAL_VALUES = Object.freeze({});
 const IDENTITY_NUMBER_PATTERN = /^\d{5,12}$/;
@@ -435,16 +436,10 @@ export default function AddStudentForm({
             />
           </div>
 
-          <TextField
-            id="medical-provider"
-            name="medicalProvider"
-            label="קופת חולים"
+          <MedicalProviderField
             value={values.medicalProvider}
-            onChange={handleChange}
-            onBlur={handleBlur}
-            required={false}
+            onChange={(nextValue) => handleSelectChange('medicalProvider', nextValue)}
             disabled={isSubmitting}
-            placeholder="לדוגמה: כללית"
             description="אופציונלי"
           />
 
