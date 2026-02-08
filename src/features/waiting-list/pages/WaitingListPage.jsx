@@ -531,7 +531,7 @@ export default function WaitingListPage() {
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg" dir="rtl">
+        <DialogContent className="sm:max-w-3xl" dir="rtl">
           <DialogHeader>
             <DialogTitle>{formValues.id ? 'עריכת רשומה' : 'רשומה חדשה'}</DialogTitle>
             <DialogDescription className="text-right">
@@ -565,11 +565,11 @@ export default function WaitingListPage() {
 
               <div className="space-y-3">
                 <Label className="block text-right">ימי זמינות</Label>
-                <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
+                <div className="flex items-start gap-4 overflow-x-auto pb-2">
                   {DAYS_OF_WEEK.map((day) => {
                     const ranges = formValues.preferredTimesByDay?.[day.value] || [];
                     return (
-                      <div key={day.value} className="flex flex-col items-center gap-2">
+                      <div key={day.value} className="flex min-w-[120px] flex-col items-center gap-2">
                         <button
                           type="button"
                           onClick={() => togglePreferredDay(day.value)}
@@ -594,7 +594,8 @@ export default function WaitingListPage() {
                         {ranges.length > 0 ? (
                           <div className="w-full space-y-2">
                             {ranges.map((range, index) => (
-                              <div key={`${day.value}-${index}`} className="flex items-center gap-2">
+                              <div key={`${day.value}-${index}`} className="flex flex-col gap-2">
+                                <div className="flex items-center gap-2">
                                 <input
                                   type="time"
                                   className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
@@ -608,9 +609,10 @@ export default function WaitingListPage() {
                                   value={range.end}
                                   onChange={(event) => updatePreferredTime(day.value, index, 'end', event.target.value)}
                                 />
+                                </div>
                                 <button
                                   type="button"
-                                  className="text-xs text-neutral-500 hover:text-neutral-700"
+                                  className="self-end text-xs text-neutral-500 hover:text-neutral-700"
                                   onClick={() => removePreferredTime(day.value, index)}
                                 >
                                   הסר

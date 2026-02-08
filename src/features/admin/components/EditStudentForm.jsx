@@ -30,6 +30,7 @@ export default function EditStudentForm({
   isSubmitting = false, 
   error = '', 
   renderFooterOutside = false,
+  onSelectOpenChange, // Mobile fix: callback for Select open/close tracking
   onSubmitDisabledChange = () => {},
 }) {
   const [values, setValues] = useState(() => createStudentFormState(student));
