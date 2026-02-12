@@ -151,7 +151,7 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
       metadata,
       created_at,
       updated_at,
-      lesson_participants!inner (
+      lesson_participants(
         id,
         student_id,
         participant_status,
@@ -160,7 +160,7 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
         commitment_id,
         documentation_ref,
         metadata,
-        students (
+        students(
           id,
           first_name,
           middle_name,
@@ -168,14 +168,14 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
           metadata
         )
       ),
-      Services (
+      Services(
         id,
         service_name,
         color,
         is_active,
         metadata
       ),
-      Employees (
+      Employees(
         id,
         first_name,
         middle_name,
@@ -223,7 +223,11 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
       code: error.code,
       details: error.details,
     });
-    return respond(context, 500, { message: 'failed_to_load_instances' });
+    return respond(context, 500, { 
+      message: 'failed_to_load_instances',
+      error: error.message,
+      details: error.details,
+    });
   }
 
   // Transform data for frontend consumption
@@ -238,18 +242,21 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
           commitment_id: p.commitment_id,
           documentation_ref: p.documentation_ref,
           metadata: p.metadata,
-          student: p.students ? {
-            id: p.students.id,
-            first_name: p.students.first_name,
-            middle_name: p.students.middle_name,
-            last_name: p.students.last_name,
-            full_name: [p.students.first_name, p.students.middle_name, p.students.last_name]
+          student: p.students && p.students.length > 0 ? {
+            id: p.students[0].id,
+            first_name: p.students[0].first_name,
+            middle_name: p.students[0].middle_name,
+            last_name: p.students[0].last_name,
+            full_name: [p.students[0].first_name, p.students[0].middle_name, p.students[0].last_name]
               .filter(Boolean)
               .join(' '),
-            metadata: p.students.metadata,
+            metadata: p.students[0].metadata,
           } : null,
         }))
       : [];
+
+    const serviceData = instance.Services && instance.Services.length > 0 ? instance.Services[0] : null;
+    const instructorData = instance.Employees && instance.Employees.length > 0 ? instance.Employees[0] : null;
 
     return {
       id: instance.id,
@@ -265,23 +272,23 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
       created_at: instance.created_at,
       updated_at: instance.updated_at,
       participants,
-      service: instance.Services ? {
-        id: instance.Services.id,
-        service_name: instance.Services.service_name,
-        color: instance.Services.color,
-        is_active: instance.Services.is_active,
-        metadata: instance.Services.metadata,
+      service: serviceData ? {
+        id: serviceData.id,
+        service_name: serviceData.service_name,
+        color: serviceData.color,
+        is_active: serviceData.is_active,
+        metadata: serviceData.metadata,
       } : null,
-      instructor: instance.Employees ? {
-        id: instance.Employees.id,
-        first_name: instance.Employees.first_name,
-        middle_name: instance.Employees.middle_name,
-        last_name: instance.Employees.last_name,
-        full_name: [instance.Employees.first_name, instance.Employees.middle_name, instance.Employees.last_name]
+      instructor: instructorData ? {
+        id: instructorData.id,
+        first_name: instructorData.first_name,
+        middle_name: instructorData.middle_name,
+        last_name: instructorData.last_name,
+        full_name: [instructorData.first_name, instructorData.middle_name, instructorData.last_name]
           .filter(Boolean)
           .join(' '),
-        email: instance.Employees.email,
-        metadata: instance.Employees.metadata,
+        email: instructorData.email,
+        metadata: instructorData.metadata,
       } : null,
     };
   });
