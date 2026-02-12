@@ -10,11 +10,7 @@ export function LessonInstanceCard({ instance, onClick }) {
   // Get service color or default
   const bgColor = instance.service?.color || '#6B7280'; // gray-500 default
   
-  // Get student names
-  const studentNames = (instance.participants || [])
-    .map(p => p.student?.first_name || 'לא ידוע')
-    .join(', ');
-  
+  // Get first student name and count
   const firstStudentName = instance.participants?.[0]?.student?.first_name || 'לא ידוע';
   const additionalCount = (instance.participants?.length || 1) - 1;
   

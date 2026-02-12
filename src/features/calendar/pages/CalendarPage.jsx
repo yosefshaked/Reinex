@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { PageLayout } from '../../../components/ui/PageLayout';
+import PageLayout from '@/components/ui/PageLayout';
 import { CalendarHeader } from '../components/CalendarHeader/CalendarHeader';
 import { CalendarGrid } from '../components/CalendarGrid/CalendarGrid';
 import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
