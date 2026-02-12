@@ -717,6 +717,7 @@ export default function WaitingListPage() {
                 <div className="space-y-2">
                   {(formValues.preferredTimesByDay?.[timeEditorDay] || []).map((range, index) => (
                     <div key={`${timeEditorDay}-${index}`} className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-neutral-500">התחלה</span>
                       <input
                         type="time"
                         className="h-9 rounded-md border border-input bg-background px-2 text-sm"
@@ -724,6 +725,7 @@ export default function WaitingListPage() {
                         onChange={(event) => updatePreferredTime(timeEditorDay, index, 'start', event.target.value)}
                       />
                       <span className="text-sm text-neutral-500">–</span>
+                      <span className="text-xs text-neutral-500">סיום</span>
                       <input
                         type="time"
                         className="h-9 rounded-md border border-input bg-background px-2 text-sm"
