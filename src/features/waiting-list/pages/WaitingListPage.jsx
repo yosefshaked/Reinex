@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Pencil, Clock } from 'lucide-react';
+import { Plus, Pencil } from 'lucide-react';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -179,6 +179,8 @@ export default function WaitingListPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formValues, setFormValues] = useState(buildInitialForm());
   const [touched, setTouched] = useState({});
+  const [timeEditorDay, setTimeEditorDay] = useState(null);
+  const [timeEditorOpen, setTimeEditorOpen] = useState(false);
 
   const canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection && canManage);
 
@@ -291,11 +293,35 @@ export default function WaitingListPage() {
 
   const togglePreferredDay = (dayValue) => {
     setFormValues((prev) => {
-      const nextDays = prev.preferredDays.includes(dayValue)
+      const isSelected = prev.preferredDays.includes(dayValue);
+      const nextDays = isSelected
         ? prev.preferredDays.filter((day) => day !== dayValue)
         : [...prev.preferredDays, dayValue].sort((a, b) => a - b);
-      return { ...prev, preferredDays: nextDays };
+      const nextPreferredTimes = { ...prev.preferredTimesByDay };
+      if (isSelected) {
+        delete nextPreferredTimes[dayValue];
+      }
+      return { ...prev, preferredDays: nextDays, preferredTimesByDay: nextPreferredTimes };
     });
+
+    const currentlySelected = formValues.preferredDays.includes(dayValue);
+    if (!currentlySelected) {
+      const ranges = formValues.preferredTimesByDay?.[dayValue] || [];
+      if (ranges.length === 0) {
+        setTimeEditorDay(dayValue);
+        setTimeEditorOpen(true);
+      }
+    }
+  };
+
+  const openTimeEditor = (dayValue) => {
+    setTimeEditorDay(dayValue);
+    setTimeEditorOpen(true);
+  };
+
+  const closeTimeEditor = () => {
+    setTimeEditorOpen(false);
+    setTimeEditorDay(null);
   };
 
   const addPreferredTime = (dayValue) => {
@@ -568,6 +594,7 @@ export default function WaitingListPage() {
                 <div className="flex items-start gap-4 overflow-x-auto pb-2">
                   {DAYS_OF_WEEK.map((day) => {
                     const ranges = formValues.preferredTimesByDay?.[day.value] || [];
+                    const isSelected = formValues.preferredDays.includes(day.value);
                     return (
                       <div key={day.value} className="flex min-w-[120px] flex-col items-center gap-2">
                         <button
@@ -575,7 +602,7 @@ export default function WaitingListPage() {
                           onClick={() => togglePreferredDay(day.value)}
                           className={cn(
                             'flex flex-col items-center justify-center min-w-[3rem] h-[3rem] rounded-lg border-2 transition-colors',
-                            formValues.preferredDays.includes(day.value)
+                            isSelected
                               ? 'bg-primary text-primary-foreground border-primary'
                               : 'bg-background hover:bg-muted border-muted-foreground/20'
                           )}
@@ -583,43 +610,18 @@ export default function WaitingListPage() {
                           <span className="text-xs font-medium">{day.labelShort}</span>
                           <span className="text-[0.65rem] opacity-80">{day.label}</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => addPreferredTime(day.value)}
-                          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                        >
-                          <Clock className="h-3.5 w-3.5" />
-                          הוסף שעה
-                        </button>
+                        {isSelected ? (
+                          <button
+                            type="button"
+                            onClick={() => openTimeEditor(day.value)}
+                            className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs text-primary hover:bg-primary/10"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            עריכה
+                          </button>
+                        ) : null}
                         {ranges.length > 0 ? (
-                          <div className="w-full space-y-2">
-                            {ranges.map((range, index) => (
-                              <div key={`${day.value}-${index}`} className="flex flex-col gap-2">
-                                <div className="flex items-center gap-2">
-                                <input
-                                  type="time"
-                                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
-                                  value={range.start}
-                                  onChange={(event) => updatePreferredTime(day.value, index, 'start', event.target.value)}
-                                />
-                                <span className="text-xs text-neutral-500">–</span>
-                                <input
-                                  type="time"
-                                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
-                                  value={range.end}
-                                  onChange={(event) => updatePreferredTime(day.value, index, 'end', event.target.value)}
-                                />
-                                </div>
-                                <button
-                                  type="button"
-                                  className="self-end text-xs text-neutral-500 hover:text-neutral-700"
-                                  onClick={() => removePreferredTime(day.value, index)}
-                                >
-                                  הסר
-                                </button>
-                              </div>
-                            ))}
-                          </div>
+                          <span className="text-[0.65rem] text-neutral-500">טווחים: {ranges.length}</span>
                         ) : null}
                       </div>
                     );
@@ -678,6 +680,79 @@ export default function WaitingListPage() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={timeEditorOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeTimeEditor();
+            return;
+          }
+          setTimeEditorOpen(true);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg" dir="rtl">
+          <DialogHeader>
+            <DialogTitle>עריכת זמינות</DialogTitle>
+            <DialogDescription className="text-right">
+              {timeEditorDay !== null
+                ? `הגדירו טווחי זמן ליום ${DAYS_OF_WEEK.find((day) => day.value === timeEditorDay)?.label || ''}`
+                : 'בחרו יום כדי לערוך זמינות.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {timeEditorDay !== null ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">טווחים זמינים</span>
+                <Button type="button" variant="ghost" size="sm" onClick={() => addPreferredTime(timeEditorDay)}>
+                  הוספת טווח
+                </Button>
+              </div>
+              {(formValues.preferredTimesByDay?.[timeEditorDay] || []).length === 0 ? (
+                <p className="text-xs text-neutral-500">לא הוגדרו טווחים.</p>
+              ) : (
+                <div className="space-y-2">
+                  {(formValues.preferredTimesByDay?.[timeEditorDay] || []).map((range, index) => (
+                    <div key={`${timeEditorDay}-${index}`} className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="time"
+                        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                        value={range.start}
+                        onChange={(event) => updatePreferredTime(timeEditorDay, index, 'start', event.target.value)}
+                      />
+                      <span className="text-sm text-neutral-500">–</span>
+                      <input
+                        type="time"
+                        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                        value={range.end}
+                        onChange={(event) => updatePreferredTime(timeEditorDay, index, 'end', event.target.value)}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removePreferredTime(timeEditorDay, index)}
+                      >
+                        הסר
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          <div className="flex flex-row-reverse gap-2 pt-4">
+            <Button type="button" onClick={closeTimeEditor}>
+              שמירה
+            </Button>
+            <Button type="button" variant="outline" onClick={closeTimeEditor}>
+              דלג
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </PageLayout>
