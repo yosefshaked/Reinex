@@ -10,6 +10,8 @@ import { useCalendarInstructors } from '../hooks/useCalendar';
 import { Loader2, AlertCircle, Users, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ComboBoxField } from '@/components/ui/forms-ui';
+import { authenticatedFetch } from '@/lib/api-client.js';
+import { useAuth } from '@/auth/AuthContext.jsx';
 
 /**
  * AddLessonDialog - Create new lesson instance
@@ -17,6 +19,7 @@ import { ComboBoxField } from '@/components/ui/forms-ui';
  */
 export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
   const { currentOrg } = useOrg();
+  const { session } = useAuth();
   const { services, isLoading: servicesLoading } = useServices();
   const { instructors, isLoading: instructorsLoading } = useCalendarInstructors();
   
@@ -39,37 +42,28 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
   const [error, setError] = useState(null);
   const [studentDetails, setStudentDetails] = useState(null); // Cache first student details
 
-  // Fetch students
+  // Fetch students using authenticatedFetch (proper pattern)
   useEffect(() => {
-    if (!open) return;
+    if (!open || !session) return;
 
     async function fetchStudents() {
       setStudentsLoading(true);
       try {
-        const response = await fetch('students-list', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-        });
-
-        console.log('Students response status:', response.status);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch students: ${response.status} ${response.statusText}`);
-        }
-
-        const data = await response.json();
+        const data = await authenticatedFetch('students-list', { session });
         console.log('Students data received:', data);
         setStudents(Array.isArray(data) ? data : (data.students || []));
+        setError(null);
       } catch (err) {
         console.error('Error fetching students:', err);
         setError(`Failed to load students: ${err.message}`);
+        setStudents([]);
       } finally {
         setStudentsLoading(false);
       }
     }
 
     fetchStudents();
-  }, [open]);
+  }, [open, session]);
 
   // When first student is selected, auto-populate service and instructor
   useEffect(() => {
