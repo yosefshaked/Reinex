@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useOrg } from '@/org/OrgContext';
-import { useAuth } from '@/auth/AuthContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 
 /**
@@ -8,7 +7,6 @@ import { authenticatedFetch } from '@/lib/api-client.js';
  */
 export function useCalendarInstances(date, instructorId = null) {
   const { activeOrgId } = useOrg();
-  const { session } = useAuth();
   const [instances, setInstances] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -19,7 +17,7 @@ export function useCalendarInstances(date, instructorId = null) {
   }, []);
 
   useEffect(() => {
-    if (!activeOrgId || !date || !session) {
+    if (!activeOrgId || !date) {
       return;
     }
 
@@ -29,7 +27,6 @@ export function useCalendarInstances(date, instructorId = null) {
 
       try {
         const data = await authenticatedFetch('calendar/instances', {
-          session,
           params: {
             org_id: activeOrgId,
             date,
@@ -46,7 +43,7 @@ export function useCalendarInstances(date, instructorId = null) {
     }
 
     fetchInstances();
-  }, [activeOrgId, date, instructorId, refetchTrigger, session]);
+  }, [activeOrgId, date, instructorId, refetchTrigger]);
 
   return { instances, isLoading, error, refetch };
 }
@@ -56,7 +53,6 @@ export function useCalendarInstances(date, instructorId = null) {
  */
 export function useCalendarInstructors(includeInactive = false) {
   const { activeOrgId } = useOrg();
-  const { session } = useAuth();
   const [instructors, setInstructors] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -67,7 +63,7 @@ export function useCalendarInstructors(includeInactive = false) {
   }, []);
 
   useEffect(() => {
-    if (!activeOrgId || !session) {
+    if (!activeOrgId) {
       return;
     }
 
@@ -77,7 +73,6 @@ export function useCalendarInstructors(includeInactive = false) {
 
       try {
         const data = await authenticatedFetch('calendar/instructors', {
-          session,
           params: {
             org_id: activeOrgId,
             include_inactive: includeInactive,
@@ -93,7 +88,7 @@ export function useCalendarInstructors(includeInactive = false) {
     }
 
     fetchInstructors();
-  }, [activeOrgId, includeInactive, refetchTrigger, session]);
+  }, [activeOrgId, includeInactive, refetchTrigger]);
 
   return { instructors, isLoading, error, refetch };
 }
