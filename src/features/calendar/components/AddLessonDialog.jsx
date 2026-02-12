@@ -1,15 +1,17 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useState, useEffect, useCallback } from 'react';
 import { useOrg } from '@/org/OrgContext';
-import { useServices, useStudents } from '@/hooks/useOrgData';
+import { useStudents } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { Loader2, AlertCircle, Users, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ComboBoxField } from '@/components/ui/forms-ui';
+import { authenticatedFetch } from '@/lib/api-client.js';
+import { useAuth } from '@/auth/AuthContext.jsx';
 
 /**
  * AddLessonDialog - Create new lesson instance
@@ -17,11 +19,12 @@ import { ComboBoxField } from '@/components/ui/forms-ui';
  */
 export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
   const { activeOrgId } = useOrg();
-  const { services, loadingServices: servicesLoading, servicesError } = useServices({
-    enabled: open && !!activeOrgId,
-    orgId: activeOrgId,
-  });
+  const { session } = useAuth();
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
+
+  const [services, setServices] = useState([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [servicesError, setServicesError] = useState('');
 
   const { students, loadingStudents: studentsLoading, studentsError } = useStudents({
     status: 'active',
@@ -44,6 +47,35 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [studentDetails, setStudentDetails] = useState(null); // Cache first student details
+
+  useEffect(() => {
+    if (!open || !activeOrgId || !session) return;
+
+    let isMounted = true;
+    async function fetchServices() {
+      setServicesLoading(true);
+      setServicesError('');
+      try {
+        const payload = await authenticatedFetch('services', {
+          session,
+          params: { org_id: activeOrgId },
+        });
+        if (!isMounted) return;
+        setServices(Array.isArray(payload) ? payload : []);
+      } catch (err) {
+        if (!isMounted) return;
+        setServices([]);
+        setServicesError(err?.message || 'טעינת השירותים נכשלה.');
+      } finally {
+        if (isMounted) setServicesLoading(false);
+      }
+    }
+
+    fetchServices();
+    return () => {
+      isMounted = false;
+    };
+  }, [open, activeOrgId, session]);
 
   useEffect(() => {
     if (studentsError) {
@@ -81,33 +113,26 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
     setIsCheckingConflicts(true);
     try {
       const datetime_start = `${formData.date}T${formData.time}:00`;
-      
-      const response = await fetch('/api/calendar/conflicts/check', {
+      const data = await authenticatedFetch('calendar/conflicts/check', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify({
+        session,
+        body: {
           org_id: activeOrgId,
           datetime_start,
           duration_minutes: formData.duration_minutes,
           instructor_employee_id: formData.instructor_employee_id,
           student_ids: formData.student_ids,
           service_id: formData.service_id,
-        }),
+        },
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setConflicts(data.conflicts || []);
-      }
+      setConflicts(data?.conflicts || []);
     } catch (err) {
       console.error('Error checking conflicts:', err);
     } finally {
       setIsCheckingConflicts(false);
     }
-  }, [formData, activeOrgId]);
+  }, [formData, activeOrgId, session]);
 
   useEffect(() => {
     if (!formData.instructor_employee_id || !formData.date || !formData.time || formData.student_ids.length === 0) {
@@ -133,14 +158,11 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
 
     try {
       const datetime_start = `${formData.date}T${formData.time}:00`;
-      
-      const response = await fetch('/api/calendar/instances', {
+
+      await authenticatedFetch('calendar/instances', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify({
+        session,
+        body: {
           org_id: activeOrgId,
           datetime_start,
           duration_minutes: formData.duration_minutes,
@@ -148,19 +170,14 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
           service_id: formData.service_id,
           student_ids: formData.student_ids,
           created_source: 'manual',
-        }),
+        },
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to create lesson');
-      }
 
       onSuccess?.();
       onClose();
     } catch (err) {
       console.error('Error creating lesson:', err);
-      setError(err.message);
+      setError(err?.message || 'Failed to create lesson');
     } finally {
       setIsSubmitting(false);
     }
@@ -172,13 +189,14 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
     searchText: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''} ${s.identity_number || ''}`.toLowerCase(),
   }));
 
-  const activeServices = services?.filter(s => s.is_active) || [];
+  const activeServices = services?.filter((s) => s?.is_active !== false) || [];
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>שיעור חדש</DialogTitle>
+          <DialogDescription className="sr-only">יצירת שיעור חדש עבור תלמידים נבחרים.</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -329,7 +347,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
               <SelectContent>
                 {activeServices.map((service) => (
                   <SelectItem key={service.id} value={service.id}>
-                    {service.service_name}
+                    {service.name || service.service_name}
                   </SelectItem>
                 ))}
               </SelectContent>

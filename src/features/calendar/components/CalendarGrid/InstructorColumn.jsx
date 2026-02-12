@@ -13,7 +13,7 @@ export function InstructorColumn({ instructor, instances, onInstanceClick }) {
   );
 
   return (
-    <div className="flex-shrink-0 border-l border-gray-300" style={{ width: '200px' }}>
+    <div className="flex-1 min-w-[200px] border-l border-gray-300">
       {/* Instructor header */}
       <div className="h-12 border-b border-gray-300 flex items-center justify-center px-2 bg-gray-50">
         <div className="text-center">

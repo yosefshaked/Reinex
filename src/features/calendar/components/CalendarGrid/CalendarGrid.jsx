@@ -15,10 +15,13 @@ export function CalendarGrid({ instructors, instances, onInstanceClick }) {
 
   return (
     <div className="border border-gray-300 rounded-lg overflow-hidden bg-white">
-      <div className="flex overflow-x-auto">
+      <div className="flex flex-row-reverse overflow-x-auto w-full">
+        {/* Time column (sticky on right for RTL) */}
+        <TimeColumn />
+
         {/* Instructor columns (scrollable) */}
-        <div className="flex">
-          {instructors.map(instructor => (
+        <div className="flex flex-1 min-w-0">
+          {instructors.map((instructor) => (
             <InstructorColumn
               key={instructor.id}
               instructor={instructor}
@@ -27,9 +30,6 @@ export function CalendarGrid({ instructors, instances, onInstanceClick }) {
             />
           ))}
         </div>
-        
-        {/* Time column (sticky on right for RTL) */}
-        <TimeColumn />
       </div>
     </div>
   );

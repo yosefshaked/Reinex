@@ -1,7 +1,7 @@
 import { generateTimeSlots } from '../../utils/timeGrid';
 
 /**
- * TimeColumn component - displays time labels on the left side
+ * TimeColumn component - displays time labels on the right side (RTL)
  */
 export function TimeColumn() {
   const timeSlots = generateTimeSlots(6, 22);
