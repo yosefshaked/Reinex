@@ -83,7 +83,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
     }
   }, [studentsError]);
 
-  // When first student is selected, auto-populate service and instructor
+  // When first student is selected, auto-populate service and instructor (only if valid)
   useEffect(() => {
     if (formData.student_ids.length === 0) {
       setStudentDetails(null);
@@ -93,19 +93,27 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
 
     const firstStudentId = formData.student_ids[0];
     const student = students.find(s => s.id === firstStudentId);
-    
+
     if (student) {
       setStudentDetails(student);
-      // Auto-populate service if student has a service assigned
-      if (student.service_id) {
-        setFormData(prev => ({ ...prev, service_id: student.service_id }));
-      }
-      // Auto-populate instructor if student has an assigned instructor
-      if (student.assigned_instructor_id) {
-        setFormData(prev => ({ ...prev, instructor_employee_id: student.assigned_instructor_id }));
-      }
+
+      const serviceIds = new Set((services || []).map(svc => String(svc?.id || '')));
+      const instructorIds = new Set((instructors || []).map(inst => String(inst?.id || '')));
+
+      const nextServiceId = student.service_id && serviceIds.has(String(student.service_id))
+        ? String(student.service_id)
+        : '';
+      const nextInstructorId = student.assigned_instructor_id && instructorIds.has(String(student.assigned_instructor_id))
+        ? String(student.assigned_instructor_id)
+        : '';
+
+      setFormData(prev => ({
+        ...prev,
+        service_id: nextServiceId || prev.service_id,
+        instructor_employee_id: nextInstructorId || prev.instructor_employee_id,
+      }));
     }
-  }, [formData.student_ids, students]);
+  }, [formData.student_ids, students, services, instructors]);
 
   // Check conflicts when form data changes
   const checkConflicts = useCallback(async () => {
@@ -338,7 +346,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
             )}
             <Select
               value={formData.service_id}
-              onValueChange={(value) => setFormData({ ...formData, service_id: value })}
+              onValueChange={(value) => setFormData({ ...formData, service_id: String(value) })}
               disabled={servicesLoading || !formData.student_ids.length}
             >
               <SelectTrigger id="service">
@@ -346,7 +354,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
               </SelectTrigger>
               <SelectContent>
                 {activeServices.map((service) => (
-                  <SelectItem key={service.id} value={service.id}>
+                  <SelectItem key={service.id} value={String(service.id)}>
                     {service.name || service.service_name}
                   </SelectItem>
                 ))}
@@ -362,7 +370,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
             )}
             <Select
               value={formData.instructor_employee_id}
-              onValueChange={(value) => setFormData({ ...formData, instructor_employee_id: value })}
+              onValueChange={(value) => setFormData({ ...formData, instructor_employee_id: String(value) })}
               disabled={instructorsLoading || !formData.student_ids.length}
             >
               <SelectTrigger id="instructor">
@@ -370,7 +378,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
               </SelectTrigger>
               <SelectContent>
                 {instructors.map((instructor) => (
-                  <SelectItem key={instructor.id} value={instructor.id}>
+                  <SelectItem key={instructor.id} value={String(instructor.id)}>
                     {instructor.full_name}
                   </SelectItem>
                 ))}
