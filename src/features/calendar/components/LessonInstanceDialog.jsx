@@ -60,6 +60,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const dateDisplay = formatDateDisplay(instance.datetime_start);
 
   async function handleSave() {
+    if (!currentOrg?.id) {
+      setError('Organization not found');
+      return;
+    }
     setIsSaving(true);
     setError(null);
 
@@ -100,6 +104,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   }
 
   async function handleMarkAttendance(participantId, status) {
+    if (!currentOrg?.id) {
+      setError('Organization not found');
+      return;
+    }
     setIsMarkingAttendance(true);
     setError(null);
 
@@ -133,6 +141,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   }
 
   async function handleCancel(reason) {
+    if (!currentOrg?.id) {
+      setError('Organization not found');
+      return;
+    }
     setIsSaving(true);
     setError(null);
 

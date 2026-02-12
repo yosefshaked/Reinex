@@ -67,6 +67,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
 
   // Check conflicts when form data changes
   const checkConflicts = useCallback(async () => {
+    if (!currentOrg?.id) return;
     setIsCheckingConflicts(true);
     try {
       const datetime_start = `${formData.date}T${formData.time}:00`;
@@ -96,7 +97,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
     } finally {
       setIsCheckingConflicts(false);
     }
-  }, [formData, currentOrg.id]);
+  }, [formData, currentOrg?.id]);
 
   useEffect(() => {
     if (!formData.instructor_employee_id || !formData.date || !formData.time || formData.student_ids.length === 0) {
@@ -109,9 +110,13 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
     }, 500); // Debounce
 
     return () => clearTimeout(timeoutId);
-  }, [formData, currentOrg.id, checkConflicts]);
+  }, [formData, currentOrg?.id, checkConflicts]);
 
   async function handleSubmit(e) {
+    if (!currentOrg?.id) {
+      setError('Organization not found');
+      return;
+    }
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
