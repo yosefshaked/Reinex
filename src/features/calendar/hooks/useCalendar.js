@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { useOrganization } from '../../../contexts/OrganizationContext';
+import { useOrg } from '@/org/OrgContext';
 
 /**
  * Hook for fetching calendar instances
  */
 export function useCalendarInstances(date, instructorId = null) {
-  const { currentOrg } = useOrganization();
+  const { currentOrg } = useOrg();
   const [instances, setInstances] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -59,7 +59,7 @@ export function useCalendarInstances(date, instructorId = null) {
  * Hook for fetching calendar instructors
  */
 export function useCalendarInstructors(includeInactive = false) {
-  const { currentOrg } = useOrganization();
+  const { currentOrg } = useOrg();
   const [instructors, setInstructors] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
