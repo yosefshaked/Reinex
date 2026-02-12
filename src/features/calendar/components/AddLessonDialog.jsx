@@ -5,26 +5,26 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useState, useEffect, useCallback } from 'react';
 import { useOrg } from '@/org/OrgContext';
-import { useServices } from '@/hooks/useOrgData';
+import { useServices, useStudents } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { Loader2, AlertCircle, Users, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ComboBoxField } from '@/components/ui/forms-ui';
-import { authenticatedFetch } from '@/lib/api-client.js';
-import { useAuth } from '@/auth/AuthContext.jsx';
 
 /**
  * AddLessonDialog - Create new lesson instance
  * Flow: Select student → Auto-fetch their service/instructor → Add more students if group session → Set date/time
  */
 export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
-  const { currentOrg } = useOrg();
-  const { session } = useAuth();
+  const { activeOrgId } = useOrg();
   const { services, isLoading: servicesLoading } = useServices();
   const { instructors, isLoading: instructorsLoading } = useCalendarInstructors();
-  
-  const [students, setStudents] = useState([]);
-  const [studentsLoading, setStudentsLoading] = useState(false);
+
+  const { students, loadingStudents: studentsLoading, studentsError } = useStudents({
+    status: 'active',
+    enabled: open && !!activeOrgId,
+    orgId: activeOrgId,
+  });
   const [isGroupSession, setIsGroupSession] = useState(false);
   
   const [formData, setFormData] = useState({
@@ -42,28 +42,11 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
   const [error, setError] = useState(null);
   const [studentDetails, setStudentDetails] = useState(null); // Cache first student details
 
-  // Fetch students using authenticatedFetch (proper pattern)
   useEffect(() => {
-    if (!open || !session) return;
-
-    async function fetchStudents() {
-      setStudentsLoading(true);
-      try {
-        const data = await authenticatedFetch('students-list', { session });
-        console.log('Students data received:', data);
-        setStudents(Array.isArray(data) ? data : (data.students || []));
-        setError(null);
-      } catch (err) {
-        console.error('Error fetching students:', err);
-        setError(`Failed to load students: ${err.message}`);
-        setStudents([]);
-      } finally {
-        setStudentsLoading(false);
-      }
+    if (studentsError) {
+      console.error('Error fetching students:', studentsError);
     }
-
-    fetchStudents();
-  }, [open, session]);
+  }, [studentsError]);
 
   // When first student is selected, auto-populate service and instructor
   useEffect(() => {
@@ -91,7 +74,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
 
   // Check conflicts when form data changes
   const checkConflicts = useCallback(async () => {
-    if (!currentOrg?.id) return;
+    if (!activeOrgId) return;
     setIsCheckingConflicts(true);
     try {
       const datetime_start = `${formData.date}T${formData.time}:00`;
@@ -103,7 +86,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
         body: JSON.stringify({
-          org_id: currentOrg.id,
+          org_id: activeOrgId,
           datetime_start,
           duration_minutes: formData.duration_minutes,
           instructor_employee_id: formData.instructor_employee_id,
@@ -121,7 +104,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
     } finally {
       setIsCheckingConflicts(false);
     }
-  }, [formData, currentOrg?.id]);
+  }, [formData, activeOrgId]);
 
   useEffect(() => {
     if (!formData.instructor_employee_id || !formData.date || !formData.time || formData.student_ids.length === 0) {
@@ -134,10 +117,10 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
     }, 500); // Debounce
 
     return () => clearTimeout(timeoutId);
-  }, [formData, currentOrg?.id, checkConflicts]);
+  }, [formData, activeOrgId, checkConflicts]);
 
   async function handleSubmit(e) {
-    if (!currentOrg?.id) {
+    if (!activeOrgId) {
       setError('Organization not found');
       return;
     }
@@ -155,7 +138,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
         body: JSON.stringify({
-          org_id: currentOrg.id,
+          org_id: activeOrgId,
           datetime_start,
           duration_minutes: formData.duration_minutes,
           instructor_employee_id: formData.instructor_employee_id,
@@ -219,7 +202,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
                 טוען תלמידים...
               </div>
             )}
-            {!studentsLoading && studentOptions.length === 0 && (
+            {studentsError && !studentsLoading && (
+              <div className="text-sm text-red-600 mb-2">
+                {studentsError}
+              </div>
+            )}
+            {!studentsLoading && !studentsError && studentOptions.length === 0 && (
               <div className="text-sm text-amber-600 mb-2">
                 לא נמצאו תלמידים
               </div>
