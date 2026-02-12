@@ -7,12 +7,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, Users } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ComboBoxField } from '@/components/ui/forms-ui';
 
 /**
  * AddLessonDialog - Create new lesson instance
+ * Flow: Select student → Auto-fetch their service/instructor → Add more students if group session → Set date/time
  */
 export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
   const { currentOrg } = useOrg();
@@ -21,6 +22,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
   
   const [students, setStudents] = useState([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
+  const [isGroupSession, setIsGroupSession] = useState(false);
   
   const [formData, setFormData] = useState({
     student_ids: [],
@@ -35,6 +37,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
   const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [studentDetails, setStudentDetails] = useState(null); // Cache first student details
 
   // Fetch students
   useEffect(() => {
@@ -64,6 +67,30 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
 
     fetchStudents();
   }, [currentOrg?.id, open]);
+
+  // When first student is selected, auto-populate service and instructor
+  useEffect(() => {
+    if (formData.student_ids.length === 0) {
+      setStudentDetails(null);
+      setFormData(prev => ({ ...prev, instructor_employee_id: '', service_id: '' }));
+      return;
+    }
+
+    const firstStudentId = formData.student_ids[0];
+    const student = students.find(s => s.id === firstStudentId);
+    
+    if (student) {
+      setStudentDetails(student);
+      // Auto-populate service if student has a service assigned
+      if (student.service_id) {
+        setFormData(prev => ({ ...prev, service_id: student.service_id }));
+      }
+      // Auto-populate instructor if student has an assigned instructor
+      if (student.assigned_instructor_id) {
+        setFormData(prev => ({ ...prev, instructor_employee_id: student.assigned_instructor_id }));
+      }
+    }
+  }, [formData.student_ids, students]);
 
   // Check conflicts when form data changes
   const checkConflicts = useCallback(async () => {
@@ -172,16 +199,52 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Service */}
+          {/* Student - FIRST FIELD */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <Label htmlFor="students">תלמיד *</Label>
+              {formData.student_ids.length > 0 && (
+                <Button
+                  type="button"
+                  variant={isGroupSession ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setIsGroupSession(!isGroupSession)}
+                  className="gap-1"
+                >
+                  <Users className="h-4 w-4" />
+                  {isGroupSession ? 'שיעור קבוצתי' : 'להוסיף תלמידים'}
+                </Button>
+              )}
+            </div>
+            <ComboBoxField
+              id="students"
+              options={studentOptions}
+              value={isGroupSession ? formData.student_ids : formData.student_ids.slice(0, 1)}
+              onChange={(value) => {
+                const newStudentIds = isGroupSession ? value : value.slice(0, 1);
+                setFormData({ ...formData, student_ids: newStudentIds });
+              }}
+              placeholder="בחר תלמיד"
+              multiple={isGroupSession}
+              disabled={studentsLoading}
+            />
+            {!isGroupSession && formData.student_ids.length > 0 && studentDetails && (
+              <div className="mt-2 p-2 bg-blue-50 rounded text-sm">
+                <p className="font-medium">{studentDetails.first_name} {studentDetails.last_name}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Service - AUTO-POPULATED */}
           <div>
             <Label htmlFor="service">שירות *</Label>
             <Select
               value={formData.service_id}
               onValueChange={(value) => setFormData({ ...formData, service_id: value })}
-              disabled={servicesLoading}
+              disabled={servicesLoading || !formData.student_ids.length}
             >
               <SelectTrigger id="service">
-                <SelectValue placeholder="בחר שירות" />
+                <SelectValue placeholder={formData.student_ids.length ? "בחר שירות" : "בחר תלמיד תחילה"} />
               </SelectTrigger>
               <SelectContent>
                 {activeServices.map((service) => (
@@ -193,16 +256,16 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
             </Select>
           </div>
 
-          {/* Instructor */}
+          {/* Instructor - AUTO-POPULATED */}
           <div>
             <Label htmlFor="instructor">מדריך *</Label>
             <Select
               value={formData.instructor_employee_id}
               onValueChange={(value) => setFormData({ ...formData, instructor_employee_id: value })}
-              disabled={instructorsLoading}
+              disabled={instructorsLoading || !formData.student_ids.length}
             >
               <SelectTrigger id="instructor">
-                <SelectValue placeholder="בחר מדריך" />
+                <SelectValue placeholder={formData.student_ids.length ? "בחר מדריך" : "בחר תלמיד תחילה"} />
               </SelectTrigger>
               <SelectContent>
                 {instructors.map((instructor) => (
@@ -212,20 +275,6 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          {/* Students */}
-          <div>
-            <Label htmlFor="students">תלמידים *</Label>
-            <ComboBoxField
-              id="students"
-              options={studentOptions}
-              value={formData.student_ids}
-              onChange={(value) => setFormData({ ...formData, student_ids: value })}
-              placeholder="בחר תלמידים"
-              multiple
-              disabled={studentsLoading}
-            />
           </div>
 
           {/* Date */}
