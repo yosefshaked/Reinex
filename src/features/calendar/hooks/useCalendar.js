@@ -7,7 +7,8 @@ import { authenticatedFetch } from '@/lib/api-client.js';
  * Hook for fetching calendar instances
  */
 export function useCalendarInstances(date, instructorId = null) {
-  const { currentOrg } = useOrg();
+  const { activeOrgId } = useOrg();
+  const { session } = useAuth();
   const [instances, setInstances] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -18,7 +19,7 @@ export function useCalendarInstances(date, instructorId = null) {
   }, []);
 
   useEffect(() => {
-    if (!currentOrg?.id || !date) {
+    if (!activeOrgId || !date || !session) {
       return;
     }
 
@@ -27,37 +28,25 @@ export function useCalendarInstances(date, instructorId = null) {
       setError(null);
 
       try {
-        const params = new URLSearchParams({
-          org_id: currentOrg.id,
-          date: date,
-        });
-
-        if (instructorId) {
-          params.append('instructor_id', instructorId);
-        }
-
-        const response = await fetch(`/api/calendar/instances?${params}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        const data = await authenticatedFetch('calendar/instances', {
+          session,
+          params: {
+            org_id: activeOrgId,
+            date,
+            ...(instructorId ? { instructor_id: instructorId } : {}),
           },
         });
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch instances: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        setInstances(data);
+        setInstances(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error('Error fetching calendar instances:', err);
-        setError(err.message);
+        setError(err?.message || 'Failed to load instances');
       } finally {
         setIsLoading(false);
       }
     }
 
     fetchInstances();
-  }, [currentOrg?.id, date, instructorId, refetchTrigger]);
+  }, [activeOrgId, date, instructorId, refetchTrigger, session]);
 
   return { instances, isLoading, error, refetch };
 }
