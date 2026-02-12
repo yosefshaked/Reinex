@@ -367,8 +367,14 @@ async function handleCreateInstance(context, body, tenantClient, userId, isAdmin
     context.log?.error?.('calendar/instances failed to create instance', { 
       message: instanceError.message,
       code: instanceError.code,
+      details: instanceError.details,
+      hint: instanceError.hint,
     });
-    return respond(context, 500, { message: 'failed_to_create_instance' });
+    return respond(context, 500, {
+      message: 'failed_to_create_instance',
+      error: instanceError.code || 'instance_insert_failed',
+      details: instanceError.message,
+    });
   }
 
   // Create participants
@@ -390,10 +396,17 @@ async function handleCreateInstance(context, body, tenantClient, userId, isAdmin
   if (participantsError) {
     context.log?.error?.('calendar/instances failed to create participants', { 
       message: participantsError.message,
+      code: participantsError.code,
+      details: participantsError.details,
+      hint: participantsError.hint,
     });
     // Rollback instance creation
     await tenantClient.from('lesson_instances').delete().eq('id', instance.id);
-    return respond(context, 500, { message: 'failed_to_create_participants' });
+    return respond(context, 500, {
+      message: 'failed_to_create_participants',
+      error: participantsError.code || 'participants_insert_failed',
+      details: participantsError.message,
+    });
   }
 
   return respond(context, 201, { id: instance.id, message: 'instance created successfully' });

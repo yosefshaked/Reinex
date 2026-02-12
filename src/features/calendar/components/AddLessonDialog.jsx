@@ -195,7 +195,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
           instructor_employee_id: formData.instructor_employee_id,
           service_id: formData.service_id,
           student_ids: formData.student_ids,
-          created_source: 'manual',
+          created_source: 'one_time',
         },
       });
 
