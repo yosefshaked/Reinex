@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
-import { Loader2, AlertCircle, Users } from 'lucide-react';
+import { Loader2, AlertCircle, Users, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ComboBoxField } from '@/components/ui/forms-ui';
 
@@ -41,32 +41,35 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
 
   // Fetch students
   useEffect(() => {
-    if (!currentOrg?.id || !open) return;
+    if (!open) return;
 
     async function fetchStudents() {
       setStudentsLoading(true);
       try {
-        const response = await fetch(`/api/students-list?org_id=${currentOrg.id}`, {
+        const response = await fetch('students-list', {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
           },
         });
 
+        console.log('Students response status:', response.status);
         if (!response.ok) {
-          throw new Error('Failed to fetch students');
+          throw new Error(`Failed to fetch students: ${response.status} ${response.statusText}`);
         }
 
         const data = await response.json();
-        setStudents(data.students || []);
+        console.log('Students data received:', data);
+        setStudents(Array.isArray(data) ? data : (data.students || []));
       } catch (err) {
         console.error('Error fetching students:', err);
+        setError(`Failed to load students: ${err.message}`);
       } finally {
         setStudentsLoading(false);
       }
     }
 
     fetchStudents();
-  }, [currentOrg?.id, open]);
+  }, [open]);
 
   // When first student is selected, auto-populate service and instructor
   useEffect(() => {
@@ -203,31 +206,120 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
           <div>
             <div className="flex items-center justify-between mb-2">
               <Label htmlFor="students">תלמיד *</Label>
-              {formData.student_ids.length > 0 && (
+              {formData.student_ids.length > 0 && !isGroupSession && (
                 <Button
                   type="button"
-                  variant={isGroupSession ? "default" : "outline"}
+                  variant="outline"
                   size="sm"
-                  onClick={() => setIsGroupSession(!isGroupSession)}
-                  className="gap-1"
+                  onClick={() => setIsGroupSession(true)}
+                  className="gap-1 ml-auto"
                 >
                   <Users className="h-4 w-4" />
-                  {isGroupSession ? 'שיעור קבוצתי' : 'להוסיף תלמידים'}
+                  להוסיף תלמידים נוספים
                 </Button>
               )}
             </div>
+            {studentsLoading && (
+              <div className="text-sm text-gray-500 mb-2 flex items-center gap-2">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                טוען תלמידים...
+              </div>
+            )}
+            {!studentsLoading && studentOptions.length === 0 && (
+              <div className="text-sm text-amber-600 mb-2">
+                לא נמצאו תלמידים
+              </div>
+            )}
+            
+            {/* Primary student selection */}
             <ComboBoxField
-              id="students"
+              id="primary-student"
+              name="primary-student"
               options={studentOptions}
-              value={isGroupSession ? formData.student_ids : formData.student_ids.slice(0, 1)}
+              value={formData.student_ids[0] ? students.find(s => s.id === formData.student_ids[0])?.label || '' : ''}
               onChange={(value) => {
-                const newStudentIds = isGroupSession ? value : value.slice(0, 1);
-                setFormData({ ...formData, student_ids: newStudentIds });
+                const student = students.find(s => 
+                  `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() === value.trim()
+                );
+                const newIds = student ? [student.id] : [];
+                if (isGroupSession) {
+                  // Keep existing secondary students
+                  const otherIds = formData.student_ids.slice(1);
+                  setFormData({ ...formData, student_ids: [...newIds, ...otherIds] });
+                } else {
+                  setFormData({ ...formData, student_ids: newIds });
+                }
               }}
-              placeholder="בחר תלמיד"
-              multiple={isGroupSession}
-              disabled={studentsLoading}
+              placeholder={studentsLoading ? "טוען..." : "בחר תלמיד"}
+              disabled={studentsLoading || studentOptions.length === 0}
+              emptyMessage="לא נמצאו תלמידים"
             />
+
+            {/* Additional students for group sessions */}
+            {isGroupSession && (
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="flex items-center justify-between mb-2">
+                  <Label>תלמידים נוספים</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsGroupSession(false)}
+                  >
+                    סגור
+                  </Button>
+                </div>
+                <Select
+                  value=""
+                  onValueChange={(studentId) => {
+                    if (!formData.student_ids.includes(studentId)) {
+                      setFormData({ ...formData, student_ids: [...formData.student_ids, studentId] });
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="הוסף תלמיד נוסף" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {students
+                      .filter(s => !formData.student_ids.includes(s.id))
+                      .map((student) => (
+                        <SelectItem key={student.id} value={student.id}>
+                          {student.label}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+
+                {/* List of added students */}
+                {formData.student_ids.length > 1 && (
+                  <div className="mt-3 space-y-2">
+                    {formData.student_ids.slice(1).map((studentId) => {
+                      const student = students.find(s => s.id === studentId);
+                      return (
+                        <div key={studentId} className="flex items-center justify-between p-2 bg-white rounded border">
+                          <span>{student?.label}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setFormData({
+                                ...formData,
+                                student_ids: formData.student_ids.filter(id => id !== studentId)
+                              });
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {!isGroupSession && formData.student_ids.length > 0 && studentDetails && (
               <div className="mt-2 p-2 bg-blue-50 rounded text-sm">
                 <p className="font-medium">{studentDetails.first_name} {studentDetails.last_name}</p>
