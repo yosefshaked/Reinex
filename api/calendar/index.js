@@ -159,29 +159,29 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
         pricing_breakdown,
         commitment_id,
         documentation_ref,
-        metadata,
+        reminder_sent,
+        reminder_seen,
+        attendance_confirmed_at,
+        documented_at,
         students(
           id,
           first_name,
           middle_name,
-          last_name,
-          metadata
+          last_name
         )
       ),
       Services(
         id,
         service_name,
         color,
-        is_active,
-        metadata
+        is_active
       ),
       Employees(
         id,
         first_name,
         middle_name,
         last_name,
-        email,
-        metadata
+        email
       )
     `)
     .gte('datetime_start', `${startDate}T00:00:00`)
@@ -241,7 +241,10 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
           pricing_breakdown: p.pricing_breakdown,
           commitment_id: p.commitment_id,
           documentation_ref: p.documentation_ref,
-          metadata: p.metadata,
+          reminder_sent: p.reminder_sent,
+          reminder_seen: p.reminder_seen,
+          attendance_confirmed_at: p.attendance_confirmed_at,
+          documented_at: p.documented_at,
           student: p.students && p.students.length > 0 ? {
             id: p.students[0].id,
             first_name: p.students[0].first_name,
@@ -250,7 +253,6 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
             full_name: [p.students[0].first_name, p.students[0].middle_name, p.students[0].last_name]
               .filter(Boolean)
               .join(' '),
-            metadata: p.students[0].metadata,
           } : null,
         }))
       : [];
@@ -277,7 +279,6 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
         service_name: serviceData.service_name,
         color: serviceData.color,
         is_active: serviceData.is_active,
-        metadata: serviceData.metadata,
       } : null,
       instructor: instructorData ? {
         id: instructorData.id,
@@ -288,7 +289,6 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
           .filter(Boolean)
           .join(' '),
         email: instructorData.email,
-        metadata: instructorData.metadata,
       } : null,
     };
   });
