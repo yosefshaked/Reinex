@@ -19,6 +19,7 @@ export default function CreateGuardianDialog({
   onOpenChange,
   onSuccess,
   onCreateGuardian,
+  initialPhone = '',
 }) {
   const [formData, setFormData] = useState({
     firstName: '',
@@ -34,6 +35,13 @@ export default function CreateGuardianDialog({
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
+
+  React.useEffect(() => {
+    if (!open) return;
+    if (initialPhone) {
+      setFormData((prev) => ({ ...prev, phone: initialPhone }));
+    }
+  }, [open, initialPhone]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

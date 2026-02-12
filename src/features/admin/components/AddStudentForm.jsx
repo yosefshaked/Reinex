@@ -357,7 +357,6 @@ export default function AddStudentForm({
             isLoading={loadingGuardians}
             disabled={isSubmitting}
             onCreateGuardian={createGuardian}
-            onSelectOpenChange={onSelectOpenChange}
           />
 
           {values.guardianId && (
