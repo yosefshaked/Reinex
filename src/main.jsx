@@ -4,7 +4,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
 import AppShell from './components/layout/AppShell.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
-import CalendarPage from './pages/CalendarPage.jsx';
+import CalendarPage from './features/calendar/pages/CalendarPage.jsx';
 import EmployeesPage from './pages/EmployeesPage.jsx';
 import ServicesPage from './pages/ServicesPage.jsx';
 import ServiceProfilePage from './pages/ServiceProfilePage.jsx';
