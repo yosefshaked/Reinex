@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useOrg } from '@/org/OrgContext';
 
 /**
@@ -9,6 +9,11 @@ export function useCalendarInstances(date, instructorId = null) {
   const [instances, setInstances] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
+
+  const refetch = useCallback(() => {
+    setRefetchTrigger(prev => prev + 1);
+  }, []);
 
   useEffect(() => {
     if (!currentOrg?.id || !date) {
@@ -50,9 +55,9 @@ export function useCalendarInstances(date, instructorId = null) {
     }
 
     fetchInstances();
-  }, [currentOrg?.id, date, instructorId]);
+  }, [currentOrg?.id, date, instructorId, refetchTrigger]);
 
-  return { instances, isLoading, error };
+  return { instances, isLoading, error, refetch };
 }
 
 /**
@@ -63,6 +68,11 @@ export function useCalendarInstructors(includeInactive = false) {
   const [instructors, setInstructors] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
+
+  const refetch = useCallback(() => {
+    setRefetchTrigger(prev => prev + 1);
+  }, []);
 
   useEffect(() => {
     if (!currentOrg?.id) {
@@ -100,7 +110,7 @@ export function useCalendarInstructors(includeInactive = false) {
     }
 
     fetchInstructors();
-  }, [currentOrg?.id, includeInactive]);
+  }, [currentOrg?.id, includeInactive, refetchTrigger]);
 
-  return { instructors, isLoading, error };
+  return { instructors, isLoading, error, refetch };
 }

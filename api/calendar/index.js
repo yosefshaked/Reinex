@@ -91,6 +91,14 @@ export default async function (context, req) {
     return await handleGetInstances(context, req, tenantClient, userId, isAdmin);
   }
 
+  if (method === 'POST') {
+    return await handleCreateInstance(context, body, tenantClient, userId, isAdmin);
+  }
+
+  if (method === 'PUT') {
+    return await handleUpdateInstance(context, body, tenantClient, userId, isAdmin);
+  }
+
   return respond(context, 405, { message: 'method not allowed' });
 }
 
@@ -279,4 +287,174 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
   });
 
   return respond(context, 200, transformedInstances);
+}
+
+async function handleCreateInstance(context, body, tenantClient, userId, isAdmin) {
+  // Validate required fields
+  if (!body.datetime_start) {
+    return respond(context, 400, { message: 'missing datetime_start' });
+  }
+  if (!body.duration_minutes || body.duration_minutes <= 0) {
+    return respond(context, 400, { message: 'missing or invalid duration_minutes' });
+  }
+  if (!body.instructor_employee_id) {
+    return respond(context, 400, { message: 'missing instructor_employee_id' });
+  }
+  if (!body.service_id) {
+    return respond(context, 400, { message: 'missing service_id' });
+  }
+  if (!body.student_ids || !Array.isArray(body.student_ids) || body.student_ids.length === 0) {
+    return respond(context, 400, { message: 'missing or invalid student_ids array' });
+  }
+
+  // Non-admin users can only create lessons for themselves
+  if (!isAdmin) {
+    const { data: instructors } = await tenantClient
+      .from('Employees')
+      .select('id')
+      .eq('user_id', userId)
+      .limit(1);
+    
+    if (!instructors || instructors.length === 0 || instructors[0].id !== body.instructor_employee_id) {
+      return respond(context, 403, { message: 'forbidden: can only create lessons for yourself' });
+    }
+  }
+
+  // Verify instructor exists
+  const { data: instructor, error: instructorError } = await tenantClient
+    .from('Employees')
+    .select('id')
+    .eq('id', body.instructor_employee_id)
+    .eq('is_active', true)
+    .single();
+
+  if (instructorError || !instructor) {
+    return respond(context, 400, { message: 'invalid instructor_employee_id' });
+  }
+
+  // Verify service exists
+  const { data: service, error: serviceError } = await tenantClient
+    .from('Services')
+    .select('id')
+    .eq('id', body.service_id)
+    .eq('is_active', true)
+    .single();
+
+  if (serviceError || !service) {
+    return respond(context, 400, { message: 'invalid service_id' });
+  }
+
+  // Create lesson instance
+  const instanceData = {
+    template_id: body.template_id || null,
+    datetime_start: body.datetime_start,
+    duration_minutes: body.duration_minutes,
+    instructor_employee_id: body.instructor_employee_id,
+    service_id: body.service_id,
+    status: body.status || 'scheduled',
+    documentation_status: body.documentation_status || 'undocumented',
+    created_source: body.created_source || 'manual',
+    metadata: body.metadata || {},
+  };
+
+  const { data: instance, error: instanceError } = await tenantClient
+    .from('lesson_instances')
+    .insert(instanceData)
+    .select()
+    .single();
+
+  if (instanceError) {
+    context.log?.error?.('calendar/instances failed to create instance', { 
+      message: instanceError.message,
+      code: instanceError.code,
+    });
+    return respond(context, 500, { message: 'failed_to_create_instance' });
+  }
+
+  // Create participants
+  const participantData = body.student_ids.map(studentId => ({
+    lesson_instance_id: instance.id,
+    student_id: studentId,
+    participant_status: 'pending',
+    price_charged: null,
+    pricing_breakdown: null,
+    commitment_id: null,
+    documentation_ref: null,
+    metadata: {},
+  }));
+
+  const { error: participantsError } = await tenantClient
+    .from('lesson_participants')
+    .insert(participantData);
+
+  if (participantsError) {
+    context.log?.error?.('calendar/instances failed to create participants', { 
+      message: participantsError.message,
+    });
+    // Rollback instance creation
+    await tenantClient.from('lesson_instances').delete().eq('id', instance.id);
+    return respond(context, 500, { message: 'failed_to_create_participants' });
+  }
+
+  return respond(context, 201, { id: instance.id, message: 'instance created successfully' });
+}
+
+async function handleUpdateInstance(context, body, tenantClient, userId, isAdmin) {
+  if (!body.id) {
+    return respond(context, 400, { message: 'missing instance id' });
+  }
+
+  // Fetch existing instance
+  const { data: existingInstance, error: fetchError } = await tenantClient
+    .from('lesson_instances')
+    .select('id, instructor_employee_id, status')
+    .eq('id', body.id)
+    .single();
+
+  if (fetchError || !existingInstance) {
+    return respond(context, 404, { message: 'instance not found' });
+  }
+
+  // Non-admin users can only update their own lessons
+  if (!isAdmin) {
+    const { data: instructors } = await tenantClient
+      .from('Employees')
+      .select('id')
+      .eq('user_id', userId)
+      .limit(1);
+    
+    if (!instructors || instructors.length === 0 || instructors[0].id !== existingInstance.instructor_employee_id) {
+      return respond(context, 403, { message: 'forbidden: can only update your own lessons' });
+    }
+  }
+
+  // Build update object (only update provided fields)
+  const updateData = {};
+  
+  if (body.datetime_start !== undefined) updateData.datetime_start = body.datetime_start;
+  if (body.duration_minutes !== undefined) updateData.duration_minutes = body.duration_minutes;
+  if (body.instructor_employee_id !== undefined) updateData.instructor_employee_id = body.instructor_employee_id;
+  if (body.service_id !== undefined) updateData.service_id = body.service_id;
+  if (body.status !== undefined) updateData.status = body.status;
+  if (body.cancellation_reason !== undefined) updateData.cancellation_reason = body.cancellation_reason;
+  if (body.documentation_status !== undefined) updateData.documentation_status = body.documentation_status;
+  if (body.metadata !== undefined) updateData.metadata = body.metadata;
+  
+  updateData.updated_at = new Date().toISOString();
+
+  // Update instance
+  const { error: updateError } = await tenantClient
+    .from('lesson_instances')
+    .update(updateData)
+    .eq('id', body.id);
+
+  if (updateError) {
+    context.log?.error?.('calendar/instances failed to update instance', { 
+      message: updateError.message,
+      code: updateError.code,
+    });
+    return respond(context, 500, { message: 'failed_to_update_instance' });
+  }
+
+  return respond(context, 200, { message: 'instance updated successfully' });
 }

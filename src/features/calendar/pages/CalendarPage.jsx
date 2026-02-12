@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import PageLayout from '@/components/ui/PageLayout';
+import { Button } from '@/components/ui/button';
+import { Plus } from 'lucide-react';
 import { CalendarHeader } from '../components/CalendarHeader/CalendarHeader';
 import { CalendarGrid } from '../components/CalendarGrid/CalendarGrid';
 import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
+import { AddLessonDialog } from '../components/AddLessonDialog';
 import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
 import { Loader2 } from 'lucide-react';
 
@@ -12,9 +15,10 @@ import { Loader2 } from 'lucide-react';
 export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedInstance, setSelectedInstance] = useState(null);
+  const [showAddDialog, setShowAddDialog] = useState(false);
 
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
-  const { instances, isLoading: instancesLoading, error: instancesError } = useCalendarInstances(currentDate);
+  const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(currentDate);
 
   const handleInstanceClick = (instance) => {
     setSelectedInstance(instance);
@@ -24,10 +28,25 @@ export default function CalendarPage() {
     setSelectedInstance(null);
   };
 
+  const handleAddSuccess = () => {
+    refetchInstances();
+  };
+
+  const handleUpdateSuccess = () => {
+    refetchInstances();
+    setSelectedInstance(null);
+  };
+
   return (
     <PageLayout title="לוח זמנים">
       <div className="space-y-4">
-        <CalendarHeader currentDate={currentDate} onDateChange={setCurrentDate} />
+        <div className="flex items-center justify-between">
+          <CalendarHeader currentDate={currentDate} onDateChange={setCurrentDate} />
+          <Button onClick={() => setShowAddDialog(true)} className="gap-2">
+            <Plus className="h-4 w-4" />
+            שיעור חדש
+          </Button>
+        </div>
 
         {/* Loading State */}
         {(instructorsLoading || instancesLoading) && (
@@ -58,6 +77,15 @@ export default function CalendarPage() {
         instance={selectedInstance}
         open={!!selectedInstance}
         onClose={handleCloseDialog}
+        onUpdate={handleUpdateSuccess}
+      />
+
+      {/* Add Lesson Dialog */}
+      <AddLessonDialog
+        open={showAddDialog}
+        onClose={() => setShowAddDialog(false)}
+        onSuccess={handleAddSuccess}
+        defaultDate={currentDate}
       />
     </PageLayout>
   );
