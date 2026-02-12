@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Pencil } from 'lucide-react';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,7 +13,9 @@ import { cn } from '@/lib/utils';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { normalizeMembershipRole, isAdminOrOffice } from '@/features/students/utils/endpoints.js';
+import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/features/students/utils/endpoints.js';
+import AddStudentForm, { AddStudentFormFooter } from '@/features/admin/components/AddStudentForm.jsx';
+import { toast } from 'sonner';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'ראשון', labelShort: 'א' },
@@ -181,8 +183,16 @@ export default function WaitingListPage() {
   const [touched, setTouched] = useState({});
   const [timeEditorDay, setTimeEditorDay] = useState(null);
   const [timeEditorOpen, setTimeEditorOpen] = useState(false);
+  const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
+  const [isCreatingStudent, setIsCreatingStudent] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [addSubmitDisabled, setAddSubmitDisabled] = useState(false);
+
+  const openSelectCountRef = useRef(0);
+  const isClosingSelectRef = useRef(false);
 
   const canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection && canManage);
+  const canCreateStudent = isAdminRole(membershipRole);
 
   const studentOptionMap = useMemo(() => {
     const map = new Map();
@@ -322,6 +332,93 @@ export default function WaitingListPage() {
   const closeTimeEditor = () => {
     setTimeEditorOpen(false);
     setTimeEditorDay(null);
+  };
+
+  const handleOpenAddStudentDialog = () => {
+    setCreateError('');
+    setIsAddStudentOpen(true);
+  };
+
+  const handleAddStudentDialogOpenChange = (open) => {
+    if (!open) {
+      openSelectCountRef.current = 0;
+      isClosingSelectRef.current = false;
+      setIsAddStudentOpen(false);
+      setCreateError('');
+    } else {
+      setIsAddStudentOpen(true);
+    }
+  };
+
+  const handleAddStudentSubmit = async (formData) => {
+    if (!session || !activeOrgId || !tenantClientReady || !activeOrgHasConnection) {
+      setCreateError('חיבור לא זמין. ודא את החיבור וניסיון מחדש.');
+      return;
+    }
+
+    setIsCreatingStudent(true);
+    setCreateError('');
+
+    const body = {
+      org_id: activeOrgId,
+      first_name: formData.firstName,
+      middle_name: formData.middleName,
+      last_name: formData.lastName,
+      identity_number: formData.identityNumber,
+      date_of_birth: formData.dateOfBirth,
+      guardian_id: formData.guardianId,
+      guardian_relationship: formData.guardianRelationship,
+      phone: formData.phone,
+      email: formData.email,
+      medical_provider: formData.medicalProvider,
+      default_notification_method: formData.notificationMethod,
+      special_rate: formData.specialRate,
+      medical_flags: formData.medicalFlags,
+      onboarding_status: formData.onboardingStatus,
+      notes_internal: formData.notesInternal,
+      tags: formData.tags,
+      is_active: formData.isActive,
+    };
+
+    try {
+      const createdStudent = await authenticatedFetch('students-list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        session,
+      });
+      toast.success('התלמיד נוסף בהצלחה');
+      setStudents((prev) => {
+        if (!createdStudent?.id) return prev;
+        if (prev.some((student) => student.id === createdStudent.id)) return prev;
+        return [createdStudent, ...prev];
+      });
+      if (createdStudent?.id) {
+        setFormValues((prev) => ({
+          ...prev,
+          studentId: createdStudent.id,
+          studentSearch: buildStudentOption(createdStudent),
+        }));
+      }
+      setIsAddStudentOpen(false);
+    } catch (error) {
+      const apiMessage = error?.data?.message || error?.message;
+      const apiCode = error?.data?.error || error?.data?.code || error?.code;
+      let message = 'הוספת תלמיד נכשלה.';
+      if (apiCode === 'identity_number_duplicate' || apiMessage === 'duplicate_identity_number') {
+        message = 'תעודת זהות קיימת כבר במערכת.';
+      } else if (apiMessage === 'missing national id') {
+        message = 'יש להזין מספר זהות.';
+      } else if (apiMessage === 'invalid national id') {
+        message = 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
+      } else if (apiCode === 'schema_upgrade_required') {
+        message = 'נדרשת שדרוג לסכמת מסד הנתונים.';
+      }
+      setCreateError(message);
+      toast.error(message);
+    } finally {
+      setIsCreatingStudent(false);
+    }
   };
 
   const addPreferredTime = (dayValue) => {
@@ -577,6 +674,13 @@ export default function WaitingListPage() {
                 required
                 error={studentError}
               />
+              {canCreateStudent ? (
+                <div className="flex justify-end">
+                  <Button type="button" variant="ghost" size="sm" onClick={handleOpenAddStudentDialog}>
+                    + תלמיד חדש
+                  </Button>
+                </div>
+              ) : null}
 
               <SelectField
                 id="waiting-service"
@@ -757,6 +861,55 @@ export default function WaitingListPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {canCreateStudent && (
+        <Dialog open={isAddStudentOpen} onOpenChange={handleAddStudentDialogOpenChange}>
+          <DialogContent
+            className="sm:max-w-2xl"
+            onInteractOutside={(event) => {
+              if (openSelectCountRef.current > 0 || isClosingSelectRef.current) {
+                event.preventDefault();
+              }
+            }}
+            footer={
+              <AddStudentFormFooter
+                isSubmitting={isCreatingStudent}
+                disableSubmit={addSubmitDisabled}
+                onCancel={() => setIsAddStudentOpen(false)}
+                onSubmit={() => {
+                  document.getElementById('add-student-form')?.requestSubmit();
+                }}
+              />
+            }
+          >
+            <DialogHeader>
+              <DialogTitle>הוספת תלמיד חדש</DialogTitle>
+              <DialogDescription>
+                הזן את פרטי התלמיד. מספר זהות וטלפון (או אפוטרופוס) הם שדות חובה.
+              </DialogDescription>
+            </DialogHeader>
+            <AddStudentForm
+              onSubmit={handleAddStudentSubmit}
+              onCancel={() => setIsAddStudentOpen(false)}
+              isSubmitting={isCreatingStudent}
+              error={createError}
+              onSubmitDisabledChange={setAddSubmitDisabled}
+              renderFooterOutside
+              onSelectOpenChange={(open) => {
+                if (open) {
+                  openSelectCountRef.current++;
+                } else {
+                  isClosingSelectRef.current = true;
+                  setTimeout(() => {
+                    openSelectCountRef.current = Math.max(0, openSelectCountRef.current - 1);
+                    isClosingSelectRef.current = false;
+                  }, 100);
+                }
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
     </PageLayout>
   );
 }
