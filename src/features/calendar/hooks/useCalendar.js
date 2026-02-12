@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useOrg } from '@/org/OrgContext';
+import { useAuth } from '@/auth/AuthContext.jsx';
+import { authenticatedFetch } from '@/lib/api-client.js';
 
 /**
  * Hook for fetching calendar instances
@@ -64,7 +66,8 @@ export function useCalendarInstances(date, instructorId = null) {
  * Hook for fetching calendar instructors
  */
 export function useCalendarInstructors(includeInactive = false) {
-  const { currentOrg } = useOrg();
+  const { activeOrgId } = useOrg();
+  const { session } = useAuth();
   const [instructors, setInstructors] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -75,7 +78,7 @@ export function useCalendarInstructors(includeInactive = false) {
   }, []);
 
   useEffect(() => {
-    if (!currentOrg?.id) {
+    if (!activeOrgId || !session) {
       return;
     }
 
@@ -84,33 +87,24 @@ export function useCalendarInstructors(includeInactive = false) {
       setError(null);
 
       try {
-        const params = new URLSearchParams({
-          org_id: currentOrg.id,
-          include_inactive: includeInactive.toString(),
-        });
-
-        const response = await fetch(`/api/calendar/instructors?${params}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        const data = await authenticatedFetch('calendar/instructors', {
+          session,
+          params: {
+            org_id: activeOrgId,
+            include_inactive: includeInactive,
           },
         });
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch instructors: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        setInstructors(data);
+        setInstructors(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error('Error fetching calendar instructors:', err);
-        setError(err.message);
+        setError(err?.message || 'Failed to load instructors');
       } finally {
         setIsLoading(false);
       }
     }
 
     fetchInstructors();
-  }, [currentOrg?.id, includeInactive, refetchTrigger]);
+  }, [activeOrgId, includeInactive, refetchTrigger, session]);
 
   return { instructors, isLoading, error, refetch };
 }

@@ -17,8 +17,11 @@ import { ComboBoxField } from '@/components/ui/forms-ui';
  */
 export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
   const { activeOrgId } = useOrg();
-  const { services, isLoading: servicesLoading } = useServices();
-  const { instructors, isLoading: instructorsLoading } = useCalendarInstructors();
+  const { services, loadingServices: servicesLoading, servicesError } = useServices({
+    enabled: open && !!activeOrgId,
+    orgId: activeOrgId,
+  });
+  const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
 
   const { students, loadingStudents: studentsLoading, studentsError } = useStudents({
     status: 'active',
@@ -312,6 +315,9 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
           {/* Service - AUTO-POPULATED */}
           <div>
             <Label htmlFor="service">שירות *</Label>
+            {servicesError && (
+              <div className="text-sm text-red-600 mb-2">{servicesError}</div>
+            )}
             <Select
               value={formData.service_id}
               onValueChange={(value) => setFormData({ ...formData, service_id: value })}
@@ -333,6 +339,9 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
           {/* Instructor - AUTO-POPULATED */}
           <div>
             <Label htmlFor="instructor">מדריך *</Label>
+            {instructorsError && (
+              <div className="text-sm text-red-600 mb-2">{instructorsError}</div>
+            )}
             <Select
               value={formData.instructor_employee_id}
               onValueChange={(value) => setFormData({ ...formData, instructor_employee_id: value })}
