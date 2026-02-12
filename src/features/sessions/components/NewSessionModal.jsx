@@ -18,6 +18,7 @@ const REQUEST_STATE = Object.freeze({
   error: 'error',
 });
 
+
 /**
  * Format date as DD/MM/YYYY for display
  */
@@ -220,7 +221,7 @@ export default function NewSessionModal({
 }) {
   const { loading: supabaseLoading } = useSupabase();
   const { user } = useAuth();
-  const { activeOrg, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrg, activeOrgHasConnection, tenantClientReady, activeOrgConnection } = useOrg();
   const [studentsState, setStudentsState] = useState(REQUEST_STATE.idle);
   const [studentsError, setStudentsError] = useState('');
   const [students, setStudents] = useState([]);
@@ -236,8 +237,10 @@ export default function NewSessionModal({
   const [visibilityLoaded, setVisibilityLoaded] = useState(false);
   const [initialStatusApplied, setInitialStatusApplied] = useState(false);
   const [successState, setSuccessState] = useState(null); // { studentId, studentName, date }
+  const [personalPreanswers, setPersonalPreanswers] = useState({});
   const formResetRef = useRef(null); // Will hold the form's reset function
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false); // Track advanced filter visibility
+  const personalFetchAbortRef = useRef(null);
 
   // Fix for mobile: prevent Dialog close when Select is open/closing
   const openSelectCountRef = useRef(0);
@@ -258,8 +261,10 @@ export default function NewSessionModal({
     );
   }, [open, activeOrgId, activeOrgHasConnection, tenantClientReady, supabaseLoading]);
 
+  // Fetch instructors for BOTH admins and non-admin instructors.
+  // Backend enforces: non-admin users only receive their own instructor record.
   const { instructors } = useInstructors({
-    enabled: open && canFetchStudents && canAdmin,
+    enabled: open && Boolean(activeOrgId),
     orgId: activeOrgId,
   });
 
@@ -270,9 +275,42 @@ export default function NewSessionModal({
 
   // Check if the logged-in user is an instructor (must be after instructors is defined)
   const userIsInstructor = useMemo(() => {
-    if (!userId || !instructors || instructors.length === 0) return false;
-    return instructors.some(inst => inst.id === userId);
-  }, [userId, instructors]);
+    if (!userId) return false;
+    if (Array.isArray(instructors) && instructors.length > 0) {
+      return instructors.some((inst) => inst.id === userId);
+    }
+    const roleFromMembership = normalizeMembershipRole(activeOrg?.membership?.role);
+    return roleFromMembership === 'instructor';
+  }, [userId, instructors, activeOrg]);
+
+  const canEditPersonalPreanswers = userIsInstructor; // Only instructors can maintain personal snippets
+
+  // Extract preanswers cap from permissions (must come from permission registry). If permissions are
+  // stored as a JSON string, parse locally to avoid changing user-context API.
+  const preanswersCapLimit = useMemo(() => {
+    const rawPerms = activeOrgConnection?.permissions ?? activeOrg?.connection?.permissions;
+    let perms = null;
+
+    if (typeof rawPerms === 'string') {
+      try {
+        perms = JSON.parse(rawPerms);
+      } catch {
+        perms = null;
+      }
+    } else if (rawPerms && typeof rawPerms === 'object') {
+      perms = rawPerms;
+    }
+
+    if (!perms) {
+      return undefined;
+    }
+
+    const capRaw = perms.session_form_preanswers_cap;
+    if (typeof capRaw === 'number' && capRaw > 0) {
+      return capRaw;
+    }
+    return undefined;
+  }, [activeOrg, activeOrgConnection]);
 
   useEffect(() => {
     if (!open) {
@@ -353,6 +391,11 @@ export default function NewSessionModal({
       setSubmitError('');
       setSuccessState(null);
       setShowAdvancedFilters(false); // Reset advanced filters visibility when modal closes
+      setPersonalPreanswers({});
+      if (personalFetchAbortRef.current) {
+        personalFetchAbortRef.current.abort();
+        personalFetchAbortRef.current = null;
+      }
     }
   }, [open]);
 
@@ -438,6 +481,51 @@ export default function NewSessionModal({
       setStudentScope('all');
     }
   }, [open, loadQuestions]);
+
+  useEffect(() => {
+    if (!open || !canFetchStudents || !userId || !activeOrgId) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    personalFetchAbortRef.current = abortController;
+
+    const extractCustomPreanswers = (record) => {
+      if (!record || typeof record !== 'object') return {};
+      const meta = record.metadata && typeof record.metadata === 'object' ? record.metadata : {};
+      const custom = meta.custom_preanswers && typeof meta.custom_preanswers === 'object' ? meta.custom_preanswers : {};
+      return custom;
+    };
+
+    const loadPersonal = async () => {
+      try {
+        if (canAdmin && Array.isArray(instructors) && instructors.length > 0) {
+          const mine = instructors.find((inst) => inst?.id === userId);
+          if (mine) {
+            setPersonalPreanswers(extractCustomPreanswers(mine));
+            return;
+          }
+        }
+
+        const searchParams = new URLSearchParams({ org_id: activeOrgId });
+        const payload = await authenticatedFetch(`instructors?${searchParams.toString()}`, {
+          signal: abortController.signal,
+        });
+        const record = Array.isArray(payload) ? payload.find((row) => row?.id === userId) || payload[0] : null;
+        setPersonalPreanswers(extractCustomPreanswers(record));
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+        console.error('Failed to load instructor preanswers', error);
+        setPersonalPreanswers({});
+      }
+    };
+
+    void loadPersonal();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [open, canFetchStudents, canAdmin, instructors, userId, activeOrgId]);
 
   useEffect(() => {
     if (!open || !canFetchStudents) {
@@ -614,6 +702,49 @@ export default function NewSessionModal({
     }
   }, [successState]);
 
+  const handleSavePersonalPreanswers = useCallback(async (questionKey, list) => {
+    if (!questionKey || !userId || !activeOrgId) return;
+
+    const normalizeList = (raw) => {
+      if (!Array.isArray(raw)) return [];
+      const unique = [];
+      const seen = new Set();
+      for (const entry of raw) {
+        if (typeof entry !== 'string') continue;
+        const trimmed = entry.trim();
+        if (!trimmed || seen.has(trimmed)) continue;
+        seen.add(trimmed);
+        unique.push(trimmed);
+        if (unique.length >= preanswersCapLimit) break;
+      }
+      return unique;
+    };
+
+    const normalizedList = normalizeList(list);
+    const nextMap = { ...personalPreanswers };
+    
+    // Find the question and use its id if available, otherwise use the key
+    const question = questions.find((q) => q?.key === questionKey);
+    const storageKey = question?.id || questionKey;
+    nextMap[storageKey] = normalizedList;
+
+    setPersonalPreanswers(nextMap);
+    try {
+      await authenticatedFetch('instructors', {
+        method: 'PUT',
+        body: {
+          id: userId,
+          org_id: activeOrgId,
+          metadata: { custom_preanswers: nextMap },
+        },
+      });
+      toast.success('התשובות האישיות נשמרו');
+    } catch (error) {
+      console.error('Failed to save personal preanswers', error);
+      toast.error('שמירת התשובות האישיות נכשלה');
+    }
+  }, [activeOrgId, personalPreanswers, questions, userId, preanswersCapLimit]);
+
   const dialogTitle = canFetchStudents
     ? 'רישום מפגש חדש'
     : 'לא ניתן ליצור מפגש חדש';
@@ -675,6 +806,10 @@ export default function NewSessionModal({
             students={students}
             questions={questions}
             suggestions={suggestions}
+            personalPreanswers={personalPreanswers}
+            onSavePersonalPreanswers={handleSavePersonalPreanswers}
+            canEditPersonalPreanswers={canEditPersonalPreanswers}
+            preanswersCapLimit={preanswersCapLimit}
             services={services}
             instructors={instructors}
             canFilterByInstructor={isAdminRole(membershipRole)}

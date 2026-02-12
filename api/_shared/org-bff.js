@@ -61,14 +61,24 @@ export function isAdminRole(role) {
   return normalized === 'admin' || normalized === 'owner';
 }
 
+export function isOfficeRole(role) {
+  if (!role) {
+    return false;
+  }
+  const normalized = String(role).trim().toLowerCase();
+  return normalized === 'office';
+}
+
+export function isAdminOrOffice(role) {
+  return isAdminRole(role) || isOfficeRole(role);
+}
+
 export async function ensureMembership(supabase, orgId, userId) {
   const { data, error } = await supabase
     .from('org_memberships')
-    .select('role, created_at')
+    .select('role')
     .eq('org_id', orgId)
     .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(1)
     .maybeSingle();
 
   if (error) {
@@ -104,10 +114,7 @@ export async function fetchOrgConnection(supabase, orgId) {
     return { error: orgError };
   }
 
-  const supabaseUrl = normalizeString(settings?.supabase_url);
-  const anonKey = normalizeString(settings?.anon_key);
-
-  if (!supabaseUrl || !anonKey) {
+  if (!settings || !settings.supabase_url || !settings.anon_key) {
     return { error: new Error('missing_connection_settings') };
   }
 
@@ -116,8 +123,8 @@ export async function fetchOrgConnection(supabase, orgId) {
   }
 
   return {
-    supabaseUrl,
-    anonKey,
+    supabaseUrl: settings.supabase_url,
+    anonKey: settings.anon_key,
     encryptedKey: organization.dedicated_key_encrypted,
   };
 }
@@ -212,103 +219,12 @@ export function decryptDedicatedKey(payload, keyBuffer) {
   }
 }
 
-function normalizeDecryptedJwt(value) {
-  const trimmed = normalizeString(value);
-  if (!trimmed) {
-    return '';
-  }
-
-  // Common copy/paste artifacts: quoted strings or an embedded Bearer prefix.
-  let candidate = trimmed;
-  if ((candidate.startsWith('"') && candidate.endsWith('"')) || (candidate.startsWith("'") && candidate.endsWith("'"))) {
-    candidate = candidate.slice(1, -1).trim();
-  }
-
-  if (candidate.toLowerCase().startsWith('bearer ')) {
-    candidate = candidate.slice(7).trim();
-  }
-
-  return candidate;
-}
-
-function looksLikeJwt(token) {
-  const normalized = normalizeString(token);
-  if (!normalized) {
-    return false;
-  }
-
-  const parts = normalized.split('.');
-  return parts.length === 3 && parts.every(Boolean);
-}
-
-function isDebugTenantAuthEnabled(env) {
-  const raw = normalizeString(env?.APP_DEBUG_TENANT_AUTH ?? env?.DEBUG_TENANT_AUTH ?? env?.DEBUG_TENANT_KEYS);
-  if (!raw) {
-    return false;
-  }
-  const normalized = raw.toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-}
-
-function tokenPreview(token) {
-  const normalized = normalizeString(token);
-  if (!normalized) {
-    return '';
-  }
-
-  if (normalized.length <= 24) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, 12)}…${normalized.slice(-12)}`;
-}
-
-function sha256Hex(value) {
-  const normalized = normalizeString(value);
-  if (!normalized) {
-    return '';
-  }
-  return createHash('sha256').update(normalized).digest('hex');
-}
-
-function decodeJwtPart(part) {
-  try {
-    const base64 = part.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
-    const jsonText = Buffer.from(padded, 'base64').toString('utf8');
-    const parsed = JSON.parse(jsonText);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function decodeJwtUnsafe(token) {
-  const normalized = normalizeString(token);
-  const parts = normalized.split('.');
-  if (parts.length !== 3) {
-    return { header: null, payload: null };
-  }
-  return {
-    header: decodeJwtPart(parts[0]),
-    payload: decodeJwtPart(parts[1]),
-  };
-}
-
-export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey, schema = 'public' }) {
+export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey }) {
   if (!supabaseUrl || !anonKey || !dedicatedKey) {
     throw new Error('Missing tenant connection parameters.');
   }
 
-  const normalizedSchema = normalizeString(schema) || 'public';
-  const allowedSchemas = new Set(['public']);
-  if (!allowedSchemas.has(normalizedSchema)) {
-    throw new Error('Invalid tenant schema.');
-  }
-
-  // Tenant access uses an "app_user" JWT as Authorization with the tenant project's anon key.
-  // This keeps RLS enforced while still allowing the BFF to access the tenant schema.
-  return createClient(supabaseUrl, anonKey, {
+  const client = createClient(supabaseUrl, anonKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
@@ -319,10 +235,12 @@ export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey, schema 
         Authorization: `Bearer ${dedicatedKey}`,
       },
     },
-    db: {
-      schema: normalizedSchema,
-    },
   });
+
+  // Explicitly set schema to 'public' for Reinex (AGENTS.md line 8: "Tenant DB schema is **public only**")
+  // This is required for Postgres to properly resolve table references like 'students' 
+  // (lowercase, unquoted) alongside legacy tables like "Employees" (capital, quoted).
+  return client.schema('public');
 }
 
 export function resolveOrgId(req, body) {
@@ -346,13 +264,7 @@ export function mapConnectionError(error) {
   return buildTenantError(message, status);
 }
 
-export async function resolveTenantClient(context, supabase, env, orgId, options = undefined) {
-  const normalizedSchema = normalizeString(options?.schema) || 'public';
-  const allowedSchemas = new Set(['public']);
-  if (!allowedSchemas.has(normalizedSchema)) {
-    return { error: buildTenantError('invalid_tenant_schema', 400) };
-  }
-
+export async function resolveTenantClient(context, supabase, env, orgId) {
   const connectionResult = await fetchOrgConnection(supabase, orgId);
   if (connectionResult.error) {
     return { error: mapConnectionError(connectionResult.error) };
@@ -366,42 +278,25 @@ export async function resolveTenantClient(context, supabase, env, orgId, options
     return { error: buildTenantError('encryption_not_configured') };
   }
 
-  const decrypted = decryptDedicatedKey(connectionResult.encryptedKey, encryptionKey);
-  const dedicatedKey = normalizeDecryptedJwt(decrypted);
-
+  const dedicatedKey = decryptDedicatedKey(connectionResult.encryptedKey, encryptionKey);
   if (!dedicatedKey) {
+    context.log?.error?.('[DEBUG] Decryption failed completely');
     return { error: buildTenantError('failed_to_decrypt_key') };
   }
 
-  if (!looksLikeJwt(dedicatedKey)) {
-    context.log?.warn?.('tenant connection dedicated key does not look like a JWT', {
-      orgId,
-      length: dedicatedKey.length,
-      segments: dedicatedKey.split('.').length,
-    });
-    return { error: buildTenantError('dedicated_key_malformed', 428) };
-  }
-
-  if (isDebugTenantAuthEnabled(env)) {
-    const { header, payload } = decodeJwtUnsafe(dedicatedKey);
-    context.log?.warn?.('[DEBUG] tenant auth material (redacted)', {
-      orgId,
-      tenantUrl: tokenPreview(connectionResult.supabaseUrl),
-      anonKeyPreview: tokenPreview(connectionResult.anonKey),
-      anonKeySha256: sha256Hex(connectionResult.anonKey),
-      dedicatedKeyPreview: tokenPreview(dedicatedKey),
-      dedicatedKeySha256: sha256Hex(dedicatedKey),
-      jwtHeader: header,
-      jwtPayload: payload,
-    });
-  }
+  // DEBUG LOG 3: Show first/last 4 chars after decryption (students-list)
+  context.log?.('[DEBUG] Students-list decrypted credentials', {
+    first4: dedicatedKey.substring(0, 4),
+    last4: dedicatedKey.substring(dedicatedKey.length - 4),
+    totalLength: dedicatedKey.length,
+    isJWT: dedicatedKey.startsWith('eyJ') && dedicatedKey.split('.').length === 3,
+  });
 
   try {
     const tenantClient = createTenantClient({
       supabaseUrl: connectionResult.supabaseUrl,
       anonKey: connectionResult.anonKey,
       dedicatedKey,
-      schema: normalizedSchema,
     });
     return { client: tenantClient };
   } catch (clientError) {
@@ -409,7 +304,4 @@ export async function resolveTenantClient(context, supabase, env, orgId, options
     return { error: buildTenantError('failed_to_connect_tenant') };
   }
 }
-
-export function resolveTenantPublicClient(context, supabase, env, orgId) {
-  return resolveTenantClient(context, supabase, env, orgId, { schema: 'public' });
-}
+  

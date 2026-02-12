@@ -18,7 +18,7 @@ import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';
 import { assignLooseSession, createAndAssignLooseSession } from '@/features/sessions/api/loose-sessions.js';
 import { mapLooseSessionError } from '@/lib/error-mapping.js';
 import AddStudentForm from '@/features/admin/components/AddStudentForm.jsx';
-import { buildDisplayName } from '@/lib/person-name.js';
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
 
 const DAY_NAMES = ['', 'ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
@@ -197,7 +197,7 @@ export default function BulkResolvePendingReportsDialog({
         const result = await createAndAssignLooseSession({
           sessionId: report.id,
           name: studentData.name,
-          nationalId: studentData.nationalId,
+          identityNumber: studentData.identityNumber,
           assignedInstructorId: studentData.assignedInstructorId,
           defaultService: studentData.defaultService || null,
           orgId: activeOrgId,
@@ -367,9 +367,7 @@ export default function BulkResolvePendingReportsDialog({
                     <SelectContent className="max-h-[250px] sm:max-h-[300px]">
                       {filteredStudents.map((student) => (
                         <SelectItem key={student.id} value={student.id} className="text-right">
-                          <span className="block truncate">
-                            {buildDisplayName({ ...student, fallback: student.name }) || 'ללא שם'}
-                          </span>
+                          <span className="block truncate">{formatStudentName(student) || 'ללא שם'}</span>
                           {student.contact_name && <span className="text-xs text-neutral-500"> ({student.contact_name})</span>}
                         </SelectItem>
                       ))}
@@ -437,7 +435,7 @@ export default function BulkResolvePendingReportsDialog({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">כל המדריכים</SelectItem>
-                        {instructors.map((inst) => (
+                        {instructors.filter(inst => inst?.id).map((inst) => (
                           <SelectItem key={inst.id} value={inst.id}>
                             {inst.name}
                           </SelectItem>
@@ -531,10 +529,9 @@ export default function BulkResolvePendingReportsDialog({
               <AddStudentForm
                 onSubmit={handleCreateAndAssign}
                 onCancel={() => setMode(RESOLUTION_MODE.SELECT)}
-                submitLabel={`צור ושייך ${reports.length} דיווחים`}
-                submitDisabled={isProcessing}
+                isSubmitting={isProcessing}
                 renderFooterOutside={false}
-                initialValues={suggestedInstructorId ? { assignedInstructorId: suggestedInstructorId } : {}}
+                initialValues={suggestedInstructorId ? { assignedInstructorId: suggestedInstructorId } : undefined}
               />
             </div>
           )}

@@ -192,9 +192,31 @@ export default async function userContext(context, req) {
       organizationsResponse = await supabase
         .from('organizations')
         .select(
-          'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at, dedicated_key_saved_at',
+          'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at, dedicated_key_saved_at, dedicated_key_encrypted',
         )
         .in('id', idsArray);
+
+      // DEBUG LOG 2: Show encrypted key data from database
+      if (organizationsResponse.data && organizationsResponse.data.length > 0) {
+        for (const org of organizationsResponse.data) {
+          if (org.dedicated_key_encrypted) {
+            const encrypted = org.dedicated_key_encrypted;
+            context.log?.('[DEBUG] User-context fetched encrypted credentials', {
+              orgId: org.id,
+              orgName: org.name,
+              encryptedFirst20: encrypted.substring(0, 20),
+              encryptedLast20: encrypted.substring(encrypted.length - 20),
+              encryptedLength: encrypted.length,
+              format: encrypted.split(':').length === 5 ? 'valid_v1_gcm' : 'invalid_format',
+            });
+          } else {
+            context.log?.warn?.('[DEBUG] Org has no encrypted key', {
+              orgId: org.id,
+              orgName: org.name,
+            });
+          }
+        }
+      }
 
       settingsResponse = await supabase
         .from('org_settings')

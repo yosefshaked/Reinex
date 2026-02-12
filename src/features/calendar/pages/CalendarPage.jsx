@@ -1,179 +1,92 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronRight, ChevronLeft } from 'lucide-react';
-import { useOrg } from '@/org/OrgContext.jsx';
-import { fetchInstructors, fetchServices, fetchDailyLessons } from '../api/calendarApi.js';
-import DailyCalendar from '../components/DailyCalendar.jsx';
-import PageLayout from '@/components/ui/PageLayout.jsx';
-import { Button } from '@/components/ui/button.jsx';
+import { useState } from 'react';
+import PageLayout from '@/components/ui/PageLayout';
+import { Button } from '@/components/ui/button';
+import { Plus } from 'lucide-react';
+import { CalendarHeader } from '../components/CalendarHeader/CalendarHeader';
+import { CalendarGrid } from '../components/CalendarGrid/CalendarGrid';
+import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
+import { AddLessonDialog } from '../components/AddLessonDialog';
+import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
+import { Loader2 } from 'lucide-react';
 
 /**
- * Format date for display (Hebrew)
+ * CalendarPage - main calendar view showing daily schedule
  */
-function formatDateDisplay(date) {
-  const options = { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
-  };
-  return date.toLocaleDateString('he-IL', options);
-}
-
-/**
- * Get start and end of day (00:00:00 to 23:59:59)
- */
-function getDayBounds(date) {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  
-  const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
-  
-  return { start, end };
-}
-
 export default function CalendarPage() {
-  const { activeOrgId } = useOrg();
-  const [currentDate, setCurrentDate] = useState(() => new Date());
-  const [instructors, setInstructors] = useState([]);
-  const [services, setServices] = useState([]);
-  const [lessons, setLessons] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedInstance, setSelectedInstance] = useState(null);
+  const [showAddDialog, setShowAddDialog] = useState(false);
 
-  // Fetch data when date or org changes
-  useEffect(() => {
-    if (!activeOrgId) {
-      setLoading(false);
-      return;
-    }
+  const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
+  const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(currentDate);
 
-    const abortController = new AbortController();
-    setLoading(true);
-    setError(null);
-
-    const { start, end } = getDayBounds(currentDate);
-
-    Promise.all([
-      fetchInstructors(activeOrgId, { signal: abortController.signal }),
-      fetchServices(activeOrgId, { signal: abortController.signal }),
-      fetchDailyLessons(activeOrgId, start, end, { signal: abortController.signal }),
-    ])
-      .then(([instructorsData, servicesData, lessonsData]) => {
-        setInstructors(instructorsData);
-        setServices(servicesData);
-        setLessons(lessonsData);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (err.name !== 'AbortError') {
-          console.error('Failed to fetch calendar data:', err);
-          setError(err.message);
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      abortController.abort();
-    };
-  }, [activeOrgId, currentDate]);
-
-  const goToPreviousDay = () => {
-    setCurrentDate(prevDate => {
-      const newDate = new Date(prevDate);
-      newDate.setDate(newDate.getDate() - 1);
-      return newDate;
-    });
+  const handleInstanceClick = (instance) => {
+    setSelectedInstance(instance);
   };
 
-  const goToNextDay = () => {
-    setCurrentDate(prevDate => {
-      const newDate = new Date(prevDate);
-      newDate.setDate(newDate.getDate() + 1);
-      return newDate;
-    });
+  const handleCloseDialog = () => {
+    setSelectedInstance(null);
   };
 
-  const goToToday = () => {
-    setCurrentDate(new Date());
+  const handleAddSuccess = () => {
+    refetchInstances();
   };
 
-  if (!activeOrgId) {
-    return (
-      <PageLayout title="לוח שנה">
-        <div className="flex items-center justify-center h-64 text-neutral-500">
-          אנא בחר ארגון כדי להציג את לוח השנה
-        </div>
-      </PageLayout>
-    );
-  }
-
-  if (loading) {
-    return (
-      <PageLayout title="לוח שנה">
-        <div className="flex items-center justify-center h-64 text-neutral-500">
-          טוען נתונים...
-        </div>
-      </PageLayout>
-    );
-  }
-
-  if (error) {
-    return (
-      <PageLayout title="לוח שנה">
-        <div className="flex items-center justify-center h-64 text-red-500">
-          שגיאה בטעינת הנתונים: {error}
-        </div>
-      </PageLayout>
-    );
-  }
+  const handleUpdateSuccess = () => {
+    refetchInstances();
+    setSelectedInstance(null);
+  };
 
   return (
-    <PageLayout 
-      title="לוח שנה"
-      subtitle={formatDateDisplay(currentDate)}
-    >
-      {/* Date navigation */}
-      <div className="flex items-center justify-between mb-4 gap-4" dir="rtl">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={goToPreviousDay}
-            title="יום קודם"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={goToToday}
-          >
-            היום
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={goToNextDay}
-            title="יום הבא"
-          >
-            <ChevronLeft className="h-4 w-4" />
+    <PageLayout title="לוח זמנים">
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <CalendarHeader currentDate={currentDate} onDateChange={setCurrentDate} />
+          <Button onClick={() => setShowAddDialog(true)} className="gap-2">
+            <Plus className="h-4 w-4" />
+            שיעור חדש
           </Button>
         </div>
 
-        <div className="text-sm text-neutral-600">
-          {lessons.length} שיעורים מתוכננים
-        </div>
+        {/* Loading State */}
+        {(instructorsLoading || instancesLoading) && (
+          <div className="flex items-center justify-center h-96">
+            <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+          </div>
+        )}
+
+        {/* Error State */}
+        {(instructorsError || instancesError) && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+            שגיאה בטעינת הנתונים: {instructorsError || instancesError}
+          </div>
+        )}
+
+        {/* Calendar Grid */}
+        {!instructorsLoading && !instancesLoading && !instructorsError && !instancesError && (
+          <CalendarGrid
+            instructors={instructors}
+            instances={instances}
+            onInstanceClick={handleInstanceClick}
+          />
+        )}
       </div>
 
-      {/* Calendar grid */}
-      <div className="border border-border rounded-lg overflow-hidden bg-white" style={{ height: 'calc(100vh - 250px)' }}>
-        <DailyCalendar
-          instructors={instructors}
-          lessons={lessons}
-          currentDate={currentDate}
-        />
-      </div>
+      {/* Instance Details Dialog */}
+      <LessonInstanceDialog
+        instance={selectedInstance}
+        open={!!selectedInstance}
+        onClose={handleCloseDialog}
+        onUpdate={handleUpdateSuccess}
+      />
+
+      {/* Add Lesson Dialog */}
+      <AddLessonDialog
+        open={showAddDialog}
+        onClose={() => setShowAddDialog(false)}
+        onSuccess={handleAddSuccess}
+        defaultDate={currentDate}
+      />
     </PageLayout>
   );
 }
