@@ -121,6 +121,15 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
     setIsCheckingConflicts(true);
     try {
       const datetime_start = `${formData.date}T${formData.time}:00`;
+      const serviceIds = new Set(
+        (services || [])
+          .filter((svc) => svc?.is_active === true)
+          .map((svc) => String(svc?.id || ''))
+      );
+      if (formData.service_id && !serviceIds.has(String(formData.service_id))) {
+        setConflicts([]);
+        return;
+      }
       const data = await authenticatedFetch('calendar/conflicts/check', {
         method: 'POST',
         session,
@@ -140,7 +149,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
     } finally {
       setIsCheckingConflicts(false);
     }
-  }, [formData, activeOrgId, session]);
+  }, [formData, activeOrgId, session, services]);
 
   useEffect(() => {
     if (!formData.instructor_employee_id || !formData.date || !formData.time || formData.student_ids.length === 0) {
@@ -165,6 +174,15 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
     setError(null);
 
     try {
+      const serviceIds = new Set(
+        (services || [])
+          .filter((svc) => svc?.is_active === true)
+          .map((svc) => String(svc?.id || ''))
+      );
+      if (!formData.service_id || !serviceIds.has(String(formData.service_id))) {
+        setError('יש לבחור שירות מהרשימה.');
+        return;
+      }
       const datetime_start = `${formData.date}T${formData.time}:00`;
 
       await authenticatedFetch('calendar/instances', {
@@ -197,7 +215,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
     searchText: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''} ${s.identity_number || ''}`.toLowerCase(),
   }));
 
-  const activeServices = services?.filter((s) => s?.is_active !== false) || [];
+  const activeServices = services?.filter((s) => s?.is_active === true) || [];
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
