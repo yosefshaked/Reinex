@@ -381,7 +381,7 @@ async function handleCreateInstance(context, body, tenantClient, userId, isAdmin
   const participantData = body.student_ids.map(studentId => ({
     lesson_instance_id: instance.id,
     student_id: studentId,
-    participant_status: 'pending',
+    participant_status: 'scheduled',
     price_charged: null,
     pricing_breakdown: null,
     commitment_id: null,
