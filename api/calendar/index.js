@@ -172,7 +172,7 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
       ),
       Services(
         id,
-        service_name,
+        name,
         color,
         is_active
       ),
@@ -276,7 +276,7 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
       participants,
       service: serviceData ? {
         id: serviceData.id,
-        service_name: serviceData.service_name,
+        service_name: serviceData.name,
         color: serviceData.color,
         is_active: serviceData.is_active,
       } : null,
