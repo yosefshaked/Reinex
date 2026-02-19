@@ -45,6 +45,14 @@ export function DraggableLessonCard({
     setIsDragging(true);
   };
 
+  // Helper: Check if position/instructor actually changed
+  const hasPositionChanged = (newDateTime, newInstructor) => {
+    const originalTime = new Date(instance.datetime_start);
+    const timeChanged = newDateTime.getTime() !== originalTime.getTime();
+    const instructorChanged = newInstructor?.id !== instance.instructor_employee_id;
+    return timeChanged || instructorChanged;
+  };
+
   useEffect(() => {
     if (!isDragging) return;
 
@@ -67,9 +75,10 @@ export function DraggableLessonCard({
 
     const handleMouseUp = async () => {
       setIsDragging(false);
+      setTargetTimeSlot(null);
+      setPreviewPosition(null);
 
       if (!targetTimeSlot || !previewPosition) {
-        setTargetTimeSlot(null);
         return;
       }
 
@@ -87,6 +96,11 @@ export function DraggableLessonCard({
       const columnWidth = parentWidth / (instructors.length + 1); // +1 for time column
       const columnIndex = Math.round(previewPosition.x / columnWidth) - 1;
       const newInstructor = instructors[Math.max(0, Math.min(columnIndex, instructors.length - 1))];
+
+      // Cancel if dragged back to original position
+      if (!hasPositionChanged(newDateTime, newInstructor)) {
+        return;
+      }
 
       // Check for conflicts
       try {
@@ -113,8 +127,6 @@ export function DraggableLessonCard({
         newInstructor: newInstructor || instance.instructor,
       });
       setShowConfirmDialog(true);
-      setPreviewPosition(null);
-      setTargetTimeSlot(null);
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -171,11 +183,12 @@ export function DraggableLessonCard({
 
       <div
         ref={cardRef}
-        className="absolute w-full px-1 cursor-pointer transition-transform hover:z-50"
+        className="absolute w-full px-1 transition-transform hover:z-50"
         style={{ 
           top: `${top}px`,
           height: `${height}px`,
           opacity: isDragging ? 0.7 : 1,
+          cursor: isDragging ? 'grabbing' : 'pointer',
         }}
         onClick={() => !isDragging && onClick?.(instance)}
       >
