@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
 import PageLayout from '@/components/ui/PageLayout';
 import { Button } from '@/components/ui/button';
-import { Plus } from 'lucide-react';
+import { Plus, LayoutTemplate, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { CalendarHeader } from '../components/CalendarHeader/CalendarHeader';
 import { CalendarGrid } from '../components/CalendarGrid/CalendarGrid';
 import { WeekCalendarGrid } from '../components/CalendarGrid/WeekCalendarGrid';
 import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
 import { AddLessonDialog } from '../components/AddLessonDialog';
 import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
-import { Loader2 } from 'lucide-react';
 
 const CALENDAR_DATE_KEY = 'reinex_calendar_date';
 const CALENDAR_VIEW_KEY = 'reinex_calendar_view'; // 'day' or 'week'
@@ -31,6 +31,7 @@ export default function CalendarPage() {
     return 'day';
   });
 
+  const navigate = useNavigate();
   const [selectedInstance, setSelectedInstance] = useState(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
 
@@ -118,10 +119,16 @@ export default function CalendarPage() {
               </Button>
             </div>
           </div>
-          <Button onClick={() => setShowAddDialog(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            שיעור חדש
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => navigate('/calendar/templates')} className="gap-2">
+              <LayoutTemplate className="h-4 w-4" />
+              תבניות
+            </Button>
+            <Button onClick={() => setShowAddDialog(true)} className="gap-2">
+              <Plus className="h-4 w-4" />
+              שיעור חדש
+            </Button>
+          </div>
         </div>
 
         {/* Loading State */}

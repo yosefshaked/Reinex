@@ -5,6 +5,7 @@ import './index.css';
 import AppShell from './components/layout/AppShell.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import CalendarPage from './features/calendar/pages/CalendarPage.jsx';
+import TemplateManagerPage from './features/calendar/pages/TemplateManagerPage.jsx';
 import EmployeesPage from './pages/EmployeesPage.jsx';
 import ServicesPage from './pages/ServicesPage.jsx';
 import ServiceProfilePage from './pages/ServiceProfilePage.jsx';
@@ -77,6 +78,7 @@ function App({ config = null }) {
                     <Route path="/dashboard" element={<DashboardPage />} />
                     <Route path="/Dashboard" element={<Navigate to="/dashboard" replace />} />
                     <Route path="/calendar" element={<CalendarPage />} />
+                    <Route path="/calendar/templates" element={<TemplateManagerPage />} />
                     <Route path="/employees" element={<EmployeesPage />} />
                     <Route path="/Employees" element={<Navigate to="/employees" replace />} />
                     <Route path="/services" element={<ServicesPage />} />

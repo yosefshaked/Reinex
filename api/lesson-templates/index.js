@@ -4,7 +4,7 @@ import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/s
 import {
   UUID_PATTERN,
   ensureMembership,
-  isAdminRole,
+  isAdminOrOffice,
   normalizeString,
   parseRequestBody,
   readEnv,
@@ -63,8 +63,8 @@ function isIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value).trim());
 }
 
-function buildTemplateSelect() {
-  return [
+function buildTemplateSelect({ includeStudent = false } = {}) {
+  const fields = [
     'id',
     'student_id',
     'instructor_employee_id',
@@ -83,7 +83,11 @@ function buildTemplateSelect() {
     'metadata',
     'instructor:Employees(id, first_name, middle_name, last_name, email)',
     'service:Services(id, name, duration_minutes, color)',
-  ].join(',');
+  ];
+  if (includeStudent) {
+    fields.push('student:students(id, first_name, middle_name, last_name)');
+  }
+  return fields.join(',');
 }
 
 export default async function lessonTemplates(context, req) {
@@ -142,7 +146,7 @@ export default async function lessonTemplates(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const isAdmin = isAdminRole(role);
+  const isAdmin = isAdminOrOffice(role);
 
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
   if (tenantError) {
@@ -151,10 +155,42 @@ export default async function lessonTemplates(context, req) {
 
   if (method === 'GET') {
     const studentId = normalizeUuid(req?.query?.student_id || body?.student_id || body?.studentId);
-    if (!studentId) {
-      return respond(context, 400, { message: 'invalid_student_id' });
+    const listAll = normalizeString(req?.query?.all) === 'true';
+
+    // Mode 1: List all templates (Template Manager grid view) — admin/office only
+    if (listAll || !studentId) {
+      if (!isAdmin) {
+        return respond(context, 403, { message: 'forbidden' });
+      }
+
+      const showInactive = normalizeString(req?.query?.show_inactive) === 'true';
+      const instructorId = normalizeUuid(req?.query?.instructor_id);
+
+      let query = tenantClient
+        .from('lesson_templates')
+        .select(buildTemplateSelect({ includeStudent: true }))
+        .order('day_of_week', { ascending: true })
+        .order('time_of_day', { ascending: true });
+
+      if (!showInactive) {
+        query = query.eq('is_active', true);
+      }
+
+      if (instructorId) {
+        query = query.eq('instructor_employee_id', instructorId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        context.log?.error?.('lesson-templates failed to list all templates', { message: error.message });
+        return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
+      }
+
+      return respond(context, 200, Array.isArray(data) ? data : []);
     }
 
+    // Mode 2: Student-scoped (existing behavior — student detail page)
     if (!isAdmin) {
       const { data: assignmentRows, error: assignmentError } = await tenantClient
         .from('lesson_templates')
@@ -383,6 +419,35 @@ export default async function lessonTemplates(context, req) {
     }
 
     return respond(context, 200, data);
+  }
+
+  if (method === 'DELETE') {
+    const templateId = normalizeUuid(
+      context?.bindingData?.templateId || body?.template_id || body?.templateId,
+    );
+    if (!templateId) {
+      return respond(context, 400, { message: 'invalid_template_id' });
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data, error } = await tenantClient
+      .from('lesson_templates')
+      .update({ is_active: false, valid_until: today, updated_at: new Date().toISOString() })
+      .eq('id', templateId)
+      .select('id, is_active, valid_until')
+      .maybeSingle();
+
+    if (error) {
+      context.log?.error?.('lesson-templates failed to deactivate template', { message: error.message, templateId });
+      return respond(context, 500, { message: 'failed_to_deactivate_lesson_template' });
+    }
+
+    if (!data) {
+      return respond(context, 404, { message: 'lesson_template_not_found' });
+    }
+
+    return respond(context, 200, { message: 'template_deactivated', id: data.id });
   }
 
   return respond(context, 405, { message: 'method_not_allowed' });
