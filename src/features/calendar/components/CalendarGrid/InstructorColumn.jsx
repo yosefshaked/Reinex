@@ -37,8 +37,8 @@ export function InstructorColumn({ instructor, instances, onInstanceClick, instr
         </div>
       </div>
       
-      {/* Time grid with instances */}
-      <div className="relative bg-white overflow-visible" style={{ height: `${timeSlots.length * 24}px` }}>
+      {/* Time grid with instances - add padding to allow expanded cards to be visible */}
+      <div className="relative bg-white overflow-visible px-2 pb-8 pt-2" style={{ height: `${timeSlots.length * 24}px` }}>
         {/* Grid lines (every 15 minutes) */}
         {timeSlots.map((slot, index) => (
           <div

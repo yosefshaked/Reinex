@@ -54,7 +54,7 @@ export function WeekCalendarGrid({
               </div>
 
               {/* Time grid for this day */}
-              <div className="relative bg-white overflow-visible" style={{ height: `${timeSlots.length * 24}px` }}>
+              <div className="relative bg-white overflow-visible px-2 pb-8 pt-2" style={{ height: `${timeSlots.length * 24}px` }}>
                 {/* Grid lines */}
                 {timeSlots.map((slot, index) => (
                   <div

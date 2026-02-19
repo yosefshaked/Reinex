@@ -10,21 +10,22 @@ export function TimeColumn() {
   const hourSlots = timeSlots.filter((_, index) => index % 4 === 0);
 
   return (
-    <div className="sticky right-0 bg-white border-l border-gray-300 z-20" style={{ width: '80px' }}>
+    <div className="sticky right-0 bg-white border-l border-gray-300 z-20 flex flex-col" style={{ width: '80px' }}>
       {/* Header spacer */}
-      <div className="h-12 border-b border-gray-300 flex items-center justify-center text-sm font-medium">
+      <div className="h-12 border-b border-gray-300 flex items-center justify-center text-sm font-medium px-1">
         שעה
       </div>
       
       {/* Time labels */}
-      <div className="relative" style={{ height: `${timeSlots.length * 24}px` }}>
+      <div className="relative flex-1" style={{ height: `${timeSlots.length * 24}px` }}>
         {hourSlots.map((slot) => (
           <div
             key={slot.timeString}
-            className="absolute w-full text-center text-sm text-gray-600 pr-2"
+            className="absolute w-full text-center text-sm text-gray-600 px-1 font-medium"
             style={{ 
               top: `${(slot.totalMinutes - 360) / 15 * 24}px`,
               transform: 'translateY(-50%)',
+              minWidth: '100%',
             }}
           >
             {slot.timeString}

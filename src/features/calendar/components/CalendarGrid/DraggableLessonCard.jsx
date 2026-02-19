@@ -197,7 +197,7 @@ export function DraggableLessonCard({
           style={{ backgroundColor: bgColor }}
         >
           {/* Header with drag handle and status */}
-          <div className="flex items-start justify-between mb-1">
+          <div className="flex flex-row-reverse items-start justify-between mb-1 gap-1">
             <span className="text-white font-medium text-sm truncate flex-1">
               {instance.service?.service_name || 'שירות'}
             </span>
@@ -205,14 +205,14 @@ export function DraggableLessonCard({
             {/* Drag Handle */}
             <div
               ref={dragRef}
-              className="cursor-grab active:cursor-grabbing ml-1 flex-shrink-0"
+              className="cursor-grab active:cursor-grabbing flex-shrink-0"
               onMouseDown={handleDragStart}
               title="גרור כדי להעביר שיעור"
             >
               <GripVertical className="h-4 w-4 text-white/60 hover:text-white" />
             </div>
 
-            <span className={`text-lg ${statusInfo.color}`} title={statusInfo.label}>
+            <span className={`text-lg flex-shrink-0 ${statusInfo.color}`} title={statusInfo.label}>
               {statusInfo.icon}
             </span>
           </div>
