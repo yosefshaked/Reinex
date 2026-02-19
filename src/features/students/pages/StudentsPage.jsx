@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -29,7 +29,7 @@ import { saveFilterState, loadFilterState } from '@/features/students/utils/filt
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
 import MyPendingReportsCard from '@/features/sessions/components/MyPendingReportsCard.jsx';
-import { buildDisplayName } from '@/lib/person-name.js';
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
 
 export default function StudentsPage() {
   const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
@@ -50,7 +50,6 @@ export default function StudentsPage() {
   const [isMaintenanceOpen, setIsMaintenanceOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [dayFilter, setDayFilter] = useState(null);
-  const [instructorFilterId, setInstructorFilterId] = useState('');
   const [tagFilter, setTagFilter] = useState('');
   const [sortBy, setSortBy] = useState(STUDENT_SORT_OPTIONS.SCHEDULE); // Default sort by schedule
   const [statusFilter, setStatusFilter] = useState('active'); // 'active' | 'inactive' | 'all'
@@ -83,18 +82,9 @@ export default function StudentsPage() {
   const canFetchVisibility = canFetch && !isAdmin;
 
   const { instructors } = useInstructors({
-    enabled: canFetch && isAdmin, // Only admins need the full instructor list
+    enabled: canFetch && isAdmin,
     orgId: activeOrgId,
   });
-
-  const instructorMap = useMemo(() => {
-    return instructors.reduce((map, instructor) => {
-      if (instructor?.id) {
-        map.set(instructor.id, instructor);
-      }
-      return map;
-    }, new Map());
-  }, [instructors]);
 
   // Determine effective status for API call
   const effectiveStatus = isAdmin 
@@ -181,9 +171,8 @@ export default function StudentsPage() {
       if (savedFilters.sortBy !== undefined) setSortBy(savedFilters.sortBy);
       
       // Admin-only filters
-      if (isAdmin) {
-        if (savedFilters.instructorFilterId !== undefined) setInstructorFilterId(savedFilters.instructorFilterId);
-        if (savedFilters.statusFilter !== undefined) setStatusFilter(savedFilters.statusFilter);
+      if (isAdmin && savedFilters.statusFilter !== undefined) {
+        setStatusFilter(savedFilters.statusFilter);
       }
       // Instructor statusFilter will be restored after permission check
     }
@@ -278,23 +267,6 @@ export default function StudentsPage() {
     };
   }, [fetchPendingReportsCount]);
 
-  // Default the view for admins/owners who are also instructors to "mine" on first visit
-  useEffect(() => {
-    if (!isAdmin || !user || !Array.isArray(instructors) || instructors.length === 0 || !activeOrgId) return;
-    
-    // Check if this admin is also an instructor
-    const isInstructor = instructors.some((i) => i?.id === user.id);
-    if (!isInstructor) return;
-    
-    // Only set default if no saved 'admin' filter exists for this org at all (truly first visit)
-    const savedFilters = loadFilterState(activeOrgId, 'admin');
-    const isFirstVisit = !savedFilters || Object.keys(savedFilters).length === 0;
-    
-    if (isFirstVisit) {
-      setInstructorFilterId(user.id);
-    }
-  }, [isAdmin, user, instructors, activeOrgId]);
-
   // Save filter state whenever it changes
   useEffect(() => {
     if (activeOrgId) {
@@ -305,15 +277,10 @@ export default function StudentsPage() {
         sortBy,
         statusFilter,
       };
-      
-      // Admin-only filter
-      if (isAdmin) {
-        filterState.instructorFilterId = instructorFilterId;
-      }
-      
+
       saveFilterState(activeOrgId, filterMode, filterState);
     }
-  }, [activeOrgId, filterMode, isAdmin, searchQuery, dayFilter, instructorFilterId, tagFilter, sortBy, statusFilter]);
+  }, [activeOrgId, filterMode, isAdmin, searchQuery, dayFilter, tagFilter, sortBy, statusFilter]);
 
   // Client-side filtering and sorting - applied to all fetched students
   useEffect(() => {
@@ -338,19 +305,15 @@ export default function StudentsPage() {
       result = result.filter((s) => {
         const name = (s.name || '').toLowerCase();
         const phone = (s.contact_phone || '').toLowerCase();
-        const nationalId = (s.national_id || '').toLowerCase();
-        return name.includes(query) || phone.includes(query) || nationalId.includes(query);
+        const identityNumber = (s.identity_number || s.national_id || '').toLowerCase();
+        const studentPhone = (s.phone || '').toLowerCase();
+        return name.includes(query) || phone.includes(query) || studentPhone.includes(query) || identityNumber.includes(query);
       });
     }
 
     // Filter by day of week
     if (dayFilter !== null) {
       result = result.filter((s) => dayMatches(s.default_day_of_week, dayFilter));
-    }
-
-    // Filter by instructor (admin only)
-    if (isAdmin && instructorFilterId) {
-      result = result.filter((s) => s.assigned_instructor_id === instructorFilterId);
     }
 
     // Filter by tag
@@ -366,7 +329,7 @@ export default function StudentsPage() {
     result.sort(comparator);
 
     setFilteredStudents(result);
-  }, [students, isAdmin, statusFilter, searchQuery, dayFilter, instructorFilterId, tagFilter, sortBy, canViewInactive]);
+  }, [students, isAdmin, statusFilter, searchQuery, dayFilter, tagFilter, sortBy, canViewInactive]);
 
   const handleResetFilters = () => {
     setSearchQuery('');
@@ -375,10 +338,6 @@ export default function StudentsPage() {
     setSortBy(STUDENT_SORT_OPTIONS.SCHEDULE);
     setStatusFilter('active');
     
-    // Admin-only filter
-    if (isAdmin) {
-      setInstructorFilterId('');
-    }
   };
 
   // Check if any filters are active
@@ -390,11 +349,10 @@ export default function StudentsPage() {
     );
     
     if (isAdmin) {
-      return commonFilters || instructorFilterId !== '' || statusFilter !== 'active';
-    } else {
-      return commonFilters || (canViewInactive && statusFilter !== 'active');
+      return commonFilters || statusFilter !== 'active';
     }
-  }, [isAdmin, searchQuery, dayFilter, instructorFilterId, tagFilter, statusFilter, canViewInactive]);
+    return commonFilters || (canViewInactive && statusFilter !== 'active');
+  }, [isAdmin, searchQuery, dayFilter, tagFilter, statusFilter, canViewInactive]);
 
   const handleOpenAddDialog = () => {
     setCreateError('');
@@ -421,18 +379,27 @@ export default function StudentsPage() {
     setIsCreatingStudent(true);
     setCreateError('');
 
+    // AddStudentForm submits Reinex camelCase structure
     const body = {
       org_id: activeOrgId,
-      name: formData.name,
-      assigned_instructor_id: formData.assigned_instructor_id,
-      tags: normalizeTagIdsForWrite(formData.tags),
-      default_service: formData.default_service || '',
-      default_day_of_week: formData.default_day_of_week,
-      default_session_time: formData.default_session_time || '',
-      national_id: formData.national_id?.trim() || '',
-      contact_name: formData.contact_name?.trim() || '',
-      contact_phone: formData.contact_phone?.trim() || '',
-      notes: formData.notes?.trim() || '',
+      // Reinex structure: separate name fields
+      first_name: formData.firstName,
+      middle_name: formData.middleName,
+      last_name: formData.lastName,
+      identity_number: formData.identityNumber,
+      date_of_birth: formData.dateOfBirth,
+      guardian_id: formData.guardianId,
+      guardian_relationship: formData.guardianRelationship,
+      phone: formData.phone,
+      email: formData.email,
+      medical_provider: formData.medicalProvider,
+      default_notification_method: formData.notificationMethod,
+      special_rate: formData.specialRate,
+      medical_flags: formData.medicalFlags,
+      onboarding_status: formData.onboardingStatus,
+      notes_internal: formData.notesInternal,
+      tags: formData.tags,
+      is_active: formData.isActive,
     };
 
     try {
@@ -446,11 +413,21 @@ export default function StudentsPage() {
       await refreshRoster();
       setIsAddDialogOpen(false);
     } catch (error) {
-      console.error('Failed to create student:', error);
+      const apiMessage = error?.data?.message || error?.message;
+      const apiCode = error?.data?.error || error?.data?.code || error?.code;
+      console.error('[students-list][POST] Failed to create student', {
+        status: error?.status,
+        code: apiCode,
+        message: apiMessage,
+      });
       let message = 'הוספת תלמיד נכשלה.';
-      if (error?.code === 'national_id_duplicate') {
+      if (apiCode === 'identity_number_duplicate' || apiMessage === 'duplicate_identity_number') {
         message = 'תעודת זהות קיימת כבר במערכת.';
-      } else if (error?.code === 'schema_upgrade_required') {
+      } else if (apiMessage === 'missing national id') {
+        message = 'יש להזין מספר זהות.';
+      } else if (apiMessage === 'invalid national id') {
+        message = 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
+      } else if (apiCode === 'schema_upgrade_required') {
         message = 'נדרשת שדרוג לסכמת מסד הנתונים.';
       }
       setCreateError(message);
@@ -495,11 +472,19 @@ export default function StudentsPage() {
       await refreshRoster();
       handleEditModalClose();
     } catch (error) {
-      console.error('Failed to update student:', error);
+      const apiMessage = error?.data?.message || error?.message;
+      const apiCode = error?.data?.error || error?.data?.code || error?.code;
+      console.error('[students-list][PUT] Failed to update student', {
+        status: error?.status,
+        code: apiCode,
+        message: apiMessage,
+      });
       let message = 'עדכון פרטי התלמיד נכשל.';
-      if (error?.code === 'national_id_duplicate') {
+      if (apiCode === 'identity_number_duplicate' || apiMessage === 'duplicate_identity_number') {
         message = 'תעודת זהות קיימת כבר במערכת.';
-      } else if (error?.code === 'schema_upgrade_required') {
+      } else if (apiMessage === 'invalid national id') {
+        message = 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
+      } else if (apiCode === 'schema_upgrade_required') {
         message = 'נדרשת שדרוג לסכמת מסד הנתונים.';
       }
       setUpdateError(message);
@@ -611,8 +596,6 @@ export default function StudentsPage() {
               onSearchChange={setSearchQuery}
               dayFilter={dayFilter}
               onDayFilterChange={setDayFilter}
-              instructorFilterId={instructorFilterId}
-              onInstructorFilterChange={setInstructorFilterId}
               tagFilter={tagFilter}
               onTagFilterChange={setTagFilter}
               statusFilter={statusFilter}
@@ -621,9 +604,8 @@ export default function StudentsPage() {
               onSortChange={setSortBy}
               hasActiveFilters={hasActiveFilters}
               onResetFilters={handleResetFilters}
-              instructors={instructors}
               tags={tagOptions}
-              showInstructorFilter={isAdmin}
+              showInstructorFilter={false}
               canViewInactive={isAdmin || canViewInactive}
             />
           </CardHeader>
@@ -641,22 +623,16 @@ export default function StudentsPage() {
                       <TableHead className="text-right">שם</TableHead>
                       <TableHead className="text-right">יום מפגש</TableHead>
                       <TableHead className="text-right">שעת מפגש</TableHead>
-                      {isAdmin && <TableHead className="text-right">מדריך</TableHead>}
                       <TableHead className="text-right">סטטוס</TableHead>
                       <TableHead className="text-right">פעולות</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredStudents.map((student) => {
-                      const instructor = isAdmin ? instructorMap.get(student.assigned_instructor_id) : null;
                       const isInactive = student.is_active === false;
-                      const missingNationalId = !student.national_id?.trim();
+                      const missingIdentityNumber = !(student.identity_number || student.national_id)?.trim();
                       const summary = complianceSummary[student.id] || {};
                       const hasExpiredDocs = summary.expiredDocuments > 0;
-                      const studentDisplayName = buildDisplayName({
-                        ...student,
-                        fallback: student.name,
-                      });
 
                       return (
                         <TableRow key={student.id}>
@@ -666,14 +642,14 @@ export default function StudentsPage() {
                                 to={`/students/${student.id}`}
                                 className="font-medium text-primary hover:underline"
                               >
-                                {studentDisplayName || 'ללא שם'}
+                                {formatStudentName(student)}
                               </Link>
                               {isInactive && (
                                 <Badge variant="secondary" className="w-fit bg-neutral-200 text-neutral-700">
                                   לא פעיל
                                 </Badge>
                               )}
-                              {missingNationalId && (
+                              {missingIdentityNumber && (
                                 <Badge variant="destructive" className="w-fit gap-1">
                                   <AlertCircle className="h-3 w-3" />
                                   <span>חסרה תעודת זהות</span>
@@ -697,15 +673,6 @@ export default function StudentsPage() {
                               ? formatDefaultTime(student.default_session_time)
                               : '—'}
                           </TableCell>
-                          {isAdmin && (
-                            <TableCell className="text-right">
-                              {instructor ? (
-                                <span>{instructor.name || instructor.email}</span>
-                              ) : (
-                                <span className="text-amber-600">לא משוייך</span>
-                              )}
-                            </TableCell>
-                          )}
                           <TableCell className="text-right">
                             {isInactive ? (
                               <Badge variant="secondary">לא פעיל</Badge>
@@ -754,10 +721,10 @@ export default function StudentsPage() {
             }}
             footer={
               <AddStudentFormFooter
-                isCreating={isCreatingStudent}
-                isSubmitDisabled={addSubmitDisabled}
+                isSubmitting={isCreatingStudent}
+                disableSubmit={addSubmitDisabled}
                 onCancel={() => setIsAddDialogOpen(false)}
-                onSubmitClick={() => {
+                onSubmit={() => {
                   document.getElementById('add-student-form')?.requestSubmit();
                 }}
               />
@@ -765,22 +732,29 @@ export default function StudentsPage() {
           >
             <DialogHeader>
               <DialogTitle>הוספת תלמיד חדש</DialogTitle>
+              <DialogDescription>
+                הזן את פרטי התלמיד. מספר זהות וטלפון (או אפוטרופוס) הם שדות חובה.
+              </DialogDescription>
             </DialogHeader>
             <AddStudentForm
-              formId="add-student-form"
-              instructors={instructors}
-              tagOptions={tagOptions}
               onSubmit={handleAddSubmit}
+              onCancel={() => setIsAddDialogOpen(false)}
+              isSubmitting={isCreatingStudent}
+              error={createError}
               onSubmitDisabledChange={setAddSubmitDisabled}
               renderFooterOutside
-              openSelectCountRef={openSelectCountRef}
-              isClosingSelectRef={isClosingSelectRef}
+              onSelectOpenChange={(open) => {
+                if (open) {
+                  openSelectCountRef.current++;
+                } else {
+                  isClosingSelectRef.current = true;
+                  setTimeout(() => {
+                    openSelectCountRef.current = Math.max(0, openSelectCountRef.current - 1);
+                    isClosingSelectRef.current = false;
+                  }, 100);
+                }
+              }}
             />
-            {createError && (
-              <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-                {createError}
-              </div>
-            )}
           </DialogContent>
         </Dialog>
       )}
@@ -788,11 +762,10 @@ export default function StudentsPage() {
       {/* Admin-only: Edit Student Modal */}
       {isAdmin && studentForEdit && (
         <EditStudentModal
+          open={Boolean(studentForEdit)}
           student={studentForEdit}
-          instructors={instructors}
-          tagOptions={tagOptions}
-          isUpdating={isUpdatingStudent}
-          updateError={updateError}
+          isSubmitting={isUpdatingStudent}
+          error={updateError}
           onClose={handleEditModalClose}
           onSubmit={handleEditSubmit}
         />

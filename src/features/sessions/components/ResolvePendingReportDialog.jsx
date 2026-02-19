@@ -14,7 +14,7 @@ import { assignLooseSession, createAndAssignLooseSession } from '@/features/sess
 import AddStudentForm from '@/features/admin/components/AddStudentForm.jsx';
 import { mapLooseSessionError } from '@/lib/error-mapping.js';
 import { DAY_NAMES } from '@/features/students/utils/schedule.js';
-import { buildDisplayName } from '@/lib/person-name.js';
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',
@@ -173,7 +173,7 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
       await createAndAssignLooseSession({
         sessionId: report.id,
         name: studentPayload.name,
-        nationalId: studentPayload.nationalId,
+        identityNumber: studentPayload.identityNumber,
         assignedInstructorId: studentPayload.assignedInstructorId,
         defaultService: studentPayload.defaultService,
         orgId: activeOrgId,
@@ -309,7 +309,7 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">כל המדריכים</SelectItem>
-                        {instructors.map((inst) => (
+                        {instructors.filter(inst => inst?.id).map((inst) => (
                           <SelectItem key={inst.id} value={inst.id}>
                             {inst.name}
                           </SelectItem>
@@ -386,9 +386,7 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
                   <SelectContent className="max-h-[250px] sm:max-h-[300px]">
                     {filteredStudents.map((student) => (
                       <SelectItem key={student.id} value={student.id} className="text-right">
-                        <span className="block truncate">
-                          {buildDisplayName({ ...student, fallback: student.name }) || 'ללא שם'}
-                        </span>
+                        <span className="block truncate">{formatStudentName(student) || 'ללא שם'}</span>
                         {student.contact_name && <span className="text-xs text-neutral-500"> ({student.contact_name})</span>}
                       </SelectItem>
                     ))}

@@ -328,7 +328,7 @@ export default function ResubmitRejectedReportDialog({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="date" className="block text-right mb-1 flex items-center gap-1">
+                <Label htmlFor="date" className="text-right mb-1 flex items-center gap-1">
                   <Calendar className="h-4 w-4" />
                   תאריך <span className="text-red-500">*</span>
                 </Label>
@@ -342,7 +342,7 @@ export default function ResubmitRejectedReportDialog({
               </div>
 
               <div>
-                <Label htmlFor="time" className="block text-right mb-1 flex items-center gap-1">
+                <Label htmlFor="time" className="text-right mb-1 flex items-center gap-1">
                   <Clock className="h-4 w-4" />
                   שעה <span className="text-red-500">*</span>
                 </Label>
@@ -435,7 +435,7 @@ export default function ResubmitRejectedReportDialog({
 
           {/* Admin Notes */}
           <div className="space-y-2 pt-4 border-t">
-            <Label htmlFor="adminNotes" className="block text-right flex items-center gap-2">
+            <Label htmlFor="adminNotes" className="text-right flex items-center gap-2">
               <MessageSquare className="h-4 w-4" />
               הערות למנהל
             </Label>

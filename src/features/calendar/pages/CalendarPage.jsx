@@ -1,179 +1,186 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronRight, ChevronLeft } from 'lucide-react';
-import { useOrg } from '@/org/OrgContext.jsx';
-import { fetchInstructors, fetchServices, fetchDailyLessons } from '../api/calendarApi.js';
-import DailyCalendar from '../components/DailyCalendar.jsx';
-import PageLayout from '@/components/ui/PageLayout.jsx';
-import { Button } from '@/components/ui/button.jsx';
+import { useState, useEffect } from 'react';
+import PageLayout from '@/components/ui/PageLayout';
+import { Button } from '@/components/ui/button';
+import { Plus, LayoutTemplate, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { CalendarHeader } from '../components/CalendarHeader/CalendarHeader';
+import { CalendarGrid } from '../components/CalendarGrid/CalendarGrid';
+import { WeekCalendarGrid } from '../components/CalendarGrid/WeekCalendarGrid';
+import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
+import { AddLessonDialog } from '../components/AddLessonDialog';
+import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
 
-/**
- * Format date for display (Hebrew)
- */
-function formatDateDisplay(date) {
-  const options = { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
-  };
-  return date.toLocaleDateString('he-IL', options);
-}
-
-/**
- * Get start and end of day (00:00:00 to 23:59:59)
- */
-function getDayBounds(date) {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  
-  const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
-  
-  return { start, end };
-}
+const CALENDAR_DATE_KEY = 'reinex_calendar_date';
+const CALENDAR_VIEW_KEY = 'reinex_calendar_view'; // 'day' or 'week'
 
 export default function CalendarPage() {
-  const { activeOrgId } = useOrg();
-  const [currentDate, setCurrentDate] = useState(() => new Date());
-  const [instructors, setInstructors] = useState([]);
-  const [services, setServices] = useState([]);
-  const [lessons, setLessons] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  // Fetch data when date or org changes
-  useEffect(() => {
-    if (!activeOrgId) {
-      setLoading(false);
-      return;
+  const [currentDate, setCurrentDateState] = useState(() => {
+    // Try to get saved date from sessionStorage, fall back to today
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem(CALENDAR_DATE_KEY);
+      return saved || new Date().toISOString().split('T')[0];
     }
+    return new Date().toISOString().split('T')[0];
+  });
 
-    const abortController = new AbortController();
-    setLoading(true);
-    setError(null);
+  const [viewMode, setViewModeState] = useState(() => {
+    // Get saved view mode or default to 'day'
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem(CALENDAR_VIEW_KEY) || 'day';
+    }
+    return 'day';
+  });
 
-    const { start, end } = getDayBounds(currentDate);
+  const navigate = useNavigate();
+  const [selectedInstance, setSelectedInstance] = useState(null);
+  const [showAddDialog, setShowAddDialog] = useState(false);
 
-    Promise.all([
-      fetchInstructors(activeOrgId, { signal: abortController.signal }),
-      fetchServices(activeOrgId, { signal: abortController.signal }),
-      fetchDailyLessons(activeOrgId, start, end, { signal: abortController.signal }),
-    ])
-      .then(([instructorsData, servicesData, lessonsData]) => {
-        setInstructors(instructorsData);
-        setServices(servicesData);
-        setLessons(lessonsData);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (err.name !== 'AbortError') {
-          console.error('Failed to fetch calendar data:', err);
-          setError(err.message);
-          setLoading(false);
-        }
-      });
+  // Save date to sessionStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(CALENDAR_DATE_KEY, currentDate);
+    }
+  }, [currentDate]);
 
-    return () => {
-      abortController.abort();
-    };
-  }, [activeOrgId, currentDate]);
+  // Save view mode to sessionStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(CALENDAR_VIEW_KEY, viewMode);
+    }
+  }, [viewMode]);
 
-  const goToPreviousDay = () => {
-    setCurrentDate(prevDate => {
-      const newDate = new Date(prevDate);
-      newDate.setDate(newDate.getDate() - 1);
-      return newDate;
-    });
+  const setCurrentDate = (newDate) => {
+    setCurrentDateState(newDate);
   };
 
-  const goToNextDay = () => {
-    setCurrentDate(prevDate => {
-      const newDate = new Date(prevDate);
-      newDate.setDate(newDate.getDate() + 1);
-      return newDate;
-    });
+  const setViewMode = (mode) => {
+    setViewModeState(mode);
   };
 
-  const goToToday = () => {
-    setCurrentDate(new Date());
+  // For week view, get date range
+  const getWeekStartDate = (dateString) => {
+    const date = new Date(dateString);
+    const day = date.getDay();
+    // Sunday is 0, we want Monday as start (day 1)
+    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+    const weekStart = new Date(date.setDate(diff));
+    return weekStart.toISOString().split('T')[0];
   };
 
-  if (!activeOrgId) {
-    return (
-      <PageLayout title="לוח שנה">
-        <div className="flex items-center justify-center h-64 text-neutral-500">
-          אנא בחר ארגון כדי להציג את לוח השנה
-        </div>
-      </PageLayout>
-    );
-  }
+  const dateForQuery = viewMode === 'week' ? getWeekStartDate(currentDate) : currentDate;
 
-  if (loading) {
-    return (
-      <PageLayout title="לוח שנה">
-        <div className="flex items-center justify-center h-64 text-neutral-500">
-          טוען נתונים...
-        </div>
-      </PageLayout>
-    );
-  }
+  const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
+  const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(dateForQuery, viewMode);
 
-  if (error) {
-    return (
-      <PageLayout title="לוח שנה">
-        <div className="flex items-center justify-center h-64 text-red-500">
-          שגיאה בטעינת הנתונים: {error}
-        </div>
-      </PageLayout>
-    );
-  }
+  const handleInstanceClick = (instance) => {
+    setSelectedInstance(instance);
+  };
+
+  const handleCloseDialog = () => {
+    setSelectedInstance(null);
+  };
+
+  const handleAddSuccess = () => {
+    refetchInstances();
+  };
+
+  const handleUpdateSuccess = () => {
+    refetchInstances();
+    setSelectedInstance(null);
+  };
+
+  const handleRescheduleSuccess = () => {
+    // Refresh instances after successful reschedule
+    refetchInstances();
+    // Close any open detail dialog
+    setSelectedInstance(null);
+  };
 
   return (
-    <PageLayout 
-      title="לוח שנה"
-      subtitle={formatDateDisplay(currentDate)}
-    >
-      {/* Date navigation */}
-      <div className="flex items-center justify-between mb-4 gap-4" dir="rtl">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={goToPreviousDay}
-            title="יום קודם"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={goToToday}
-          >
-            היום
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={goToNextDay}
-            title="יום הבא"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
+    <PageLayout title="לוח זמנים">
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CalendarHeader currentDate={currentDate} onDateChange={setCurrentDate} viewMode={viewMode} />
+            <div className="flex items-center gap-1 border-l border-gray-300 pl-4">
+              <Button 
+                variant={viewMode === 'day' ? 'default' : 'outline'} 
+                size="sm"
+                onClick={() => setViewMode('day')}
+              >
+                יום
+              </Button>
+              <Button 
+                variant={viewMode === 'week' ? 'default' : 'outline'} 
+                size="sm"
+                onClick={() => setViewMode('week')}
+              >
+                שבוע
+              </Button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => navigate('/calendar/templates')} className="gap-2">
+              <LayoutTemplate className="h-4 w-4" />
+              תבניות
+            </Button>
+            <Button onClick={() => setShowAddDialog(true)} className="gap-2">
+              <Plus className="h-4 w-4" />
+              שיעור חדש
+            </Button>
+          </div>
         </div>
 
-        <div className="text-sm text-neutral-600">
-          {lessons.length} שיעורים מתוכננים
-        </div>
+        {/* Loading State */}
+        {(instructorsLoading || instancesLoading) && (
+          <div className="flex items-center justify-center h-96">
+            <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+          </div>
+        )}
+
+        {/* Error State */}
+        {(instructorsError || instancesError) && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+            שגיאה בטעינת הנתונים: {instructorsError || instancesError}
+          </div>
+        )}
+
+        {/* Calendar Grid */}
+        {!instructorsLoading && !instancesLoading && !instructorsError && !instancesError && (
+          viewMode === 'week' ? (
+            <WeekCalendarGrid
+              instructors={instructors}
+              instances={instances}
+              onInstanceClick={handleInstanceClick}
+              onRescheduleSuccess={handleRescheduleSuccess}
+              weekStartDate={dateForQuery}
+            />
+          ) : (
+            <CalendarGrid
+              instructors={instructors}
+              instances={instances}
+              onInstanceClick={handleInstanceClick}
+              onRescheduleSuccess={handleRescheduleSuccess}
+            />
+          )
+        )}
       </div>
 
-      {/* Calendar grid */}
-      <div className="border border-border rounded-lg overflow-hidden bg-white" style={{ height: 'calc(100vh - 250px)' }}>
-        <DailyCalendar
-          instructors={instructors}
-          lessons={lessons}
-          currentDate={currentDate}
-        />
-      </div>
+      {/* Instance Details Dialog */}
+      <LessonInstanceDialog
+        instance={selectedInstance}
+        open={!!selectedInstance}
+        onClose={handleCloseDialog}
+        onUpdate={handleUpdateSuccess}
+      />
+
+      {/* Add Lesson Dialog */}
+      <AddLessonDialog
+        open={showAddDialog}
+        onClose={() => setShowAddDialog(false)}
+        onSuccess={handleAddSuccess}
+        defaultDate={currentDate}
+      />
     </PageLayout>
   );
 }

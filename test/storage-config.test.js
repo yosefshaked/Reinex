@@ -1,3 +1,5 @@
+/* eslint-env node */
+/* global process */
 /**
  * Storage Configuration Validation Tests
  * 
@@ -30,14 +32,6 @@ function test(description, testFn) {
 function assertEqual(actual, expected, message) {
   if (actual !== expected) {
     throw new Error(`${message || 'Assertion failed'}: expected ${expected}, got ${actual}`);
-  }
-}
-
-function assertDeepEqual(actual, expected, message) {
-  const actualStr = JSON.stringify(actual);
-  const expectedStr = JSON.stringify(expected);
-  if (actualStr !== expectedStr) {
-    throw new Error(`${message || 'Assertion failed'}:\nExpected: ${expectedStr}\nActual: ${actualStr}`);
   }
 }
 

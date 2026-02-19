@@ -8,7 +8,7 @@ import ProfileEditorView from './ProfileEditorView.jsx';
 import DocumentCenterView from './DocumentCenterView.jsx';
 
 const VIEW_TITLES = {
-  menu: 'ניהול מדריכים',
+  menu: 'ניהול עובדים',
   directory: 'ניהול מצבת כוח אדם',
   profiles: 'עריכת פרטים אישיים',
   documents: 'מרכז מסמכים',
@@ -23,10 +23,10 @@ export default function InstructorManagementHub({ session, orgId, activeOrgHasCo
     return (
       <Card className="w-full border-0 shadow-lg bg-white/80">
         <CardHeader>
-          <CardTitle>ניהול מדריכים</CardTitle>
+          <CardTitle>ניהול עובדים</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-slate-600">נדרש חיבור Supabase פעיל כדי לנהל מדריכים.</p>
+          <p className="text-sm text-slate-600">נדרש חיבור Supabase פעיל כדי לנהל עובדים.</p>
         </CardContent>
       </Card>
     );
