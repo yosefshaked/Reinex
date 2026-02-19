@@ -11,7 +11,7 @@ export function LessonInstanceCard({ instance, onClick }) {
   const bgColor = instance.service?.color || '#6B7280'; // gray-500 default
   
   // Get first student name and count
-  const firstStudentName = instance.participants?.[0]?.student?.first_name || 'לא ידוע';
+  const firstStudentName = instance.participants?.[0]?.student?.full_name || 'לא ידוע';
   const additionalCount = (instance.participants?.length || 1) - 1;
   
   // Format time range
