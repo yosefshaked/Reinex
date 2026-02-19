@@ -3,7 +3,7 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
   ensureMembership,
-  isAdminRole,
+  isAdminOrOffice,
   normalizeString,
   readEnv,
   respond,
@@ -80,7 +80,7 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const isAdmin = isAdminRole(role);
+  const canManageAll = isAdminOrOffice(role);
 
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
   if (tenantError) {
@@ -88,7 +88,7 @@ export default async function (context, req) {
   }
 
   if (method === 'GET') {
-    return await handleGetInstances(context, req, tenantClient, userId, isAdmin);
+    return await handleGetInstances(context, req, tenantClient, userId, canManageAll);
   }
 
   if (method === 'POST') {
@@ -96,13 +96,13 @@ export default async function (context, req) {
   }
 
   if (method === 'PUT') {
-    return await handleUpdateInstance(context, body, tenantClient, userId, isAdmin);
+    return await handleUpdateInstance(context, body, tenantClient, userId, canManageAll);
   }
 
   return respond(context, 405, { message: 'method not allowed' });
 }
 
-async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
+async function handleGetInstances(context, req, tenantClient, userId, canManageAll) {
   const queryParams = req.query || {};
   
   // Parse date parameters
@@ -193,8 +193,8 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
     instancesQuery = instancesQuery.eq('instructor_employee_id', instructorIdParam);
   }
 
-  // Non-admin users: filter by their instructor record
-  if (!isAdmin) {
+  // Non-admin/office users: filter by their instructor record
+  if (!canManageAll) {
     // Find instructor record for this user
     const { data: instructors, error: instructorError } = await tenantClient
       .from('Employees')
@@ -416,7 +416,7 @@ async function handleCreateInstance(context, body, tenantClient, userId, isAdmin
   return respond(context, 201, { id: instance.id, message: 'instance created successfully' });
 }
 
-async function handleUpdateInstance(context, body, tenantClient, userId, isAdmin) {
+async function handleUpdateInstance(context, body, tenantClient, userId, canManageAll) {
   if (!body.id) {
     return respond(context, 400, { message: 'missing instance id' });
   }
@@ -432,17 +432,43 @@ async function handleUpdateInstance(context, body, tenantClient, userId, isAdmin
     return respond(context, 404, { message: 'instance not found' });
   }
 
-  // Non-admin users can only update their own lessons
-  if (!isAdmin) {
+  // Instructors (non-admin/office) can only update their own lessons
+  if (!canManageAll) {
     const { data: instructors } = await tenantClient
       .from('Employees')
       .select('id')
       .eq('user_id', userId)
       .limit(1);
-    
+
     if (!instructors || instructors.length === 0 || instructors[0].id !== existingInstance.instructor_employee_id) {
       return respond(context, 403, { message: 'forbidden: can only update your own lessons' });
     }
+
+    const allowedStatusUpdates = new Set(['completed', 'no_show']);
+    const requestedStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
+    const hasOtherUpdates = [
+      'datetime_start',
+      'duration_minutes',
+      'instructor_employee_id',
+      'service_id',
+      'cancellation_reason',
+      'documentation_status',
+      'metadata',
+    ].some((field) => Object.prototype.hasOwnProperty.call(body, field));
+
+    if (hasOtherUpdates) {
+      return respond(context, 403, { message: 'forbidden: instructors can only report attendance status' });
+    }
+
+    if (!allowedStatusUpdates.has(requestedStatus)) {
+      return respond(context, 400, { message: 'invalid status update' });
+    }
+
+    if (!['scheduled', 'rescheduled'].includes(existingInstance.status)) {
+      return respond(context, 409, { message: 'instance not in reportable state' });
+    }
+
+    body.status = requestedStatus;
   }
 
   // Build update object (only update provided fields)

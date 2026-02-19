@@ -16,9 +16,12 @@ import { Alert, AlertDescription } from '../../../components/ui/alert';
  * LessonInstanceDialog component - displays and edits lesson instance details
  */
 export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
-  const { currentOrg } = useOrg();
+  const { currentOrg, activeOrg } = useOrg();
   const { services, isLoading: servicesLoading } = useServices();
   const { instructors, isLoading: instructorsLoading } = useCalendarInstructors();
+  const org = currentOrg ?? activeOrg;
+  const role = typeof org?.membership?.role === 'string' ? org.membership.role.trim().toLowerCase() : 'member';
+  const canManageAll = role === 'admin' || role === 'owner' || role === 'office';
   
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -60,7 +63,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const dateDisplay = formatDateDisplay(instance.datetime_start);
 
   async function handleSave() {
-    if (!currentOrg?.id) {
+    if (!org?.id) {
       setError('Organization not found');
       return;
     }
@@ -78,7 +81,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         },
         body: JSON.stringify({
           id: instance.id,
-          org_id: currentOrg.id,
+          org_id: org.id,
           datetime_start,
           duration_minutes: formData.duration_minutes,
           instructor_employee_id: formData.instructor_employee_id,
@@ -104,7 +107,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   }
 
   async function handleMarkAttendance(participantId, status) {
-    if (!currentOrg?.id) {
+    if (!org?.id) {
       setError('Organization not found');
       return;
     }
@@ -119,7 +122,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
         body: JSON.stringify({
-          org_id: currentOrg.id,
+          org_id: org.id,
           instance_id: instance.id,
           participant_id: participantId,
           participant_status: status,
@@ -141,7 +144,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   }
 
   async function handleCancel(reason) {
-    if (!currentOrg?.id) {
+    if (!org?.id) {
       setError('Organization not found');
       return;
     }
@@ -157,7 +160,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         },
         body: JSON.stringify({
           id: instance.id,
-          org_id: currentOrg.id,
+          org_id: org.id,
           status: 'cancelled',
           cancellation_reason: reason,
         }),
@@ -178,9 +181,48 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
+  async function handleReportStatus(status) {
+    if (!org?.id) {
+      setError('Organization not found');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/calendar/instances', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({
+          id: instance.id,
+          org_id: org.id,
+          status,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to update status');
+      }
+
+      onUpdate?.();
+      onClose();
+    } catch (err) {
+      console.error('Error reporting lesson status:', err);
+      setError(err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   const activeServices = services?.filter(s => s.is_active) || [];
-  const canEdit = instance.status === 'scheduled' || instance.status === 'rescheduled';
-  const canMarkAttendance = instance.status === 'scheduled' || instance.status === 'rescheduled';
+  const isReportable = instance.status === 'scheduled' || instance.status === 'rescheduled';
+  const canEdit = canManageAll && isReportable;
+  const canMarkAttendance = isReportable;
+  const canReportStatus = !canManageAll && isReportable;
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -303,6 +345,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   <SelectItem value="rescheduled">נדחה</SelectItem>
                   <SelectItem value="cancelled">בוטל</SelectItem>
                   <SelectItem value="completed">הושלם</SelectItem>
+                  {canManageAll && <SelectItem value="no_show">אי הגעה</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
@@ -358,6 +401,28 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               <Badge variant={instance.status === 'completed' ? 'default' : 'secondary'}>
                 {statusInfo.label}
               </Badge>
+              {canReportStatus && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleReportStatus('completed')}
+                    disabled={isSaving}
+                  >
+                    <Check className="h-4 w-4 ml-1" />
+                    הושלם
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleReportStatus('no_show')}
+                    disabled={isSaving}
+                  >
+                    <XCircle className="h-4 w-4 ml-1" />
+                    אי הגעה
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Service Info */}
