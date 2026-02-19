@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import PageLayout from '@/components/ui/PageLayout';
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
@@ -9,13 +9,34 @@ import { AddLessonDialog } from '../components/AddLessonDialog';
 import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
 import { Loader2 } from 'lucide-react';
 
+const CALENDAR_DATE_KEY = 'reinex_calendar_date';
+
 /**
  * CalendarPage - main calendar view showing daily schedule
  */
 export default function CalendarPage() {
-  const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [currentDate, setCurrentDateState] = useState(() => {
+    // Try to get saved date from sessionStorage, fall back to today
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem(CALENDAR_DATE_KEY);
+      return saved || new Date().toISOString().split('T')[0];
+    }
+    return new Date().toISOString().split('T')[0];
+  });
+
   const [selectedInstance, setSelectedInstance] = useState(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
+
+  // Save date to sessionStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(CALENDAR_DATE_KEY, currentDate);
+    }
+  }, [currentDate]);
+
+  const setCurrentDate = (newDate) => {
+    setCurrentDateState(newDate);
+  };
 
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
   const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(currentDate);
