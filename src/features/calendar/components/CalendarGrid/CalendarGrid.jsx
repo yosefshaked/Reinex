@@ -14,7 +14,7 @@ export function CalendarGrid({ instructors, instances, onInstanceClick, onResche
   }
 
   return (
-    <div className="border border-gray-300 rounded-lg overflow-hidden bg-white">
+    <div className="border border-gray-300 rounded-lg bg-white">
       <div className="flex flex-row-reverse overflow-x-auto w-full">
         {/* Time column (sticky on right for RTL) */}
         <TimeColumn />

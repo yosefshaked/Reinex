@@ -39,7 +39,7 @@ export function WeekCalendarGrid({
   };
 
   return (
-    <div className="border border-gray-300 rounded-lg overflow-hidden bg-white">
+    <div className="border border-gray-300 rounded-lg bg-white">
       <div className="flex flex-row-reverse overflow-x-auto w-full">
         {/* Time column (sticky on right for RTL) */}
         <TimeColumn />
@@ -47,14 +47,14 @@ export function WeekCalendarGrid({
         {/* Week columns (one per day) */}
         <div className="flex flex-1 min-w-0">
           {daysOfWeek.map((dateString) => (
-            <div key={dateString} className="flex-1 min-w-[120px] border-l border-gray-300">
+            <div key={dateString} className="flex-1 min-w-[120px] border-l border-gray-300 overflow-visible">
               {/* Day header */}
               <div className="h-12 border-b border-gray-300 flex items-center justify-center px-2 bg-gray-50 text-xs font-semibold text-center whitespace-pre-line">
                 {formatDayHeader(dateString)}
               </div>
 
               {/* Time grid for this day */}
-              <div className="relative bg-white" style={{ height: `${timeSlots.length * 24}px` }}>
+              <div className="relative bg-white overflow-visible" style={{ height: `${timeSlots.length * 24}px` }}>
                 {/* Grid lines */}
                 {timeSlots.map((slot, index) => (
                   <div

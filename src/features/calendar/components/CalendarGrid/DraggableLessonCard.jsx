@@ -151,7 +151,7 @@ export function DraggableLessonCard({
     <>
       <div
         ref={cardRef}
-        className="absolute w-full px-1 cursor-pointer transition-transform hover:z-30"
+        className="absolute w-full px-1 cursor-pointer transition-transform hover:z-50"
         style={{ 
           top: `${top}px`,
           height: `${height}px`,
@@ -160,7 +160,7 @@ export function DraggableLessonCard({
         onClick={() => !isDragging && onClick?.(instance)}
       >
         <div
-          className="h-full rounded-lg shadow-md border border-white/20 p-2 overflow-hidden flex flex-col hover:scale-105"
+          className="h-full rounded-lg shadow-md border border-white/20 p-2 overflow-visible flex flex-col hover:scale-105 hover:shadow-2xl"
           style={{ backgroundColor: bgColor }}
         >
           {/* Header with drag handle and status */}
