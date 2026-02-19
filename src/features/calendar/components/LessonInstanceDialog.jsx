@@ -222,7 +222,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const isReportable = instance.status === 'scheduled' || instance.status === 'rescheduled';
   const canEdit = canManageAll && isReportable;
   const canMarkAttendance = isReportable;
-  const canReportStatus = !canManageAll && isReportable;
+  const canQuickReport = isReportable;
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -401,7 +401,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               <Badge variant={instance.status === 'completed' ? 'default' : 'secondary'}>
                 {statusInfo.label}
               </Badge>
-              {canReportStatus && (
+              {canQuickReport && (
                 <div className="flex items-center gap-2">
                   <Button
                     size="sm"
