@@ -14,6 +14,27 @@ export function generateTimeSlots(startHour = 6, endHour = 22) {
 }
 
 /**
+ * Get time slot at a specific pixel position in the calendar grid
+ * Grid: 24px = 15 minutes, starts at 6am
+ * @param {number} pixelY - Y position in pixels relative to grid top
+ * @param {number} slotHeightPx - Height of each 15-minute slot in pixels (default 24)
+ * @param {number} startHour - Hour when grid starts (default 6)
+ * @returns {object} Time slot object { timeString, totalMinutes, slotIndex, pixelTop }
+ */
+export function getTimeSlotAtPixel(pixelY, slotHeightPx = 24, startHour = 6) {
+  const slots = generateTimeSlots(startHour, 22);
+  const slotIndex = Math.round(pixelY / slotHeightPx);
+  const clampedIndex = Math.max(0, Math.min(slotIndex, slots.length - 1));
+  const slot = slots[clampedIndex];
+  
+  return {
+    ...slot,
+    slotIndex: clampedIndex,
+    pixelTop: clampedIndex * slotHeightPx,
+  };
+}
+
+/**
  * Convert datetime string to minutes from start of day
  */
 export function datetimeToMinutes(datetimeString) {

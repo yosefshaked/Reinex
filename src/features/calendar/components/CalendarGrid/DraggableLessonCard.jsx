@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { GripVertical } from 'lucide-react';
-import { calculateCardPosition, formatTimeDisplay, getInstanceStatusIcon, datetimeToMinutes } from '../../utils/timeGrid';
+import { calculateCardPosition, formatTimeDisplay, getInstanceStatusIcon, getTimeSlotAtPixel } from '../../utils/timeGrid';
 import { ResizeConfirmationDialog } from '../ResizeConfirmationDialog';
 import { authenticatedFetch } from '@/lib/api-client';
 import { useOrg } from '@/org/OrgContext';
@@ -18,6 +18,7 @@ export function DraggableLessonCard({
   const { activeOrgId } = useOrg();
   const [isDragging, setIsDragging] = useState(false);
   const [previewPosition, setPreviewPosition] = useState(null);
+  const [targetTimeSlot, setTargetTimeSlot] = useState(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [pendingReschedule, setPendingReschedule] = useState(null);
   const [isRescheduleLoading, setIsRescheduleLoading] = useState(false);
@@ -54,14 +55,12 @@ export function DraggableLessonCard({
       const newOffsetX = e.clientX - cardRect.left;
       const newOffsetY = e.clientY - cardRect.top;
 
-      // Calculate preview position with 15-minute snapping
-      const PIXELS_PER_15MIN = 24;
-      const rawY = newOffsetY - (height / 2);
-      const snappedY = Math.round(rawY / PIXELS_PER_15MIN) * PIXELS_PER_15MIN;
-      const constrainedY = Math.max(0, Math.min(snappedY, cardRef.current?.parentElement?.clientHeight - height));
+      // Find the target time slot at this Y position
+      const slot = getTimeSlotAtPixel(newOffsetY);
+      setTargetTimeSlot(slot);
 
       setPreviewPosition({
-        y: constrainedY,
+        y: slot.pixelTop,
         x: newOffsetX,
       });
     };
@@ -69,21 +68,14 @@ export function DraggableLessonCard({
     const handleMouseUp = async () => {
       setIsDragging(false);
 
-      if (!previewPosition) return;
+      if (!targetTimeSlot || !previewPosition) {
+        setTargetTimeSlot(null);
+        return;
+      }
 
-      // Calculate new time from Y position
-      // Grid: 24px = 15 minutes (96px = 1 hour)
-      const PIXELS_PER_15MIN = 24;
-      const GRID_START_HOUR = 6; // Calendar starts at 6am
-      const GRID_START_MINUTES = GRID_START_HOUR * 60;
-      
-      // Calculate absolute minutes from top of grid
-      const absoluteMinutes = Math.round(previewPosition.y / PIXELS_PER_15MIN) * 15;
-      const newTotalMinutes = GRID_START_MINUTES + absoluteMinutes;
-      
-      // Convert back to hours and minutes
-      const newHour = Math.floor(newTotalMinutes / 60);
-      const newMinute = newTotalMinutes % 60;
+      // Use the target time slot to create the new datetime
+      const newHour = Math.floor(targetTimeSlot.totalMinutes / 60);
+      const newMinute = targetTimeSlot.totalMinutes % 60;
       
       const newDateTime = new Date(instance.datetime_start);
       newDateTime.setHours(newHour);
@@ -119,10 +111,10 @@ export function DraggableLessonCard({
       setPendingReschedule({
         newDateTime,
         newInstructor: newInstructor || instance.instructor,
-        minutesOffset: (newTotalMinutes - GRID_START_MINUTES) - (datetimeToMinutes(instance.datetime_start) - GRID_START_MINUTES),
       });
       setShowConfirmDialog(true);
       setPreviewPosition(null);
+      setTargetTimeSlot(null);
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -132,7 +124,8 @@ export function DraggableLessonCard({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, previewPosition, top, height, instance, instructors, activeOrgId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDragging, targetTimeSlot, top, height, instance, instructors, activeOrgId]);
 
   const handleConfirmReschedule = async () => {
     if (!pendingReschedule || !activeOrgId) return;
@@ -164,6 +157,18 @@ export function DraggableLessonCard({
 
   return (
     <>
+      {/* Visual time slot indicator during drag */}
+      {isDragging && targetTimeSlot && (
+        <div
+          className="absolute w-full border-2 border-gray-900 bg-gray-900/5 pointer-events-none z-40"
+          style={{
+            top: `${targetTimeSlot.pixelTop}px`,
+            height: '24px',
+          }}
+          title={`Będzie przydzielone na ${targetTimeSlot.timeString}`}
+        />
+      )}
+
       <div
         ref={cardRef}
         className="absolute w-full px-1 cursor-pointer transition-transform hover:z-50"
