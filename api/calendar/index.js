@@ -151,7 +151,7 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
       metadata,
       created_at,
       updated_at,
-      lesson_participants(
+      participants:lesson_participants(
         id,
         student_id,
         participant_status,
@@ -163,20 +163,20 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
         reminder_seen,
         attendance_confirmed_at,
         documented_at,
-        students(
+        student:students(
           id,
           first_name,
           middle_name,
           last_name
         )
       ),
-      Services(
+      service:Services(
         id,
         name,
         color,
         is_active
       ),
-      Employees(
+      instructor:Employees(
         id,
         first_name,
         middle_name,
@@ -232,8 +232,8 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
 
   // Transform data for frontend consumption
   const transformedInstances = (instances || []).map(instance => {
-    const participants = Array.isArray(instance.lesson_participants) 
-      ? instance.lesson_participants.map(p => ({
+    const participants = Array.isArray(instance.participants) 
+      ? instance.participants.map(p => ({
           id: p.id,
           student_id: p.student_id,
           participant_status: p.participant_status,
@@ -245,20 +245,17 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
           reminder_seen: p.reminder_seen,
           attendance_confirmed_at: p.attendance_confirmed_at,
           documented_at: p.documented_at,
-          student: p.students && p.students.length > 0 ? {
-            id: p.students[0].id,
-            first_name: p.students[0].first_name,
-            middle_name: p.students[0].middle_name,
-            last_name: p.students[0].last_name,
-            full_name: [p.students[0].first_name, p.students[0].middle_name, p.students[0].last_name]
+          student: p.student ? {
+            id: p.student.id,
+            first_name: p.student.first_name,
+            middle_name: p.student.middle_name,
+            last_name: p.student.last_name,
+            full_name: [p.student.first_name, p.student.middle_name, p.student.last_name]
               .filter(Boolean)
               .join(' '),
           } : null,
         }))
       : [];
-
-    const serviceData = instance.Services && instance.Services.length > 0 ? instance.Services[0] : null;
-    const instructorData = instance.Employees && instance.Employees.length > 0 ? instance.Employees[0] : null;
 
     return {
       id: instance.id,
@@ -274,21 +271,21 @@ async function handleGetInstances(context, req, tenantClient, userId, isAdmin) {
       created_at: instance.created_at,
       updated_at: instance.updated_at,
       participants,
-      service: serviceData ? {
-        id: serviceData.id,
-        service_name: serviceData.name,
-        color: serviceData.color,
-        is_active: serviceData.is_active,
+      service: instance.service ? {
+        id: instance.service.id,
+        service_name: instance.service.name,
+        color: instance.service.color,
+        is_active: instance.service.is_active,
       } : null,
-      instructor: instructorData ? {
-        id: instructorData.id,
-        first_name: instructorData.first_name,
-        middle_name: instructorData.middle_name,
-        last_name: instructorData.last_name,
-        full_name: [instructorData.first_name, instructorData.middle_name, instructorData.last_name]
+      instructor: instance.instructor ? {
+        id: instance.instructor.id,
+        first_name: instance.instructor.first_name,
+        middle_name: instance.instructor.middle_name,
+        last_name: instance.instructor.last_name,
+        full_name: [instance.instructor.first_name, instance.instructor.middle_name, instance.instructor.last_name]
           .filter(Boolean)
           .join(' '),
-        email: instructorData.email,
+        email: instance.instructor.email,
       } : null,
     };
   });
