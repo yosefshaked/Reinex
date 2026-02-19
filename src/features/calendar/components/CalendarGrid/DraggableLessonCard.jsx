@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { GripVertical } from 'lucide-react';
-import { calculateCardPosition, formatTimeDisplay, getInstanceStatusIcon } from '../../utils/timeGrid';
+import { calculateCardPosition, formatTimeDisplay, getInstanceStatusIcon, datetimeToMinutes } from '../../utils/timeGrid';
 import { ResizeConfirmationDialog } from '../ResizeConfirmationDialog';
 import { authenticatedFetch } from '@/lib/api-client';
 import { useOrg } from '@/org/OrgContext';
@@ -54,9 +54,11 @@ export function DraggableLessonCard({
       const newOffsetX = e.clientX - cardRect.left;
       const newOffsetY = e.clientY - cardRect.top;
 
-      // Calculate preview position
-      const newY = top + (newOffsetY - top - (height / 2));
-      const constrainedY = Math.max(0, Math.min(newY, cardRef.current?.parentElement?.clientHeight - height));
+      // Calculate preview position with 15-minute snapping
+      const PIXELS_PER_15MIN = 24;
+      const rawY = newOffsetY - (height / 2);
+      const snappedY = Math.round(rawY / PIXELS_PER_15MIN) * PIXELS_PER_15MIN;
+      const constrainedY = Math.max(0, Math.min(snappedY, cardRef.current?.parentElement?.clientHeight - height));
 
       setPreviewPosition({
         y: constrainedY,
@@ -70,10 +72,23 @@ export function DraggableLessonCard({
       if (!previewPosition) return;
 
       // Calculate new time from Y position
-      const timeSlotHeight = 60; // pixels per hour (adjust based on your grid)
-      const minutesOffset = Math.round((previewPosition.y - top) / timeSlotHeight) * 60;
+      // Grid: 24px = 15 minutes (96px = 1 hour)
+      const PIXELS_PER_15MIN = 24;
+      const GRID_START_HOUR = 6; // Calendar starts at 6am
+      const GRID_START_MINUTES = GRID_START_HOUR * 60;
+      
+      // Calculate absolute minutes from top of grid
+      const absoluteMinutes = Math.round(previewPosition.y / PIXELS_PER_15MIN) * 15;
+      const newTotalMinutes = GRID_START_MINUTES + absoluteMinutes;
+      
+      // Convert back to hours and minutes
+      const newHour = Math.floor(newTotalMinutes / 60);
+      const newMinute = newTotalMinutes % 60;
+      
       const newDateTime = new Date(instance.datetime_start);
-      newDateTime.setMinutes(newDateTime.getMinutes() + minutesOffset);
+      newDateTime.setHours(newHour);
+      newDateTime.setMinutes(newMinute);
+      newDateTime.setSeconds(0);
 
       // Calculate new instructor from X position (simplified - assumes uniform column widths)
       const parentWidth = cardRef.current?.parentElement?.parentElement?.clientWidth || 0;
@@ -104,7 +119,7 @@ export function DraggableLessonCard({
       setPendingReschedule({
         newDateTime,
         newInstructor: newInstructor || instance.instructor,
-        minutesOffset,
+        minutesOffset: (newTotalMinutes - GRID_START_MINUTES) - (datetimeToMinutes(instance.datetime_start) - GRID_START_MINUTES),
       });
       setShowConfirmDialog(true);
       setPreviewPosition(null);
