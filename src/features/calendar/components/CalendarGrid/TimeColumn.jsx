@@ -21,11 +21,9 @@ export function TimeColumn() {
         {hourSlots.map((slot) => (
           <div
             key={slot.timeString}
-            className="absolute w-full text-center text-sm text-gray-600 px-1 font-medium"
+            className="absolute w-full text-right text-xs text-gray-500 pr-2 leading-none"
             style={{ 
-              top: `${(slot.totalMinutes - 360) / 15 * 24}px`,
-              transform: 'translateY(-50%)',
-              minWidth: '100%',
+              top: `${(slot.totalMinutes - 360) / 15 * 24 + 4}px`,
             }}
           >
             {slot.timeString}

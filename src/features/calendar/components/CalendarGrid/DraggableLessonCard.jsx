@@ -193,49 +193,53 @@ export function DraggableLessonCard({
         onClick={() => !isDragging && onClick?.(instance)}
       >
         <div
-          className="h-full rounded-lg shadow-md border border-white/20 p-2 overflow-visible flex flex-col hover:scale-105 hover:shadow-2xl"
+          className="h-full rounded-lg shadow-md border border-white/20 overflow-visible flex hover:shadow-2xl hover:border-white/50 transition-shadow"
           style={{ backgroundColor: bgColor }}
         >
-          {/* Header with drag handle and status */}
-          <div className="flex flex-row-reverse items-start justify-between mb-1 gap-1">
-            <span className="text-white font-medium text-sm truncate flex-1">
-              {instance.service?.service_name || 'שירות'}
-            </span>
-            
-            {/* Drag Handle */}
-            <div
-              ref={dragRef}
-              className="cursor-grab active:cursor-grabbing flex-shrink-0"
-              onMouseDown={handleDragStart}
-              title="גרור כדי להעביר שיעור"
-            >
-              <GripVertical className="h-4 w-4 text-white/60 hover:text-white" />
-            </div>
+          {/* Two-column layout: Grip handle (right in RTL) | Info area (left in RTL) */}
+          
+          {/* Grip Handle Column - spans full height, vertically centered */}
+          <div
+            ref={dragRef}
+            className="flex items-center justify-center border-l border-white/20 px-1 flex-shrink-0 cursor-grab active:cursor-grabbing"
+            onMouseDown={handleDragStart}
+            title="גרור כדי להעביר שיעור"
+          >
+            <GripVertical className="h-4 w-4 text-white/60 hover:text-white" />
+          </div>
 
-            <span className={`text-lg flex-shrink-0 ${statusInfo.color}`} title={statusInfo.label}>
-              {statusInfo.icon}
-            </span>
-          </div>
-          
-          {/* Student names */}
-          <div className="text-white text-sm truncate">
-            {firstStudentName}
-            {additionalCount > 0 && <span className="font-bold"> +{additionalCount}</span>}
-          </div>
-          
-          {/* Time range */}
-          <div className="text-white/90 text-xs mt-auto">
-            {startTime} - {endTime}
-          </div>
-          
-          {/* Documentation status badge */}
-          {instance.documentation_status === 'undocumented' && instance.status === 'completed' && (
-            <div className="mt-1">
-              <span className="inline-block bg-amber-500 text-white text-xs px-1.5 py-0.5 rounded">
-                לא תועד
+          {/* Info Column - rows of information */}
+          <div className="flex-1 flex flex-col p-1.5 min-w-0">
+            {/* Row 1: Service name + status icon (status stays on physical left) */}
+            <div className="flex items-center gap-1">
+              <span className="text-white font-medium text-sm truncate flex-1">
+                {instance.service?.service_name || 'שירות'}
+              </span>
+              <span className={`text-lg flex-shrink-0 ${statusInfo.color}`} title={statusInfo.label}>
+                {statusInfo.icon}
               </span>
             </div>
-          )}
+            
+            {/* Row 2: Student names */}
+            <div className="text-white text-sm truncate">
+              {firstStudentName}
+              {additionalCount > 0 && <span className="font-bold"> +{additionalCount}</span>}
+            </div>
+            
+            {/* Row 3: Time range */}
+            <div className="text-white/90 text-xs mt-auto">
+              {startTime} - {endTime}
+            </div>
+            
+            {/* Documentation status badge */}
+            {instance.documentation_status === 'undocumented' && instance.status === 'completed' && (
+              <div className="mt-1">
+                <span className="inline-block bg-amber-500 text-white text-xs px-1.5 py-0.5 rounded">
+                  לא תועד
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
