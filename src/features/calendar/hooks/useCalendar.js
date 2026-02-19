@@ -5,7 +5,7 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 /**
  * Hook for fetching calendar instances
  */
-export function useCalendarInstances(date, instructorId = null) {
+export function useCalendarInstances(date, viewMode = 'day', instructorId = null) {
   const { activeOrgId } = useOrg();
   const [instances, setInstances] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -15,6 +15,22 @@ export function useCalendarInstances(date, instructorId = null) {
   const refetch = useCallback(() => {
     setRefetchTrigger(prev => prev + 1);
   }, []);
+
+  const getDateRange = (dateString, mode) => {
+    if (mode === 'week') {
+      const date = new Date(dateString);
+      const day = date.getDay();
+      const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+      const weekStart = new Date(date.setDate(diff));
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      return {
+        start_date: weekStart.toISOString().split('T')[0],
+        end_date: weekEnd.toISOString().split('T')[0],
+      };
+    }
+    return { date: dateString };
+  };
 
   useEffect(() => {
     if (!activeOrgId || !date) {
@@ -26,12 +42,14 @@ export function useCalendarInstances(date, instructorId = null) {
       setError(null);
 
       try {
+        const params = {
+          org_id: activeOrgId,
+          ...getDateRange(date, viewMode),
+          ...(instructorId ? { instructor_id: instructorId } : {}),
+        };
+        
         const data = await authenticatedFetch('calendar/instances', {
-          params: {
-            org_id: activeOrgId,
-            date,
-            ...(instructorId ? { instructor_id: instructorId } : {}),
-          },
+          params,
         });
         setInstances(Array.isArray(data) ? data : []);
       } catch (err) {
@@ -43,7 +61,7 @@ export function useCalendarInstances(date, instructorId = null) {
     }
 
     fetchInstances();
-  }, [activeOrgId, date, instructorId, refetchTrigger]);
+  }, [activeOrgId, date, viewMode, instructorId, refetchTrigger]);
 
   return { instances, isLoading, error, refetch };
 }

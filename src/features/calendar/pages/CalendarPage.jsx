@@ -4,16 +4,15 @@ import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 import { CalendarHeader } from '../components/CalendarHeader/CalendarHeader';
 import { CalendarGrid } from '../components/CalendarGrid/CalendarGrid';
+import { WeekCalendarGrid } from '../components/CalendarGrid/WeekCalendarGrid';
 import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
 import { AddLessonDialog } from '../components/AddLessonDialog';
 import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
 import { Loader2 } from 'lucide-react';
 
 const CALENDAR_DATE_KEY = 'reinex_calendar_date';
+const CALENDAR_VIEW_KEY = 'reinex_calendar_view'; // 'day' or 'week'
 
-/**
- * CalendarPage - main calendar view showing daily schedule
- */
 export default function CalendarPage() {
   const [currentDate, setCurrentDateState] = useState(() => {
     // Try to get saved date from sessionStorage, fall back to today
@@ -22,6 +21,14 @@ export default function CalendarPage() {
       return saved || new Date().toISOString().split('T')[0];
     }
     return new Date().toISOString().split('T')[0];
+  });
+
+  const [viewMode, setViewModeState] = useState(() => {
+    // Get saved view mode or default to 'day'
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem(CALENDAR_VIEW_KEY) || 'day';
+    }
+    return 'day';
   });
 
   const [selectedInstance, setSelectedInstance] = useState(null);
@@ -34,12 +41,35 @@ export default function CalendarPage() {
     }
   }, [currentDate]);
 
+  // Save view mode to sessionStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(CALENDAR_VIEW_KEY, viewMode);
+    }
+  }, [viewMode]);
+
   const setCurrentDate = (newDate) => {
     setCurrentDateState(newDate);
   };
 
+  const setViewMode = (mode) => {
+    setViewModeState(mode);
+  };
+
+  // For week view, get date range
+  const getWeekStartDate = (dateString) => {
+    const date = new Date(dateString);
+    const day = date.getDay();
+    // Sunday is 0, we want Monday as start (day 1)
+    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+    const weekStart = new Date(date.setDate(diff));
+    return weekStart.toISOString().split('T')[0];
+  };
+
+  const dateForQuery = viewMode === 'week' ? getWeekStartDate(currentDate) : currentDate;
+
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
-  const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(currentDate);
+  const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(dateForQuery, viewMode);
 
   const handleInstanceClick = (instance) => {
     setSelectedInstance(instance);
@@ -58,11 +88,36 @@ export default function CalendarPage() {
     setSelectedInstance(null);
   };
 
+  const handleRescheduleSuccess = () => {
+    // Refresh instances after successful reschedule
+    refetchInstances();
+    // Close any open detail dialog
+    setSelectedInstance(null);
+  };
+
   return (
     <PageLayout title="לוח זמנים">
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <CalendarHeader currentDate={currentDate} onDateChange={setCurrentDate} />
+          <div className="flex items-center gap-2">
+            <CalendarHeader currentDate={currentDate} onDateChange={setCurrentDate} viewMode={viewMode} />
+            <div className="flex items-center gap-1 border-l border-gray-300 pl-4">
+              <Button 
+                variant={viewMode === 'day' ? 'default' : 'outline'} 
+                size="sm"
+                onClick={() => setViewMode('day')}
+              >
+                יום
+              </Button>
+              <Button 
+                variant={viewMode === 'week' ? 'default' : 'outline'} 
+                size="sm"
+                onClick={() => setViewMode('week')}
+              >
+                שבוע
+              </Button>
+            </div>
+          </div>
           <Button onClick={() => setShowAddDialog(true)} className="gap-2">
             <Plus className="h-4 w-4" />
             שיעור חדש
@@ -85,11 +140,22 @@ export default function CalendarPage() {
 
         {/* Calendar Grid */}
         {!instructorsLoading && !instancesLoading && !instructorsError && !instancesError && (
-          <CalendarGrid
-            instructors={instructors}
-            instances={instances}
-            onInstanceClick={handleInstanceClick}
-          />
+          viewMode === 'week' ? (
+            <WeekCalendarGrid
+              instructors={instructors}
+              instances={instances}
+              onInstanceClick={handleInstanceClick}
+              onRescheduleSuccess={handleRescheduleSuccess}
+              weekStartDate={dateForQuery}
+            />
+          ) : (
+            <CalendarGrid
+              instructors={instructors}
+              instances={instances}
+              onInstanceClick={handleInstanceClick}
+              onRescheduleSuccess={handleRescheduleSuccess}
+            />
+          )
         )}
       </div>
 

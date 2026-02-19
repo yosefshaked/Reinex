@@ -1,16 +1,23 @@
 import { generateTimeSlots } from '../../utils/timeGrid';
-import { LessonInstanceCard } from './LessonInstanceCard';
+import { DraggableLessonCard } from './DraggableLessonCard';
 
 /**
- * InstructorColumn component - displays one instructor's schedule
+ * InstructorColumn component - displays one instructor's schedule with draggable cards
  */
-export function InstructorColumn({ instructor, instances, onInstanceClick }) {
+export function InstructorColumn({ instructor, instances, onInstanceClick, instructors = [], onRescheduleSuccess }) {
   const timeSlots = generateTimeSlots(6, 22);
   
   // Filter instances for this instructor
   const instructorInstances = instances.filter(
     i => i.instructor_employee_id === instructor.id
   );
+
+  const handleRescheduleSuccess = (updatedInstance) => {
+    // Notify parent component about successful reschedule
+    if (onRescheduleSuccess) {
+      onRescheduleSuccess(updatedInstance);
+    }
+  };
 
   return (
     <div className="flex-1 min-w-[200px] border-l border-gray-300">
@@ -41,12 +48,14 @@ export function InstructorColumn({ instructor, instances, onInstanceClick }) {
           />
         ))}
         
-        {/* Lesson instance cards */}
+        {/* Lesson instance cards (now draggable) */}
         {instructorInstances.map(instance => (
-          <LessonInstanceCard
+          <DraggableLessonCard
             key={instance.id}
             instance={instance}
             onClick={onInstanceClick}
+            instructors={instructors}
+            onRescheduleSuccess={handleRescheduleSuccess}
           />
         ))}
       </div>

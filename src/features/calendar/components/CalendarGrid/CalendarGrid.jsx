@@ -4,7 +4,7 @@ import { InstructorColumn } from './InstructorColumn';
 /**
  * CalendarGrid component - main grid layout with time column and instructor columns
  */
-export function CalendarGrid({ instructors, instances, onInstanceClick }) {
+export function CalendarGrid({ instructors, instances, onInstanceClick, onRescheduleSuccess }) {
   if (!instructors || instructors.length === 0) {
     return (
       <div className="flex items-center justify-center h-96 text-gray-500">
@@ -27,6 +27,8 @@ export function CalendarGrid({ instructors, instances, onInstanceClick }) {
               instructor={instructor}
               instances={instances}
               onInstanceClick={onInstanceClick}
+              instructors={instructors}
+              onRescheduleSuccess={onRescheduleSuccess}
             />
           ))}
         </div>
