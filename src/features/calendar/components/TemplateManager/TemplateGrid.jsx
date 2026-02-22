@@ -52,7 +52,10 @@ function TemplateCard({ template, onClick }) {
         backgroundColor: `${serviceColor}22`,
         borderColor: `${serviceColor}55`,
       }}
-      onClick={() => onClick(template)}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick(template);
+      }}
     >
       <div className="flex items-center gap-1 font-medium text-gray-900 truncate">
         <User className="h-3 w-3 shrink-0 text-gray-500" />

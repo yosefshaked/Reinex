@@ -43,6 +43,7 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
     orgId: activeOrgId,
   });
 
+  const [studentLabel, setStudentLabel] = useState('');
   const [formData, setFormData] = useState({
     student_id: '',
     instructor_employee_id: defaultInstructorId || '',
@@ -59,6 +60,7 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
   // Reset form when dialog opens with defaults
   useEffect(() => {
     if (open) {
+      setStudentLabel('');
       setFormData({
         student_id: '',
         instructor_employee_id: defaultInstructorId || '',
@@ -189,8 +191,12 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
               <ComboBoxField
                 id="template-student"
                 options={studentOptions}
-                value={formData.student_id}
-                onChange={(value) => setFormData((prev) => ({ ...prev, student_id: value }))}
+                value={studentLabel}
+                onChange={(value) => {
+                  const match = studentOptions.find((opt) => opt.label === value);
+                  setStudentLabel(value);
+                  setFormData((prev) => ({ ...prev, student_id: match?.value || '' }));
+                }}
                 placeholder="חפש תלמיד..."
                 emptyText="לא נמצאו תלמידים"
               />
