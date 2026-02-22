@@ -1,6 +1,6 @@
-# Reinex
+# Tuttiud Student Support Platform
 
-Reinex is a Vite + React application backed by Azure Functions and Supabase. It is multi-tenant: each organization connects to its own tenant database, and all privileged operations are gated through `/api/*` endpoints.
+Tuttiud is a Vite + React application for managing instructors, students, and instructional session records. Supabase provides tenant data storage while Azure Functions guard every privileged operation.
 
 ## 🚀 MVP priorities
 
@@ -13,21 +13,28 @@ The refactored codebase focuses on four launch stories:
 
 ## 🧭 Onboarding checklist
 
-Reinex tenant-domain tables live in the tenant database `public` schema.
+The onboarding wizard (`Settings → Supabase Setup`) leads every new organization through three steps:
 
-1. **Run the canonical tenant setup SQL** – use the script exported from [`src/lib/setup-sql.js`](src/lib/setup-sql.js) (also shown in the in-app Setup Assistant) and execute it in the tenant Supabase SQL editor.
-2. **Paste the dedicated key** – use the Supabase JWT (dedicated key) produced by the setup script.
-3. **Validate & store** – the setup flow stores the key through `/api/save-org-credentials` and marks the organization connection as verified.
+1. **Run the canonical SQL** – copy the script exported from [`src/lib/setup-sql.js`](src/lib/setup-sql.js) into the Supabase SQL editor and execute it. Version 2.4 adds the `metadata` jsonb column to the `Settings` table for auxiliary configuration storage; version 2.5 adds `SessionRecords.is_legacy` (boolean, default `false`) and registers the `can_reupload_legacy_reports` permission in the control-plane registry for future legacy import flows. The latest script also adds `Students.intake_responses`, `Students.needs_intake_approval`, and settings keys for the Intake Bridge (`intake_field_mapping`, `intake_important_fields`, `intake_display_labels`, `external_intake_secret`).
+2. **Paste the dedicated key** – grab the `APP_DEDICATED_KEY` JWT produced by the script and drop it into the wizard.
+3. **Validate & store** – the wizard runs `tuttiud.setup_assistant_diagnostics()` (schema/RLS/policy/index checks), encrypts the JWT through `/api/save-org-credentials`, and the API now persists `dedicated_key_saved_at`, `verified_at`, and `setup_completed` before the UI records verification and unlocks the rest of the app.
+   - If the diagnostics still flag missing tables or policies, `/api/settings` answers with HTTP 424 (`settings_schema_incomplete` / `settings_schema_unverified`) and echoes the failing checks so admins can rerun the SQL script before retrying writes.
+
+All states (loading, error, success) are surfaced inline with accessible messages (`aria-live`). The wizard can be reopened at any time to re-run diagnostics or rotate the key.
 
 ## 🔑 Key UI behavior
 
 - **Supabase Setup Assistant** (`src/components/settings/SetupAssistant.jsx`) is the single entry point for onboarding. It owns the SQL copy helpers, JWT capture, and validation flow.
 - **App shell** (`src/components/layout/AppShell.jsx`) delivers the mobile-first navigation: a bottom tab bar with a central session FAB on phones and a desktop sidebar for wider screens.
 - **Dashboard landing page** (`src/pages/DashboardPage.jsx`) greets authenticated users, surfaces the Weekly Compliance widget once the tenant database is reachable, and keeps quick links to `/my-students` (or `/admin/students`) alongside the session logging shortcut.
+- **Intake Review Queue** (`src/features/dashboard/components/IntakeReviewQueue.jsx`) renders a half-page scorecard-style summary for students flagged with `needs_intake_approval`, with big-number tiles for new (unassigned) and existing (assigned) students. Clicking each tile (or the "פתח תור" action) opens the queue in a modal with the appropriate filter applied, while loading/error/empty states remain visible with retry support. Admins can assign an instructor and update contact details/notes from the modal so the assigned instructor can approve the intake via `/api/intake/approve` after confirming the agreement, can dismiss accidental intake submissions via `/api/intake/dismiss`, and restore dismissed intakes via `/api/intake/restore`. Admins can still filter by instructor/unassigned while seeing a streamlined single-row identity summary, and the "assigned to me" shortcut is reserved for admins who are also instructors.
+- Intake notes for instructors are stored in `Students.metadata.intake_notes` so the main student `notes` remain reserved for student-level context.
+- **Student Intake Card** (`src/features/students/components/StudentIntakeCard.jsx`) keeps intake details collapsed by default on the student profile, shows parsed intake key/value pairs, and renders the stored HTML summary on demand.
 - **ComplianceHeatmap** (`src/features/dashboard/components/ComplianceHeatmap.jsx`) draws the compliance board using `/api/weekly-compliance`, keeps the SessionListDrawer drill-down per cell, and now behaves as a two-state widget. Desktop users see the full weekly heatmap by default, while screens below 1015px switch to a single-day focus with a date picker. Pressing "תצוגה מפורטת" swaps the widget into the inline day view, fetches `/api/daily-compliance`, and keeps the drill-down embedded in the dashboard instead of opening a modal.
 - **SessionCardList** (`src/features/dashboard/components/SessionCardList.jsx`) renders the instructor-colored, time-grouped session chips with ✔/✖ status icons plus "פתח" / "תעד עכשיו" actions. Both the inline Day Detail view and the legacy SessionListDrawer reuse this component so status handling, timeline grouping, and button layouts stay consistent across contexts.
 - **Instructor color palette** – `api/_shared/instructor-colors.js` maintains a 20-color bank with deterministic gradient fallbacks. Both `/api/instructors` and `/api/weekly-compliance` call `ensureInstructorColors()` so every instructor persists a unique `metadata.instructor_color`.
 - **Admin Student Management** (`src/features/admin/pages/StudentManagementPage.jsx`) is the new mobile-first roster experience. It fetches `/api/students-list` on load, renders loading/error/empty states, opens `AddStudentForm` for creation, and drives instructor assignment through `AssignInstructorModal`.
+- **Intake settings** (`src/components/settings/IntakeSettingsCard.jsx`) lets admins map Microsoft Forms question text (as it appears in the HTML summary) to the system fields and rotate the `external_intake_secret` that authenticates `/api/intake` calls.
 - **Data Maintenance CSV** – the roster actions now surface a modal that downloads a maintenance CSV (`/api/students-maintenance-export`) with all editable fields (UUID, national ID, phone, instructor, tags, schedule defaults, notes, activity) and imports edited files (`/api/students-maintenance-import`) with per-row validation and conflict reporting.
 - **Student deduplication safeguards** add real-time national ID blocking (`/api/students-check-id`) with profile shortcuts plus soft name suggestions from `/api/students-search`. The roster now highlights missing national IDs with a red badge to prioritize cleanup.
 - **Instructor My Students** (`src/features/instructor/pages/MyStudentsPage.jsx`) presents members with only their assigned students. It composes `PageLayout`, loads `/api/my-students`, and surfaces loading, error, and empty cards before rendering each student inside a `Card` with name and contact details.
@@ -37,8 +44,7 @@ Reinex tenant-domain tables live in the tenant database `public` schema.
 - **Reports navigation state** – the "דוחות" link is intentionally disabled (with a tooltip) until reporting ships, preventing dead ends in the main navigation.
 - **Feature-sliced admin components** live in `src/features/admin/components/`. Each component is scoped to the admin feature (forms, modals) while shared primitives stay in `src/components/ui`.
 - **Org context** (`src/org/OrgContext.jsx`) stores the encrypted dedicated key timestamp (`dedicated_key_saved_at`) and still toggles `setup_completed` after verification, complementing the server-side persistence added to `/api/save-org-credentials`.
-- **Runtime verification helpers** (`src/runtime/verification.js`) expose `verifyOrgConnection({ dataClient })` for tenant connectivity checks.
-   - `verifyOrgConnection` runs `public.setup_assistant_diagnostics()` and returns diagnostic rows for custom UI messaging.
+- **Runtime verification helpers** (`src/runtime/verification.js`) expose `verifyOrgConnection({ dataClient })` which runs `tuttiud.setup_assistant_diagnostics()` and returns the diagnostic rows for custom UI messaging.
 - Feature modules (students, instructors, sessions) must load data exclusively through secure `/api/*` endpoints. The frontend never uses the dedicated JWT directly.
 - **Legacy import workflow (Phase 2 UI):** Admin/Owner users see an "ייבוא דוחות היסטוריים" button on `StudentDetailPage`. The dialog enforces a backup warning, asks whether the CSV matches the current session questionnaire, and renders either dropdown-based mappings against `session_form_config` or custom text fields with a required session-date column. It now also captures the service context either once for all rows or via a dedicated service column in the CSV. If a legacy import already exists and `can_reupload_legacy_reports` is false, the entry point is disabled.
 - **Legacy import backend:** `/api/students/{id}/legacy-import` is now available for admins/owners. It checks `can_reupload_legacy_reports`, clears prior `is_legacy` rows when allowed, and ingests CSV text (`csv_text` + mapping payload) to create new `SessionRecords` flagged as legacy. Imports can set `service_context` globally or map it from a CSV column; blank values are persisted as no service.
@@ -55,9 +61,15 @@ Reinex tenant-domain tables live in the tenant database `public` schema.
 ## 🔐 Secure API endpoints (MVP)
 
 - `GET /api/instructors` – admin/owner list of instructor IDs + names derived from `org_memberships` and `profiles`.
-- `GET /api/students-list` – unified endpoint for all users; admins see all students, non-admins filtered by `assigned_instructor_id`; supports status filtering (`active`/`inactive`/`all`).
+- `GET /api/students-list` – unified endpoint for all users; admins see all students, non-admins filtered by `assigned_instructor_id`; supports status filtering (`active`/`inactive`/`all`). Dismissed intakes are always excluded.
 - `POST /api/students-list` – admin/owner creation of student records with optional instructor assignment.
 - `PUT /api/students-list/{studentId}` – admin/owner updates to student metadata (name, contact info, instructor, tags, notes).
+- `POST /api/intake` – public intake endpoint for Power Automate; requires `x-org-id` + `x-intake-secret` headers, parses `html_content`, and writes intake history + approval flag.
+- `POST /api/intake/approve` – instructor-only approval endpoint that clears `needs_intake_approval` and records `metadata.last_approval` with agreement metadata once the intake is assigned.
+- `POST /api/intake/dismiss` – admin-only endpoint that removes an intake submission from the queue.
+- `POST /api/intake/restore` – admin-only endpoint that restores a dismissed intake back into the queue.
+- `GET /api/intake/dismissed` – admin-only endpoint that returns dismissed intakes for the intake queue.
+- `POST /api/students-merge` – admin-only endpoint that merges a pending intake into an existing student with field-by-field selection, reattaches intake responses, deletes the source row, and stores a `metadata.merge_backup` snapshot.
 - `GET /api/weekly-compliance` – member/admin/owner weekly aggregation including instructor colors, scheduled chips, documentation status, and a dynamic hour range for the dashboard widget.
 - `POST /api/sessions` – member/admin/owner insertion of `SessionRecords` with assignment verification for members.
 - `GET /api/user-context` – authenticated fetch that returns the caller's organization memberships and pending invitations (with organization names) via the Supabase admin client so invitees bypass RLS limitations.
@@ -65,6 +77,7 @@ Reinex tenant-domain tables live in the tenant database `public` schema.
 ## 📚 Documentation
 
 - English & Hebrew project docs live in [`ProjectDoc/Eng.md`](ProjectDoc/Eng.md) and [`ProjectDoc/Heb.md`](ProjectDoc/Heb.md). Update both together.
+- Intake dashboard UX notes are additionally tracked in [`ProjectDocs/Eng.md`](ProjectDocs/Eng.md) and [`ProjectDocs/Heb.md`](ProjectDocs/Heb.md).
 - Any onboarding or AI-related insights belong in [`AGENTS.md`](AGENTS.md).
 - Legacy import progress is tracked in [`FEATURE_PROGRESS.md`](FEATURE_PROGRESS.md) at the project root.
 

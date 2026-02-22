@@ -157,7 +157,6 @@ export default function MyPendingReportsCard() {
         pendingCount: pendingReports.length,
         rejectedCount: rejectedReports.length,
         resolvedCount: resolvedReports.length,
-        sampleResolved: resolvedReports.slice(0, 2).map(r => ({ id: r.id, name: r.metadata?.unassigned_details?.name, student_id: r.student_id, date: r.date })),
       });
     }
   }, [reports, filteredReports, pendingReports, rejectedReports, resolvedReports]);

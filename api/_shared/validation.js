@@ -225,11 +225,22 @@ const PHONE_PATTERN = /^[0-9+\-()\s]{6,20}$/;
 
 export function validateInstructorCreate(body) {
   const userId = normalizeString(body?.user_id || body?.userId);
-  if (!isUUID(userId)) {
-    return { error: 'missing_user_id' };
+  const isManual = !userId;
+
+  if (userId && !isUUID(userId)) {
+    return { error: 'invalid_user_id' };
   }
 
-  const name = normalizeString(body?.name) || '';
+  // Support both camelCase and snake_case for name fields
+  const firstName = normalizeString(body?.first_name || body?.firstName) || '';
+  const middleName = normalizeString(body?.middle_name || body?.middleName) || '';
+  const lastName = normalizeString(body?.last_name || body?.lastName) || '';
+
+  // For manual employees, name is required
+  if (isManual && !firstName) {
+    return { error: 'first_name_required_for_manual_employee' };
+  }
+
   const emailRaw = normalizeString(body?.email).toLowerCase();
   const email = emailRaw ? (isEmail(emailRaw) ? emailRaw : null) : '';
   const phoneRaw = normalizeString(body?.phone);
@@ -239,27 +250,76 @@ export function validateInstructorCreate(body) {
     return { error: 'invalid_notes' };
   }
 
+  // employee_id is required (national ID or worker number)
+  const employeeId = normalizeString(body?.employee_id || body?.employeeId);
+  if (!employeeId) {
+    return { error: 'employee_id_required' };
+  }
+
   return {
-    userId,
+    userId, // null for manual
+    isManual,
     // empty strings mean "not provided"; nulls mean "provided but invalid"
-    name,
+    firstName,
+    middleName,
+    lastName,
     email,
     phone,
     notes: notesResult.value,
+    employeeId,
   };
 }
 
-export function validateInstructorUpdate(body) {
+export function validateInstructorUpdate(body, orgPermissions = {}) {
   const instructorId = normalizeString(body?.id || body?.instructor_id || body?.instructorId);
   if (!isUUID(instructorId)) {
     return { error: 'missing_instructor_id' };
   }
 
   const updates = {};
+  const metadataUpdates = {};
 
-  if (Object.prototype.hasOwnProperty.call(body, 'name')) {
-    const v = normalizeString(body.name);
-    updates['name'] = v || null;
+  const normalizePreanswersMap = (raw, orgPermissions) => {
+    const capRaw = orgPermissions?.session_form_preanswers_cap;
+    const cap = typeof capRaw === 'number' && capRaw > 0 ? capRaw : 50;
+    if (!raw || typeof raw !== 'object') return {};
+    const normalized = {};
+    for (const [key, list] of Object.entries(raw)) {
+      if (!key || !Array.isArray(list)) continue;
+      const unique = [];
+      const seen = new Set();
+      for (const rawEntry of list) {
+        if (typeof rawEntry !== 'string') continue;
+        const trimmed = rawEntry.trim();
+        if (!trimmed || seen.has(trimmed)) continue;
+        seen.add(trimmed);
+        unique.push(trimmed);
+        if (unique.length >= cap) break;
+      }
+      normalized[key] = unique;
+    }
+    return normalized;
+  };
+
+  if (Object.prototype.hasOwnProperty.call(body, 'first_name') || Object.prototype.hasOwnProperty.call(body, 'firstName')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'first_name') ? body.first_name : body.firstName
+    );
+    updates['first_name'] = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'middle_name') || Object.prototype.hasOwnProperty.call(body, 'middleName')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'middle_name') ? body.middle_name : body.middleName
+    );
+    updates['middle_name'] = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'last_name') || Object.prototype.hasOwnProperty.call(body, 'lastName')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'last_name') ? body.last_name : body.lastName
+    );
+    updates['last_name'] = v || null;
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'email')) {
@@ -294,6 +354,27 @@ export function validateInstructorUpdate(body) {
     } else {
       updates.instructor_types = null;
     }
+  }
+
+  if (body && typeof body === 'object') {
+    const rawMeta = body.metadata && typeof body.metadata === 'object' ? body.metadata : null;
+    const rawCustom = rawMeta && typeof rawMeta.custom_preanswers === 'object'
+      ? rawMeta.custom_preanswers
+      : null;
+    if (rawCustom) {
+      metadataUpdates.custom_preanswers = normalizePreanswersMap(rawCustom, orgPermissions);
+    }
+
+    const rawAlias = body.custom_preanswers && typeof body.custom_preanswers === 'object'
+      ? body.custom_preanswers
+      : null;
+    if (rawAlias) {
+      metadataUpdates.custom_preanswers = normalizePreanswersMap(rawAlias, orgPermissions);
+    }
+  }
+
+  if (Object.keys(metadataUpdates).length > 0) {
+    updates.__metadata_custom_preanswers = metadataUpdates.custom_preanswers || {};
   }
 
   return { instructorId, updates };

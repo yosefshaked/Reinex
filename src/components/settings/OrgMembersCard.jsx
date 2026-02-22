@@ -294,6 +294,15 @@ export default function OrgMembersCard() {
             <p className="text-sm text-slate-600 mt-2">
               כל המשתמשים בארגון חולקים את אותו חיבור Supabase. מנהלים יכולים להזמין ולנהל חברים נוספים.
             </p>
+            {/* Deprecation Notice */}
+            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-800">
+                  <strong>שים לב:</strong> כרטיס זה יוסר בגרסה הבאה. כדי להזמין משתמשים חדשים, השתמש בכפתור "הזמן משתמש" בדף <strong>הגדרות → עובדים ומדריכים</strong>.
+                </div>
+              </div>
+            </div>
           </div>
           {canManageOrgMembers && expiredInvitesCount > 0 ? (
             <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-100 gap-1 whitespace-nowrap">

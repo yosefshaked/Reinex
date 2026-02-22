@@ -79,6 +79,9 @@ This document maps each requirement from **Reinex-PRD.md** (Therapeutic Riding &
 | PRD Requirement | Table/Field | Notes |
 |---|---|---|
 | Basic profile | `students.first_name`, `.middle_name`, `.last_name`, `.date_of_birth` | ✓ |
+| Identity number (unique identifier) | `students.identity_number` | Planned unique index; optional only if business rules allow |
+| Student phone (independent/adult) | `students.phone` | Optional |
+| Student email (independent/adult) | `students.email` | Optional |
 | Guardian linkage | `student_guardians` (M2M relationship) | ✓ Supports multiple guardians |
 | notes_internal | `students.notes_internal` | ✓ |
 | default_notification_method | `students.default_notification_method` | ✓ Enum: whatsapp, email |

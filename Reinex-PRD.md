@@ -211,9 +211,15 @@ Fields:
 
 Basic profile
 
+Identity number (unique identifier)
+
+Phone (optional; for independent/adult students)
+
+Email (optional; for independent/adult students)
+
 Date of birth (optional)
 
-guardian_id or self
+Guardians relationship (optional; adult/independent students may have none)
 
 notes_internal
 

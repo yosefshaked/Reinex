@@ -28,7 +28,7 @@
  * - Conditional enabled/disabled (settings dialogs)
  * - Refetch on demand (after mutations)
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -85,6 +85,7 @@ function useOrgDataResource({
   params = {},
   mapResponse,
 }) {
+  void resource;
   const { session: contextSession } = useAuth();
   const { activeOrgId } = useOrg();
 
@@ -96,21 +97,41 @@ function useOrgDataResource({
 
   // Memoize mapResponse if provided as inline function
   const stableMapResponse = useCallback(
-    mapResponse || ((payload) => payload),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mapResponse ? String(mapResponse) : 'identity']
+    (payload) => (typeof mapResponse === 'function' ? mapResponse(payload) : payload),
+    [mapResponse]
   );
+
+  const paramsKey = useMemo(() => {
+    if (!params || typeof params !== 'object') return '';
+    const keys = Object.keys(params);
+    if (keys.length === 0) return '';
+    try {
+      return JSON.stringify(params);
+    } catch {
+      return '';
+    }
+  }, [params]);
+
+  const stableParamsRef = useRef({ key: null, value: {} });
+  const stableParams = useMemo(() => {
+    if (!paramsKey) {
+      stableParamsRef.current = { key: null, value: {} };
+      return stableParamsRef.current.value;
+    }
+
+    if (stableParamsRef.current.key === paramsKey) {
+      return stableParamsRef.current.value;
+    }
+
+    stableParamsRef.current = { key: paramsKey, value: params };
+    return stableParamsRef.current.value;
+  }, [paramsKey, params]);
 
   // Create stable query string from params - only changes when actual param values change
   const queryString = useMemo(() => {
-    if (!params || Object.keys(params).length === 0) return '';
-    return buildSearchParamsString(params, orgId);
-  }, [
-    // Serialize params to detect actual value changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    JSON.stringify(params),
-    orgId
-  ]);
+    if (!paramsKey || !stableParams || Object.keys(stableParams).length === 0) return '';
+    return buildSearchParamsString(stableParams, orgId);
+  }, [paramsKey, stableParams, orgId]);
 
   // Fetch function - stable reference, only recreates when critical deps change
   const fetchResource = useCallback(async () => {
@@ -132,19 +153,19 @@ function useOrgDataResource({
       const url = `${path}${queryString ? `?${queryString}` : ''}`;
       const payload = await authenticatedFetch(url, { session });
       const mapped = stableMapResponse(payload);
-      const normalized = Array.isArray(mapped) ? mapped : [];
+      // Keep objects as-is (e.g., { employees, unlinked_members }); normalize only primitives
+      const normalized = Array.isArray(mapped) ? mapped : (typeof mapped === 'object' && mapped !== null ? mapped : []);
       setData(normalized);
     } catch (err) {
       if (err?.name === 'AbortError') {
         return;
       }
-      console.error(`Failed to load ${resource}:`, err);
       setError(err?.message || 'Failed to load data');
       setData([]);
     } finally {
       setLoading(false);
     }
-  }, [enabled, orgId, resetOnDisable, queryString, session, stableMapResponse, resource, path]);
+  }, [enabled, orgId, resetOnDisable, queryString, session, stableMapResponse, path]);
 
   // Auto-fetch when dependencies change
   useEffect(() => {
@@ -160,8 +181,11 @@ function useOrgDataResource({
 }
 
 export function useInstructors(options = {}) {
-  const { includeInactive = false, enabled = true, orgId, session, resetOnDisable = true } = options;
-  const params = useMemo(() => ({ include_inactive: includeInactive ? 'true' : undefined }), [includeInactive]);
+  const { includeInactive = false, includeUnlinked = false, enabled = true, orgId, session, resetOnDisable = true } = options;
+  const params = useMemo(() => ({
+    include_inactive: includeInactive ? 'true' : undefined,
+    include_unlinked_members: includeUnlinked ? 'true' : undefined,
+  }), [includeInactive, includeUnlinked]);
 
   const { data, loading, error, refetch } = useOrgDataResource({
     resource: 'instructors',
@@ -173,8 +197,20 @@ export function useInstructors(options = {}) {
     params,
   });
 
+  // API returns either an array (legacy) or an object { employees, unlinked_members }
+  const instructors = Array.isArray(data) ? data : (data?.employees || []);
+  const unlinkedMembers = Array.isArray(data?.unlinked_members) ? data.unlinked_members : [];
+
+  // Debug logging
+  if (includeUnlinked) {
+    console.log('[useInstructors] includeUnlinked=true, data:', data);
+    console.log('[useInstructors] instructors:', instructors);
+    console.log('[useInstructors] unlinkedMembers:', unlinkedMembers);
+  }
+
   return {
-    instructors: data,
+    instructors,
+    unlinkedMembers,
     loadingInstructors: loading,
     instructorsError: error,
     refetchInstructors: refetch,
@@ -184,6 +220,8 @@ export function useInstructors(options = {}) {
 export function useServices(options = {}) {
   const { enabled = true, orgId, session, resetOnDisable = true } = options;
 
+  const mapResponse = useCallback((payload) => payload?.settings?.available_services, []);
+
   const { data, loading, error, refetch } = useOrgDataResource({
     resource: 'services',
     path: 'settings',
@@ -192,7 +230,7 @@ export function useServices(options = {}) {
     session,
     resetOnDisable,
     params: { keys: 'available_services' },
-    mapResponse: (payload) => payload?.settings?.available_services,
+    mapResponse,
   });
 
   return {

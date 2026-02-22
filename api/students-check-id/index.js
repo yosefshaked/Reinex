@@ -80,16 +80,18 @@ export default async function (context, req) {
     return respond(context, tenantError.status, tenantError.body);
   }
 
-  const nationalId = normalizeString(req?.query?.national_id || req?.query?.nationalId || '');
+  const identityNumber = normalizeString(
+    req?.query?.identity_number || req?.query?.identityNumber || req?.query?.national_id || req?.query?.nationalId || '',
+  );
   context.log?.info?.('[students-check-id] Request received', {
-    nationalId,
-    hasNationalId: !!nationalId,
+    identityNumber,
+    hasIdentityNumber: !!identityNumber,
     orgId,
     userId,
   });
 
-  if (!nationalId) {
-    context.log?.info?.('[students-check-id] Empty national ID, returning exists=false');
+  if (!identityNumber) {
+    context.log?.info?.('[students-check-id] Empty identity number, returning exists=false');
     return respond(context, 200, { exists: false });
   }
 
@@ -97,15 +99,15 @@ export default async function (context, req) {
   const excludeId = excludeIdRaw && UUID_PATTERN.test(excludeIdRaw) ? excludeIdRaw : '';
 
   context.log?.info?.('[students-check-id] Query params', {
-    nationalId,
+    identityNumber,
     excludeId: excludeId || 'none',
     hasExcludeId: !!excludeId,
   });
 
   let query = tenantClient
-    .from('Students')
-    .select('id, name, national_id, is_active')
-    .eq('national_id', nationalId)
+    .from('students')
+    .select('id, first_name, last_name, identity_number, is_active')
+    .eq('identity_number', identityNumber)
     .limit(1);
 
   if (excludeId) {
@@ -121,14 +123,14 @@ export default async function (context, req) {
       code: error.code,
       details: error.details,
       orgId,
-      nationalId,
+      identityNumber,
     });
-    return respond(context, 500, { message: 'failed_to_validate_national_id' });
+    return respond(context, 500, { message: 'failed_to_validate_identity_number' });
   }
 
   if (!data) {
     context.log?.info?.('[students-check-id] No duplicate found', {
-      nationalId,
+      identityNumber,
       excludeId: excludeId || 'none',
       result: 'exists=false',
     });
@@ -136,11 +138,12 @@ export default async function (context, req) {
   }
 
   context.log?.info?.('[students-check-id] Duplicate found', {
-    nationalId,
+    identityNumber,
     excludeId: excludeId || 'none',
     duplicateStudent: {
       id: data.id,
-      name: data.name,
+      first_name: data.first_name,
+      last_name: data.last_name,
       is_active: data.is_active,
     },
     result: 'exists=true',

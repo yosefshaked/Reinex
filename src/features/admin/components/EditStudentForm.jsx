@@ -15,11 +15,13 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { validateIsraeliPhone } from '@/components/ui/helpers/phone';
 import StudentTagsField from './StudentTagsField.jsx';
+import MedicalProviderField from './MedicalProviderField.jsx';
 import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
-import { useStudentNameSuggestions, useNationalIdGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
-import { useInstructors, useServices } from '@/hooks/useOrgData.js';
-import { buildDisplayName } from '@/lib/person-name.js';
+import { useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
+import { useServices } from '@/hooks/useOrgData.js';
+
+const IDENTITY_NUMBER_PATTERN = /^\d{5,12}$/;
 
 export default function EditStudentForm({ 
   student, 
@@ -33,25 +35,28 @@ export default function EditStudentForm({
 }) {
   const [values, setValues] = useState(() => createStudentFormState(student));
   const [touched, setTouched] = useState({});
-  const { services, loadingServices } = useServices();
-  const { instructors, loadingInstructors } = useInstructors();
+  const { services = [], loadingServices } = useServices();
   
   // Track the ID of the student currently being edited
   const currentStudentIdRef = useRef(student?.id);
   const excludeStudentId = student?.id; // Use stable reference for hook dependency
 
-  const { suggestions, loading: searchingNames } = useStudentNameSuggestions(values.name, {
-    excludeStudentId,
-  });
-  const { duplicate, loading: checkingNationalId, error: nationalIdError } = useNationalIdGuard(values.nationalId, {
+  const { duplicate, loading: checkingIdentityNumber, error: identityNumberError } = useIdentityNumberGuard(values.identityNumber, {
     excludeStudentId,
   });
 
+  const trimmedIdentityNumber = values.identityNumber.trim();
+  const isIdentityNumberFormatValid = useMemo(() => {
+    if (!trimmedIdentityNumber) return true;
+    return IDENTITY_NUMBER_PATTERN.test(trimmedIdentityNumber);
+  }, [trimmedIdentityNumber]);
+
   const preventSubmitReason = useMemo(() => {
     if (duplicate) return 'duplicate';
-    if (nationalIdError) return 'error';
+    if (identityNumberError) return 'error';
+    if (!isIdentityNumberFormatValid) return 'invalid_identity_number';
     return '';
-  }, [duplicate, nationalIdError]);
+  }, [duplicate, identityNumberError, isIdentityNumberFormatValid]);
 
   useEffect(() => {
     onSubmitDisabledChange(Boolean(preventSubmitReason) || isSubmitting);
@@ -83,10 +88,10 @@ export default function EditStudentForm({
     setTouched((previous) => ({ ...previous, [name]: true }));
   }, []);
 
-  const handleTagChange = useCallback((nextTagId) => {
+  const handleTagChange = useCallback((nextTags) => {
     setValues((previous) => ({
       ...previous,
-      tagId: nextTagId,
+      tags: nextTags,
     }));
   }, []);
 
@@ -101,27 +106,34 @@ export default function EditStudentForm({
     event.preventDefault();
 
     const newTouched = {
-      name: true,
-      nationalId: true,
+      firstName: true,
+      lastName: true,
+      identityNumber: true,
+      phone: true,
+      email: true,
       contactName: true,
       contactPhone: true,
-      assignedInstructorId: true,
       defaultDayOfWeek: true,
       defaultSessionTime: true,
     };
     setTouched(newTouched);
 
-    const trimmedName = values.name.trim();
+    const trimmedFirstName = values.firstName.trim();
+    const trimmedLastName = values.lastName.trim();
     const trimmedContactName = values.contactName.trim();
     const trimmedContactPhone = values.contactPhone.trim();
-    const trimmedNationalId = values.nationalId.trim();
+    const trimmedIdentityNumberInner = values.identityNumber.trim();
 
-    if (duplicate || nationalIdError) {
+    if (duplicate || identityNumberError) {
       return;
     }
 
-    if (!trimmedName || !trimmedNationalId || !trimmedContactName || !trimmedContactPhone || 
-        !values.assignedInstructorId || !values.defaultDayOfWeek || !values.defaultSessionTime) {
+    if (!trimmedFirstName || !trimmedLastName || !trimmedIdentityNumberInner ||
+        !values.defaultDayOfWeek || !values.defaultSessionTime) {
+      return;
+    }
+
+    if (!IDENTITY_NUMBER_PATTERN.test(trimmedIdentityNumberInner)) {
       return;
     }
 
@@ -131,31 +143,38 @@ export default function EditStudentForm({
 
     onSubmit({
       id: student?.id,
-      name: trimmedName,
-      nationalId: trimmedNationalId,
-      contactName: trimmedContactName,
-      contactPhone: trimmedContactPhone,
-      assignedInstructorId: values.assignedInstructorId,
+      firstName: trimmedFirstName,
+      middleName: values.middleName.trim() || null,
+      lastName: trimmedLastName,
+      identityNumber: trimmedIdentityNumberInner,
+      phone: values.phone.trim() || null,
+      email: values.email.trim() || null,
+      medicalProvider: values.medicalProvider?.trim() || null,
+      contactName: trimmedContactName || null,
+      contactPhone: trimmedContactPhone || null,
       defaultService: values.defaultService || null,
       defaultDayOfWeek: values.defaultDayOfWeek,
       defaultSessionTime: values.defaultSessionTime,
       notes: values.notes.trim() || null,
-      tags: normalizeTagIdsForWrite(values.tagId),
+      tags: normalizeTagIdsForWrite(values.tags),
       isActive: values.isActive !== false,
     });
   };
 
-  const trimmedNationalId = values.nationalId.trim();
-  const showNameError = touched.name && !values.name.trim();
-  const nationalIdErrorMessage = (() => {
+  const showFirstNameError = touched.firstName && !values.firstName.trim();
+  const showLastNameError = touched.lastName && !values.lastName.trim();
+  const identityNumberErrorMessage = (() => {
     if (duplicate) return '';
-    if (nationalIdError) return nationalIdError;
-    if (touched.nationalId && !trimmedNationalId) return 'יש להזין מספר זהות.';
+    if (identityNumberError) return identityNumberError;
+    if (error === 'duplicate_identity_number') return '';
+    if (touched.identityNumber && !trimmedIdentityNumber) return 'יש להזין מספר זהות.';
+    if (touched.identityNumber && trimmedIdentityNumber && !isIdentityNumberFormatValid) {
+      return 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
+    }
     return '';
   })();
-  const showContactNameError = touched.contactName && !values.contactName.trim();
-  const showContactPhoneError = touched.contactPhone && (!values.contactPhone.trim() || !validateIsraeliPhone(values.contactPhone));
-  const showInstructorError = touched.assignedInstructorId && !values.assignedInstructorId;
+  const showContactNameError = false;
+  const showContactPhoneError = touched.contactPhone && values.contactPhone.trim() && !validateIsraeliPhone(values.contactPhone);
   const showDayError = touched.defaultDayOfWeek && !values.defaultDayOfWeek;
   const showTimeError = touched.defaultSessionTime && !values.defaultSessionTime;
   const isInactive = values.isActive === false;
@@ -165,66 +184,61 @@ export default function EditStudentForm({
       <div className="space-y-5 divide-y divide-border">
         <div className="space-y-5 py-1">
           <TextField
-            id="student-name"
-            name="name"
-            label="שם התלמיד"
-            value={values.name}
+            id="student-first-name"
+            name="firstName"
+            label="שם פרטי"
+            value={values.firstName}
             onChange={handleChange}
             onBlur={handleBlur}
             required
-            placeholder="הקלד את שם התלמיד"
+            placeholder="הקלד את השם הפרטי"
             disabled={isSubmitting}
-            error={showNameError ? 'יש להזין שם תלמיד.' : ''}
+            error={showFirstNameError ? 'יש להזין שם פרטי.' : ''}
           />
 
-          {suggestions.length > 0 && (
-            <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-800 space-y-2" role="note">
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-medium">תלמידים דומים קיימים במערכת:</p>
-                {searchingNames && <Loader2 className="h-4 w-4 animate-spin text-neutral-500" aria-hidden="true" />}
-              </div>
-              <ul className="space-y-1">
-                {suggestions.map((match) => (
-                  <li key={match.id} className="flex items-center justify-between gap-2">
-                    <div className="space-y-0.5">
-                      <div className="font-semibold text-neutral-900">
-                        {buildDisplayName({ ...match, fallback: match.name }) || 'ללא שם'}
-                      </div>
-                      <div className="text-xs text-neutral-600">מספר זהות: {match.national_id || '—'} | סטטוס: {match.is_active === false ? 'לא פעיל' : 'פעיל'}</div>
-                    </div>
-                    <Link
-                      to={`/students/${match.id}`}
-                      className="text-primary text-xs font-medium underline underline-offset-2 hover:text-primary/80"
-                    >
-                      מעבר לפרופיל
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <TextField
+            id="student-middle-name"
+            name="middleName"
+            label="שם אמצעי"
+            value={values.middleName}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            placeholder="הקלד את השם האמצעי (אופציונלי)"
+            disabled={isSubmitting}
+          />
 
           <TextField
-            id="national-id"
-            name="nationalId"
+            id="student-last-name"
+            name="lastName"
+            label="שם משפחה"
+            value={values.lastName}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            required
+            placeholder="הקלד את שם המשפחה"
+            disabled={isSubmitting}
+            error={showLastNameError ? 'יש להזין שם משפחה.' : ''}
+          />
+
+          <TextField
+            id="identity-number"
+            name="identityNumber"
             label="מספר זהות"
-            value={values.nationalId}
+            value={values.identityNumber}
             onChange={handleChange}
             onBlur={handleBlur}
             placeholder="הקלד מספר זהות למניעת כפילויות"
             disabled={isSubmitting}
             required
-            error={nationalIdErrorMessage}
-            description={checkingNationalId ? 'בודק כפילויות...' : ''}
+            error={identityNumberErrorMessage}
+            description={checkingIdentityNumber ? 'בודק כפילויות...' : ''}
           />
 
           {duplicate && (
             <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 space-y-2" role="alert">
               <p className="font-semibold">מספר זהות זה כבר קיים.</p>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <span>
-                  כדי למנוע כפילויות, עברו לפרופיל של {buildDisplayName({ ...duplicate, fallback: duplicate.name }) || 'ללא שם'}.
-                </span>
+                <span>כדי למנוע כפילויות, עברו לפרופיל של {duplicate.name}.</span>
                 <Link
                   to={`/students/${duplicate.id}`}
                   className="inline-flex items-center justify-center rounded-md bg-red-600 px-3 py-1.5 text-white shadow hover:bg-red-700"
@@ -235,19 +249,34 @@ export default function EditStudentForm({
             </div>
           )}
 
-          <SelectField
-            id="assigned-instructor"
-            name="assignedInstructorId"
-            label="מדריך משויך"
-            value={values.assignedInstructorId}
-            onChange={(value) => handleSelectChange('assignedInstructorId', value)}
-            onOpenChange={onSelectOpenChange}
-            options={instructors.map((inst) => ({ value: inst.id, label: inst.name || inst.email || inst.id }))}
-            placeholder={loadingInstructors ? 'טוען...' : 'בחר מדריך'}
-            required
-            disabled={isSubmitting || loadingInstructors}
-            description="מוצגים רק מדריכים פעילים."
-            error={showInstructorError ? 'יש לבחור מדריך.' : ''}
+          <TextField
+            id="phone"
+            name="phone"
+            label="טלפון (תלמיד)"
+            value={values.phone}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            required={false}
+            disabled={isSubmitting}
+          />
+
+          <TextField
+            id="email"
+            name="email"
+            label="אימייל (תלמיד)"
+            type="email"
+            value={values.email}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            required={false}
+            disabled={isSubmitting}
+          />
+
+          <MedicalProviderField
+            value={values.medicalProvider}
+            onChange={(nextValue) => handleSelectChange('medicalProvider', nextValue)}
+            disabled={isSubmitting}
+            description="אופציונלי"
           />
 
           <TextField
@@ -257,8 +286,8 @@ export default function EditStudentForm({
             value={values.contactName}
             onChange={handleChange}
             onBlur={handleBlur}
-            required
-            placeholder="שם הורה או אפוטרופוס"
+            required={false}
+            placeholder="שם הורה או אפוטרופוס (אופציונלי)"
             disabled={isSubmitting}
             error={showContactNameError ? 'יש להזין שם איש קשר.' : ''}
           />
@@ -270,7 +299,7 @@ export default function EditStudentForm({
             value={values.contactPhone}
             onChange={handleChange}
             onBlur={handleBlur}
-            required
+            required={false}
             disabled={isSubmitting}
             error={showContactPhoneError ? 'יש להזין מספר טלפון ישראלי תקין.' : ''}
           />
@@ -302,16 +331,16 @@ export default function EditStudentForm({
               disabled={isSubmitting}
               error={showDayError ? 'יש לבחור יום.' : ''}
             />
-
             <TimeField
-              id="default-time"
+              id="default-session-time"
               name="defaultSessionTime"
-              label="שעת מפגש קבועה"
+              label="שעה קבועה"
               value={values.defaultSessionTime}
               onChange={(value) => handleSelectChange('defaultSessionTime', value)}
-              disabled={isSubmitting}
               required
+              disabled={isSubmitting}
               error={showTimeError ? 'יש לבחור שעה.' : ''}
+              placeholder="HH:MM"
             />
           </div>
 
@@ -346,7 +375,7 @@ export default function EditStudentForm({
           </div>
 
           <StudentTagsField
-            value={values.tagId}
+            value={values.tags}
             onChange={handleTagChange}
             disabled={isSubmitting}
             description="תגיות לסינון וארגון תלמידים."
@@ -395,7 +424,7 @@ export default function EditStudentForm({
 export function EditStudentFormFooter({ onSubmit, onCancel, isSubmitting = false, disableSubmit = false }) {
   return (
     <div className="flex flex-col gap-2 sm:flex-row-reverse sm:justify-end">
-      <Button onClick={onSubmit} disabled={isSubmitting || disableSubmit} className="gap-2 shadow-md hover:shadow-lg transition-shadow">
+      <Button type="button" onClick={onSubmit} disabled={isSubmitting || disableSubmit} className="gap-2 shadow-md hover:shadow-lg transition-shadow">
         {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
         שמירת שינויים
       </Button>

@@ -1,13 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import React, { useEffect, useState } from "react"
 
 import Card from "@/components/ui/CustomCard.jsx"
 import { useAuth } from "@/auth/AuthContext.jsx"
 import { useOrg } from "@/org/OrgContext.jsx"
 import { useSupabase } from "@/context/SupabaseContext.jsx"
-import { useSessionModal } from "@/features/sessions/context/SessionModalContext.jsx"
 import { useInstructors } from "@/hooks/useOrgData.js"
 import { ComplianceHeatmap } from "@/features/dashboard/components/ComplianceHeatmap.jsx"
+import IntakeReviewQueue from "@/features/dashboard/components/IntakeReviewQueue.jsx"
 
 /**
  * Build greeting with proper fallback chain:
@@ -51,9 +50,8 @@ function buildGreeting(instructorName, profileName, authName, email) {
 
 export default function DashboardPage() {
   const { user, session } = useAuth()
-  const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg()
+  const { activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg()
   const { authClient } = useSupabase()
-  const { openSessionModal } = useSessionModal()
   const [instructorName, setInstructorName] = useState(null)
   const [profileName, setProfileName] = useState(null)
 
@@ -62,26 +60,6 @@ export default function DashboardPage() {
     orgId: activeOrgId,
     session,
   })
-
-  const membershipRole = activeOrg?.membership?.role
-  const { studentsLink, studentsTitle, studentsDescription } = useMemo(() => {
-    const normalizedRole = typeof membershipRole === "string" ? membershipRole.toLowerCase() : "member"
-    const isAdminRole = normalizedRole === "admin" || normalizedRole === "owner"
-
-    if (isAdminRole) {
-      return {
-        studentsLink: "/admin/students",
-        studentsTitle: "ניהול תלמידים",
-        studentsDescription: "מעבר לרשימת כלל התלמידים בארגון",
-      }
-    }
-
-    return {
-      studentsLink: "/my-students",
-      studentsTitle: "התלמידים שלי",
-      studentsDescription: "מעבר לרשימת התלמידים המשויכים אליך",
-    }
-  }, [membershipRole])
 
   // Resolve instructor name from hook data
   useEffect(() => {
@@ -153,38 +131,8 @@ export default function DashboardPage() {
             </div>
           </header>
 
-          {/* Quick action cards */}
-          <div className="grid grid-cols-1 gap-lg pb-xl md:grid-cols-2">
-            <Link to={studentsLink} className="group focus-visible:outline-none">
-              <Card
-                className="group h-full cursor-pointer rounded-2xl border border-border bg-surface p-lg text-right shadow-sm transition hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg group-focus-visible:ring-2 group-focus-visible:ring-primary/40"
-              >
-                <h2 className="text-2xl font-semibold text-foreground group-hover:text-primary">
-                  {studentsTitle}
-                </h2>
-                <p className="mt-sm text-neutral-600">
-                  {studentsDescription}
-                </p>
-              </Card>
-            </Link>
-
-            <button
-              type="button"
-              onClick={() => openSessionModal?.()}
-              className="group focus-visible:outline-none"
-              aria-label="פתיחת טופס רישום מפגש חדש"
-            >
-              <Card
-                className="group h-full cursor-pointer rounded-2xl border border-border bg-surface p-lg text-right shadow-sm transition hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg group-focus-visible:ring-2 group-focus-visible:ring-primary/40"
-              >
-                <h2 className="text-2xl font-semibold text-foreground group-hover:text-primary">
-                  תיעוד מפגש חדש
-                </h2>
-                <p className="mt-sm text-neutral-600">
-                  פתיחת טופס התיעוד בדיוק כמו לחצן הפלוס המרכזי.
-                </p>
-              </Card>
-            </button>
+          <div className="pb-md">
+            <IntakeReviewQueue />
           </div>
 
           {/* Weekly compliance - mobile */}
@@ -212,38 +160,7 @@ export default function DashboardPage() {
             </div>
           </header>
 
-          <div className="grid grid-cols-2 gap-lg">
-            <Link to={studentsLink} className="group focus-visible:outline-none">
-              <Card
-                className="group h-full cursor-pointer rounded-2xl border border-border bg-surface p-lg text-right shadow-sm transition hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg group-focus-visible:ring-2 group-focus-visible:ring-primary/40"
-              >
-                <h2 className="text-2xl font-semibold text-foreground group-hover:text-primary">
-                  {studentsTitle}
-                </h2>
-                <p className="mt-sm text-neutral-600">
-                  {studentsDescription}
-                </p>
-              </Card>
-            </Link>
-
-            <button
-              type="button"
-              onClick={() => openSessionModal?.()}
-              className="group focus-visible:outline-none"
-              aria-label="פתיחת טופס רישום מפגש חדש"
-            >
-              <Card
-                className="group h-full cursor-pointer rounded-2xl border border-border bg-surface p-lg text-right shadow-sm transition hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg group-focus-visible:ring-2 group-focus-visible:ring-primary/40"
-              >
-                <h2 className="text-2xl font-semibold text-foreground group-hover:text-primary">
-                  תיעוד מפגש חדש
-                </h2>
-                <p className="mt-sm text-neutral-600">
-                  פתיחת טופס התיעוד בדיוק כמו לחצן הפלוס המרכזי.
-                </p>
-              </Card>
-            </button>
-          </div>
+          <IntakeReviewQueue />
 
           {tenantClientReady && activeOrgHasConnection ? (
           <ComplianceHeatmap />

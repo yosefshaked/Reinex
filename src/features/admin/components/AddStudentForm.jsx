@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
@@ -6,18 +6,42 @@ import {
   TextField,
   TextAreaField,
   SelectField,
-  PhoneField,
-  DayOfWeekField,
-  ComboBoxField,
-  TimeField
+  PhoneField
 } from '@/components/ui/forms-ui';
 import { validateIsraeliPhone } from '@/components/ui/helpers/phone';
 import StudentTagsField from './StudentTagsField.jsx';
 import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
-import { useStudentNameSuggestions, useNationalIdGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
-import { useInstructors, useServices } from '@/hooks/useOrgData.js';
-import { buildDisplayName } from '@/lib/person-name.js';
+import { useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
+import { useGuardians } from '@/hooks/useGuardians.js';
+import GuardianSelector from './GuardianSelector.jsx';
+import MedicalProviderField from './MedicalProviderField.jsx';
+
+const EMPTY_INITIAL_VALUES = Object.freeze({});
+const IDENTITY_NUMBER_PATTERN = /^\d{5,12}$/;
+
+function buildInitialValuesKey(initialValues) {
+  const value = initialValues && typeof initialValues === 'object' ? initialValues : EMPTY_INITIAL_VALUES;
+  return [
+    value.firstName ?? '',
+    value.middleName ?? '',
+    value.lastName ?? '',
+    value.identityNumber ?? value.identity_number ?? value.nationalId ?? '',
+    value.dateOfBirth ?? '',
+    value.guardianId ?? '',
+    value.guardianRelationship ?? '',
+    value.phone ?? '',
+    value.email ?? '',
+    value.medicalProvider ?? '',
+    value.notificationMethod ?? 'whatsapp',
+    value.specialRate ?? '',
+    value.medicalFlags ?? '',
+    value.onboardingStatus ?? 'not_started',
+    value.notesInternal ?? '',
+    Array.isArray(value.tags) ? value.tags.join(',') : '',
+    value.isActive === false ? '0' : '1',
+  ].join('|');
+}
 
 export default function AddStudentForm({ 
   onSubmit, 
@@ -27,22 +51,68 @@ export default function AddStudentForm({
   renderFooterOutside = false,
   onSelectOpenChange, // Mobile fix: callback for Select open/close tracking
   onSubmitDisabledChange = () => {},
-  initialValues = {},
+  initialValues = EMPTY_INITIAL_VALUES,
 }) {
-  const initialState = useMemo(() => ({ ...createStudentFormState(), ...initialValues }), [initialValues]);
+  // Fetch guardians for selection
+  const { guardians, isLoading: loadingGuardians, createGuardian } = useGuardians();
+
+  // Avoid infinite rerenders when callers pass a new object literal each render (or when defaulting to `{}`)
+  const initialValuesKey = useMemo(() => buildInitialValuesKey(initialValues), [initialValues]);
+
+  const stableInitialValuesRef = useRef(EMPTY_INITIAL_VALUES);
+  const stableInitialValuesKeyRef = useRef('');
+  if (stableInitialValuesKeyRef.current !== initialValuesKey) {
+    stableInitialValuesKeyRef.current = initialValuesKey;
+    stableInitialValuesRef.current = initialValues && typeof initialValues === 'object'
+      ? initialValues
+      : EMPTY_INITIAL_VALUES;
+  }
+
+  const initialStateRef = useRef(null);
+  const initialStateKeyRef = useRef('');
+  if (initialStateKeyRef.current !== initialValuesKey) {
+    initialStateKeyRef.current = initialValuesKey;
+    initialStateRef.current = { ...createStudentFormState(), ...stableInitialValuesRef.current };
+    if (!Array.isArray(initialStateRef.current.tags)) {
+      initialStateRef.current.tags = [];
+    }
+  }
+
+  const initialState = initialStateRef.current;
   const [values, setValues] = useState(() => initialState);
   const [touched, setTouched] = useState({});
-  const { services, loadingServices } = useServices();
-  const { instructors, loadingInstructors } = useInstructors();
 
-  const { suggestions, loading: searchingNames } = useStudentNameSuggestions(values.name);
-  const { duplicate, loading: checkingNationalId, error: nationalIdError } = useNationalIdGuard(values.nationalId);
+  const { duplicate, loading: checkingIdentityNumber, error: identityNumberError } = useIdentityNumberGuard(values.identityNumber);
+
+  const trimmedIdentityNumber = values.identityNumber.trim();
+  const isIdentityNumberFormatValid = useMemo(() => {
+    if (!trimmedIdentityNumber) return true;
+    return IDENTITY_NUMBER_PATTERN.test(trimmedIdentityNumber);
+  }, [trimmedIdentityNumber]);
+
+  // Phone validation: required if no guardian connected
+  const isPhoneRequired = !values.guardianId;
+  const phoneProvidedAndValid = values.phone.trim() && validateIsraeliPhone(values.phone);
+  const isGuardianRelationshipRequired = Boolean(values.guardianId);
+  const guardianRelationshipProvided = Boolean(values.guardianRelationship);
 
   const preventSubmitReason = useMemo(() => {
     if (duplicate) return 'duplicate';
-    if (nationalIdError) return 'error';
+    if (identityNumberError) return 'error';
+    if (!isIdentityNumberFormatValid) return 'invalid_identity_number';
+    // Phone required if no guardian
+    if (isPhoneRequired && !phoneProvidedAndValid) return 'phone_required';
+    if (isGuardianRelationshipRequired && !guardianRelationshipProvided) return 'guardian_relationship_required';
     return '';
-  }, [duplicate, nationalIdError]);
+  }, [
+    duplicate,
+    identityNumberError,
+    isIdentityNumberFormatValid,
+    isPhoneRequired,
+    phoneProvidedAndValid,
+    isGuardianRelationshipRequired,
+    guardianRelationshipProvided,
+  ]);
 
   useEffect(() => {
     onSubmitDisabledChange(Boolean(preventSubmitReason) || isSubmitting);
@@ -83,10 +153,10 @@ export default function AddStudentForm({
     }));
   };
 
-  const handleTagChange = useCallback((nextTagId) => {
+  const handleTagChange = useCallback((nextTags) => {
     setValues((previous) => ({
       ...previous,
-      tagId: nextTagId,
+      tags: nextTags,
     }));
   }, []);
 
@@ -94,68 +164,101 @@ export default function AddStudentForm({
     event.preventDefault();
 
     const newTouched = {
-      name: true,
-      nationalId: true,
-      contactName: true,
-      contactPhone: true,
-      assignedInstructorId: true,
-      defaultDayOfWeek: true,
-      defaultSessionTime: true,
+      firstName: true,
+      lastName: true,
+      identityNumber: true,
+      guardianId: true,
+      guardianRelationship: true,
+      phone: true,
+      email: true,
+      notificationMethod: true,
     };
     setTouched(newTouched);
 
-    const trimmedName = values.name.trim();
-    const trimmedContactName = values.contactName.trim();
-    const trimmedContactPhone = values.contactPhone.trim();
-    const trimmedNationalId = values.nationalId.trim();
+    const trimmedFirstName = values.firstName.trim();
+    const trimmedLastName = values.lastName.trim();
+    const trimmedIdentityNumberInner = values.identityNumber.trim();
 
-    if (duplicate || nationalIdError) {
+    if (duplicate || identityNumberError) {
       return;
     }
 
-    if (!trimmedName || !trimmedNationalId || !trimmedContactName || !trimmedContactPhone ||
-        !values.assignedInstructorId || !values.defaultDayOfWeek || !values.defaultSessionTime) {
+    if (!trimmedFirstName || !trimmedLastName || !trimmedIdentityNumberInner) {
       return;
     }
 
-    if (!validateIsraeliPhone(trimmedContactPhone)) {
+    if (!IDENTITY_NUMBER_PATTERN.test(trimmedIdentityNumberInner)) {
+      return;
+    }
+
+    // Phone required if no guardian
+    if (!values.guardianId && !values.phone.trim()) {
+      return;
+    }
+
+    if (values.guardianId && !values.guardianRelationship) {
+      return;
+    }
+
+    // Validate phone if provided
+    if (values.phone.trim() && !validateIsraeliPhone(values.phone)) {
       return;
     }
 
     onSubmit({
-      name: trimmedName,
-      nationalId: trimmedNationalId,
-      contactName: trimmedContactName,
-      contactPhone: trimmedContactPhone,
-      assignedInstructorId: values.assignedInstructorId,
-      defaultService: values.defaultService || null,
-      defaultDayOfWeek: values.defaultDayOfWeek,
-      defaultSessionTime: values.defaultSessionTime,
-      notes: values.notes.trim() || null,
-      tags: normalizeTagIdsForWrite(values.tagId),
+      firstName: trimmedFirstName,
+      middleName: values.middleName.trim() || null,
+      lastName: trimmedLastName,
+      identityNumber: trimmedIdentityNumberInner,
+      dateOfBirth: values.dateOfBirth || null,
+      guardianId: values.guardianId || null,
+      guardianRelationship: values.guardianRelationship || null,
+      phone: values.phone.trim() || null,
+      email: values.email.trim() || null,
+      medicalProvider: values.medicalProvider.trim() || null,
+      notificationMethod: values.notificationMethod || 'whatsapp',
+      specialRate: values.specialRate ? parseFloat(values.specialRate) : null,
+      medicalFlags: values.medicalFlags || null,
+      onboardingStatus: values.onboardingStatus || 'not_started',
+      notesInternal: values.notesInternal.trim() || null,
+      tags: normalizeTagIdsForWrite(values.tags),
       isActive: values.isActive !== false,
     });
   };
 
-  const trimmedNationalId = values.nationalId.trim();
-  const showNameError = touched.name && !values.name.trim();
-  const nationalIdErrorMessage = (() => {
+  const showFirstNameError = touched.firstName && !values.firstName.trim();
+  const showLastNameError = touched.lastName && !values.lastName.trim();
+  const identityNumberErrorMessage = (() => {
     // Avoid double-surfacing duplicates; detailed banner handles it
     if (duplicate) return '';
-    if (nationalIdError) return nationalIdError;
-    if (error === 'duplicate_national_id') return '';
-    if (touched.nationalId && !trimmedNationalId) return 'יש להזין מספר זהות.';
+    if (identityNumberError) return identityNumberError;
+    if (error === 'duplicate_identity_number') return '';
+    if (touched.identityNumber && !trimmedIdentityNumber) return 'יש להזין מספר זהות.';
+    if (touched.identityNumber && trimmedIdentityNumber && !isIdentityNumberFormatValid) {
+      return 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
+    }
     return '';
   })();
-  const showContactNameError = touched.contactName && !values.contactName.trim();
-  const showContactPhoneError = touched.contactPhone && (!values.contactPhone.trim() || !validateIsraeliPhone(values.contactPhone));
-  const showInstructorError = touched.assignedInstructorId && !values.assignedInstructorId;
-  const showDayError = touched.defaultDayOfWeek && !values.defaultDayOfWeek;
-  const showTimeError = touched.defaultSessionTime && !values.defaultSessionTime;
+
+  // Phone error: required if no guardian, or invalid format if provided
+  const showPhoneError = touched.phone && (
+    (!values.guardianId && !values.phone.trim()) || 
+    (values.phone.trim() && !validateIsraeliPhone(values.phone))
+  );
+  const showGuardianRelationshipError = touched.guardianRelationship && values.guardianId && !values.guardianRelationship;
+  const phoneErrorMessage = (() => {
+    if (!values.guardianId && !values.phone.trim()) {
+      return 'יש להזין מספר טלפון או לשייך אפוטרופוס';
+    }
+    if (values.phone.trim() && !validateIsraeliPhone(values.phone)) {
+      return 'יש להזין מספר טלפון ישראלי תקין';
+    }
+    return '';
+  })();
 
   return (
     <form id="add-student-form" onSubmit={handleSubmit} className="space-y-5" dir="rtl">
-      {error && error !== 'duplicate_national_id' && (
+      {error && error !== 'duplicate_identity_number' && (
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
           {error}
         </div>
@@ -164,66 +267,61 @@ export default function AddStudentForm({
       <div className="space-y-5 divide-y divide-border">
         <div className="space-y-5 py-1">
           <TextField
-            id="student-name"
-            name="name"
-            label="שם התלמיד"
-            value={values.name}
+            id="student-first-name"
+            name="firstName"
+            label="שם פרטי"
+            value={values.firstName}
             onChange={handleChange}
             onBlur={handleBlur}
             required
-            placeholder="הקלד את שם התלמיד"
+            placeholder="הקלד שם פרטי"
             disabled={isSubmitting}
-            error={showNameError ? 'יש להזין שם תלמיד.' : ''}
+            error={showFirstNameError ? 'יש להזין שם פרטי.' : ''}
           />
 
-          {suggestions.length > 0 && (
-            <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-800 space-y-2" role="note">
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-medium">האם אחד מהם התלמיד שאתם מחפשים?</p>
-                {searchingNames && <Loader2 className="h-4 w-4 animate-spin text-neutral-500" aria-hidden="true" />}
-              </div>
-              <ul className="space-y-1">
-                {suggestions.map((match) => (
-                  <li key={match.id} className="flex items-center justify-between gap-2">
-                    <div className="space-y-0.5">
-                      <div className="font-semibold text-neutral-900">
-                        {buildDisplayName({ ...match, fallback: match.name }) || 'ללא שם'}
-                      </div>
-                      <div className="text-xs text-neutral-600">מספר זהות: {match.national_id || '—'} | סטטוס: {match.is_active === false ? 'לא פעיל' : 'פעיל'}</div>
-                    </div>
-                    <Link
-                      to={`/students/${match.id}`}
-                      className="text-primary text-xs font-medium underline underline-offset-2 hover:text-primary/80"
-                    >
-                      מעבר לפרופיל
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <TextField
+            id="student-middle-name"
+            name="middleName"
+            label="שם אמצעי"
+            value={values.middleName}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            placeholder="הקלד שם אמצעי (אופציונלי)"
+            disabled={isSubmitting}
+          />
 
           <TextField
-            id="national-id"
-            name="nationalId"
+            id="student-last-name"
+            name="lastName"
+            label="שם משפחה"
+            value={values.lastName}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            required
+            placeholder="הקלד שם משפחה"
+            disabled={isSubmitting}
+            error={showLastNameError ? 'יש להזין שם משפחה.' : ''}
+          />
+
+          <TextField
+            id="identity-number"
+            name="identityNumber"
             label="מספר זהות"
-            value={values.nationalId}
+            value={values.identityNumber}
             onChange={handleChange}
             onBlur={handleBlur}
             placeholder="הקלד מספר זהות למניעת כפילויות"
             disabled={isSubmitting}
             required
-            error={nationalIdErrorMessage}
-            description={checkingNationalId ? 'בודק כפילויות...' : ''}
+            error={identityNumberErrorMessage}
+            description={checkingIdentityNumber ? 'בודק כפילויות...' : ''}
           />
 
           {duplicate && (
             <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 space-y-2" role="alert">
               <p className="font-semibold">מספר זהות זה כבר קיים.</p>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <span>
-                  כדי למנוע כפילויות, עברו לפרופיל של {buildDisplayName({ ...duplicate, fallback: duplicate.name }) || 'ללא שם'}.
-                </span>
+                <span>כדי למנוע כפילויות, עברו לפרופיל של {duplicate.name}.</span>
                 <Link
                   to={`/students/${duplicate.id}`}
                   className="inline-flex items-center justify-center rounded-md bg-red-600 px-3 py-1.5 text-white shadow hover:bg-red-700"
@@ -234,115 +332,153 @@ export default function AddStudentForm({
             </div>
           )}
 
+          <TextField
+            id="date-of-birth"
+            name="dateOfBirth"
+            label="תאריך לידה"
+            type="date"
+            value={values.dateOfBirth}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            required={false}
+            disabled={isSubmitting}
+            description="אופציונלי - לצורך תכנון שירותים"
+          />
+
+          <GuardianSelector
+            value={values.guardianId}
+            onChange={(value) => {
+              handleSelectChange('guardianId', value);
+              if (!value) {
+                handleSelectChange('guardianRelationship', '');
+              }
+            }}
+            guardians={guardians}
+            isLoading={loadingGuardians}
+            disabled={isSubmitting}
+            onCreateGuardian={createGuardian}
+          />
+
+          {values.guardianId && (
+            <SelectField
+              id="guardian-relationship"
+              name="guardianRelationship"
+              label="קרבה לאפוטרופוס"
+              value={values.guardianRelationship}
+              onChange={(value) => handleSelectChange('guardianRelationship', value)}
+              onOpenChange={onSelectOpenChange}
+              options={[
+                { value: 'father', label: 'אב' },
+                { value: 'mother', label: 'אם' },
+                { value: 'self', label: 'עצמי' },
+                { value: 'caretaker', label: 'מטפל' },
+                { value: 'other', label: 'אחר' },
+              ]}
+              placeholder="בחר קרבה"
+              required
+              disabled={isSubmitting}
+              error={showGuardianRelationshipError ? 'יש לבחור קרבה לאפוטרופוס.' : ''}
+            />
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <PhoneField
+              id="phone"
+              name="phone"
+              label="טלפון (תלמיד)"
+              value={values.phone}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              required={!values.guardianId}
+              disabled={isSubmitting}
+              error={showPhoneError ? phoneErrorMessage : ''}
+              description={values.guardianId 
+                ? "אופציונלי רק במידה ואפוטרופוס מחובר"
+                : "חובה - אין אפוטרופוס מחובר"
+              }
+            />
+
+            <TextField
+              id="email"
+              name="email"
+              label="אימייל (תלמיד)"
+              type="email"
+              value={values.email}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              required={false}
+              disabled={isSubmitting}
+              description="אופציונלי"
+            />
+          </div>
+
+          <MedicalProviderField
+            value={values.medicalProvider}
+            onChange={(nextValue) => handleSelectChange('medicalProvider', nextValue)}
+            disabled={isSubmitting}
+            description="אופציונלי"
+          />
+
           <SelectField
-            id="assigned-instructor"
-            name="assignedInstructorId"
-            label="מדריך משויך"
-            value={values.assignedInstructorId}
-            onChange={(value) => handleSelectChange('assignedInstructorId', value)}
+            id="notification-method"
+            name="notificationMethod"
+            label="שיטת התראה מועדפת"
+            value={values.notificationMethod}
+            onChange={(value) => handleSelectChange('notificationMethod', value)}
             onOpenChange={onSelectOpenChange}
-            options={instructors.map((inst) => ({
-              value: inst.id,
-              label: inst.name || inst.email || inst.id,
-            }))}
-            placeholder={loadingInstructors ? 'טוען...' : 'בחר מדריך'}
+            options={[
+              { value: 'whatsapp', label: 'WhatsApp' },
+              { value: 'email', label: 'דואר אלקטרוני' },
+            ]}
+            placeholder="בחר שיטת התראה"
             required
-            disabled={isSubmitting || loadingInstructors}
-            description="מוצגים רק מדריכים פעילים."
-            error={showInstructorError ? 'יש לבחור מדריך.' : ''}
+            disabled={isSubmitting}
+            description="כיצד ישלח המערכת תזכורות ואישורים"
           />
 
           <TextField
-            id="contact-name"
-            name="contactName"
-            label="שם איש קשר"
-            value={values.contactName}
+            id="special-rate"
+            name="specialRate"
+            label="תעריף מיוחד"
+            type="number"
+            step="0.01"
+            min="0"
+            value={values.specialRate}
             onChange={handleChange}
             onBlur={handleBlur}
-            required
-            placeholder="שם הורה או אפוטרופוס"
+            required={false}
             disabled={isSubmitting}
-            error={showContactNameError ? 'יש להזין שם איש קשר.' : ''}
-          />
-
-          <PhoneField
-            id="contact-phone"
-            name="contactPhone"
-            label="טלפון איש קשר"
-            value={values.contactPhone}
-            onChange={handleChange}
-            onBlur={handleBlur}
-            required
-            disabled={isSubmitting}
-            error={showContactPhoneError ? 'יש להזין מספר טלפון ישראלי תקין.' : ''}
+            description="אופציונלי - תעריף מיוחד לתלמיד זה (במקום תעריף ברירת מחדל)"
+            placeholder="0.00"
           />
         </div>
 
         <div className="space-y-5 py-4">
-
-          <ComboBoxField
-            id="default-service"
-            name="defaultService"
-            label="שירות ברירת מחדל"
-            value={values.defaultService}
-            onChange={(value) => handleSelectChange('defaultService', value)}
-            options={services}
-            placeholder={loadingServices ? 'טוען...' : 'בחרו מהרשימה או הקלידו שירות'}
-            disabled={isSubmitting || loadingServices}
-            dir="rtl"
-            emptyMessage="לא נמצאו שירותים תואמים"
-            description="ניתן להגדיר שירותים זמינים בעמוד ההגדרות."
-          />
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <DayOfWeekField
-              id="default-day"
-              name="defaultDayOfWeek"
-              label="יום קבוע"
-              value={values.defaultDayOfWeek}
-              onChange={(value) => handleSelectChange('defaultDayOfWeek', value)}
-              required
-              disabled={isSubmitting}
-              error={showDayError ? 'יש לבחור יום.' : ''}
-            />
-
-            <TimeField
-              id="default-time"
-              name="defaultSessionTime"
-              label="שעת מפגש קבועה"
-              value={values.defaultSessionTime}
-              onChange={(value) => handleSelectChange('defaultSessionTime', value)}
-              disabled={isSubmitting}
-              required
-              error={showTimeError ? 'יש לבחור שעה.' : ''}
-            />
+          <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+            <p className="font-semibold mb-1">הערה: שיבוץ שיעורים</p>
+            <p>אפשר לשבץ תלמיד לשיעורים קבועים דרך עמוד התלמיד לאחר היצירה, או דרך לוח השנה.</p>
           </div>
 
           <StudentTagsField
-            value={values.tagId}
+            value={values.tags}
             onChange={handleTagChange}
             disabled={isSubmitting}
             description="תגיות לסינון וארגון תלמידים."
           />
 
           <TextAreaField
-            id="notes"
-            name="notes"
-            label="הערות"
-            value={values.notes}
+            id="notes-internal"
+            name="notesInternal"
+            label="הערות פנימיות"
+            value={values.notesInternal}
             onChange={handleChange}
-            placeholder="הערות נוספות על התלמיד"
+            placeholder="הערות פנימיות על התלמיד (לא נראות לאפוטרופוסים)"
             rows={3}
             disabled={isSubmitting}
+            description="הערות אלו מיועדות לצוות בלבד"
           />
         </div>
       </div>
-
-      {error && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 text-right" role="alert">
-          {error}
-        </div>
-      )}
 
       {!renderFooterOutside && (
         <div className="border-t -mx-4 sm:-mx-6 mt-6 pt-3 sm:pt-4 px-4 sm:px-6">
@@ -368,7 +504,7 @@ export default function AddStudentForm({
 export function AddStudentFormFooter({ onSubmit, onCancel, isSubmitting = false, disableSubmit = false }) {
   return (
     <div className="flex flex-col gap-2 sm:flex-row-reverse sm:justify-end">
-      <Button onClick={onSubmit} disabled={isSubmitting || disableSubmit} className="gap-2 shadow-md hover:shadow-lg transition-shadow">
+      <Button type="button" onClick={onSubmit} disabled={isSubmitting || disableSubmit} className="gap-2 shadow-md hover:shadow-lg transition-shadow">
         {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
         שמירת תלמיד חדש
       </Button>

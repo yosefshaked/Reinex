@@ -1,7 +1,7 @@
 {
-  "name": "tuttiud-api",
+  "name": "reinex-api",
   "type": "module",
-  "version": "1.8.0",
+  "version": "0.1.0",
   "private": true,
   "engines": {
     "node": ">=18 <20"
