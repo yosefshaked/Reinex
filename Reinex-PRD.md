@@ -310,6 +310,11 @@ expires_at (optional)
 
 metadata
 
+Model note:
+
+Commitments remain package/HMO allocation records for audit and reporting,
+while system-wide operational balance is computed at query-time (money-first) from base ledger data.
+
 7.2 Consumption
 For each completed lesson:
 
@@ -317,7 +322,24 @@ lesson_instance_id
 
 amount_charged
 
-remaining_balance (calculated view)
+student_balance_after_charge (computed at query-time from commitments and consumption_entries, including transfer-linked rows)
+
+7.3 Balance Transfers (System-wide)
+For family and admin financial operations:
+
+Represented via existing ledger tables:
+
+- One `commitments` row for the target student (adds balance)
+- One `consumption_entries` row for the source student (reduces balance)
+- `consumption_entries.commitment_id` points to the source student's commitment being consumed
+- Cross-student linkage uses shared `transfer_ref` on both rows
+- `consumption_entries.lesson_participant_id` is optional for transfer flows (required for lesson flows)
+- Audit data remains in `metadata` (reason, operator, context)
+
+Transfer policy:
+
+Supports moving balance between packages (allocation change) and between sibling students,
+with mandatory audit trail and reason.
 
 8. Waiting List
 8.1 Fields:

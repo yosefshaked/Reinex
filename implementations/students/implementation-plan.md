@@ -158,7 +158,7 @@ Note: `canManageRoster` = `isAdminOrOffice(role)` — already declared at the to
 
 **Tab: Overview (ברירת מחדל)**
 - Attention flags strip (amber/red banners if any flags)
-- Quick stats row: next lesson date, active commitments count, commitment balance, pending forms count
+- Quick stats row: next lesson date, current monetary balance, pending forms count, active packages count (secondary)
 - Upcoming lesson instances (next 3, card format)
 - Active commitment summary (inline balance cards)
 - Recent form submissions (latest 2)
@@ -206,7 +206,9 @@ Note: `canManageRoster` = `isAdminOrOffice(role)` — already declared at the to
 - Form template CRUD
 - Sending forms to students (OTP link generation)
 - Manual OTP display for admin relay
-- National ID + OTP self-serve access (Phase 6b, after rate-limiting is verified)
+- National ID + OTP self-serve access (Phase 6b)
+- Validation UX: use a generic failure message `ID or OTP were wrong` (never indicate which field failed)
+- Validation UX: keep entered fields visible so the user can review and retry without retyping everything
 - Submission viewer (built into Phase 5 Forms tab)
 
 ---
@@ -217,10 +219,28 @@ Note: `canManageRoster` = `isAdminOrOffice(role)` — already declared at the to
 
 **Scope:**
 - Commitment creation (type: HMO quota, private package, cash balance)
-- `commitment_balances` view (non-materialized, used as read helper)
+- Hybrid model: commitments keep package-level accounting, while UI and ops read system-wide student monetary balance first
+- Query-time balance computation from `commitments` + `consumption_entries` (no precomputed balance table)
+- Transfers are implemented via existing ledger tables: one `commitments` credit row + one `consumption_entries` debit row
+- `consumption_entries.commitment_id` always references the source student's commitment; pair linkage is via shared `transfer_ref`
+- `consumption_entries.lesson_participant_id` is optional for transfer entries and required for lesson-occurrence entries
+- Data trust guardrail: add deterministic balance query fixtures and reconciliation checks in test/diagnostic mode
 - `lesson_participants.price_charged` / `pricing_breakdown` filling on lesson completion
 - Outstanding attention flag computation
 - Export: student financial summary
+
+---
+
+### Phase 8 — Security Hardening (Final Phase)
+
+**Goal:** Protect self-serve form access from enumeration and brute-force attempts.
+
+**Scope:**
+- Rate limit National ID + OTP validation endpoints (per IP and per ID, with sliding window)
+- Add attempt throttling and temporary lockouts after repeated failures
+- Keep all auth failure responses generic (`ID or OTP were wrong`)
+- Add audit logging for failed attempts and lockouts
+- Add monitoring/alerts for suspicious spikes in validation failures
 
 ---
 

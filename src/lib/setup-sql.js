@@ -940,6 +940,7 @@ CREATE TABLE IF NOT EXISTS public.commitments (
   student_id uuid NOT NULL,
   service_id uuid NOT NULL,
   total_amount numeric NOT NULL,
+  transfer_ref uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NULL,
   metadata jsonb NULL
@@ -949,6 +950,7 @@ ALTER TABLE public.commitments
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS total_amount numeric,
+  ADD COLUMN IF NOT EXISTS transfer_ref uuid,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS expires_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
@@ -973,7 +975,18 @@ EXCEPTION
     NULL;
 END $$;
 
+DO $$
+BEGIN
+  ALTER TABLE public.commitments
+    ADD CONSTRAINT commitments_total_amount_non_negative_check
+    CHECK (total_amount >= 0);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
 CREATE INDEX IF NOT EXISTS commitments_student_id_idx ON public.commitments (student_id);
+CREATE INDEX IF NOT EXISTS commitments_transfer_ref_idx ON public.commitments (transfer_ref) WHERE transfer_ref IS NOT NULL;
 
 DO $$
 BEGIN
@@ -991,8 +1004,11 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS public.consumption_entries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  lesson_participant_id uuid NOT NULL,
+  lesson_participant_id uuid NULL,
+  student_id uuid NULL,
+  source_type text NOT NULL DEFAULT 'lesson',
   commitment_id uuid NULL,
+  transfer_ref uuid NULL,
   amount_charged numeric NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL
@@ -1000,16 +1016,52 @@ CREATE TABLE IF NOT EXISTS public.consumption_entries (
 
 ALTER TABLE public.consumption_entries
   ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
+  ADD COLUMN IF NOT EXISTS student_id uuid,
+  ADD COLUMN IF NOT EXISTS source_type text,
   ADD COLUMN IF NOT EXISTS commitment_id uuid,
+  ADD COLUMN IF NOT EXISTS transfer_ref uuid,
   ADD COLUMN IF NOT EXISTS amount_charged numeric,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+ALTER TABLE public.consumption_entries
+  ALTER COLUMN lesson_participant_id DROP NOT NULL;
+
+-- Backfill student_id for legacy rows when possible.
+UPDATE public.consumption_entries e
+SET student_id = lp.student_id
+FROM public.lesson_participants lp
+WHERE e.lesson_participant_id = lp.id
+  AND e.student_id IS NULL;
+
+UPDATE public.consumption_entries e
+SET student_id = c.student_id
+FROM public.commitments c
+WHERE e.commitment_id = c.id
+  AND e.student_id IS NULL;
+
+UPDATE public.consumption_entries
+SET source_type = COALESCE(source_type, 'lesson')
+WHERE source_type IS NULL;
+
+ALTER TABLE public.consumption_entries
+  ALTER COLUMN source_type SET DEFAULT 'lesson';
 
 DO $$
 BEGIN
   ALTER TABLE public.consumption_entries
     ADD CONSTRAINT consumption_entries_lesson_participant_id_fkey
     FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.consumption_entries
+    ADD CONSTRAINT consumption_entries_student_id_fkey
+    FOREIGN KEY (student_id) REFERENCES public.students(id);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -1025,21 +1077,180 @@ EXCEPTION
     NULL;
 END $$;
 
+DO $$
+BEGIN
+  ALTER TABLE public.consumption_entries
+    ADD CONSTRAINT consumption_entries_source_type_check
+    CHECK (source_type IN ('lesson','transfer','adjustment'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.consumption_entries
+    ADD CONSTRAINT consumption_entries_lesson_participant_required_for_lesson_check
+    CHECK (
+      (source_type = 'lesson' AND lesson_participant_id IS NOT NULL)
+      OR (source_type <> 'lesson')
+    ) NOT VALID;
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.consumption_entries
+    ADD CONSTRAINT consumption_entries_commitment_required_for_transfer_check
+    CHECK (
+      (source_type = 'transfer' AND commitment_id IS NOT NULL AND transfer_ref IS NOT NULL)
+      OR (source_type <> 'transfer')
+    ) NOT VALID;
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.consumption_entries
+    ADD CONSTRAINT consumption_entries_transfer_requires_student_check
+    CHECK (
+      (source_type = 'transfer' AND student_id IS NOT NULL)
+      OR (source_type <> 'transfer')
+    ) NOT VALID;
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.consumption_entries
+    ADD CONSTRAINT consumption_entries_transfer_has_no_lesson_participant_check
+    CHECK (
+      (source_type = 'transfer' AND lesson_participant_id IS NULL)
+      OR (source_type <> 'transfer')
+    ) NOT VALID;
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
 CREATE INDEX IF NOT EXISTS consumption_entries_commitment_id_idx
   ON public.consumption_entries (commitment_id);
+CREATE INDEX IF NOT EXISTS consumption_entries_student_id_idx
+  ON public.consumption_entries (student_id);
+CREATE INDEX IF NOT EXISTS consumption_entries_source_type_idx
+  ON public.consumption_entries (source_type);
+CREATE INDEX IF NOT EXISTS consumption_entries_transfer_ref_idx
+  ON public.consumption_entries (transfer_ref) WHERE transfer_ref IS NOT NULL;
 
-CREATE OR REPLACE VIEW public.commitment_balances AS
-SELECT
-  c.id AS commitment_id,
-  c.student_id,
-  c.service_id,
-  c.total_amount,
-  COALESCE(SUM(e.amount_charged), 0) AS consumed_amount,
-  c.total_amount - COALESCE(SUM(e.amount_charged), 0) AS remaining_balance
-FROM public.commitments c
-LEFT JOIN public.consumption_entries e
-  ON e.commitment_id = c.id
-GROUP BY c.id, c.student_id, c.service_id, c.total_amount;
+CREATE OR REPLACE FUNCTION public.validate_consumption_commitment_ownership()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_commitment_student_id uuid;
+  v_entry_student_id uuid;
+BEGIN
+  IF NEW.commitment_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT c.student_id
+    INTO v_commitment_student_id
+  FROM public.commitments c
+  WHERE c.id = NEW.commitment_id;
+
+  IF v_commitment_student_id IS NULL THEN
+    RAISE EXCEPTION 'Invalid commitment_id for consumption entry';
+  END IF;
+
+  v_entry_student_id := NEW.student_id;
+
+  IF v_entry_student_id IS NULL AND NEW.lesson_participant_id IS NOT NULL THEN
+    SELECT lp.student_id
+      INTO v_entry_student_id
+    FROM public.lesson_participants lp
+    WHERE lp.id = NEW.lesson_participant_id;
+  END IF;
+
+  IF v_entry_student_id IS NULL THEN
+    RAISE EXCEPTION 'student_id (or lesson_participant_id) is required when commitment_id is set';
+  END IF;
+
+  IF v_commitment_student_id <> v_entry_student_id THEN
+    RAISE EXCEPTION 'consumption_entries.commitment_id must belong to the same student being debited';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS consumption_entries_validate_commitment_ownership_trg ON public.consumption_entries;
+CREATE TRIGGER consumption_entries_validate_commitment_ownership_trg
+BEFORE INSERT OR UPDATE OF commitment_id, student_id, lesson_participant_id
+ON public.consumption_entries
+FOR EACH ROW
+EXECUTE FUNCTION public.validate_consumption_commitment_ownership();
+
+DROP VIEW IF EXISTS public.commitment_balances;
+
+-- Cleanup for deprecated precomputed balance model
+DROP TRIGGER IF EXISTS commitments_recalculate_student_balance_trg ON public.commitments;
+DROP TRIGGER IF EXISTS consumption_entries_recalculate_student_balance_trg ON public.consumption_entries;
+DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_commitments();
+DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_consumption_entries();
+DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_transfers();
+DROP FUNCTION IF EXISTS public.recalculate_student_balance_account_by_commitment(uuid);
+DROP FUNCTION IF EXISTS public.recalculate_student_balance_account(uuid);
+DROP TABLE IF EXISTS public.student_balance_accounts;
+DROP TABLE IF EXISTS public.student_balance_transfers;
+DROP INDEX IF EXISTS commitments_balance_entry_type_idx;
+
+ALTER TABLE public.commitments
+  DROP CONSTRAINT IF EXISTS commitments_balance_entry_type_check,
+  DROP CONSTRAINT IF EXISTS commitments_transfer_not_self_check,
+  DROP CONSTRAINT IF EXISTS commitments_transfer_peer_student_id_fkey;
+
+ALTER TABLE public.commitments
+  DROP COLUMN IF EXISTS balance_entry_type,
+  DROP COLUMN IF EXISTS transfer_peer_student_id;
+
+-- -----------------------------------------------------------------
+-- Query-time balance computation helpers
+-- -----------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.get_student_remaining_balance(p_student_id uuid)
+RETURNS numeric
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_commitment_total numeric := 0;
+  v_debited numeric := 0;
+BEGIN
+  IF p_student_id IS NULL THEN
+    RETURN 0;
+  END IF;
+
+  SELECT COALESCE(SUM(c.total_amount), 0)
+    INTO v_commitment_total
+  FROM public.commitments c
+  WHERE c.student_id = p_student_id;
+
+  SELECT COALESCE(SUM(e.amount_charged), 0)
+    INTO v_debited
+  FROM public.consumption_entries e
+  LEFT JOIN public.lesson_participants lp ON lp.id = e.lesson_participant_id
+  LEFT JOIN public.commitments c ON c.id = e.commitment_id
+  WHERE COALESCE(e.student_id, lp.student_id, c.student_id) = p_student_id;
+
+  RETURN v_commitment_total - v_debited;
+END;
+$$;
 
 -- -----------------------------------------------------------------
 -- public.lesson_earnings
@@ -1551,13 +1762,6 @@ GRANT ALL ON TABLE public.otp_challenges TO app_user;
 GRANT ALL ON TABLE public.waiting_list_entries TO app_user;
 GRANT ALL ON TABLE public."Settings" TO app_user;
 GRANT ALL ON TABLE public."Documents" TO app_user;
-
-DO $$
-BEGIN
-  IF to_regclass('public.commitment_balances') IS NOT NULL THEN
-    GRANT SELECT ON TABLE public.commitment_balances TO app_user;
-  END IF;
-END $$;
 
 GRANT app_user TO postgres, authenticated, anon;
 

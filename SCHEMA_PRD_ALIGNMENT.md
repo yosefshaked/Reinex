@@ -148,7 +148,18 @@ This document maps each requirement from **Reinex-PRD.md** (Therapeutic Riding &
 |---|---|---|
 | lesson_instance_id | `consumption_entries.lesson_participant_id` | ✓ (via lesson_participants) |
 | amount_charged | `consumption_entries.amount_charged` | ✓ Numeric |
-| remaining_balance | View: `commitment_balances` | ✓ Calculated from commitment total - SUM(consumed) |
+| student_balance_after_charge | Query: commitments + consumption_entries | ✓ Computed at query-time (no materialized/precomputed table) |
+
+### Balance Transfers (§7.3)
+| PRD Requirement | Table/Field | Notes |
+|---|---|---|
+| source student debit | `consumption_entries.student_id` | ✓ Student whose balance is reduced |
+| target student credit | `commitments.student_id` | ✓ Student whose balance is increased |
+| amount | `commitments.total_amount` + `consumption_entries.amount_charged` | ✓ Same transfer amount on paired rows |
+| source commitment ownership | `consumption_entries.commitment_id` → source student's `commitments.id` | ✓ Enforced by trigger |
+| cross-student linkage | `commitments.transfer_ref` = `consumption_entries.transfer_ref` | ✓ Neutral transfer pair key |
+| lesson linkage optionality | `consumption_entries.lesson_participant_id` nullable | ✓ Required for lesson source_type, optional for transfer |
+| reason + audit metadata | `commitments.metadata`, `consumption_entries.metadata` | ✓ Full audit trail in metadata |
 
 ---
 

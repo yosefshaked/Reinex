@@ -404,12 +404,20 @@ Indexes:
 - `created_at timestamptz NOT NULL DEFAULT now()`
 - `metadata jsonb NULL`
 
-**View:** `public.commitment_balances` (computed)
+**Balance computation:** query-time only (no precomputed balance table)
 
-- `commitment_id`
-- `total_amount`
-- `consumed_amount`
-- `remaining_balance`
+- Per-student remaining balance is computed from:
+  - credits: `SUM(commitments.total_amount)`
+  - debits: `SUM(consumption_entries.amount_charged)` by consumption owner student
+  - transfers are represented as one commitment credit + one consumption debit
+
+**Transfer handling via existing ledger tables:**
+
+- Create one `commitments` row for destination student (credit)
+- Create one `consumption_entries` row for source student (debit)
+- Keep ownership: `consumption_entries.commitment_id` references source student's commitment
+- Link transfer pair by shared `transfer_ref` value on both rows
+- `lesson_participant_id` remains required for lesson consumption and optional for transfer consumption
 
 #### 4.2.8 Earnings & payroll
 
