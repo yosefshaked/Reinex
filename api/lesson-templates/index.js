@@ -280,19 +280,6 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 400, { message: 'invalid_valid_until' });
     }
 
-    const { error: deactivateError } = await tenantClient
-      .from('lesson_templates')
-      .update({ is_active: false, updated_at: new Date().toISOString() })
-      .eq('student_id', studentId)
-      .eq('is_active', true);
-
-    if (deactivateError) {
-      context.log?.warn?.('lesson-templates failed to deactivate existing templates', {
-        message: deactivateError.message,
-        studentId,
-      });
-    }
-
     const { data, error } = await tenantClient
       .from('lesson_templates')
       .insert({

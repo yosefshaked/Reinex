@@ -24,6 +24,21 @@ const DAYS_OF_WEEK = [
   { value: 6, label: 'שבת' },
 ];
 
+function formatTemplateTime(timeString) {
+  if (!timeString) return '—';
+  const [hours = '00', minutes = '00'] = String(timeString).split(':');
+  return `${hours}:${minutes}`;
+}
+
+function dayLabel(day) {
+  return DAYS_OF_WEEK.find((entry) => entry.value === day)?.label || '—';
+}
+
+function personName(person) {
+  if (!person) return '—';
+  return [person.first_name, person.middle_name, person.last_name].filter(Boolean).join(' ') || '—';
+}
+
 /**
  * AddTemplateDialog — Create a new lesson template
  * @param {{ open, onClose, onSuccess, defaultInstructorId?, defaultDayOfWeek? }} props
@@ -36,6 +51,8 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
 
   const [services, setServices] = useState([]);
   const [servicesLoading, setServicesLoading] = useState(false);
+  const [existingTemplates, setExistingTemplates] = useState([]);
+  const [existingTemplatesLoading, setExistingTemplatesLoading] = useState(false);
 
   const { students, loadingStudents: studentsLoading } = useStudents({
     status: 'active',
@@ -121,6 +138,48 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
     }));
   }, [formData.student_id, students, services, instructors]);
 
+  // Warn when selected student already has templates
+  useEffect(() => {
+    if (!open || !activeOrgId || !formData.student_id) {
+      setExistingTemplates([]);
+      setExistingTemplatesLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    async function fetchExistingTemplates() {
+      setExistingTemplatesLoading(true);
+      try {
+        const payload = await authenticatedFetch('lesson-templates', {
+          session,
+          params: {
+            org_id: activeOrgId,
+            student_id: formData.student_id,
+          },
+        });
+
+        if (isMounted) {
+          setExistingTemplates(Array.isArray(payload) ? payload : []);
+        }
+      } catch {
+        if (isMounted) {
+          setExistingTemplates([]);
+        }
+      } finally {
+        if (isMounted) {
+          setExistingTemplatesLoading(false);
+        }
+      }
+    }
+
+    fetchExistingTemplates();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [open, activeOrgId, formData.student_id, session]);
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError(null);
@@ -202,6 +261,44 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
               />
             )}
           </div>
+
+          {formData.student_id && (
+            <div className="space-y-2">
+              {existingTemplatesLoading ? (
+                <div className="text-sm text-gray-500 flex items-center gap-2">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  בודק תבניות קיימות...
+                </div>
+              ) : existingTemplates.length > 0 ? (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
+                  <p className="text-sm font-medium text-amber-900">
+                    לתלמיד זה כבר קיימות {existingTemplates.length} תבניות.
+                  </p>
+                  <p className="text-xs text-amber-800 mt-1">
+                    ניתן להמשיך וליצור תבנית נוספת, אבל חשוב לוודא שאין כפילויות לא רצויות.
+                  </p>
+                  <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                    {existingTemplates.map((template) => (
+                      <div key={template.id} className="text-xs bg-white/70 border border-amber-200 rounded px-2 py-1">
+                        <span className="font-medium">{dayLabel(template.day_of_week)}</span>
+                        <span> • </span>
+                        <span>{formatTemplateTime(template.time_of_day)}</span>
+                        <span> • </span>
+                        <span>{template.duration_minutes} דק׳</span>
+                        <span> • </span>
+                        <span>{template.service?.name || 'ללא שירות'}</span>
+                        <span> • </span>
+                        <span>{personName(template.instructor)}</span>
+                        <span className={template.is_active ? 'text-green-700 mr-1' : 'text-gray-500 mr-1'}>
+                          {template.is_active ? '(פעיל)' : '(לא פעיל)'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
 
           {/* Instructor */}
           <div>
