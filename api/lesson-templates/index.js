@@ -491,6 +491,25 @@ export default async function lessonTemplates(context, req) {
         : existingTemplate.is_active,
     };
 
+    if (nextTemplateState.valid_until && nextTemplateState.valid_until < nextTemplateState.valid_from) {
+      return respond(context, 400, { message: 'invalid_valid_until' });
+    }
+
+    const isReactivating = !existingTemplate.is_active && nextTemplateState.is_active;
+    if (isReactivating) {
+      const hasValidFromUpdate = Object.prototype.hasOwnProperty.call(updates, 'valid_from');
+      const hasValidUntilUpdate = Object.prototype.hasOwnProperty.call(updates, 'valid_until');
+      const rangeChanged = (
+        (hasValidFromUpdate && updates.valid_from !== existingTemplate.valid_from)
+        || (hasValidUntilUpdate && updates.valid_until !== existingTemplate.valid_until)
+      );
+
+      // Prevent accidental re-activation with stale dates.
+      if (!hasValidFromUpdate || !rangeChanged) {
+        return respond(context, 400, { message: 'reactivation_requires_new_valid_range' });
+      }
+    }
+
     if (nextTemplateState.is_active) {
       const { conflict, error: conflictCheckError } = await findExactTemplateConflict(tenantClient, {
         studentId: nextTemplateState.student_id,

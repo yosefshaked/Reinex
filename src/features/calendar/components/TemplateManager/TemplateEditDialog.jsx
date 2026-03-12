@@ -7,7 +7,7 @@ import { useState, useEffect } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { useCalendarInstructors } from '../../hooks/useCalendar';
 import { useTemplateMutations } from '../../hooks/useTemplates';
-import { Loader2, AlertCircle, Trash2, Pencil, X } from 'lucide-react';
+import { Loader2, AlertCircle, Trash2, Pencil, X, RotateCcw } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
@@ -44,6 +44,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
   const { updateTemplate, deleteTemplate, isSubmitting } = useTemplateMutations();
 
   const [isEditing, setIsEditing] = useState(false);
+  const [isReactivating, setIsReactivating] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const [services, setServices] = useState([]);
@@ -55,6 +56,10 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
     day_of_week: 0,
     time_of_day: '09:00',
     duration_minutes: 60,
+    valid_from: '',
+    valid_until: '',
+  });
+  const [reactivationRange, setReactivationRange] = useState({
     valid_from: '',
     valid_until: '',
   });
@@ -74,7 +79,12 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
         valid_until: template.valid_until || '',
       });
       setIsEditing(false);
+      setIsReactivating(false);
       setShowDeleteConfirm(false);
+      setReactivationRange({
+        valid_from: '',
+        valid_until: '',
+      });
       setError(null);
     }
   }, [template, open]);
@@ -172,6 +182,41 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
     onClose();
   }
 
+  async function handleReactivate() {
+    setError(null);
+
+    if (!reactivationRange.valid_from) {
+      setError('כדי להפעיל מחדש יש לבחור טווח תוקף חדש (תוקף מ- הוא שדה חובה).');
+      return;
+    }
+
+    if (reactivationRange.valid_until && reactivationRange.valid_until < reactivationRange.valid_from) {
+      setError('תוקף עד לא יכול להיות מוקדם מתוקף מ-.');
+      return;
+    }
+
+    const { error: apiError } = await updateTemplate(template.id, {
+      is_active: true,
+      valid_from: reactivationRange.valid_from,
+      valid_until: reactivationRange.valid_until || null,
+    });
+
+    if (apiError) {
+      setError(
+        apiError === 'duplicate_template_conflict'
+          ? 'לא ניתן להפעיל תבנית זהה וחופפת (תלמיד+מדריך+יום+שעה) כאשר כבר קיימת תבנית פעילה.'
+          : apiError === 'reactivation_requires_new_valid_range'
+            ? 'כדי להפעיל תבנית לא פעילה יש לבחור טווח תוקף חדש.'
+            : apiError,
+      );
+      return;
+    }
+
+    setIsReactivating(false);
+    onUpdate?.();
+    onClose();
+  }
+
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -185,7 +230,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
         </DialogHeader>
 
         {/* View Mode */}
-        {!isEditing && (
+        {!isEditing && !isReactivating && (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-y-2 text-sm">
               <span className="text-gray-500">תלמיד:</span>
@@ -259,11 +304,74 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
                       </Button>
                     </>
                   )}
+                  {!template.is_active && (
+                    <Button variant="outline" size="sm" onClick={() => setIsReactivating(true)}>
+                      <RotateCcw className="h-4 w-4 ml-1" />
+                      הפעלה מחדש
+                    </Button>
+                  )}
                 </div>
                 <Button variant="outline" onClick={onClose}>
                   סגור
                 </Button>
               </div>
+            </DialogFooter>
+          </div>
+        )}
+
+        {/* Reactivation Mode */}
+        {isReactivating && (
+          <div className="space-y-4">
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                הפעלת תבנית מחייבת בחירת טווח תוקף חדש. שאר השדות יישארו ללא שינוי.
+              </AlertDescription>
+            </Alert>
+
+            <div>
+              <Label>תלמיד</Label>
+              <Input value={studentName} disabled className="bg-gray-50" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="reactivate-valid-from">תוקף מ- *</Label>
+                <Input
+                  id="reactivate-valid-from"
+                  type="date"
+                  value={reactivationRange.valid_from}
+                  onChange={(e) => setReactivationRange((prev) => ({ ...prev, valid_from: e.target.value }))}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="reactivate-valid-until">תוקף עד</Label>
+                <Input
+                  id="reactivate-valid-until"
+                  type="date"
+                  value={reactivationRange.valid_until}
+                  onChange={(e) => setReactivationRange((prev) => ({ ...prev, valid_until: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsReactivating(false)} disabled={isSubmitting}>
+                <X className="h-4 w-4 ml-1" />
+                ביטול
+              </Button>
+              <Button onClick={handleReactivate} disabled={isSubmitting}>
+                {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+                הפעל תבנית
+              </Button>
             </DialogFooter>
           </div>
         )}
