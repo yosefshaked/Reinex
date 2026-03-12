@@ -74,7 +74,7 @@ function buildInstanceSelect() {
     'metadata',
     'instructor:Employees(id, name)',
     'service:Services(id, name, color, duration_minutes)',
-    'participants:lesson_participants(id, student_id, participant_status, paid_by_student, payment_recorded_at, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, student:students(id, first_name, middle_name, last_name))',
+    'participants:lesson_participants(id, student_id, participant_status, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, student:students(id, first_name, middle_name, last_name))',
   ].join(',');
 }
 

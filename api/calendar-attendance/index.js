@@ -21,9 +21,8 @@ const MAX_BODY_BYTES = 64 * 1024;
  *   - participant_id (UUID, required)
  *   - attended (boolean, optional)
  *   - participant_status (string, optional)
- *   - paid_by_student (boolean, optional)
  *
- * Supports attendance status updates and lightweight payment indication updates
+ * Supports attendance status updates
  */
 export default async function (context, req) {
   const env = readEnv(context);
@@ -102,11 +101,10 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     ? body.participant_status.trim().toLowerCase()
     : '';
   const hasParticipantStatus = Boolean(requestedParticipantStatus);
-  const hasPaidByStudent = typeof body.paid_by_student === 'boolean';
 
-  if (!hasAttendedFlag && !hasParticipantStatus && !hasPaidByStudent) {
+  if (!hasAttendedFlag && !hasParticipantStatus) {
     return respond(context, 400, {
-      message: 'missing update payload (expected attended, participant_status, or paid_by_student)',
+      message: 'missing update payload (expected attended or participant_status)',
     });
   }
 
@@ -147,11 +145,6 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     }
 
     participantUpdate.participant_status = participantStatus;
-  }
-
-  if (hasPaidByStudent) {
-    participantUpdate.paid_by_student = body.paid_by_student;
-    participantUpdate.payment_recorded_at = new Date().toISOString();
   }
 
   const { error: updateError } = await tenantClient

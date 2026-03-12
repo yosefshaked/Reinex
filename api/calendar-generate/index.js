@@ -582,7 +582,6 @@ export default async function calendarGenerate(context, req) {
           lesson_instance_id: insertedInstance.id,
           student_id: proposal.student_id,
           participant_status: 'scheduled',
-          paid_by_student: null,
           metadata: {
             generation_run_id: generationRunId,
             generation_mode: 'manual',
