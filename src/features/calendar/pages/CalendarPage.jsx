@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import PageLayout from '@/components/ui/PageLayout';
 import { Button } from '@/components/ui/button';
-import { Plus, LayoutTemplate, Loader2 } from 'lucide-react';
+import { Plus, LayoutTemplate, Loader2, Wand2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarHeader } from '../components/CalendarHeader/CalendarHeader';
 import { CalendarGrid } from '../components/CalendarGrid/CalendarGrid';
 import { WeekCalendarGrid } from '../components/CalendarGrid/WeekCalendarGrid';
 import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
 import { AddLessonDialog } from '../components/AddLessonDialog';
+import { ManualGenerationDialog } from '../components/ManualGenerationDialog';
 import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
 
 const CALENDAR_DATE_KEY = 'reinex_calendar_date';
@@ -34,6 +35,7 @@ export default function CalendarPage() {
   const navigate = useNavigate();
   const [selectedInstance, setSelectedInstance] = useState(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showGenerationDialog, setShowGenerationDialog] = useState(false);
 
   // Save date to sessionStorage whenever it changes
   useEffect(() => {
@@ -96,6 +98,10 @@ export default function CalendarPage() {
     setSelectedInstance(null);
   };
 
+  const handleGenerationApplied = () => {
+    refetchInstances();
+  };
+
   return (
     <PageLayout title="לוח זמנים">
       <div className="space-y-4">
@@ -120,6 +126,10 @@ export default function CalendarPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setShowGenerationDialog(true)} className="gap-2">
+              <Wand2 className="h-4 w-4" />
+              יצירה מתבניות
+            </Button>
             <Button variant="outline" onClick={() => navigate('/calendar/templates')} className="gap-2">
               <LayoutTemplate className="h-4 w-4" />
               תבניות
@@ -180,6 +190,13 @@ export default function CalendarPage() {
         onClose={() => setShowAddDialog(false)}
         onSuccess={handleAddSuccess}
         defaultDate={currentDate}
+      />
+
+      <ManualGenerationDialog
+        open={showGenerationDialog}
+        onClose={() => setShowGenerationDialog(false)}
+        defaultDate={currentDate}
+        onApplied={handleGenerationApplied}
       />
     </PageLayout>
   );

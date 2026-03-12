@@ -92,7 +92,7 @@ export default async function (context, req) {
   }
 
   if (method === 'POST') {
-    return await handleCreateInstance(context, body, tenantClient, userId, isAdmin);
+    return await handleCreateInstance(context, body, tenantClient, userId, canManageAll);
   }
 
   if (method === 'PUT') {
@@ -155,6 +155,8 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
         id,
         student_id,
         participant_status,
+        paid_by_student,
+        payment_recorded_at,
         price_charged,
         pricing_breakdown,
         commitment_id,
@@ -237,6 +239,8 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
           id: p.id,
           student_id: p.student_id,
           participant_status: p.participant_status,
+          paid_by_student: Object.prototype.hasOwnProperty.call(p, 'paid_by_student') ? p.paid_by_student : null,
+          payment_recorded_at: p.payment_recorded_at || null,
           price_charged: p.price_charged,
           pricing_breakdown: p.pricing_breakdown,
           commitment_id: p.commitment_id,
@@ -386,6 +390,7 @@ async function handleCreateInstance(context, body, tenantClient, userId, isAdmin
     lesson_instance_id: instance.id,
     student_id: studentId,
     participant_status: 'scheduled',
+    paid_by_student: null,
     price_charged: null,
     pricing_breakdown: null,
     commitment_id: null,

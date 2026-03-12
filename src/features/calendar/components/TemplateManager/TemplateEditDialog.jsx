@@ -6,7 +6,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { useState, useEffect } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { useCalendarInstructors } from '../../hooks/useCalendar';
-import { useTemplateMutations } from '../../hooks/useTemplates';
+import { useTemplateMutations, useTemplateOverrides } from '../../hooks/useTemplates';
 import { Loader2, AlertCircle, Trash2, Pencil, X, RotateCcw } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -41,7 +41,21 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
   const { activeOrgId } = useOrg();
   const { session } = useAuth();
   const { instructors, isLoading: instructorsLoading } = useCalendarInstructors();
-  const { updateTemplate, deleteTemplate, isSubmitting } = useTemplateMutations();
+  const {
+    updateTemplate,
+    deleteTemplate,
+    createTemplateOverride,
+    deleteTemplateOverride,
+    isSubmitting,
+  } = useTemplateMutations();
+  const {
+    overrides,
+    isLoading: overridesLoading,
+    error: overridesError,
+    refetch: refetchOverrides,
+  } = useTemplateOverrides(template?.id || null, {
+    enabled: open && Boolean(template?.id),
+  });
 
   const [isEditing, setIsEditing] = useState(false);
   const [isReactivating, setIsReactivating] = useState(false);
@@ -63,8 +77,23 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
     valid_from: '',
     valid_until: '',
   });
+  const [newOverrideDate, setNewOverrideDate] = useState('');
 
   const [error, setError] = useState(null);
+
+  function formatDate(dateString) {
+    if (!dateString) return '—';
+    const date = new Date(`${dateString}T00:00:00`);
+    if (Number.isNaN(date.getTime())) {
+      return dateString;
+    }
+    return new Intl.DateTimeFormat('he-IL', {
+      weekday: 'short',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(date);
+  }
 
   // Populate form from template
   useEffect(() => {
@@ -85,6 +114,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
         valid_from: '',
         valid_until: '',
       });
+      setNewOverrideDate('');
       setError(null);
     }
   }, [template, open]);
@@ -217,6 +247,47 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
     onClose();
   }
 
+  async function handleAddCancelOverride() {
+    setError(null);
+
+    if (!newOverrideDate) {
+      setError('בחר תאריך לביטול חד-פעמי.');
+      return;
+    }
+
+    const { error: apiError } = await createTemplateOverride({
+      template_id: template.id,
+      target_date: newOverrideDate,
+      override_type: 'cancel',
+    });
+
+    if (apiError) {
+      setError(
+        apiError === 'template_override_already_exists'
+          ? 'כבר קיימת חריגה לתאריך הזה.'
+          : apiError === 'target_date_outside_template_range'
+            ? 'התאריך הנבחר מחוץ לטווח התוקף של התבנית.'
+            : apiError,
+      );
+      return;
+    }
+
+    setNewOverrideDate('');
+    refetchOverrides();
+  }
+
+  async function handleDeleteOverride(overrideId) {
+    setError(null);
+
+    const { error: apiError } = await deleteTemplateOverride(overrideId);
+    if (apiError) {
+      setError(apiError);
+      return;
+    }
+
+    refetchOverrides();
+  }
+
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -261,6 +332,88 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
               <span className={template.is_active ? 'text-green-600 font-medium' : 'text-red-500 font-medium'}>
                 {template.is_active ? 'פעיל' : 'לא פעיל'}
               </span>
+            </div>
+
+            <div className="border rounded-md p-3 space-y-3 bg-gray-50/70">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">חריגות חד-פעמיות</p>
+                  <p className="text-xs text-gray-500">ניהול ביטול לשיעור בתאריך ספציפי</p>
+                </div>
+              </div>
+
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <Label htmlFor="add-cancel-override-date">תאריך לביטול</Label>
+                  <Input
+                    id="add-cancel-override-date"
+                    type="date"
+                    value={newOverrideDate}
+                    onChange={(e) => setNewOverrideDate(e.target.value)}
+                    disabled={isSubmitting || !template.is_active}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleAddCancelOverride}
+                  disabled={isSubmitting || !template.is_active || !newOverrideDate}
+                >
+                  {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+                  הוסף ביטול
+                </Button>
+              </div>
+
+              {!template.is_active && (
+                <p className="text-xs text-amber-700">
+                  לא ניתן להוסיף חריגות כאשר התבנית לא פעילה.
+                </p>
+              )}
+
+              {overridesLoading && (
+                <div className="text-sm text-gray-500 flex items-center gap-2">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  טוען חריגות...
+                </div>
+              )}
+
+              {!overridesLoading && overridesError && (
+                <p className="text-sm text-red-600">שגיאה בטעינת חריגות: {overridesError}</p>
+              )}
+
+              {!overridesLoading && !overridesError && overrides.length === 0 && (
+                <p className="text-sm text-gray-500">אין חריגות לתבנית זו.</p>
+              )}
+
+              {!overridesLoading && !overridesError && overrides.length > 0 && (
+                <div className="space-y-2">
+                  {overrides.map((override) => (
+                    <div
+                      key={override.id}
+                      className="flex items-center justify-between gap-2 rounded border bg-white px-2 py-2"
+                    >
+                      <div className="text-sm">
+                        <div className="font-medium">
+                          {override.override_type === 'cancel' ? 'ביטול' : 'שינוי'} • {formatDate(override.target_date)}
+                        </div>
+                        {override.note && (
+                          <div className="text-xs text-gray-500">{override.note}</div>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteOverride(override.id)}
+                        disabled={isSubmitting}
+                        aria-label="מחק חריגה"
+                      >
+                        <Trash2 className="h-4 w-4 text-red-600" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Delete confirmation */}

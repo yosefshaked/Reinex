@@ -19,9 +19,11 @@ const MAX_BODY_BYTES = 64 * 1024;
  *   - org_id (required)
  *   - instance_id (UUID, required)
  *   - participant_id (UUID, required)
- *   - attended (boolean, required)
+ *   - attended (boolean, optional)
+ *   - participant_status (string, optional)
+ *   - paid_by_student (boolean, optional)
  *
- * Updates participant status and instance status based on attendance
+ * Supports attendance status updates and lightweight payment indication updates
  */
 export default async function (context, req) {
   const env = readEnv(context);
@@ -94,8 +96,18 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
   if (!body.participant_id) {
     return respond(context, 400, { message: 'missing participant_id' });
   }
-  if (typeof body.attended !== 'boolean') {
-    return respond(context, 400, { message: 'missing or invalid attended field (must be boolean)' });
+
+  const hasAttendedFlag = typeof body.attended === 'boolean';
+  const requestedParticipantStatus = typeof body.participant_status === 'string'
+    ? body.participant_status.trim().toLowerCase()
+    : '';
+  const hasParticipantStatus = Boolean(requestedParticipantStatus);
+  const hasPaidByStudent = typeof body.paid_by_student === 'boolean';
+
+  if (!hasAttendedFlag && !hasParticipantStatus && !hasPaidByStudent) {
+    return respond(context, 400, {
+      message: 'missing update payload (expected attended, participant_status, or paid_by_student)',
+    });
   }
 
   // Fetch instance to verify permissions
@@ -122,15 +134,31 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     }
   }
 
-  // Update participant status
-  const participantStatus = body.attended ? 'attended' : 'no_show';
-  
+  const participantUpdate = {};
+
+  if (hasAttendedFlag || hasParticipantStatus) {
+    const allowedParticipantStatuses = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
+    const participantStatus = hasAttendedFlag
+      ? (body.attended ? 'attended' : 'no_show')
+      : requestedParticipantStatus;
+
+    if (!allowedParticipantStatuses.has(participantStatus)) {
+      return respond(context, 400, { message: 'invalid participant_status' });
+    }
+
+    participantUpdate.participant_status = participantStatus;
+  }
+
+  if (hasPaidByStudent) {
+    participantUpdate.paid_by_student = body.paid_by_student;
+    participantUpdate.payment_recorded_at = new Date().toISOString();
+  }
+
   const { error: updateError } = await tenantClient
     .from('lesson_participants')
-    .update({ 
-      participant_status: participantStatus,
-    })
-    .eq('id', body.participant_id);
+    .update(participantUpdate)
+    .eq('id', body.participant_id)
+    .eq('lesson_instance_id', body.instance_id);
 
   if (updateError) {
     context.log?.error?.('calendar/attendance failed to update participant', { 
@@ -139,31 +167,34 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     return respond(context, 500, { message: 'failed_to_update_attendance' });
   }
 
-  // Check if all participants have been marked
-  const { data: allParticipants, error: fetchError } = await tenantClient
-    .from('lesson_participants')
-    .select('participant_status')
-    .eq('lesson_instance_id', body.instance_id);
+  if (Object.prototype.hasOwnProperty.call(participantUpdate, 'participant_status')) {
+    // Check if all participants have attendance statuses so instance can be marked completed.
+    const { data: allParticipants, error: fetchError } = await tenantClient
+      .from('lesson_participants')
+      .select('participant_status')
+      .eq('lesson_instance_id', body.instance_id);
 
-  if (fetchError) {
-    context.log?.error?.('calendar/attendance failed to fetch participants', { message: fetchError.message });
-    // Don't fail the request, just log the error
-  } else if (allParticipants) {
-    const allMarked = allParticipants.every(
-      p => p.participant_status === 'attended' || p.participant_status === 'no_show'
-    );
+    if (fetchError) {
+      context.log?.error?.('calendar/attendance failed to fetch participants', { message: fetchError.message });
+    } else if (allParticipants) {
+      const allMarked = allParticipants.every((p) => (
+        p.participant_status === 'attended'
+          || p.participant_status === 'no_show'
+          || p.participant_status === 'cancelled_student'
+          || p.participant_status === 'cancelled_clinic'
+      ));
 
-    // Update instance status if all participants are marked
-    if (allMarked) {
-      await tenantClient
-        .from('lesson_instances')
-        .update({ 
-          status: 'completed',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', body.instance_id);
+      if (allMarked) {
+        await tenantClient
+          .from('lesson_instances')
+          .update({
+            status: 'completed',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', body.instance_id);
+      }
     }
   }
 
-  return respond(context, 200, { message: 'attendance marked successfully' });
+  return respond(context, 200, { message: 'participant updated successfully' });
 }

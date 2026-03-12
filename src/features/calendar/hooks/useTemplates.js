@@ -140,5 +140,118 @@ export function useTemplateMutations() {
     [activeOrgId],
   );
 
-  return { createTemplate, updateTemplate, deleteTemplate, isSubmitting };
+  const createTemplateOverride = useCallback(
+    async (overrideData) => {
+      setIsSubmitting(true);
+      try {
+        const data = await authenticatedFetch('lesson-template-overrides', {
+          method: 'POST',
+          body: {
+            ...overrideData,
+            org_id: activeOrgId,
+          },
+        });
+        return { data, error: null };
+      } catch (err) {
+        return { data: null, error: err?.message || 'Failed to create template override' };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [activeOrgId],
+  );
+
+  const deleteTemplateOverride = useCallback(
+    async (overrideId) => {
+      setIsSubmitting(true);
+      try {
+        const data = await authenticatedFetch(`lesson-template-overrides/${overrideId}`, {
+          method: 'DELETE',
+          body: {
+            override_id: overrideId,
+            org_id: activeOrgId,
+          },
+        });
+        return { data, error: null };
+      } catch (err) {
+        return { data: null, error: err?.message || 'Failed to delete template override' };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [activeOrgId],
+  );
+
+  return {
+    createTemplate,
+    updateTemplate,
+    deleteTemplate,
+    createTemplateOverride,
+    deleteTemplateOverride,
+    isSubmitting,
+  };
+}
+
+/**
+ * Hook for loading date-specific overrides for a single template.
+ * @param {string|null} templateId
+ * @param {{ enabled?: boolean }} options
+ */
+export function useTemplateOverrides(templateId, { enabled = true } = {}) {
+  const { activeOrgId } = useOrg();
+  const [overrides, setOverrides] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
+
+  const refetch = useCallback(() => {
+    setRefetchTrigger((prev) => prev + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled || !activeOrgId || !templateId) {
+      setOverrides([]);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function fetchOverrides() {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const data = await authenticatedFetch('lesson-template-overrides', {
+          params: {
+            org_id: activeOrgId,
+            template_id: templateId,
+          },
+        });
+
+        if (!cancelled) {
+          setOverrides(Array.isArray(data) ? data : []);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Error fetching template overrides:', err);
+          setError(err?.message || 'Failed to load template overrides');
+          setOverrides([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    fetchOverrides();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrgId, templateId, enabled, refetchTrigger]);
+
+  return { overrides, isLoading, error, refetch };
 }

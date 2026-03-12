@@ -143,6 +143,43 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
+  async function handleMarkPayment(participantId, paidByStudent) {
+    if (!org?.id) {
+      setError('Organization not found');
+      return;
+    }
+    setIsMarkingAttendance(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/calendar/attendance', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({
+          org_id: org.id,
+          instance_id: instance.id,
+          participant_id: participantId,
+          paid_by_student: paidByStudent,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to update payment state');
+      }
+
+      onUpdate?.();
+    } catch (err) {
+      console.error('Error updating payment state:', err);
+      setError(err.message);
+    } finally {
+      setIsMarkingAttendance(false);
+    }
+  }
+
   async function handleCancel(reason) {
     if (!org?.id) {
       setError('Organization not found');
@@ -472,16 +509,47 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   >
                     <div className="flex-1">
                       <p className="font-medium">{participant.student?.full_name || 'לא ידוע'}</p>
-                      <p className="text-sm text-gray-600">
+                      <div className="text-sm text-gray-600">
                         {participant.participant_status === 'attended' && '✓ נכח'}
                         {participant.participant_status === 'no_show' && '✗ לא הגיע'}
-                        {participant.participant_status === 'pending' && 'ממתין'}
-                      </p>
+                        {participant.participant_status === 'scheduled' && 'מתוכנן'}
+                        {participant.participant_status === 'cancelled_student' && 'בוטל ע"י תלמיד'}
+                        {participant.participant_status === 'cancelled_clinic' && 'בוטל ע"י המכון'}
+                      </div>
+                      <div className="mt-1">
+                        <Badge variant="outline" className="text-xs">
+                          {participant.paid_by_student === true && 'שולם ע"י תלמיד'}
+                          {participant.paid_by_student === false && 'לא שולם ע"י תלמיד'}
+                          {participant.paid_by_student === null || typeof participant.paid_by_student === 'undefined'
+                            ? 'תשלום ע"י תלמיד לא סומן'
+                            : null}
+                        </Badge>
+                      </div>
                     </div>
                     {participant.price_charged && (
                       <Badge variant="outline" className="ml-2">₪{participant.price_charged}</Badge>
                     )}
-                    {canMarkAttendance && participant.participant_status === 'pending' && (
+                    {canManageAll && (
+                      <div className="flex gap-1 mr-2">
+                        <Button
+                          size="sm"
+                          variant={participant.paid_by_student === true ? 'default' : 'outline'}
+                          onClick={() => handleMarkPayment(participant.id, true)}
+                          disabled={isMarkingAttendance}
+                        >
+                          שולם
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={participant.paid_by_student === false ? 'default' : 'outline'}
+                          onClick={() => handleMarkPayment(participant.id, false)}
+                          disabled={isMarkingAttendance}
+                        >
+                          לא שולם
+                        </Button>
+                      </div>
+                    )}
+                    {canMarkAttendance && participant.participant_status === 'scheduled' && (
                       <div className="flex gap-1 mr-2">
                         <Button
                           size="sm"

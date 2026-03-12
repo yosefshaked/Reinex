@@ -109,6 +109,10 @@ export const AUDIT_ACTIONS = {
   TEMPLATE_UPDATED: 'template.updated',
   TEMPLATE_DEACTIVATED: 'template.deactivated',
   TEMPLATE_REACTIVATED: 'template.reactivated',
+  TEMPLATE_OVERRIDE_CREATED: 'template.override_created',
+  TEMPLATE_OVERRIDE_DELETED: 'template.override_deleted',
+  CALENDAR_GENERATION_DRY_RUN: 'calendar.generation_dry_run',
+  CALENDAR_GENERATION_APPLIED: 'calendar.generation_applied',
   
   // Students
   STUDENT_CREATED: 'student.created',
