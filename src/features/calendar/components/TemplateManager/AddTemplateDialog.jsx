@@ -39,6 +39,20 @@ function personName(person) {
   return [person.first_name, person.middle_name, person.last_name].filter(Boolean).join(' ') || '—';
 }
 
+function normalizeTemplateTimeForCompare(timeString) {
+  if (!timeString) return '';
+  const [hours = '00', minutes = '00'] = String(timeString).split(':');
+  return `${hours}:${minutes}`;
+}
+
+function rangeOverlap(startA, endA, startB, endB) {
+  const aStart = startA || '0001-01-01';
+  const aEnd = endA || '9999-12-31';
+  const bStart = startB || '0001-01-01';
+  const bEnd = endB || '9999-12-31';
+  return aStart <= bEnd && bStart <= aEnd;
+}
+
 /**
  * AddTemplateDialog — Create a new lesson template
  * @param {{ open, onClose, onSuccess, defaultInstructorId?, defaultDayOfWeek? }} props
@@ -201,6 +215,19 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
       return;
     }
 
+    const localConflict = activeExistingTemplates.find((template) => {
+      if (template.student_id !== formData.student_id) return false;
+      if (template.instructor_employee_id !== formData.instructor_employee_id) return false;
+      if (Number(template.day_of_week) !== Number(formData.day_of_week)) return false;
+      if (normalizeTemplateTimeForCompare(template.time_of_day) !== normalizeTemplateTimeForCompare(formData.time_of_day)) return false;
+      return rangeOverlap(template.valid_from, template.valid_until, formData.valid_from, formData.valid_until || null);
+    });
+
+    if (localConflict) {
+      setError('קיימת כבר תבנית פעילה זהה (תלמיד+מדריך+יום+שעה) בטווח תאריכים חופף.');
+      return;
+    }
+
     const { error: apiError } = await createTemplate({
       student_id: formData.student_id,
       instructor_employee_id: formData.instructor_employee_id,
@@ -213,7 +240,11 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
     });
 
     if (apiError) {
-      setError(apiError);
+      setError(
+        apiError === 'duplicate_template_conflict'
+          ? 'לא ניתן ליצור תבנית זהה וחופפת (תלמיד+מדריך+יום+שעה) כאשר כבר קיימת תבנית פעילה.'
+          : apiError,
+      );
       return;
     }
 
@@ -227,6 +258,7 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
     searchText: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''} ${s.identity_number || ''}`.toLowerCase(),
   }));
 
+  const activeExistingTemplates = existingTemplates.filter((template) => template.is_active);
   const activeServices = (services || []).filter((s) => s?.is_active === true);
 
   return (
@@ -269,16 +301,16 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
                   <Loader2 className="h-3 w-3 animate-spin" />
                   בודק תבניות קיימות...
                 </div>
-              ) : existingTemplates.length > 0 ? (
+              ) : activeExistingTemplates.length > 0 ? (
                 <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
                   <p className="text-sm font-medium text-amber-900">
-                    לתלמיד זה כבר קיימות {existingTemplates.length} תבניות.
+                    לתלמיד זה כבר קיימות {activeExistingTemplates.length} תבניות פעילות.
                   </p>
                   <p className="text-xs text-amber-800 mt-1">
                     ניתן להמשיך וליצור תבנית נוספת, אבל חשוב לוודא שאין כפילויות לא רצויות.
                   </p>
                   <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                    {existingTemplates.map((template) => (
+                    {activeExistingTemplates.map((template) => (
                       <div key={template.id} className="text-xs bg-white/70 border border-amber-200 rounded px-2 py-1">
                         <span className="font-medium">{dayLabel(template.day_of_week)}</span>
                         <span> • </span>
@@ -289,9 +321,6 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
                         <span>{template.service?.name || 'ללא שירות'}</span>
                         <span> • </span>
                         <span>{personName(template.instructor)}</span>
-                        <span className={template.is_active ? 'text-green-700 mr-1' : 'text-gray-500 mr-1'}>
-                          {template.is_active ? '(פעיל)' : '(לא פעיל)'}
-                        </span>
                       </div>
                     ))}
                   </div>

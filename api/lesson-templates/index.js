@@ -63,6 +63,54 @@ function isIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value).trim());
 }
 
+function normalizeDateForCompare(dateValue, fallback) {
+  const normalized = normalizeString(dateValue);
+  return normalized || fallback;
+}
+
+function rangesOverlap(startA, endA, startB, endB) {
+  const normalizedStartA = normalizeDateForCompare(startA, '0001-01-01');
+  const normalizedEndA = normalizeDateForCompare(endA, '9999-12-31');
+  const normalizedStartB = normalizeDateForCompare(startB, '0001-01-01');
+  const normalizedEndB = normalizeDateForCompare(endB, '9999-12-31');
+
+  return normalizedStartA <= normalizedEndB && normalizedStartB <= normalizedEndA;
+}
+
+async function findExactTemplateConflict(tenantClient, {
+  studentId,
+  instructorEmployeeId,
+  dayOfWeek,
+  timeOfDay,
+  validFrom,
+  validUntil,
+  excludeTemplateId = null,
+}) {
+  let query = tenantClient
+    .from('lesson_templates')
+    .select('id, valid_from, valid_until')
+    .eq('student_id', studentId)
+    .eq('instructor_employee_id', instructorEmployeeId)
+    .eq('day_of_week', dayOfWeek)
+    .eq('time_of_day', timeOfDay)
+    .eq('is_active', true);
+
+  if (excludeTemplateId) {
+    query = query.neq('id', excludeTemplateId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    return { conflict: null, error };
+  }
+
+  const overlappingTemplate = (data || []).find((existing) =>
+    rangesOverlap(existing.valid_from, existing.valid_until, validFrom, validUntil),
+  );
+
+  return { conflict: overlappingTemplate || null, error: null };
+}
+
 function buildTemplateSelect({ includeStudent = false } = {}) {
   const fields = [
     'id',
@@ -280,6 +328,30 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 400, { message: 'invalid_valid_until' });
     }
 
+    const { conflict, error: conflictCheckError } = await findExactTemplateConflict(tenantClient, {
+      studentId,
+      instructorEmployeeId,
+      dayOfWeek,
+      timeOfDay,
+      validFrom,
+      validUntil,
+    });
+
+    if (conflictCheckError) {
+      context.log?.error?.('lesson-templates failed to check duplicate conflict', {
+        message: conflictCheckError.message,
+        studentId,
+      });
+      return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+    }
+
+    if (conflict) {
+      return respond(context, 409, {
+        message: 'duplicate_template_conflict',
+        conflicting_template_id: conflict.id,
+      });
+    }
+
     const { data, error } = await tenantClient
       .from('lesson_templates')
       .insert({
@@ -311,6 +383,24 @@ export default async function lessonTemplates(context, req) {
     );
     if (!templateId) {
       return respond(context, 400, { message: 'invalid_template_id' });
+    }
+
+    const { data: existingTemplate, error: existingTemplateError } = await tenantClient
+      .from('lesson_templates')
+      .select('id, student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active')
+      .eq('id', templateId)
+      .maybeSingle();
+
+    if (existingTemplateError) {
+      context.log?.error?.('lesson-templates failed to load existing template for update', {
+        message: existingTemplateError.message,
+        templateId,
+      });
+      return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+    }
+
+    if (!existingTemplate) {
+      return respond(context, 404, { message: 'lesson_template_not_found' });
     }
 
     const updates = {};
@@ -385,6 +475,47 @@ export default async function lessonTemplates(context, req) {
 
     if (Object.keys(updates).length === 0) {
       return respond(context, 400, { message: 'missing_updates' });
+    }
+
+    const nextTemplateState = {
+      student_id: updates.student_id ?? existingTemplate.student_id,
+      instructor_employee_id: updates.instructor_employee_id ?? existingTemplate.instructor_employee_id,
+      day_of_week: updates.day_of_week ?? existingTemplate.day_of_week,
+      time_of_day: updates.time_of_day ?? existingTemplate.time_of_day,
+      valid_from: updates.valid_from ?? existingTemplate.valid_from,
+      valid_until: Object.prototype.hasOwnProperty.call(updates, 'valid_until')
+        ? updates.valid_until
+        : existingTemplate.valid_until,
+      is_active: Object.prototype.hasOwnProperty.call(updates, 'is_active')
+        ? updates.is_active
+        : existingTemplate.is_active,
+    };
+
+    if (nextTemplateState.is_active) {
+      const { conflict, error: conflictCheckError } = await findExactTemplateConflict(tenantClient, {
+        studentId: nextTemplateState.student_id,
+        instructorEmployeeId: nextTemplateState.instructor_employee_id,
+        dayOfWeek: nextTemplateState.day_of_week,
+        timeOfDay: nextTemplateState.time_of_day,
+        validFrom: nextTemplateState.valid_from,
+        validUntil: nextTemplateState.valid_until,
+        excludeTemplateId: templateId,
+      });
+
+      if (conflictCheckError) {
+        context.log?.error?.('lesson-templates failed to check duplicate conflict on update', {
+          message: conflictCheckError.message,
+          templateId,
+        });
+        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+      }
+
+      if (conflict) {
+        return respond(context, 409, {
+          message: 'duplicate_template_conflict',
+          conflicting_template_id: conflict.id,
+        });
+      }
     }
 
     updates.updated_at = new Date().toISOString();

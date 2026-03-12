@@ -146,7 +146,11 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
     const { error: apiError } = await updateTemplate(template.id, updates);
 
     if (apiError) {
-      setError(apiError);
+      setError(
+        apiError === 'duplicate_template_conflict'
+          ? 'לא ניתן לשמור תבנית זהה וחופפת (תלמיד+מדריך+יום+שעה) כאשר כבר קיימת תבנית פעילה.'
+          : apiError,
+      );
       return;
     }
 
