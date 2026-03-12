@@ -1,6 +1,7 @@
 /* eslint-env node */
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import {
   UUID_PATTERN,
   ensureMembership,
@@ -138,6 +139,50 @@ function buildTemplateSelect({ includeStudent = false } = {}) {
   return fields.join(',');
 }
 
+function isDuplicateTemplateConstraintError(error) {
+  const code = normalizeString(error?.code);
+  if (code === '23P01' || code === '23505') {
+    return true;
+  }
+
+  const text = [error?.message, error?.details, error?.hint]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return text.includes('lesson_templates_active_overlap') || text.includes('duplicate_template_conflict');
+}
+
+function computeSafeDeactivationUntil(existingTemplate, today) {
+  let safeValidUntil = today;
+
+  if (existingTemplate?.valid_until && existingTemplate.valid_until < safeValidUntil) {
+    safeValidUntil = existingTemplate.valid_until;
+  }
+
+  if (existingTemplate?.valid_from && safeValidUntil < existingTemplate.valid_from) {
+    safeValidUntil = existingTemplate.valid_from;
+  }
+
+  return safeValidUntil;
+}
+
+async function resolveInstructorEmployeeIdsForUser(tenantClient, userId) {
+  const { data, error } = await tenantClient
+    .from('Employees')
+    .select('id')
+    .eq('user_id', userId);
+
+  if (error) {
+    return { ids: [], error };
+  }
+
+  return {
+    ids: Array.isArray(data) ? data.map((row) => normalizeUuid(row?.id)).filter(Boolean) : [],
+    error: null,
+  };
+}
+
 export default async function lessonTemplates(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
 
@@ -171,6 +216,7 @@ export default async function lessonTemplates(context, req) {
   }
 
   const userId = authResult.data.user.id;
+  const userEmail = normalizeString(authResult.data.user.email) || `missing-email-${userId}`;
   const body = parseRequestBody(req);
   const orgId = resolveOrgId(req, body);
 
@@ -240,11 +286,28 @@ export default async function lessonTemplates(context, req) {
 
     // Mode 2: Student-scoped (existing behavior — student detail page)
     if (!isAdmin) {
+      const {
+        ids: instructorEmployeeIds,
+        error: instructorLookupError,
+      } = await resolveInstructorEmployeeIdsForUser(tenantClient, userId);
+
+      if (instructorLookupError) {
+        context.log?.error?.('lesson-templates failed to resolve instructor mapping', {
+          message: instructorLookupError.message,
+          userId,
+        });
+        return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
+      }
+
+      if (instructorEmployeeIds.length === 0) {
+        return respond(context, 403, { message: 'student_not_assigned_to_user' });
+      }
+
       const { data: assignmentRows, error: assignmentError } = await tenantClient
         .from('lesson_templates')
         .select('id')
         .eq('student_id', studentId)
-        .eq('instructor_employee_id', userId)
+        .in('instructor_employee_id', instructorEmployeeIds)
         .eq('is_active', true)
         .limit(1);
 
@@ -370,8 +433,42 @@ export default async function lessonTemplates(context, req) {
       .single();
 
     if (error) {
+      if (isDuplicateTemplateConstraintError(error)) {
+        return respond(context, 409, {
+          message: 'duplicate_template_conflict',
+        });
+      }
+
       context.log?.error?.('lesson-templates failed to create template', { message: error.message, studentId });
       return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+    }
+
+    try {
+      await logAuditEvent(supabase, {
+        orgId,
+        userId,
+        userEmail,
+        userRole: role,
+        actionType: AUDIT_ACTIONS.TEMPLATE_CREATED,
+        actionCategory: AUDIT_CATEGORIES.CALENDAR,
+        resourceType: 'lesson_template',
+        resourceId: data.id,
+        details: {
+          student_id: data.student_id,
+          instructor_employee_id: data.instructor_employee_id,
+          service_id: data.service_id,
+          day_of_week: data.day_of_week,
+          time_of_day: data.time_of_day,
+          valid_from: data.valid_from,
+          valid_until: data.valid_until,
+          duration_minutes: data.duration_minutes,
+        },
+      });
+    } catch (auditError) {
+      context.log?.error?.('lesson-templates failed to write audit event (create)', {
+        message: auditError?.message,
+        templateId: data?.id,
+      });
     }
 
     return respond(context, 201, data);
@@ -547,12 +644,63 @@ export default async function lessonTemplates(context, req) {
       .maybeSingle();
 
     if (error) {
+      if (isDuplicateTemplateConstraintError(error)) {
+        return respond(context, 409, {
+          message: 'duplicate_template_conflict',
+        });
+      }
+
       context.log?.error?.('lesson-templates failed to update template', { message: error.message, templateId });
       return respond(context, 500, { message: 'failed_to_update_lesson_template' });
     }
 
     if (!data) {
       return respond(context, 404, { message: 'lesson_template_not_found' });
+    }
+
+    const actionType = !existingTemplate.is_active && data.is_active
+      ? AUDIT_ACTIONS.TEMPLATE_REACTIVATED
+      : existingTemplate.is_active && !data.is_active
+        ? AUDIT_ACTIONS.TEMPLATE_DEACTIVATED
+        : AUDIT_ACTIONS.TEMPLATE_UPDATED;
+
+    try {
+      await logAuditEvent(supabase, {
+        orgId,
+        userId,
+        userEmail,
+        userRole: role,
+        actionType,
+        actionCategory: AUDIT_CATEGORIES.CALENDAR,
+        resourceType: 'lesson_template',
+        resourceId: data.id,
+        details: {
+          before: {
+            student_id: existingTemplate.student_id,
+            instructor_employee_id: existingTemplate.instructor_employee_id,
+            day_of_week: existingTemplate.day_of_week,
+            time_of_day: existingTemplate.time_of_day,
+            valid_from: existingTemplate.valid_from,
+            valid_until: existingTemplate.valid_until,
+            is_active: existingTemplate.is_active,
+          },
+          updates,
+          after: {
+            student_id: data.student_id,
+            instructor_employee_id: data.instructor_employee_id,
+            day_of_week: data.day_of_week,
+            time_of_day: data.time_of_day,
+            valid_from: data.valid_from,
+            valid_until: data.valid_until,
+            is_active: data.is_active,
+          },
+        },
+      });
+    } catch (auditError) {
+      context.log?.error?.('lesson-templates failed to write audit event (update)', {
+        message: auditError?.message,
+        templateId: data?.id,
+      });
     }
 
     return respond(context, 200, data);
@@ -568,11 +716,31 @@ export default async function lessonTemplates(context, req) {
 
     const today = new Date().toISOString().split('T')[0];
 
+    const { data: existingTemplate, error: loadTemplateError } = await tenantClient
+      .from('lesson_templates')
+      .select('id, student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active')
+      .eq('id', templateId)
+      .maybeSingle();
+
+    if (loadTemplateError) {
+      context.log?.error?.('lesson-templates failed to load template for deactivation', {
+        message: loadTemplateError.message,
+        templateId,
+      });
+      return respond(context, 500, { message: 'failed_to_deactivate_lesson_template' });
+    }
+
+    if (!existingTemplate) {
+      return respond(context, 404, { message: 'lesson_template_not_found' });
+    }
+
+    const safeValidUntil = computeSafeDeactivationUntil(existingTemplate, today);
+
     const { data, error } = await tenantClient
       .from('lesson_templates')
-      .update({ is_active: false, valid_until: today, updated_at: new Date().toISOString() })
+      .update({ is_active: false, valid_until: safeValidUntil, updated_at: new Date().toISOString() })
       .eq('id', templateId)
-      .select('id, is_active, valid_until')
+      .select('id, student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active')
       .maybeSingle();
 
     if (error) {
@@ -581,7 +749,38 @@ export default async function lessonTemplates(context, req) {
     }
 
     if (!data) {
-      return respond(context, 404, { message: 'lesson_template_not_found' });
+      return respond(context, 500, { message: 'failed_to_deactivate_lesson_template' });
+    }
+
+    try {
+      await logAuditEvent(supabase, {
+        orgId,
+        userId,
+        userEmail,
+        userRole: role,
+        actionType: AUDIT_ACTIONS.TEMPLATE_DEACTIVATED,
+        actionCategory: AUDIT_CATEGORIES.CALENDAR,
+        resourceType: 'lesson_template',
+        resourceId: data.id,
+        details: {
+          before: {
+            valid_from: existingTemplate.valid_from,
+            valid_until: existingTemplate.valid_until,
+            is_active: existingTemplate.is_active,
+          },
+          after: {
+            valid_from: data.valid_from,
+            valid_until: data.valid_until,
+            is_active: data.is_active,
+          },
+          deactivated_on: today,
+        },
+      });
+    } catch (auditError) {
+      context.log?.error?.('lesson-templates failed to write audit event (deactivate)', {
+        message: auditError?.message,
+        templateId: data?.id,
+      });
     }
 
     return respond(context, 200, { message: 'template_deactivated', id: data.id });

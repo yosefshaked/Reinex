@@ -609,6 +609,57 @@ END $$;
 CREATE INDEX IF NOT EXISTS lesson_templates_student_id_idx ON public.lesson_templates (student_id);
 CREATE INDEX IF NOT EXISTS lesson_templates_instructor_day_time_idx ON public.lesson_templates (instructor_employee_id, day_of_week, time_of_day);
 
+CREATE OR REPLACE FUNCTION public.validate_lesson_template_no_active_overlap()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF COALESCE(NEW.is_active, true) = false THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.valid_until IS NOT NULL AND NEW.valid_until < NEW.valid_from THEN
+    RAISE EXCEPTION 'invalid_valid_until' USING ERRCODE = '22007';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.lesson_templates existing
+    WHERE existing.id IS DISTINCT FROM NEW.id
+      AND existing.student_id = NEW.student_id
+      AND existing.instructor_employee_id = NEW.instructor_employee_id
+      AND existing.day_of_week = NEW.day_of_week
+      AND existing.time_of_day = NEW.time_of_day
+      AND existing.is_active = true
+      AND NEW.valid_from <= COALESCE(existing.valid_until, DATE '9999-12-31')
+      AND existing.valid_from <= COALESCE(NEW.valid_until, DATE '9999-12-31')
+  ) THEN
+    RAISE EXCEPTION 'duplicate_template_conflict'
+      USING ERRCODE = '23P01',
+            DETAIL = 'lesson_templates_active_overlap';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_lesson_templates_active_overlap_guard'
+      AND tgrelid = 'public.lesson_templates'::regclass
+  ) THEN
+    CREATE TRIGGER trg_lesson_templates_active_overlap_guard
+      BEFORE INSERT OR UPDATE OF student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active
+      ON public.lesson_templates
+      FOR EACH ROW
+      EXECUTE FUNCTION public.validate_lesson_template_no_active_overlap();
+  END IF;
+END
+$$;
+
 -- -----------------------------------------------------------------
 -- public.lesson_template_overrides
 -- -----------------------------------------------------------------

@@ -254,7 +254,7 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
 
   const studentOptions = (students || []).map((s) => ({
     value: s.id,
-    label: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() || 'ללא שם',
+    label: `${`${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() || 'ללא שם'}${s.identity_number ? ` • ${s.identity_number}` : ''}`,
     searchText: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''} ${s.identity_number || ''}`.toLowerCase(),
   }));
 
@@ -284,12 +284,23 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
                 options={studentOptions}
                 value={studentLabel}
                 onChange={(value) => {
-                  const match = studentOptions.find((opt) => opt.label === value);
                   setStudentLabel(value);
-                  setFormData((prev) => ({ ...prev, student_id: match?.value || '' }));
+                  const exactMatches = studentOptions.filter((opt) => opt.label === value);
+                  setFormData((prev) => ({
+                    ...prev,
+                    student_id: exactMatches.length === 1 ? exactMatches[0].value : '',
+                  }));
                 }}
+                onOptionSelect={(option) => {
+                  setStudentLabel(option?.label || '');
+                  setFormData((prev) => ({
+                    ...prev,
+                    student_id: option?.value || '',
+                  }));
+                }}
+                allowCustomValue={false}
                 placeholder="חפש תלמיד..."
-                emptyText="לא נמצאו תלמידים"
+                emptyMessage="לא נמצאו תלמידים"
               />
             )}
           </div>

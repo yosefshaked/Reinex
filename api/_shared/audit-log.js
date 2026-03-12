@@ -103,6 +103,12 @@ export const AUDIT_ACTIONS = {
   // Sessions
   SESSION_CREATED: 'session.created',
   SESSION_RESOLVED: 'session.resolved',
+
+  // Calendar Templates
+  TEMPLATE_CREATED: 'template.created',
+  TEMPLATE_UPDATED: 'template.updated',
+  TEMPLATE_DEACTIVATED: 'template.deactivated',
+  TEMPLATE_REACTIVATED: 'template.reactivated',
   
   // Students
   STUDENT_CREATED: 'student.created',
@@ -133,6 +139,7 @@ export const AUDIT_CATEGORIES = {
   SESSIONS: 'sessions',
   STUDENTS: 'students',
   INSTRUCTORS: 'instructors',
+  CALENDAR: 'calendar',
 };
 
 /**

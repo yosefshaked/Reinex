@@ -10,27 +10,31 @@ import { ChevronDown } from 'lucide-react';
  * @param {string} id - Input element id
  * @param {string} name - Input name attribute
  * @param {string} value - Current value
- * @param {function} onChange - Callback when value changes (receives string)
- * @param {Array<string>} options - List of suggestion strings
+ * @param {function} onChange - Callback when value changes (receives display string)
+ * @param {function} onOptionSelect - Callback when an option is selected (receives normalized option object)
+ * @param {Array<string|object>} options - List of suggestion strings or { label, value, searchText }
  * @param {boolean} disabled - Whether input is disabled
  * @param {boolean} required - Whether input is required
  * @param {string} placeholder - Placeholder text
  * @param {string} className - Additional CSS classes
  * @param {string} dir - Text direction ('ltr' or 'rtl')
  * @param {string} emptyMessage - Message when no results found
+ * @param {boolean} allowCustomValue - Whether free text is allowed when closing/committing
  */
 export default function ComboBoxInput({
   id,
   name,
   value = '',
   onChange,
+  onOptionSelect,
   options = [],
   disabled = false,
   required = false,
   placeholder = 'בחר מהרשימה או הקלד',
   className = '',
   dir = 'rtl',
-  emptyMessage = 'לא נמצאו תוצאות'
+  emptyMessage = 'לא נמצאו תוצאות',
+  allowCustomValue = true,
 }) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState(value);
@@ -44,22 +48,52 @@ export default function ComboBoxInput({
       if (typeof opt === 'object') {
         const candidate = opt.label ?? opt.name ?? opt.value;
         if (candidate === null || candidate === undefined) return '';
-        return String(candidate);
+        return {
+          label: String(candidate),
+          value: String(opt.value ?? candidate),
+          searchText: String(opt.searchText ?? candidate),
+          raw: opt,
+        };
       }
       return '';
     };
 
     const list = Array.isArray(options) ? options : [];
     const normalized = list
-      .map(normalize)
-      .map((s) => String(s || '').trim())
+      .map((item) => {
+        const candidate = normalize(item);
+
+        if (!candidate) return null;
+        if (typeof candidate === 'string') {
+          const trimmed = candidate.trim();
+          if (!trimmed) return null;
+          return {
+            label: trimmed,
+            value: trimmed,
+            searchText: trimmed,
+            raw: item,
+          };
+        }
+
+        const label = String(candidate.label || '').trim();
+        const optionValue = String(candidate.value || '').trim();
+        if (!label || !optionValue) return null;
+
+        return {
+          label,
+          value: optionValue,
+          searchText: String(candidate.searchText || label).toLowerCase(),
+          raw: candidate.raw,
+        };
+      })
       .filter(Boolean);
 
     // Keep order, drop duplicates
     const seen = new Set();
     return normalized.filter((item) => {
-      if (seen.has(item)) return false;
-      seen.add(item);
+      const key = `${item.value}::${item.label}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
   }, [options]);
@@ -70,29 +104,68 @@ export default function ComboBoxInput({
     lastCommittedRef.current = value;
   }, [value]);
 
-  // Commit when popover closes and query differs from last committed value
-  React.useEffect(() => {
-    if (!open && query !== lastCommittedRef.current) {
-      const trimmed = String(query || '').trim();
-      onChange?.(trimmed);
-      lastCommittedRef.current = trimmed;
-      setQuery(trimmed);
-    }
-  }, [open, query, onChange]);
-
   const filtered = React.useMemo(() => {
     const q = String(query || '').toLowerCase().trim();
     if (!q) return normalizedOptions;
-    return normalizedOptions.filter((opt) => opt.toLowerCase().includes(q));
+    return normalizedOptions.filter((opt) => {
+      const searchText = String(opt.searchText || '').toLowerCase();
+      return opt.label.toLowerCase().includes(q) || opt.value.toLowerCase().includes(q) || searchText.includes(q);
+    });
   }, [query, normalizedOptions]);
 
-  const commit = (newValue) => {
+  const commitOption = React.useCallback((option) => {
+    const optionLabel = String(option?.label || '').trim();
+    if (!optionLabel) {
+      onChange?.('');
+      onOptionSelect?.(null);
+      lastCommittedRef.current = '';
+      setQuery('');
+      setOpen(false);
+      return;
+    }
+
+    onChange?.(optionLabel);
+    onOptionSelect?.(option);
+    lastCommittedRef.current = optionLabel;
+    setQuery(optionLabel);
+    setOpen(false);
+  }, [onChange, onOptionSelect]);
+
+  const commit = React.useCallback((newValue) => {
     const trimmed = String(newValue || '').trim();
+    const lowerTrimmed = trimmed.toLowerCase();
+
+    const exactMatch = normalizedOptions.find((opt) =>
+      opt.label.toLowerCase() === lowerTrimmed || opt.value.toLowerCase() === lowerTrimmed,
+    );
+
+    if (exactMatch) {
+      commitOption(exactMatch);
+      return;
+    }
+
+    if (!allowCustomValue) {
+      onChange?.('');
+      onOptionSelect?.(null);
+      lastCommittedRef.current = '';
+      setQuery('');
+      setOpen(false);
+      return;
+    }
+
     onChange?.(trimmed);
+    onOptionSelect?.(null);
     lastCommittedRef.current = trimmed;
     setQuery(trimmed);
     setOpen(false);
-  };
+  }, [allowCustomValue, commitOption, normalizedOptions, onChange, onOptionSelect]);
+
+  // Commit when popover closes and query differs from last committed value
+  React.useEffect(() => {
+    if (!open && query !== lastCommittedRef.current) {
+      commit(query);
+    }
+  }, [open, query, commit]);
 
   const onKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -148,19 +221,19 @@ export default function ComboBoxInput({
         <ul id={`${id || name}-list`} role="listbox" className="py-1" dir={dir}>
           {filtered.map((option, index) => (
             <li
-              key={`${option}::${index}`}
+              key={`${option.value}::${index}`}
               role="option"
-              aria-selected={value === option}
+              aria-selected={value === option.label}
               className="cursor-pointer select-none px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
               onMouseDown={(e) => {
                 // Prevent Input blur before we handle selection
                 e.preventDefault();
               }}
               onClick={() => {
-                commit(option);
+                commitOption(option);
               }}
             >
-              {option}
+              {option.label}
             </li>
           ))}
           {filtered.length === 0 && (
