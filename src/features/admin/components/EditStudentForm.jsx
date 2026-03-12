@@ -7,19 +7,14 @@ import {
   TextAreaField,
   SelectField,
   PhoneField,
-  DayOfWeekField,
-  ComboBoxField,
-  TimeField
 } from '@/components/ui/forms-ui';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { validateIsraeliPhone } from '@/components/ui/helpers/phone';
 import StudentTagsField from './StudentTagsField.jsx';
 import MedicalProviderField from './MedicalProviderField.jsx';
 import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
 import { useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
-import { useServices } from '@/hooks/useOrgData.js';
 
 const IDENTITY_NUMBER_PATTERN = /^\d{5,12}$/;
 
@@ -35,7 +30,6 @@ export default function EditStudentForm({
 }) {
   const [values, setValues] = useState(() => createStudentFormState(student));
   const [touched, setTouched] = useState({});
-  const { services = [], loadingServices } = useServices();
   
   // Track the ID of the student currently being edited
   const currentStudentIdRef = useRef(student?.id);
@@ -111,33 +105,23 @@ export default function EditStudentForm({
       identityNumber: true,
       phone: true,
       email: true,
-      contactName: true,
-      contactPhone: true,
-      defaultDayOfWeek: true,
-      defaultSessionTime: true,
+      notificationMethod: true,
     };
     setTouched(newTouched);
 
     const trimmedFirstName = values.firstName.trim();
     const trimmedLastName = values.lastName.trim();
-    const trimmedContactName = values.contactName.trim();
-    const trimmedContactPhone = values.contactPhone.trim();
     const trimmedIdentityNumberInner = values.identityNumber.trim();
 
     if (duplicate || identityNumberError) {
       return;
     }
 
-    if (!trimmedFirstName || !trimmedLastName || !trimmedIdentityNumberInner ||
-        !values.defaultDayOfWeek || !values.defaultSessionTime) {
+    if (!trimmedFirstName || !trimmedLastName || !trimmedIdentityNumberInner) {
       return;
     }
 
     if (!IDENTITY_NUMBER_PATTERN.test(trimmedIdentityNumberInner)) {
-      return;
-    }
-
-    if (!validateIsraeliPhone(trimmedContactPhone)) {
       return;
     }
 
@@ -147,15 +131,13 @@ export default function EditStudentForm({
       middleName: values.middleName.trim() || null,
       lastName: trimmedLastName,
       identityNumber: trimmedIdentityNumberInner,
+      dateOfBirth: values.dateOfBirth || null,
       phone: values.phone.trim() || null,
       email: values.email.trim() || null,
       medicalProvider: values.medicalProvider?.trim() || null,
-      contactName: trimmedContactName || null,
-      contactPhone: trimmedContactPhone || null,
-      defaultService: values.defaultService || null,
-      defaultDayOfWeek: values.defaultDayOfWeek,
-      defaultSessionTime: values.defaultSessionTime,
-      notes: values.notes.trim() || null,
+      notificationMethod: values.notificationMethod || 'whatsapp',
+      specialRate: values.specialRate !== '' ? values.specialRate : null,
+      notesInternal: values.notesInternal.trim() || null,
       tags: normalizeTagIdsForWrite(values.tags),
       isActive: values.isActive !== false,
     });
@@ -173,15 +155,12 @@ export default function EditStudentForm({
     }
     return '';
   })();
-  const showContactNameError = false;
-  const showContactPhoneError = touched.contactPhone && values.contactPhone.trim() && !validateIsraeliPhone(values.contactPhone);
-  const showDayError = touched.defaultDayOfWeek && !values.defaultDayOfWeek;
-  const showTimeError = touched.defaultSessionTime && !values.defaultSessionTime;
   const isInactive = values.isActive === false;
 
   return (
     <form id="edit-student-form" onSubmit={handleSubmit} className="space-y-5" dir="rtl">
       <div className="space-y-5 divide-y divide-border">
+        {/* ── Personal details ── */}
         <div className="space-y-5 py-1">
           <TextField
             id="student-first-name"
@@ -250,27 +229,44 @@ export default function EditStudentForm({
           )}
 
           <TextField
-            id="phone"
-            name="phone"
-            label="טלפון (תלמיד)"
-            value={values.phone}
+            id="date-of-birth"
+            name="dateOfBirth"
+            label="תאריך לידה"
+            type="date"
+            value={values.dateOfBirth}
             onChange={handleChange}
             onBlur={handleBlur}
             required={false}
             disabled={isSubmitting}
+            description="אופציונלי – לצורך תכנון שירותים"
           />
 
-          <TextField
-            id="email"
-            name="email"
-            label="אימייל (תלמיד)"
-            type="email"
-            value={values.email}
-            onChange={handleChange}
-            onBlur={handleBlur}
-            required={false}
-            disabled={isSubmitting}
-          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <PhoneField
+              id="phone"
+              name="phone"
+              label="טלפון (תלמיד)"
+              value={values.phone}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              required={false}
+              disabled={isSubmitting}
+              description="אופציונלי"
+            />
+
+            <TextField
+              id="email"
+              name="email"
+              label="אימייל (תלמיד)"
+              type="email"
+              value={values.email}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              required={false}
+              disabled={isSubmitting}
+              description="אופציונלי"
+            />
+          </div>
 
           <MedicalProviderField
             value={values.medicalProvider}
@@ -279,71 +275,42 @@ export default function EditStudentForm({
             description="אופציונלי"
           />
 
-          <TextField
-            id="contact-name"
-            name="contactName"
-            label="שם איש קשר"
-            value={values.contactName}
-            onChange={handleChange}
-            onBlur={handleBlur}
-            required={false}
-            placeholder="שם הורה או אפוטרופוס (אופציונלי)"
+          <SelectField
+            id="notification-method"
+            name="notificationMethod"
+            label="שיטת התראה מועדפת"
+            value={values.notificationMethod}
+            onChange={(value) => handleSelectChange('notificationMethod', value)}
+            onOpenChange={onSelectOpenChange}
+            options={[
+              { value: 'whatsapp', label: 'WhatsApp' },
+              { value: 'email', label: 'דואר אלקטרוני' },
+            ]}
+            placeholder="בחר שיטת התראה"
+            required
             disabled={isSubmitting}
-            error={showContactNameError ? 'יש להזין שם איש קשר.' : ''}
+            description="כיצד ישלח המערכת תזכורות ואישורים"
           />
 
-          <PhoneField
-            id="contact-phone"
-            name="contactPhone"
-            label="טלפון איש קשר"
-            value={values.contactPhone}
+          <TextField
+            id="special-rate"
+            name="specialRate"
+            label="תעריף מיוחד"
+            type="number"
+            step="0.01"
+            min="0"
+            value={values.specialRate}
             onChange={handleChange}
             onBlur={handleBlur}
             required={false}
             disabled={isSubmitting}
-            error={showContactPhoneError ? 'יש להזין מספר טלפון ישראלי תקין.' : ''}
+            description="אופציונלי – תעריף מיוחד לתלמיד זה (במקום תעריף ברירת מחדל)"
+            placeholder="0.00"
           />
         </div>
 
+        {/* ── Status & organisation ── */}
         <div className="space-y-5 py-4">
-          <ComboBoxField
-            id="default-service"
-            name="defaultService"
-            label="שירות ברירת מחדל"
-            value={values.defaultService}
-            onChange={(value) => handleSelectChange('defaultService', value)}
-            options={services}
-            placeholder={loadingServices ? 'טוען...' : 'בחרו מהרשימה או הקלידו שירות'}
-            disabled={isSubmitting || loadingServices}
-            dir="rtl"
-            emptyMessage="לא נמצאו שירותים תואמים"
-            description="ניתן להגדיר שירותים זמינים בעמוד ההגדרות."
-          />
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <DayOfWeekField
-              id="default-day"
-              name="defaultDayOfWeek"
-              label="יום קבוע"
-              value={values.defaultDayOfWeek}
-              onChange={(value) => handleSelectChange('defaultDayOfWeek', value)}
-              required
-              disabled={isSubmitting}
-              error={showDayError ? 'יש לבחור יום.' : ''}
-            />
-            <TimeField
-              id="default-session-time"
-              name="defaultSessionTime"
-              label="שעה קבועה"
-              value={values.defaultSessionTime}
-              onChange={(value) => handleSelectChange('defaultSessionTime', value)}
-              required
-              disabled={isSubmitting}
-              error={showTimeError ? 'יש לבחור שעה.' : ''}
-              placeholder="HH:MM"
-            />
-          </div>
-
           <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
@@ -382,14 +349,15 @@ export default function EditStudentForm({
           />
 
           <TextAreaField
-            id="notes"
-            name="notes"
-            label="הערות"
-            value={values.notes}
+            id="notes-internal"
+            name="notesInternal"
+            label="הערות פנימיות"
+            value={values.notesInternal}
             onChange={handleChange}
-            placeholder="הערות נוספות על התלמיד"
+            placeholder="הערות פנימיות על התלמיד (לא נראות לאפוטרופוסים)"
             rows={3}
             disabled={isSubmitting}
+            description="הערות אלו מיועדות לצוות בלבד"
           />
         </div>
       </div>
@@ -419,6 +387,7 @@ export default function EditStudentForm({
       )}
     </form>
   );
+
 }
 
 export function EditStudentFormFooter({ onSubmit, onCancel, isSubmitting = false, disableSubmit = false }) {

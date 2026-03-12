@@ -4,7 +4,6 @@ import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/s
 import {
   UUID_PATTERN,
   ensureMembership,
-  isAdminRole,
   isAdminOrOffice,
   normalizeString,
   parseRequestBody,
@@ -517,7 +516,6 @@ export default async function handler(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const isAdmin = isAdminRole(role);
   const canManageRoster = isAdminOrOffice(role);
 
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
@@ -615,8 +613,8 @@ export default async function handler(context, req) {
     return respond(context, 200, Array.isArray(data) ? data : []);
   }
 
-  // POST and PUT require admin role
-  if (!isAdmin) {
+  // POST and PUT require admin or office role
+  if (!canManageRoster) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
