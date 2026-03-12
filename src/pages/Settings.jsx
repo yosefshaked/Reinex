@@ -34,6 +34,8 @@ export default function Settings() {
   const normalizedRole = typeof membershipRole === 'string' ? membershipRole.trim().toLowerCase() : '';
   const canManageSessionForm = normalizedRole === 'admin' || normalizedRole === 'owner';
   const setupDialogAutoOpenRef = useRef(!activeOrgHasConnection);
+  const orgIdSyncCompletedRef = useRef(new Set());
+  const orgIdSyncInFlightRef = useRef(new Set());
   const [selectedModule, setSelectedModule] = useState(null); // 'setup' | 'orgMembers' | 'sessionForm' | 'services' | 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'intake' | 'auditLogs'
   const [backupEnabled, setBackupEnabled] = useState(false);
   const [logoEnabled, setLogoEnabled] = useState(false);
@@ -197,22 +199,66 @@ export default function Settings() {
   useEffect(() => {
     if (!session || !activeOrgId || !activeOrgHasConnection) return;
 
+    const completedSet = orgIdSyncCompletedRef.current;
+    const inFlightSet = orgIdSyncInFlightRef.current;
+
+    if (completedSet.has(activeOrgId) || inFlightSet.has(activeOrgId)) {
+      return;
+    }
+
+    inFlightSet.add(activeOrgId);
+    let isCancelled = false;
+
     const saveOrgId = async () => {
       try {
-        await upsertSetting({
+        const existingOrgIdSetting = await fetchSettingsValue({
           session,
           orgId: activeOrgId,
           key: '_system_org_id',
-          value: activeOrgId,
         });
-        console.log('[Settings] Org ID saved to Settings table:', activeOrgId);
+
+        if (isCancelled) {
+          return;
+        }
+
+        const existingValue = typeof existingOrgIdSetting?.value === 'string'
+          ? existingOrgIdSetting.value.trim()
+          : existingOrgIdSetting?.value;
+
+        const shouldUpsert = !existingOrgIdSetting?.exists || existingValue !== activeOrgId;
+
+        if (shouldUpsert) {
+          await upsertSetting({
+            session,
+            orgId: activeOrgId,
+            key: '_system_org_id',
+            value: activeOrgId,
+          });
+
+          if (!isCancelled) {
+            console.log('[Settings] Org ID saved to Settings table:', activeOrgId);
+          }
+        } else {
+          console.log('[Settings] Org ID already synced in Settings table:', activeOrgId);
+        }
+
+        if (!isCancelled) {
+          completedSet.add(activeOrgId);
+        }
       } catch (error) {
         // Silently fail - this is a helper for migration, not critical for app functionality
         console.warn('[Settings] Failed to save org_id to Settings:', error);
+      } finally {
+        inFlightSet.delete(activeOrgId);
       }
     };
 
     saveOrgId();
+
+    return () => {
+      isCancelled = true;
+      inFlightSet.delete(activeOrgId);
+    };
   }, [session, activeOrgId, activeOrgHasConnection]);
 
   useEffect(() => {
