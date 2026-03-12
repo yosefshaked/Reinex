@@ -1,4 +1,5 @@
 import { normalizeDay } from './schedule.js';
+import { formatInstructorName, formatStudentName } from '@/lib/format-name.js';
 
 /**
  * Parse time string to minutes since midnight for comparison
@@ -31,8 +32,8 @@ function parseTimeToMinutes(timeStr) {
  * @returns {number} - Comparison result (-1, 0, 1)
  */
 function compareStudentNames(a, b) {
-  const nameA = String(a?.name || '').toLowerCase();
-  const nameB = String(b?.name || '').toLowerCase();
+  const nameA = String(a?.name || formatStudentName(a) || '').toLowerCase();
+  const nameB = String(b?.name || formatStudentName(b) || '').toLowerCase();
   return nameA.localeCompare(nameB, 'he');
 }
 
@@ -89,8 +90,8 @@ export function compareStudentsBySchedule(a, b, instructorMap = new Map()) {
   const instructorA = instructorMap.get(a?.assigned_instructor_id);
   const instructorB = instructorMap.get(b?.assigned_instructor_id);
   
-  const instructorNameA = instructorA?.name || '';
-  const instructorNameB = instructorB?.name || '';
+  const instructorNameA = instructorA?.name || formatInstructorName(instructorA) || '';
+  const instructorNameB = instructorB?.name || formatInstructorName(instructorB) || '';
   
   const instructorCompare = compareInstructorNames(instructorNameA, instructorNameB);
   if (instructorCompare !== null && instructorCompare !== 0) {
@@ -149,8 +150,8 @@ export function getStudentComparator(sortBy, instructorMap = new Map()) {
         const instructorA = instructorMap.get(a?.assigned_instructor_id);
         const instructorB = instructorMap.get(b?.assigned_instructor_id);
         
-        const instructorNameA = instructorA?.name || '';
-        const instructorNameB = instructorB?.name || '';
+        const instructorNameA = instructorA?.name || formatInstructorName(instructorA) || '';
+        const instructorNameB = instructorB?.name || formatInstructorName(instructorB) || '';
         
         const instructorCompare = compareInstructorNames(instructorNameA, instructorNameB);
         if (instructorCompare !== null && instructorCompare !== 0) {

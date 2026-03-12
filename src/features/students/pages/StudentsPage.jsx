@@ -20,11 +20,11 @@ import DataMaintenanceModal from '@/features/admin/components/DataMaintenanceMod
 import { DataMaintenanceMenu } from '@/features/admin/components/DataMaintenanceMenu.jsx';
 import { StudentFilterSection } from '@/features/students/components/StudentFilterSection.jsx';
 import PageLayout from '@/components/ui/PageLayout.jsx';
-import { DAY_NAMES, formatDefaultTime, dayMatches } from '@/features/students/utils/schedule.js';
+import { DAY_NAMES, formatDefaultTime } from '@/features/students/utils/schedule.js';
 import DayOfWeekSelect from '@/components/ui/DayOfWeekSelect.jsx';
 import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';
-import { getStudentComparator, STUDENT_SORT_OPTIONS } from '@/features/students/utils/sorting.js';
+import { STUDENT_SORT_OPTIONS } from '@/features/students/utils/sorting.js';
 import { saveFilterState, loadFilterState } from '@/features/students/utils/filter-state.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
@@ -33,7 +33,7 @@ import { formatStudentName } from '@/features/students/utils/name-utils.js';
 
 export default function StudentsPage() {
   const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
-  const { session, user, loading: supabaseLoading } = useSupabase();
+  const { session, loading: supabaseLoading } = useSupabase();
   const navigate = useNavigate();
 
   // All hooks must be called before any conditional returns
@@ -53,6 +53,8 @@ export default function StudentsPage() {
   const [tagFilter, setTagFilter] = useState('');
   const [sortBy, setSortBy] = useState(STUDENT_SORT_OPTIONS.SCHEDULE); // Default sort by schedule
   const [statusFilter, setStatusFilter] = useState('active'); // 'active' | 'inactive' | 'all'
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
   const [filteredStudents, setFilteredStudents] = useState([]); // Local client-side filtered list
   const [filtersRestored, setFiltersRestored] = useState(false); // Track when filters have been restored from sessionStorage
   const [pendingReportsCount, setPendingReportsCount] = useState(0); // Count of loose reports awaiting assignment
@@ -91,11 +93,20 @@ export default function StudentsPage() {
     ? (statusFilter === 'all' ? 'all' : statusFilter)
     : (canViewInactive ? statusFilter : 'active');
 
-  const { students, loadingStudents, studentsError: hookStudentsError, refetchStudents } = useStudents({
+  const pageOffset = useMemo(() => (Math.max(currentPage, 1) - 1) * pageSize, [currentPage, pageSize]);
+
+  const { students, studentsPagination, loadingStudents, studentsError: hookStudentsError, refetchStudents } = useStudents({
     status: effectiveStatus,
     enabled: canFetch && filtersRestored,
     orgId: activeOrgId,
     session,
+    pagination: true,
+    limit: pageSize,
+    offset: pageOffset,
+    search: searchQuery.trim(),
+    tag: tagFilter,
+    day: dayFilter ?? '',
+    sortBy,
   });
 
   const fetchComplianceSummary = useCallback(async () => {
@@ -169,6 +180,8 @@ export default function StudentsPage() {
       if (savedFilters.dayFilter !== undefined) setDayFilter(savedFilters.dayFilter);
       if (savedFilters.tagFilter !== undefined) setTagFilter(savedFilters.tagFilter);
       if (savedFilters.sortBy !== undefined) setSortBy(savedFilters.sortBy);
+      if (savedFilters.pageSize !== undefined) setPageSize(savedFilters.pageSize);
+      if (savedFilters.currentPage !== undefined) setCurrentPage(savedFilters.currentPage);
       
       // Admin-only filters
       if (isAdmin && savedFilters.statusFilter !== undefined) {
@@ -276,60 +289,18 @@ export default function StudentsPage() {
         tagFilter,
         sortBy,
         statusFilter,
+        pageSize,
+        currentPage,
       };
 
       saveFilterState(activeOrgId, filterMode, filterState);
     }
-  }, [activeOrgId, filterMode, isAdmin, searchQuery, dayFilter, tagFilter, sortBy, statusFilter]);
+  }, [activeOrgId, filterMode, isAdmin, searchQuery, dayFilter, tagFilter, sortBy, statusFilter, pageSize, currentPage]);
 
-  // Client-side filtering and sorting - applied to all fetched students
+  // Server handles search/tag/day/sort. Just mirror the response.
   useEffect(() => {
-    let result = [...students]; // Always copy to prevent mutation
-
-    // Filter by status
-    if (isAdmin && statusFilter !== 'all') {
-      result = result.filter((s) => {
-        const isActive = s.is_active !== false;
-        return statusFilter === 'active' ? isActive : !isActive;
-      });
-    } else if (!isAdmin && canViewInactive && statusFilter !== 'all') {
-      result = result.filter((s) => {
-        const isActive = s.is_active !== false;
-        return statusFilter === 'active' ? isActive : !isActive;
-      });
-    }
-
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      result = result.filter((s) => {
-        const name = (s.name || '').toLowerCase();
-        const phone = (s.contact_phone || '').toLowerCase();
-        const identityNumber = (s.identity_number || s.national_id || '').toLowerCase();
-        const studentPhone = (s.phone || '').toLowerCase();
-        return name.includes(query) || phone.includes(query) || studentPhone.includes(query) || identityNumber.includes(query);
-      });
-    }
-
-    // Filter by day of week
-    if (dayFilter !== null) {
-      result = result.filter((s) => dayMatches(s.default_day_of_week, dayFilter));
-    }
-
-    // Filter by tag
-    if (tagFilter) {
-      result = result.filter((s) => {
-        const studentTags = s.tags || [];
-        return studentTags.includes(tagFilter);
-      });
-    }
-
-    // Sort
-    const comparator = getStudentComparator(sortBy);
-    result.sort(comparator);
-
-    setFilteredStudents(result);
-  }, [students, isAdmin, statusFilter, searchQuery, dayFilter, tagFilter, sortBy, canViewInactive]);
+    setFilteredStudents([...students]);
+  }, [students]);
 
   const handleResetFilters = () => {
     setSearchQuery('');
@@ -337,8 +308,47 @@ export default function StudentsPage() {
     setTagFilter('');
     setSortBy(STUDENT_SORT_OPTIONS.SCHEDULE);
     setStatusFilter('active');
+    setCurrentPage(1);
     
   };
+
+  const handleSearchQueryChange = (value) => {
+    setSearchQuery(value);
+    setCurrentPage(1);
+  };
+
+  const handleDayFilterChange = (value) => {
+    setDayFilter(value);
+    setCurrentPage(1);
+  };
+
+  const handleTagFilterChange = (value) => {
+    setTagFilter(value);
+    setCurrentPage(1);
+  };
+
+  const handleStatusFilterChange = (value) => {
+    setStatusFilter(value);
+    setCurrentPage(1);
+  };
+
+  const handlePageSizeChange = (value) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return;
+    }
+    setPageSize(parsed);
+    setCurrentPage(1);
+  };
+
+  const totalStudents = Number.isFinite(studentsPagination?.total) ? studentsPagination.total : filteredStudents.length;
+  const totalPages = Math.max(1, Math.ceil(totalStudents / Math.max(pageSize, 1)));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   // Check if any filters are active
   const hasActiveFilters = useMemo(() => {
@@ -593,20 +603,20 @@ export default function StudentsPage() {
 
             <StudentFilterSection
               searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
+              onSearchChange={handleSearchQueryChange}
               dayFilter={dayFilter}
-              onDayFilterChange={setDayFilter}
+              onDayFilterChange={handleDayFilterChange}
               tagFilter={tagFilter}
-              onTagFilterChange={setTagFilter}
+              onTagFilterChange={handleTagFilterChange}
               statusFilter={statusFilter}
-              onStatusFilterChange={setStatusFilter}
+              onStatusFilterChange={handleStatusFilterChange}
               sortBy={sortBy}
               onSortChange={setSortBy}
               hasActiveFilters={hasActiveFilters}
               onResetFilters={handleResetFilters}
               tags={tagOptions}
               showInstructorFilter={false}
-              canViewInactive={isAdmin || canViewInactive}
+              showStatusFilter={isAdmin || canViewInactive}
             />
           </CardHeader>
 
@@ -616,93 +626,144 @@ export default function StudentsPage() {
                 לא נמצאו תלמידים התואמים את הסינון.
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-right">שם</TableHead>
-                      <TableHead className="text-right">יום מפגש</TableHead>
-                      <TableHead className="text-right">שעת מפגש</TableHead>
-                      <TableHead className="text-right">סטטוס</TableHead>
-                      <TableHead className="text-right">פעולות</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredStudents.map((student) => {
-                      const isInactive = student.is_active === false;
-                      const missingIdentityNumber = !(student.identity_number || student.national_id)?.trim();
-                      const summary = complianceSummary[student.id] || {};
-                      const hasExpiredDocs = summary.expiredDocuments > 0;
+              <div>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-right">שם</TableHead>
+                        <TableHead className="text-right">יום מפגש</TableHead>
+                        <TableHead className="text-right">שעת מפגש</TableHead>
+                        <TableHead className="text-right">סטטוס</TableHead>
+                        <TableHead className="text-right">פעולות</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredStudents.map((student) => {
+                        const isInactive = student.is_active === false;
+                        const missingIdentityNumber = !(student.identity_number || student.national_id)?.trim();
+                        const summary = complianceSummary[student.id] || {};
+                        const hasExpiredDocs = summary.expiredDocuments > 0;
 
-                      return (
-                        <TableRow key={student.id}>
-                          <TableCell className="text-right">
-                            <div className="flex flex-col gap-1">
-                              <Link
-                                to={`/students/${student.id}`}
-                                className="font-medium text-primary hover:underline"
-                              >
-                                {formatStudentName(student)}
-                              </Link>
-                              {isInactive && (
-                                <Badge variant="secondary" className="w-fit bg-neutral-200 text-neutral-700">
-                                  לא פעיל
-                                </Badge>
-                              )}
-                              {missingIdentityNumber && (
-                                <Badge variant="destructive" className="w-fit gap-1">
-                                  <AlertCircle className="h-3 w-3" />
-                                  <span>חסרה תעודת זהות</span>
-                                </Badge>
-                              )}
-                              {hasExpiredDocs && (
-                                <Badge variant="destructive" className="w-fit gap-1">
-                                  <FileWarning className="h-3 w-3" />
-                                  <span>{summary.expiredDocuments} מסמכים שפג תוקפם</span>
-                                </Badge>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {student.default_day_of_week
-                              ? DAY_NAMES[student.default_day_of_week]
-                              : '—'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {student.default_session_time
-                              ? formatDefaultTime(student.default_session_time)
-                              : '—'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {isInactive ? (
-                              <Badge variant="secondary">לא פעיל</Badge>
-                            ) : (
-                              <Badge variant="success">פעיל</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center gap-2">
-                              <Link to={`/students/${student.id}`}>
-                                <Button variant="ghost" size="icon">
-                                  <User className="h-4 w-4" />
-                                </Button>
-                              </Link>
-                              {isAdmin && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleEditStudent(student)}
+                        return (
+                          <TableRow key={student.id}>
+                            <TableCell className="text-right">
+                              <div className="flex flex-col gap-1">
+                                <Link
+                                  to={`/students/${student.id}`}
+                                  className="font-medium text-primary hover:underline"
                                 >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
+                                  {formatStudentName(student)}
+                                </Link>
+                                {isInactive && (
+                                  <Badge variant="secondary" className="w-fit bg-neutral-200 text-neutral-700">
+                                    לא פעיל
+                                  </Badge>
+                                )}
+                                {missingIdentityNumber && (
+                                  <Badge variant="destructive" className="w-fit gap-1">
+                                    <AlertCircle className="h-3 w-3" />
+                                    <span>חסרה תעודת זהות</span>
+                                  </Badge>
+                                )}
+                                {hasExpiredDocs && (
+                                  <Badge variant="destructive" className="w-fit gap-1">
+                                    <FileWarning className="h-3 w-3" />
+                                    <span>{summary.expiredDocuments} מסמכים שפג תוקפם</span>
+                                  </Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {student.default_day_of_week
+                                ? DAY_NAMES[student.default_day_of_week]
+                                : '—'}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {student.default_session_time
+                                ? formatDefaultTime(student.default_session_time)
+                                : '—'}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {isInactive ? (
+                                <Badge variant="secondary">לא פעיל</Badge>
+                              ) : (
+                                <Badge variant="success">פעיל</Badge>
                               )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center gap-2">
+                                <Link to={`/students/${student.id}`}>
+                                  <Button variant="ghost" size="icon">
+                                    <User className="h-4 w-4" />
+                                  </Button>
+                                </Link>
+                                {isAdmin && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleEditStudent(student)}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    מציג
+                    {' '}
+                    {totalStudents === 0 ? 0 : pageOffset + 1}
+                    {' '}
+                    -
+                    {' '}
+                    {Math.min(pageOffset + filteredStudents.length, totalStudents)}
+                    {' '}
+                    מתוך
+                    {' '}
+                    {totalStudents}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
+                      <SelectTrigger className="w-[110px]">
+                        <SelectValue placeholder="כמות" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="25">25</SelectItem>
+                        <SelectItem value="50">50</SelectItem>
+                        <SelectItem value="100">100</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                    >
+                      הקודם
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      עמוד {currentPage} מתוך {totalPages}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!studentsPagination?.hasMore}
+                      onClick={() => setCurrentPage((prev) => prev + 1)}
+                    >
+                      הבא
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
           </CardContent>

@@ -458,6 +458,52 @@ function determineStatusFilter(query, canViewInactive = true) {
   return 'active';
 }
 
+function parsePagination(query) {
+  const rawLimit = Number.parseInt(normalizeString(query?.limit) || '', 10);
+  const rawOffset = Number.parseInt(normalizeString(query?.offset) || '', 10);
+
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : 25;
+  const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+
+  return { limit, offset };
+}
+
+function parseDayFilter(query) {
+  const rawDay = normalizeString(
+    query?.day ?? query?.day_of_week ?? query?.default_day_of_week,
+  );
+
+  if (!rawDay) {
+    return null;
+  }
+
+  const parsedDay = Number.parseInt(rawDay, 10);
+  if (!Number.isInteger(parsedDay) || parsedDay < 1 || parsedDay > 7) {
+    return Number.NaN;
+  }
+
+  return parsedDay;
+}
+
+function parseSortOrder(query) {
+  const raw = normalizeString(query?.sort ?? query?.sort_by);
+  if (raw === 'name') return 'name';
+  return 'schedule'; // default: day → time → name
+}
+
+function escapeILikeValue(value) {
+  return String(value || '').replace(/[%_,]/g, '');
+}
+
+function isPaginationRequested(query) {
+  const parsed = coerceBooleanFlag(query?.pagination ?? query?.paginated, {
+    defaultValue: false,
+    allowUndefined: true,
+  });
+
+  return Boolean(parsed.valid && parsed.value);
+}
+
 export default async function handler(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
   if (!['GET', 'POST', 'PUT'].includes(method)) {
@@ -525,6 +571,17 @@ export default async function handler(context, req) {
 
   // GET: Fetch students list with role-based filtering
   if (method === 'GET') {
+    const paginationRequested = isPaginationRequested(req?.query);
+    const { limit, offset } = parsePagination(req?.query);
+    const dayFilter = parseDayFilter(req?.query);
+    const sortOrder = parseSortOrder(req?.query);
+    const searchTerm = normalizeString(req?.query?.search);
+    const tagFilter = normalizeString(req?.query?.tag ?? req?.query?.tags);
+
+    if (Number.isNaN(dayFilter)) {
+      return respond(context, 400, { message: 'invalid_day_filter' });
+    }
+
     let instructorsCanViewInactive = true; // Default for admins
     
     // Non-admin users need to check the setting
@@ -552,8 +609,21 @@ export default async function handler(context, req) {
 
     let builder = tenantClient
       .from('students')
-      .select('*')
-      .order('first_name', { ascending: true });
+      .select('*', paginationRequested ? { count: 'exact' } : undefined);
+
+    if (sortOrder === 'name') {
+      builder = builder
+        .order('first_name', { ascending: true })
+        .order('middle_name', { ascending: true, nullsFirst: false })
+        .order('last_name', { ascending: true });
+    } else {
+      // schedule (default): day → time → first name → last name
+      builder = builder
+        .order('default_day_of_week', { ascending: true, nullsFirst: false })
+        .order('default_session_time', { ascending: true, nullsFirst: false })
+        .order('first_name', { ascending: true })
+        .order('last_name', { ascending: true });
+    }
 
     let instructorFilterId = '';
 
@@ -587,7 +657,18 @@ export default async function handler(context, req) {
       }
 
       if (!studentIds.length) {
-        return respond(context, 200, []);
+        if (!paginationRequested) {
+          return respond(context, 200, []);
+        }
+
+        return respond(context, 200, {
+          data: [],
+          total: 0,
+          page_size: limit,
+          page: Math.floor(offset / limit) + 1,
+          offset,
+          has_more: false,
+        });
       }
 
       builder = builder.in('id', studentIds);
@@ -601,16 +682,67 @@ export default async function handler(context, req) {
       builder = builder.eq('is_active', false);
     }
 
-    builder = builder.or('metadata->intake_dismissal->>active.is.null,metadata->intake_dismissal->>active.neq.true');
+    builder = builder.not('metadata->intake_dismissal->>active', 'eq', 'true');
 
-    const { data, error } = await builder;
+    if (searchTerm) {
+      const sanitizedSearch = escapeILikeValue(searchTerm);
+      builder = builder.or(
+        [
+          `first_name.ilike.%${sanitizedSearch}%`,
+          `middle_name.ilike.%${sanitizedSearch}%`,
+          `last_name.ilike.%${sanitizedSearch}%`,
+          `identity_number.ilike.%${sanitizedSearch}%`,
+          `phone.ilike.%${sanitizedSearch}%`,
+          `email.ilike.%${sanitizedSearch}%`,
+        ].join(','),
+      );
+    }
+
+    if (tagFilter) {
+      const normalizedTags = tagFilter
+        .split(',')
+        .map((value) => normalizeString(value))
+        .filter(Boolean);
+
+      if (normalizedTags.length) {
+        builder = builder.contains('tags', [normalizedTags[0]]);
+      }
+    }
+
+    if (dayFilter !== null) {
+      builder = builder.eq('default_day_of_week', dayFilter);
+    }
+
+    if (paginationRequested) {
+      builder = builder.range(offset, offset + limit - 1);
+    }
+
+    const { data, error, count } = await builder;
 
     if (error) {
       context.log?.error?.('students-list failed to fetch roster', { message: error.message });
       return respond(context, 500, { message: 'failed_to_load_students' });
     }
 
-    return respond(context, 200, Array.isArray(data) ? data : []);
+    const normalizedData = Array.isArray(data) ? data : [];
+
+    if (!paginationRequested) {
+      return respond(context, 200, normalizedData);
+    }
+
+    const total = Number.isFinite(count) ? count : normalizedData.length;
+    const pageSize = limit;
+    const page = Math.floor(offset / pageSize) + 1;
+    const hasMore = offset + normalizedData.length < total;
+
+    return respond(context, 200, {
+      data: normalizedData,
+      total,
+      page_size: pageSize,
+      page,
+      offset,
+      has_more: hasMore,
+    });
   }
 
   // POST and PUT require admin or office role

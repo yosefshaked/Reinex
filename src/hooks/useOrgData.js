@@ -249,9 +249,24 @@ export function useStudents(options = {}) {
     session,
     resetOnDisable = true,
     extraParams = {},
+    pagination = false,
+    limit = 25,
+    offset = 0,
+    search = '',
+    tag = '',
+    day = '',
+    sortBy = 'schedule',
   } = options;
 
-  const params = useMemo(() => ({ status, ...extraParams }), [status, extraParams]);
+  const params = useMemo(() => ({
+    status,
+    ...(pagination ? { pagination: '1', limit, offset } : {}),
+    ...(search ? { search } : {}),
+    ...(tag ? { tag } : {}),
+    ...(day ? { day } : {}),
+    sort: sortBy,
+    ...extraParams,
+  }), [status, pagination, limit, offset, search, tag, day, sortBy, extraParams]);
 
   const { data, loading, error, refetch } = useOrgDataResource({
     resource: 'students',
@@ -263,8 +278,23 @@ export function useStudents(options = {}) {
     params,
   });
 
+  const students = pagination && data && typeof data === 'object' && Array.isArray(data.data)
+    ? data.data
+    : (Array.isArray(data) ? data : []);
+
+  const paginationInfo = pagination && data && typeof data === 'object'
+    ? {
+        total: Number.isFinite(data.total) ? data.total : students.length,
+        pageSize: Number.isFinite(data.page_size) ? data.page_size : limit,
+        page: Number.isFinite(data.page) ? data.page : (Math.floor(offset / Math.max(limit, 1)) + 1),
+        offset: Number.isFinite(data.offset) ? data.offset : offset,
+        hasMore: Boolean(data.has_more),
+      }
+    : null;
+
   return {
-    students: data,
+    students,
+    studentsPagination: paginationInfo,
     loadingStudents: loading,
     studentsError: error,
     refetchStudents: refetch,
