@@ -19,8 +19,7 @@ import { assignLooseSession, createAndAssignLooseSession } from '@/features/sess
 import { mapLooseSessionError } from '@/lib/error-mapping.js';
 import AddStudentForm from '@/features/admin/components/AddStudentForm.jsx';
 import { formatStudentName } from '@/features/students/utils/name-utils.js';
-
-const DAY_NAMES = ['', 'ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+import { DAY_NAMES } from '@/features/students/utils/schedule.js';
 
 const RESOLUTION_MODE = Object.freeze({
   SELECT: 'select',
@@ -453,14 +452,11 @@ export default function BulkResolvePendingReportsDialog({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">כל הימים</SelectItem>
-                        {DAY_NAMES.map((day, index) => {
-                          if (index === 0) return null;
-                          return (
-                            <SelectItem key={index} value={String(index)}>
-                              {day}
-                            </SelectItem>
-                          );
-                        })}
+                        {Object.entries(DAY_NAMES).map(([dayValue, dayLabel]) => (
+                          <SelectItem key={dayValue} value={dayValue}>
+                            {dayLabel}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>

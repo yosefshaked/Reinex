@@ -11,16 +11,7 @@ import { Loader2, AlertCircle, Trash2, Pencil, X, RotateCcw } from 'lucide-react
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
-
-const DAYS_OF_WEEK = [
-  { value: 0, label: 'ראשון' },
-  { value: 1, label: 'שני' },
-  { value: 2, label: 'שלישי' },
-  { value: 3, label: 'רביעי' },
-  { value: 4, label: 'חמישי' },
-  { value: 5, label: 'שישי' },
-  { value: 6, label: 'שבת' },
-];
+import { DAY_OPTIONS, normalizeDayToken } from '@/lib/day-of-week.js';
 
 function formatTime(timeString) {
   if (!timeString) return '';
@@ -67,7 +58,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
   const [formData, setFormData] = useState({
     instructor_employee_id: '',
     service_id: '',
-    day_of_week: 0,
+    day_of_week: '',
     time_of_day: '09:00',
     duration_minutes: 60,
     valid_from: '',
@@ -101,7 +92,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
       setFormData({
         instructor_employee_id: template.instructor_employee_id || '',
         service_id: template.service_id || '',
-        day_of_week: template.day_of_week ?? 0,
+        day_of_week: normalizeDayToken(template.day_of_week) || '',
         time_of_day: formatTime(template.time_of_day) || '09:00',
         duration_minutes: template.duration_minutes || 60,
         valid_from: template.valid_from || '',
@@ -148,7 +139,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
   const studentName = getPersonName(template.student);
   const instructorName = getPersonName(template.instructor);
   const serviceName = template.service?.name || '—';
-  const dayLabel = DAYS_OF_WEEK.find((d) => d.value === template.day_of_week)?.label || '—';
+  const dayLabel = DAY_OPTIONS.find((d) => d.value === normalizeDayToken(template.day_of_week))?.label || '—';
   const activeServices = (services || []).filter((s) => s?.is_active === true);
 
   async function handleSave() {
@@ -162,8 +153,8 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
     if (formData.service_id !== template.service_id) {
       updates.service_id = formData.service_id;
     }
-    if (Number(formData.day_of_week) !== template.day_of_week) {
-      updates.day_of_week = Number(formData.day_of_week);
+    if (normalizeDayToken(formData.day_of_week) !== normalizeDayToken(template.day_of_week)) {
+      updates.day_of_week = formData.day_of_week;
     }
     if (formData.time_of_day !== formatTime(template.time_of_day)) {
       updates.time_of_day = formData.time_of_day;
@@ -601,15 +592,15 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
             <div>
               <Label htmlFor="edit-day">יום בשבוע *</Label>
               <Select
-                value={String(formData.day_of_week)}
-                onValueChange={(value) => setFormData((prev) => ({ ...prev, day_of_week: Number(value) }))}
+                value={formData.day_of_week || undefined}
+                onValueChange={(value) => setFormData((prev) => ({ ...prev, day_of_week: value }))}
               >
                 <SelectTrigger id="edit-day">
                   <SelectValue placeholder="בחר יום" />
                 </SelectTrigger>
                 <SelectContent>
-                  {DAYS_OF_WEEK.map((day) => (
-                    <SelectItem key={day.value} value={String(day.value)}>
+                  {DAY_OPTIONS.map((day) => (
+                    <SelectItem key={day.value} value={day.value}>
                       {day.label}
                     </SelectItem>
                   ))}

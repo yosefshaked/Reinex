@@ -863,11 +863,8 @@ export default function StudentDetailPage() {
   const identityNumber = student?.identity_number || student?.national_id || '';
   const notes = typeof student?.notes === 'string' ? student.notes.trim() : '';
   const defaultService = student?.default_service || 'לא הוגדר';
-  const templateDayOfWeek = typeof lessonTemplate?.day_of_week === 'number'
-    ? lessonTemplate.day_of_week + 1
-    : null;
   const scheduleDescription = lessonTemplate
-    ? describeSchedule(templateDayOfWeek, lessonTemplate?.time_of_day)
+    ? describeSchedule(lessonTemplate?.day_of_week, lessonTemplate?.time_of_day)
     : describeSchedule(student?.default_day_of_week, student?.default_session_time);
   const tagDisplayList = buildTagDisplayList(student?.tags, tagCatalog);
   const isTagsLoading = tagsState === REQUEST_STATE.loading;

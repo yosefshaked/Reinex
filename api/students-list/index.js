@@ -13,6 +13,7 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { normalizeDayToken, daySortValue } from '../_shared/day-of-week.js';
 import {
   coerceBooleanFlag,
   coerceIdentityNumber,
@@ -114,10 +115,8 @@ function compareNameParts(left, right) {
 }
 
 function compareScheduleEntries(left, right) {
-  const leftDay = Number.parseInt(left?.default_day_of_week, 10);
-  const rightDay = Number.parseInt(right?.default_day_of_week, 10);
-  const safeLeftDay = Number.isInteger(leftDay) ? leftDay : Number.POSITIVE_INFINITY;
-  const safeRightDay = Number.isInteger(rightDay) ? rightDay : Number.POSITIVE_INFINITY;
+  const safeLeftDay = daySortValue(left?.default_day_of_week);
+  const safeRightDay = daySortValue(right?.default_day_of_week);
 
   if (safeLeftDay !== safeRightDay) {
     return safeLeftDay - safeRightDay;
@@ -163,12 +162,28 @@ async function fetchPrimarySchedulesByStudentIds(tenantClient, studentIds) {
       continue;
     }
 
+    const normalizedDay = normalizeDayToken(row?.day_of_week);
     const candidate = {
-      default_day_of_week: row?.day_of_week ?? null,
+      default_day_of_week: normalizedDay,
       default_session_time: row?.time_of_day ?? null,
+      active_template_count: 1,
+      has_multiple_templates: false,
     };
 
-    schedules.set(studentId, choosePrimarySchedule(schedules.get(studentId), candidate));
+    const existing = schedules.get(studentId);
+    if (!existing) {
+      schedules.set(studentId, candidate);
+      continue;
+    }
+
+    const mergedCount = (existing.active_template_count || 1) + 1;
+    const primary = choosePrimarySchedule(existing, candidate);
+
+    schedules.set(studentId, {
+      ...primary,
+      active_template_count: mergedCount,
+      has_multiple_templates: mergedCount > 1,
+    });
   }
 
   return { data: schedules, error: null };
@@ -179,13 +194,21 @@ function mergeStudentSchedules(students, scheduleMap) {
     const derivedSchedule = scheduleMap.get(student.id);
 
     if (!derivedSchedule) {
-      return student;
+      return {
+        ...student,
+        default_day_of_week: normalizeDayToken(student.default_day_of_week),
+        active_template_count: 0,
+        has_multiple_templates: false,
+      };
     }
 
     return {
       ...student,
-      default_day_of_week: student.default_day_of_week ?? derivedSchedule.default_day_of_week,
-      default_session_time: student.default_session_time ?? derivedSchedule.default_session_time,
+      // lesson_templates is the source of truth for schedule in Reinex.
+      default_day_of_week: derivedSchedule.default_day_of_week,
+      default_session_time: derivedSchedule.default_session_time,
+      active_template_count: derivedSchedule.active_template_count || 1,
+      has_multiple_templates: Boolean(derivedSchedule.has_multiple_templates),
     };
   });
 }
@@ -587,8 +610,8 @@ function parseDayFilter(query) {
     return null;
   }
 
-  const parsedDay = Number.parseInt(rawDay, 10);
-  if (!Number.isInteger(parsedDay) || parsedDay < 1 || parsedDay > 7) {
+  const parsedDay = normalizeDayToken(rawDay);
+  if (!parsedDay) {
     return Number.NaN;
   }
 
@@ -842,7 +865,7 @@ export default async function handler(context, req) {
     if (requiresDerivedSchedule) {
       if (dayFilter !== null) {
         normalizedData = normalizedData.filter(
-          (student) => Number.parseInt(student?.default_day_of_week, 10) === dayFilter,
+          (student) => normalizeDayToken(student?.default_day_of_week) === dayFilter,
         );
       }
 

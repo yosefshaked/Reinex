@@ -644,6 +644,10 @@ export default function StudentsPage() {
                         const missingIdentityNumber = !(student.identity_number || student.national_id)?.trim();
                         const summary = complianceSummary[student.id] || {};
                         const hasExpiredDocs = summary.expiredDocuments > 0;
+                        const activeTemplateCount = Number.parseInt(student?.active_template_count, 10);
+                        const extraTemplateCount = Number.isInteger(activeTemplateCount) && activeTemplateCount > 1
+                          ? activeTemplateCount - 1
+                          : 0;
 
                         return (
                           <TableRow key={student.id}>
@@ -675,9 +679,18 @@ export default function StudentsPage() {
                               </div>
                             </TableCell>
                             <TableCell className="text-right">
-                              {student.default_day_of_week
-                                ? DAY_NAMES[student.default_day_of_week]
-                                : '—'}
+                              <div className="flex items-center justify-end gap-2">
+                                <span>
+                                  {student.default_day_of_week
+                                    ? DAY_NAMES[student.default_day_of_week] || '—'
+                                    : '—'}
+                                </span>
+                                {extraTemplateCount > 0 ? (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
+                                    +{extraTemplateCount}
+                                  </Badge>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell className="text-right">
                               {student.default_session_time

@@ -1,4 +1,4 @@
-import { normalizeDay } from './schedule.js';
+import { daySortValue } from '@/lib/day-of-week.js';
 import { formatInstructorName, formatStudentName } from '@/lib/format-name.js';
 
 /**
@@ -68,13 +68,10 @@ function compareInstructorNames(nameA, nameB) {
  */
 export function compareStudentsBySchedule(a, b, instructorMap = new Map()) {
   // 1. Compare by day of week
-  const dayA = normalizeDay(a?.default_day_of_week);
-  const dayB = normalizeDay(b?.default_day_of_week);
-  
-  // Nulls go to the end
-  if (dayA === null && dayB !== null) return 1;
-  if (dayA !== null && dayB === null) return -1;
-  if (dayA !== null && dayB !== null && dayA !== dayB) {
+  const dayA = daySortValue(a?.default_day_of_week);
+  const dayB = daySortValue(b?.default_day_of_week);
+
+  if (dayA !== dayB) {
     return dayA - dayB;
   }
   
@@ -137,12 +134,10 @@ export function getStudentComparator(sortBy, instructorMap = new Map()) {
     case STUDENT_SORT_OPTIONS.INSTRUCTOR:
       return (a, b) => {
         // 1. Compare by day of week
-        const dayA = normalizeDay(a?.default_day_of_week);
-        const dayB = normalizeDay(b?.default_day_of_week);
-        
-        if (dayA === null && dayB !== null) return 1;
-        if (dayA !== null && dayB === null) return -1;
-        if (dayA !== null && dayB !== null && dayA !== dayB) {
+        const dayA = daySortValue(a?.default_day_of_week);
+        const dayB = daySortValue(b?.default_day_of_week);
+
+        if (dayA !== dayB) {
           return dayA - dayB;
         }
         

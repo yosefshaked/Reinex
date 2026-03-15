@@ -13,16 +13,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ComboBoxField } from '@/components/ui/forms-ui';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
-
-const DAYS_OF_WEEK = [
-  { value: 0, label: 'ראשון' },
-  { value: 1, label: 'שני' },
-  { value: 2, label: 'שלישי' },
-  { value: 3, label: 'רביעי' },
-  { value: 4, label: 'חמישי' },
-  { value: 5, label: 'שישי' },
-  { value: 6, label: 'שבת' },
-];
+import { DAY_OPTIONS, normalizeDayToken } from '@/lib/day-of-week.js';
 
 function formatTemplateTime(timeString) {
   if (!timeString) return '—';
@@ -31,7 +22,8 @@ function formatTemplateTime(timeString) {
 }
 
 function dayLabel(day) {
-  return DAYS_OF_WEEK.find((entry) => entry.value === day)?.label || '—';
+  const normalized = normalizeDayToken(day);
+  return DAY_OPTIONS.find((entry) => entry.value === normalized)?.label || '—';
 }
 
 function personName(person) {
@@ -79,7 +71,7 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
     student_id: '',
     instructor_employee_id: defaultInstructorId || '',
     service_id: '',
-    day_of_week: defaultDayOfWeek ?? '',
+    day_of_week: normalizeDayToken(defaultDayOfWeek) || '',
     time_of_day: '09:00',
     duration_minutes: 60,
     valid_from: new Date().toISOString().split('T')[0],
@@ -96,7 +88,7 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
         student_id: '',
         instructor_employee_id: defaultInstructorId || '',
         service_id: '',
-        day_of_week: defaultDayOfWeek ?? '',
+        day_of_week: normalizeDayToken(defaultDayOfWeek) || '',
         time_of_day: '09:00',
         duration_minutes: 60,
         valid_from: new Date().toISOString().split('T')[0],
@@ -218,7 +210,7 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
     const localConflict = activeExistingTemplates.find((template) => {
       if (template.student_id !== formData.student_id) return false;
       if (template.instructor_employee_id !== formData.instructor_employee_id) return false;
-      if (Number(template.day_of_week) !== Number(formData.day_of_week)) return false;
+      if (normalizeDayToken(template.day_of_week) !== normalizeDayToken(formData.day_of_week)) return false;
       if (normalizeTemplateTimeForCompare(template.time_of_day) !== normalizeTemplateTimeForCompare(formData.time_of_day)) return false;
       return rangeOverlap(template.valid_from, template.valid_until, formData.valid_from, formData.valid_until || null);
     });
@@ -232,7 +224,7 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
       student_id: formData.student_id,
       instructor_employee_id: formData.instructor_employee_id,
       service_id: formData.service_id,
-      day_of_week: Number(formData.day_of_week),
+      day_of_week: formData.day_of_week,
       time_of_day: formData.time_of_day,
       duration_minutes: Number(formData.duration_minutes),
       valid_from: formData.valid_from,
@@ -403,15 +395,15 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
           <div>
             <Label htmlFor="template-day">יום בשבוע *</Label>
             <Select
-              value={formData.day_of_week !== '' && formData.day_of_week !== null ? String(formData.day_of_week) : undefined}
-              onValueChange={(value) => setFormData((prev) => ({ ...prev, day_of_week: Number(value) }))}
+              value={formData.day_of_week ? String(formData.day_of_week) : undefined}
+              onValueChange={(value) => setFormData((prev) => ({ ...prev, day_of_week: value }))}
             >
               <SelectTrigger id="template-day">
                 <SelectValue placeholder="בחר יום" />
               </SelectTrigger>
               <SelectContent>
-                {DAYS_OF_WEEK.map((day) => (
-                  <SelectItem key={day.value} value={String(day.value)}>
+                {DAY_OPTIONS.map((day) => (
+                  <SelectItem key={day.value} value={day.value}>
                     {day.label}
                   </SelectItem>
                 ))}

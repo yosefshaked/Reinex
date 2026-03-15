@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { TextField, SelectField, DayOfWeekField, TimeField } from '@/components/ui/forms-ui';
+import { normalizeDayToken } from '@/lib/day-of-week.js';
 
 const DEFAULT_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 const DEFAULT_DURATION_MINUTES = 45;
@@ -22,7 +23,7 @@ function formatTimeValue(value) {
 }
 
 function buildInitialState(template, defaultServiceId) {
-  const dayOfWeek = typeof template?.day_of_week === 'number' ? template.day_of_week + 1 : null;
+  const dayOfWeek = normalizeDayToken(template?.day_of_week);
   return {
     instructorEmployeeId: template?.instructor_employee_id || '',
     serviceId: template?.service_id || defaultServiceId || DEFAULT_SERVICE_ID,
@@ -111,8 +112,8 @@ export default function StudentScheduleDialog({
       return;
     }
 
-    const normalizedDay = Number(values.dayOfWeek) - 1;
-    if (Number.isNaN(normalizedDay) || normalizedDay < 0 || normalizedDay > 6) {
+    const normalizedDay = normalizeDayToken(values.dayOfWeek);
+    if (!normalizedDay) {
       return;
     }
 

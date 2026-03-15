@@ -521,7 +521,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_templates (
   student_id uuid NOT NULL,
   instructor_employee_id uuid NOT NULL,
   service_id uuid NOT NULL,
-  day_of_week int NOT NULL,
+  day_of_week text NOT NULL,
   time_of_day time NOT NULL,
   duration_minutes int NOT NULL,
   valid_from date NOT NULL,
@@ -541,7 +541,7 @@ ALTER TABLE public.lesson_templates
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS instructor_employee_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
-  ADD COLUMN IF NOT EXISTS day_of_week int,
+  ADD COLUMN IF NOT EXISTS day_of_week text,
   ADD COLUMN IF NOT EXISTS time_of_day time,
   ADD COLUMN IF NOT EXISTS duration_minutes int,
   ADD COLUMN IF NOT EXISTS valid_from date,
@@ -599,12 +599,30 @@ END $$;
 DO $$
 BEGIN
   ALTER TABLE public.lesson_templates
-    ADD CONSTRAINT lesson_templates_day_of_week_check
-    CHECK (day_of_week BETWEEN 0 AND 6);
+    ALTER COLUMN day_of_week TYPE text
+    USING (
+      CASE
+        WHEN day_of_week::text = '0' THEN 'sunday'
+        WHEN day_of_week::text = '1' THEN 'monday'
+        WHEN day_of_week::text = '2' THEN 'tuesday'
+        WHEN day_of_week::text = '3' THEN 'wednesday'
+        WHEN day_of_week::text = '4' THEN 'thursday'
+        WHEN day_of_week::text = '5' THEN 'friday'
+        WHEN day_of_week::text = '6' THEN 'saturday'
+        ELSE lower(day_of_week::text)
+      END
+    );
 EXCEPTION
-  WHEN duplicate_object THEN
+  WHEN undefined_column THEN
     NULL;
 END $$;
+
+ALTER TABLE public.lesson_templates
+  DROP CONSTRAINT IF EXISTS lesson_templates_day_of_week_check;
+
+ALTER TABLE public.lesson_templates
+  ADD CONSTRAINT lesson_templates_day_of_week_check
+  CHECK (day_of_week IN ('sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'));
 
 CREATE INDEX IF NOT EXISTS lesson_templates_student_id_idx ON public.lesson_templates (student_id);
 CREATE INDEX IF NOT EXISTS lesson_templates_instructor_day_time_idx ON public.lesson_templates (instructor_employee_id, day_of_week, time_of_day);

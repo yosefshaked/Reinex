@@ -2,6 +2,7 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { normalizeDayToken, daySortValue } from '../_shared/day-of-week.js';
 import {
   UUID_PATTERN,
   ensureMembership,
@@ -23,11 +24,16 @@ function normalizeUuid(value) {
 }
 
 function normalizeDayOfWeek(value) {
-  const num = Number(value);
-  if (!Number.isInteger(num) || num < 0 || num > 6) {
-    return null;
+  return normalizeDayToken(value);
+}
+
+function compareTemplatesByDayAndTime(left, right) {
+  const dayDiff = daySortValue(left?.day_of_week) - daySortValue(right?.day_of_week);
+  if (dayDiff !== 0) {
+    return dayDiff;
   }
-  return num;
+
+  return String(left?.time_of_day || '').localeCompare(String(right?.time_of_day || ''));
 }
 
 function normalizeTime(value) {
@@ -262,9 +268,7 @@ export default async function lessonTemplates(context, req) {
 
       let query = tenantClient
         .from('lesson_templates')
-        .select(buildTemplateSelect({ includeStudent: true }))
-        .order('day_of_week', { ascending: true })
-        .order('time_of_day', { ascending: true });
+        .select(buildTemplateSelect({ includeStudent: true }));
 
       if (!showInactive) {
         query = query.eq('is_active', true);
@@ -281,7 +285,10 @@ export default async function lessonTemplates(context, req) {
         return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
       }
 
-      return respond(context, 200, Array.isArray(data) ? data : []);
+      const rows = Array.isArray(data) ? [...data] : [];
+      rows.sort(compareTemplatesByDayAndTime);
+
+      return respond(context, 200, rows);
     }
 
     // Mode 2: Student-scoped (existing behavior — student detail page)

@@ -13,6 +13,7 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
+import { dayTokenForDate, normalizeDayToken } from '../_shared/day-of-week.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 const MAX_GENERATION_DAYS = 31;
@@ -33,11 +34,6 @@ function enumerateDates(startDate, endDate) {
   }
 
   return dates;
-}
-
-function dayOfWeekForDate(dateString) {
-  const date = new Date(`${dateString}T00:00:00Z`);
-  return date.getUTCDay();
 }
 
 function normalizeTimeHms(timeValue) {
@@ -435,7 +431,7 @@ export default async function calendarGenerate(context, req) {
     }
 
     for (const date of dates) {
-      if (dayOfWeekForDate(date) !== Number(template.day_of_week)) {
+      if (dayTokenForDate(date) !== normalizeDayToken(template.day_of_week)) {
         continue;
       }
 

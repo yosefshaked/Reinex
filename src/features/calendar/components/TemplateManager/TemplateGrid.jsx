@@ -1,16 +1,7 @@
 import { useMemo } from 'react';
 import { Clock, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const DAYS_OF_WEEK = [
-  { value: 0, label: 'ראשון', labelShort: 'א׳' },
-  { value: 1, label: 'שני', labelShort: 'ב׳' },
-  { value: 2, label: 'שלישי', labelShort: 'ג׳' },
-  { value: 3, label: 'רביעי', labelShort: 'ד׳' },
-  { value: 4, label: 'חמישי', labelShort: 'ה׳' },
-  { value: 5, label: 'שישי', labelShort: 'ו׳' },
-  { value: 6, label: 'שבת', labelShort: 'ש׳' },
-];
+import { DAY_OPTIONS } from '@/lib/day-of-week.js';
 
 function formatTime(timeString) {
   if (!timeString) return '';
@@ -129,7 +120,7 @@ export function TemplateGrid({ templates, instructors, onTemplateClick, onCellCl
           </tr>
         </thead>
         <tbody>
-          {DAYS_OF_WEEK.map((day) => (
+          {DAY_OPTIONS.map((day) => (
             <tr key={day.value} className="group">
               {/* Day label */}
               <td className="border-b border-l border-gray-200 px-3 py-2 text-right text-sm font-medium text-gray-700 bg-gray-50/50 sticky right-0 z-10">
