@@ -596,6 +596,13 @@ EXCEPTION
     NULL;
 END $$;
 
+-- Drop trigger and old day constraint before changing day_of_week type.
+DROP TRIGGER IF EXISTS trg_lesson_templates_active_overlap_guard
+  ON public.lesson_templates;
+
+ALTER TABLE public.lesson_templates
+  DROP CONSTRAINT IF EXISTS lesson_templates_day_of_week_check;
+
 DO $$
 BEGIN
   ALTER TABLE public.lesson_templates
@@ -616,9 +623,6 @@ EXCEPTION
   WHEN undefined_column THEN
     NULL;
 END $$;
-
-ALTER TABLE public.lesson_templates
-  DROP CONSTRAINT IF EXISTS lesson_templates_day_of_week_check;
 
 ALTER TABLE public.lesson_templates
   ADD CONSTRAINT lesson_templates_day_of_week_check
