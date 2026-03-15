@@ -132,6 +132,15 @@ function compareScheduleEntries(left, right) {
   return compareNameParts(left, right);
 }
 
+function compareTemplateSchedule(left, right) {
+  const dayDiff = daySortValue(left?.day_of_week) - daySortValue(right?.day_of_week);
+  if (dayDiff !== 0) {
+    return dayDiff;
+  }
+
+  return parseTimeToMinutes(left?.time_of_day) - parseTimeToMinutes(right?.time_of_day);
+}
+
 function choosePrimarySchedule(currentValue, candidateValue) {
   if (!currentValue) {
     return candidateValue;
@@ -168,6 +177,12 @@ async function fetchPrimarySchedulesByStudentIds(tenantClient, studentIds) {
       default_session_time: row?.time_of_day ?? null,
       active_template_count: 1,
       has_multiple_templates: false,
+      templates: [
+        {
+          day_of_week: normalizedDay,
+          time_of_day: row?.time_of_day ?? null,
+        },
+      ],
     };
 
     const existing = schedules.get(studentId);
@@ -183,6 +198,10 @@ async function fetchPrimarySchedulesByStudentIds(tenantClient, studentIds) {
       ...primary,
       active_template_count: mergedCount,
       has_multiple_templates: mergedCount > 1,
+      templates: [
+        ...(Array.isArray(existing.templates) ? existing.templates : []),
+        ...(Array.isArray(candidate.templates) ? candidate.templates : []),
+      ],
     });
   }
 
@@ -199,8 +218,23 @@ function mergeStudentSchedules(students, scheduleMap) {
         default_day_of_week: normalizeDayToken(student.default_day_of_week),
         active_template_count: 0,
         has_multiple_templates: false,
+        additional_templates: [],
       };
     }
+
+    const allTemplates = Array.isArray(derivedSchedule.templates)
+      ? [...derivedSchedule.templates].sort(compareTemplateSchedule)
+      : [];
+    const primaryTemplateKey = `${derivedSchedule.default_day_of_week || ''}|${derivedSchedule.default_session_time || ''}`;
+    let skippedPrimary = false;
+    const additionalTemplates = allTemplates.filter((template) => {
+      const key = `${template?.day_of_week || ''}|${template?.time_of_day || ''}`;
+      if (!skippedPrimary && key === primaryTemplateKey) {
+        skippedPrimary = true;
+        return false;
+      }
+      return true;
+    });
 
     return {
       ...student,
@@ -209,6 +243,7 @@ function mergeStudentSchedules(students, scheduleMap) {
       default_session_time: derivedSchedule.default_session_time,
       active_template_count: derivedSchedule.active_template_count || 1,
       has_multiple_templates: Boolean(derivedSchedule.has_multiple_templates),
+      additional_templates: additionalTemplates,
     };
   });
 }

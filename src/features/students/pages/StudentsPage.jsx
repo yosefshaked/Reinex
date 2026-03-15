@@ -644,10 +644,22 @@ export default function StudentsPage() {
                         const missingIdentityNumber = !(student.identity_number || student.national_id)?.trim();
                         const summary = complianceSummary[student.id] || {};
                         const hasExpiredDocs = summary.expiredDocuments > 0;
+                        const additionalTemplates = Array.isArray(student?.additional_templates)
+                          ? student.additional_templates
+                          : [];
                         const activeTemplateCount = Number.parseInt(student?.active_template_count, 10);
                         const extraTemplateCount = Number.isInteger(activeTemplateCount) && activeTemplateCount > 1
                           ? activeTemplateCount - 1
                           : 0;
+                        const additionalTemplatesTitle = additionalTemplates.length
+                          ? additionalTemplates
+                            .map((template) => {
+                              const dayLabel = DAY_NAMES[template?.day_of_week] || 'יום לא מוגדר';
+                              const timeLabel = template?.time_of_day ? formatDefaultTime(template.time_of_day) : 'שעה לא מוגדרת';
+                              return `${dayLabel} • ${timeLabel}`;
+                            })
+                            .join('\n')
+                          : '';
 
                         return (
                           <TableRow key={student.id}>
@@ -679,17 +691,56 @@ export default function StudentsPage() {
                               </div>
                             </TableCell>
                             <TableCell className="text-right">
-                              <div className="flex items-center justify-end gap-2">
+                              <div className="flex items-center justify-end gap-2" dir="ltr">
+                                {extraTemplateCount > 0 ? (
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 min-w-6 rounded-full px-2 text-[10px]"
+                                        title={additionalTemplatesTitle || 'תבניות נוספות'}
+                                      >
+                                        +{extraTemplateCount}
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent align="end" className="w-64 text-right" dir="rtl">
+                                      <div className="space-y-2">
+                                        <p className="text-xs font-semibold text-neutral-700">
+                                          תבניות נוספות לתלמיד
+                                        </p>
+                                        {additionalTemplates.length ? (
+                                          <ul className="space-y-1 text-xs text-neutral-600">
+                                            {additionalTemplates.map((template, index) => {
+                                              const dayLabel = DAY_NAMES[template?.day_of_week] || 'יום לא מוגדר';
+                                              const timeLabel = template?.time_of_day
+                                                ? formatDefaultTime(template.time_of_day)
+                                                : 'שעה לא מוגדרת';
+
+                                              return (
+                                                <li key={`${student.id}-additional-template-${index}`} className="rounded border px-2 py-1">
+                                                  {dayLabel}
+                                                  {' '}
+                                                  •
+                                                  {' '}
+                                                  {timeLabel}
+                                                </li>
+                                              );
+                                            })}
+                                          </ul>
+                                        ) : (
+                                          <p className="text-xs text-neutral-500">לא נמצאו תבניות נוספות.</p>
+                                        )}
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                ) : null}
                                 <span>
                                   {student.default_day_of_week
                                     ? DAY_NAMES[student.default_day_of_week] || '—'
                                     : '—'}
                                 </span>
-                                {extraTemplateCount > 0 ? (
-                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
-                                    +{extraTemplateCount}
-                                  </Badge>
-                                ) : null}
                               </div>
                             </TableCell>
                             <TableCell className="text-right">
