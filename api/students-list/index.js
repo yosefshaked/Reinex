@@ -80,6 +80,116 @@ async function fetchStudentIdsByInstructor(tenantClient, instructorEmployeeId) {
   return { studentIds, error: null };
 }
 
+function parseTimeToMinutes(value) {
+  if (!value) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const parts = String(value).split(':');
+  if (parts.length < 2) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const hours = Number.parseInt(parts[0], 10);
+  const minutes = Number.parseInt(parts[1], 10);
+
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return (hours * 60) + minutes;
+}
+
+function compareNameParts(left, right) {
+  const leftName = [left?.first_name, left?.middle_name, left?.last_name]
+    .map((value) => normalizeString(value))
+    .filter(Boolean)
+    .join(' ');
+  const rightName = [right?.first_name, right?.middle_name, right?.last_name]
+    .map((value) => normalizeString(value))
+    .filter(Boolean)
+    .join(' ');
+
+  return leftName.localeCompare(rightName, 'he');
+}
+
+function compareScheduleEntries(left, right) {
+  const leftDay = Number.parseInt(left?.default_day_of_week, 10);
+  const rightDay = Number.parseInt(right?.default_day_of_week, 10);
+  const safeLeftDay = Number.isInteger(leftDay) ? leftDay : Number.POSITIVE_INFINITY;
+  const safeRightDay = Number.isInteger(rightDay) ? rightDay : Number.POSITIVE_INFINITY;
+
+  if (safeLeftDay !== safeRightDay) {
+    return safeLeftDay - safeRightDay;
+  }
+
+  const leftTime = parseTimeToMinutes(left?.default_session_time);
+  const rightTime = parseTimeToMinutes(right?.default_session_time);
+
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+
+  return compareNameParts(left, right);
+}
+
+function choosePrimarySchedule(currentValue, candidateValue) {
+  if (!currentValue) {
+    return candidateValue;
+  }
+
+  return compareScheduleEntries(candidateValue, currentValue) < 0 ? candidateValue : currentValue;
+}
+
+async function fetchPrimarySchedulesByStudentIds(tenantClient, studentIds) {
+  if (!Array.isArray(studentIds) || studentIds.length === 0) {
+    return { data: new Map(), error: null };
+  }
+
+  const { data, error } = await tenantClient
+    .from('lesson_templates')
+    .select('student_id, day_of_week, time_of_day')
+    .in('student_id', studentIds)
+    .eq('is_active', true);
+
+  if (error) {
+    return { data: new Map(), error };
+  }
+
+  const schedules = new Map();
+  for (const row of data || []) {
+    const studentId = normalizeString(row?.student_id);
+    if (!studentId) {
+      continue;
+    }
+
+    const candidate = {
+      default_day_of_week: row?.day_of_week ?? null,
+      default_session_time: row?.time_of_day ?? null,
+    };
+
+    schedules.set(studentId, choosePrimarySchedule(schedules.get(studentId), candidate));
+  }
+
+  return { data: schedules, error: null };
+}
+
+function mergeStudentSchedules(students, scheduleMap) {
+  return (students || []).map((student) => {
+    const derivedSchedule = scheduleMap.get(student.id);
+
+    if (!derivedSchedule) {
+      return student;
+    }
+
+    return {
+      ...student,
+      default_day_of_week: student.default_day_of_week ?? derivedSchedule.default_day_of_week,
+      default_session_time: student.default_session_time ?? derivedSchedule.default_session_time,
+    };
+  });
+}
+
 // Removed splitFullName - users now provide first_name, middle_name, last_name directly
 
 function buildStudentPayload(body) {
@@ -577,6 +687,7 @@ export default async function handler(context, req) {
     const sortOrder = parseSortOrder(req?.query);
     const searchTerm = normalizeString(req?.query?.search);
     const tagFilter = normalizeString(req?.query?.tag ?? req?.query?.tags);
+    const requiresDerivedSchedule = sortOrder === 'schedule' || dayFilter !== null;
 
     if (Number.isNaN(dayFilter)) {
       return respond(context, 400, { message: 'invalid_day_filter' });
@@ -615,13 +726,6 @@ export default async function handler(context, req) {
       builder = builder
         .order('first_name', { ascending: true })
         .order('middle_name', { ascending: true, nullsFirst: false })
-        .order('last_name', { ascending: true });
-    } else {
-      // schedule (default): day → time → first name → last name
-      builder = builder
-        .order('default_day_of_week', { ascending: true, nullsFirst: false })
-        .order('default_session_time', { ascending: true, nullsFirst: false })
-        .order('first_name', { ascending: true })
         .order('last_name', { ascending: true });
     }
 
@@ -709,11 +813,7 @@ export default async function handler(context, req) {
       }
     }
 
-    if (dayFilter !== null) {
-      builder = builder.eq('default_day_of_week', dayFilter);
-    }
-
-    if (paginationRequested) {
+    if (paginationRequested && !requiresDerivedSchedule) {
       builder = builder.range(offset, offset + limit - 1);
     }
 
@@ -724,19 +824,53 @@ export default async function handler(context, req) {
       return respond(context, 500, { message: 'failed_to_load_students' });
     }
 
-    const normalizedData = Array.isArray(data) ? data : [];
+    let normalizedData = Array.isArray(data) ? data : [];
+
+    const studentIds = normalizedData.map((student) => student?.id).filter(Boolean);
+    const { data: scheduleMap, error: scheduleError } = await fetchPrimarySchedulesByStudentIds(
+      tenantClient,
+      studentIds,
+    );
+
+    if (scheduleError) {
+      context.log?.error?.('students-list failed to load lesson templates for roster schedule', {
+        message: scheduleError.message,
+      });
+      return respond(context, 500, { message: 'failed_to_load_students' });
+    }
+
+    normalizedData = mergeStudentSchedules(normalizedData, scheduleMap);
+
+    if (requiresDerivedSchedule) {
+      if (dayFilter !== null) {
+        normalizedData = normalizedData.filter(
+          (student) => Number.parseInt(student?.default_day_of_week, 10) === dayFilter,
+        );
+      }
+
+      if (sortOrder === 'schedule') {
+        normalizedData.sort(compareScheduleEntries);
+      } else {
+        normalizedData.sort(compareNameParts);
+      }
+    }
 
     if (!paginationRequested) {
       return respond(context, 200, normalizedData);
     }
 
-    const total = Number.isFinite(count) ? count : normalizedData.length;
+    const total = requiresDerivedSchedule
+      ? normalizedData.length
+      : (Number.isFinite(count) ? count : normalizedData.length);
     const pageSize = limit;
     const page = Math.floor(offset / pageSize) + 1;
-    const hasMore = offset + normalizedData.length < total;
+    const pagedData = requiresDerivedSchedule
+      ? normalizedData.slice(offset, offset + limit)
+      : normalizedData;
+    const hasMore = offset + pagedData.length < total;
 
     return respond(context, 200, {
-      data: normalizedData,
+      data: pagedData,
       total,
       page_size: pageSize,
       page,

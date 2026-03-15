@@ -96,7 +96,9 @@ export default async function handler(context, req) {
     .from('Students')
     .select('*')
     .eq('metadata->intake_dismissal->>active', 'true')
-    .order('name', { ascending: true });
+    .order('first_name', { ascending: true })
+    .order('middle_name', { ascending: true, nullsFirst: false })
+    .order('last_name', { ascending: true });
 
   if (error) {
     if (isSchemaError(error)) {

@@ -94,15 +94,8 @@ export async function ensureInstructorColors(
     .from(targetTable)
     .select(selectColumns);
 
-  // The Instructors table does not guarantee a created_at column across tenants. When
-  // ordering by a non-existent column Supabase responds with HTTP 400, which surfaces as
-  // `failed_to_prepare_instructors` in the weekly compliance endpoint. Prefer deterministic
-  // ordering by `name` when it is part of the requested projection and always fall back to
-  // the primary key to keep color assignments stable without triggering schema errors.
-  if (selectColumns.includes('name')) {
-    query = query.order('name', { ascending: true, nullsFirst: false });
-  }
-
+  // Tenant schemas are not consistent about human-readable name columns. Prefer the primary
+  // key only here so color assignment stays deterministic without depending on legacy shapes.
   query = query.order('id', { ascending: true, nullsFirst: false });
 
   const { data, error } = await query;

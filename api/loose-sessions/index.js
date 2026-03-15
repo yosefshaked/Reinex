@@ -109,9 +109,7 @@ export default async function (context, req) {
           updated_at, 
           student_id, 
           deleted,
-          deleted_at,
-          Instructors!SessionRecords_instructor_id_fkey(name, email),
-          Students!SessionRecords_student_id_fkey(name)
+          deleted_at
         `)
         .eq('instructor_id', userId)
         .not('metadata->unassigned_details', 'is', null) // Only loose reports
@@ -150,8 +148,7 @@ export default async function (context, req) {
           updated_at, 
           student_id, 
           deleted,
-          deleted_at,
-          Instructors!SessionRecords_instructor_id_fkey(name, email)
+          deleted_at
         `)
         .is('student_id', null)
         .eq('deleted', false)
