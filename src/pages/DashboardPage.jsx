@@ -6,7 +6,6 @@ import { useOrg } from "@/org/OrgContext.jsx"
 import { useSupabase } from "@/context/SupabaseContext.jsx"
 import { useInstructors } from "@/hooks/useOrgData.js"
 import { ComplianceHeatmap } from "@/features/dashboard/components/ComplianceHeatmap.jsx"
-import IntakeReviewQueue from "@/features/dashboard/components/IntakeReviewQueue.jsx"
 
 /**
  * Build greeting with proper fallback chain:
@@ -131,10 +130,6 @@ export default function DashboardPage() {
             </div>
           </header>
 
-          <div className="pb-md">
-            <IntakeReviewQueue />
-          </div>
-
           {/* Weekly compliance - mobile */}
           {tenantClientReady && activeOrgHasConnection ? (
           <ComplianceHeatmap />
@@ -159,8 +154,6 @@ export default function DashboardPage() {
               <p className="max-w-2xl text-sm text-neutral-600 sm:text-body-md">מה תרצו לעשות כעת?</p>
             </div>
           </header>
-
-          <IntakeReviewQueue />
 
           {tenantClientReady && activeOrgHasConnection ? (
           <ComplianceHeatmap />

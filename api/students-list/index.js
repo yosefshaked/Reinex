@@ -786,8 +786,6 @@ export default async function handler(context, req) {
       builder = builder.eq('is_active', false);
     }
 
-    builder = builder.not('metadata->intake_dismissal->>active', 'eq', 'true');
-
     if (searchTerm) {
       const sanitizedSearch = escapeILikeValue(searchTerm);
       builder = builder.or(

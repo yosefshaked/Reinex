@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EnhancedDialogHeader } from '@/components/ui/DialogHeader';
-import { PlugZap, Sparkles, Users, ListChecks, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, Inbox, History } from 'lucide-react';
+import { PlugZap, Sparkles, Users, ListChecks, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History } from 'lucide-react';
 import SetupAssistant from '@/components/settings/SetupAssistant.jsx';
 import OrgMembersCard from '@/components/settings/OrgMembersCard.jsx';
 import SessionFormManager from '@/components/settings/SessionFormManager.jsx';
@@ -15,7 +15,6 @@ import LogoManager from '@/components/settings/LogoManager.jsx';
 import TagsManager from '@/components/settings/TagsManager.jsx';
 import StudentVisibilitySettings from '@/components/settings/StudentVisibilitySettings.jsx';
 import StorageSettingsCard from '@/components/settings/StorageSettingsCard.jsx';
-import IntakeSettingsCard from '@/components/settings/IntakeSettingsCard.jsx';
 import DocumentRulesManager from '@/components/settings/DocumentRulesManager.jsx';
 import MyInstructorDocuments from '@/components/settings/MyInstructorDocuments.jsx';
 import OrgDocumentsManager from '@/components/settings/OrgDocumentsManager.jsx';
@@ -36,7 +35,7 @@ export default function Settings() {
   const setupDialogAutoOpenRef = useRef(!activeOrgHasConnection);
   const orgIdSyncCompletedRef = useRef(new Set());
   const orgIdSyncInFlightRef = useRef(new Set());
-  const [selectedModule, setSelectedModule] = useState(null); // 'setup' | 'orgMembers' | 'sessionForm' | 'services' | 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'intake' | 'auditLogs'
+  const [selectedModule, setSelectedModule] = useState(null); // 'setup' | 'orgMembers' | 'sessionForm' | 'services' | 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs'
   const [backupEnabled, setBackupEnabled] = useState(false);
   const [logoEnabled, setLogoEnabled] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
@@ -701,34 +700,6 @@ export default function Settings() {
             </CardContent>
           </Card>
 
-          {/* Intake Bridge Settings Card */}
-          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
-            <CardHeader className="space-y-2 pb-3 flex-1">
-              <div className="flex items-start gap-2">
-                <div className="rounded-lg bg-rose-100 p-2 text-rose-600 transition-colors group-hover:bg-rose-600 group-hover:text-white">
-                  <Inbox className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <CardTitle className="text-lg font-bold text-slate-900">
-                  קליטת תלמידים (Intake)
-                </CardTitle>
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                מיפוי שדות טפסים והגדרת סוד חיצוני לקליטה אוטומטית.
-              </p>
-            </CardHeader>
-            <CardContent className="pt-0 mt-auto">
-              <Button
-                size="sm"
-                className="w-full gap-2"
-                onClick={() => setSelectedModule('intake')}
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
-              >
-                <Inbox className="h-4 w-4" /> ניהול קליטה
-              </Button>
-            </CardContent>
-          </Card>
-
           {/* Storage Settings Card */}
           <Card className={`group relative w-full overflow-hidden border-0 shadow-md transition-all duration-200 flex flex-col ${
             storageEnabled ? 'bg-white/80 hover:shadow-xl hover:scale-[1.02]' : 'bg-slate-50 opacity-75'
@@ -910,7 +881,6 @@ export default function Settings() {
                 selectedModule === 'documents' ? <FileText /> :
                 selectedModule === 'orgDocuments' ? <Briefcase /> :
                 selectedModule === 'myDocuments' ? <FileText /> :
-                selectedModule === 'intake' ? <Inbox /> :
                 selectedModule === 'auditLogs' ? <History /> :
                 null
               }
@@ -927,7 +897,6 @@ export default function Settings() {
                 selectedModule === 'documents' ? 'ניהול מסמכים' :
                 selectedModule === 'orgDocuments' ? 'מסמכי הארגון' :
                 selectedModule === 'myDocuments' ? 'המסמכים שלי' :
-                selectedModule === 'intake' ? 'קליטת תלמידים' :
                 selectedModule === 'auditLogs' ? 'יומן ביקורת' :
                 ''
               }
@@ -991,13 +960,6 @@ export default function Settings() {
                 )}
                 {selectedModule === 'myDocuments' && (
                   <MyInstructorDocuments session={session} orgId={activeOrgId} userId={user?.id} />
-                )}
-                {selectedModule === 'intake' && (
-                  <IntakeSettingsCard
-                    session={session}
-                    orgId={activeOrgId}
-                    activeOrgHasConnection={activeOrgHasConnection}
-                  />
                 )}
                 {selectedModule === 'auditLogs' && (
                   <AuditLogViewer session={session} orgId={activeOrgId} />
