@@ -12,9 +12,12 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import StudentTagsField from './StudentTagsField.jsx';
 import MedicalProviderField from './MedicalProviderField.jsx';
+import GuardianSelector from './GuardianSelector.jsx';
+import { useGuardians } from '@/hooks/useGuardians.js';
 import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 import { createStudentFormState } from '@/features/students/utils/form-state.js';
 import { useIdentityNumberGuard } from '@/features/admin/hooks/useStudentDeduplication.js';
+import { validateIsraeliPhone } from '@/components/ui/helpers/phone.js';
 
 const IDENTITY_NUMBER_PATTERN = /^\d{5,12}$/;
 
@@ -39,18 +42,33 @@ export default function EditStudentForm({
     excludeStudentId,
   });
 
+  const { guardians, isLoading: loadingGuardians, createGuardian } = useGuardians();
+
   const trimmedIdentityNumber = values.identityNumber.trim();
   const isIdentityNumberFormatValid = useMemo(() => {
     if (!trimmedIdentityNumber) return true;
     return IDENTITY_NUMBER_PATTERN.test(trimmedIdentityNumber);
   }, [trimmedIdentityNumber]);
 
+  // Phone is required when no guardian is linked
+  const isPhoneRequired = !values.guardianId;
+  const phoneProvidedAndValid = useMemo(() => {
+    const trimmed = (values.phone || '').trim();
+    if (!trimmed) return false;
+    return validateIsraeliPhone(trimmed);
+  }, [values.phone]);
+
+  const isGuardianRelationshipRequired = Boolean(values.guardianId);
+  const guardianRelationshipProvided = Boolean(values.guardianRelationship);
+
   const preventSubmitReason = useMemo(() => {
     if (duplicate) return 'duplicate';
     if (identityNumberError) return 'error';
     if (!isIdentityNumberFormatValid) return 'invalid_identity_number';
+    if (isPhoneRequired && !phoneProvidedAndValid) return 'phone_required';
+    if (isGuardianRelationshipRequired && !guardianRelationshipProvided) return 'guardian_relationship_required';
     return '';
-  }, [duplicate, identityNumberError, isIdentityNumberFormatValid]);
+  }, [duplicate, identityNumberError, isIdentityNumberFormatValid, isPhoneRequired, phoneProvidedAndValid, isGuardianRelationshipRequired, guardianRelationshipProvided]);
 
   useEffect(() => {
     onSubmitDisabledChange(Boolean(preventSubmitReason) || isSubmitting);
@@ -106,6 +124,7 @@ export default function EditStudentForm({
       phone: true,
       email: true,
       notificationMethod: true,
+      guardianRelationship: true,
     };
     setTouched(newTouched);
 
@@ -125,6 +144,16 @@ export default function EditStudentForm({
       return;
     }
 
+    // Phone is required when no guardian is linked
+    if (isPhoneRequired && !phoneProvidedAndValid) {
+      return;
+    }
+
+    // Relationship is required when a guardian is selected
+    if (isGuardianRelationshipRequired && !guardianRelationshipProvided) {
+      return;
+    }
+
     onSubmit({
       id: student?.id,
       firstName: trimmedFirstName,
@@ -140,6 +169,8 @@ export default function EditStudentForm({
       notesInternal: values.notesInternal.trim() || null,
       tags: normalizeTagIdsForWrite(values.tags),
       isActive: values.isActive !== false,
+      guardianId: values.guardianId || null,
+      guardianRelationship: values.guardianRelationship || null,
     });
   };
 
@@ -155,6 +186,8 @@ export default function EditStudentForm({
     }
     return '';
   })();
+  const showPhoneRequiredError = touched.phone && isPhoneRequired && !phoneProvidedAndValid;
+  const showGuardianRelationshipError = touched.guardianRelationship && isGuardianRelationshipRequired && !guardianRelationshipProvided;
   const isInactive = values.isActive === false;
 
   return (
@@ -249,9 +282,10 @@ export default function EditStudentForm({
               value={values.phone}
               onChange={handleChange}
               onBlur={handleBlur}
-              required={false}
+              required={isPhoneRequired}
               disabled={isSubmitting}
-              description="אופציונלי"
+              description={isPhoneRequired ? 'חובה כאשר לא מחובר אפוטרופוס' : 'אופציונלי'}
+              error={showPhoneRequiredError ? 'יש להזין טלפון כאשר אין אפוטרופוס מקושר.' : ''}
             />
 
             <TextField
@@ -266,6 +300,45 @@ export default function EditStudentForm({
               disabled={isSubmitting}
               description="אופציונלי"
             />
+          </div>
+
+          {/* ── Guardian ── */}
+          <div className="space-y-4 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+            <h3 className="text-sm font-semibold text-neutral-800">אפוטרופוס</h3>
+
+            <GuardianSelector
+              value={values.guardianId}
+              onChange={(value) => {
+                handleSelectChange('guardianId', value);
+                if (!value) handleSelectChange('guardianRelationship', '');
+              }}
+              guardians={guardians}
+              isLoading={loadingGuardians}
+              disabled={isSubmitting}
+              onCreateGuardian={createGuardian}
+            />
+
+            {values.guardianId ? (
+              <SelectField
+                id="guardian-relationship"
+                name="guardianRelationship"
+                label="קרבה לאפוטרופוס"
+                value={values.guardianRelationship}
+                onChange={(value) => handleSelectChange('guardianRelationship', value)}
+                onOpenChange={onSelectOpenChange}
+                options={[
+                  { value: 'father', label: 'אב' },
+                  { value: 'mother', label: 'אם' },
+                  { value: 'self', label: 'עצמי' },
+                  { value: 'caretaker', label: 'מטפל' },
+                  { value: 'other', label: 'אחר' },
+                ]}
+                placeholder="בחר קרבה"
+                required
+                disabled={isSubmitting}
+                error={showGuardianRelationshipError ? 'יש לבחור קרבה לאפוטרופוס.' : ''}
+              />
+            ) : null}
           </div>
 
           <MedicalProviderField

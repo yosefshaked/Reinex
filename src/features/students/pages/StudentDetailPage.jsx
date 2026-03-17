@@ -290,28 +290,14 @@ export default function StudentDetailPage() {
     setStudentError('');
 
     try {
-      // Use unified students-list endpoint with 'all' status for admins
+      // Use single-student GET endpoint with guardian join
       const searchParams = new URLSearchParams();
       if (activeOrgId) searchParams.set('org_id', activeOrgId);
-      searchParams.set('status', 'all');
-      const endpoint = searchParams.toString() ? `students-list?${searchParams}` : 'students-list';
-      
-      let payload = await authenticatedFetch(endpoint);
-      let roster = Array.isArray(payload) ? payload : [];
-      let match = roster.find((entry) => entry?.id === studentId) || null;
+      const endpoint = `students-list/${studentId}${searchParams.toString() ? `?${searchParams}` : ''}`;
 
-      if (!match && !isAdminRole(membershipRole)) {
-        // Fallback to 'active' status for non-admins
-        const fallbackParams = new URLSearchParams();
-        if (activeOrgId) fallbackParams.set('org_id', activeOrgId);
-        fallbackParams.set('status', 'active');
-        const fallbackEndpoint = fallbackParams.toString() ? `students-list?${fallbackParams}` : 'students-list';
-        payload = await authenticatedFetch(fallbackEndpoint);
-        roster = Array.isArray(payload) ? payload : [];
-        match = roster.find((entry) => entry?.id === studentId) || null;
-      }
+      const match = await authenticatedFetch(endpoint);
 
-      if (!match) {
+      if (!match || !match.id) {
         setStudent(null);
         setStudentState(REQUEST_STATE.error);
         setStudentError('התלמיד לא נמצא במערכת.');
@@ -326,7 +312,7 @@ export default function StudentDetailPage() {
       setStudentState(REQUEST_STATE.error);
       setStudentError(error?.message || 'טעינת פרטי התלמיד נכשלה.');
     }
-  }, [canFetch, activeOrgId, membershipRole, studentId]);
+  }, [canFetch, activeOrgId, studentId]);
 
   useEffect(() => {
     void loadServiceCatalog();
@@ -702,18 +688,21 @@ export default function StudentDetailPage() {
       const normalizedTags = normalizeTagIdsForWrite(payload.tags);
       const body = {
         org_id: activeOrgId,
-        name: payload.name,
-        identity_number: payload.identityNumber || null,
-        phone: payload.phone || null,
-        email: payload.email || null,
-        contact_name: payload.contactName,
-        contact_phone: payload.contactPhone,
-        default_service: payload.defaultService,
-        default_day_of_week: payload.defaultDayOfWeek,
-        default_session_time: payload.defaultSessionTime,
-        notes: payload.notes,
+        firstName: payload.firstName,
+        middleName: payload.middleName,
+        lastName: payload.lastName,
+        identityNumber: payload.identityNumber,
+        dateOfBirth: payload.dateOfBirth,
+        phone: payload.phone,
+        email: payload.email,
+        medicalProvider: payload.medicalProvider,
+        notificationMethod: payload.notificationMethod,
+        specialRate: payload.specialRate,
+        notesInternal: payload.notesInternal,
         tags: normalizedTags,
-        is_active: payload.isActive,
+        isActive: payload.isActive,
+        guardianId: payload.guardianId,
+        guardianRelationship: payload.guardianRelationship,
       };
       await authenticatedFetch(`students-list/${payload.id}`, { method: 'PUT', body, session });
       setStudentForEdit(null);

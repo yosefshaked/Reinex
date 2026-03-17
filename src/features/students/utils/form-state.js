@@ -16,8 +16,9 @@ export function createStudentFormState(student) {
     dateOfBirth: student?.date_of_birth || '',
     
     // Guardian (optional for independent students)
-    guardianId: student?.guardian_id || '',
-    guardianRelationship: student?.guardian_relationship || '',
+    // Supports both flat guardian_id field and nested guardian object from single-student GET
+    guardianId: student?.guardian?.id || student?.guardian_id || '',
+    guardianRelationship: student?.guardian?.relationship || student?.guardian_relationship || '',
     
     // Contact (phone required if no guardian)
     phone: student?.phone || '',

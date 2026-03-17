@@ -456,8 +456,8 @@ export default function StudentsPage() {
     setUpdateError('');
   };
 
-  const handleEditSubmit = async (studentId, updates) => {
-    if (!session || !activeOrgId || !tenantClientReady || !activeOrgHasConnection) {
+  const handleEditSubmit = async (payload) => {
+    if (!payload?.id || !session || !activeOrgId || !tenantClientReady || !activeOrgHasConnection) {
       setUpdateError('חיבור לא זמין. ודא את החיבור וניסיון מחדש.');
       return;
     }
@@ -467,12 +467,25 @@ export default function StudentsPage() {
 
     const body = {
       org_id: activeOrgId,
-      ...updates,
-      tags: normalizeTagIdsForWrite(updates.tags),
+      firstName: payload.firstName,
+      middleName: payload.middleName,
+      lastName: payload.lastName,
+      identityNumber: payload.identityNumber,
+      dateOfBirth: payload.dateOfBirth,
+      phone: payload.phone,
+      email: payload.email,
+      medicalProvider: payload.medicalProvider,
+      notificationMethod: payload.notificationMethod,
+      specialRate: payload.specialRate,
+      notesInternal: payload.notesInternal,
+      tags: normalizeTagIdsForWrite(payload.tags),
+      isActive: payload.isActive,
+      guardianId: payload.guardianId,
+      guardianRelationship: payload.guardianRelationship,
     };
 
     try {
-      await authenticatedFetch(`students-list/${studentId}`, {
+      await authenticatedFetch(`students-list/${payload.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

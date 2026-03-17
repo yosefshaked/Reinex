@@ -81,6 +81,48 @@ async function fetchStudentIdsByInstructor(tenantClient, instructorEmployeeId) {
   return { studentIds, error: null };
 }
 
+/**
+ * Fetch the primary guardian for a student by joining student_guardians → guardians.
+ * Returns { guardian: {...} | null, error }.
+ */
+async function fetchPrimaryGuardian(tenantClient, studentId) {
+  if (!studentId) return { guardian: null, error: null };
+
+  const { data, error } = await tenantClient
+    .from('student_guardians')
+    .select('guardian_id, relationship, is_primary')
+    .eq('student_id', studentId)
+    .order('is_primary', { ascending: false })
+    .limit(1);
+
+  if (error) return { guardian: null, error };
+  if (!data || !data.length) return { guardian: null, error: null };
+
+  const link = data[0];
+  const { data: guardianRow, error: guardianError } = await tenantClient
+    .from('guardians')
+    .select('id, first_name, middle_name, last_name, phone, email')
+    .eq('id', link.guardian_id)
+    .maybeSingle();
+
+  if (guardianError) return { guardian: null, error: guardianError };
+  if (!guardianRow) return { guardian: null, error: null };
+
+  return {
+    guardian: {
+      id: guardianRow.id,
+      first_name: guardianRow.first_name,
+      middle_name: guardianRow.middle_name || null,
+      last_name: guardianRow.last_name,
+      phone: guardianRow.phone || null,
+      email: guardianRow.email || null,
+      relationship: link.relationship,
+      is_primary: link.is_primary ?? true,
+    },
+    error: null,
+  };
+}
+
 function parseTimeToMinutes(value) {
   if (!value) {
     return Number.POSITIVE_INFINITY;
@@ -601,11 +643,44 @@ function buildStudentUpdates(body) {
     hasAny = true;
   }
 
+  // Guardian fields (stored in student_guardians, not students)
+  const guardianProvided =
+    Object.prototype.hasOwnProperty.call(body, 'guardian_id') ||
+    Object.prototype.hasOwnProperty.call(body, 'guardianId');
+  let guardianId;
+  let guardianRelationship;
+
+  if (guardianProvided) {
+    const rawId = body?.guardian_id ?? body?.guardianId;
+    // Explicit null or empty string means "clear guardian"
+    if (rawId === null || rawId === '' || rawId === undefined) {
+      guardianId = null;
+      guardianRelationship = null;
+    } else {
+      if (typeof rawId !== 'string' || !UUID_PATTERN.test(rawId)) {
+        return { error: 'invalid_guardian_id' };
+      }
+      guardianId = rawId;
+
+      const rawRel = body?.guardian_relationship ?? body?.guardianRelationship;
+      if (!rawRel || typeof rawRel !== 'string') {
+        return { error: 'guardian_relationship_required' };
+      }
+      const allowedRelationships = new Set(['father', 'mother', 'self', 'caretaker', 'other']);
+      const trimmedRel = rawRel.trim();
+      if (!allowedRelationships.has(trimmedRel)) {
+        return { error: 'invalid_guardian_relationship' };
+      }
+      guardianRelationship = trimmedRel;
+    }
+    hasAny = true;
+  }
+
   if (!hasAny) {
     return { error: 'missing_updates' };
   }
 
-  return { updates, intakeNotes };
+  return { updates, intakeNotes, guardianProvided, guardianId, guardianRelationship };
 }
 
 function determineStatusFilter(query, canViewInactive = true) {
@@ -739,6 +814,58 @@ export default async function handler(context, req) {
 
   // GET: Fetch students list with role-based filtering
   if (method === 'GET') {
+    // ── Single-student GET with guardian join ──
+    const singleStudentId = normalizeString(context?.bindingData?.studentId);
+    if (singleStudentId && UUID_PATTERN.test(singleStudentId)) {
+      // Fetch the single student
+      const { data: singleStudent, error: singleError } = await tenantClient
+        .from('students')
+        .select('*')
+        .eq('id', singleStudentId)
+        .maybeSingle();
+
+      if (singleError) {
+        context.log?.error?.('students-list failed to fetch single student', {
+          message: singleError.message,
+          studentId: singleStudentId,
+        });
+        return respond(context, 500, { message: 'failed_to_load_student' });
+      }
+
+      if (!singleStudent) {
+        return respond(context, 404, { message: 'student_not_found' });
+      }
+
+      // Non-admin instructors can only view their own students
+      if (!canManageRoster) {
+        const { studentIds: instructorStudentIds, error: accessError } =
+          await fetchStudentIdsByInstructor(tenantClient, userId);
+        if (accessError || !instructorStudentIds.includes(singleStudentId)) {
+          return respond(context, 403, { message: 'forbidden' });
+        }
+      }
+
+      // Join primary guardian
+      const { guardian, error: guardianError } = await fetchPrimaryGuardian(
+        tenantClient,
+        singleStudentId,
+      );
+
+      if (guardianError) {
+        context.log?.warn?.('students-list failed to load guardian for single student', {
+          message: guardianError.message,
+          studentId: singleStudentId,
+        });
+        // Non-fatal: return student without guardian data
+      }
+
+      return respond(context, 200, {
+        ...singleStudent,
+        guardian: guardian || null,
+      });
+    }
+
+    // ── List GET (existing behaviour) ──
     const paginationRequested = isPaginationRequested(req?.query);
     const { limit, offset } = parsePagination(req?.query);
     const dayFilter = parseDayFilter(req?.query);
@@ -1109,7 +1236,13 @@ export default async function handler(context, req) {
                 ? 'invalid tags'
                 : normalizedUpdates.error === 'invalid_is_active'
                   ? 'invalid is_active flag'
-                  : 'invalid payload';
+                  : normalizedUpdates.error === 'invalid_guardian_id'
+                    ? 'invalid guardian id'
+                    : normalizedUpdates.error === 'guardian_relationship_required'
+                      ? 'guardian relationship is required when linking a guardian'
+                      : normalizedUpdates.error === 'invalid_guardian_relationship'
+                        ? 'invalid guardian relationship'
+                        : 'invalid payload';
     return respond(context, 400, { message: updateMessage });
   }
 
@@ -1202,6 +1335,91 @@ export default async function handler(context, req) {
 
   if (!data) {
     return respond(context, 404, { message: 'student_not_found' });
+  }
+
+  // ── Guardian upsert / delete in student_guardians ──
+  if (normalizedUpdates.guardianProvided) {
+    if (normalizedUpdates.guardianId) {
+      // Link or update guardian: upsert into student_guardians
+      // First check if a row already exists for this student
+      const { data: existingLink, error: linkLookupError } = await tenantClient
+        .from('student_guardians')
+        .select('id, guardian_id, relationship')
+        .eq('student_id', studentId)
+        .order('is_primary', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (linkLookupError) {
+        context.log?.warn?.('students-list failed to look up existing guardian link', {
+          message: linkLookupError.message,
+          studentId,
+        });
+      }
+
+      if (existingLink) {
+        // Update existing link (guardian or relationship may have changed)
+        const linkUpdates = {};
+        if (existingLink.guardian_id !== normalizedUpdates.guardianId) {
+          linkUpdates.guardian_id = normalizedUpdates.guardianId;
+        }
+        if (existingLink.relationship !== normalizedUpdates.guardianRelationship) {
+          linkUpdates.relationship = normalizedUpdates.guardianRelationship;
+        }
+
+        if (Object.keys(linkUpdates).length > 0) {
+          const { error: linkUpdateError } = await tenantClient
+            .from('student_guardians')
+            .update(linkUpdates)
+            .eq('id', existingLink.id);
+
+          if (linkUpdateError) {
+            context.log?.error?.('students-list failed to update guardian link', {
+              message: linkUpdateError.message,
+              studentId,
+              guardianId: normalizedUpdates.guardianId,
+            });
+          } else {
+            changedFields.push('guardian');
+          }
+        }
+      } else {
+        // Insert new link
+        const { error: linkInsertError } = await tenantClient
+          .from('student_guardians')
+          .insert({
+            student_id: studentId,
+            guardian_id: normalizedUpdates.guardianId,
+            relationship: normalizedUpdates.guardianRelationship,
+            is_primary: true,
+          });
+
+        if (linkInsertError) {
+          context.log?.error?.('students-list failed to create guardian link', {
+            message: linkInsertError.message,
+            studentId,
+            guardianId: normalizedUpdates.guardianId,
+          });
+        } else {
+          changedFields.push('guardian');
+        }
+      }
+    } else {
+      // guardianId is null → clear the guardian link
+      const { error: deleteError } = await tenantClient
+        .from('student_guardians')
+        .delete()
+        .eq('student_id', studentId);
+
+      if (deleteError) {
+        context.log?.error?.('students-list failed to delete guardian link', {
+          message: deleteError.message,
+          studentId,
+        });
+      } else {
+        changedFields.push('guardian');
+      }
+    }
   }
 
   // Audit log: student updated
