@@ -123,6 +123,7 @@ export default async function auditLog(context, req) {
   const limit = normalizeLimit(req?.query?.limit || body?.limit);
   const before = normalizeIsoTimestamp(req?.query?.before || body?.before);
   const actionCategory = normalizeString(req?.query?.action_category || body?.action_category).toLowerCase();
+  const resourceId = normalizeString(req?.query?.resource_id || req?.query?.student_id || body?.resource_id || body?.student_id);
 
   if ((req?.query?.before || body?.before) && !before) {
     return respond(context, 400, { message: 'invalid_before_cursor' });
@@ -141,6 +142,10 @@ export default async function auditLog(context, req) {
 
   if (actionCategory) {
     query = query.eq('action_category', actionCategory);
+  }
+
+  if (resourceId) {
+    query = query.eq('resource_id', resourceId);
   }
 
   const { data, error } = await query;

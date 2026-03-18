@@ -91,7 +91,7 @@ function App({ config = null }) {
                     <Route path="/financials" element={<FinancialsPage />} />
                     <Route path="/pending-reports" element={<PendingReportsPage />} />
                     <Route path="/admin/pending-reports" element={<Navigate to="/pending-reports" replace />} />
-                    <Route path="/students/:id" element={<StudentDetailPage />} />
+                    <Route path="/students/:id/:tab?" element={<StudentDetailPage />} />
                     <Route path="/Settings" element={<Settings />} />
                     <Route path="/diagnostics" element={<Diagnostics />} />
                   </Route>

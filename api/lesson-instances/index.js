@@ -153,6 +153,7 @@ export default async function lessonInstances(context, req) {
     }
 
     const requestedInstructorId = normalizeUuid(req?.query?.instructor_id || req?.query?.instructorId);
+    const requestedStudentId = normalizeUuid(req?.query?.student_id || req?.query?.studentId);
 
     let builder = tenantClient
       .from('lesson_instances')
@@ -165,6 +166,14 @@ export default async function lessonInstances(context, req) {
       builder = builder.eq('instructor_employee_id', userId);
     } else if (requestedInstructorId) {
       builder = builder.eq('instructor_employee_id', requestedInstructorId);
+    }
+
+    // Filter by student_id if provided (for StudentScheduleTab integration)
+    if (requestedStudentId) {
+      // Need to join through lesson_participants to filter by student
+      builder = builder
+        .select(`${buildInstanceSelect()},lesson_participants(student_id)`)
+        .filter('lesson_participants.student_id', 'eq', requestedStudentId);
     }
 
     const { data, error } = await builder;

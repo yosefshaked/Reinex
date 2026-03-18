@@ -1494,3 +1494,95 @@ export default async function handler(context, req) {
 
   return respond(context, 200, data);
 }
+
+// PATCH: Update student status (soft-delete, suspend/activate)
+if (method === 'PATCH') {
+  const studentId = extractStudentId(context, req, body);
+  if (!studentId) {
+    return respond(context, 400, { message: 'invalid student id' });
+  }
+
+  // Fetch existing student
+  const { data: existingStudent, error: fetchError } = await tenantClient
+    .from('students')
+    .select('id, first_name, last_name, is_active')
+    .eq('id', studentId)
+    .maybeSingle();
+
+  if (fetchError) {
+    context.log?.error?.('students-list failed to fetch student for PATCH', {
+      message: fetchError.message,
+      studentId,
+    });
+    return respond(context, 500, { message: 'failed_to_fetch_student' });
+  }
+
+  if (!existingStudent) {
+    return respond(context, 404, { message: 'student_not_found' });
+  }
+
+  // Extract status change
+  const isActiveSource = body?.is_active ?? body?.isActive;
+  if (isActiveSource === null || isActiveSource === undefined) {
+    return respond(context, 400, { message: 'missing_status_field' });
+  }
+
+  const { value: newIsActive, valid } = coerceBooleanFlag(isActiveSource, {
+    defaultValue: true,
+    allowUndefined: false,
+  });
+
+  if (!valid) {
+    return respond(context, 400, { message: 'invalid_is_active' });
+  }
+
+  const oldIsActive = existingStudent.is_active;
+
+  // No change needed
+  if (oldIsActive === newIsActive) {
+    return respond(context, 200, existingStudent);
+  }
+
+  // Update is_active
+  const { data: updated, error: updateError } = await tenantClient
+    .from('students')
+    .update({
+      is_active: newIsActive,
+      metadata: {
+        ...existingStudent.metadata,
+        status_updated_by: userId,
+        status_updated_at: new Date().toISOString(),
+      },
+    })
+    .eq('id', studentId)
+    .select()
+    .maybeSingle();
+
+  if (updateError) {
+    context.log?.error?.('students-list failed to update student status', {
+      message: updateError.message,
+      studentId,
+    });
+    return respond(context, 500, { message: 'failed_to_update_student' });
+  }
+
+  // Audit: status changed
+  await logAuditEvent(supabase, {
+    orgId,
+    userId,
+    userEmail: authResult.data.user.email || '',
+    userRole: role,
+    actionType: AUDIT_ACTIONS.STUDENT_UPDATED,
+    actionCategory: AUDIT_CATEGORIES.STUDENTS,
+    resourceType: 'student',
+    resourceId: studentId,
+    details: {
+      student_name: `${updated.first_name} ${updated.last_name}`.trim(),
+      status_change: oldIsActive ? 'suspended' : 'reactivated',
+      status_before: oldIsActive,
+      status_after: newIsActive,
+    },
+  });
+
+  return respond(context, 200, updated);
+}
