@@ -149,7 +149,7 @@ export default function StudentScheduleTab({ studentId }) {
           <div className="flex items-center gap-2 mb-4">
             <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center text-lg">📚</div>
             <h3 className="font-semibold text-zinc-800">קורסים בהרשמה</h3>
-            <span className="mr-auto text-sm text-muted-foreground">
+            <span className="me-auto text-sm text-muted-foreground">
               {isLoadingTemplates ? 'טוען...' : `${templates.length} קורסים פעילים`}
             </span>
           </div>
@@ -213,7 +213,7 @@ export default function StudentScheduleTab({ studentId }) {
           <div className="flex items-center gap-2 mb-4">
             <div className="w-9 h-9 rounded-lg bg-green-100 text-green-600 flex items-center justify-center text-lg">📅</div>
             <h3 className="font-semibold text-zinc-800">שיעורים ב-14 ימים הקרובים</h3>
-            <span className="mr-auto text-sm text-muted-foreground">
+            <span className="me-auto text-sm text-muted-foreground">
               {isLoadingInstances ? 'טוען...' : `${instances.length} שיעורים מתוכננים`}
             </span>
           </div>
@@ -232,11 +232,11 @@ export default function StudentScheduleTab({ studentId }) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-right">תאריך</TableHead>
-                    <TableHead className="text-right">שעה</TableHead>
-                    <TableHead className="text-right">שיעור</TableHead>
-                    <TableHead className="text-right">מדריך</TableHead>
-                    <TableHead className="text-right">סטטוס</TableHead>
+                    <TableHead className="text-end">תאריך</TableHead>
+                    <TableHead className="text-end">שעה</TableHead>
+                    <TableHead className="text-end">שיעור</TableHead>
+                    <TableHead className="text-end">מדריך</TableHead>
+                    <TableHead className="text-end">סטטוס</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

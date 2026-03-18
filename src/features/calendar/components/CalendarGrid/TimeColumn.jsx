@@ -10,7 +10,7 @@ export function TimeColumn() {
   const hourSlots = timeSlots.filter((_, index) => index % 4 === 0);
 
   return (
-    <div className="sticky right-0 bg-white border-l border-gray-300 z-20 flex flex-col" style={{ width: '80px' }}>
+    <div className="sticky end-0 bg-white border-s border-gray-300 z-20 flex flex-col" style={{ width: '80px' }}>
       {/* Header spacer */}
       <div className="h-12 border-b border-gray-300 flex items-center justify-center text-sm font-medium px-1">
         שעה
@@ -21,7 +21,7 @@ export function TimeColumn() {
         {hourSlots.map((slot) => (
           <div
             key={slot.timeString}
-            className="absolute w-full text-right text-xs text-gray-500 pr-2 leading-none"
+            className="absolute w-full text-end text-xs text-gray-500 pe-2 leading-none"
             style={{ 
               top: `${(slot.totalMinutes - 360) / 15 * 24 + 4}px`,
             }}

@@ -232,7 +232,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             <span>פרטי שיעור</span>
             {!isEditMode && canEdit && (
               <Button variant="ghost" size="sm" onClick={() => setIsEditMode(true)}>
-                <Pencil className="h-4 w-4 ml-2" />
+                <Pencil className="h-4 w-4 ms-2" />
                 עריכה
               </Button>
             )}
@@ -384,7 +384,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               <Button onClick={handleSave} disabled={isSaving}>
                 {isSaving ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
                     שומר...
                   </>
                 ) : (
@@ -409,7 +409,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                     onClick={() => handleReportStatus('completed')}
                     disabled={isSaving}
                   >
-                    <Check className="h-4 w-4 ml-1" />
+                    <Check className="h-4 w-4 ms-1" />
                     הושלם
                   </Button>
                   <Button
@@ -418,7 +418,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                     onClick={() => handleReportStatus('no_show')}
                     disabled={isSaving}
                   >
-                    <XCircle className="h-4 w-4 ml-1" />
+                    <XCircle className="h-4 w-4 ms-1" />
                     אי הגעה
                   </Button>
                 </div>
@@ -481,10 +481,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                       </div>
                     </div>
                     {participant.price_charged && (
-                      <Badge variant="outline" className="ml-2">₪{participant.price_charged}</Badge>
+                      <Badge variant="outline" className="ms-2">₪{participant.price_charged}</Badge>
                     )}
                     {canMarkAttendance && participant.participant_status === 'scheduled' && (
-                      <div className="flex gap-1 mr-2">
+                      <div className="flex gap-1 me-2">
                         <Button
                           size="sm"
                           variant="ghost"
@@ -559,7 +559,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   }}
                   disabled={isSaving}
                 >
-                  <X className="mr-2 h-4 w-4" />
+                  <X className="me-2 h-4 w-4" />
                   בטל שיעור
                 </Button>
               </div>

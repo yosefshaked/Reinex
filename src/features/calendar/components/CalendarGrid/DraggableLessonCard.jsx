@@ -201,7 +201,7 @@ export function DraggableLessonCard({
           {/* Grip Handle Column - spans full height, vertically centered */}
           <div
             ref={dragRef}
-            className="flex items-center justify-center border-l border-white/20 px-1 flex-shrink-0 cursor-grab active:cursor-grabbing"
+            className="flex items-center justify-center border-s border-white/20 px-1 flex-shrink-0 cursor-grab active:cursor-grabbing"
             onMouseDown={handleDragStart}
             title="גרור כדי להעביר שיעור"
           >

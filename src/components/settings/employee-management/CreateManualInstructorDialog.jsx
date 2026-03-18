@@ -55,8 +55,8 @@ export default function CreateManualInstructorDialog({ open, onOpenChange, orgId
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right">הוספת עובד ידני</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogTitle className="text-end">הוספת עובד ידני</DialogTitle>
+          <DialogDescription className="text-end">
             יצירת כרטיס עובד ללא שיוך למשתמש מערכת (לצורך ניהול שכר ושיבוצים בלבד).
           </DialogDescription>
         </DialogHeader>
@@ -104,12 +104,12 @@ export default function CreateManualInstructorDialog({ open, onOpenChange, orgId
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? (
                   <>
-                    <span className="animate-spin mr-2">⏳</span>
+                    <span className="animate-spin me-2">⏳</span>
                     שומר...
                   </>
                 ) : (
                   <>
-                    <UserPlus className="mr-2 h-4 w-4" />
+                    <UserPlus className="me-2 h-4 w-4" />
                     צור עובד
                   </>
                 )}

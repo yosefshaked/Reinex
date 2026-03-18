@@ -32,7 +32,7 @@ export default function InstructorMenu({ onNavigate }) {
 
   return (
     <div className="space-y-4" dir="rtl">
-      <p className="text-sm text-muted-foreground text-right">בחר את הפעולה הרצויה לניהול עובדי הארגון</p>
+      <p className="text-sm text-muted-foreground text-end">בחר את הפעולה הרצויה לניהול עובדי הארגון</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       {menuItems.map((item) => {
         const Icon = item.icon;

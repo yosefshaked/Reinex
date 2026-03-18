@@ -142,7 +142,7 @@ export default function Diagnostics() {
           </div>
           <div className="border border-slate-200 rounded-lg p-4">
             <dt className="text-sm text-slate-500">תוכן תשובת ‎/api/org/:id/keys‎</dt>
-            <dd className="text-sm font-mono text-left whitespace-pre-wrap break-words text-slate-800 bg-white border border-slate-200 rounded-lg p-3">
+            <dd className="text-sm font-mono text-start whitespace-pre-wrap break-words text-slate-800 bg-white border border-slate-200 rounded-lg p-3">
               {lastKeysBody}
             </dd>
           </div>

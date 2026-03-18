@@ -140,7 +140,7 @@ export default function StudentScheduleDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>הגדרת שיבוץ ולו״ז</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogDescription className="text-end">
             הגדירו מדריך, שירות ושעת מפגש לתלמיד. הפעולה יוצרת תבנית מפגש פעילה.
           </DialogDescription>
         </DialogHeader>

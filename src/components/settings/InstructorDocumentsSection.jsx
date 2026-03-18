@@ -92,15 +92,15 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
     <Dialog open={!!file} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-[500px]" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right">עריכת מסמך</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogTitle className="text-end">עריכת מסמך</DialogTitle>
+          <DialogDescription className="text-end">
             ערוך את פרטי המסמך
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="edit-doc-name" className="text-right block">
+            <Label htmlFor="edit-doc-name" className="text-end block">
               שם המסמך <span className="text-red-500">*</span>
             </Label>
             <Input
@@ -109,17 +109,17 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="שם המסמך"
-              className="text-right"
+              className="text-end"
             />
             {file.original_name && (
-              <p className="text-xs text-muted-foreground text-right">
+              <p className="text-xs text-muted-foreground text-end">
                 קובץ מקורי: {file.original_name}
               </p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="edit-relevant-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="edit-relevant-date" className="text-end flex items-center gap-2 justify-end">
               <span>תאריך רלוונטי</span>
               <Calendar className="h-4 w-4" />
             </Label>
@@ -129,12 +129,12 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
               dir="ltr"
               value={relevantDate}
               onChange={(e) => setRelevantDate(e.target.value)}
-              className="text-right"
+              className="text-end"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="edit-expiration-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="edit-expiration-date" className="text-end flex items-center gap-2 justify-end">
               <span>תאריך תפוגה</span>
               <CalendarX className="h-4 w-4" />
             </Label>
@@ -144,7 +144,7 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
               dir="ltr"
               value={expirationDate}
               onChange={(e) => setExpirationDate(e.target.value)}
-              className="text-right"
+              className="text-end"
             />
           </div>
         </div>
@@ -195,10 +195,10 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
     <Dialog open={files.length > 0} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-[700px] max-h-[80vh]" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right">
+          <DialogTitle className="text-end">
             הגדרות {filesData.length} קבצים
           </DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogDescription className="text-end">
             ערוך את פרטי המסמכים לפני ההעלאה. שדות שאינם מסומנים ב-* הם אופציונליים
           </DialogDescription>
         </DialogHeader>
@@ -210,13 +210,13 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                 <div className="flex items-center gap-2 text-sm font-medium mb-2">
                   <FileText className="h-4 w-4" />
                   <span>קובץ {index + 1}</span>
-                  <Badge variant="outline" className="mr-auto">
+                  <Badge variant="outline" className="me-auto">
                     {fileData.file.name}
                   </Badge>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor={`name-${fileData.id}`} className="text-right block">
+                  <Label htmlFor={`name-${fileData.id}`} className="text-end block">
                     שם המסמך <span className="text-red-500">*</span>
                   </Label>
                   <Input
@@ -225,14 +225,14 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                     value={fileData.name}
                     onChange={(e) => handleFileChange(fileData.id, 'name', e.target.value)}
                     placeholder="לדוגמה: אישור רפואי"
-                    className="text-right"
+                    className="text-end"
                     disabled={!!definitionName}
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-2">
-                    <Label htmlFor={`relevant-${fileData.id}`} className="text-right flex items-center gap-1 justify-end text-xs">
+                    <Label htmlFor={`relevant-${fileData.id}`} className="text-end flex items-center gap-1 justify-end text-xs">
                       <span>תאריך רלוונטי</span>
                       <Calendar className="h-3 w-3" />
                     </Label>
@@ -242,12 +242,12 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                       dir="ltr"
                       value={fileData.relevantDate}
                       onChange={(e) => handleFileChange(fileData.id, 'relevantDate', e.target.value)}
-                      className="text-right text-sm"
+                      className="text-end text-sm"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor={`expiration-${fileData.id}`} className="text-right flex items-center gap-1 justify-end text-xs">
+                    <Label htmlFor={`expiration-${fileData.id}`} className="text-end flex items-center gap-1 justify-end text-xs">
                       <span>תאריך תפוגה</span>
                       <CalendarX className="h-3 w-3" />
                     </Label>
@@ -257,7 +257,7 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                       dir="ltr"
                       value={fileData.expirationDate}
                       onChange={(e) => handleFileChange(fileData.id, 'expirationDate', e.target.value)}
-                      className="text-right text-sm"
+                      className="text-end text-sm"
                     />
                   </div>
                 </div>
@@ -268,7 +268,7 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
 
         <div className="flex gap-2 flex-row-reverse border-t pt-4">
           <Button onClick={handleConfirm} disabled={!allNamesValid}>
-            <Upload className="h-4 w-4 ml-2" />
+            <Upload className="h-4 w-4 ms-2" />
             העלה {filesData.length} קבצים
           </Button>
           <Button onClick={onCancel} variant="outline">
@@ -318,15 +318,15 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
     <Dialog open={!!file} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-[500px]" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right">הגדרות מסמך</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogTitle className="text-end">הגדרות מסמך</DialogTitle>
+          <DialogDescription className="text-end">
             ערוך את פרטי המסמך לפני ההעלאה
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="doc-name" className="text-right block">
+            <Label htmlFor="doc-name" className="text-end block">
               שם המסמך <span className="text-red-500">*</span>
             </Label>
             <Input
@@ -335,16 +335,16 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="לדוגמה: אישור רפואי"
-              className="text-right"
+              className="text-end"
               disabled={!!definitionName}
             />
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground text-end">
               {definitionName ? `שם מוגדר מראש: ${definitionName}` : `קובץ מקורי: ${file.name}`}
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="relevant-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="relevant-date" className="text-end flex items-center gap-2 justify-end">
               <span>תאריך רלוונטי</span>
               <Calendar className="h-4 w-4" />
             </Label>
@@ -354,15 +354,15 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
               dir="ltr"
               value={relevantDate}
               onChange={(e) => setRelevantDate(e.target.value)}
-              className="text-right"
+              className="text-end"
             />
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground text-end">
               תאריך הנפקה, אישור וכדומה
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="expiration-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="expiration-date" className="text-end flex items-center gap-2 justify-end">
               <span>תאריך תפוגה</span>
               <CalendarX className="h-4 w-4" />
             </Label>
@@ -372,9 +372,9 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
               dir="ltr"
               value={expirationDate}
               onChange={(e) => setExpirationDate(e.target.value)}
-              className="text-right"
+              className="text-end"
             />
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground text-end">
               תאריך תפוגת המסמך (אופציונלי)
             </p>
           </div>
@@ -1161,7 +1161,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
                   </div>
 
                   {def.description && (
-                    <p className="text-sm text-muted-foreground text-right">
+                    <p className="text-sm text-muted-foreground text-end">
                       {def.description}
                     </p>
                   )}
@@ -1174,7 +1174,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
                           key={file.id}
                           className="flex items-center justify-between p-2 bg-slate-50 rounded"
                         >
-                          <div className="flex-1 min-w-0 text-right">
+                          <div className="flex-1 min-w-0 text-end">
                             <p className="text-sm font-medium truncate">{file.name}</p>
                             <p className="text-xs text-muted-foreground" dir="ltr">
                               {formatFileSize(file.size)} • {formatFileDate(file.uploaded_at)}
@@ -1197,12 +1197,12 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
                                     <CalendarX className="h-3 w-3" />
                                     {format(parseISO(file.expiration_date), 'dd/MM/yyyy')}
                                     {file.resolved ? (
-                                      <Badge variant="outline" className="text-xs mr-1 bg-green-50 text-green-700 border-green-300">
-                                        <CheckCircle className="h-3 w-3 ml-1" />
+                                      <Badge variant="outline" className="text-xs me-1 bg-green-50 text-green-700 border-green-300">
+                                        <CheckCircle className="h-3 w-3 ms-1" />
                                         טופל
                                       </Badge>
                                     ) : _isExpired(file.expiration_date) ? (
-                                      <Badge variant="destructive" className="text-xs mr-1">
+                                      <Badge variant="destructive" className="text-xs me-1">
                                         פג תוקף
                                       </Badge>
                                     ) : null}
@@ -1211,7 +1211,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
                               )}
                             </p>
                           </div>
-                          <div className="flex items-center gap-1 mr-3">
+                          <div className="flex items-center gap-1 me-3">
                             <Button
                               size="sm"
                               variant="ghost"
@@ -1338,7 +1338,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
                       isOrphaned ? 'bg-amber-50 border-amber-200' : 'bg-slate-50'
                     }`}
                   >
-                    <div className="flex-1 min-w-0 text-right">
+                    <div className="flex-1 min-w-0 text-end">
                       <div className="flex items-center gap-2 justify-end">
                         <p className="text-sm font-medium truncate">{file.name}</p>
                         {isOrphaned && (
@@ -1368,12 +1368,12 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
                               <CalendarX className="h-3 w-3" />
                               {format(parseISO(file.expiration_date), 'dd/MM/yyyy')}
                               {file.resolved ? (
-                                <Badge variant="outline" className="text-xs mr-1 bg-green-50 text-green-700 border-green-300">
-                                  <CheckCircle className="h-3 w-3 ml-1" />
+                                <Badge variant="outline" className="text-xs me-1 bg-green-50 text-green-700 border-green-300">
+                                  <CheckCircle className="h-3 w-3 ms-1" />
                                   טופל
                                 </Badge>
                               ) : _isExpired(file.expiration_date) ? (
-                                <Badge variant="destructive" className="text-xs mr-1">
+                                <Badge variant="destructive" className="text-xs me-1">
                                   פג תוקף
                                 </Badge>
                               ) : null}
@@ -1382,7 +1382,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
                         )}
                       </p>
                     </div>
-                    <div className="flex items-center gap-1 mr-3">
+                    <div className="flex items-center gap-1 me-3">
                       <Button
                         size="sm"
                         variant="ghost"

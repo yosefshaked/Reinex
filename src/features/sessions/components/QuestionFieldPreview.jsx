@@ -25,7 +25,7 @@ export default function QuestionFieldPreview({
   if (type === 'textarea') {
     return (
       <div className="space-y-xs" dir="rtl">
-        <Label htmlFor={id} className="block text-right">
+        <Label htmlFor={id} className="block text-end">
           {label}
           {required ? ' *' : ''}
         </Label>
@@ -37,7 +37,7 @@ export default function QuestionFieldPreview({
   if (type === 'text') {
     return (
       <div className="space-y-xs" dir="rtl">
-        <Label htmlFor={id} className="block text-right">
+        <Label htmlFor={id} className="block text-end">
           {label}
           {required ? ' *' : ''}
         </Label>
@@ -49,7 +49,7 @@ export default function QuestionFieldPreview({
   if (type === 'number') {
     return (
       <div className="space-y-xs" dir="rtl">
-        <Label htmlFor={id} className="block text-right">
+        <Label htmlFor={id} className="block text-end">
           {label}
           {required ? ' *' : ''}
         </Label>
@@ -61,7 +61,7 @@ export default function QuestionFieldPreview({
   if (type === 'date') {
     return (
       <div className="space-y-xs" dir="rtl">
-        <Label htmlFor={id} className="block text-right">
+        <Label htmlFor={id} className="block text-end">
           {label}
           {required ? ' *' : ''}
         </Label>
@@ -73,7 +73,7 @@ export default function QuestionFieldPreview({
   if (type === 'select') {
     return (
       <div className="space-y-xs" dir="rtl">
-        <Label className="block text-right">
+        <Label className="block text-end">
           {label}
           {required ? ' *' : ''}
         </Label>
@@ -100,7 +100,7 @@ export default function QuestionFieldPreview({
     const selected = options[1]?.value; // show a selected sample
     return (
       <div className="space-y-xs" dir="rtl">
-        <Label className="block text-right">
+        <Label className="block text-end">
           {label}
           {required ? ' *' : ''}
         </Label>
@@ -153,7 +153,7 @@ export default function QuestionFieldPreview({
     const sliderValue = Math.round((min + max) / 2);
     return (
       <div className="space-y-2" dir="rtl">
-        <Label className="block text-right">
+        <Label className="block text-end">
           {label}
           {required ? ' *' : ''}
         </Label>
@@ -170,7 +170,7 @@ export default function QuestionFieldPreview({
   // Fallback: text
   return (
     <div className="space-y-xs" dir="rtl">
-      <Label className="block text-right">
+      <Label className="block text-end">
         {label}
         {required ? ' *' : ''}
       </Label>

@@ -232,7 +232,7 @@ export default function StudentHeader({
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent dir="rtl" className="text-right">
+        <AlertDialogContent dir="rtl" className="text-end">
           <AlertDialogHeader>
             <AlertDialogTitle>מחיקת תלמיד</AlertDialogTitle>
             <AlertDialogDescription>

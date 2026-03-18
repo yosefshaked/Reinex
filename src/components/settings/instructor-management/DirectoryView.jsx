@@ -175,7 +175,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="mr-3 text-sm text-slate-600">טוען נתונים...</span>
+        <span className="me-3 text-sm text-slate-600">טוען נתונים...</span>
       </div>
     );
   }
@@ -194,19 +194,19 @@ export default function DirectoryView({ session, orgId, canLoad }) {
         <TabsTrigger value="active" className="flex-col gap-1 py-2 whitespace-normal break-words">
           <div className="flex flex-col items-center gap-1">
             <span className="text-xs sm:text-sm text-center">עובדים פעילים</span>
-            <Badge variant="secondary" className="text-xs sm:mr-2">{activeInstructors.length}</Badge>
+            <Badge variant="secondary" className="text-xs sm:me-2">{activeInstructors.length}</Badge>
           </div>
         </TabsTrigger>
         <TabsTrigger value="inactive" className="flex-col gap-1 py-2 whitespace-normal break-words">
           <div className="flex flex-col items-center gap-1">
             <span className="text-xs sm:text-sm text-center">עובדים מושבתים</span>
-            <Badge variant="secondary" className="text-xs sm:mr-2">{inactiveInstructors.length}</Badge>
+            <Badge variant="secondary" className="text-xs sm:me-2">{inactiveInstructors.length}</Badge>
           </div>
         </TabsTrigger>
         <TabsTrigger value="members" className="flex-col gap-1 py-2 whitespace-normal break-words">
           <div className="flex flex-col items-center gap-1">
             <span className="text-xs sm:text-sm text-center">חברי ארגון</span>
-            <Badge variant="secondary" className="text-xs sm:mr-2">{nonInstructorMembers.length}</Badge>
+            <Badge variant="secondary" className="text-xs sm:me-2">{nonInstructorMembers.length}</Badge>
           </div>
         </TabsTrigger>
       </TabsList>
@@ -239,7 +239,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-                  <div className="flex flex-row-reverse sm:flex-row items-center gap-1 w-full sm:w-auto">
+                  <div className="flex flex-row items-center gap-1 w-full sm:w-auto">
                     <InfoTooltip 
                       message="להגדרת סיווגי עובדים: הגדרות ← ניהול תגיות וסיווגים"
                       side="top"
@@ -267,7 +267,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
                                 <span className="text-muted-foreground text-sm">בחר סיווגים...</span>
                               )}
                             </div>
-                            <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            <ChevronDown className="ms-2 h-4 w-4 shrink-0 opacity-50" />
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className="w-64 p-0" align="start">

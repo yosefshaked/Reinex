@@ -20,7 +20,7 @@ export function InstructorColumn({ instructor, instances, onInstanceClick, instr
   };
 
   return (
-    <div className="flex-1 min-w-[200px] border-l border-gray-300">
+    <div className="flex-1 min-w-[200px] border-s border-gray-300">
       {/* Instructor header */}
       <div className="h-12 border-b border-gray-300 flex items-center justify-center px-2 bg-gray-50">
         <div className="text-center">

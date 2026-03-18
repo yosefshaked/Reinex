@@ -319,11 +319,11 @@ export default function MyInstructorDocuments({ session, orgId, userId }) {
       <Dialog open={!!duplicateDialog} onOpenChange={(open) => !open && setDuplicateDialog(null)}>
         <DialogContent dir="rtl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-right">
+            <DialogTitle className="flex items-center gap-2 text-end">
               <AlertTriangle className="h-5 w-5 text-amber-600" />
               קובץ כפול זוהה
             </DialogTitle>
-            <DialogDescription className="text-right">
+            <DialogDescription className="text-end">
               קובץ זהה כבר קיים במערכת. האם ברצונך להמשיך בהעלאה?
             </DialogDescription>
           </DialogHeader>
@@ -338,7 +338,7 @@ export default function MyInstructorDocuments({ session, orgId, userId }) {
               <p className="font-medium mb-2">נמצא גם אצל:</p>
               <div className="space-y-2 max-h-40 overflow-y-auto">
                 {duplicateDialog?.duplicates?.map((dup, idx) => (
-                  <div key={idx} className="p-2 bg-amber-50 border border-amber-200 rounded text-right">
+                  <div key={idx} className="p-2 bg-amber-50 border border-amber-200 rounded text-end">
                     <p className="font-medium">{dup.instructor_name}</p>
                     <div className="text-xs text-muted-foreground mt-1">
                       <p>שם קובץ: {dup.file_name}</p>
@@ -349,7 +349,7 @@ export default function MyInstructorDocuments({ session, orgId, userId }) {
               </div>
             </div>
 
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground text-end">
               ניתן להעלות את הקובץ בכל זאת אם הוא נדרש גם עבור המדריך הנוכחי.
             </p>
           </div>
@@ -451,7 +451,7 @@ export default function MyInstructorDocuments({ session, orgId, userId }) {
                           )}
                           {!isMissing && (
                           <Badge variant="outline" className="text-xs border-green-600 text-green-700">
-                            <CheckCircle2 className="h-3 w-3 ml-1" />
+                            <CheckCircle2 className="h-3 w-3 ms-1" />
                             הועלה
                           </Badge>
                         )}
@@ -511,12 +511,12 @@ export default function MyInstructorDocuments({ session, orgId, userId }) {
                     >
                       {uploadingDefId === definition.id ? (
                         <>
-                          <Loader2 className="h-4 w-4 ml-2 animate-spin" />
+                          <Loader2 className="h-4 w-4 ms-2 animate-spin" />
                           מעלה...
                         </>
                       ) : (
                         <>
-                          <Upload className="h-4 w-4 ml-2" />
+                          <Upload className="h-4 w-4 ms-2" />
                           {files.length > 0 ? 'העלה קובץ נוסף' : 'העלה קובץ'}
                         </>
                       )}
@@ -555,12 +555,12 @@ export default function MyInstructorDocuments({ session, orgId, userId }) {
             >
               {uploadingAdhoc ? (
                 <>
-                  <Loader2 className="h-4 w-4 ml-2 animate-spin" />
+                  <Loader2 className="h-4 w-4 ms-2 animate-spin" />
                   מעלה...
                 </>
               ) : (
                 <>
-                  <Upload className="h-4 w-4 ml-2" />
+                  <Upload className="h-4 w-4 ms-2" />
                   העלה קובץ
                 </>
               )}

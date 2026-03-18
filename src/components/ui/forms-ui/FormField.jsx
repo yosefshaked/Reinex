@@ -26,17 +26,17 @@ export default function FormField({
   return (
     <div className="space-y-2" dir="rtl">
       {label ? (
-        <Label htmlFor={id} className="block text-right">
+        <Label htmlFor={id} className="block text-end">
           {label}
           {required ? ' *' : ''}
         </Label>
       ) : null}
       {field}
       {description ? (
-        <p id={descriptionId} className="text-xs text-neutral-500 text-right">{description}</p>
+        <p id={descriptionId} className="text-xs text-neutral-500 text-end">{description}</p>
       ) : null}
       {error ? (
-        <p id={errorId} className="text-sm text-red-600 text-right" role="alert" aria-live="polite">{error}</p>
+        <p id={errorId} className="text-sm text-red-600 text-end" role="alert" aria-live="polite">{error}</p>
       ) : null}
     </div>
   );

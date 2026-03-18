@@ -117,8 +117,8 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
         {step === STEPS.DETAILS && (
           <>
             <DialogHeader>
-              <DialogTitle className="text-right">יצירת עובד חדש</DialogTitle>
-              <DialogDescription className="text-right">
+              <DialogTitle className="text-end">יצירת עובד חדש</DialogTitle>
+              <DialogDescription className="text-end">
                 הזן את הפרטים הבסיסיים של העובד. תוכל להזמין אותו למערכת בשלב הבא.
               </DialogDescription>
             </DialogHeader>
@@ -176,13 +176,13 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
                   <Button type="submit" disabled={isSubmitting}>
                     {isSubmitting ? (
                       <>
-                        <span className="animate-spin mr-2">⏳</span>
+                        <span className="animate-spin me-2">⏳</span>
                         יוצר...
                       </>
                     ) : (
                       <>
                         הבא
-                        <ArrowLeft className="ml-2 h-4 w-4" />
+                        <ArrowLeft className="ms-2 h-4 w-4" />
                       </>
                     )}
                   </Button>
@@ -198,8 +198,8 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
         {step === STEPS.INVITE_OPTION && (
           <>
             <DialogHeader>
-              <DialogTitle className="text-right">האם להזמין את העובד למערכת?</DialogTitle>
-              <DialogDescription className="text-right">
+              <DialogTitle className="text-end">האם להזמין את העובד למערכת?</DialogTitle>
+              <DialogDescription className="text-end">
                 העובד נוצר בהצלחה. כעת תוכל לשלוח לו הזמנה להצטרף למערכת או להמשיך ללא הזמנה.
               </DialogDescription>
             </DialogHeader>
@@ -211,7 +211,7 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
               >
                 <div className="flex items-center gap-3">
                   <Mail className="h-5 w-5" />
-                  <div className="text-right">
+                  <div className="text-end">
                     <div className="font-semibold">שלח הזמנה למשתמש</div>
                     <div className="text-xs text-muted-foreground">העובד יוכל להתחבר למערכת</div>
                   </div>
@@ -226,7 +226,7 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
               >
                 <div className="flex items-center gap-3">
                   <UserPlus className="h-5 w-5" />
-                  <div className="text-right">
+                  <div className="text-end">
                     <div className="font-semibold">המשך ללא הזמנה</div>
                     <div className="text-xs text-muted-foreground">ניהול עובד ידני בלבד</div>
                   </div>
@@ -236,7 +236,7 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
             </div>
             <DialogFooter className="sm:justify-start">
               <Button variant="ghost" onClick={() => setStep(STEPS.DETAILS)}>
-                <ArrowRight className="ml-2 h-4 w-4" />
+                <ArrowRight className="ms-2 h-4 w-4" />
                 חזור
               </Button>
             </DialogFooter>
@@ -246,8 +246,8 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
         {step === STEPS.EMAIL && (
           <>
             <DialogHeader>
-              <DialogTitle className="text-right">שליחת הזמנה למשתמש</DialogTitle>
-              <DialogDescription className="text-right">
+              <DialogTitle className="text-end">שליחת הזמנה למשתמש</DialogTitle>
+              <DialogDescription className="text-end">
                 הזן את כתובת הדוא"ל של העובד. הוא יקבל הזמנה להצטרף לארגון במערכת.
               </DialogDescription>
             </DialogHeader>
@@ -268,18 +268,18 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
                   <Button type="submit" disabled={isSubmitting}>
                     {isSubmitting ? (
                       <>
-                        <span className="animate-spin mr-2">⏳</span>
+                        <span className="animate-spin me-2">⏳</span>
                         שולח...
                       </>
                     ) : (
                       <>
-                        <Mail className="mr-2 h-4 w-4" />
+                        <Mail className="me-2 h-4 w-4" />
                         שלח הזמנה
                       </>
                     )}
                   </Button>
                   <Button type="button" variant="outline" onClick={() => setStep(STEPS.INVITE_OPTION)} disabled={isSubmitting}>
-                    <ArrowRight className="ml-2 h-4 w-4" />
+                    <ArrowRight className="ms-2 h-4 w-4" />
                     חזור
                   </Button>
                 </div>

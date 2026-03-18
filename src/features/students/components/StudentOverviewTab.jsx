@@ -159,7 +159,7 @@ export default function StudentOverviewTab({ student }) {
             <div className="w-9 h-9 rounded-lg bg-green-100 text-green-600 flex items-center justify-center text-lg">📅</div>
             <h3 className="font-semibold text-zinc-800">השיעור הבא</h3>
             {relativeTime && (
-              <span className="mr-auto inline-flex items-center rounded-full bg-green-50 text-green-700 border border-green-200 px-2.5 py-0.5 text-xs font-medium">
+              <span className="me-auto inline-flex items-center rounded-full bg-green-50 text-green-700 border border-green-200 px-2.5 py-0.5 text-xs font-medium">
                 {relativeTime}
               </span>
             )}
@@ -271,17 +271,17 @@ export default function StudentOverviewTab({ student }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-muted-foreground">
-                    <th className="text-right pb-2.5 pr-2 font-medium text-xs">יום</th>
-                    <th className="text-right pb-2.5 font-medium text-xs">שעה</th>
-                    <th className="text-right pb-2.5 font-medium text-xs">שירות</th>
-                    <th className="text-right pb-2.5 font-medium text-xs">מדריך/ה</th>
-                    <th className="text-right pb-2.5 font-medium text-xs">סטטוס</th>
+                    <th className="text-end pb-2.5 pe-2 font-medium text-xs">יום</th>
+                    <th className="text-end pb-2.5 font-medium text-xs">שעה</th>
+                    <th className="text-end pb-2.5 font-medium text-xs">שירות</th>
+                    <th className="text-end pb-2.5 font-medium text-xs">מדריך/ה</th>
+                    <th className="text-end pb-2.5 font-medium text-xs">סטטוס</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lessonTemplates.map((template) => (
                     <tr key={template.id} className="border-b border-border/60 hover:bg-gray-50/50 transition">
-                      <td className="py-3 pr-2 font-medium">{formatDayOfWeek(template.day_of_week)}</td>
+                      <td className="py-3 pe-2 font-medium">{formatDayOfWeek(template.day_of_week)}</td>
                       <td className="py-3">{template.time_of_day || '—'}</td>
                       <td className="py-3">{template.service?.name || '—'}</td>
                       <td className="py-3">

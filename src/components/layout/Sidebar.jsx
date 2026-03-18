@@ -47,7 +47,7 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
     <aside
       dir="rtl"
       className={cn(
-        'hidden md:flex md:h-screen md:flex-col md:border-l md:border-border md:bg-surface',
+        'hidden md:flex md:h-screen md:flex-col md:border-s md:border-border md:bg-surface',
         'transition-[width] duration-200 ease-out',
         expanded ? 'md:w-64' : 'md:w-16'
       )}
@@ -73,7 +73,7 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
                 );
               }}
             >
-              <div className={cn('flex items-center gap-sm', expanded ? 'flex-row-reverse' : 'justify-center')}>
+              <div className={cn('flex items-center gap-sm', expanded ? '' : 'justify-center')}>
                 <Icon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
                 {expanded ? <span className="whitespace-nowrap">{item.label}</span> : null}
               </div>

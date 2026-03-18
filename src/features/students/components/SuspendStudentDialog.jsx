@@ -99,7 +99,7 @@ export default function SuspendStudentDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={handleClose}>
-      <AlertDialogContent dir="rtl" className="text-right max-w-md">
+      <AlertDialogContent dir="rtl" className="text-end max-w-md">
         <AlertDialogHeader>
           <AlertDialogTitle>השהיית תלמיד</AlertDialogTitle>
           <AlertDialogDescription>
@@ -112,7 +112,7 @@ export default function SuspendStudentDialog({
           <button
             type="button"
             onClick={() => setMode('immediate')}
-            className={`w-full text-right rounded-lg border p-3 transition ${
+            className={`w-full text-end rounded-lg border p-3 transition ${
               mode === 'immediate'
                 ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200'
                 : 'border-border hover:bg-accent'
@@ -126,7 +126,7 @@ export default function SuspendStudentDialog({
               </div>
               <span className="font-medium text-sm">באופן מיידי</span>
             </div>
-            <p className="text-xs text-muted-foreground mt-1 mr-6">
+            <p className="text-xs text-muted-foreground mt-1 me-6">
               בטל את כל השיעורים מהיום והלאה
             </p>
           </button>
@@ -135,7 +135,7 @@ export default function SuspendStudentDialog({
           <button
             type="button"
             onClick={() => setMode('from-date')}
-            className={`w-full text-right rounded-lg border p-3 transition ${
+            className={`w-full text-end rounded-lg border p-3 transition ${
               mode === 'from-date'
                 ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200'
                 : 'border-border hover:bg-accent'
@@ -149,14 +149,14 @@ export default function SuspendStudentDialog({
               </div>
               <span className="font-medium text-sm">מתאריך מסוים...</span>
             </div>
-            <p className="text-xs text-muted-foreground mt-1 mr-6">
+            <p className="text-xs text-muted-foreground mt-1 me-6">
               בטל שיעורים מתאריך שתבחר
             </p>
           </button>
 
           {/* Date Picker (shown when from-date mode) */}
           {mode === 'from-date' && (
-            <div className="mr-6">
+            <div className="me-6">
               <Popover>
                 <PopoverTrigger asChild>
                   <Button variant="outline" size="sm" className="gap-2 w-full justify-start">

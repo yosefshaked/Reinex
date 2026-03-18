@@ -122,7 +122,7 @@ function DateChoiceFooter({ lastReportDate, studentName, onClose, onNewReport, o
               className="justify-start gap-2 h-auto py-3"
             >
               <CalendarCheck className="h-4 w-4 shrink-0" />
-              <div className="flex flex-col items-start text-right">
+              <div className="flex flex-col items-start text-end">
                 <span className="font-medium">אותו התאריך</span>
                 <span className="text-xs opacity-80">{formatDateForDisplay(lastReportDate)}</span>
               </div>
@@ -135,7 +135,7 @@ function DateChoiceFooter({ lastReportDate, studentName, onClose, onNewReport, o
             className="justify-start gap-2 h-auto py-3"
           >
             <CalendarClock className="h-4 w-4 shrink-0" />
-            <div className="flex flex-col items-start text-right">
+            <div className="flex flex-col items-start text-end">
               <span className="font-medium">היום</span>
               <span className="text-xs opacity-80">{formatDateForDisplay(todayDate)}</span>
             </div>
@@ -147,7 +147,7 @@ function DateChoiceFooter({ lastReportDate, studentName, onClose, onNewReport, o
             className="justify-start gap-2 h-auto py-3"
           >
             <Calendar className="h-4 w-4 shrink-0" />
-            <div className="flex flex-col items-start text-right">
+            <div className="flex flex-col items-start text-end">
               <span className="font-medium">תאריך אחר</span>
               <span className="text-xs opacity-80">בחירה חופשית</span>
             </div>

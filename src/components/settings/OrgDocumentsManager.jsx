@@ -125,15 +125,15 @@ function PreUploadDialog({ file, onConfirm, onCancel }) {
     <Dialog open={!!file} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-[500px]" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right">הגדרות מסמך</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogTitle className="text-end">הגדרות מסמך</DialogTitle>
+          <DialogDescription className="text-end">
             ערוך את פרטי המסמך לפני ההעלאה
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="doc-name" className="text-right block">
+            <Label htmlFor="doc-name" className="text-end block">
               שם המסמך <span className="text-red-500">*</span>
             </Label>
             <Input
@@ -142,15 +142,15 @@ function PreUploadDialog({ file, onConfirm, onCancel }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="לדוגמה: רישיון עסק"
-              className="text-right"
+              className="text-end"
             />
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground text-end">
               קובץ מקורי: {file.name}
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="relevant-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="relevant-date" className="text-end flex items-center gap-2 justify-end">
               <span>תאריך רלוונטי</span>
               <Calendar className="h-4 w-4" />
             </Label>
@@ -160,15 +160,15 @@ function PreUploadDialog({ file, onConfirm, onCancel }) {
               dir="ltr"
               value={relevantDate}
               onChange={(e) => setRelevantDate(e.target.value)}
-              className="text-right"
+              className="text-end"
             />
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground text-end">
               תאריך הנפקה, אישור וכדומה
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="expiration-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="expiration-date" className="text-end flex items-center gap-2 justify-end">
               <span>תאריך תפוגה</span>
               <CalendarX className="h-4 w-4" />
             </Label>
@@ -178,9 +178,9 @@ function PreUploadDialog({ file, onConfirm, onCancel }) {
               dir="ltr"
               value={expirationDate}
               onChange={(e) => setExpirationDate(e.target.value)}
-              className="text-right"
+              className="text-end"
             />
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground text-end">
               המסמך יסומן כפג תוקף לאחר תאריך זה
             </p>
           </div>
@@ -188,7 +188,7 @@ function PreUploadDialog({ file, onConfirm, onCancel }) {
 
         <div className="flex gap-2 flex-row-reverse">
           <Button onClick={handleConfirm} disabled={!name.trim()}>
-            <Upload className="h-4 w-4 ml-2" />
+            <Upload className="h-4 w-4 ms-2" />
             העלה
           </Button>
           <Button onClick={onCancel} variant="outline">
@@ -229,15 +229,15 @@ function EditMetadataDialog({ document, onSave, onCancel }) {
     <Dialog open={!!document} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-[500px]" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right">עריכת מסמך</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogTitle className="text-end">עריכת מסמך</DialogTitle>
+          <DialogDescription className="text-end">
             ערוך את פרטי המסמך
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="edit-name" className="text-right block">
+            <Label htmlFor="edit-name" className="text-end block">
               שם המסמך <span className="text-red-500">*</span>
             </Label>
             <Input
@@ -245,12 +245,12 @@ function EditMetadataDialog({ document, onSave, onCancel }) {
               dir="rtl"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="text-right"
+              className="text-end"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="edit-relevant-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="edit-relevant-date" className="text-end flex items-center gap-2 justify-end">
               <span>תאריך רלוונטי</span>
               <Calendar className="h-4 w-4" />
             </Label>
@@ -260,12 +260,12 @@ function EditMetadataDialog({ document, onSave, onCancel }) {
               dir="ltr"
               value={relevantDate}
               onChange={(e) => setRelevantDate(e.target.value)}
-              className="text-right"
+              className="text-end"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="edit-expiration-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="edit-expiration-date" className="text-end flex items-center gap-2 justify-end">
               <span>תאריך תפוגה</span>
               <CalendarX className="h-4 w-4" />
             </Label>
@@ -275,7 +275,7 @@ function EditMetadataDialog({ document, onSave, onCancel }) {
               dir="ltr"
               value={expirationDate}
               onChange={(e) => setExpirationDate(e.target.value)}
-              className="text-right"
+              className="text-end"
             />
           </div>
         </div>
@@ -284,12 +284,12 @@ function EditMetadataDialog({ document, onSave, onCancel }) {
           <Button onClick={handleSave} disabled={!name.trim() || saving}>
             {saving ? (
               <>
-                <Loader2 className="h-4 w-4 ml-2 animate-spin" />
+                <Loader2 className="h-4 w-4 ms-2 animate-spin" />
                 שומר...
               </>
             ) : (
               <>
-                <Check className="h-4 w-4 ml-2" />
+                <Check className="h-4 w-4 ms-2" />
                 שמור
               </>
             )}
@@ -349,8 +349,8 @@ function BulkPreUploadDialog({ files, onConfirm, onCancel }) {
     <Dialog open={files.length > 0} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-[600px] max-h-[80vh]" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right">הגדרות מסמכים ({files.length})</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogTitle className="text-end">הגדרות מסמכים ({files.length})</DialogTitle>
+          <DialogDescription className="text-end">
             ערוך את פרטי המסמכים לפני ההעלאה
           </DialogDescription>
         </DialogHeader>
@@ -365,7 +365,7 @@ function BulkPreUploadDialog({ files, onConfirm, onCancel }) {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor={`bulk-name-${idx}`} className="text-right block">
+                  <Label htmlFor={`bulk-name-${idx}`} className="text-end block">
                     שם המסמך <span className="text-red-500">*</span>
                   </Label>
                   <Input
@@ -374,16 +374,16 @@ function BulkPreUploadDialog({ files, onConfirm, onCancel }) {
                     value={meta.name}
                     onChange={(e) => updateMetadata(idx, 'name', e.target.value)}
                     placeholder="לדוגמה: רישיון עסק"
-                    className="text-right"
+                    className="text-end"
                   />
-                  <p className="text-xs text-muted-foreground text-right">
+                  <p className="text-xs text-muted-foreground text-end">
                     קובץ מקורי: {meta.file.name}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label htmlFor={`bulk-relevant-${idx}`} className="text-right block text-xs">
+                    <Label htmlFor={`bulk-relevant-${idx}`} className="text-end block text-xs">
                       תאריך רלוונטי
                     </Label>
                     <Input
@@ -392,12 +392,12 @@ function BulkPreUploadDialog({ files, onConfirm, onCancel }) {
                       dir="ltr"
                       value={meta.relevantDate}
                       onChange={(e) => updateMetadata(idx, 'relevantDate', e.target.value)}
-                      className="text-right text-sm"
+                      className="text-end text-sm"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor={`bulk-expiration-${idx}`} className="text-right block text-xs">
+                    <Label htmlFor={`bulk-expiration-${idx}`} className="text-end block text-xs">
                       תאריך תפוגה
                     </Label>
                     <Input
@@ -406,7 +406,7 @@ function BulkPreUploadDialog({ files, onConfirm, onCancel }) {
                       dir="ltr"
                       value={meta.expirationDate}
                       onChange={(e) => updateMetadata(idx, 'expirationDate', e.target.value)}
-                      className="text-right text-sm"
+                      className="text-end text-sm"
                     />
                   </div>
                 </div>
@@ -417,7 +417,7 @@ function BulkPreUploadDialog({ files, onConfirm, onCancel }) {
 
         <div className="flex gap-2 flex-row-reverse border-t pt-4">
           <Button onClick={handleConfirm} disabled={!allValid}>
-            <Upload className="h-4 w-4 ml-2" />
+            <Upload className="h-4 w-4 ms-2" />
             העלה {files.length} קבצים
           </Button>
           <Button onClick={onCancel} variant="outline">
@@ -1052,7 +1052,7 @@ function DocumentCard({ document: doc, expired, canManage, deleteState, onEdit, 
           <div className="flex items-center gap-1.5 sm:gap-2 mb-1 flex-wrap">
             <button
               onClick={onPreview}
-              className="font-medium text-slate-900 text-sm sm:text-base leading-tight hover:text-primary underline-offset-2 hover:underline text-right"
+              className="font-medium text-slate-900 text-sm sm:text-base leading-tight hover:text-primary underline-offset-2 hover:underline text-end"
               title="לחץ לתצוגה מקדימה"
             >
               {doc.name}
@@ -1069,7 +1069,7 @@ function DocumentCard({ document: doc, expired, canManage, deleteState, onEdit, 
               <div className="relative">
                 <button
                   onClick={() => setShowFullOriginalName(!showFullOriginalName)}
-                  className="text-xs text-slate-500 hover:text-slate-700 underline-offset-2 hover:underline text-right w-full"
+                  className="text-xs text-slate-500 hover:text-slate-700 underline-offset-2 hover:underline text-end w-full"
                   title={showFullOriginalName ? 'לחץ להסתרה' : 'לחץ לצפייה בשם המלא'}
                 >
                   <span className={showFullOriginalName ? 'break-words' : 'truncate block'}>

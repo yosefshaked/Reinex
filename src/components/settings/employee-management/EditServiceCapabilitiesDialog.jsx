@@ -116,8 +116,8 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right">ניהול יכולות שירות</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogTitle className="text-end">ניהול יכולות שירות</DialogTitle>
+          <DialogDescription className="text-end">
             הגדר את השירותים שהעובד יכול לספק, מספר תלמידים מקסימלי ותעריף בסיס
           </DialogDescription>
         </DialogHeader>
@@ -155,7 +155,7 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
                     <div className="grid grid-cols-2 gap-3">
                       {/* Max Students */}
                       <div className="space-y-1">
-                        <Label className="text-xs text-right flex items-center gap-1">
+                        <Label className="text-xs text-end flex items-center gap-1">
                           <Users className="h-3 w-3" />
                           תלמידים מקסימלי
                         </Label>
@@ -166,14 +166,14 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
                           value={capability.max_students}
                           onChange={(e) => updateCapability(index, 'max_students', parseInt(e.target.value, 10) || 1)}
                           disabled={isSaving}
-                          className="text-right"
+                          className="text-end"
                           dir="ltr"
                         />
                       </div>
 
                       {/* Base Rate */}
                       <div className="space-y-1">
-                        <Label className="text-xs text-right flex items-center gap-1">
+                        <Label className="text-xs text-end flex items-center gap-1">
                           <DollarSign className="h-3 w-3" />
                           תעריף בסיס (₪)
                         </Label>
@@ -184,7 +184,7 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
                           value={capability.base_rate}
                           onChange={(e) => updateCapability(index, 'base_rate', parseFloat(e.target.value) || 0)}
                           disabled={isSaving}
-                          className="text-right"
+                          className="text-end"
                           dir="ltr"
                         />
                       </div>
@@ -203,7 +203,7 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
                 disabled={isSaving || loadingServices}
                 className="w-full"
               >
-                <Plus className="mr-2 h-4 w-4" />
+                <Plus className="me-2 h-4 w-4" />
                 הוסף שירות
               </Button>
             )}
@@ -217,7 +217,7 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
             <Button type="submit" disabled={isSaving}>
               {isSaving ? (
                 <>
-                  <span className="animate-spin mr-2">⏳</span>
+                  <span className="animate-spin me-2">⏳</span>
                   שומר...
                 </>
               ) : (

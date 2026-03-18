@@ -26,7 +26,7 @@ function LoadingState() {
 function EmptyState({ onCreate }) {
   return (
     <Card className="max-w-2xl w-full">
-      <CardHeader className="space-y-2 text-right">
+      <CardHeader className="space-y-2 text-end">
         <CardTitle className="text-2xl font-bold text-slate-900">ברוך הבא!</CardTitle>
         <p className="text-slate-600 text-sm">
           עדיין אין ארגון המשויך לחשבון שלך. צור ארגון חדש או בקש ממנהל להזמין אותך.
@@ -34,7 +34,7 @@ function EmptyState({ onCreate }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <Button onClick={onCreate} className="w-full" size="lg">
-          <Building2 className="w-4 h-4 ml-2" />
+          <Building2 className="w-4 h-4 ms-2" />
           צור ארגון חדש
         </Button>
         <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3 text-sm text-blue-900" role="status">
@@ -52,13 +52,13 @@ function InviteList({ invites, onAccept }) {
   if (!invites.length) return null;
   return (
     <Card className="w-full max-w-3xl">
-      <CardHeader className="text-right">
+      <CardHeader className="text-end">
         <CardTitle className="text-lg font-semibold text-slate-900">הזמנות ממתינות</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {invites.map((invite) => (
           <div key={invite.id} className="border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div className="text-right">
+            <div className="text-end">
               <p className="font-medium text-slate-900">{invite.organization?.name || 'ארגון ללא שם'}</p>
               <p className="text-sm text-slate-500">{invite.email}</p>
             </div>
@@ -80,7 +80,7 @@ function OrganizationList({ organizations, onSelect }) {
   if (!organizations.length) return null;
   return (
     <Card className="w-full max-w-3xl">
-      <CardHeader className="text-right">
+      <CardHeader className="text-end">
         <CardTitle className="text-lg font-semibold text-slate-900">בחר ארגון</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -89,7 +89,7 @@ function OrganizationList({ organizations, onSelect }) {
             key={organization.id}
             type="button"
             onClick={() => onSelect(organization.id)}
-            className="w-full border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition rounded-xl p-4 text-right"
+            className="w-full border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition rounded-xl p-4 text-end"
           >
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -158,7 +158,7 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
           </p>
         </div>
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          <div className="space-y-2 text-right">
+          <div className="space-y-2 text-end">
             <Label htmlFor="org-name">שם הארגון</Label>
             <Input
               id="org-name"
@@ -244,7 +244,7 @@ export default function OrgSelection() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center px-4 py-10" dir="rtl">
-      <div className="absolute top-4 left-4">
+      <div className="absolute top-4 start-4">
         <Button variant="ghost" onClick={handleLogout} className="gap-2 text-slate-600 hover:text-slate-900">
           <LogOut className="w-4 h-4" />
           התנתק

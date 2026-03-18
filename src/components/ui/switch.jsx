@@ -38,7 +38,7 @@ const Switch = React.forwardRef(({ className, ...props }, ref) => {
 
   const isRtl = direction === "rtl"
 
-  const thumbAnchorClass = isRtl ? "right-0" : "left-0"
+  const thumbAnchorClass = isRtl ? "end-0" : "start-0"
   const thumbCheckedTranslate = isRtl
     ? "data-[state=checked]:-translate-x-[1.25rem]"
     : "data-[state=checked]:translate-x-[1.25rem]"

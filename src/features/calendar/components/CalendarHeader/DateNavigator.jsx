@@ -51,7 +51,7 @@ export function DateNavigator({ currentDate, onDateChange, viewMode = 'day' }) {
   return (
     <div className="flex items-center gap-2">
       <Button variant="outline" size="sm" onClick={handleToday}>
-        <Calendar className="w-4 h-4 ml-1" />
+        <Calendar className="w-4 h-4 ms-1" />
         היום
       </Button>
       

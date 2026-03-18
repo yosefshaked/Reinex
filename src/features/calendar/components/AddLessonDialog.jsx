@@ -236,7 +236,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
                   variant="outline"
                   size="sm"
                   onClick={() => setIsGroupSession(true)}
-                  className="gap-1 ml-auto"
+                  className="gap-1 ms-auto"
                 >
                   <Users className="h-4 w-4" />
                   להוסיף תלמידים נוספים
@@ -480,7 +480,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
             <Button type="submit" disabled={isSubmitting || !formData.service_id || !formData.instructor_employee_id || formData.student_ids.length === 0}>
               {isSubmitting ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="me-2 h-4 w-4 animate-spin" />
                   שומר...
                 </>
               ) : (

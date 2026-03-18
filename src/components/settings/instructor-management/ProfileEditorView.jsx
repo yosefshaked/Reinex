@@ -109,7 +109,7 @@ export default function ProfileEditorView({ session, orgId, canLoad }) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="mr-3 text-sm text-slate-600">טוען נתונים...</span>
+        <span className="me-3 text-sm text-slate-600">טוען נתונים...</span>
       </div>
     );
   }
@@ -163,7 +163,7 @@ export default function ProfileEditorView({ session, orgId, canLoad }) {
 
         <div className="space-y-4">
           <div>
-            <Label htmlFor="edit-name" className="block text-right mb-2">
+            <Label htmlFor="edit-name" className="block text-end mb-2">
               שם מלא
             </Label>
             <Input
@@ -177,7 +177,7 @@ export default function ProfileEditorView({ session, orgId, canLoad }) {
           </div>
 
           <div>
-            <Label htmlFor="edit-phone" className="block text-right mb-2">
+            <Label htmlFor="edit-phone" className="block text-end mb-2">
               מספר טלפון
             </Label>
             <Input
@@ -187,12 +187,12 @@ export default function ProfileEditorView({ session, orgId, canLoad }) {
               placeholder="טלפון"
               disabled={isSaving}
               dir="ltr"
-              className="text-right"
+              className="text-end"
             />
           </div>
 
           <div>
-            <Label htmlFor="edit-notes" className="block text-right mb-2">
+            <Label htmlFor="edit-notes" className="block text-end mb-2">
               הערות
             </Label>
             <textarea
@@ -230,13 +230,13 @@ export default function ProfileEditorView({ session, orgId, canLoad }) {
   return (
     <div className="space-y-4" dir="rtl">
       <div className="relative">
-        <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Search className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           type="text"
           placeholder="חיפוש לפי שם, אימייל, טלפון או סוג..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="pr-10"
+          className="pe-10"
           dir="rtl"
         />
       </div>

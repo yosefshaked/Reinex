@@ -35,7 +35,7 @@ function TemplateCard({ template, onClick }) {
     <button
       type="button"
       className={cn(
-        'w-full text-right rounded-md px-2 py-1.5 text-xs border transition-shadow cursor-pointer',
+        'w-full text-end rounded-md px-2 py-1.5 text-xs border transition-shadow cursor-pointer',
         'hover:shadow-md hover:border-white/60',
         isInactive && 'opacity-50 line-through',
       )}
@@ -105,14 +105,14 @@ export function TemplateGrid({ templates, instructors, onTemplateClick, onCellCl
         <thead>
           <tr>
             {/* Day column header (right side in RTL) */}
-            <th className="border-b border-l border-gray-200 px-3 py-2 text-right text-sm font-semibold text-gray-700 bg-gray-50 sticky right-0 z-10 w-20">
+            <th className="border-b border-s border-gray-200 px-3 py-2 text-end text-sm font-semibold text-gray-700 bg-gray-50 sticky end-0 z-10 w-20">
               יום
             </th>
             {/* Instructor column headers */}
             {instructors.map((instructor) => (
               <th
                 key={instructor.id}
-                className="border-b border-l border-gray-200 px-3 py-2 text-center text-sm font-semibold text-gray-700 bg-gray-50 min-w-[180px]"
+                className="border-b border-s border-gray-200 px-3 py-2 text-center text-sm font-semibold text-gray-700 bg-gray-50 min-w-[180px]"
               >
                 {getInstructorName(instructor)}
               </th>
@@ -123,7 +123,7 @@ export function TemplateGrid({ templates, instructors, onTemplateClick, onCellCl
           {DAY_OPTIONS.map((day) => (
             <tr key={day.value} className="group">
               {/* Day label */}
-              <td className="border-b border-l border-gray-200 px-3 py-2 text-right text-sm font-medium text-gray-700 bg-gray-50/50 sticky right-0 z-10">
+              <td className="border-b border-s border-gray-200 px-3 py-2 text-end text-sm font-medium text-gray-700 bg-gray-50/50 sticky end-0 z-10">
                 <div className="flex items-center gap-1">
                   <span className="font-semibold text-gray-500">{day.labelShort}</span>
                   <span>{day.label}</span>
@@ -137,7 +137,7 @@ export function TemplateGrid({ templates, instructors, onTemplateClick, onCellCl
                 return (
                   <td
                     key={cellKey}
-                    className="border-b border-l border-gray-200 px-2 py-1.5 align-top min-h-[60px] hover:bg-blue-50/30 cursor-pointer transition-colors"
+                    className="border-b border-s border-gray-200 px-2 py-1.5 align-top min-h-[60px] hover:bg-blue-50/30 cursor-pointer transition-colors"
                     onClick={(e) => {
                       // Only fire cell click if they didn't click a template card
                       if (e.target === e.currentTarget || e.target.closest('td') === e.currentTarget) {

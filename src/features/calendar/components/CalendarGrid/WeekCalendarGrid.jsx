@@ -40,14 +40,14 @@ export function WeekCalendarGrid({
 
   return (
     <div className="border border-gray-300 rounded-lg bg-white">
-      <div className="flex flex-row-reverse overflow-x-auto w-full">
+      <div className="flex flex-row overflow-x-auto w-full">
         {/* Time column (sticky on right for RTL) */}
         <TimeColumn />
 
         {/* Week columns (one per day) */}
         <div className="flex flex-1 min-w-0">
           {daysOfWeek.map((dateString) => (
-            <div key={dateString} className="flex-1 min-w-[120px] border-l border-gray-300 overflow-visible">
+            <div key={dateString} className="flex-1 min-w-[120px] border-s border-gray-300 overflow-visible">
               {/* Day header */}
               <div className="h-12 border-b border-gray-300 flex items-center justify-center px-2 bg-gray-50 text-xs font-semibold text-center whitespace-pre-line">
                 {formatDayHeader(dateString)}

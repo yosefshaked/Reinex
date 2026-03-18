@@ -62,8 +62,8 @@ export default function EditInstructorProfileDialog({ open, onOpenChange, instru
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right">עריכת פרופיל עובד</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogTitle className="text-end">עריכת פרופיל עובד</DialogTitle>
+          <DialogDescription className="text-end">
             הגדר ימי עבודה ומשך הפסקה עבור {instructor?.first_name} {instructor?.last_name}
           </DialogDescription>
         </DialogHeader>
@@ -73,7 +73,7 @@ export default function EditInstructorProfileDialog({ open, onOpenChange, instru
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-slate-600" />
-                <Label className="text-right">ימי עבודה</Label>
+                <Label className="text-end">ימי עבודה</Label>
               </div>
               <div className="flex flex-wrap gap-2" dir="rtl">
                 {DAYS_OF_WEEK.map((day) => (
@@ -109,7 +109,7 @@ export default function EditInstructorProfileDialog({ open, onOpenChange, instru
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-slate-600" />
-                <Label htmlFor="break_time" className="text-right">
+                <Label htmlFor="break_time" className="text-end">
                   משך הפסקה (דקות)
                 </Label>
               </div>
@@ -122,7 +122,7 @@ export default function EditInstructorProfileDialog({ open, onOpenChange, instru
                 value={breakTimeMinutes}
                 onChange={(e) => setBreakTimeMinutes(parseInt(e.target.value, 10) || 0)}
                 disabled={isSaving}
-                className="text-right"
+                className="text-end"
                 dir="ltr"
               />
               <p className="text-xs text-slate-500">
@@ -137,7 +137,7 @@ export default function EditInstructorProfileDialog({ open, onOpenChange, instru
             <Button type="submit" disabled={isSaving}>
               {isSaving ? (
                 <>
-                  <span className="animate-spin mr-2">⏳</span>
+                  <span className="animate-spin me-2">⏳</span>
                   שומר...
                 </>
               ) : (

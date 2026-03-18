@@ -168,7 +168,7 @@ export default function CompleteRegistrationPage() {
   const renderContent = () => {
     if (inviteStatus === 'loading') {
       return (
-        <div className="p-8 space-y-6 text-right">
+        <div className="p-8 space-y-6 text-end">
           <div className="flex items-center justify-end gap-3 text-blue-600">
             <div className="w-10 h-10 rounded-full border-2 border-blue-200 flex items-center justify-center">
               <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
@@ -187,7 +187,7 @@ export default function CompleteRegistrationPage() {
 
     if (inviteStatus === 'error') {
       return (
-        <div className="p-8 space-y-6 text-right">
+        <div className="p-8 space-y-6 text-end">
           <div className="bg-red-50 border border-red-200 text-red-800 rounded-2xl px-4 py-3" role="alert">
             {inviteError}
           </div>
@@ -206,19 +206,19 @@ export default function CompleteRegistrationPage() {
     }
 
     return (
-      <form dir="rtl" className="p-8 space-y-6 text-right" onSubmit={handleSubmit}>
+      <form dir="rtl" className="p-8 space-y-6 text-end" onSubmit={handleSubmit}>
         <div className="space-y-2">
           <label htmlFor="invite-email" className="block text-sm font-medium text-slate-600">
             ההזמנה נשלחה ל
           </label>
           <div className="relative">
-            <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-400" aria-hidden="true" />
+            <Mail className="w-4 h-4 absolute start-3 top-3 text-slate-400" aria-hidden="true" />
             <input
               id="invite-email"
               type="email"
               value={invitationEmail}
               readOnly
-              className="w-full rounded-xl border border-slate-200 px-4 py-3 pr-4 text-right shadow-sm bg-slate-50 focus:outline-none"
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 pe-4 text-end shadow-sm bg-slate-50 focus:outline-none"
             />
           </div>
         </div>
@@ -244,17 +244,17 @@ export default function CompleteRegistrationPage() {
 
         <div className="space-y-4">
           <div>
-            <label htmlFor="invite-password" className="block text-sm font-medium text-slate-600 text-right">
+            <label htmlFor="invite-password" className="block text-sm font-medium text-slate-600 text-end">
               צור סיסמה
             </label>
             <div className="relative mt-1">
-              <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" aria-hidden="true" />
+              <Lock className="w-4 h-4 absolute start-3 top-3 text-slate-400" aria-hidden="true" />
               <input
                 id="invite-password"
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 pr-4 text-right shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 pe-4 text-end shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 autoComplete="new-password"
                 required
               />
@@ -262,7 +262,7 @@ export default function CompleteRegistrationPage() {
           </div>
 
           <div>
-            <label htmlFor="invite-password-confirm" className="block text-sm font-medium text-slate-600 text-right">
+            <label htmlFor="invite-password-confirm" className="block text-sm font-medium text-slate-600 text-end">
               אימות סיסמה
             </label>
             <input
@@ -270,7 +270,7 @@ export default function CompleteRegistrationPage() {
               type="password"
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-right shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-end shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               autoComplete="new-password"
               required
             />
@@ -297,7 +297,7 @@ export default function CompleteRegistrationPage() {
 
   return (
     <AuthLayout>
-      <div className="bg-gradient-to-l from-blue-500 to-indigo-500 p-6 text-right text-white">
+      <div className="bg-gradient-to-l from-blue-500 to-indigo-500 p-6 text-end text-white">
         <div className="flex items-center justify-center gap-3">
           <ShieldCheck className="w-10 h-10" />
           <div className="text-center">

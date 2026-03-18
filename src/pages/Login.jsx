@@ -160,14 +160,14 @@ export default function Login() {
       <div className="p-8 space-y-6">
           {redirectMessage ? (
             <div
-              className="bg-blue-50 border border-blue-100 text-blue-900 text-right rounded-2xl px-4 py-3 shadow-sm"
+              className="bg-blue-50 border border-blue-100 text-blue-900 text-end rounded-2xl px-4 py-3 shadow-sm"
               role="alert"
             >
               {redirectMessage}
             </div>
           ) : null}
 
-          <p className="text-sm text-slate-600 text-right leading-relaxed">
+          <p className="text-sm text-slate-600 text-end leading-relaxed">
             התחבר כדי להמשיך למערכת. ניתן להשתמש בחשבון גוגל, מיקרוסופט או בדוא"ל וסיסמה שסופקו לך על ידי הארגון.
           </p>
 
@@ -200,7 +200,7 @@ export default function Login() {
           </div>
 
           <form onSubmit={handleEmailSignIn} className="space-y-4">
-            <label className="block text-right">
+            <label className="block text-end">
               <span className="text-sm font-medium text-slate-600">דוא"ל</span>
               <div className="relative mt-1">
                 <input
@@ -208,15 +208,15 @@ export default function Login() {
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   required
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-right shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-end shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   placeholder="name@example.com"
                   autoComplete="email"
                 />
-                <Mail className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Mail className="w-4 h-4 absolute start-4 top-1/2 -translate-y-1/2 text-slate-400" />
               </div>
             </label>
 
-            <label className="block text-right">
+            <label className="block text-end">
               <span className="text-sm font-medium text-slate-600">סיסמה</span>
               <div className="relative mt-1">
                 <input
@@ -224,7 +224,7 @@ export default function Login() {
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   required
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-right shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-end shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   placeholder="••••••••"
                   autoComplete="current-password"
                 />
@@ -242,7 +242,7 @@ export default function Login() {
 
             {loginError ? (
               <div
-                className="bg-rose-50 border border-rose-200 text-rose-700 text-right rounded-2xl px-4 py-3 shadow-sm"
+                className="bg-rose-50 border border-rose-200 text-rose-700 text-end rounded-2xl px-4 py-3 shadow-sm"
                 role="alert"
                 aria-live="assertive"
               >

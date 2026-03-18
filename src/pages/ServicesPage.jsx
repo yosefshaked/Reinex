@@ -230,27 +230,27 @@ export default function ServicesPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-right">שם</TableHead>
-                    <TableHead className="text-right">משך</TableHead>
-                    <TableHead className="text-right">מודל תשלום</TableHead>
-                    <TableHead className="text-right">צבע</TableHead>
-                    <TableHead className="text-right">סטטוס</TableHead>
-                    <TableHead className="text-right">פעולות</TableHead>
+                    <TableHead className="text-end">שם</TableHead>
+                    <TableHead className="text-end">משך</TableHead>
+                    <TableHead className="text-end">מודל תשלום</TableHead>
+                    <TableHead className="text-end">צבע</TableHead>
+                    <TableHead className="text-end">סטטוס</TableHead>
+                    <TableHead className="text-end">פעולות</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {services.map((service) => (
                     <TableRow key={service.id}>
-                      <TableCell className="text-right font-medium">
+                      <TableCell className="text-end font-medium">
                         <Link to={`/services/${service.id}`} className="text-primary hover:underline">
                           {service.name}
                         </Link>
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-end">
                         {service.duration_minutes ? `${service.duration_minutes} דק׳` : '—'}
                       </TableCell>
-                      <TableCell className="text-right">{service.payment_model || '—'}</TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-end">{service.payment_model || '—'}</TableCell>
+                      <TableCell className="text-end">
                         {service.color ? (
                           <span className="inline-flex items-center gap-2">
                             <span className="h-4 w-4 rounded-full border" style={{ backgroundColor: service.color }} />
@@ -260,10 +260,10 @@ export default function ServicesPage() {
                           '—'
                         )}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-end">
                         {service.is_active === false ? 'מושהה' : 'פעיל'}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-end">
                         <Button
                           variant="ghost"
                           size="icon"
@@ -274,7 +274,7 @@ export default function ServicesPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="ml-2"
+                          className="ms-2"
                           onClick={() => handleToggleActive(service)}
                           disabled={toggleId === service.id}
                         >
@@ -294,7 +294,7 @@ export default function ServicesPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{formValues.id ? 'עריכת שירות' : 'שירות חדש'}</DialogTitle>
-            <DialogDescription className="text-right">
+            <DialogDescription className="text-end">
               עדכנו את פרטי השירות הזמין במערכת.
             </DialogDescription>
           </DialogHeader>
@@ -354,7 +354,7 @@ export default function ServicesPage() {
             />
 
             <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2">
-              <div className="text-right">
+              <div className="text-end">
                 <span className="block text-sm font-medium text-foreground">שירות פעיל</span>
                 <span className="text-xs text-neutral-500">אפשר להשבית שירות בלי למחוק אותו.</span>
               </div>

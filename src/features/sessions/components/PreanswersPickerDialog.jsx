@@ -106,8 +106,8 @@ export default function PreanswersPickerDialog({
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-right">בחירת תשובה מוכנה</DialogTitle>
-          <p className="text-sm text-neutral-600 text-right mt-2">
+          <DialogTitle className="text-end">בחירת תשובה מוכנה</DialogTitle>
+          <p className="text-sm text-neutral-600 text-end mt-2">
             {questionLabel}
           </p>
         </DialogHeader>
@@ -150,7 +150,7 @@ export default function PreanswersPickerDialog({
                       </span>
                     </>
                   ) : (
-                    <span className="mr-2 text-xs text-red-600">(מגבלה לא נטענה)</span>
+                    <span className="me-2 text-xs text-red-600">(מגבלה לא נטענה)</span>
                   )}
                 </span>
               </div>
@@ -165,20 +165,20 @@ export default function PreanswersPickerDialog({
                     <span className="text-neutral-500">{preanswersCapLimit}</span>
                   </>
                 ) : (
-                  <span className="mr-2 text-xs text-red-600">(מגבלה לא נטענה)</span>
+                  <span className="me-2 text-xs text-red-600">(מגבלה לא נטענה)</span>
                 )}
               </span>
             </div>
           )}
 
           <div className="relative">
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+            <Search className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
             <Input
               type="text"
               placeholder="חיפוש תשובות..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pr-10"
+              className="pe-10"
               autoFocus
             />
           </div>
@@ -220,8 +220,8 @@ export default function PreanswersPickerDialog({
                     role="option"
                     aria-selected={selectedAnswer === answer}
                     className={cn(
-                      'p-3 cursor-pointer transition-colors hover:bg-primary/5 flex items-start gap-2 text-right',
-                      selectedAnswer === answer ? 'bg-primary/10 border-r-4 border-primary' : ''
+                      'p-3 cursor-pointer transition-colors hover:bg-primary/5 flex items-start gap-2 text-end',
+                      selectedAnswer === answer ? 'bg-primary/10 border-e-4 border-primary' : ''
                     )}
                     onClick={() => setSelectedAnswer(answer)}
                     onDoubleClick={() => {
@@ -229,7 +229,7 @@ export default function PreanswersPickerDialog({
                       onClose?.();
                     }}
                   >
-                    <span className="text-xs text-neutral-500 leading-6 w-6 text-left">{index + 1}.</span>
+                    <span className="text-xs text-neutral-500 leading-6 w-6 text-start">{index + 1}.</span>
                     {selectedAnswer === answer && (
                       <CheckCircle2 className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
                     )}

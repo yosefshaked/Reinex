@@ -130,7 +130,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad, viewMode 
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="mr-3 text-sm text-slate-600">טוען עובדים...</span>
+        <span className="me-3 text-sm text-slate-600">טוען עובדים...</span>
       </div>
     );
   }
@@ -160,11 +160,11 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad, viewMode 
             variant="outline"
             disabled={viewMode === 'unlinked'}
           >
-            {showInactive ? <EyeOff className="mr-2 h-4 w-4" /> : <Eye className="mr-2 h-4 w-4" />}
+            {showInactive ? <EyeOff className="me-2 h-4 w-4" /> : <Eye className="me-2 h-4 w-4" />}
             {showInactive ? 'הסתר מושבתים' : 'הצג מושבתים'}
           </Button>
           <Button onClick={() => setShowWizard(true)} size="sm" disabled={viewMode === 'unlinked'}>
-            <UserPlus className="mr-2 h-4 w-4" />
+            <UserPlus className="me-2 h-4 w-4" />
             עובד חדש
           </Button>
           {viewMode !== 'unlinked' && (
@@ -173,7 +173,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad, viewMode 
               size="sm"
               variant="outline"
             >
-              <Users className="mr-2 h-4 w-4" />
+              <Users className="me-2 h-4 w-4" />
               חברי ארגון ללא עובד
             </Button>
           )}
@@ -361,7 +361,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad, viewMode 
                           }}
                           disabled={isLoading}
                         >
-                          <UserPlus className="h-4 w-4 mr-2" /> צור עובד חדש
+                          <UserPlus className="h-4 w-4 me-2" /> צור עובד חדש
                         </Button>
                       </div>
 

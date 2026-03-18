@@ -17,7 +17,7 @@ export default function OrgSelectionBanner() {
 
   return (
     <div
-      className="bg-sky-50 border border-sky-200 rounded-2xl px-4 py-2 flex items-center gap-3 text-sky-800 text-sm mt-4 mr-6 ml-6"
+      className="bg-sky-50 border border-sky-200 rounded-2xl px-4 py-2 flex items-center gap-3 text-sky-800 text-sm mt-4 me-6 ms-6"
       role="alert"
       dir="rtl"
     >

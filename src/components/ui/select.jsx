@@ -17,7 +17,7 @@ const SelectTrigger = React.forwardRef(({ className, children, ...props }, ref) 
       // RTL-friendly trigger: align value/placeholder text to the right and ensure the
       // value span consumes full width so alignment actually takes effect. Also reverse
       // row order in RTL so the chevron appears on the left.
-      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 rtl:flex-row-reverse rtl:text-right rtl:[&>span]:text-right rtl:[&>span]:w-full",
+      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 rtl:flex-row-reverse rtl:text-end rtl:[&>span]:text-end rtl:[&>span]:w-full",
       className
     )}
     {...props}>
@@ -89,7 +89,7 @@ SelectContent.displayName = SelectPrimitive.Content.displayName
 const SelectLabel = React.forwardRef(({ className, ...props }, ref) => (
   <SelectPrimitive.Label
     ref={ref}
-    className={cn("py-1.5 pl-8 pr-2 text-sm font-semibold", className)}
+    className={cn("py-1.5 ps-8 pe-2 text-sm font-semibold", className)}
     {...props} />
 ))
 SelectLabel.displayName = SelectPrimitive.Label.displayName
@@ -100,11 +100,11 @@ const SelectItem = React.forwardRef(({ className, children, ...props }, ref) => 
     className={cn(
       // RTL-friendly item: mirror padding and align text to the right; also mirror the
       // absolute position of the check indicator span.
-      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 rtl:text-right rtl:pr-8 rtl:pl-2",
+      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 ps-8 pe-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 rtl:text-end rtl:pe-8 rtl:ps-2",
       className
     )}
     {...props}>
-    <span className="absolute left-2 rtl:left-auto rtl:right-2 flex h-3.5 w-3.5 items-center justify-center">
+    <span className="absolute start-2 rtl:start-auto rtl:end-2 flex h-3.5 w-3.5 items-center justify-center">
       <SelectPrimitive.ItemIndicator>
         <Check className="h-4 w-4" />
       </SelectPrimitive.ItemIndicator>

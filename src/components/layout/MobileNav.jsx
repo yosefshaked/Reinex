@@ -95,8 +95,8 @@ export default function MobileNav() {
           </SheetTrigger>
 
           <SheetContent side="bottom" className="bg-surface border-t border-border" dir="rtl">
-            <SheetHeader className="text-right">
-              <SheetTitle className="text-right">תפריט</SheetTitle>
+            <SheetHeader className="text-end">
+              <SheetTitle className="text-end">תפריט</SheetTitle>
             </SheetHeader>
 
             <div className="mt-4 space-y-2">

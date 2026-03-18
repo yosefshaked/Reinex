@@ -180,7 +180,7 @@ export default function StudentHistoryTab({ studentId }) {
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-lg">🕐</div>
           <h3 className="font-semibold text-zinc-800">היסטוריית שינויים</h3>
-          <span className="mr-auto text-sm text-muted-foreground">כל השינויים שנעשו בנתוני התלמיד</span>
+          <span className="me-auto text-sm text-muted-foreground">כל השינויים שנעשו בנתוני התלמיד</span>
         </div>
         {isLoading ? (
           <div className="space-y-4">
@@ -220,11 +220,11 @@ export default function StudentHistoryTab({ studentId }) {
                     <div className="flex-1 pb-4">
                       <button
                         type="button"
-                        className="w-full rounded-md border px-3 py-3 text-right hover:bg-neutral-50/50 transition-colors"
+                        className="w-full rounded-md border px-3 py-3 text-end hover:bg-neutral-50/50 transition-colors"
                         onClick={() => toggleExpanded(entry.id)}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 text-right">
+                          <div className="flex-1 text-end">
                             <div className="flex flex-wrap gap-2 items-center mb-1">
                               <Badge variant={getActionVariant(entry.action_type)} className="text-xs">
                                 {getActionLabel(entry.action_type)}
@@ -249,7 +249,7 @@ export default function StudentHistoryTab({ studentId }) {
 
                         {/* Expandable before/after details */}
                         {isExpanded && (
-                          <div className="mt-3 border-t pt-3 text-right">
+                          <div className="mt-3 border-t pt-3 text-end">
                             {renderDetails(entry)}
                           </div>
                         )}

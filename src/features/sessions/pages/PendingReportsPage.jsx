@@ -538,7 +538,7 @@ export default function PendingReportsPage() {
               <span>סינון מתקדם</span>
               {showFilters ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               {(serviceFilter || reasonFilter || fromDate || toDate) && (
-                <Badge variant="secondary" className="mr-2">פעיל</Badge>
+                <Badge variant="secondary" className="me-2">פעיל</Badge>
               )}
             </Button>
           </div>
@@ -672,8 +672,8 @@ export default function PendingReportsPage() {
                                         </button>
                                       </TooltipTrigger>
                                     </PopoverTrigger>
-                                    <TooltipContent side="bottom" className="max-w-xs text-right">
-                                      <div dir="rtl" className="text-right whitespace-pre-wrap">
+                                    <TooltipContent side="bottom" className="max-w-xs text-end">
+                                      <div dir="rtl" className="text-end whitespace-pre-wrap">
                                         {notesPreview}
                                       </div>
                                     </TooltipContent>
@@ -681,8 +681,8 @@ export default function PendingReportsPage() {
                                 </TooltipProvider>
                                 <PopoverContent side="bottom" align="start" className="w-80 p-3">
                                   <div dir="rtl" className="space-y-2">
-                                    <div className="text-xs font-semibold text-neutral-600 text-right">הערות מהמדריך</div>
-                                    <div className="text-sm text-neutral-900 text-right whitespace-pre-wrap break-words">
+                                    <div className="text-xs font-semibold text-neutral-600 text-end">הערות מהמדריך</div>
+                                    <div className="text-sm text-neutral-900 text-end whitespace-pre-wrap break-words">
                                       {instructorNotes}
                                     </div>
                                   </div>

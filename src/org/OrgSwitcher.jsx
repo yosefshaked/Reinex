@@ -32,7 +32,7 @@ export default function OrgSwitcher() {
             close();
           }
         }}
-        className="flex items-center justify-between gap-2 w-full bg-white border border-slate-200 hover:border-blue-400 text-right rounded-xl px-3 py-2 transition"
+        className="flex items-center justify-between gap-2 w-full bg-white border border-slate-200 hover:border-blue-400 text-end rounded-xl px-3 py-2 transition"
         aria-haspopup="menu"
         aria-expanded={isOpen}
       >
@@ -53,7 +53,7 @@ export default function OrgSwitcher() {
       {isOpen ? (
         <div
           role="menu"
-          className="absolute z-20 mt-2 right-0 w-full max-w-xs bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+          className="absolute z-20 mt-2 end-0 w-full max-w-xs bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
         >
           {organizations.map((org) => {
             const isActive = org.id === activeOrg?.id;
@@ -68,7 +68,7 @@ export default function OrgSwitcher() {
                     : 'hover:bg-slate-50 text-slate-700'
                 }`}
               >
-                <span className="truncate text-right">{org.name}</span>
+                <span className="truncate text-end">{org.name}</span>
                 {isActive ? <Check className="w-4 h-4" aria-hidden="true" /> : null}
               </button>
             );

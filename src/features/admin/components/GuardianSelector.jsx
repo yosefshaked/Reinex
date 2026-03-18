@@ -152,7 +152,7 @@ export default function GuardianSelector({
               {Array.isArray(selectedGuardian.linked_students) && selectedGuardian.linked_students.length > 0 && (
                 <div>
                   <p className="font-semibold">תלמידים מקושרים</p>
-                  <ul className="list-disc pr-5 space-y-0.5">
+                  <ul className="list-disc pe-5 space-y-0.5">
                     {selectedGuardian.linked_students.slice(0, 2).map((link, index) => (
                       <li key={`${selectedGuardian.id}-${index}`}>
                         {link.student_name || 'ללא שם'}

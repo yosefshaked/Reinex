@@ -596,14 +596,14 @@ export default function WaitingListPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-right">תלמיד</TableHead>
-                    <TableHead className="text-right">שירות מבוקש</TableHead>
-                    <TableHead className="text-right">ימי זמינות</TableHead>
-                    <TableHead className="text-right">זמני העדפה</TableHead>
-                    <TableHead className="text-right">עדיפות</TableHead>
-                    <TableHead className="text-right">סטטוס</TableHead>
-                    <TableHead className="text-right">הערות</TableHead>
-                    <TableHead className="text-right">פעולות</TableHead>
+                    <TableHead className="text-end">תלמיד</TableHead>
+                    <TableHead className="text-end">שירות מבוקש</TableHead>
+                    <TableHead className="text-end">ימי זמינות</TableHead>
+                    <TableHead className="text-end">זמני העדפה</TableHead>
+                    <TableHead className="text-end">עדיפות</TableHead>
+                    <TableHead className="text-end">סטטוס</TableHead>
+                    <TableHead className="text-end">הערות</TableHead>
+                    <TableHead className="text-end">פעולות</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -614,31 +614,31 @@ export default function WaitingListPage() {
                       <TableRow
                         key={entry.id}
                         className={cn(
-                          isPriority && 'border-l-4 border-red-400 bg-red-50/40'
+                          isPriority && 'border-s-4 border-red-400 bg-red-50/40'
                         )}
                       >
-                        <TableCell className="text-right font-medium">
+                        <TableCell className="text-end font-medium">
                           {buildStudentName(entry.student)}
                         </TableCell>
-                        <TableCell className="text-right">{entry.service?.name || '—'}</TableCell>
-                        <TableCell className="text-right">{formatPreferredDays(entry.preferred_days)}</TableCell>
-                        <TableCell className="text-right text-sm text-neutral-600">
+                        <TableCell className="text-end">{entry.service?.name || '—'}</TableCell>
+                        <TableCell className="text-end">{formatPreferredDays(entry.preferred_days)}</TableCell>
+                        <TableCell className="text-end text-sm text-neutral-600">
                           {formatPreferredTimes(entry.preferred_times)}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-end">
                           {isPriority ? (
                             <Badge variant="destructive">דחוף</Badge>
                           ) : (
                             <Badge variant="secondary">רגיל</Badge>
                           )}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-end">
                           <Badge variant={STATUS_BADGE_VARIANTS[entry.status] || 'outline'}>{statusLabel}</Badge>
                         </TableCell>
-                        <TableCell className="text-right text-sm text-neutral-600">
+                        <TableCell className="text-end text-sm text-neutral-600">
                           {entry.notes || '—'}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-end">
                           <Button variant="ghost" size="icon" onClick={() => openEditDialog(entry)}>
                             <Pencil className="h-4 w-4" />
                           </Button>
@@ -657,7 +657,7 @@ export default function WaitingListPage() {
         <DialogContent className="sm:max-w-3xl" dir="rtl">
           <DialogHeader>
             <DialogTitle>{formValues.id ? 'עריכת רשומה' : 'רשומה חדשה'}</DialogTitle>
-            <DialogDescription className="text-right">
+            <DialogDescription className="text-end">
               הגדירו את צרכי התלמיד כדי שנוכל לשבץ אותו בשיעור קבוע.
             </DialogDescription>
           </DialogHeader>
@@ -694,7 +694,7 @@ export default function WaitingListPage() {
               />
 
               <div className="space-y-3">
-                <Label className="block text-right">ימי זמינות</Label>
+                <Label className="block text-end">ימי זמינות</Label>
                 <div className="flex items-start gap-4 overflow-x-auto pb-2">
                   {DAYS_OF_WEEK.map((day) => {
                     const ranges = formValues.preferredTimesByDay?.[day.value] || [];
@@ -741,7 +741,7 @@ export default function WaitingListPage() {
 
               <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2">
                 <div>
-                  <Label className="block text-right">עדיפות גבוהה</Label>
+                  <Label className="block text-end">עדיפות גבוהה</Label>
                   <p className="text-xs text-neutral-500">סמנו אם נדרש שיבוץ דחוף.</p>
                 </div>
                 <Switch
@@ -800,7 +800,7 @@ export default function WaitingListPage() {
         <DialogContent className="sm:max-w-lg" dir="rtl">
           <DialogHeader>
             <DialogTitle>עריכת זמינות</DialogTitle>
-            <DialogDescription className="text-right">
+            <DialogDescription className="text-end">
               {timeEditorDay !== null
                 ? `הגדירו טווחי זמן ליום ${DAYS_OF_WEEK.find((day) => day.value === timeEditorDay)?.label || ''}`
                 : 'בחרו יום כדי לערוך זמינות.'}

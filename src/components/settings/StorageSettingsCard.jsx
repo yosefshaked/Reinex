@@ -393,7 +393,7 @@ export default function StorageSettingsCard({ session, orgId }) {
               type="button"
               onClick={() => canUseManaged && setSelectedMode(STORAGE_MODES.MANAGED)}
               disabled={!canUseManaged}
-              className={`p-4 border-2 rounded-lg text-right transition-all ${
+              className={`p-4 border-2 rounded-lg text-end transition-all ${
                 selectedMode === STORAGE_MODES.MANAGED
                   ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
                   : canUseManaged
@@ -423,7 +423,7 @@ export default function StorageSettingsCard({ session, orgId }) {
               type="button"
               onClick={() => canUseBYOS && setSelectedMode(STORAGE_MODES.BYOS)}
               disabled={!canUseBYOS}
-              className={`p-4 border-2 rounded-lg text-right transition-all ${
+              className={`p-4 border-2 rounded-lg text-end transition-all ${
                 selectedMode === STORAGE_MODES.BYOS
                   ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
                   : canUseBYOS
@@ -664,11 +664,11 @@ export default function StorageSettingsCard({ session, orgId }) {
       <Dialog open={showDisconnectDialog} onOpenChange={setShowDisconnectDialog}>
         <DialogContent dir="rtl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-right">
+            <DialogTitle className="flex items-center gap-2 text-end">
               <AlertTriangle className="h-5 w-5 text-destructive" />
               ניתוק אחסון
             </DialogTitle>
-            <DialogDescription className="text-right">
+            <DialogDescription className="text-end">
               פעולה זו תנתק את הגדרות האחסון. קבצים קיימים יישארו זמינים לתקופה מוגבלת.
             </DialogDescription>
           </DialogHeader>

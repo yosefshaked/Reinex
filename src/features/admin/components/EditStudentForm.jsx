@@ -436,7 +436,7 @@ export default function EditStudentForm({
       </div>
 
       {error && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 text-right" role="alert">
+        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 text-end" role="alert">
           {error}
         </div>
       )}

@@ -112,7 +112,7 @@ export default function ServiceManager({ session, orgId, activeOrgHasConnection,
         {isLoading ? (
           <div className="flex items-center justify-center py-md sm:py-lg">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            <span className="mr-2 text-xs text-slate-600 sm:text-sm">טוען שירותים...</span>
+            <span className="me-2 text-xs text-slate-600 sm:text-sm">טוען שירותים...</span>
           </div>
         ) : loadError ? (
           <div className="rounded-md bg-red-50 p-sm text-xs text-red-700 sm:p-md sm:text-sm">

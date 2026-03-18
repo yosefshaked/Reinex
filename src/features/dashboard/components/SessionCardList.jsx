@@ -132,9 +132,9 @@ export default function SessionCardList({
                   dir="rtl"
                 >
                   {session?.instructorColor && (
-                    <div className="absolute right-0 top-0 bottom-0 w-1.5 rounded-r-lg" style={barStyle} aria-hidden />
+                    <div className="absolute end-0 top-0 bottom-0 w-1.5 rounded-e-lg" style={barStyle} aria-hidden />
                   )}
-                  <div className="flex-1 min-w-0 pr-3 text-right">
+                  <div className="flex-1 min-w-0 pe-3 text-end">
                     <p className="text-base font-semibold truncate">{session?.studentName || '—'}</p>
                     <div className="mt-1 flex items-center justify-between gap-3 text-sm text-muted-foreground sm:justify-start">
                       <div className="flex min-h-[1.5rem] min-w-0 items-center gap-2">
@@ -149,7 +149,7 @@ export default function SessionCardList({
                       </div>
                       <div
                         className={cn(
-                          'text-2xl font-semibold flex flex-shrink-0 items-center justify-center text-left sm:hidden',
+                          'text-2xl font-semibold flex flex-shrink-0 items-center justify-center text-start sm:hidden',
                           status.className,
                         )}
                         aria-label={status.label}

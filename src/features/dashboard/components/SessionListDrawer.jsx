@@ -46,16 +46,16 @@ export function SessionListDrawer({ isOpen, onClose, cellData, orgId, onSessionC
     <Sheet open={isOpen} onOpenChange={onClose}>
       <SheetContent side="left" className="w-full sm:max-w-lg">
         <SheetHeader>
-          <SheetTitle className="text-right">
+          <SheetTitle className="text-end">
             {dayName} {fullDate} | {cellData.timeSlot}
           </SheetTitle>
-          <SheetDescription className="text-right">
+          <SheetDescription className="text-end">
             {cellData.documented} מתועדים מתוך {cellData.total} שיעורים
             {cellData.upcoming > 0 && ` (${cellData.upcoming} קרובים)`}
           </SheetDescription>
         </SheetHeader>
 
-        <div className="h-[calc(100vh-180px)] mt-6 overflow-y-auto pr-4">
+        <div className="h-[calc(100vh-180px)] mt-6 overflow-y-auto pe-4">
           <SessionCardList
             sessions={cellData.sessions}
             onOpenStudent={session => handleViewStudent(session.studentId)}

@@ -668,11 +668,11 @@ export default function StudentsPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="text-right">שם</TableHead>
-                        <TableHead className="text-right">יום מפגש</TableHead>
-                        <TableHead className="text-right">שעת מפגש</TableHead>
-                        <TableHead className="text-right">סטטוס</TableHead>
-                        <TableHead className="text-right">פעולות</TableHead>
+                        <TableHead className="text-end">שם</TableHead>
+                        <TableHead className="text-end">יום מפגש</TableHead>
+                        <TableHead className="text-end">שעת מפגש</TableHead>
+                        <TableHead className="text-end">סטטוס</TableHead>
+                        <TableHead className="text-end">פעולות</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -700,7 +700,7 @@ export default function StudentsPage() {
 
                         return (
                           <TableRow key={student.id}>
-                            <TableCell className="text-right">
+                            <TableCell className="text-end">
                               <div className="flex flex-col gap-1">
                                 <Link
                                   to={`/students/${student.id}`}
@@ -727,8 +727,8 @@ export default function StudentsPage() {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex items-center justify-end gap-2" dir="ltr">
+                            <TableCell className="text-end">
+                              <div className="flex items-center justify-end gap-2">
                                 {extraTemplateCount > 0 ? (
                                   <Popover>
                                     <PopoverTrigger asChild>
@@ -742,7 +742,7 @@ export default function StudentsPage() {
                                         +{extraTemplateCount}
                                       </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent align="end" className="w-64 text-right" dir="rtl">
+                                    <PopoverContent align="end" className="w-64 text-end" dir="rtl">
                                       <div className="space-y-2">
                                         <p className="text-xs font-semibold text-neutral-700">
                                           תבניות נוספות לתלמיד
@@ -780,19 +780,19 @@ export default function StudentsPage() {
                                 </span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-end">
                               {student.default_session_time
                                 ? formatDefaultTime(student.default_session_time)
                                 : '—'}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-end">
                               {isInactive ? (
                                 <Badge variant="secondary">לא פעיל</Badge>
                               ) : (
                                 <Badge variant="success">פעיל</Badge>
                               )}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-end">
                               <div className="flex items-center gap-2">
                                 <Link to={`/students/${student.id}`}>
                                   <Button variant="ghost" size="icon">

@@ -167,7 +167,7 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied }
             סגור
           </Button>
           <Button type="button" variant="outline" onClick={handlePreview} disabled={!canPreview || isPreviewLoading || isApplyLoading}>
-            {isPreviewLoading && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+            {isPreviewLoading && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
             תצוגה מקדימה
           </Button>
           <Button
@@ -175,7 +175,7 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied }
             onClick={handleApply}
             disabled={!canPreview || isPreviewLoading || isApplyLoading || (result && result.summary?.to_insert_instances === 0)}
           >
-            {isApplyLoading && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+            {isApplyLoading && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
             בצע יצירה
           </Button>
         </DialogFooter>

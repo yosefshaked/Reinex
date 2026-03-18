@@ -266,13 +266,13 @@ export default function BulkResolvePendingReportsDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right">שיוך מרובה - {reports.length} דיווחים</DialogTitle>
+          <DialogTitle className="text-end">שיוך מרובה - {reports.length} דיווחים</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           {/* Summary */}
           <div className="rounded-lg bg-neutral-50 p-3 space-y-2">
-            <p className="text-sm font-medium text-foreground text-right">דיווחים נבחרים:</p>
+            <p className="text-sm font-medium text-foreground text-end">דיווחים נבחרים:</p>
             <div className="flex flex-wrap gap-2">
               {reportNames.map((name) => (
                 <Badge key={name} variant="outline">
@@ -281,7 +281,7 @@ export default function BulkResolvePendingReportsDialog({
               ))}
             </div>
             {hasMultipleNames && (
-              <p className="text-xs text-neutral-600 text-right">
+              <p className="text-xs text-neutral-600 text-end">
                 ⚠️ שים לב: נבחרו דיווחים עם שמות שונים. כל הדיווחים ישוייכו לאותו תלמיד.
               </p>
             )}
@@ -290,7 +290,7 @@ export default function BulkResolvePendingReportsDialog({
           {/* Mode Selection */}
           {mode === RESOLUTION_MODE.SELECT && (
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground text-right">
+              <p className="text-sm text-muted-foreground text-end">
                 בחר פעולה לביצוע עבור כל הדיווחים הנבחרים:
               </p>
               <div className="grid grid-cols-1 gap-3">
@@ -304,7 +304,7 @@ export default function BulkResolvePendingReportsDialog({
                     <Users className="h-5 w-5" />
                     <span className="font-semibold">שיוך לתלמיד קיים</span>
                   </div>
-                  <p className="text-xs text-muted-foreground text-right">
+                  <p className="text-xs text-muted-foreground text-end">
                     שייך את כל הדיווחים לתלמיד אחד מהרשימה
                   </p>
                 </Button>
@@ -319,7 +319,7 @@ export default function BulkResolvePendingReportsDialog({
                     <UserPlus className="h-5 w-5" />
                     <span className="font-semibold">יצירת תלמיד חדש</span>
                   </div>
-                  <p className="text-xs text-muted-foreground text-right">
+                  <p className="text-xs text-muted-foreground text-end">
                     צור תלמיד חדש ושייך אליו את כל הדיווחים
                   </p>
                 </Button>
@@ -332,7 +332,7 @@ export default function BulkResolvePendingReportsDialog({
             <div className="space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="student-select" className="text-right block">
+                  <Label htmlFor="student-select" className="text-end block">
                     בחר תלמיד <span className="text-destructive">*</span>
                   </Label>
                   {!studentsLoading && (
@@ -349,9 +349,9 @@ export default function BulkResolvePendingReportsDialog({
                       value={studentSearchQuery}
                       onChange={(e) => setStudentSearchQuery(e.target.value)}
                       disabled={studentsLoading || isProcessing}
-                      className="pr-10"
+                      className="pe-10"
                     />
-                    <svg className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                   </div>
@@ -365,7 +365,7 @@ export default function BulkResolvePendingReportsDialog({
                     </SelectTrigger>
                     <SelectContent className="max-h-[250px] sm:max-h-[300px]">
                       {filteredStudents.map((student) => (
-                        <SelectItem key={student.id} value={student.id} className="text-right">
+                        <SelectItem key={student.id} value={student.id} className="text-end">
                           <span className="block truncate">{formatStudentName(student) || 'ללא שם'}</span>
                           {student.contact_name && <span className="text-xs text-neutral-500"> ({student.contact_name})</span>}
                         </SelectItem>
@@ -517,7 +517,7 @@ export default function BulkResolvePendingReportsDialog({
           {mode === RESOLUTION_MODE.CREATE_NEW && (
             <div className="space-y-4">
               <div className="rounded-lg bg-neutral-50 p-3">
-                <p className="text-sm text-neutral-600 text-right">
+                <p className="text-sm text-neutral-600 text-end">
                   תלמיד חדש ייווצר ו-{reports.length} דיווחים ישוייכו אליו.
                 </p>
               </div>

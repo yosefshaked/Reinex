@@ -204,7 +204,7 @@ export default function ComboBoxInput({
           <button
             type="button"
             aria-label="פתח רשימת אפשרויות"
-            className="absolute inset-y-0 left-2 flex items-center text-muted-foreground hover:text-foreground pointer-events-auto"
+            className="absolute inset-y-0 start-2 flex items-center text-muted-foreground hover:text-foreground pointer-events-auto"
             tabIndex={-1}
             disabled={disabled}
           >

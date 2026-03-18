@@ -62,7 +62,7 @@ export function RejectReportDialog({ open, onClose, onReject, reportName, isBulk
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-md" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-right">
+          <DialogTitle className="flex items-center gap-2 text-end">
             <AlertTriangle className="h-5 w-5 text-destructive" />
             דחיית דיווח
           </DialogTitle>
@@ -71,15 +71,15 @@ export function RejectReportDialog({ open, onClose, onReject, reportName, isBulk
         <div className="space-y-4 py-4">
           {reportName && (
             <div className="rounded-lg bg-muted p-3">
-              <p className="text-sm text-muted-foreground text-right">
+              <p className="text-sm text-muted-foreground text-end">
                 {isBulk ? 'מספר דיווחים:' : 'שם התלמיד בדיווח:'}
               </p>
-              <p className="font-medium text-right">{reportName}</p>
+              <p className="font-medium text-end">{reportName}</p>
             </div>
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="reject-reason" className="text-right block">
+            <Label htmlFor="reject-reason" className="text-end block">
               סיבת הדחייה <span className="text-destructive">*</span>
             </Label>
             <Select value={selectedReason} onValueChange={setSelectedReason} dir="rtl">
@@ -98,7 +98,7 @@ export function RejectReportDialog({ open, onClose, onReject, reportName, isBulk
 
           {selectedReason === 'other' && (
             <div className="space-y-2">
-              <Label htmlFor="custom-reason" className="text-right block">
+              <Label htmlFor="custom-reason" className="text-end block">
                 פרט את הסיבה <span className="text-destructive">*</span>
               </Label>
               <Textarea
@@ -114,7 +114,7 @@ export function RejectReportDialog({ open, onClose, onReject, reportName, isBulk
           )}
 
           <div className="rounded-lg bg-amber-50 dark:bg-amber-950/20 p-3 border border-amber-200 dark:border-amber-900">
-            <p className="text-sm text-amber-900 dark:text-amber-200 text-right">
+            <p className="text-sm text-amber-900 dark:text-amber-200 text-end">
               <strong>שים לב:</strong> {isBulk 
                 ? 'דיווחים שנדחו יישמרו במערכת למעקב אך לא יהיו זמינים לפתרון.' 
                 : 'דיווח שנדחה יישמר במערכת למעקב אך לא יהיה זמין לפתרון.'}

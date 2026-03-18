@@ -328,7 +328,7 @@ export default function OrgMembersCard() {
                   key={member.id || member.user_id}
                   className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border border-slate-200 rounded-xl px-4 py-3"
                 >
-                  <div className="text-right space-y-2 flex-1">
+                  <div className="text-end space-y-2 flex-1">
                     {isEditing ? (
                       <div className="space-y-1">
                         <label htmlFor={`member-name-${member.id}`} className="sr-only">
@@ -514,7 +514,7 @@ export default function OrgMembersCard() {
                         expired ? 'border-amber-300 bg-amber-50' : 'border-slate-200'
                       }`}
                     >
-                      <div className="text-right space-y-1">
+                      <div className="text-end space-y-1">
                         <p className="text-sm font-medium text-slate-900" dir="ltr">{invite.email}</p>
                         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                           <span>נשלח: {formatDate(invite.createdAt || invite.created_at)}</span>

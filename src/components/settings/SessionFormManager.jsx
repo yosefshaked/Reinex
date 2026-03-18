@@ -1086,7 +1086,7 @@ export default function SessionFormManager({
             {validationErrors.length ? (
               <div className="space-y-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert">
                 <p className="font-semibold">נא לטפל בשגיאות הבאות:</p>
-                <ul className="list-disc space-y-1 pr-5">
+                <ul className="list-disc space-y-1 pe-5">
                   {validationErrors.map((error) => (
                     <li key={error}>{error}</li>
                   ))}

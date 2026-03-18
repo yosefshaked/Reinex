@@ -55,7 +55,7 @@ export default function LandingPage() {
     <AccessibilityProvider>
       <div className="min-h-screen bg-gradient-to-b from-primary/5 to-background" dir="rtl">
         {/* Accessibility Button */}
-        <div className="fixed bottom-4 left-4 z-50">
+        <div className="fixed bottom-4 start-4 z-50">
           <AccessibilityButton />
         </div>
 
@@ -116,7 +116,7 @@ export default function LandingPage() {
                   <div className="rounded-lg bg-primary/10 p-3">
                     <feature.icon className="h-6 w-6 text-primary" />
                   </div>
-                  <div className="flex-1 text-right">
+                  <div className="flex-1 text-end">
                     <h3 className="text-lg font-semibold text-foreground">{feature.title}</h3>
                     <p className="mt-2 text-sm text-neutral-600">{feature.description}</p>
                   </div>
@@ -141,7 +141,7 @@ export default function LandingPage() {
         <div className="mt-12 space-y-16">
           {/* Dashboard Preview */}
           <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
-            <div className="order-2 text-right lg:order-1">
+            <div className="order-2 text-end lg:order-1">
               <h3 className="text-2xl font-bold text-foreground">לוח בקרה ראשי</h3>
               <p className="mt-4 text-lg text-neutral-600">
                 נגישות נוחה לחלקיה המרכזיים של המערכת - מבט על התלמידים ותיעוד מפגש חדש.
@@ -167,7 +167,7 @@ export default function LandingPage() {
 
           {/* Student Management Preview */}
           <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
-            <div className="order-2 text-right lg:order-2">
+            <div className="order-2 text-end lg:order-2">
               <h3 className="text-2xl font-bold text-foreground">ניהול תלמידים מתקדם</h3>
               <p className="mt-4 text-lg text-neutral-600">
                 ממשק ניהול תלמידים אינטואיטיבי עם חיפוש מהיר, סינון לפי מדריך או יום בשבוע,
@@ -202,7 +202,7 @@ export default function LandingPage() {
 
           {/* Session Recording Preview */}
           <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
-            <div className="order-2 text-right lg:order-1">
+            <div className="order-2 text-end lg:order-1">
               <h3 className="text-2xl font-bold text-foreground">תיעוד מפגשים מהיר ונוח</h3>
               <p className="mt-4 text-lg text-neutral-600">
                 תיעוד מפגש בכמה קליקים - בחירת תלמיד, מילוי שאלות מותאמות אישית, ושמירה מיידית.

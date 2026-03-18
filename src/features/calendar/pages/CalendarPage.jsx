@@ -108,7 +108,7 @@ export default function CalendarPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CalendarHeader currentDate={currentDate} onDateChange={setCurrentDate} viewMode={viewMode} />
-            <div className="flex items-center gap-1 border-l border-gray-300 pl-4">
+            <div className="flex items-center gap-1 border-s border-gray-300 ps-4">
               <Button 
                 variant={viewMode === 'day' ? 'default' : 'outline'} 
                 size="sm"

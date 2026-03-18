@@ -252,11 +252,11 @@ export default function ResubmitRejectedReportDialog({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right flex items-center gap-2">
+          <DialogTitle className="text-end flex items-center gap-2">
             <RotateCcw className="h-5 w-5" />
             שליחה מחדש של דיווח שנדחה
           </DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogDescription className="text-end">
             תוכל לערוך את כל פרטי הדיווח ותוכן המפגש לפני שליחה מחדש
           </DialogDescription>
         </DialogHeader>
@@ -276,7 +276,7 @@ export default function ResubmitRejectedReportDialog({
           {/* Form Fields */}
           <div className="space-y-3">
             <div>
-              <Label htmlFor="name" className="block text-right mb-1">
+              <Label htmlFor="name" className="block text-end mb-1">
                 שם התלמיד <span className="text-red-500">*</span>
               </Label>
               <Input
@@ -290,7 +290,7 @@ export default function ResubmitRejectedReportDialog({
             </div>
 
             <div>
-              <Label htmlFor="reason" className="block text-right mb-1">
+              <Label htmlFor="reason" className="block text-end mb-1">
                 סיבה <span className="text-red-500">*</span>
               </Label>
               <Select
@@ -312,7 +312,7 @@ export default function ResubmitRejectedReportDialog({
 
             {formData.reason === 'other' && (
               <div>
-                <Label htmlFor="reasonOther" className="block text-right mb-1">
+                <Label htmlFor="reasonOther" className="block text-end mb-1">
                   פירוט הסיבה
                 </Label>
                 <Textarea
@@ -328,7 +328,7 @@ export default function ResubmitRejectedReportDialog({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="date" className="text-right mb-1 flex items-center gap-1">
+                <Label htmlFor="date" className="text-end mb-1 flex items-center gap-1">
                   <Calendar className="h-4 w-4" />
                   תאריך <span className="text-red-500">*</span>
                 </Label>
@@ -342,7 +342,7 @@ export default function ResubmitRejectedReportDialog({
               </div>
 
               <div>
-                <Label htmlFor="time" className="text-right mb-1 flex items-center gap-1">
+                <Label htmlFor="time" className="text-end mb-1 flex items-center gap-1">
                   <Clock className="h-4 w-4" />
                   שעה <span className="text-red-500">*</span>
                 </Label>
@@ -358,7 +358,7 @@ export default function ResubmitRejectedReportDialog({
             </div>
 
             <div>
-              <Label htmlFor="service" className="block text-right mb-1">
+              <Label htmlFor="service" className="block text-end mb-1">
                 שירות
               </Label>
               <Input
@@ -379,7 +379,7 @@ export default function ResubmitRejectedReportDialog({
             </div>
           ) : questions.length > 0 ? (
             <div className="space-y-3 pt-4 border-t">
-              <h3 className="font-semibold text-sm text-right">תוכן הדיווח</h3>
+              <h3 className="font-semibold text-sm text-end">תוכן הדיווח</h3>
               {questions.map((question) => {
                 const questionKey = question.key || question.id;
                 const questionLabel = question.label || question.question || questionKey;
@@ -389,7 +389,7 @@ export default function ResubmitRejectedReportDialog({
 
                 return (
                   <div key={questionKey}>
-                    <Label htmlFor={`q-${questionKey}`} className="block text-right mb-1">
+                    <Label htmlFor={`q-${questionKey}`} className="block text-end mb-1">
                       {questionLabel}
                     </Label>
                     {question.type === 'textarea' ? (
@@ -435,11 +435,11 @@ export default function ResubmitRejectedReportDialog({
 
           {/* Admin Notes */}
           <div className="space-y-2 pt-4 border-t">
-            <Label htmlFor="adminNotes" className="text-right flex items-center gap-2">
+            <Label htmlFor="adminNotes" className="text-end flex items-center gap-2">
               <MessageSquare className="h-4 w-4" />
               הערות למנהל
             </Label>
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground text-end">
               הערות אלו יהיו נראות רק למנהל בדף הדיווחים הממתינים ולא יופיעו בפרופיל התלמיד
             </p>
             <Textarea

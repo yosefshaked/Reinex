@@ -14,11 +14,11 @@ export default function EmployeeDiagnosticsDialog({ open, onOpenChange, employee
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right flex items-center gap-2">
+          <DialogTitle className="text-end flex items-center gap-2">
             <User className="h-5 w-5" />
             {fullName || employee.email || 'עובד'}
           </DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogDescription className="text-end">
             <div className="flex gap-2 mt-2">
               <Badge variant={employee.is_active ? "default" : "secondary"}>
                 {employee.is_active ? 'פעיל' : 'מושבת'}
@@ -36,19 +36,19 @@ export default function EmployeeDiagnosticsDialog({ open, onOpenChange, employee
         <Tabs defaultValue="details" className="w-full" dir="rtl">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="details">
-              <User className="h-4 w-4 ml-2" />
+              <User className="h-4 w-4 ms-2" />
               פרטים
             </TabsTrigger>
             <TabsTrigger value="activity">
-              <Activity className="h-4 w-4 ml-2" />
+              <Activity className="h-4 w-4 ms-2" />
               פעילות
             </TabsTrigger>
             <TabsTrigger value="salary">
-              <DollarSign className="h-4 w-4 ml-2" />
+              <DollarSign className="h-4 w-4 ms-2" />
               שכר
             </TabsTrigger>
             <TabsTrigger value="documents">
-              <FileText className="h-4 w-4 ml-2" />
+              <FileText className="h-4 w-4 ms-2" />
               מסמכים
             </TabsTrigger>
           </TabsList>

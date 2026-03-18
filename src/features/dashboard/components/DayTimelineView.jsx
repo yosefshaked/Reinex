@@ -173,14 +173,14 @@ export function DayTimelineView({ orgId, date, onBack }) {
               <div className="relative">
                 {/* Time Header */}
                 <div className="flex border-b-2 border-border mb-2 pb-2">
-                  <div className="w-32 flex-shrink-0 pl-4 font-semibold text-sm text-right">
+                  <div className="w-32 flex-shrink-0 ps-4 font-semibold text-sm text-end">
                     מדריך
                   </div>
                   <div className="flex-1 flex">
                     {timelineData.hours.map(hour => (
                       <div
                         key={hour}
-                        className="flex-shrink-0 w-[120px] text-center text-sm font-medium text-muted-foreground border-l border-border"
+                        className="flex-shrink-0 w-[120px] text-center text-sm font-medium text-muted-foreground border-s border-border"
                       >
                         {hour}
                       </div>
@@ -197,7 +197,7 @@ export function DayTimelineView({ orgId, date, onBack }) {
                       dir="rtl"
                     >
                       {/* Instructor Name */}
-                      <div className="w-32 flex-shrink-0 pl-4 py-1 text-right">
+                      <div className="w-32 flex-shrink-0 ps-4 py-1 text-end">
                         <div className="font-medium text-xs truncate">
                           {instructor.name}
                         </div>
@@ -213,7 +213,7 @@ export function DayTimelineView({ orgId, date, onBack }) {
                           {timelineData.hours.map(hour => (
                             <div
                               key={hour}
-                              className="flex-shrink-0 w-[120px] border-l border-border/50"
+                              className="flex-shrink-0 w-[120px] border-s border-border/50"
                             />
                           ))}
                         </div>

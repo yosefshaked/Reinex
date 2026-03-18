@@ -53,15 +53,15 @@ export default function InviteUserDialog({ open, onOpenChange, activeOrgId, sess
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md" dir="rtl">
         <DialogHeader>
-          <DialogTitle className="text-right">הזמן משתמש חדש לארגון</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogTitle className="text-end">הזמן משתמש חדש לארגון</DialogTitle>
+          <DialogDescription className="text-end">
             הזן כתובת דוא"ל. המשתמש יקבל הזמנה להצטרף לארגון.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleInvite}>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="email" className="block text-right">
+              <Label htmlFor="email" className="block text-end">
                 כתובת דוא"ל
               </Label>
               <Input
@@ -72,7 +72,7 @@ export default function InviteUserDialog({ open, onOpenChange, activeOrgId, sess
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={isInviting}
                 required
-                className="text-right"
+                className="text-end"
                 dir="ltr"
               />
             </div>
@@ -82,12 +82,12 @@ export default function InviteUserDialog({ open, onOpenChange, activeOrgId, sess
               <Button type="submit" disabled={isInviting || !email.trim()}>
                 {isInviting ? (
                   <>
-                    <span className="animate-spin mr-2">⏳</span>
+                    <span className="animate-spin me-2">⏳</span>
                     שולח...
                   </>
                 ) : (
                   <>
-                    <MailPlus className="mr-2 h-4 w-4" />
+                    <MailPlus className="me-2 h-4 w-4" />
                     שלח הזמנה
                   </>
                 )}

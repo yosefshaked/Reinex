@@ -168,7 +168,7 @@ export default function MyPendingReportsCard() {
   return (
     <Card dir="rtl">
       <CardHeader>
-        <CardTitle className="text-right">הדיווחים הממתינים שלי</CardTitle>
+        <CardTitle className="text-end">הדיווחים הממתינים שלי</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Date Range Filter */}
@@ -202,7 +202,7 @@ export default function MyPendingReportsCard() {
           </div>
         ) : (
           <>
-            <div className="text-sm text-muted-foreground text-right">
+            <div className="text-sm text-muted-foreground text-end">
               דיווחים שהגשת ללא שיוך תלמיד. רק מנהל יכול לשייך דיווחים אלה לתלמידים.
             </div>
 
@@ -329,7 +329,7 @@ export default function MyPendingReportsCard() {
                                   <div className="flex items-center gap-2 flex-wrap mb-2">
                                     <h4 className="text-base font-semibold text-foreground">{name}</h4>
                                     <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300">
-                                      <XCircle className="h-3 w-3 ml-1" />
+                                      <XCircle className="h-3 w-3 ms-1" />
                                       נדחה
                                     </Badge>
                                   </div>

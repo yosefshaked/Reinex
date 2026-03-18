@@ -109,7 +109,7 @@ function StudentPreviewCard({ preview, selected, onToggle, instructors }) {
         />
         <Label
           htmlFor={`preview-${preview.student_id}`}
-          className="flex-1 cursor-pointer text-right"
+          className="flex-1 cursor-pointer text-end"
           dir="rtl"
         >
           <div className="flex items-center justify-between gap-2">
@@ -240,7 +240,7 @@ export default function DataMaintenancePreview({
             indeterminate={someSelected}
             onCheckedChange={handleToggleAll}
           />
-          <Label htmlFor="select-all" className="flex-1 cursor-pointer text-right font-medium">
+          <Label htmlFor="select-all" className="flex-1 cursor-pointer text-end font-medium">
             בחר הכל ({selectedCount} מתוך {previewsWithChanges.length})
           </Label>
         </div>

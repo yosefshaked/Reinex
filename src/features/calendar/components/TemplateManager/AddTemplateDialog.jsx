@@ -312,7 +312,7 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
                   <p className="text-xs text-amber-800 mt-1">
                     ניתן להמשיך וליצור תבנית נוספת, אבל חשוב לוודא שאין כפילויות לא רצויות.
                   </p>
-                  <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                  <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pe-1">
                     {activeExistingTemplates.map((template) => (
                       <div key={template.id} className="text-xs bg-white/70 border border-amber-200 rounded px-2 py-1">
                         <span className="font-medium">{dayLabel(template.day_of_week)}</span>
@@ -474,7 +474,7 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
               ביטול
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
               צור תבנית
             </Button>
           </DialogFooter>

@@ -151,7 +151,7 @@ export default function DocumentCenterView({ session, orgId, canLoad }) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="mr-3 text-sm text-slate-600">טוען נתונים...</span>
+        <span className="me-3 text-sm text-slate-600">טוען נתונים...</span>
       </div>
     );
   }
@@ -213,13 +213,13 @@ export default function DocumentCenterView({ session, orgId, canLoad }) {
   return (
     <div className="space-y-4" dir="rtl">
       <div className="relative">
-        <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Search className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           type="text"
           placeholder="חיפוש לפי שם או אימייל..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="pr-10"
+          className="pe-10"
           dir="rtl"
         />
       </div>

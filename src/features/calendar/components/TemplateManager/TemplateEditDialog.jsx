@@ -350,7 +350,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
                   onClick={handleAddCancelOverride}
                   disabled={isSubmitting || !template.is_active || !newOverrideDate}
                 >
-                  {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+                  {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
                   הוסף ביטול
                 </Button>
               </div>
@@ -415,7 +415,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
                   <div className="mb-2">האם לבטל תבנית זו? התבנית תסומן כלא פעילה.</div>
                   <div className="flex gap-2">
                     <Button size="sm" variant="destructive" onClick={handleDelete} disabled={isSubmitting}>
-                      {isSubmitting && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
+                      {isSubmitting && <Loader2 className="h-3 w-3 animate-spin ms-1" />}
                       אישור ביטול
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => setShowDeleteConfirm(false)} disabled={isSubmitting}>
@@ -439,18 +439,18 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
                   {template.is_active && (
                     <>
                       <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>
-                        <Pencil className="h-4 w-4 ml-1" />
+                        <Pencil className="h-4 w-4 ms-1" />
                         עריכה
                       </Button>
                       <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700" onClick={() => setShowDeleteConfirm(true)}>
-                        <Trash2 className="h-4 w-4 ml-1" />
+                        <Trash2 className="h-4 w-4 ms-1" />
                         ביטול תבנית
                       </Button>
                     </>
                   )}
                   {!template.is_active && (
                     <Button variant="outline" size="sm" onClick={() => setIsReactivating(true)}>
-                      <RotateCcw className="h-4 w-4 ml-1" />
+                      <RotateCcw className="h-4 w-4 ms-1" />
                       הפעלה מחדש
                     </Button>
                   )}
@@ -509,11 +509,11 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsReactivating(false)} disabled={isSubmitting}>
-                <X className="h-4 w-4 ml-1" />
+                <X className="h-4 w-4 ms-1" />
                 ביטול
               </Button>
               <Button onClick={handleReactivate} disabled={isSubmitting}>
-                {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+                {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
                 הפעל תבנית
               </Button>
             </DialogFooter>
@@ -666,11 +666,11 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsEditing(false)} disabled={isSubmitting}>
-                <X className="h-4 w-4 ml-1" />
+                <X className="h-4 w-4 ms-1" />
                 ביטול עריכה
               </Button>
               <Button onClick={handleSave} disabled={isSubmitting}>
-                {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+                {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
                 שמור שינויים
               </Button>
             </DialogFooter>

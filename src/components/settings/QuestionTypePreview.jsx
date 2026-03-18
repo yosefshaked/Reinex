@@ -39,7 +39,7 @@ export default function QuestionTypePreview({ questionType }) {
         data-rs-scroll
       >
         <div className="space-y-2">
-          <h4 className="font-semibold text-sm text-right">תצוגה מקדימה</h4>
+          <h4 className="font-semibold text-sm text-end">תצוגה מקדימה</h4>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <QuestionFieldPreview {...sample} />
           </div>
