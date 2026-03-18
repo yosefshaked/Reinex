@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { DirectionProvider } from '@radix-ui/react-direction';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
 import AppShell from './components/layout/AppShell.jsx';
@@ -58,7 +59,8 @@ class AppErrorBoundary extends React.Component {
 
 function App({ config = null }) {
   return (
-    <RuntimeConfigProvider config={config}>
+    <DirectionProvider dir="rtl">
+      <RuntimeConfigProvider config={config}>
       <SupabaseProvider>
         <AuthProvider>
           <OrgProvider>
@@ -103,6 +105,7 @@ function App({ config = null }) {
         </AuthProvider>
       </SupabaseProvider>
     </RuntimeConfigProvider>
+    </DirectionProvider>
   );
 }
 
