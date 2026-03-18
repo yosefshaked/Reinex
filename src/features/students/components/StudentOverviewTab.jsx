@@ -271,11 +271,11 @@ export default function StudentOverviewTab({ student }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-muted-foreground">
-                    <th className="text-end pb-2.5 pe-2 font-medium text-xs">יום</th>
-                    <th className="text-end pb-2.5 font-medium text-xs">שעה</th>
-                    <th className="text-end pb-2.5 font-medium text-xs">שירות</th>
-                    <th className="text-end pb-2.5 font-medium text-xs">מדריך/ה</th>
-                    <th className="text-end pb-2.5 font-medium text-xs">סטטוס</th>
+                    <th className="pb-2.5 pe-2 font-medium text-xs">יום</th>
+                    <th className="pb-2.5 font-medium text-xs">שעה</th>
+                    <th className="pb-2.5 font-medium text-xs">שירות</th>
+                    <th className="pb-2.5 font-medium text-xs">מדריך/ה</th>
+                    <th className="pb-2.5 font-medium text-xs">סטטוס</th>
                   </tr>
                 </thead>
                 <tbody>
