@@ -749,8 +749,8 @@ function isPaginationRequested(query) {
 
 export default async function handler(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
-  if (!['GET', 'POST', 'PUT'].includes(method)) {
-    return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET,POST,PUT' });
+  if (!['GET', 'POST', 'PUT', 'PATCH'].includes(method)) {
+    return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET,POST,PUT,PATCH' });
   }
 
   const env = readEnv(context);
@@ -1220,6 +1220,7 @@ export default async function handler(context, req) {
   }
 
   // PUT: Update existing student
+  if (method === 'PUT') {
   const studentId = extractStudentId(context, req, body);
   if (!studentId) {
     return respond(context, 400, { message: 'invalid student id' });
@@ -1493,10 +1494,10 @@ export default async function handler(context, req) {
   });
 
   return respond(context, 200, data);
-}
+  }
 
-// PATCH: Update student status (soft-delete, suspend/activate)
-if (method === 'PATCH') {
+  // PATCH: Update student status (soft-delete, suspend/activate)
+  if (method === 'PATCH') {
   const studentId = extractStudentId(context, req, body);
   if (!studentId) {
     return respond(context, 400, { message: 'invalid student id' });
@@ -1585,4 +1586,5 @@ if (method === 'PATCH') {
   });
 
   return respond(context, 200, updated);
+  }
 }
