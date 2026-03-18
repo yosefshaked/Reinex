@@ -214,7 +214,7 @@ export default function StudentDetailPage() {
       {/* Tabbed content */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         <div className="border-b border-border">
-          <TabsList className="bg-transparent h-auto p-0 gap-1" dir="rtl">
+          <TabsList className="bg-transparent h-auto p-0 gap-1">
             <TabsTrigger value="overview" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">סקירה</TabsTrigger>
             <TabsTrigger value="schedule" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">לוח שיעורים</TabsTrigger>
             <TabsTrigger value="history" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">היסטוריה</TabsTrigger>
