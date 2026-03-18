@@ -12,7 +12,9 @@ import StudentHeader from '@/features/students/components/StudentHeader.jsx';
 import StudentOverviewTab from '@/features/students/components/StudentOverviewTab.jsx';
 import StudentScheduleTab from '@/features/students/components/StudentScheduleTab.jsx';
 import StudentHistoryTab from '@/features/students/components/StudentHistoryTab.jsx';
-import StudentDocumentsSection from '@/features/students/components/StudentDocumentsSection.jsx';
+import StudentDocumentsTab from '@/features/students/components/StudentDocumentsTab.jsx';
+import StudentFinancialTab from '@/features/students/components/StudentFinancialTab.jsx';
+import StudentFormsTab from '@/features/students/components/StudentFormsTab.jsx';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -205,22 +207,19 @@ export default function StudentDetailPage() {
         canEdit={canEdit}
         isUpdating={isUpdatingStudent}
         onEdit={handleOpenEdit}
-        onSuspend={() => {
-          // Will implement suspend via PATCH
-          toast.info('השהיית תלמיד יוטמעת בקרוב');
-        }}
-        onDelete={() => {
-          // Will implement delete via PATCH
-          toast.info('מחיקת תלמיד יוטמעת בקרוב');
-        }}
+        onSuspend={loadStudent}
+        onDelete={loadStudent}
       />
 
       {/* Tabbed content */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 dir-rtl" dir="rtl">
+        <TabsList className="grid w-full grid-cols-3 md:grid-cols-6 dir-rtl" dir="rtl">
           <TabsTrigger value="overview">סקירה כללית</TabsTrigger>
           <TabsTrigger value="schedule">לוח זמנים</TabsTrigger>
           <TabsTrigger value="history">היסטוריה</TabsTrigger>
+          <TabsTrigger value="documents">מסמכים</TabsTrigger>
+          <TabsTrigger value="financial">כספים</TabsTrigger>
+          <TabsTrigger value="forms">טפסים</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -234,15 +233,24 @@ export default function StudentDetailPage() {
         <TabsContent value="history" className="space-y-4">
           <StudentHistoryTab studentId={studentId} />
         </TabsContent>
-      </Tabs>
 
-      {/* Documents section (bonus) */}
-      <StudentDocumentsSection
-        student={student}
-        session={session}
-        orgId={activeOrgId}
-        onRefresh={loadStudent}
-      />
+        <TabsContent value="documents" className="space-y-4">
+          <StudentDocumentsTab
+            student={student}
+            session={session}
+            orgId={activeOrgId}
+            onRefresh={loadStudent}
+          />
+        </TabsContent>
+
+        <TabsContent value="financial" className="space-y-4">
+          <StudentFinancialTab />
+        </TabsContent>
+
+        <TabsContent value="forms" className="space-y-4">
+          <StudentFormsTab />
+        </TabsContent>
+      </Tabs>
 
       {/* Edit modal */}
       <EditStudentModal
