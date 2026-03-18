@@ -1162,6 +1162,7 @@ export default async function handler(context, req) {
     }
 
     // If guardian provided, create the relationship in student_guardians table
+    let guardianLinkAudit = null;
     if (normalized.guardianId) {
       const { error: relationError } = await tenantClient
         .from('student_guardians')
@@ -1178,8 +1179,24 @@ export default async function handler(context, req) {
           studentId: data.id,
           guardianId: normalized.guardianId,
         });
+        guardianLinkAudit = {
+          requested: true,
+          action: 'linked',
+          success: false,
+          guardian_id: normalized.guardianId,
+          relationship: normalized.guardianRelationship,
+          error: relationError.message,
+        };
         // Student created but guardian relation failed - log but don't fail the request
         // The student can be edited later to add the guardian
+      } else {
+        guardianLinkAudit = {
+          requested: true,
+          action: 'linked',
+          success: true,
+          guardian_id: normalized.guardianId,
+          relationship: normalized.guardianRelationship,
+        };
       }
     }
 
@@ -1195,6 +1212,7 @@ export default async function handler(context, req) {
       resourceId: data.id,
       details: {
         student_name: `${data.first_name} ${data.last_name}`.trim(),
+        guardian_link: guardianLinkAudit,
       },
     });
 
@@ -1338,25 +1356,48 @@ export default async function handler(context, req) {
   }
 
   // ── Guardian upsert / delete in student_guardians ──
+  let guardianAudit = null;
   if (normalizedUpdates.guardianProvided) {
+    guardianAudit = {
+      requested: true,
+      previous: null,
+      next: normalizedUpdates.guardianId
+        ? {
+            guardian_id: normalizedUpdates.guardianId,
+            relationship: normalizedUpdates.guardianRelationship,
+          }
+        : null,
+      action: 'unchanged',
+      success: true,
+      error: null,
+    };
+
+    // First check if a row already exists for this student.
+    const { data: existingLink, error: linkLookupError } = await tenantClient
+      .from('student_guardians')
+      .select('id, guardian_id, relationship')
+      .eq('student_id', studentId)
+      .order('is_primary', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (linkLookupError) {
+      context.log?.warn?.('students-list failed to look up existing guardian link', {
+        message: linkLookupError.message,
+        studentId,
+      });
+      guardianAudit.success = false;
+      guardianAudit.error = `lookup_failed:${linkLookupError.message}`;
+    }
+
+    if (existingLink) {
+      guardianAudit.previous = {
+        guardian_id: existingLink.guardian_id,
+        relationship: existingLink.relationship,
+      };
+    }
+
     if (normalizedUpdates.guardianId) {
-      // Link or update guardian: upsert into student_guardians
-      // First check if a row already exists for this student
-      const { data: existingLink, error: linkLookupError } = await tenantClient
-        .from('student_guardians')
-        .select('id, guardian_id, relationship')
-        .eq('student_id', studentId)
-        .order('is_primary', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (linkLookupError) {
-        context.log?.warn?.('students-list failed to look up existing guardian link', {
-          message: linkLookupError.message,
-          studentId,
-        });
-      }
-
       if (existingLink) {
         // Update existing link (guardian or relationship may have changed)
         const linkUpdates = {};
@@ -1379,8 +1420,12 @@ export default async function handler(context, req) {
               studentId,
               guardianId: normalizedUpdates.guardianId,
             });
+            guardianAudit.action = 'update_failed';
+            guardianAudit.success = false;
+            guardianAudit.error = linkUpdateError.message;
           } else {
             changedFields.push('guardian');
+            guardianAudit.action = 'updated';
           }
         }
       } else {
@@ -1400,12 +1445,16 @@ export default async function handler(context, req) {
             studentId,
             guardianId: normalizedUpdates.guardianId,
           });
+          guardianAudit.action = 'insert_failed';
+          guardianAudit.success = false;
+          guardianAudit.error = linkInsertError.message;
         } else {
           changedFields.push('guardian');
+          guardianAudit.action = 'linked';
         }
       }
-    } else {
-      // guardianId is null → clear the guardian link
+    } else if (existingLink) {
+      // guardianId is null -> clear the guardian link
       const { error: deleteError } = await tenantClient
         .from('student_guardians')
         .delete()
@@ -1416,8 +1465,12 @@ export default async function handler(context, req) {
           message: deleteError.message,
           studentId,
         });
+        guardianAudit.action = 'delete_failed';
+        guardianAudit.success = false;
+        guardianAudit.error = deleteError.message;
       } else {
         changedFields.push('guardian');
+        guardianAudit.action = 'cleared';
       }
     }
   }
@@ -1433,8 +1486,9 @@ export default async function handler(context, req) {
     resourceType: 'student',
     resourceId: studentId,
     details: {
-      updated_fields: changedFields,
+      updated_fields: Array.from(new Set(changedFields)),
       student_name: `${data.first_name} ${data.last_name}`.trim(),
+      guardian_change: guardianAudit,
     },
   });
 

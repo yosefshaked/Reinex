@@ -44,6 +44,7 @@ export default function StudentsPage() {
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
   const [createError, setCreateError] = useState('');
   const [studentForEdit, setStudentForEdit] = useState(null);
+  const [isLoadingStudentForEdit, setIsLoadingStudentForEdit] = useState(false);
   const [isUpdatingStudent, setIsUpdatingStudent] = useState(false);
   const [updateError, setUpdateError] = useState('');
   const [addSubmitDisabled, setAddSubmitDisabled] = useState(false);
@@ -447,8 +448,31 @@ export default function StudentsPage() {
     }
   };
 
-  const handleEditStudent = (student) => {
-    setStudentForEdit(student);
+  const handleEditStudent = async (student) => {
+    if (!student?.id) {
+      return;
+    }
+
+    setUpdateError('');
+    setIsLoadingStudentForEdit(true);
+
+    try {
+      const searchParams = new URLSearchParams();
+      if (activeOrgId) {
+        searchParams.set('org_id', activeOrgId);
+      }
+      const endpoint = `students-list/${student.id}${searchParams.toString() ? `?${searchParams}` : ''}`;
+      const fullStudent = await authenticatedFetch(endpoint, { session });
+
+      setStudentForEdit(fullStudent?.id ? fullStudent : student);
+    } catch (error) {
+      console.error('Failed to load full student data for edit', error);
+      // Fallback to row data so editing remains available even if enrichment fails.
+      setStudentForEdit(student);
+      toast.error('טעינת פרטי תלמיד מלאים נכשלה. ניתן להמשיך לערוך, אך ייתכן שחלק מהשדות לא יוצגו.');
+    } finally {
+      setIsLoadingStudentForEdit(false);
+    }
   };
 
   const handleEditModalClose = () => {
@@ -779,6 +803,7 @@ export default function StudentsPage() {
                                   <Button
                                     variant="ghost"
                                     size="icon"
+                                    disabled={isLoadingStudentForEdit || isUpdatingStudent}
                                     onClick={() => handleEditStudent(student)}
                                   >
                                     <Pencil className="h-4 w-4" />
@@ -902,7 +927,7 @@ export default function StudentsPage() {
         <EditStudentModal
           open={Boolean(studentForEdit)}
           student={studentForEdit}
-          isSubmitting={isUpdatingStudent}
+          isSubmitting={isUpdatingStudent || isLoadingStudentForEdit}
           error={updateError}
           onClose={handleEditModalClose}
           onSubmit={handleEditSubmit}

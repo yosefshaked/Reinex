@@ -20,6 +20,7 @@ export default function GuardianSelector({
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [guardianPhone, setGuardianPhone] = useState('');
   const [showNotFound, setShowNotFound] = useState(false);
+  const [hasManualPhoneInput, setHasManualPhoneInput] = useState(false);
 
   const formatRelationship = (relationship) => {
     const normalized = (relationship || '').toLowerCase();
@@ -39,29 +40,6 @@ export default function GuardianSelector({
     }
   };
 
-  const buildGuardianLabel = (guardian) => {
-    const fullName = `${guardian.first_name || ''} ${guardian.last_name || ''}`.trim();
-    const links = guardian.linked_students || [];
-    if (!links.length) {
-      return fullName;
-    }
-
-    const relationshipSet = new Set(links.map(link => formatRelationship(link.relationship)).filter(Boolean));
-    const relationshipText = Array.from(relationshipSet).join('/');
-    const studentNames = links
-      .map(link => link.student_name)
-      .filter(Boolean)
-      .slice(0, 2);
-    const extraCount = Math.max(0, links.length - studentNames.length);
-
-    const metaBits = [relationshipText, studentNames.join(', ')]
-      .filter(Boolean)
-      .join(' · ');
-    const extraText = extraCount ? ` ועוד ${extraCount}` : '';
-
-    return `${fullName}${metaBits || extraText ? ` (${metaBits}${extraText})` : ''}`;
-  };
-
   const selectedGuardian = guardians.find(g => g.id === value);
   const normalizedPhone = useMemo(() => String(guardianPhone || '').replace(/[\s-]/g, ''), [guardianPhone]);
 
@@ -77,13 +55,16 @@ export default function GuardianSelector({
     if (selectedGuardian?.phone) {
       setGuardianPhone(selectedGuardian.phone);
       setShowNotFound(false);
+      setHasManualPhoneInput(false);
     }
   }, [selectedGuardian]);
 
   useEffect(() => {
     if (!normalizedPhone) {
       setShowNotFound(false);
-      if (value) {
+      // Preserve existing selection on initial mount/loading.
+      // Clear only when user explicitly erased the phone input.
+      if (hasManualPhoneInput && value) {
         onChange('');
       }
       return;
@@ -105,7 +86,7 @@ export default function GuardianSelector({
         onChange('');
       }
     }
-  }, [guardianPhone, matchingGuardian, normalizedPhone, onChange, value]);
+  }, [guardianPhone, hasManualPhoneInput, matchingGuardian, normalizedPhone, onChange, value]);
 
   const handleCreateSuccess = (newGuardian) => {
     setShowCreateDialog(false);
@@ -113,6 +94,7 @@ export default function GuardianSelector({
     if (newGuardian?.phone) {
       setGuardianPhone(newGuardian.phone);
     }
+    setHasManualPhoneInput(false);
     setShowNotFound(false);
   };
 
@@ -125,7 +107,10 @@ export default function GuardianSelector({
             name="guardianPhone"
             label="טלפון אפוטרופוס"
             value={guardianPhone}
-            onChange={(event) => setGuardianPhone(event.target.value)}
+            onChange={(event) => {
+              setHasManualPhoneInput(true);
+              setGuardianPhone(event.target.value);
+            }}
             required={false}
             disabled={disabled || isLoading}
             description={isLoading ? 'טוען אפוטרופוסים...' : 'הקלידו טלפון כדי לאתר אפוטרופוס קיים'}

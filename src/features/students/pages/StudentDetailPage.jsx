@@ -80,6 +80,16 @@ function formatSessionDate(value) {
   return value;
 }
 
+function formatGuardianRelationship(relationship) {
+  const normalized = String(relationship || '').toLowerCase();
+  if (normalized === 'father') return 'אב';
+  if (normalized === 'mother') return 'אם';
+  if (normalized === 'self') return 'עצמי';
+  if (normalized === 'caretaker') return 'מטפל';
+  if (normalized === 'other') return 'אחר';
+  return '';
+}
+
 function extractQuestionLabelRaw(entry) {
   if (!entry || typeof entry !== 'object') return '';
   if (typeof entry.label === 'string' && entry.label.trim()) return entry.label.trim();
@@ -295,7 +305,7 @@ export default function StudentDetailPage() {
       if (activeOrgId) searchParams.set('org_id', activeOrgId);
       const endpoint = `students-list/${studentId}${searchParams.toString() ? `?${searchParams}` : ''}`;
 
-      const match = await authenticatedFetch(endpoint);
+      const match = await authenticatedFetch(endpoint, { session });
 
       if (!match || !match.id) {
         setStudent(null);
@@ -312,7 +322,7 @@ export default function StudentDetailPage() {
       setStudentState(REQUEST_STATE.error);
       setStudentError(error?.message || 'טעינת פרטי התלמיד נכשלה.');
     }
-  }, [canFetch, activeOrgId, studentId]);
+  }, [canFetch, activeOrgId, studentId, session]);
 
   useEffect(() => {
     void loadServiceCatalog();
@@ -846,11 +856,20 @@ export default function StudentDetailPage() {
     return next;
   });
 
-  const contactName = student?.contact_name || 'לא סופק';
-  const contactPhone = student?.contact_phone || '';
+  const guardianName = [
+    student?.guardian?.first_name,
+    student?.guardian?.middle_name,
+    student?.guardian?.last_name,
+  ].filter(Boolean).join(' ');
+  const guardianRelationshipLabel = formatGuardianRelationship(student?.guardian?.relationship);
+  const contactName = guardianName || 'לא סופק';
+  const contactPhone = student?.guardian?.phone || student?.phone || '';
+  const contactEmail = student?.guardian?.email || student?.email || '';
   const contactInfo = student?.contact_info || '';
   const identityNumber = student?.identity_number || student?.national_id || '';
-  const notes = typeof student?.notes === 'string' ? student.notes.trim() : '';
+  const notes = typeof student?.notes_internal === 'string'
+    ? student.notes_internal.trim()
+    : (typeof student?.notes === 'string' ? student.notes.trim() : '');
   const defaultService = student?.default_service || 'לא הוגדר';
   const scheduleDescription = lessonTemplate
     ? describeSchedule(lessonTemplate?.day_of_week, lessonTemplate?.time_of_day)
@@ -875,7 +894,7 @@ export default function StudentDetailPage() {
       <div className="flex flex-col gap-sm sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-xs">
           <h1 className="text-xl font-semibold text-foreground sm:text-2xl">פרטי תלמיד</h1>
-          <p className="text-xs text-neutral-600 sm:text-sm">סקירת הפרטים והמפגשים של {student?.name || 'תלמיד ללא שם'}.</p>
+          <p className="text-xs text-neutral-600 sm:text-sm">סקירת הפרטים והמפגשים של {formatStudentName(student)}.</p>
         </div>
         <div className="flex gap-2 self-start flex-wrap">
           {canManageLegacyImport ? (
@@ -1050,9 +1069,15 @@ export default function StudentDetailPage() {
                 ) : null}
               </div>
               <div className="space-y-1">
-                <dt className="text-xs font-medium text-neutral-500 sm:text-sm">שם איש קשר</dt>
+                <dt className="text-xs font-medium text-neutral-500 sm:text-sm">שם אפוטרופוס</dt>
                 <dd className="text-foreground">{contactName}</dd>
               </div>
+              {guardianRelationshipLabel ? (
+                <div className="space-y-1">
+                  <dt className="text-xs font-medium text-neutral-500 sm:text-sm">קרבה</dt>
+                  <dd className="text-foreground">{guardianRelationshipLabel}</dd>
+                </div>
+              ) : null}
               {contactPhone ? (
                 <div className="space-y-1">
                   <dt className="text-xs font-medium text-neutral-500 sm:text-sm">טלפון</dt>
@@ -1061,6 +1086,12 @@ export default function StudentDetailPage() {
                       {contactPhone}
                     </a>
                   </dd>
+                </div>
+              ) : null}
+              {contactEmail ? (
+                <div className="space-y-1">
+                  <dt className="text-xs font-medium text-neutral-500 sm:text-sm">אימייל</dt>
+                  <dd className="text-foreground break-all">{contactEmail}</dd>
                 </div>
               ) : null}
               {contactInfo ? (
@@ -1247,7 +1278,7 @@ export default function StudentDetailPage() {
     <LegacyImportModal
       open={isLegacyModalOpen}
       onClose={handleCloseLegacyModal}
-      studentName={student?.name}
+      studentName={formatStudentName(student)}
       questions={questions}
       canReupload={canReuploadLegacy}
       hasLegacyImport={hasLegacyImport}
