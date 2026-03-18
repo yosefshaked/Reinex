@@ -1,21 +1,67 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Calendar, BookOpen, DollarSign, Notebook, AlertCircle } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2, AlertCircle, Phone, MessageCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 
-/**
- * Overview tab showing student dashboard: next lesson, templates, financials, and notes.
- * 
- * Displays high-level information organized in a grid layout with
- * color-coded sections (green for action-ready, amber for information, base for neutral).
- * 
- * @param {Object} props
- * @param {Object} props.student - Student data
- * @returns {JSX.Element}
- */
+const DAY_NAMES_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+
+function formatDayOfWeek(dayToken) {
+  if (dayToken == null) return '';
+  const idx = Number(dayToken);
+  if (idx >= 0 && idx < DAY_NAMES_HE.length) return `יום ${DAY_NAMES_HE[idx]}`;
+  return String(dayToken);
+}
+
+function formatDateTime(isoString) {
+  if (!isoString) return '';
+  try {
+    const date = new Date(isoString);
+    return date.toLocaleString('he-IL', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return isoString;
+  }
+}
+
+function formatRelativeTime(isoString) {
+  if (!isoString) return null;
+  const now = new Date();
+  const target = new Date(isoString);
+  const diffMs = target - now;
+  if (diffMs < 0) return null;
+  const hours = Math.floor(diffMs / (1000 * 60 * 60));
+  if (hours < 1) return 'בקרוב';
+  if (hours < 24) return `בעוד ${hours} שעות`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'מחר';
+  return `בעוד ${days} ימים`;
+}
+
+function getGuardianInitials(guardian) {
+  const first = guardian?.first_name?.[0] || '';
+  const last = guardian?.last_name?.[0] || '';
+  return (first + last) || '?';
+}
+
+function getGuardianName(guardian) {
+  if (!guardian) return '';
+  return [guardian.first_name, guardian.last_name].filter(Boolean).join(' ');
+}
+
+const RELATIONSHIP_HE = {
+  father: 'אב', mother: 'אם', guardian: 'אפוטרופוס',
+  grandparent: 'סב/סבתא', other: 'אחר',
+};
+
 export default function StudentOverviewTab({ student }) {
   const { session } = useSupabase();
   const { activeOrg } = useOrg();
@@ -28,7 +74,6 @@ export default function StudentOverviewTab({ student }) {
   const activeOrgId = activeOrg?.id;
   const studentId = student?.id;
 
-  // Fetch lesson templates on mount
   useEffect(() => {
     if (!studentId || !activeOrgId) return;
 
@@ -37,7 +82,6 @@ export default function StudentOverviewTab({ student }) {
       setError(null);
 
       try {
-        // Fetch lesson templates
         const params = new URLSearchParams({ student_id: studentId, org_id: activeOrgId });
         const templates = await authenticatedFetch(
           `api/lesson-templates?${params}`,
@@ -47,24 +91,24 @@ export default function StudentOverviewTab({ student }) {
         const activeTemplates = Array.isArray(templates)
           ? templates.filter((t) => t?.is_active !== false)
           : [];
-
         setLessonTemplates(activeTemplates);
 
-        // Fetch next lesson instance
-        const today = new Date().toISOString().split('T')[0];
-        const instances = await authenticatedFetch(
-          `api/lesson-instances?date=${today}&student_id=${studentId}&org_id=${activeOrgId}`,
-          { session }
-        );
-
-        if (Array.isArray(instances) && instances.length > 0) {
-          // Find first upcoming lesson
-          const upcoming = instances.find((li) => {
-            const startTime = new Date(li.datetime_start);
-            return startTime > new Date();
-          });
-          setNextLesson(upcoming || instances[0]);
+        // Fetch next 7 days to find first upcoming lesson
+        const today = new Date();
+        let upcoming = null;
+        for (let d = 0; d < 7 && !upcoming; d++) {
+          const date = new Date(today);
+          date.setDate(today.getDate() + d);
+          const dateStr = date.toISOString().split('T')[0];
+          const instances = await authenticatedFetch(
+            `api/lesson-instances?date=${dateStr}&student_id=${studentId}&org_id=${activeOrgId}`,
+            { session }
+          );
+          if (Array.isArray(instances)) {
+            upcoming = instances.find((li) => new Date(li.datetime_start) > new Date());
+          }
         }
+        setNextLesson(upcoming || null);
       } catch (err) {
         console.error('Failed to load overview data', err);
         setError(err?.message || 'טעינת נתוני הסקירה נכשלה');
@@ -93,174 +137,283 @@ export default function StudentOverviewTab({ student }) {
     );
   }
 
-  const formatDateTime = (isoString) => {
-    if (!isoString) return '';
-    try {
-      const date = new Date(isoString);
-      return date.toLocaleString('he-IL', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return isoString;
-    }
-  };
+  const guardian = student?.guardian;
+  const tags = Array.isArray(student?.tags) ? student.tags : [];
+  const internalNotes = student?.metadata?.internal_notes || '';
+
+  // Compute age
+  const age = student?.date_of_birth
+    ? Math.floor((Date.now() - new Date(student.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+    : null;
+
+  const relativeTime = nextLesson ? formatRelativeTime(nextLesson.datetime_start) : null;
 
   return (
-    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-      {/* Next Lesson Card - Green (Action-Ready) */}
-      <Card className="border-t-4 border-t-green-500 md:col-span-1 lg:col-span-1">
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-green-600" />
-            <CardTitle className="text-lg">השיעור הקרוב</CardTitle>
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+
+      {/* ── CARD: Next Lesson (Hero) ── */}
+      <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden md:col-span-2 xl:col-span-2">
+        <div className="h-1.5 bg-green-500" />
+        <div className="p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-9 h-9 rounded-lg bg-green-100 text-green-600 flex items-center justify-center text-lg">📅</div>
+            <h3 className="font-semibold text-zinc-800">השיעור הבא</h3>
+            {relativeTime && (
+              <span className="mr-auto inline-flex items-center rounded-full bg-green-50 text-green-700 border border-green-200 px-2.5 py-0.5 text-xs font-medium">
+                {relativeTime}
+              </span>
+            )}
           </div>
-          <CardDescription>שיעור בעתיד הקרוב</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
+
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-neutral-400" />
+            </div>
+          ) : nextLesson ? (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-green-400 to-emerald-500 text-white flex items-center justify-center text-3xl shadow-md shadow-green-200/50 shrink-0">
+                📋
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xl font-semibold">{nextLesson.service?.name || 'שיעור'}</p>
+                <p className="text-sm text-muted-foreground mt-1">{formatDateTime(nextLesson.datetime_start)}</p>
+                {nextLesson.instructor && (
+                  <p className="text-sm text-muted-foreground">
+                    מדריך/ה: {nextLesson.instructor.first_name} {nextLesson.instructor.last_name || ''}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-4">לא נמצאו שיעורים קרובים</p>
+          )}
+        </div>
+      </div>
+
+      {/* ── CARD: Guardian ── */}
+      <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="h-1.5 bg-violet-500" />
+        <div className="p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center text-lg">👨‍👩‍👦</div>
+            <h3 className="font-semibold text-zinc-800">אפוטרופוס ראשי</h3>
+          </div>
+
+          {guardian ? (
+            <>
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center font-bold text-sm">
+                  {getGuardianInitials(guardian)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium">{getGuardianName(guardian)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {RELATIONSHIP_HE[guardian.relationship] || guardian.relationship || ''}
+                  </p>
+                </div>
+              </div>
+              <dl className="text-sm space-y-2">
+                {guardian.phone && (
+                  <div className="flex items-center justify-between">
+                    <dt className="text-muted-foreground text-xs">טלפון</dt>
+                    <dd className="font-medium" dir="ltr">{guardian.phone}</dd>
+                  </div>
+                )}
+                {guardian.email && (
+                  <div className="flex items-center justify-between">
+                    <dt className="text-muted-foreground text-xs">אימייל</dt>
+                    <dd className="font-medium text-xs" dir="ltr">{guardian.email}</dd>
+                  </div>
+                )}
+              </dl>
+              <div className="flex gap-2 pt-1">
+                {guardian.phone && (
+                  <>
+                    <a
+                      href={`tel:${guardian.phone}`}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium hover:bg-accent transition"
+                    >
+                      <Phone className="h-3 w-3" /> התקשר
+                    </a>
+                    <a
+                      href={`https://wa.me/${guardian.phone.replace(/[\s\-()]/g, '')}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium hover:bg-accent transition"
+                    >
+                      <MessageCircle className="h-3 w-3" /> WhatsApp
+                    </a>
+                  </>
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">לא משויך אפוטרופוס</p>
+          )}
+        </div>
+      </div>
+
+      {/* ── CARD: Weekly Schedule ── */}
+      <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden md:col-span-2">
+        <div className="h-1.5 bg-blue-500" />
+        <div className="p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center text-lg">🗓</div>
+            <h3 className="font-semibold text-zinc-800">לוח שבועי קבוע</h3>
+          </div>
+
           {isLoading ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="h-5 w-5 animate-spin text-neutral-400" />
             </div>
-          ) : nextLesson ? (
-            <>
-              <div>
-                <p className="text-xs text-neutral-500">קורס</p>
-                <p className="font-semibold">{nextLesson.service?.name || 'לא זוהה'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-neutral-500">מחנך</p>
-                <p className="font-semibold">{nextLesson.instructor?.name || 'לא הוקצה'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-neutral-500">תאריך ושעה</p>
-                <p className="font-semibold">{formatDateTime(nextLesson.datetime_start)}</p>
-              </div>
-            </>
+          ) : lessonTemplates.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="text-right pb-2.5 pr-2 font-medium text-xs">יום</th>
+                    <th className="text-right pb-2.5 font-medium text-xs">שעה</th>
+                    <th className="text-right pb-2.5 font-medium text-xs">שירות</th>
+                    <th className="text-right pb-2.5 font-medium text-xs">מדריך/ה</th>
+                    <th className="text-right pb-2.5 font-medium text-xs">סטטוס</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lessonTemplates.map((template) => (
+                    <tr key={template.id} className="border-b border-border/60 hover:bg-gray-50/50 transition">
+                      <td className="py-3 pr-2 font-medium">{formatDayOfWeek(template.day_of_week)}</td>
+                      <td className="py-3">{template.time_of_day || '—'}</td>
+                      <td className="py-3">{template.service?.name || '—'}</td>
+                      <td className="py-3">
+                        {template.instructor?.first_name
+                          ? `${template.instructor.first_name} ${template.instructor.last_name || ''}`
+                          : '—'}
+                      </td>
+                      <td className="py-3">
+                        <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 text-xs">
+                          קבוע
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
-            <p className="text-sm text-neutral-500 py-2">לא קיימים שיעורים בעתיד הקרוב</p>
+            <p className="text-sm text-muted-foreground py-2">אין שיעורים קבועים</p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      {/* Lesson Templates Card */}
-      <Card className="md:col-span-1 lg:col-span-1">
-        <CardHeader className="pb-3">
+      {/* ── CARD: Financial Summary ── */}
+      <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="h-1.5 bg-amber-500" />
+        <div className="p-5 space-y-4">
           <div className="flex items-center gap-2">
-            <BookOpen className="h-5 w-5 text-blue-600" />
-            <CardTitle className="text-lg">קורסים פעילים</CardTitle>
+            <div className="w-9 h-9 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center text-lg">💰</div>
+            <h3 className="font-semibold text-zinc-800">סיכום כספי</h3>
           </div>
-          <CardDescription>
-            {lessonTemplates.length}
-            {' '}
-            קורס
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {lessonTemplates.length > 0 ? (
-            <div className="space-y-2">
-              {lessonTemplates.map((template) => (
-                <div
-                  key={template.id}
-                  className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-neutral-50/50"
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-center">
+              <p className="text-xl font-bold text-emerald-700">—</p>
+              <p className="text-xs text-emerald-600 mt-0.5">יתרת זכות</p>
+            </div>
+            <div className="rounded-lg bg-amber-50 border border-amber-100 p-3 text-center">
+              <p className="text-xl font-bold text-amber-700">—</p>
+              <p className="text-xs text-amber-600 mt-0.5">חוב פתוח</p>
+            </div>
+            <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-center">
+              <p className="text-xl font-bold text-blue-700">{lessonTemplates.length * 4}</p>
+              <p className="text-xs text-blue-600 mt-0.5">שיעורים/חודש (הערכה)</p>
+            </div>
+            <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-center">
+              <p className="text-xl font-bold text-zinc-700">
+                {student?.special_rate ? `₪${student.special_rate}` : '—'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">תעריף לשיעור</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── CARD: Internal Notes ── */}
+      <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden md:col-span-2 xl:col-span-2">
+        <div className="h-1.5 bg-yellow-400" />
+        <div className="p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-9 h-9 rounded-lg bg-yellow-100 text-yellow-600 flex items-center justify-center text-lg">📝</div>
+            <h3 className="font-semibold text-zinc-800">הערות פנימיות</h3>
+          </div>
+          {internalNotes ? (
+            <div className="rounded-lg bg-yellow-50 border border-yellow-100 p-4">
+              <p className="text-sm text-zinc-700 leading-relaxed whitespace-pre-wrap">{internalNotes}</p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">אין הערות פנימיות</p>
+          )}
+        </div>
+      </div>
+
+      {/* ── CARD: Personal Details ── */}
+      <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="h-1.5 bg-gray-400" />
+        <div className="p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center text-lg">👤</div>
+            <h3 className="font-semibold text-zinc-800">פרטים אישיים</h3>
+          </div>
+          <dl className="text-sm space-y-3">
+            <DetailRow label="שם מלא" value={[student.first_name, student.middle_name, student.last_name].filter(Boolean).join(' ')} />
+            {student.identity_number && <DetailRow label="תעודת זהות" value={student.identity_number} />}
+            {student.date_of_birth && (
+              <DetailRow
+                label="תאריך לידה"
+                value={`${new Date(student.date_of_birth).toLocaleDateString('he-IL')}${age != null ? ` (גיל ${age})` : ''}`}
+              />
+            )}
+            {student.phone && <DetailRow label="טלפון" value={student.phone} dir="ltr" />}
+            {student.email && <DetailRow label="אימייל" value={student.email} dir="ltr" small />}
+            {student.notification_method && <DetailRow label="שיטת התראה" value={student.notification_method} />}
+          </dl>
+        </div>
+      </div>
+
+      {/* ── CARD: Tags ── */}
+      {tags.length > 0 && (
+        <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden xl:col-span-3 md:col-span-2">
+          <div className="h-1.5 bg-teal-500" />
+          <div className="p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-9 h-9 rounded-lg bg-teal-100 text-teal-600 flex items-center justify-center text-lg">🏷</div>
+              <h3 className="font-semibold text-zinc-800">תגיות</h3>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {tags.map((tag, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex items-center rounded-full bg-teal-50 text-teal-700 border border-teal-200 px-3 py-1.5 text-xs font-medium"
                 >
-                  <div>
-                    <p className="font-medium text-sm">{template.lesson_name}</p>
-                    {template.instructor?.name && (
-                      <p className="text-xs text-neutral-500 ms-0">{template.instructor.name}</p>
-                    )}
-                  </div>
-                  <Badge variant="secondary" className="text-xs">פעיל</Badge>
-                </div>
+                  {tag}
+                </span>
               ))}
             </div>
-          ) : (
-            <p className="text-sm text-neutral-500 py-2">אין קורסים פעילים</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Financial Summary Card - Placeholder */}
-      <Card className="opacity-50 md:col-span-1 lg:col-span-1">
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <DollarSign className="h-5 w-5 text-amber-600" />
-            <CardTitle className="text-lg">סיכום כספי</CardTitle>
           </div>
-          <CardDescription>לא זמין בגרסה זו</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-xs text-neutral-500">יוטמע בחדשים הקרובים</p>
-        </CardContent>
-      </Card>
-
-      {/* Internal Notes Card - Amber Tinted (Spans full width on mobile) */}
-      <Card className="border-t-4 border-t-amber-400 md:col-span-2 lg:col-span-3">
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Notebook className="h-5 w-5 text-amber-600" />
-            <CardTitle className="text-lg">הערות פנימיות</CardTitle>
-          </div>
-          <CardDescription>מידע סוחף עבור צוות</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {student?.metadata?.internal_notes ? (
-            <p className="text-sm whitespace-pre-wrap text-neutral-700">
-              {student.metadata.internal_notes}
-            </p>
-          ) : (
-            <p className="text-sm text-neutral-500">אין הערות פנימיות</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Student Status Card */}
-      <Card className="md:col-span-2 lg:col-span-3">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">סטטוס תלמיד</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-xs text-neutral-500 mb-1">סטטוס</p>
-              <Badge variant={student?.is_active ? 'secondary' : 'destructive'}>
-                {student?.is_active ? 'פעיל' : 'לא פעיל'}
-              </Badge>
-            </div>
-            {student?.identity_number && (
-              <div>
-                <p className="text-xs text-neutral-500 mb-1">מ.ז</p>
-                <p className="font-semibold text-sm">{student.identity_number}</p>
-              </div>
-            )}
-            {student?.phone && (
-              <div>
-                <p className="text-xs text-neutral-500 mb-1">טלפון</p>
-                <a
-                  href={`tel:${student.phone}`}
-                  className="text-primary hover:underline text-sm font-semibold"
-                >
-                  {student.phone}
-                </a>
-              </div>
-            )}
-            {student?.email && (
-              <div>
-                <p className="text-xs text-neutral-500 mb-1">אימייל</p>
-                <a
-                  href={`mailto:${student.email}`}
-                  className="text-primary hover:underline text-sm font-semibold break-all"
-                >
-                  {student.email}
-                </a>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+      )}
     </div>
+  );
+}
+
+function DetailRow({ label, value, dir, small }) {
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <dt className="text-muted-foreground text-xs">{label}</dt>
+        <dd className={`font-medium ${small ? 'text-xs' : ''}`} dir={dir}>
+          {value || '—'}
+        </dd>
+      </div>
+      <hr className="border-border/50" />
+    </>
   );
 }

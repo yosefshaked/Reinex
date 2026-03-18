@@ -1,6 +1,7 @@
 /* eslint-env node */
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import {
   UUID_PATTERN,
   ensureMembership,
@@ -349,6 +350,106 @@ export default async function lessonInstances(context, req) {
     }
 
     return respond(context, 200, data);
+  }
+
+  // PATCH: Bulk operations (admin only)
+  if (method === 'PATCH') {
+    if (!isAdmin) {
+      return respond(context, 403, { message: 'forbidden' });
+    }
+
+    const action = normalizeString(body?.action);
+    if (action !== 'bulk-cancel') {
+      return respond(context, 400, { message: 'invalid_action' });
+    }
+
+    // bulk-cancel: Cancel all future lesson instances for a student from a given date
+    const studentId = normalizeUuid(body?.student_id || body?.studentId);
+    const fromDate = normalizeString(body?.from_date || body?.fromDate);
+
+    if (!studentId) {
+      return respond(context, 400, { message: 'missing_student_id' });
+    }
+    if (!fromDate || !isIsoDate(fromDate)) {
+      return respond(context, 400, { message: 'invalid_from_date' });
+    }
+
+    const fromDatetime = `${fromDate}T00:00:00.000Z`;
+
+    // Find all future lesson_instances where this student is a participant and status is 'scheduled'
+    const { data: futureInstances, error: fetchErr } = await tenantClient
+      .from('lesson_participants')
+      .select('id, lesson_instance_id, lesson_instance:lesson_instances(id, datetime_start, status)')
+      .eq('student_id', studentId)
+      .gte('lesson_instance.datetime_start', fromDatetime)
+      .eq('lesson_instance.status', 'scheduled');
+
+    if (fetchErr) {
+      context.log?.error?.('lesson-instances bulk-cancel failed to find instances', { message: fetchErr.message });
+      return respond(context, 500, { message: 'failed_to_find_instances' });
+    }
+
+    // Filter out rows where the join didn't match (Supabase returns nulls)
+    const matchedParticipants = (futureInstances || []).filter(
+      (p) => p.lesson_instance && p.lesson_instance.id
+    );
+
+    if (matchedParticipants.length === 0) {
+      return respond(context, 200, { cancelled_count: 0, message: 'no_instances_to_cancel' });
+    }
+
+    const instanceIds = matchedParticipants.map((p) => p.lesson_instance_id);
+    const participantIds = matchedParticipants.map((p) => p.id);
+
+    // Update participant status to cancelled
+    const { error: participantUpdateErr } = await tenantClient
+      .from('lesson_participants')
+      .update({ participant_status: 'cancelled_student' })
+      .in('id', participantIds);
+
+    if (participantUpdateErr) {
+      context.log?.error?.('lesson-instances bulk-cancel failed to update participants', { message: participantUpdateErr.message });
+      return respond(context, 500, { message: 'failed_to_cancel_participants' });
+    }
+
+    // For instances where this student was the only scheduled participant, cancel the instance too
+    const uniqueInstanceIds = [...new Set(instanceIds)];
+    for (const instId of uniqueInstanceIds) {
+      const { data: remainingParticipants } = await tenantClient
+        .from('lesson_participants')
+        .select('id')
+        .eq('lesson_instance_id', instId)
+        .neq('participant_status', 'cancelled_student');
+
+      if (!remainingParticipants || remainingParticipants.length === 0) {
+        await tenantClient
+          .from('lesson_instances')
+          .update({ status: 'cancelled_student', updated_at: new Date().toISOString() })
+          .eq('id', instId);
+      }
+    }
+
+    // Audit log
+    await logAuditEvent(supabase, {
+      orgId,
+      userId,
+      userEmail: authResult.data.user.email || '',
+      userRole: role,
+      actionType: 'student.lessons_bulk_cancelled',
+      actionCategory: AUDIT_CATEGORIES.CALENDAR,
+      resourceType: 'student',
+      resourceId: studentId,
+      details: {
+        from_date: fromDate,
+        cancelled_count: matchedParticipants.length,
+        instance_ids: uniqueInstanceIds,
+      },
+    });
+
+    return respond(context, 200, {
+      cancelled_count: matchedParticipants.length,
+      instance_count: uniqueInstanceIds.length,
+    });
   }
 
   return respond(context, 405, { message: 'method_not_allowed' });

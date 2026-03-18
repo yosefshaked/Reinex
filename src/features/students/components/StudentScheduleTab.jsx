@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, BookOpen, Clock, CalendarDays } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -144,17 +143,16 @@ export default function StudentScheduleTab({ studentId }) {
   return (
     <div className="space-y-6">
       {/* Lesson Templates Card */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <BookOpen className="h-5 w-5 text-blue-600" />
-            <CardTitle className="text-lg">קורסים בהרשמה</CardTitle>
+      <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="h-1.5 bg-blue-500" />
+        <div className="p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center text-lg">📚</div>
+            <h3 className="font-semibold text-zinc-800">קורסים בהרשמה</h3>
+            <span className="mr-auto text-sm text-muted-foreground">
+              {isLoadingTemplates ? 'טוען...' : `${templates.length} קורסים פעילים`}
+            </span>
           </div>
-          <CardDescription>
-            {isLoadingTemplates ? 'טוען...' : `${templates.length} קורסים פעילים`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
           {isLoadingTemplates ? (
             <div className="space-y-3">
               <Skeleton className="h-14 w-full" />
@@ -205,21 +203,20 @@ export default function StudentScheduleTab({ studentId }) {
               <p className="text-sm">אין קורסים פעילים</p>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Upcoming Lesson Instances Table */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <CalendarDays className="h-5 w-5 text-green-600" />
-            <CardTitle className="text-lg">שיעורים ב-14 ימים הקרובים</CardTitle>
+      <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="h-1.5 bg-green-500" />
+        <div className="p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-9 h-9 rounded-lg bg-green-100 text-green-600 flex items-center justify-center text-lg">📅</div>
+            <h3 className="font-semibold text-zinc-800">שיעורים ב-14 ימים הקרובים</h3>
+            <span className="mr-auto text-sm text-muted-foreground">
+              {isLoadingInstances ? 'טוען...' : `${instances.length} שיעורים מתוכננים`}
+            </span>
           </div>
-          <CardDescription>
-            {isLoadingInstances ? 'טוען...' : `${instances.length} שיעורים מתוכננים`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
           {isLoadingInstances ? (
             <div className="space-y-3">
               <Skeleton className="h-10 w-full" />
@@ -272,8 +269,8 @@ export default function StudentScheduleTab({ studentId }) {
               <p className="text-sm">אין שיעורים מתוכננים</p>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

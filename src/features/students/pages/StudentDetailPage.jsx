@@ -200,7 +200,7 @@ export default function StudentDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-7xl mx-auto space-y-6">
       {/* Header with actions */}
       <StudentHeader
         student={student}
@@ -213,14 +213,16 @@ export default function StudentDetailPage() {
 
       {/* Tabbed content */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 md:grid-cols-6 dir-rtl" dir="rtl">
-          <TabsTrigger value="overview">סקירה כללית</TabsTrigger>
-          <TabsTrigger value="schedule">לוח זמנים</TabsTrigger>
-          <TabsTrigger value="history">היסטוריה</TabsTrigger>
-          <TabsTrigger value="documents">מסמכים</TabsTrigger>
-          <TabsTrigger value="financial">כספים</TabsTrigger>
-          <TabsTrigger value="forms">טפסים</TabsTrigger>
-        </TabsList>
+        <div className="border-b border-border">
+          <TabsList className="bg-transparent h-auto p-0 gap-1" dir="rtl">
+            <TabsTrigger value="overview" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">סקירה</TabsTrigger>
+            <TabsTrigger value="schedule" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">לוח שיעורים</TabsTrigger>
+            <TabsTrigger value="history" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">היסטוריה</TabsTrigger>
+            <TabsTrigger value="documents" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">מסמכים</TabsTrigger>
+            <TabsTrigger value="financial" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">כספים</TabsTrigger>
+            <TabsTrigger value="forms" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">טפסים</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="overview" className="space-y-4">
           <StudentOverviewTab student={student} />

@@ -1,26 +1,21 @@
 import React from 'react';
-import { ClipboardList } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 /**
  * Forms tab: Coming soon placeholder.
  */
 export default function StudentFormsTab() {
   return (
-    <Card className="border-dashed">
-      <CardHeader className="text-center pb-2">
-        <div className="mx-auto rounded-full bg-blue-100 p-4 mb-3">
-          <ClipboardList className="h-8 w-8 text-blue-600" />
-        </div>
-        <CardTitle className="text-xl">טפסים</CardTitle>
-        <CardDescription>ניהול טפסי הרשמה, הסכמות, ושאלונים</CardDescription>
-      </CardHeader>
-      <CardContent className="text-center">
+    <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+      <div className="h-1.5 bg-blue-500" />
+      <div className="p-8 text-center space-y-3">
+        <div className="mx-auto w-14 h-14 rounded-2xl bg-blue-100 flex items-center justify-center text-2xl">📋</div>
+        <h3 className="text-xl font-semibold text-zinc-800">טפסים</h3>
+        <p className="text-sm text-muted-foreground">ניהול טפסי הרשמה, הסכמות, ושאלונים</p>
         <p className="text-lg font-semibold text-blue-600">בקרוב...</p>
-        <p className="text-sm text-neutral-500 mt-1">
+        <p className="text-sm text-muted-foreground">
           מודול הטפסים בפיתוח ויהיה זמין בגרסה הבאה.
         </p>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

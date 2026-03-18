@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Loader2, Clock, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -175,15 +174,14 @@ export default function StudentHistoryTab({ studentId }) {
   };
 
   return (
-    <Card>
-      <CardHeader>
+    <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+      <div className="h-1.5 bg-indigo-500" />
+      <div className="p-5 space-y-4">
         <div className="flex items-center gap-2">
-          <Clock className="h-5 w-5 text-blue-600" />
-          <CardTitle className="text-lg">היסטוריית שינויים</CardTitle>
+          <div className="w-9 h-9 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-lg">🕐</div>
+          <h3 className="font-semibold text-zinc-800">היסטוריית שינויים</h3>
+          <span className="mr-auto text-sm text-muted-foreground">כל השינויים שנעשו בנתוני התלמיד</span>
         </div>
-        <CardDescription>כל השינויים שנעשו בנתוני התלמיד</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
         {isLoading ? (
           <div className="space-y-4">
             {[1, 2, 3].map((i) => (
@@ -285,11 +283,11 @@ export default function StudentHistoryTab({ studentId }) {
           </>
         ) : (
           <div className="flex flex-col items-center justify-center py-8 text-neutral-500">
-            <Clock className="h-10 w-10 mb-2 text-neutral-300" />
+            <span className="text-3xl mb-2">🕐</span>
             <p className="text-sm">אין היסטוריית שינויים</p>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
