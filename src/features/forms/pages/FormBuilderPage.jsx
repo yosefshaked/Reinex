@@ -207,7 +207,25 @@ function FieldInspector({ fieldDef, required, onUpdate, onToggleRequired, onDele
 // ── Canvas field wrapper (clickable overlay on each field) ───────
 
 function CanvasFieldTemplate(props) {
-  const { id, children, classNames, selectedField, onSelectField } = props;
+  const {
+    id,
+    children,
+    classNames,
+    label,
+    required,
+    displayLabel,
+    description,
+    errors,
+    help,
+    hidden,
+    selectedField,
+    onSelectField,
+  } = props;
+
+  if (hidden) {
+    return <div className="hidden">{children}</div>;
+  }
+
   // The root-level object template has id "root" — skip wrapping it
   if (id === 'root') return children;
 
@@ -235,7 +253,18 @@ function CanvasFieldTemplate(props) {
         }
       }}
     >
-      {children}
+      <div className="space-y-1">
+        {displayLabel && label ? (
+          <label htmlFor={id} className="text-sm font-medium text-neutral-900">
+            {label}
+            {required ? <span className="ms-1 text-red-500">*</span> : null}
+          </label>
+        ) : null}
+        {description}
+        {children}
+        {errors}
+        {help}
+      </div>
     </div>
   );
 }
