@@ -19,17 +19,43 @@ import SendFormDialog from '@/features/students/components/SendFormDialog.jsx';
 import { toast } from 'sonner';
 
 function normalizeWaPhone(value) {
-  return String(value || '').replace(/[^\d]/g, '');
+  const digits = String(value || '').replace(/[^\d]/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('00')) return digits.slice(2);
+  if (digits.startsWith('972')) return digits;
+  if (digits.startsWith('0')) return `972${digits.slice(1)}`;
+  if (digits.length === 9 && digits.startsWith('5')) return `972${digits}`;
+  return digits;
 }
 
-function buildSubmissionLink() {
+function buildSubmissionLink({ accessIdentifier = '', otp = '' } = {}) {
   const origin = window?.location?.origin || '';
-  return `${origin}/#/submit`;
+  const params = new URLSearchParams();
+  const normalizedIdentifier = String(accessIdentifier || '').trim();
+  const normalizedOtp = String(otp || '').trim();
+
+  if (normalizedIdentifier) params.set('identity_number', normalizedIdentifier);
+  if (normalizedOtp) params.set('otp', normalizedOtp);
+
+  const query = params.toString();
+  return `${origin}/#/submit${query ? `?${query}` : ''}`;
 }
 
-function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier) {
+function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName) {
   const normalizedPhone = normalizeWaPhone(phone);
-  const message = `שלום, מצורף קישור למילוי טופס: ${submitLink}. קוד האימות שלך הוא: ${otp}. מזהה גישה: ${accessIdentifier}`;
+  const message = [
+    'שלום,',
+    '',
+    `שם הטופס למילוי: ${formName || 'טופס'}`,
+    '',
+    'מצורף קישור למילוי טופס:',
+    submitLink,
+    '',
+    `מזהה גישה: ${accessIdentifier}`,
+    `קוד אימות: ${otp}`,
+    '',
+    'אפשר לפתוח את הקישור ולשלוח את הטופס.',
+  ].join('\n');
   return {
     normalizedPhone,
     url: `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`,
@@ -179,8 +205,8 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
           throw new Error('response_missing_whatsapp_payload');
         }
 
-        const submitLink = buildSubmissionLink();
-        const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier);
+        const submitLink = buildSubmissionLink({ accessIdentifier, otp });
+        const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, submission?.form_name || 'טופס');
         window.open(wa.url, '_blank', 'noopener,noreferrer');
         toast.success('OTP נוצר מחדש ונפתחה הודעת וואטסאפ');
       }

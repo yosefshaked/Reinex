@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
 import { Loader2, ShieldCheck, FileCheck2, Info } from 'lucide-react';
@@ -21,6 +22,7 @@ function normalizeSchema(schema) {
 const LEGAL_NOTICE_DISMISSED_KEY = 'reinex_submit_legal_notice_dismissed';
 
 export default function SubmitFormPage() {
+  const [searchParams] = useSearchParams();
   const [step, setStep] = useState('login');
   const [identityNumber, setIdentityNumber] = useState('');
   const [otp, setOtp] = useState('');
@@ -55,6 +57,25 @@ export default function SubmitFormPage() {
       setShowLegalNotice(true);
     }
   }, []);
+
+  useEffect(() => {
+    const prefilledIdentity = String(
+      searchParams.get('identity_number') ||
+      searchParams.get('identityNumber') ||
+      searchParams.get('access_identifier') ||
+      '',
+    ).replace(/\D/g, '');
+
+    const prefilledOtp = String(searchParams.get('otp') || '').replace(/\D/g, '').slice(0, 6);
+
+    if (prefilledIdentity) {
+      setIdentityNumber((prev) => prev || prefilledIdentity);
+    }
+
+    if (prefilledOtp) {
+      setOtp((prev) => prev || prefilledOtp);
+    }
+  }, [searchParams]);
 
   const dismissLegalNotice = () => {
     setShowLegalNotice(false);

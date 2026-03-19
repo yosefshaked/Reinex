@@ -448,12 +448,12 @@ async function resolveSubmissionDestination(tenantClient, studentId, deliveryMet
   return normalizeString(await resolveStudentDestination(tenantClient, studentId, 'email')).toLowerCase();
 }
 
-function buildSubmissionAccessText(submitLink, otpCode, identityNumber) {
-  return `שלום, מצורף קישור למילוי טופס: ${submitLink}. קוד האימות שלך הוא: ${otpCode}. מזהה גישה: ${identityNumber}`;
+function buildSubmissionAccessText(submitLink, otpCode, identityNumber, formName) {
+  return `שלום, שם הטופס למילוי: ${formName || 'טופס'}. מצורף קישור למילוי טופס: ${submitLink}. קוד האימות שלך הוא: ${otpCode}. מזהה גישה: ${identityNumber}`;
 }
 
-function buildSubmissionAccessHtml(submitLink, otpCode, identityNumber) {
-  return `<p>שלום,</p><p>מצורף קישור למילוי טופס: <a href="${submitLink}">${submitLink}</a></p><p>קוד האימות שלך הוא: <strong>${otpCode}</strong></p><p>מזהה גישה: <strong>${identityNumber}</strong></p>`;
+function buildSubmissionAccessHtml(submitLink, otpCode, identityNumber, formName) {
+  return `<p>שלום,</p><p>שם הטופס למילוי: <strong>${formName || 'טופס'}</strong></p><p>מצורף קישור למילוי טופס: <a href="${submitLink}">${submitLink}</a></p><p>קוד האימות שלך הוא: <strong>${otpCode}</strong></p><p>מזהה גישה: <strong>${identityNumber}</strong></p>`;
 }
 
 async function sendSubmissionDelivery(context, {
@@ -473,8 +473,8 @@ async function sendSubmissionDelivery(context, {
 
   const organizationSenderName = await resolveOrganizationSenderName(controlClient, orgId, context);
   const submitLink = `${resolveSubmitBaseUrl(req, env)}/#/submit`;
-  const text = buildSubmissionAccessText(submitLink, otpCode, identityNumber);
-  const html = buildSubmissionAccessHtml(submitLink, otpCode, identityNumber);
+  const text = buildSubmissionAccessText(submitLink, otpCode, identityNumber, formName);
+  const html = buildSubmissionAccessHtml(submitLink, otpCode, identityNumber, formName);
 
   await sendBrevoEmail(
     {
