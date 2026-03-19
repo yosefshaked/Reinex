@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, MoreVertical, Pencil, AlertCircle, Pause, Play, Copy } from 'lucide-react';
+import { ArrowRight, MoreVertical, Pencil, AlertCircle, Pause, Play, Copy, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -16,6 +16,7 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import SuspendStudentDialog from '@/features/students/components/SuspendStudentDialog.jsx';
+import SendFormDialog from '@/features/students/components/SendFormDialog.jsx';
 
 function getInitials(student) {
   const first = student?.first_name?.[0] || '';
@@ -35,6 +36,7 @@ export default function StudentHeader({
   const { activeOrg } = useOrg();
   
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
+  const [sendFormDialogOpen, setSendFormDialogOpen] = useState(false);
   const [isSuspendingOrDeleting, setIsSuspendingOrDeleting] = useState(false);
 
   if (!student) return null;
@@ -154,6 +156,17 @@ export default function StudentHeader({
               עריכה
             </Button>
 
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSendFormDialogOpen(true)}
+              disabled={isUpdating || isSuspendingOrDeleting}
+              className="gap-2"
+            >
+              <Send className="h-4 w-4" />
+              שלח טופס
+            </Button>
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" disabled={isUpdating || isSuspendingOrDeleting} className="gap-1">
@@ -198,6 +211,12 @@ export default function StudentHeader({
         orgId={activeOrgId}
         session={session}
         onSuccess={onSuspend}
+      />
+
+      <SendFormDialog
+        open={sendFormDialogOpen}
+        onOpenChange={setSendFormDialogOpen}
+        student={student}
       />
     </>
   );

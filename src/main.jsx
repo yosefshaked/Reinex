@@ -33,6 +33,7 @@ import LandingPage from './pages/LandingPage.jsx';
 import PendingReportsPage from './features/sessions/pages/PendingReportsPage.jsx';
 import FormsListPage from './features/forms/pages/FormsListPage.jsx';
 import FormBuilderPage from './features/forms/pages/FormBuilderPage.jsx';
+import SubmitFormPage from './pages/SubmitFormPage.jsx';
 import { bootstrapSupabaseCallback } from './auth/bootstrapSupabaseCallback.js';
 
 bootstrapSupabaseCallback();
@@ -75,6 +76,7 @@ function App({ config = null }) {
                 <Route path="/verify-email" element={<VerifyEmail />} />
                 <Route path="/complete-registration" element={<CompleteRegistrationPage />} />
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
+                <Route path="/submit" element={<SubmitFormPage />} />
                 <Route element={<AuthGuard />}>
                   <Route path="/select-org" element={<OrgSelection />} />
                   <Route element={<AppShell />}>
