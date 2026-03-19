@@ -728,7 +728,12 @@ export default function StudentsPage() {
                               </div>
                             </TableCell>
                             <TableCell>
-                              <div className="flex items-center justify-end gap-2">
+                              <div className="flex items-center justify-start gap-2">
+                                <span>
+                                  {student.default_day_of_week
+                                    ? DAY_NAMES[student.default_day_of_week] || '—'
+                                    : '—'}
+                                </span>
                                 {extraTemplateCount > 0 ? (
                                   <Popover>
                                     <PopoverTrigger asChild>
@@ -773,11 +778,6 @@ export default function StudentsPage() {
                                     </PopoverContent>
                                   </Popover>
                                 ) : null}
-                                <span>
-                                  {student.default_day_of_week
-                                    ? DAY_NAMES[student.default_day_of_week] || '—'
-                                    : '—'}
-                                </span>
                               </div>
                             </TableCell>
                             <TableCell>
