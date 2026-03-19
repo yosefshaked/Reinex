@@ -2,7 +2,22 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
-import { DragDropContext, Draggable, Droppable } from 'react-beautiful-dnd';
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   ArrowRight,
   Loader2,
@@ -276,55 +291,54 @@ function CanvasFieldTemplate(props) {
   );
 }
 
-function CanvasObjectFieldTemplate(props) {
-  const { properties } = props;
+function SortableCanvasField({ property }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: property.name,
+  });
 
   return (
-    <Droppable droppableId="form-builder-fields">
-      {(droppableProvided) => (
-        <div
-          ref={droppableProvided.innerRef}
-          {...droppableProvided.droppableProps}
-          className="space-y-3"
-        >
-          {properties.map((property, index) => {
-            if (property.hidden) {
-              return (
-                <div key={property.name} className="hidden">
-                  {property.content}
-                </div>
-              );
-            }
-
-            return (
-              <Draggable key={property.name} draggableId={property.name} index={index}>
-                {(draggableProvided, snapshot) => (
-                  <div
-                    ref={draggableProvided.innerRef}
-                    {...draggableProvided.draggableProps}
-                    className={cn(
-                      'relative rounded-md transition-shadow',
-                      snapshot.isDragging ? 'bg-white shadow-md' : 'bg-transparent',
-                    )}
-                  >
-                    <button
-                      type="button"
-                      aria-label="גרור שדה לשינוי סדר"
-                      className="absolute start-1 top-1 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600"
-                      {...draggableProvided.dragHandleProps}
-                    >
-                      <GripVertical className="h-4 w-4" />
-                    </button>
-                    <div className="ps-8">{property.content}</div>
-                  </div>
-                )}
-              </Draggable>
-            );
-          })}
-          {droppableProvided.placeholder}
-        </div>
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        'relative rounded-md transition-shadow',
+        isDragging ? 'bg-white shadow-md' : 'bg-transparent',
       )}
-    </Droppable>
+    >
+      <button
+        type="button"
+        aria-label="גרור שדה לשינוי סדר"
+        className="absolute start-1 top-1 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <div className="ps-8">{property.content}</div>
+    </div>
+  );
+}
+
+function CanvasObjectFieldTemplate(props) {
+  const { properties } = props;
+  const sortableIds = properties.filter((property) => !property.hidden).map((property) => property.name);
+
+  return (
+    <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+      <div className="space-y-3">
+        {properties.map((property) => {
+          if (property.hidden) {
+            return (
+              <div key={property.name} className="hidden">
+                {property.content}
+              </div>
+            );
+          }
+
+          return <SortableCanvasField key={property.name} property={property} />;
+        })}
+      </div>
+    </SortableContext>
   );
 }
 
@@ -343,6 +357,11 @@ export default function FormBuilderPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [dirty, setDirty] = useState(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection);
 
@@ -423,23 +442,21 @@ export default function FormBuilderPage() {
     setSelectedField(null);
   }, [updateSchema]);
 
-  const handleDragEnd = useCallback((result) => {
-    const { source, destination } = result;
-    if (!destination) return;
-    if (source.index === destination.index) return;
+  const handleDragEnd = useCallback((event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
 
     updateSchema((prev) => {
       const currentOrder = getFieldOrder(prev);
       if (currentOrder.length < 2) return prev;
 
-      const nextOrder = [...currentOrder];
-      const [moved] = nextOrder.splice(source.index, 1);
-      if (!moved) return prev;
-      nextOrder.splice(destination.index, 0, moved);
+      const oldIndex = currentOrder.indexOf(String(active.id));
+      const newIndex = currentOrder.indexOf(String(over.id));
+      if (oldIndex < 0 || newIndex < 0) return prev;
 
       return {
         ...prev,
-        'x-field-order': nextOrder,
+        'x-field-order': arrayMove(currentOrder, oldIndex, newIndex),
       };
     });
   }, [updateSchema]);
@@ -533,7 +550,7 @@ export default function FormBuilderPage() {
       </div>
 
       {/* ── Two-pane layout ── */}
-      <DragDropContext onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar (Inspector / Toolbox) — appears on start side (right in RTL) */}
         <aside className="w-72 shrink-0 border-s border-border bg-surface overflow-y-auto p-4">
@@ -592,7 +609,7 @@ export default function FormBuilderPage() {
           </div>
         </main>
       </div>
-      </DragDropContext>
+      </DndContext>
     </div>
   );
 }
