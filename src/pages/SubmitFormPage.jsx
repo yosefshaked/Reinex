@@ -44,7 +44,7 @@ export default function SubmitFormPage() {
   const description = useMemo(() => {
     if (step === 'done') return 'תודה רבה, הטופס התקבל במערכת.';
     if (step === 'form') return 'נא למלא את כל הפרטים הנדרשים ולשלוח.';
-    return 'הזן ת.ז. תלמיד וקוד אימות כדי להמשיך.';
+    return 'הזן מזהה גישה וקוד אימות כדי להמשיך.';
   }, [step]);
 
   useEffect(() => {
@@ -138,8 +138,8 @@ export default function SubmitFormPage() {
     <div className="min-h-screen bg-slate-50 px-4 py-8 pb-28" dir="rtl">
       <div className="mx-auto w-full max-w-2xl">
         <Card className="shadow-sm">
-          <CardHeader className="text-end">
-            <CardTitle className="text-2xl flex items-center justify-end gap-2">
+          <CardHeader>
+            <CardTitle className="text-2xl flex items-center gap-2">
               {step === 'form' ? <FileCheck2 className="h-6 w-6" /> : <ShieldCheck className="h-6 w-6" />}
               {title}
             </CardTitle>
@@ -156,14 +156,14 @@ export default function SubmitFormPage() {
             {step === 'login' && (
               <form className="space-y-4" onSubmit={handleVerify}>
                 <div className="space-y-2">
-                  <Label htmlFor="identity-number">ת.ז. תלמיד</Label>
+                  <Label htmlFor="identity-number">מזהה גישה</Label>
                   <Input
                     id="identity-number"
-                    dir="ltr"
+                    dir="rtl"
                     inputMode="numeric"
                     value={identityNumber}
                     onChange={(e) => setIdentityNumber(e.target.value.replace(/\D/g, ''))}
-                    placeholder="123456789"
+                    placeholder="12345678910"
                   />
                 </div>
 
@@ -171,7 +171,7 @@ export default function SubmitFormPage() {
                   <Label htmlFor="otp">קוד אימות</Label>
                   <Input
                     id="otp"
-                    dir="ltr"
+                    dir="rtl"
                     inputMode="numeric"
                     value={otp}
                     onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
