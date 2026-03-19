@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
 import { Loader2, ShieldCheck, FileCheck2 } from 'lucide-react';
@@ -20,14 +19,10 @@ function normalizeSchema(schema) {
 }
 
 export default function SubmitFormPage() {
-  const [searchParams] = useSearchParams();
-  const orgId = String(searchParams.get('org_id') || '').trim();
-  const initialSubmissionId = String(searchParams.get('submission_id') || '').trim();
-
   const [step, setStep] = useState('login');
   const [identityNumber, setIdentityNumber] = useState('');
   const [otp, setOtp] = useState('');
-  const [submissionId, setSubmissionId] = useState(initialSubmissionId);
+  const [submissionId, setSubmissionId] = useState('');
   const [formSchema, setFormSchema] = useState({ type: 'object', properties: {}, required: [] });
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(false);
@@ -35,9 +30,7 @@ export default function SubmitFormPage() {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
-  const canVerify = Boolean(orgId && identityNumber.trim() && otp.trim().length === 6);
-
-  const hasMissingOrg = !orgId;
+  const canVerify = Boolean(identityNumber.trim() && otp.trim().length === 6);
 
   const title = useMemo(() => {
     if (step === 'done') return 'הטופס נשלח בהצלחה';
@@ -63,8 +56,6 @@ export default function SubmitFormPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          org_id: orgId,
-          submission_id: submissionId || undefined,
           identity_number: identityNumber,
           otp,
         }),
@@ -100,7 +91,6 @@ export default function SubmitFormPage() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          org_id: orgId,
           submission_id: submissionId,
           otp,
           answers: formData || {},
@@ -136,12 +126,6 @@ export default function SubmitFormPage() {
           </CardHeader>
 
           <CardContent className="space-y-4">
-            {hasMissingOrg && (
-              <Alert>
-                <AlertDescription>חסר מזהה ארגון בקישור. נא לפתוח את הקישור שנשלח אליך מחדש.</AlertDescription>
-              </Alert>
-            )}
-
             {error && (
               <Alert>
                 <AlertDescription className="text-red-700">{error}</AlertDescription>
@@ -174,7 +158,7 @@ export default function SubmitFormPage() {
                   />
                 </div>
 
-                <Button type="submit" className="w-full gap-2" disabled={loading || !canVerify || hasMissingOrg}>
+                <Button type="submit" className="w-full gap-2" disabled={loading || !canVerify}>
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   כניסה לטופס
                 </Button>

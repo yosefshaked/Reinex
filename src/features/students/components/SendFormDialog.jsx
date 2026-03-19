@@ -21,10 +21,9 @@ function normalizeWaPhone(value) {
   return String(value || '').replace(/[^\d]/g, '');
 }
 
-function buildSubmissionLink(orgId, submissionId) {
+function buildSubmissionLink() {
   const origin = window?.location?.origin || '';
-  const params = new URLSearchParams({ org_id: orgId, submission_id: submissionId });
-  return `${origin}/#/submit?${params.toString()}`;
+  return `${origin}/#/submit`;
 }
 
 function buildWhatsAppLink(phone, otp, submitLink) {
@@ -112,12 +111,11 @@ export default function SendFormDialog({ open, onOpenChange, student }) {
 
       const otp = String(response?.otp || '');
       const phone = String(response?.phone || '');
-      const submissionId = String(response?.submission_id || '');
-      if (!otp || !phone || !submissionId) {
+      if (!otp || !phone) {
         throw new Error('response_missing_whatsapp_payload');
       }
 
-      const submitLink = buildSubmissionLink(activeOrgId, submissionId);
+      const submitLink = buildSubmissionLink();
       const wa = buildWhatsAppLink(phone, otp, submitLink);
       setResult({
         mode: 'whatsapp',
