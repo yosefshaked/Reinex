@@ -300,7 +300,7 @@ export default function DocumentRulesManager({ session, orgId }) {
                   // Edit Mode
                   <div className="space-y-3">
                     <div>
-                      <Label htmlFor={`name-${def.id}`} className="block text-end">שם המסמך</Label>
+                      <Label htmlFor={`name-${def.id}`} className="block">שם המסמך</Label>
                       <Input
                         id={`name-${def.id}`}
                         value={editForm.name}
@@ -322,8 +322,8 @@ export default function DocumentRulesManager({ session, orgId }) {
                     {/* Tag/Type Selector - Conditional based on target type */}
                     {targetType === 'students' ? (
                       <div>
-                        <Label className="block text-end mb-2">תגיות יעד (אופציונלי)</Label>
-                        <p className="text-xs text-slate-500 mb-2 text-end">
+                        <Label className="block mb-2">תגיות יעד (אופציונלי)</Label>
+                        <p className="text-xs text-slate-500 mb-2">
                           אם לא נבחרו תגיות, המסמך יחול על כל התלמידים
                         </p>
                         
@@ -372,8 +372,8 @@ export default function DocumentRulesManager({ session, orgId }) {
                       </div>
                     ) : (
                       <div>
-                        <Label className="block text-end mb-2">סוגי מדריכים יעד (אופציונלי)</Label>
-                        <p className="text-xs text-slate-500 mb-2 text-end">
+                        <Label className="block mb-2">סוגי מדריכים יעד (אופציונלי)</Label>
+                        <p className="text-xs text-slate-500 mb-2">
                           אם לא נבחרו סוגים, המסמך יחול על כל המדריכים
                         </p>
                         

@@ -100,7 +100,7 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="edit-doc-name" className="text-end block">
+            <Label htmlFor="edit-doc-name" className="block">
               שם המסמך <span className="text-red-500">*</span>
             </Label>
             <Input
@@ -109,17 +109,16 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="שם המסמך"
-              className="text-end"
             />
             {file.original_name && (
-              <p className="text-xs text-muted-foreground text-end">
+              <p className="text-xs text-muted-foreground">
                 קובץ מקורי: {file.original_name}
               </p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="edit-relevant-date" className="text-end flex items-center gap-2 justify-end">
+            <Label htmlFor="edit-relevant-date" className="flex items-center gap-2 justify-end">
               <span>תאריך רלוונטי</span>
               <Calendar className="h-4 w-4" />
             </Label>
@@ -129,12 +128,11 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
               dir="ltr"
               value={relevantDate}
               onChange={(e) => setRelevantDate(e.target.value)}
-              className="text-end"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="edit-expiration-date" className="text-end flex items-center gap-2 justify-end">
+            <Label htmlFor="edit-expiration-date" className="flex items-center gap-2 justify-end">
               <span>תאריך תפוגה</span>
               <CalendarX className="h-4 w-4" />
             </Label>
@@ -144,7 +142,6 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
               dir="ltr"
               value={expirationDate}
               onChange={(e) => setExpirationDate(e.target.value)}
-              className="text-end"
             />
           </div>
         </div>
@@ -219,7 +216,7 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor={`name-${fileData.id}`} className="text-end block">
+                  <Label htmlFor={`name-${fileData.id}`} className="block">
                     שם המסמך <span className="text-red-500">*</span>
                   </Label>
                   <Input
@@ -228,14 +225,13 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                     value={fileData.name}
                     onChange={(e) => handleFileChange(fileData.id, 'name', e.target.value)}
                     placeholder="לדוגמה: אישור רפואי"
-                    className="text-end"
                     disabled={!!definitionName}
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-2">
-                    <Label htmlFor={`relevant-${fileData.id}`} className="text-end flex items-center gap-1 justify-end text-xs">
+                    <Label htmlFor={`relevant-${fileData.id}`} className="flex items-center gap-1 justify-end text-xs">
                       <span>תאריך רלוונטי</span>
                       <Calendar className="h-3 w-3" />
                     </Label>
@@ -245,12 +241,12 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                       dir="ltr"
                       value={fileData.relevantDate}
                       onChange={(e) => handleFileChange(fileData.id, 'relevantDate', e.target.value)}
-                      className="text-end text-sm"
+                      className="text-sm"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor={`expiration-${fileData.id}`} className="text-end flex items-center gap-1 justify-end text-xs">
+                    <Label htmlFor={`expiration-${fileData.id}`} className="flex items-center gap-1 justify-end text-xs">
                       <span>תאריך תפוגה</span>
                       <CalendarX className="h-3 w-3" />
                     </Label>
@@ -260,7 +256,7 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                       dir="ltr"
                       value={fileData.expirationDate}
                       onChange={(e) => handleFileChange(fileData.id, 'expirationDate', e.target.value)}
-                      className="text-end text-sm"
+                      className="text-sm"
                     />
                   </div>
                 </div>
@@ -329,7 +325,7 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="doc-name" className="text-end block">
+            <Label htmlFor="doc-name" className="block">
               שם המסמך <span className="text-red-500">*</span>
             </Label>
             <Input
@@ -338,16 +334,15 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="לדוגמה: אישור רפואי"
-              className="text-end"
               disabled={!!definitionName}
             />
-            <p className="text-xs text-muted-foreground text-end">
+            <p className="text-xs text-muted-foreground">
               {definitionName ? `שם מוגדר מראש: ${definitionName}` : `קובץ מקורי: ${file.name}`}
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="relevant-date" className="text-end flex items-center gap-2 justify-end">
+            <Label htmlFor="relevant-date" className="flex items-center gap-2 justify-end">
               <span>תאריך רלוונטי</span>
               <Calendar className="h-4 w-4" />
             </Label>
@@ -357,15 +352,14 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
               dir="ltr"
               value={relevantDate}
               onChange={(e) => setRelevantDate(e.target.value)}
-              className="text-end"
             />
-            <p className="text-xs text-muted-foreground text-end">
+            <p className="text-xs text-muted-foreground">
               תאריך הנפקה, אישור וכדומה
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="expiration-date" className="text-end flex items-center gap-2 justify-end">
+            <Label htmlFor="expiration-date" className="flex items-center gap-2 justify-end">
               <span>תאריך תפוגה</span>
               <CalendarX className="h-4 w-4" />
             </Label>
@@ -375,9 +369,8 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
               dir="ltr"
               value={expirationDate}
               onChange={(e) => setExpirationDate(e.target.value)}
-              className="text-end"
             />
-            <p className="text-xs text-muted-foreground text-end">
+            <p className="text-xs text-muted-foreground">
               המסמך יסומן כפג תוקף לאחר תאריך זה
             </p>
           </div>
@@ -1415,7 +1408,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
             {loadState === REQUEST_STATE.idle && (
               <>
                 {/* Upload Guidelines */}
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-end" dir="rtl">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm" dir="rtl">
                   <h4 className="font-semibold text-blue-900 mb-2">הנחיות העלאת קבצים</h4>
                   <ul className="space-y-1 text-blue-800">
                     <li>• גודל מקסימלי: 10MB</li>

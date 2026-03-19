@@ -243,7 +243,7 @@ export default function StudentHeader({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2 sm:flex sm:gap-2 sm:space-y-0">
-            <AlertDialogCancel>בטול</AlertDialogCancel>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
               disabled={isSuspendingOrDeleting}
