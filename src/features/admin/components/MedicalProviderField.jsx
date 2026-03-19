@@ -144,7 +144,7 @@ export default function MedicalProviderField({ value, onChange, disabled = false
                 צרו קופת חולים חדשה לשימוש חוזר עבור תלמידים בארגון.
               </DialogDescription>
             </DialogHeader>
-            <form id="medical-provider-create-form" onSubmit={handleCreateProvider} className="space-y-4" dir="rtl">
+            <form id="medical-provider-create-form" onSubmit={handleCreateProvider} className="space-y-4">
               <TextField
                 id="new-medical-provider-name"
                 name="newProviderName"

@@ -82,7 +82,7 @@ export function FilteredExportDialog({ open, onClose, instructors = [], tags = [
 
   return (
     <Dialog open={open} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-xl" dir="rtl">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>ייצוא תלמידים מסונן</DialogTitle>
         </DialogHeader>

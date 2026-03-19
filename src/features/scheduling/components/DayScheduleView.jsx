@@ -82,7 +82,7 @@ export default function DayScheduleView({ orgId }) {
   }, [rows])
 
   return (
-    <div className="space-y-md" dir="rtl">
+    <div className="space-y-md">
       <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
         <div className="flex flex-col gap-sm sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-1">

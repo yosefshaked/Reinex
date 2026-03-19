@@ -114,7 +114,7 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto" dir="rtl">
+      <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-end">ניהול יכולות שירות</DialogTitle>
           <DialogDescription className="text-end">

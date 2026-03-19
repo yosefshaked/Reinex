@@ -339,7 +339,7 @@ export default function AuditLogViewer({ session, orgId }) {
   }, [orgId, session?.access_token]);
 
   return (
-    <div className="space-y-5" dir="rtl">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="text-lg font-semibold text-slate-900">יומן ביקורת ארגוני</h3>

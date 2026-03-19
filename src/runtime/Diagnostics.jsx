@@ -66,7 +66,7 @@ export default function Diagnostics() {
     : '—';
 
   return (
-    <div className="max-w-2xl mx-auto mt-16 bg-white shadow-xl rounded-2xl p-8 space-y-6" dir="rtl">
+    <div className="max-w-2xl mx-auto mt-16 bg-white shadow-xl rounded-2xl p-8 space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-slate-900">אבחון קונפיגורציה</h1>
         <p className="text-slate-600">סקירה מהירה של מקור ההגדרות בזמן ריצה.</p>

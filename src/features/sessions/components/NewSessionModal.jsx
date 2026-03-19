@@ -77,7 +77,7 @@ function DateChoiceFooter({ lastReportDate, studentName, onClose, onNewReport, o
   // Initial choice: same student or other student
   if (mode === 'choose') {
     return (
-      <div className="flex flex-col gap-3" dir="rtl">
+      <div className="flex flex-col gap-3">
         <p className="text-sm font-medium text-center text-neutral-700">
           מה תרצו לעשות?
         </p>
@@ -108,7 +108,7 @@ function DateChoiceFooter({ lastReportDate, studentName, onClose, onNewReport, o
 
   // Date selection for chosen mode
   return (
-    <div className="flex flex-col gap-4" dir="rtl">
+    <div className="flex flex-col gap-4">
       <div className="space-y-3">
         <p className="text-sm font-medium text-center text-neutral-700">
           בחרו תאריך לדיווח הבא:

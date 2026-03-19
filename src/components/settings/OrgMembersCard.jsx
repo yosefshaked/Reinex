@@ -286,7 +286,7 @@ export default function OrgMembersCard() {
   }
 
   return (
-    <Card className="border-0 shadow-xl bg-white/90" dir="rtl">
+    <Card className="border-0 shadow-xl bg-white/90">
       <CardHeader className="border-b border-slate-200">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">

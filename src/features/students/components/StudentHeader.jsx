@@ -196,7 +196,7 @@ export default function StudentHeader({
                   <MoreVertical className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" dir="rtl">
+              <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={handleCopyId}>
                   <Copy className="h-4 w-4 ms-2" />
                   <span>העתק מזהה</span>
@@ -232,7 +232,7 @@ export default function StudentHeader({
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent dir="rtl" className="text-end">
+        <AlertDialogContent className="text-end">
           <AlertDialogHeader>
             <AlertDialogTitle>מחיקת תלמיד</AlertDialogTitle>
             <AlertDialogDescription>

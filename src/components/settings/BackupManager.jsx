@@ -205,7 +205,7 @@ export default function BackupManager({ session, orgId }) {
   };
 
   return (
-    <Card className="w-full border-0 shadow-lg bg-white/80" dir="rtl">
+    <Card className="w-full border-0 shadow-lg bg-white/80">
       <CardHeader className="border-b border-slate-200 space-y-xs">
         <CardTitle className="text-base font-semibold text-slate-900 sm:text-lg md:text-xl flex items-center gap-xs">
           <ShieldCheck className="h-5 w-5 text-slate-700" />

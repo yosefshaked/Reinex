@@ -60,7 +60,7 @@ export function RejectReportDialog({ open, onClose, onReject, reportName, isBulk
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md" dir="rtl">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-end">
             <AlertTriangle className="h-5 w-5 text-destructive" />
@@ -82,7 +82,7 @@ export function RejectReportDialog({ open, onClose, onReject, reportName, isBulk
             <Label htmlFor="reject-reason" className="text-end block">
               סיבת הדחייה <span className="text-destructive">*</span>
             </Label>
-            <Select value={selectedReason} onValueChange={setSelectedReason} dir="rtl">
+            <Select value={selectedReason} onValueChange={setSelectedReason}>
               <SelectTrigger id="reject-reason">
                 <SelectValue placeholder="בחר סיבה..." />
               </SelectTrigger>
@@ -107,7 +107,7 @@ export function RejectReportDialog({ open, onClose, onReject, reportName, isBulk
                 onChange={(e) => setCustomReason(e.target.value)}
                 placeholder="הזן סיבה מפורטת לדחיית הדיווח..."
                 rows={3}
-                dir="rtl"
+               
                 className="resize-none"
               />
             </div>

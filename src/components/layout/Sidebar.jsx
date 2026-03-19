@@ -45,7 +45,7 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
 
   return (
     <aside
-      dir="rtl"
+     
       className={cn(
         'hidden md:flex md:h-screen md:flex-col md:border-s md:border-border md:bg-surface',
         'transition-[width] duration-200 ease-out',

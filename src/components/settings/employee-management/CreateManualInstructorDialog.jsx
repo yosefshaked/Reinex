@@ -53,7 +53,7 @@ export default function CreateManualInstructorDialog({ open, onOpenChange, orgId
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md" dir="rtl">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-end">הוספת עובד ידני</DialogTitle>
           <DialogDescription className="text-end">

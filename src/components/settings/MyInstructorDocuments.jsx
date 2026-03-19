@@ -314,10 +314,10 @@ export default function MyInstructorDocuments({ session, orgId, userId }) {
   });
 
   return (
-    <div className="space-y-6" dir="rtl">
+    <div className="space-y-6">
       {/* Duplicate Confirmation Dialog */}
       <Dialog open={!!duplicateDialog} onOpenChange={(open) => !open && setDuplicateDialog(null)}>
-        <DialogContent dir="rtl">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-end">
               <AlertTriangle className="h-5 w-5 text-amber-600" />
@@ -328,7 +328,7 @@ export default function MyInstructorDocuments({ session, orgId, userId }) {
             </DialogDescription>
           </DialogHeader>
           
-          <div className="space-y-3" dir="rtl">
+          <div className="space-y-3">
             <div className="text-sm">
               <p className="font-medium">הקובץ הנוכחי:</p>
               <p className="text-muted-foreground">{duplicateDialog?.file?.name}</p>

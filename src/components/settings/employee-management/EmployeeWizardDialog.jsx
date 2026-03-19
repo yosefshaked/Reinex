@@ -113,7 +113,7 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
       if (!newOpen) handleReset();
       onOpenChange(newOpen);
     }}>
-      <DialogContent className="sm:max-w-md" dir="rtl">
+      <DialogContent className="sm:max-w-md">
         {step === STEPS.DETAILS && (
           <>
             <DialogHeader>

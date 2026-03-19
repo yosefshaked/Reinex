@@ -43,7 +43,7 @@ export default function InstructorManagementHub({ session, orgId, activeOrgHasCo
   return (
     <Card className="w-full border-0 shadow-lg bg-white/80">
       <CardHeader>
-        <div className="flex items-center justify-between gap-2" dir="rtl">
+        <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base sm:text-lg truncate">{VIEW_TITLES[currentView]}</CardTitle>
           {currentView !== 'menu' && (
             <Button
@@ -59,7 +59,7 @@ export default function InstructorManagementHub({ session, orgId, activeOrgHasCo
           )}
         </div>
       </CardHeader>
-      <CardContent dir="rtl">
+      <CardContent>
         {currentView === 'menu' && (
           <InstructorMenu onNavigate={handleNavigate} />
         )}

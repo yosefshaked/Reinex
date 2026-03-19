@@ -113,7 +113,7 @@ export default function CreateGuardianDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4" dir="rtl">
+        <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
             <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
               {error}

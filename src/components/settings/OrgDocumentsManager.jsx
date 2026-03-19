@@ -123,7 +123,7 @@ function PreUploadDialog({ file, onConfirm, onCancel }) {
 
   return (
     <Dialog open={!!file} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[500px]" dir="rtl">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="text-end">הגדרות מסמך</DialogTitle>
           <DialogDescription className="text-end">
@@ -138,7 +138,7 @@ function PreUploadDialog({ file, onConfirm, onCancel }) {
             </Label>
             <Input
               id="doc-name"
-              dir="rtl"
+             
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="לדוגמה: רישיון עסק"
@@ -227,7 +227,7 @@ function EditMetadataDialog({ document, onSave, onCancel }) {
 
   return (
     <Dialog open={!!document} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[500px]" dir="rtl">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="text-end">עריכת מסמך</DialogTitle>
           <DialogDescription className="text-end">
@@ -242,7 +242,7 @@ function EditMetadataDialog({ document, onSave, onCancel }) {
             </Label>
             <Input
               id="edit-name"
-              dir="rtl"
+             
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="text-end"
@@ -347,7 +347,7 @@ function BulkPreUploadDialog({ files, onConfirm, onCancel }) {
 
   return (
     <Dialog open={files.length > 0} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[600px] max-h-[80vh]" dir="rtl">
+      <DialogContent className="sm:max-w-[600px] max-h-[80vh]">
         <DialogHeader>
           <DialogTitle className="text-end">הגדרות מסמכים ({files.length})</DialogTitle>
           <DialogDescription className="text-end">
@@ -370,7 +370,7 @@ function BulkPreUploadDialog({ files, onConfirm, onCancel }) {
                   </Label>
                   <Input
                     id={`bulk-name-${idx}`}
-                    dir="rtl"
+                   
                     value={meta.name}
                     onChange={(e) => updateMetadata(idx, 'name', e.target.value)}
                     placeholder="לדוגמה: רישיון עסק"
@@ -808,7 +808,7 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
 
   return (
     <>
-      <Card dir="rtl">
+      <Card>
         <CardHeader className="pb-3">
           <div className="space-y-3">
             <div className="flex items-center justify-between">

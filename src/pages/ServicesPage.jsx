@@ -230,27 +230,27 @@ export default function ServicesPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-end">שם</TableHead>
-                    <TableHead className="text-end">משך</TableHead>
-                    <TableHead className="text-end">מודל תשלום</TableHead>
-                    <TableHead className="text-end">צבע</TableHead>
-                    <TableHead className="text-end">סטטוס</TableHead>
-                    <TableHead className="text-end">פעולות</TableHead>
+                    <TableHead>שם</TableHead>
+                    <TableHead>משך</TableHead>
+                    <TableHead>מודל תשלום</TableHead>
+                    <TableHead>צבע</TableHead>
+                    <TableHead>סטטוס</TableHead>
+                    <TableHead>פעולות</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {services.map((service) => (
                     <TableRow key={service.id}>
-                      <TableCell className="text-end font-medium">
+                      <TableCell className="font-medium">
                         <Link to={`/services/${service.id}`} className="text-primary hover:underline">
                           {service.name}
                         </Link>
                       </TableCell>
-                      <TableCell className="text-end">
+                      <TableCell>
                         {service.duration_minutes ? `${service.duration_minutes} דק׳` : '—'}
                       </TableCell>
-                      <TableCell className="text-end">{service.payment_model || '—'}</TableCell>
-                      <TableCell className="text-end">
+                      <TableCell>{service.payment_model || '—'}</TableCell>
+                      <TableCell>
                         {service.color ? (
                           <span className="inline-flex items-center gap-2">
                             <span className="h-4 w-4 rounded-full border" style={{ backgroundColor: service.color }} />
@@ -260,10 +260,10 @@ export default function ServicesPage() {
                           '—'
                         )}
                       </TableCell>
-                      <TableCell className="text-end">
+                      <TableCell>
                         {service.is_active === false ? 'מושהה' : 'פעיל'}
                       </TableCell>
-                      <TableCell className="text-end">
+                      <TableCell>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -303,7 +303,7 @@ export default function ServicesPage() {
             <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>
           ) : null}
 
-          <form onSubmit={handleSubmit} className="space-y-4" dir="rtl">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <TextField
               id="service-name"
               name="name"

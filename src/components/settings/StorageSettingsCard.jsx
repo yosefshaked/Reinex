@@ -347,7 +347,7 @@ export default function StorageSettingsCard({ session, orgId }) {
   // Render locked state
   if (isLocked) {
     return (
-      <div className="relative" dir="rtl">
+      <div className="relative">
         <div className="absolute inset-0 bg-slate-100/80 backdrop-blur-[2px] z-10 rounded-lg flex items-center justify-center">
           <div className="text-center p-6 bg-white rounded-lg shadow-lg max-w-sm">
             <Lock className="h-12 w-12 text-slate-400 mx-auto mb-3" />
@@ -373,7 +373,7 @@ export default function StorageSettingsCard({ session, orgId }) {
   }
 
   return (
-    <Card dir="rtl">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <HardDrive className="h-5 w-5" />
@@ -662,7 +662,7 @@ export default function StorageSettingsCard({ session, orgId }) {
 
       {/* Disconnect Confirmation Dialog */}
       <Dialog open={showDisconnectDialog} onOpenChange={setShowDisconnectDialog}>
-        <DialogContent dir="rtl">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-end">
               <AlertTriangle className="h-5 w-5 text-destructive" />
@@ -672,14 +672,14 @@ export default function StorageSettingsCard({ session, orgId }) {
               פעולה זו תנתק את הגדרות האחסון. קבצים קיימים יישארו זמינים לתקופה מוגבלת.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-4" dir="rtl">
+          <div className="space-y-3 py-4">
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
               <p className="text-sm text-amber-900">
                 <strong>שים לב:</strong> לאחר הניתוק, לא תוכל להעלות קבצים חדשים עד שתגדיר אחסון מחדש.
               </p>
             </div>
           </div>
-          <DialogFooter className="gap-2" dir="rtl">
+          <DialogFooter className="gap-2">
             <Button
               variant="outline"
               onClick={() => setShowDisconnectDialog(false)}

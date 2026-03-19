@@ -14,7 +14,7 @@ import { buildInvitationSearch } from '@/lib/invite-tokens.js';
 
 function LoadingState() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50" dir="rtl">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
       <div className="flex flex-col items-center gap-4 text-slate-600">
         <div className="w-12 h-12 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin" aria-hidden="true" />
         <p className="text-sm font-medium">טוען ארגונים...</p>
@@ -150,7 +150,7 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
 
   return (
     <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <div className="bg-white rounded-3xl shadow-xl w-full max-w-lg" dir="rtl">
+      <div className="bg-white rounded-3xl shadow-xl w-full max-w-lg">
         <div className="px-6 py-5 border-b border-slate-200">
           <h2 className="text-xl font-semibold text-slate-900">יצירת ארגון חדש</h2>
           <p className="text-sm text-slate-500 mt-1">
@@ -243,7 +243,7 @@ export default function OrgSelection() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center px-4 py-10" dir="rtl">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center px-4 py-10">
       <div className="absolute top-4 start-4">
         <Button variant="ghost" onClick={handleLogout} className="gap-2 text-slate-600 hover:text-slate-900">
           <LogOut className="w-4 h-4" />

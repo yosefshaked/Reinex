@@ -154,7 +154,7 @@ export default function AppShell({ children }) {
   return (
     <SessionModalContext.Provider value={sessionModalContextValue}>
       <AccessibilityProvider>
-      <div ref={shellRef} className="flex min-h-screen bg-background text-foreground overflow-x-hidden" dir="rtl">
+      <div ref={shellRef} className="flex min-h-screen bg-background text-foreground overflow-x-hidden">
         <SkipLink />
         <Sidebar hidden={isSidebarHidden} onToggleHidden={() => setIsSidebarHidden((prev) => !prev)} />
         <div className="relative flex min-h-screen flex-1 flex-col pb-[88px] md:h-screen md:pb-0">

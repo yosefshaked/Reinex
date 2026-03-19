@@ -250,7 +250,7 @@ function ConfigErrorScreen({ error }) {
   };
 
   return (
-    <div style={styles.wrapper} dir="rtl">
+    <div style={styles.wrapper}>
       <div style={styles.card}>
         <header style={styles.header}>
           <h1 style={styles.title}>טעינת ההגדרות נכשלה</h1>

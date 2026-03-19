@@ -563,7 +563,7 @@ export default function WaitingListPage() {
     <PageLayout title="רשימת המתנה" description="ניהול תלמידים הממתינים לשיבוץ" actions={pageActions}>
       <Card className="mb-4">
         <CardContent className="p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between" dir="rtl">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div className="max-w-xs">
               <SelectField
                 id="waiting-list-status-filter"
@@ -654,14 +654,14 @@ export default function WaitingListPage() {
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-3xl" dir="rtl">
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{formValues.id ? 'עריכת רשומה' : 'רשומה חדשה'}</DialogTitle>
             <DialogDescription>
               הגדירו את צרכי התלמיד כדי שנוכל לשבץ אותו בשיעור קבוע.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleSubmit} dir="rtl">
+          <form onSubmit={handleSubmit}>
             <div className="space-y-4 py-4">
               <ComboBoxField
                 id="waiting-student"
@@ -797,7 +797,7 @@ export default function WaitingListPage() {
           setTimeEditorOpen(true);
         }}
       >
-        <DialogContent className="sm:max-w-lg" dir="rtl">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>עריכת זמינות</DialogTitle>
             <DialogDescription>

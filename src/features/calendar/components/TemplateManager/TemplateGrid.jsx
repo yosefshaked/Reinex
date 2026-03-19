@@ -105,7 +105,7 @@ export function TemplateGrid({ templates, instructors, onTemplateClick, onCellCl
         <thead>
           <tr>
             {/* Day column header (right side in RTL) */}
-            <th className="border-b border-s border-gray-200 px-3 py-2 text-end text-sm font-semibold text-gray-700 bg-gray-50 sticky end-0 z-10 w-20">
+            <th className="border-b border-s border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 bg-gray-50 sticky end-0 z-10 w-20">
               יום
             </th>
             {/* Instructor column headers */}
@@ -123,7 +123,7 @@ export function TemplateGrid({ templates, instructors, onTemplateClick, onCellCl
           {DAY_OPTIONS.map((day) => (
             <tr key={day.value} className="group">
               {/* Day label */}
-              <td className="border-b border-s border-gray-200 px-3 py-2 text-end text-sm font-medium text-gray-700 bg-gray-50/50 sticky end-0 z-10">
+              <td className="border-b border-s border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-50/50 sticky end-0 z-10">
                 <div className="flex items-center gap-1">
                   <span className="font-semibold text-gray-500">{day.labelShort}</span>
                   <span>{day.label}</span>

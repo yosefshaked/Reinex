@@ -264,7 +264,7 @@ export default function BulkResolvePendingReportsDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-end">שיוך מרובה - {reports.length} דיווחים</DialogTitle>
         </DialogHeader>
@@ -298,7 +298,7 @@ export default function BulkResolvePendingReportsDialog({
                   variant="outline"
                   className="h-auto p-4 flex flex-col items-start gap-2"
                   onClick={() => handleModeSelect(RESOLUTION_MODE.ASSIGN_EXISTING)}
-                  dir="rtl"
+                 
                 >
                   <div className="flex items-center gap-2 w-full">
                     <Users className="h-5 w-5" />
@@ -313,7 +313,7 @@ export default function BulkResolvePendingReportsDialog({
                   variant="outline"
                   className="h-auto p-4 flex flex-col items-start gap-2"
                   onClick={() => handleModeSelect(RESOLUTION_MODE.CREATE_NEW)}
-                  dir="rtl"
+                 
                 >
                   <div className="flex items-center gap-2 w-full">
                     <UserPlus className="h-5 w-5" />

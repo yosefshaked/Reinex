@@ -24,7 +24,7 @@ export default function FormField({
   }
 
   return (
-    <div className="space-y-2" dir="rtl">
+    <div className="space-y-2">
       {label ? (
         <Label htmlFor={id} className="block text-end">
           {label}

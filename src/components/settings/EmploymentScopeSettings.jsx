@@ -164,7 +164,7 @@ function EmploymentScopeSettings({ session, orgId, activeOrgHasConnection }) {
       <CardHeader className="border-b">
         <CardTitle className="text-xl font-semibold text-slate-900">היקף משרה</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4" dir="rtl">
+      <CardContent className="space-y-4">
         {isLoading ? (
           <div className="space-y-3">
             <Skeleton className="h-6 w-1/2" />

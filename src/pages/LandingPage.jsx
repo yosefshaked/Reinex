@@ -53,7 +53,7 @@ export default function LandingPage() {
 
   return (
     <AccessibilityProvider>
-      <div className="min-h-screen bg-gradient-to-b from-primary/5 to-background" dir="rtl">
+      <div className="min-h-screen bg-gradient-to-b from-primary/5 to-background">
         {/* Accessibility Button */}
         <div className="fixed bottom-4 start-4 z-50">
           <AccessibilityButton />

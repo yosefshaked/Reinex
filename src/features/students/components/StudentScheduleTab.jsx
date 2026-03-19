@@ -232,11 +232,11 @@ export default function StudentScheduleTab({ studentId }) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-end">תאריך</TableHead>
-                    <TableHead className="text-end">שעה</TableHead>
-                    <TableHead className="text-end">שיעור</TableHead>
-                    <TableHead className="text-end">מדריך</TableHead>
-                    <TableHead className="text-end">סטטוס</TableHead>
+                    <TableHead>תאריך</TableHead>
+                    <TableHead>שעה</TableHead>
+                    <TableHead>שיעור</TableHead>
+                    <TableHead>מדריך</TableHead>
+                    <TableHead>סטטוס</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

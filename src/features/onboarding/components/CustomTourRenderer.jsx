@@ -214,7 +214,7 @@ export default function CustomTourRenderer() {
       className="tt-tour-popover"
       role="dialog"
       aria-modal="true"
-      dir="rtl"
+     
       style={popoverStyle}
     >
       <div className="tt-tour-card">

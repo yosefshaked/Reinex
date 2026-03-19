@@ -218,7 +218,7 @@ export default function DocumentRulesManager({ session, orgId }) {
 
   if (loadState === REQUEST_STATE.loading) {
     return (
-      <Card dir="rtl">
+      <Card>
         <CardContent className="p-8 text-center">
           <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-slate-400" />
           <p className="text-sm text-slate-600">טוען הגדרות מסמכים...</p>
@@ -229,7 +229,7 @@ export default function DocumentRulesManager({ session, orgId }) {
 
   if (loadState === REQUEST_STATE.error) {
     return (
-      <Card dir="rtl">
+      <Card>
         <CardContent className="p-8 text-center">
           <AlertCircle className="h-8 w-8 mx-auto mb-2 text-red-500" />
           <p className="text-sm text-red-600">שגיאה בטעינת הגדרות המסמכים</p>
@@ -239,7 +239,7 @@ export default function DocumentRulesManager({ session, orgId }) {
   }
 
   return (
-    <Card dir="rtl">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <FileText className="h-5 w-5" />
@@ -307,7 +307,7 @@ export default function DocumentRulesManager({ session, orgId }) {
                         onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
                         placeholder="לדוגמה: אישור רפואי"
                         className="mt-1"
-                        dir="rtl"
+                       
                       />
                     </div>
                     <div className="flex items-center gap-2">
@@ -329,7 +329,7 @@ export default function DocumentRulesManager({ session, orgId }) {
                         
                         {/* Selected Tags */}
                         {editForm.target_tags.length > 0 && (
-                          <div className="flex flex-wrap gap-2 mb-2" dir="rtl">
+                          <div className="flex flex-wrap gap-2 mb-2">
                             {editForm.target_tags.map((tagId) => (
                               <Badge key={tagId} variant="secondary" className="gap-1">
                                 <Tag className="h-3 w-3" />
@@ -348,7 +348,7 @@ export default function DocumentRulesManager({ session, orgId }) {
                         
                         {/* Tag Dropdown */}
                         <Select onValueChange={handleAddTag} value="">
-                          <SelectTrigger dir="rtl">
+                          <SelectTrigger>
                             <SelectValue placeholder="הוסף תגית..." />
                           </SelectTrigger>
                           <SelectContent>
@@ -379,7 +379,7 @@ export default function DocumentRulesManager({ session, orgId }) {
                         
                         {/* Selected Types */}
                         {editForm.target_instructor_types.length > 0 && (
-                          <div className="flex flex-wrap gap-2 mb-2" dir="rtl">
+                          <div className="flex flex-wrap gap-2 mb-2">
                             {editForm.target_instructor_types.map((typeId) => (
                               <Badge key={typeId} variant="secondary" className="gap-1">
                                 <Briefcase className="h-3 w-3" />
@@ -398,7 +398,7 @@ export default function DocumentRulesManager({ session, orgId }) {
                         
                         {/* Type Dropdown */}
                         <Select onValueChange={handleAddType} value="">
-                          <SelectTrigger dir="rtl">
+                          <SelectTrigger>
                             <SelectValue placeholder="הוסף סוג מדריך..." />
                           </SelectTrigger>
                           <SelectContent>

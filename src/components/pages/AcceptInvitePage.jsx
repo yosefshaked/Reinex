@@ -329,7 +329,7 @@ export default function AcceptInvitePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-200 flex items-center justify-center px-4 py-12" dir="rtl">
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-200 flex items-center justify-center px-4 py-12">
       <div className="max-w-2xl w-full bg-white shadow-xl rounded-3xl overflow-hidden border border-slate-100">
         <div className="bg-gradient-to-l from-blue-500 to-indigo-500 p-6 text-end text-white">
           <div className="flex items-center justify-center gap-3">

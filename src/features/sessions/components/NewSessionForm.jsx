@@ -403,7 +403,7 @@ export default function NewSessionForm({
       ref={formRef}
       className="space-y-lg"
       onSubmit={handleSubmit}
-      dir="rtl"
+     
     >
       {successState && (
         <div className="rounded-lg bg-success-50 border-2 border-success-200 p-md text-center animate-in fade-in duration-300">
@@ -758,7 +758,7 @@ export default function NewSessionForm({
           options={services}
           placeholder="בחרו מהרשימה או הקלידו שירות"
           disabled={isSubmitting}
-          dir="rtl"
+         
           emptyMessage="לא נמצאו שירותים תואמים"
           description={looseMode ? 'חובה לבחור שירות לדיווח לא משויך.' : 'הערך מוצע לפי ברירת המחדל של התלמיד אך ניתן לעריכה.'}
           required={looseMode}

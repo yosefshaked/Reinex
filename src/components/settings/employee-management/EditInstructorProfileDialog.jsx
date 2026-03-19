@@ -60,7 +60,7 @@ export default function EditInstructorProfileDialog({ open, onOpenChange, instru
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md" dir="rtl">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-end">עריכת פרופיל עובד</DialogTitle>
           <DialogDescription className="text-end">
@@ -75,7 +75,7 @@ export default function EditInstructorProfileDialog({ open, onOpenChange, instru
                 <Calendar className="h-4 w-4 text-slate-600" />
                 <Label className="text-end">ימי עבודה</Label>
               </div>
-              <div className="flex flex-wrap gap-2" dir="rtl">
+              <div className="flex flex-wrap gap-2">
                 {DAYS_OF_WEEK.map((day) => (
                   <button
                     key={day.value}

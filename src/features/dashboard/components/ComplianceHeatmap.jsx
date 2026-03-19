@@ -381,7 +381,7 @@ export function ComplianceHeatmap() {
                   />
                 </div>
                 {isAdmin && (loadingInstructors || normalizedInstructors) && (
-                  <div dir="rtl">
+                  <div>
                     <label htmlFor="instructor-filter" className="mb-2 block text-sm font-medium text-foreground">
                       סינון לפי מדריך
                     </label>
@@ -430,7 +430,7 @@ export function ComplianceHeatmap() {
             )
           ) : null}
           {viewMode === 'heatmap' && isAdmin && !isMobile && (loadingInstructors || normalizedInstructors) && (
-            <div className="w-48" dir="rtl">
+            <div className="w-48">
               <Select value={selectedInstructorId} onValueChange={setSelectedInstructorId} disabled={loadingInstructors}>
                 <SelectTrigger>
                   <SelectValue placeholder="בחר מדריך" />

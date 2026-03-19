@@ -463,7 +463,7 @@ export default function PendingReportsPage() {
   }
 
   return (
-    <div className="container mx-auto p-4 sm:p-6 max-w-7xl" dir="rtl">
+    <div className="container mx-auto p-4 sm:p-6 max-w-7xl">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
           <div>
@@ -480,7 +480,7 @@ export default function PendingReportsPage() {
         </CardHeader>
         <CardContent>
           {filteredReports.length > 0 && (
-            <div className="mb-4 p-3 border rounded-lg bg-muted/30" dir="rtl">
+            <div className="mb-4 p-3 border rounded-lg bg-muted/30">
               <div className="flex items-center gap-3 flex-wrap">
                 <Checkbox
                   checked={selectedReportIds.size === filteredReports.length && filteredReports.length > 0}
@@ -522,7 +522,7 @@ export default function PendingReportsPage() {
               placeholder="חיפוש לפי שם/סיבה/שירות/מדריך"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              dir="rtl"
+             
             />
           </div>
 
@@ -545,7 +545,7 @@ export default function PendingReportsPage() {
 
           {/* Collapsible filter section */}
           {showFilters && (
-            <div className="mb-4 space-y-3 animate-in fade-in slide-in-from-top-2" dir="rtl">
+            <div className="mb-4 space-y-3 animate-in fade-in slide-in-from-top-2">
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <Select value={serviceFilter || 'all'} onValueChange={(val) => setServiceFilter(val === 'all' ? '' : val)}>
                   <SelectTrigger>
@@ -673,14 +673,14 @@ export default function PendingReportsPage() {
                                       </TooltipTrigger>
                                     </PopoverTrigger>
                                     <TooltipContent side="bottom" className="max-w-xs text-end">
-                                      <div dir="rtl" className="text-end whitespace-pre-wrap">
+                                      <div className="text-end whitespace-pre-wrap">
                                         {notesPreview}
                                       </div>
                                     </TooltipContent>
                                   </Tooltip>
                                 </TooltipProvider>
                                 <PopoverContent side="bottom" align="start" className="w-80 p-3">
-                                  <div dir="rtl" className="space-y-2">
+                                  <div className="space-y-2">
                                     <div className="text-xs font-semibold text-neutral-600 text-end">הערות מהמדריך</div>
                                     <div className="text-sm text-neutral-900 text-end whitespace-pre-wrap break-words">
                                       {instructorNotes}
@@ -730,7 +730,7 @@ export default function PendingReportsPage() {
 
                         <div className="flex justify-end shrink-0 self-start">
                           {isAdminMember ? (
-                            <DropdownMenu dir="rtl">
+                            <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button
                                   variant="outline"
@@ -813,7 +813,7 @@ export default function PendingReportsPage() {
 
       {/* Report Content Viewer Dialog */}
       <Dialog open={reportViewOpen} onOpenChange={setReportViewOpen}>
-        <DialogContent className="max-w-3xl" dir="rtl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader className="space-y-3">
             <div className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" />

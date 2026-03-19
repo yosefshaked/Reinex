@@ -250,7 +250,7 @@ export default function ResubmitRejectedReportDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-end flex items-center gap-2">
             <RotateCcw className="h-5 w-5" />
@@ -281,7 +281,7 @@ export default function ResubmitRejectedReportDialog({
               </Label>
               <Input
                 id="name"
-                dir="rtl"
+               
                 value={formData.name}
                 onChange={(e) => handleInputChange('name', e.target.value)}
                 placeholder="הזן שם"
@@ -297,7 +297,7 @@ export default function ResubmitRejectedReportDialog({
                 value={formData.reason}
                 onValueChange={(value) => handleInputChange('reason', value)}
               >
-                <SelectTrigger id="reason" dir="rtl">
+                <SelectTrigger id="reason">
                   <SelectValue placeholder="בחר סיבה" />
                 </SelectTrigger>
                 <SelectContent>
@@ -317,7 +317,7 @@ export default function ResubmitRejectedReportDialog({
                 </Label>
                 <Textarea
                   id="reasonOther"
-                  dir="rtl"
+                 
                   value={formData.reasonOther}
                   onChange={(e) => handleInputChange('reasonOther', e.target.value)}
                   placeholder="פרט את הסיבה"
@@ -363,7 +363,7 @@ export default function ResubmitRejectedReportDialog({
               </Label>
               <Input
                 id="service"
-                dir="rtl"
+               
                 value={formData.service}
                 onChange={(e) => handleInputChange('service', e.target.value)}
                 placeholder="שם השירות (אופציונלי)"
@@ -395,7 +395,7 @@ export default function ResubmitRejectedReportDialog({
                     {question.type === 'textarea' ? (
                       <Textarea
                         id={`q-${questionKey}`}
-                        dir="rtl"
+                       
                         value={currentValue}
                         onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
                         placeholder="הזן תשובה"
@@ -406,7 +406,7 @@ export default function ResubmitRejectedReportDialog({
                         value={currentValue}
                         onValueChange={(value) => handleAnswerChange(questionKey, value)}
                       >
-                        <SelectTrigger id={`q-${questionKey}`} dir="rtl">
+                        <SelectTrigger id={`q-${questionKey}`}>
                           <SelectValue placeholder="בחר תשובה" />
                         </SelectTrigger>
                         <SelectContent>
@@ -421,7 +421,7 @@ export default function ResubmitRejectedReportDialog({
                       <Input
                         id={`q-${questionKey}`}
                         type={question.type === 'number' ? 'number' : question.type === 'date' ? 'date' : 'text'}
-                        dir="rtl"
+                       
                         value={currentValue}
                         onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
                         placeholder="הזן תשובה"
@@ -444,7 +444,7 @@ export default function ResubmitRejectedReportDialog({
             </p>
             <Textarea
               id="adminNotes"
-              dir="rtl"
+             
               value={formData.adminNotes}
               onChange={(e) => handleInputChange('adminNotes', e.target.value)}
               placeholder="הוסף הערות למנהל (אופציונלי)"

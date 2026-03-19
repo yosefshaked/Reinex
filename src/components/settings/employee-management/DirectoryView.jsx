@@ -208,7 +208,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
   }
 
   return (
-    <div className="space-y-4" dir="rtl">
+    <div className="space-y-4">
       {/* Header with Invite Button */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex-1">
@@ -227,7 +227,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
         </div>
       </div>
 
-      <Tabs defaultValue="active" className="w-full" dir="rtl">
+      <Tabs defaultValue="active" className="w-full">
         <TabsList className="grid w-full grid-cols-3 mb-4 h-auto">
           <TabsTrigger value="active" className="flex-col gap-1 py-2 whitespace-normal break-words">
             <div className="flex flex-col items-center gap-1">

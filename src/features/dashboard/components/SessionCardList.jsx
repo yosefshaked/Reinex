@@ -112,7 +112,7 @@ export default function SessionCardList({
   }
 
   return (
-    <div className={cn('space-y-6', className)} dir="rtl">
+    <div className={cn('space-y-6', className)}>
       {normalizedSlots.map(slot => (
         <section key={`${slot.timeLabel}-${slot.timeMinutes ?? 'na'}`} className="space-y-3">
           <h3 className="sticky top-0 bg-background py-2 text-sm font-semibold text-muted-foreground">
@@ -129,7 +129,7 @@ export default function SessionCardList({
                 <article
                   key={`${slot.timeLabel}-${session?.studentId}-${session?.id || ''}`}
                   className="relative flex flex-col gap-4 rounded-lg border-2 border-border bg-card p-4 text-foreground shadow-sm transition-all hover:bg-muted/50 hover:shadow-md sm:flex-row sm:items-center"
-                  dir="rtl"
+                 
                 >
                   {session?.instructorColor && (
                     <div className="absolute end-0 top-0 bottom-0 w-1.5 rounded-e-lg" style={barStyle} aria-hidden />

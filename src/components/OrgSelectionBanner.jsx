@@ -19,7 +19,7 @@ export default function OrgSelectionBanner() {
     <div
       className="bg-sky-50 border border-sky-200 rounded-2xl px-4 py-2 flex items-center gap-3 text-sky-800 text-sm mt-4 me-6 ms-6"
       role="alert"
-      dir="rtl"
+     
     >
       <AlertTriangle className="w-4 h-4" aria-hidden="true" />
       <p className="font-medium flex-1">{message}</p>

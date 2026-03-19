@@ -51,7 +51,7 @@ export default function InviteUserDialog({ open, onOpenChange, activeOrgId, sess
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md" dir="rtl">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-end">הזמן משתמש חדש לארגון</DialogTitle>
           <DialogDescription className="text-end">

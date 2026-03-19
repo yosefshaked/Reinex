@@ -90,7 +90,7 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
 
   return (
     <Dialog open={!!file} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[500px]" dir="rtl">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="text-end">עריכת מסמך</DialogTitle>
           <DialogDescription className="text-end">
@@ -105,7 +105,7 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
             </Label>
             <Input
               id="edit-doc-name"
-              dir="rtl"
+             
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="שם המסמך"
@@ -193,7 +193,7 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
 
   return (
     <Dialog open={files.length > 0} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[700px] max-h-[80vh]" dir="rtl">
+      <DialogContent className="sm:max-w-[700px] max-h-[80vh]">
         <DialogHeader>
           <DialogTitle className="text-end">
             הגדרות {filesData.length} קבצים
@@ -221,7 +221,7 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                   </Label>
                   <Input
                     id={`name-${fileData.id}`}
-                    dir="rtl"
+                   
                     value={fileData.name}
                     onChange={(e) => handleFileChange(fileData.id, 'name', e.target.value)}
                     placeholder="לדוגמה: אישור רפואי"
@@ -316,7 +316,7 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
 
   return (
     <Dialog open={!!file} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[500px]" dir="rtl">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="text-end">הגדרות מסמך</DialogTitle>
           <DialogDescription className="text-end">
@@ -331,7 +331,7 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
             </Label>
             <Input
               id="doc-name"
-              dir="rtl"
+             
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="לדוגמה: אישור רפואי"
@@ -380,7 +380,7 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
           </div>
         </div>
 
-        <div className="flex gap-2 justify-end" dir="rtl">
+        <div className="flex gap-2 justify-end">
           <Button variant="outline" onClick={onCancel}>
             ביטול
           </Button>
@@ -1061,7 +1061,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
         onCancel={() => setEditingFile(null)}
       />
       
-      <div className="space-y-4" dir="rtl">
+      <div className="space-y-4">
       {/* Upload progress indicator */}
       {backgroundUploads.length > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">

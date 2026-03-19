@@ -75,7 +75,7 @@ export function StudentFilterSection({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             className="pe-9 text-end"
-            dir="rtl"
+           
           />
         </div>
 

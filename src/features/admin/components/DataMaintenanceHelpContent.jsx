@@ -11,7 +11,7 @@ export function DataMaintenanceHelpContent() {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   return (
-    <div className="space-y-4" dir="rtl">
+    <div className="space-y-4">
       {/* Quick Start */}
       <Card className="bg-primary/5 border-primary/20">
         <CardHeader>

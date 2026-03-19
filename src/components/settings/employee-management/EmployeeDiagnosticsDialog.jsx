@@ -12,7 +12,7 @@ export default function EmployeeDiagnosticsDialog({ open, onOpenChange, employee
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto" dir="rtl">
+      <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-end flex items-center gap-2">
             <User className="h-5 w-5" />
@@ -33,7 +33,7 @@ export default function EmployeeDiagnosticsDialog({ open, onOpenChange, employee
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="details" className="w-full" dir="rtl">
+        <Tabs defaultValue="details" className="w-full">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="details">
               <User className="h-4 w-4 ms-2" />

@@ -298,7 +298,7 @@ export default function TagsManager() {
           </div>
           
           {/* Mode toggle buttons */}
-          <div className="flex gap-2 mt-4" dir="rtl">
+          <div className="flex gap-2 mt-4">
             <Button
               variant={mode === 'tags' ? 'default' : 'outline'}
               size="sm"
@@ -321,7 +321,7 @@ export default function TagsManager() {
         </CardHeader>
         <CardContent className="space-y-4">
           {error && (
-            <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2" role="alert" dir="rtl">
+            <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2" role="alert">
               <span className="flex-1 text-end">{error}</span>
               <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
             </div>
@@ -338,7 +338,7 @@ export default function TagsManager() {
                 <div
                   key={item.id}
                   className="group flex items-center justify-between p-3 rounded-lg border bg-card/90 hover:bg-accent/40 transition-colors focus-within:ring-2 focus-within:ring-primary/30"
-                  dir="rtl"
+                 
                 >
                   <div className="flex items-center gap-2">
                     <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -384,7 +384,7 @@ export default function TagsManager() {
                 : `צור ${entityLabel} חדש${mode === 'tags' ? 'ה' : ''} לסיווג ${entityContext}.`}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleSaveTag} className="space-y-4" dir="rtl">
+          <form onSubmit={handleSaveTag} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="tag-name" className="text-end block">
                 שם {entityLabel}
@@ -397,7 +397,7 @@ export default function TagsManager() {
                 placeholder={mode === 'tags' ? 'לדוגמה: תלמיד חדש' : 'לדוגמה: מטפל'}
                 required
                 disabled={actionLoading}
-                dir="rtl"
+               
                 className="text-end"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -430,7 +430,7 @@ export default function TagsManager() {
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={closeDeleteDialog}>
-        <AlertDialogContent dir="rtl">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="text-end">האם למחוק את ה{entityLabel} "{tagToDelete?.name}"?</AlertDialogTitle>
             <AlertDialogDescription className="text-end">

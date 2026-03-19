@@ -77,7 +77,7 @@ export default function MobileNav() {
           : { position: 'fixed', transform: 'translateZ(0)', willChange: 'transform', isolation: 'isolate' }
       }
     >
-      <div className="mx-auto grid max-w-md grid-cols-4 items-center gap-md" dir="rtl">
+      <div className="mx-auto grid max-w-md grid-cols-4 items-center gap-md">
         {primaryItems.map((item) => (
           <NavItem key={item.key} {...item} />
         ))}
@@ -94,7 +94,7 @@ export default function MobileNav() {
             </button>
           </SheetTrigger>
 
-          <SheetContent side="bottom" className="bg-surface border-t border-border" dir="rtl">
+          <SheetContent side="bottom" className="bg-surface border-t border-border">
             <SheetHeader className="text-end">
               <SheetTitle className="text-end">תפריט</SheetTitle>
             </SheetHeader>

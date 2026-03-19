@@ -90,7 +90,7 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
 
   return (
     <Dialog open={!!file} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[500px]" dir="rtl">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="text-end">עריכת מסמך</DialogTitle>
           <DialogDescription className="text-end">
@@ -105,7 +105,7 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
             </Label>
             <Input
               id="edit-doc-name"
-              dir="rtl"
+             
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="שם המסמך"
@@ -193,7 +193,7 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
 
   return (
     <Dialog open={files.length > 0} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[700px] max-h-[80vh]" dir="rtl">
+      <DialogContent className="sm:max-w-[700px] max-h-[80vh]">
         <DialogHeader>
           <DialogTitle className="text-end">
             הגדרות {filesData.length} קבצים
@@ -221,7 +221,7 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                   </Label>
                   <Input
                     id={`name-${fileData.id}`}
-                    dir="rtl"
+                   
                     value={fileData.name}
                     onChange={(e) => handleFileChange(fileData.id, 'name', e.target.value)}
                     placeholder="לדוגמה: אישור רפואי"
@@ -315,7 +315,7 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
 
   return (
     <Dialog open={!!file} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[500px]" dir="rtl">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="text-end">הגדרות מסמך</DialogTitle>
           <DialogDescription className="text-end">
@@ -330,7 +330,7 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
             </Label>
             <Input
               id="doc-name"
-              dir="rtl"
+             
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="לדוגמה: אישור רפואי"
@@ -1351,7 +1351,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
       />
 
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <Card dir="rtl" className="border-slate-200">
+      <Card className="border-slate-200">
         <CollapsibleTrigger asChild>
           <CardHeader className="cursor-pointer hover:bg-slate-50 transition-colors">
             <div className="flex items-center justify-between">
@@ -1376,7 +1376,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
           <CardContent className="space-y-6 pt-4">
             {/* Background Upload Indicator */}
             {backgroundUploads.length > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2" dir="rtl">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
                 <div className="flex items-center gap-2 text-sm font-medium text-blue-900">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   מעלה {backgroundUploads.length} קבצים ברקע
@@ -1408,7 +1408,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
             {loadState === REQUEST_STATE.idle && (
               <>
                 {/* Upload Guidelines */}
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm" dir="rtl">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
                   <h4 className="font-semibold text-blue-900 mb-2">הנחיות העלאת קבצים</h4>
                   <ul className="space-y-1 text-blue-800">
                     <li>• גודל מקסימלי: 10MB</li>

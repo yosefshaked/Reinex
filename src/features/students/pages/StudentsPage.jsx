@@ -742,7 +742,7 @@ export default function StudentsPage() {
                                         +{extraTemplateCount}
                                       </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent align="end" className="w-64" dir="rtl">
+                                    <PopoverContent align="end" className="w-64">
                                       <div className="space-y-2">
                                         <p className="text-xs font-semibold text-neutral-700">
                                           תבניות נוספות לתלמיד

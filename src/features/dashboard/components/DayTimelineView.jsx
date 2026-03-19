@@ -194,7 +194,7 @@ export function DayTimelineView({ orgId, date, onBack }) {
                     <div
                       key={instructor.id}
                       className="flex items-start border-b border-border py-1 hover:bg-muted/30 transition-colors"
-                      dir="rtl"
+                     
                     >
                       {/* Instructor Name */}
                       <div className="w-32 flex-shrink-0 ps-4 py-1 text-end">
@@ -241,7 +241,7 @@ export function DayTimelineView({ orgId, date, onBack }) {
                                 zIndex: 10
                               }}
                               title={`${session.studentName} - ${timeLabel}`}
-                              dir="rtl"
+                             
                             >
                               <div className="flex items-center gap-1 truncate">
                                 <span className="text-sm">{getStatusIcon(session)}</span>

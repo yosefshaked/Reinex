@@ -113,7 +113,7 @@ export default function StudentVisibilitySettings({ session, orgId, activeOrgHas
       <CardHeader className="border-b border-slate-200">
         <CardTitle className="text-lg font-semibold text-slate-900">תצוגת תלמידים לא פעילים</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4" dir="rtl">
+      <CardContent className="space-y-4">
         <p className="text-sm text-slate-600">
           שליטה האם מדריכים יוכלו להציג תלמידים שסומנו כלא פעילים בממשק. תלמידים לא פעילים נשארים בהיסטוריית המפגשים ובייצואי PDF.
         </p>

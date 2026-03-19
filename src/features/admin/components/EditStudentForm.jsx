@@ -191,7 +191,7 @@ export default function EditStudentForm({
   const isInactive = values.isActive === false;
 
   return (
-    <form id="edit-student-form" onSubmit={handleSubmit} className="space-y-5" dir="rtl">
+    <form id="edit-student-form" onSubmit={handleSubmit} className="space-y-5">
       <div className="space-y-5 divide-y divide-border">
         {/* ── Personal details ── */}
         <div className="space-y-5 py-1">

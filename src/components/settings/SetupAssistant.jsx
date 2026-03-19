@@ -325,7 +325,7 @@ export default function SetupAssistant() {
       : null;
 
   return (
-    <Card className="border-0 shadow-xl bg-white/80" dir="rtl">
+    <Card className="border-0 shadow-xl bg-white/80">
       <CardHeader className="border-b border-slate-200">
         <CardTitle className="text-2xl font-semibold text-slate-900 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span>אשף הקמה לארגון חדש</span>

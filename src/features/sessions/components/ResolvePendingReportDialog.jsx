@@ -205,7 +205,7 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
           <DialogTitle>שיוך דיווח ממתין</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 overflow-y-auto max-h-[calc(90vh-8rem)]" dir="rtl">
+        <div className="space-y-4 overflow-y-auto max-h-[calc(90vh-8rem)]">
           <div className="rounded-lg bg-neutral-50 p-3 text-sm">
             <p className="font-medium text-foreground">פרטי הדיווח:</p>
             <p className="text-neutral-600 mt-1 break-words">שם: {unassignedName}</p>

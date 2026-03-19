@@ -99,7 +99,7 @@ export default function SuspendStudentDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={handleClose}>
-      <AlertDialogContent dir="rtl" className="text-end max-w-md">
+      <AlertDialogContent className="text-end max-w-md">
         <AlertDialogHeader>
           <AlertDialogTitle>השהיית תלמיד</AlertDialogTitle>
           <AlertDialogDescription>
@@ -172,7 +172,7 @@ export default function SuspendStudentDialog({
                     selected={selectedDate}
                     onSelect={setSelectedDate}
                     disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
-                    dir="rtl"
+                   
                   />
                 </PopoverContent>
               </Popover>

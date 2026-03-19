@@ -24,7 +24,7 @@ export default function InstructorManagementHub({ session, orgId, activeOrgHasCo
       <CardHeader>
         <CardTitle className="text-base sm:text-lg">ניהול עובדים</CardTitle>
       </CardHeader>
-      <CardContent dir="rtl">
+      <CardContent>
         <UnifiedEmployeeList
           session={session}
           orgId={orgId}

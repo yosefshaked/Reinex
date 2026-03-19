@@ -166,7 +166,7 @@ export default function MyPendingReportsCard() {
   }
 
   return (
-    <Card dir="rtl">
+    <Card>
       <CardHeader>
         <CardTitle className="text-end">הדיווחים הממתינים שלי</CardTitle>
       </CardHeader>
@@ -178,7 +178,7 @@ export default function MyPendingReportsCard() {
             טווח תאריכים:
           </Label>
           <Select value={dateRange} onValueChange={setDateRange}>
-            <SelectTrigger id="dateRange" className="w-[200px]" dir="rtl">
+            <SelectTrigger id="dateRange" className="w-[200px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -215,7 +215,7 @@ export default function MyPendingReportsCard() {
             )}
 
             {(pendingReports.length > 0 || rejectedReports.length > 0 || resolvedReports.length > 0) && (
-              <Tabs defaultValue="pending" dir="rtl">
+              <Tabs defaultValue="pending">
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="pending" className="flex items-center gap-2">
                     ממתינים

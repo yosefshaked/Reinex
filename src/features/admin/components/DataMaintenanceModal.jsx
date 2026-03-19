@@ -274,7 +274,7 @@ export default function DataMaintenanceModal({ open, onClose, orgId, onRefresh }
           />
         ) : unmatchedTags.length > 0 ? (
           // Tag Mapping UI
-          <div className="space-y-4 text-sm text-neutral-700 text-end" dir="rtl">
+          <div className="space-y-4 text-sm text-neutral-700 text-end">
             <p className="text-neutral-600">
               התוויות הבאות בקובץ CSV לא נמצאו בקטלוג. אנא מפו אותן לתוויות קיימות:
             </p>
@@ -331,7 +331,7 @@ export default function DataMaintenanceModal({ open, onClose, orgId, onRefresh }
             </div>
           </div>
         ) : (
-          <div className="space-y-4 text-sm text-neutral-700 text-end" dir="rtl">
+          <div className="space-y-4 text-sm text-neutral-700 text-end">
             <p className="text-neutral-600">
               הורידו את קובץ התחזוקה כדי למלא שדות חסרים (תעודת זהות, טלפון, מדריך, תוויות ועוד) ואז העלו את הקובץ המעודכן.
               מזהה המערכת (UUID) משמש להשוואת השורות, ולכן אין למחוק או לערוך אותו.

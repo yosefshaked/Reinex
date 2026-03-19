@@ -213,7 +213,7 @@ export default function StudentTagsField({ value, onChange, disabled = false, de
                 צרו תגית לשימוש חוזר עבור תלמידים בארגון.
               </DialogDescription>
             </DialogHeader>
-            <form id="student-tag-create-form" onSubmit={handleCreateTag} className="space-y-4" dir="rtl">
+            <form id="student-tag-create-form" onSubmit={handleCreateTag} className="space-y-4">
               <TextField
                 id="new-student-tag-name"
                 name="newTagName"

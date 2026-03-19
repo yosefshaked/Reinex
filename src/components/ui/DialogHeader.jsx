@@ -21,7 +21,7 @@ export function EnhancedDialogHeader({
     <div className={cn(
       "relative flex items-center border-b bg-white px-6 py-4",
       className
-    )} dir="rtl">
+    )}>
       {/* Title and icon on the right for RTL - comes first in markup */}
       <div className="flex items-center gap-3 flex-1">
         {icon && (

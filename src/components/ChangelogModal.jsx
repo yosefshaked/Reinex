@@ -91,7 +91,7 @@ export default function ChangelogModal({ open, onClose }) {
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, color: '#334155', fontSize: 15, lineHeight: 1.7 }}>
 
           {/* 1.9.0 - Intake Feature */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.9.0')}
@@ -162,7 +162,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.8.2 - Student Filter Fix */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.8.2')}
@@ -230,7 +230,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.8.1 - Instructor Personal Preanswers */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.8.1')}
@@ -329,7 +329,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.8.0 - Loose Reports (Unassigned Sessions), Resubmissions, Advanced Filtering */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.8.0')}
@@ -437,7 +437,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.7.0 - Student data management, CSV import/export, national ID, deduplication */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.7.0')}
@@ -558,7 +558,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.6.1 - Organizational documents, session report UX, and document management improvements */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.6.1')}
@@ -667,7 +667,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.6.0 - Documents management and audit logging */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.6.0')}
@@ -790,7 +790,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.5.0 - Safari improvements and visual hierarchy */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.5.0')}
@@ -899,7 +899,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.4.0 - Weekly & daily compliance refresh */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.4.0')}
@@ -995,7 +995,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.3.2 - Mandatory manual date selection in session form */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.3.2')}
@@ -1091,7 +1091,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.3.1 - Student notes persistence */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.3.1')}
@@ -1183,7 +1183,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.3.0 - Student lifecycle controls */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header
                 onClick={() => toggleVersion('1.3.0')}
@@ -1304,7 +1304,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.2.0 - PDF Export & Registration */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header 
                 onClick={() => toggleVersion('1.2.0')}
@@ -1417,7 +1417,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.1.1 - Sorting & Layout */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header 
                 onClick={() => toggleVersion('1.1.1')}
@@ -1500,7 +1500,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.1.0 - Tags & Invitations */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header 
                 onClick={() => toggleVersion('1.1.0')}
@@ -1616,7 +1616,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.0.1 - Bug Fixes & UI Improvements */}
-          <li dir="rtl" style={{ marginBottom: 16, textAlign: 'right' }}>
+          <li style={{ marginBottom: 16 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header 
                 onClick={() => toggleVersion('1.0.1')}
@@ -1716,7 +1716,7 @@ export default function ChangelogModal({ open, onClose }) {
           </li>
 
           {/* 1.0.0 - TutTiud Launch */}
-          <li dir="rtl" style={{ marginBottom: 0, textAlign: 'right' }}>
+          <li style={{ marginBottom: 0 }}>
             <article style={{ display: 'flex', flexDirection: 'column' }}>
               <header 
                 onClick={() => toggleVersion('1.0.0')}

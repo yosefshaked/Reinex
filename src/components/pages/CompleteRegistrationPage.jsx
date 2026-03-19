@@ -206,7 +206,7 @@ export default function CompleteRegistrationPage() {
     }
 
     return (
-      <form dir="rtl" className="p-8 space-y-6 text-end" onSubmit={handleSubmit}>
+      <form className="p-8 space-y-6 text-end" onSubmit={handleSubmit}>
         <div className="space-y-2">
           <label htmlFor="invite-email" className="block text-sm font-medium text-slate-600">
             ההזמנה נשלחה ל

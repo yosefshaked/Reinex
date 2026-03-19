@@ -167,7 +167,7 @@ export default function DocumentCenterView({ session, orgId, canLoad }) {
   // Detail View
   if (selectedInstructor) {
     return (
-      <div className="space-y-6" dir="rtl">
+      <div className="space-y-6">
         <div className="flex items-center gap-3 mb-4">
           <Button
             variant="ghost"
@@ -211,7 +211,7 @@ export default function DocumentCenterView({ session, orgId, canLoad }) {
 
   // List View
   return (
-    <div className="space-y-4" dir="rtl">
+    <div className="space-y-4">
       <div className="relative">
         <Search className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
@@ -220,7 +220,7 @@ export default function DocumentCenterView({ session, orgId, canLoad }) {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pe-10"
-          dir="rtl"
+         
         />
       </div>
 

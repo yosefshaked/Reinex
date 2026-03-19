@@ -112,7 +112,7 @@ export default function PreanswersPickerDialog({
           </p>
         </DialogHeader>
 
-        <div className="space-y-4" dir="rtl">
+        <div className="space-y-4">
           {showPersonalTab ? (
             <div className="space-y-2">
               <div className="flex gap-2">

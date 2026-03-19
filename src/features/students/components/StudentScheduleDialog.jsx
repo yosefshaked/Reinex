@@ -151,7 +151,7 @@ export default function StudentScheduleDialog({
           </div>
         ) : null}
 
-        <form onSubmit={handleSubmit} className="space-y-4" dir="rtl">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <SelectField
             id="schedule-instructor"
             name="instructorEmployeeId"

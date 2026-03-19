@@ -125,7 +125,7 @@ export default function ProfileEditorView({ session, orgId, canLoad }) {
   // Detail View
   if (selectedInstructor) {
     return (
-      <div className="space-y-6" dir="rtl">
+      <div className="space-y-6">
         <div className="flex items-center gap-3 mb-4">
           <Button
             variant="ghost"
@@ -172,7 +172,7 @@ export default function ProfileEditorView({ session, orgId, canLoad }) {
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               placeholder="שם המדריך"
               disabled={isSaving}
-              dir="rtl"
+             
             />
           </div>
 
@@ -203,7 +203,7 @@ export default function ProfileEditorView({ session, orgId, canLoad }) {
               rows={4}
               placeholder="הערות על המדריך"
               disabled={isSaving}
-              dir="rtl"
+             
             />
           </div>
 
@@ -228,7 +228,7 @@ export default function ProfileEditorView({ session, orgId, canLoad }) {
 
   // List View
   return (
-    <div className="space-y-4" dir="rtl">
+    <div className="space-y-4">
       <div className="relative">
         <Search className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
@@ -237,7 +237,7 @@ export default function ProfileEditorView({ session, orgId, canLoad }) {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pe-10"
-          dir="rtl"
+         
         />
       </div>
 

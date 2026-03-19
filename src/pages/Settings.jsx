@@ -392,7 +392,7 @@ export default function Settings() {
       contentClassName="space-y-md md:space-y-lg"
     >
 
-        <Card className="w-full border-0 bg-white/90 shadow-lg" dir="rtl">
+        <Card className="w-full border-0 bg-white/90 shadow-lg">
           <CardHeader className="border-b border-slate-200 space-y-xs">
             <div className="flex items-center justify-between">
               <div className="space-y-xs">
@@ -448,13 +448,13 @@ export default function Settings() {
         </Card>
 
         {/* Onboarding Tour Card - Available to all users */}
-        <div className="w-full" dir="rtl">
+        <div className="w-full">
           <OnboardingCard />
         </div>
 
         {/* Selector grid - only visible to admin/owner */}
         {canManageSessionForm && (
-        <div className="grid w-full gap-4 sm:gap-5 md:grid-cols-2 lg:grid-cols-3" dir="rtl">
+        <div className="grid w-full gap-4 sm:gap-5 md:grid-cols-2 lg:grid-cols-3">
           {/* Setup Assistant Card */}
           <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
             <CardHeader className="space-y-2 pb-3 flex-1">
@@ -827,7 +827,7 @@ export default function Settings() {
 
         {/* Instructor Documents Card - visible to any user who is an instructor (outside admin-only section) */}
         {isInstructor && activeOrgHasConnection && tenantClientReady && (
-          <Card dir="rtl" className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02]">
+          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02]">
             <CardHeader className="space-y-2 pb-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2">

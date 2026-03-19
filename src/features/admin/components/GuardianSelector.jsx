@@ -131,17 +131,17 @@ export default function GuardianSelector({
       </div>
 
       {showNotFound && !isLoading ? (
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" dir="rtl">
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
           אפוטרופוס לא נמצא. ניתן ליצור פרופיל חדש.
         </div>
       ) : null}
 
-      <p className="text-sm text-muted-foreground" dir="rtl">
+      <p className="text-sm text-muted-foreground">
         אם מחובר אפוטרופוס, לא חובה להזין טלפון תלמיד
       </p>
 
       {selectedGuardian && (
-        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800" dir="rtl">
+        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
           <div className="flex items-start gap-2">
             <UserCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
             <div className="space-y-1">

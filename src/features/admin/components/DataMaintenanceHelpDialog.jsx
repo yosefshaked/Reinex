@@ -14,7 +14,7 @@ export function DataMaintenanceHelpDialog({ open, onOpenChange, onClose }) {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-3xl" dir="rtl" hideDefaultClose>
+      <DialogContent className="sm:max-w-3xl" hideDefaultClose>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-xl">
             <Info className="h-6 w-6 text-primary" />
