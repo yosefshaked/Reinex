@@ -232,7 +232,7 @@ export default function StudentDetailPage() {
         </TabsContent>
 
         <TabsContent value="history" className="space-y-4">
-          <StudentHistoryTab studentId={studentId} />
+          <StudentHistoryTab studentId={studentId} student={student} />
         </TabsContent>
 
         <TabsContent value="documents" className="space-y-4">

@@ -119,6 +119,7 @@ const DETAIL_LABELS_HE = {
   notification_method: 'שיטת התראה',
   updated_fields: 'שדות שעודכנו',
   guardian_change: 'שינוי אפוטרופוס',
+  relationship: 'מערכת יחסים',
   reject_reason: 'סיבת דחייה',
   cancelled_count: 'כמות שבוטלה',
   instance_count: 'כמות מופעים',
@@ -268,7 +269,7 @@ function translateEnumValue(rawValue, key) {
   return '';
 }
 
-function formatValueInternal(value, key, depth, seen) {
+function formatValueInternal(value, key, depth, seen, resolvers) {
   if (value === null || typeof value === 'undefined') {
     return '—';
   }
@@ -290,13 +291,18 @@ function formatValueInternal(value, key, depth, seen) {
 
     const parsedFromString = tryParseStructuredString(trimmed);
     if (parsedFromString && depth < 3) {
-      return formatValueInternal(parsedFromString, key, depth + 1, seen);
+      return formatValueInternal(parsedFromString, key, depth + 1, seen, resolvers);
     }
 
     const dateLike = formatDateLikeString(trimmed);
     if (dateLike) return dateLike;
 
     if ((String(key || '').endsWith('_id') || String(key || '').toLowerCase() === 'id') && UUID_PATTERN.test(trimmed)) {
+      const resolver = resolvers?.[String(key || '')];
+      if (resolver) {
+        const resolved = resolver(trimmed);
+        if (resolved) return resolved;
+      }
       return shortId(trimmed);
     }
 
@@ -311,7 +317,7 @@ function formatValueInternal(value, key, depth, seen) {
     }
 
     if (value.every((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item))) {
-      return value.map((item) => formatValueInternal(item, key, depth + 1, seen)).join(', ');
+      return value.map((item) => formatValueInternal(item, key, depth + 1, seen, resolvers)).join(', ');
     }
 
     if (depth >= 2) {
@@ -319,7 +325,7 @@ function formatValueInternal(value, key, depth, seen) {
     }
 
     return value
-      .map((item, idx) => `${idx + 1}) ${formatValueInternal(item, key, depth + 1, seen)}`)
+      .map((item, idx) => `${idx + 1}) ${formatValueInternal(item, key, depth + 1, seen, resolvers)}`)
       .join(' ; ');
   }
 
@@ -329,7 +335,16 @@ function formatValueInternal(value, key, depth, seen) {
     }
     seen.add(value);
 
-    const entries = Object.entries(value).filter(([, itemValue]) => itemValue !== null && typeof itemValue !== 'undefined');
+    const entries = Object.entries(value).filter(([childKey, childValue]) => {
+      if (childValue === null || typeof childValue === 'undefined') return false;
+      // Skip _id UUID fields only if there is no resolver that can give a human-readable name
+      if ((childKey.endsWith('_id') || childKey === 'id') && typeof childValue === 'string' && UUID_PATTERN.test(childValue.trim())) {
+        const resolver = resolvers?.[childKey];
+        if (resolver && resolver(childValue.trim())) return true;
+        return false;
+      }
+      return true;
+    });
     if (entries.length === 0) {
       return '—';
     }
@@ -337,12 +352,12 @@ function formatValueInternal(value, key, depth, seen) {
     if (depth >= 2) {
       return entries
         .slice(0, 4)
-        .map(([childKey, childValue]) => `${getAuditDetailLabel(childKey)}: ${formatValueInternal(childValue, childKey, depth + 1, seen)}`)
+        .map(([childKey, childValue]) => `${getAuditDetailLabel(childKey)}: ${formatValueInternal(childValue, childKey, depth + 1, seen, resolvers)}`)
         .join(' | ');
     }
 
     return entries
-      .map(([childKey, childValue]) => `${getAuditDetailLabel(childKey)}: ${formatValueInternal(childValue, childKey, depth + 1, seen)}`)
+      .map(([childKey, childValue]) => `${getAuditDetailLabel(childKey)}: ${formatValueInternal(childValue, childKey, depth + 1, seen, resolvers)}`)
       .join(' | ');
   }
 
@@ -391,6 +406,6 @@ export function getAuditActionVariant(actionType) {
   return 'default';
 }
 
-export function formatAuditDetailValue(value, key = '') {
-  return formatValueInternal(value, key, 0, new WeakSet());
+export function formatAuditDetailValue(value, key = '', resolvers = {}) {
+  return formatValueInternal(value, key, 0, new WeakSet(), resolvers);
 }

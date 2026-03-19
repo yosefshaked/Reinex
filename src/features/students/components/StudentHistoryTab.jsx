@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Loader2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -62,8 +62,9 @@ function getActorDisplay(entry) {
  *
  * @param {Object} props
  * @param {string} props.studentId
+ * @param {Object} [props.student] - Optional student object with .guardian for ID resolution
  */
-export default function StudentHistoryTab({ studentId }) {
+export default function StudentHistoryTab({ studentId, student }) {
   const { session } = useSupabase();
   const { activeOrg } = useOrg();
 
@@ -76,6 +77,17 @@ export default function StudentHistoryTab({ studentId }) {
   const [expandedId, setExpandedId] = useState(null);
 
   const activeOrgId = activeOrg?.id;
+
+  // Build ID resolvers from known entity data so the formatter can replace UUIDs with names
+  const resolvers = useMemo(() => {
+    const map = {};
+    const g = student?.guardian;
+    if (g?.id) {
+      const name = [g.first_name, g.last_name].filter(Boolean).join(' ');
+      if (name) map.guardian_id = (id) => (id === g.id ? name : null);
+    }
+    return map;
+  }, [student]);
 
   const fetchAuditLog = useCallback(async (cursor = null) => {
     if (!studentId || !activeOrgId) return;
@@ -145,11 +157,11 @@ export default function StudentHistoryTab({ studentId }) {
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div>
                   <p className="text-neutral-500">לפני</p>
-                  <p className="text-neutral-700 break-words whitespace-pre-wrap">{formatAuditDetailValue(change.before, change.field)}</p>
+                  <p className="text-neutral-700 break-words whitespace-pre-wrap">{formatAuditDetailValue(change.before, change.field, resolvers)}</p>
                 </div>
                 <div>
                   <p className="text-neutral-500">אחרי</p>
-                  <p className="text-neutral-700 break-words whitespace-pre-wrap">{formatAuditDetailValue(change.after, change.field)}</p>
+                  <p className="text-neutral-700 break-words whitespace-pre-wrap">{formatAuditDetailValue(change.after, change.field, resolvers)}</p>
                 </div>
               </div>
             </div>
@@ -169,7 +181,7 @@ export default function StudentHistoryTab({ studentId }) {
         {keys.map((key) => (
           <div key={key} className="flex justify-start gap-2 text-start">
             <span className="font-semibold text-neutral-600 min-w-[80px]">{getAuditDetailLabel(key)}:</span>
-            <span className="text-neutral-700 break-words whitespace-pre-wrap">{formatAuditDetailValue(details[key], key)}</span>
+            <span className="text-neutral-700 break-words whitespace-pre-wrap">{formatAuditDetailValue(details[key], key, resolvers)}</span>
           </div>
         ))}
       </div>
