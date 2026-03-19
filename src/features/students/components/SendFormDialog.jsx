@@ -26,9 +26,9 @@ function buildSubmissionLink() {
   return `${origin}/#/submit`;
 }
 
-function buildWhatsAppLink(phone, otp, submitLink) {
+function buildWhatsAppLink(phone, otp, submitLink, studentId) {
   const normalizedPhone = normalizeWaPhone(phone);
-  const message = `שלום, מצורף קישור למילוי טופס: ${submitLink}. קוד האימות שלך הוא: ${otp}`;
+  const message = `שלום, מצורף קישור למילוי טופס: ${submitLink}. קוד האימות שלך הוא: ${otp}. מזהה גישה: ${studentId}`;
   return {
     normalizedPhone,
     url: `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`,
@@ -117,7 +117,7 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
       }
 
       const submitLink = buildSubmissionLink();
-      const wa = buildWhatsAppLink(phone, otp, submitLink);
+      const wa = buildWhatsAppLink(phone, otp, submitLink, student?.id || '');
       setResult({
         mode: 'whatsapp',
         otp,

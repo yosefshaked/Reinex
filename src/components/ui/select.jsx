@@ -14,10 +14,9 @@ const SelectTrigger = React.forwardRef(({ className, children, ...props }, ref) 
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      // RTL-friendly trigger: align value/placeholder text to the right and ensure the
-      // value span consumes full width so alignment actually takes effect. Also reverse
-      // row order in RTL so the chevron appears on the left.
-      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 rtl:flex-row-reverse rtl:text-end rtl:[&>span]:text-end rtl:[&>span]:w-full",
+      // RTL-friendly trigger: keep the chevron mirrored while aligning the selected
+      // value/placeholder to the logical start side, which is the right edge in RTL.
+      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 rtl:flex-row-reverse rtl:text-start rtl:[&>span]:text-start rtl:[&>span]:w-full",
       className
     )}
     {...props}>
@@ -98,9 +97,9 @@ const SelectItem = React.forwardRef(({ className, children, ...props }, ref) => 
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      // RTL-friendly item: mirror padding and align text to the right; also mirror the
-      // absolute position of the check indicator span.
-      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 ps-8 pe-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 rtl:text-end rtl:pe-8 rtl:ps-2",
+      // RTL-friendly item: mirror padding and align text to the logical start side;
+      // also mirror the absolute position of the check indicator span.
+      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 ps-8 pe-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 rtl:text-start rtl:pe-8 rtl:ps-2",
       className
     )}
     {...props}>

@@ -697,8 +697,8 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     try {
       const organizationSenderName = await resolveOrganizationSenderName(controlClient, orgId, context);
       const submitLink = `${resolveSubmitBaseUrl(req, env)}/#/submit`;
-      const text = `שלום, מצורף קישור למילוי טופס: ${submitLink}. קוד האימות שלך הוא: ${otpCode}`;
-      const html = `<p>שלום,</p><p>מצורף קישור למילוי טופס: <a href="${submitLink}">${submitLink}</a></p><p>קוד האימות שלך הוא: <strong>${otpCode}</strong></p>`;
+      const text = `שלום, מצורף קישור למילוי טופס: ${submitLink}. קוד האימות שלך הוא: ${otpCode}. מזהה גישה: ${studentId}`;
+      const html = `<p>שלום,</p><p>מצורף קישור למילוי טופס: <a href="${submitLink}">${submitLink}</a></p><p>קוד האימות שלך הוא: <strong>${otpCode}</strong></p><p>מזהה גישה: <strong>${studentId}</strong></p>`;
 
       await sendBrevoEmail(
         {
