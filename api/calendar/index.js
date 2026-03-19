@@ -110,6 +110,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
   const startDateParam = normalizeString(queryParams.start_date);
   const endDateParam = normalizeString(queryParams.end_date);
   const instructorIdParam = normalizeString(queryParams.instructor_id);
+  const studentIdParam = normalizeString(queryParams.student_id);
 
   // Determine date range
   let startDate, endDate;
@@ -136,6 +137,8 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
   }
 
   // Build query
+  const participantsJoin = studentIdParam ? 'lesson_participants!inner' : 'lesson_participants';
+
   let instancesQuery = tenantClient
     .from('lesson_instances')
     .select(`
@@ -151,7 +154,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
       metadata,
       created_at,
       updated_at,
-      participants:lesson_participants(
+      participants:${participantsJoin}(
         id,
         student_id,
         participant_status,
@@ -191,6 +194,10 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
   // Filter by instructor if provided
   if (instructorIdParam) {
     instancesQuery = instancesQuery.eq('instructor_employee_id', instructorIdParam);
+  }
+
+  if (studentIdParam) {
+    instancesQuery = instancesQuery.eq('participants.student_id', studentIdParam);
   }
 
   // Non-admin/office users: filter by their instructor record

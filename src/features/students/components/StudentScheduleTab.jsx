@@ -51,6 +51,16 @@ function formatDayOfWeek(dayToken) {
   return String(dayToken);
 }
 
+function getServiceName(instance) {
+  return instance?.service?.service_name || instance?.service?.name || instance?.lesson_name || 'שיעור';
+}
+
+function getInstructorName(instance) {
+  const instructor = instance?.instructor;
+  if (!instructor) return '—';
+  return instructor.full_name || [instructor.first_name, instructor.last_name].filter(Boolean).join(' ') || '—';
+}
+
 /**
  * Schedule tab: fetches its own lesson templates and upcoming lesson instances.
  *
@@ -94,7 +104,7 @@ export default function StudentScheduleTab({ studentId }) {
     void fetchTemplates();
   }, [studentId, activeOrgId, session]);
 
-  // Fetch lesson instances for next 14 days
+  // Fetch lesson instances for next 14 days.
   useEffect(() => {
     if (!studentId || !activeOrgId) return;
 
@@ -105,7 +115,6 @@ export default function StudentScheduleTab({ studentId }) {
         const today = new Date();
         const allInstances = [];
 
-        // Fetch day-by-day for 14 days (API requires a date param)
         for (let d = 0; d < 14; d++) {
           const date = new Date(today);
           date.setDate(today.getDate() + d);
@@ -122,7 +131,7 @@ export default function StudentScheduleTab({ studentId }) {
         }
 
         // Sort by datetime_start ascending
-        allInstances.sort((a, b) => {
+        const sortedInstances = allInstances.sort((a, b) => {
           const aTime = new Date(a.datetime_start || 0).getTime();
           const bTime = new Date(b.datetime_start || 0).getTime();
           return aTime - bTime;
@@ -130,7 +139,7 @@ export default function StudentScheduleTab({ studentId }) {
 
         // Keep a stable, deduplicated list in case backend returns the same instance more than once.
         const deduped = Array.from(
-          new Map(allInstances.map((item) => [item.id, item])).values()
+          new Map(sortedInstances.map((item) => [item.id, item])).values()
         );
         setInstances(deduped);
       } catch (err) {
@@ -248,12 +257,8 @@ export default function StudentScheduleTab({ studentId }) {
                     <TableRow key={inst.id}>
                       <TableCell className="font-medium">{formatDate(inst.datetime_start)}</TableCell>
                       <TableCell>{formatTime(inst.datetime_start)}</TableCell>
-                      <TableCell>{inst.service?.name || inst.lesson_name || 'שיעור'}</TableCell>
-                      <TableCell>
-                        {inst.instructor?.first_name
-                          ? `${inst.instructor.first_name} ${inst.instructor.last_name || ''}`
-                          : '—'}
-                      </TableCell>
+                      <TableCell>{getServiceName(inst)}</TableCell>
+                      <TableCell>{getInstructorName(inst)}</TableCell>
                       <TableCell>
                         <Badge
                           variant={inst.status === 'completed' ? 'secondary' : 'default'}

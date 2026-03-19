@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { Loader2, AlertCircle, Phone, MessageCircle, CircleHelp } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Loader2, AlertCircle, Phone, MessageCircle, CircleHelp, Mail } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -37,6 +38,7 @@ function formatTemplateTime(timeValue) {
 function getInstructorFullName(item) {
   const instructor = item?.instructor || item?.Employees;
   if (!instructor) return '—';
+  if (instructor.full_name) return instructor.full_name;
   const fromParts = [instructor.first_name, instructor.last_name].filter(Boolean).join(' ').trim();
   if (fromParts) return fromParts;
   if (instructor.name) return instructor.name;
@@ -44,7 +46,51 @@ function getInstructorFullName(item) {
 }
 
 function getServiceName(item) {
-  return item?.service?.name || item?.Services?.name || item?.lesson_name || 'שיעור';
+  return item?.service?.service_name || item?.service?.name || item?.Services?.name || item?.lesson_name || 'שיעור';
+}
+
+function getRangeDates(daysForward) {
+  const today = new Date();
+  const endDate = new Date(today);
+  endDate.setDate(today.getDate() + daysForward);
+
+  return {
+    startDate: today.toISOString().split('T')[0],
+    endDate: endDate.toISOString().split('T')[0],
+  };
+}
+
+function resolvePreferredContact(student, guardian) {
+  const preference = String(student?.notification_method || '').trim().toLowerCase();
+  const guardianPhone = guardian?.phone ? guardian.phone.replace(/[\s\-()]/g, '') : '';
+  const emailValue = student?.email || guardian?.email || '';
+
+  if (preference === 'email' && emailValue) {
+    return {
+      href: `mailto:${emailValue}`,
+      label: 'אימייל',
+      icon: Mail,
+    };
+  }
+
+  if (guardianPhone) {
+    return {
+      href: `https://wa.me/${guardianPhone}`,
+      label: 'WhatsApp',
+      icon: MessageCircle,
+      external: true,
+    };
+  }
+
+  if (emailValue) {
+    return {
+      href: `mailto:${emailValue}`,
+      label: 'אימייל',
+      icon: Mail,
+    };
+  }
+
+  return null;
 }
 
 function formatDateTime(isoString) {
@@ -106,6 +152,8 @@ export default function StudentOverviewTab({ student }) {
 
   const activeOrgId = activeOrg?.id;
   const studentId = student?.id;
+  const guardian = student?.guardian;
+  const preferredContact = useMemo(() => resolvePreferredContact(student, guardian), [student, guardian]);
 
   useEffect(() => {
     if (!studentId || !activeOrgId) return;
@@ -126,24 +174,20 @@ export default function StudentOverviewTab({ student }) {
           : [];
         setLessonTemplates(activeTemplates);
 
-        // Fetch upcoming lesson instances for the next 14 days and pick the earliest future item.
-        const today = new Date();
+        // Use the same canonical source as the calendar feature.
         const now = new Date();
-        const allInstances = [];
-        for (let d = 0; d < 14; d++) {
-          const date = new Date(today);
-          date.setDate(today.getDate() + d);
-          const dateStr = date.toISOString().split('T')[0];
-          const instances = await authenticatedFetch(
-            `api/lesson-instances?date=${dateStr}&student_id=${studentId}&org_id=${activeOrgId}`,
-            { session }
-          );
-          if (Array.isArray(instances)) {
-            allInstances.push(...instances);
-          }
-        }
+        const { startDate, endDate } = getRangeDates(14);
+        const allInstances = await authenticatedFetch('calendar/instances', {
+          session,
+          params: {
+            org_id: activeOrgId,
+            student_id: studentId,
+            start_date: startDate,
+            end_date: endDate,
+          },
+        });
 
-        const upcoming = allInstances
+        const upcoming = (Array.isArray(allInstances) ? allInstances : [])
           .filter((item) => {
             const dateValue = new Date(item?.datetime_start);
             return !Number.isNaN(dateValue.getTime()) && dateValue > now;
@@ -180,9 +224,9 @@ export default function StudentOverviewTab({ student }) {
     );
   }
 
-  const guardian = student?.guardian;
   const tags = Array.isArray(student?.tags) ? student.tags : [];
   const internalNotes = student?.metadata?.internal_notes || '';
+  const PreferredContactIcon = preferredContact?.icon || MessageCircle;
 
   // Compute age
   const age = student?.date_of_birth
@@ -268,22 +312,26 @@ export default function StudentOverviewTab({ student }) {
                 )}
               </dl>
               <div className="flex gap-2 pt-1">
-                {guardian.phone && (
+                {(guardian.phone || preferredContact) && (
                   <>
-                    <a
-                      href={`tel:${guardian.phone}`}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium hover:bg-accent transition"
-                    >
-                      <Phone className="h-3 w-3" /> התקשר
-                    </a>
-                    <a
-                      href={`https://wa.me/${guardian.phone.replace(/[\s\-()]/g, '')}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium hover:bg-accent transition"
-                    >
-                      <MessageCircle className="h-3 w-3" /> WhatsApp
-                    </a>
+                    {guardian.phone && (
+                      <a
+                        href={`tel:${guardian.phone}`}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium hover:bg-accent transition"
+                      >
+                        <Phone className="h-3 w-3" /> התקשר
+                      </a>
+                    )}
+                    {preferredContact && (
+                      <a
+                        href={preferredContact.href}
+                        target={preferredContact.external ? '_blank' : undefined}
+                        rel={preferredContact.external ? 'noopener noreferrer' : undefined}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium hover:bg-accent transition"
+                      >
+                        <PreferredContactIcon className="h-3 w-3" /> {preferredContact.label}
+                      </a>
+                    )}
                   </>
                 )}
               </div>
@@ -343,10 +391,18 @@ export default function StudentOverviewTab({ student }) {
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center text-lg">💰</div>
             <h3 className="font-semibold text-zinc-800">סיכום כספי</h3>
-            <CircleHelp
-              className="h-4 w-4 text-muted-foreground"
-              title="נתונים אלו הם להמחשה בלבד ויופעלו בשלב הכספים"
-            />
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" className="inline-flex items-center text-muted-foreground hover:text-foreground">
+                    <CircleHelp className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  נתונים אלו הם להמחשה בלבד ויופעלו בשלב הכספים
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-center">
