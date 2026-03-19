@@ -58,7 +58,15 @@ function getServiceName(instance) {
 function getInstructorName(instance) {
   const instructor = instance?.instructor;
   if (!instructor) return '—';
-  return instructor.full_name || [instructor.first_name, instructor.last_name].filter(Boolean).join(' ') || '—';
+  const fromParts = [instructor.first_name, instructor.last_name].filter(Boolean).join(' ').trim();
+  if (fromParts) return fromParts;
+  return instructor.name || '—';
+}
+
+function getTemplateInstructorName(template) {
+  const instructor = template?.instructor;
+  if (!instructor) return '—';
+  return [instructor.first_name, instructor.middle_name, instructor.last_name].filter(Boolean).join(' ') || instructor.name || '—';
 }
 
 /**
@@ -187,9 +195,9 @@ export default function StudentScheduleTab({ studentId }) {
                       {template.service?.name || template.lesson_name || 'קורס'}
                     </p>
                     <div className="flex flex-wrap gap-2 items-center text-xs text-neutral-600">
-                      {template.instructor?.first_name && (
+                      {getTemplateInstructorName(template) !== '—' && (
                         <span>
-                          מדריך: {template.instructor.first_name} {template.instructor.last_name || ''}
+                          מדריך: {getTemplateInstructorName(template)}
                         </span>
                       )}
                       {template.day_of_week != null && (
