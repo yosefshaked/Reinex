@@ -128,6 +128,11 @@ export const AUDIT_ACTIONS = {
   INSTRUCTOR_UPDATED: 'instructor.updated',
   INSTRUCTOR_DELETED: 'instructor.deleted',
   
+  // Forms
+  FORM_TEMPLATE_CREATED: 'form_template.created',
+  FORM_TEMPLATE_UPDATED: 'form_template.updated',
+  FORM_TEMPLATE_DELETED: 'form_template.deleted',
+
   // Settings
   SETTINGS_UPDATED: 'settings.updated',
   LOGO_UPDATED: 'logo.updated',
@@ -147,6 +152,7 @@ export const AUDIT_CATEGORIES = {
   STUDENTS: 'students',
   INSTRUCTORS: 'instructors',
   CALENDAR: 'calendar',
+  FORMS: 'forms',
 };
 
 /**

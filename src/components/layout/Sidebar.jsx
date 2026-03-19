@@ -10,6 +10,7 @@ import {
   ListChecks,
   ClipboardList,
   Coins,
+  FileText,
   Settings,
   Pin,
   PinOff,
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { key: 'employees', label: 'עובדים', to: '/employees', icon: UserCog },
   { key: 'services', label: 'שירותים', to: '/services', icon: ListChecks },
   { key: 'financials', label: 'כספים', to: '/financials', icon: Coins },
+  { key: 'forms', label: 'טפסים', to: '/forms', icon: FileText },
   { key: 'settings', label: 'הגדרות', to: '/Settings', icon: Settings },
 ];
 

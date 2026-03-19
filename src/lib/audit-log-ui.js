@@ -75,6 +75,11 @@ const ACTION_LABELS_HE = {
   ENROLLMENT_DELETED: 'הרשמה בוטלה',
   TEMPLATE_CREATED: 'נוצרה תבנית חדשה',
   TEMPLATE_UPDATED: 'עודכנה תבנית קיימת',
+
+  // Forms
+  'form_template.created': 'נוצר טופס חדש',
+  'form_template.updated': 'טופס עודכן',
+  'form_template.deleted': 'טופס הושבת',
 };
 
 const CATEGORY_LABELS_HE = {
@@ -89,6 +94,7 @@ const CATEGORY_LABELS_HE = {
   membership: 'חברות בארגון',
   permissions: 'הרשאות',
   instructors: 'מדריכים',
+  forms: 'טפסים',
 };
 
 const DETAIL_LABELS_HE = {
@@ -98,6 +104,9 @@ const DETAIL_LABELS_HE = {
   guardian: 'אפוטרופוס',
   instructor_employee_id: 'מדריך',
   service_id: 'שירות',
+  form_template_id: 'טופס',
+  new_version: 'גרסה חדשה',
+  template_version: 'גרסת טופס',
   valid_from: 'מתאריך',
   valid_until: 'עד תאריך',
   duration_minutes: 'משך',
