@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, FileText, Loader2, AlertCircle, MoreHorizontal, Trash2, Eye } from 'lucide-react';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent } from '@/components/ui/card';
@@ -29,6 +30,7 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 
 export default function FormsListPage() {
+  const navigate = useNavigate();
   const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
   const { session } = useSupabase();
 
@@ -223,7 +225,7 @@ export default function FormsListPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem className="gap-2" disabled>
+                          <DropdownMenuItem className="gap-2" onClick={() => navigate(`/forms/${form.id}`)}>
                             <Eye className="h-4 w-4" />
                             עריכת שאלון
                           </DropdownMenuItem>
