@@ -4,103 +4,15 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import {
+  formatAuditDetailValue,
+  getAuditActionLabel,
+  getAuditActionVariant,
+  getAuditCategoryLabel,
+  getAuditDetailLabel,
+} from '@/lib/audit-log-ui.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
-
-/** Map technical action_type strings to readable Hebrew labels */
-const ACTION_LABELS = {
-  'template.created': 'נוצרה תבנית חדשה',
-  'template.updated': 'עודכנה תבנית קיימת',
-  'template.deactivated': 'תבנית הושבתה',
-  'template.reactivated': 'תבנית הופעלה מחדש',
-  'settings.updated': 'הגדרות הארגון עודכנו',
-  'student.created': 'יצירת תלמיד חדש',
-  'student.updated': 'עדכון פרטי תלמיד',
-  'students.bulk_update': 'בוצע עדכון מרובה לתלמידים',
-  'status.changed': 'שינוי סטטוס תלמיד',
-  'instructor.created': 'נוצר מדריך חדש',
-  'instructor.updated': 'פרטי מדריך עודכנו',
-  'member.invited': 'נשלחה הזמנה לחבר צוות',
-  'member.removed': 'חבר צוות הוסר מהארגון',
-  'member.role_changed': 'תפקיד חבר צוות שונה',
-  'backup.created': 'נוצר גיבוי חדש',
-  'backup.restored': 'בוצע שחזור מגיבוי',
-  'storage.configured': 'אחסון הארגון הוגדר',
-  'storage.updated': 'הגדרות האחסון עודכנו',
-  'storage.disconnected': 'האחסון נותק',
-  'storage.reconnected': 'האחסון חובר מחדש',
-  'storage.grace_period_started': 'החל מצב חסד לאחסון',
-  'storage.files_deleted': 'נמחקו קבצים עקב סיום תקופת חסד',
-  'storage.bulk_download': 'בוצעה הורדה מרוכזת של קבצים',
-  'file.uploaded': 'הועלה קובץ חדש',
-  'file.deleted': 'קובץ נמחק',
-  'document.updated': 'פרטי מסמך עודכנו',
-  'session.created': 'נוצר דיווח חדש',
-  'session.resolved': 'דיווח טופל',
-  'lesson.cancelled': 'ביטול שיעור',
-  STUDENT_CREATED: 'יצירת תלמיד',
-  STUDENT_UPDATED: 'עדכון פרטי תלמיד',
-  STUDENT_DELETED: 'מחיקת תלמיד',
-  STATUS_CHANGED: 'שינוי סטטוס',
-  GUARDIAN_CREATED: 'הוספת אפוטרופוס',
-  GUARDIAN_UPDATED: 'עדכון אפוטרופוס',
-  GUARDIAN_DELETED: 'מחיקת אפוטרופוס',
-  DOCUMENT_UPLOADED: 'העלאת מסמך',
-  DOCUMENT_DELETED: 'מחיקת מסמך',
-  LESSON_ASSIGNED: 'הקצאת שיעור',
-  LESSON_CANCELLED: 'ביטול שיעור',
-  ENROLLMENT_CREATED: 'הרשמה לקורס',
-  ENROLLMENT_DELETED: 'ביטול הרשמה',
-  TEMPLATE_CREATED: 'יצירת תבנית שיעור',
-  TEMPLATE_UPDATED: 'עדכון תבנית שיעור',
-};
-
-const CATEGORY_LABELS = {
-  calendar: 'לוח שנה',
-  storage: 'אחסון',
-  backup: 'גיבוי',
-  settings: 'הגדרות',
-  students: 'תלמידים',
-  files: 'מסמכים',
-  sessions: 'מפגשים',
-  session: 'מפגשים',
-};
-
-const DETAIL_LABELS = {
-  student_id: 'תלמיד',
-  student_name: 'שם תלמיד',
-  instructor_employee_id: 'מדריך',
-  service_id: 'שירות',
-  valid_from: 'מתאריך',
-  valid_until: 'עד תאריך',
-  duration_minutes: 'משך',
-  day_of_week: 'יום בשבוע',
-  time_of_day: 'שעה',
-  grace_period_days: 'ימי חסד',
-  grace_ends_at: 'סיום תקופת חסד',
-  storage_mode: 'מצב אחסון',
-  role: 'תפקיד',
-  status: 'סטטוס',
-};
-
-function getActionLabel(actionType) {
-  if (!actionType) return 'פעולה';
-  const raw = String(actionType);
-  return ACTION_LABELS[raw] || ACTION_LABELS[raw.toUpperCase()] || raw;
-}
-
-function getCategoryLabel(category) {
-  const raw = String(category || '').trim().toLowerCase();
-  return CATEGORY_LABELS[raw] || raw || '';
-}
-
-function getActionVariant(actionType) {
-  if (!actionType) return 'outline';
-  const type = String(actionType).toUpperCase();
-  if (type.includes('DELETE') || type.includes('CANCEL')) return 'destructive';
-  if (type.includes('CREATE') || type.includes('ENROLL')) return 'secondary';
-  return 'default';
-}
 
 function formatTimestamp(ts) {
   if (!ts) return '';
@@ -143,10 +55,6 @@ function getActorDisplay(entry) {
   }
 
   return 'מערכת';
-}
-
-function getDetailLabel(key) {
-  return DETAIL_LABELS[key] || key;
 }
 
 /**
@@ -233,15 +141,15 @@ export default function StudentHistoryTab({ studentId }) {
         <div className="space-y-2">
           {details.changes.map((change, idx) => (
             <div key={idx} className="space-y-1 pb-2 last:pb-0">
-              <p className="font-semibold text-neutral-700 text-xs">{getDetailLabel(change.field) || 'שדה'}</p>
+              <p className="font-semibold text-neutral-700 text-xs">{getAuditDetailLabel(change.field) || 'שדה'}</p>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div>
                   <p className="text-neutral-500">לפני</p>
-                  <p className="text-neutral-700 break-words">{String(change.before ?? '—')}</p>
+                  <p className="text-neutral-700 break-words">{formatAuditDetailValue(change.before)}</p>
                 </div>
                 <div>
                   <p className="text-neutral-500">אחרי</p>
-                  <p className="text-neutral-700 break-words">{String(change.after ?? '—')}</p>
+                  <p className="text-neutral-700 break-words">{formatAuditDetailValue(change.after)}</p>
                 </div>
               </div>
             </div>
@@ -259,9 +167,9 @@ export default function StudentHistoryTab({ studentId }) {
     return (
       <div className="space-y-1 text-xs">
         {keys.map((key) => (
-          <div key={key} className="flex justify-end gap-2 text-end">
-            <span className="font-semibold text-neutral-600 min-w-[80px]">{getDetailLabel(key)}:</span>
-            <span className="text-neutral-700 break-words">{String(details[key] ?? '—')}</span>
+          <div key={key} className="flex justify-start gap-2 text-start">
+            <span className="font-semibold text-neutral-600 min-w-[80px]">{getAuditDetailLabel(key)}:</span>
+            <span className="text-neutral-700 break-words whitespace-pre-wrap">{formatAuditDetailValue(details[key])}</span>
           </div>
         ))}
       </div>
@@ -315,23 +223,23 @@ export default function StudentHistoryTab({ studentId }) {
                     <div className="flex-1 pb-4">
                       <button
                         type="button"
-                        className="w-full rounded-md border px-3 py-3 text-end hover:bg-neutral-50/50 transition-colors"
+                        className="w-full rounded-md border px-3 py-3 text-start hover:bg-neutral-50/50 transition-colors"
                         onClick={() => toggleExpanded(entry.id)}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div className="flex flex-1 flex-col items-end text-end">
-                            <div className="mb-1 flex flex-wrap items-center justify-end gap-2">
-                              <Badge variant={getActionVariant(entry.action_type)} className="text-xs">
-                                {getActionLabel(entry.action_type)}
+                          <div className="flex flex-1 flex-col items-start text-start">
+                            <div className="mb-1 flex flex-wrap items-center justify-start gap-2">
+                              <Badge variant={getAuditActionVariant(entry.action_type)} className="text-xs">
+                                {getAuditActionLabel(entry.action_type)}
                               </Badge>
                               {entry.action_category && (
-                                <span className="text-xs text-neutral-500">{getCategoryLabel(entry.action_category)}</span>
+                                <span className="text-xs text-neutral-500">{getAuditCategoryLabel(entry.action_category)}</span>
                               )}
                             </div>
-                            <p className="self-end text-sm font-medium text-foreground text-end">
+                            <p className="self-start text-sm font-medium text-foreground text-start">
                               {getActorDisplay(entry)}
                             </p>
-                            <p className="mt-0.5 self-end text-end text-xs text-neutral-500">
+                            <p className="mt-0.5 self-start text-start text-xs text-neutral-500">
                               {formatTimestamp(entry.performed_at)}
                             </p>
                           </div>
@@ -344,7 +252,7 @@ export default function StudentHistoryTab({ studentId }) {
 
                         {/* Expandable before/after details */}
                         {isExpanded && (
-                          <div className="mt-3 border-t pt-3 text-end">
+                          <div className="mt-3 border-t pt-3 text-start">
                             {renderDetails(entry)}
                           </div>
                         )}

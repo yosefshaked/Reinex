@@ -928,7 +928,7 @@ async function revokeInvitation(context, req, supabase, invitationId) {
     userId: authUser.id,
     userEmail: authUser.email || '',
     userRole: role,
-    actionType: 'invitation.revoked',
+    actionType: AUDIT_ACTIONS.INVITATION_REVOKED,
     actionCategory: AUDIT_CATEGORIES.MEMBERSHIP,
     resourceType: 'invitation',
     resourceId: invitationId,

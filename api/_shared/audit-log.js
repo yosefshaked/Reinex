@@ -89,6 +89,7 @@ export const AUDIT_ACTIONS = {
   MEMBER_INVITED: 'member.invited',
   MEMBER_REMOVED: 'member.removed',
   MEMBER_ROLE_CHANGED: 'member.role_changed',
+  INVITATION_REVOKED: 'invitation.revoked',
   
   // Backup
   BACKUP_CREATED: 'backup.created',
@@ -103,6 +104,7 @@ export const AUDIT_ACTIONS = {
   // Sessions
   SESSION_CREATED: 'session.created',
   SESSION_RESOLVED: 'session.resolved',
+  SESSION_DELETED: 'session.deleted',
 
   // Calendar Templates
   TEMPLATE_CREATED: 'template.created',
@@ -119,6 +121,7 @@ export const AUDIT_ACTIONS = {
   STUDENT_UPDATED: 'student.updated',
   STUDENT_DELETED: 'student.deleted',
   STUDENTS_BULK_UPDATE: 'students.bulk_update',
+  STUDENT_LESSONS_BULK_CANCELLED: 'student.lessons_bulk_cancelled',
   
   // Instructors
   INSTRUCTOR_CREATED: 'instructor.created',

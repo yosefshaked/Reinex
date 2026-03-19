@@ -438,7 +438,7 @@ export default async function lessonInstances(context, req) {
       userId,
       userEmail: authResult.data.user.email || '',
       userRole: role,
-      actionType: 'student.lessons_bulk_cancelled',
+      actionType: AUDIT_ACTIONS.STUDENT_LESSONS_BULK_CANCELLED,
       actionCategory: AUDIT_CATEGORIES.CALENDAR,
       resourceType: 'student',
       resourceId: studentId,

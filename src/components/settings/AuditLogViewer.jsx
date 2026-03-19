@@ -14,6 +14,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { getAuditActionLabel, getAuditDetailLabel } from '@/lib/audit-log-ui.js';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -63,36 +64,6 @@ const CATEGORY_META = {
   },
 };
 
-const ACTION_LABELS = {
-  'template.created': 'נוצרה תבנית חדשה',
-  'template.updated': 'עודכנה תבנית קיימת',
-  'template.deactivated': 'תבנית הושבתה',
-  'template.reactivated': 'תבנית הופעלה מחדש',
-  'settings.updated': 'הגדרות הארגון עודכנו',
-  'student.created': 'נוצר תלמיד חדש',
-  'student.updated': 'פרטי תלמיד עודכנו',
-  'students.bulk_update': 'בוצע עדכון מרובה לתלמידים',
-  'instructor.created': 'נוצר מדריך חדש',
-  'instructor.updated': 'פרטי מדריך עודכנו',
-  'member.invited': 'נשלחה הזמנה לחבר צוות',
-  'member.removed': 'חבר צוות הוסר מהארגון',
-  'member.role_changed': 'תפקיד חבר צוות שונה',
-  'backup.created': 'נוצר גיבוי חדש',
-  'backup.restored': 'בוצע שחזור מגיבוי',
-  'storage.configured': 'אחסון הארגון הוגדר',
-  'storage.updated': 'הגדרות האחסון עודכנו',
-  'storage.disconnected': 'האחסון נותק',
-  'storage.reconnected': 'האחסון חובר מחדש',
-  'storage.grace_period_started': 'החל מצב חסד לאחסון',
-  'storage.files_deleted': 'נמחקו קבצים עקב סיום תקופת חסד',
-  'storage.bulk_download': 'בוצעה הורדה מרוכזת של קבצים',
-  'file.uploaded': 'הועלה קובץ חדש',
-  'file.deleted': 'קובץ נמחק',
-  'document.updated': 'פרטי מסמך עודכנו',
-  'session.created': 'נוצר דיווח חדש',
-  'session.resolved': 'דיווח טופל',
-};
-
 const RESOURCE_LABELS = {
   lesson_template: 'תבנית שיעור',
   student: 'תלמיד',
@@ -103,20 +74,6 @@ const RESOURCE_LABELS = {
   document: 'מסמך',
   membership: 'חבר צוות',
   backup: 'גיבוי',
-};
-
-const DETAIL_LABELS = {
-  student_id: 'תלמיד',
-  instructor_employee_id: 'מדריך',
-  service_id: 'שירות',
-  valid_from: 'מתאריך',
-  valid_until: 'עד תאריך',
-  duration_minutes: 'משך',
-  day_of_week: 'יום בשבוע',
-  time_of_day: 'שעה',
-  grace_period_days: 'ימי חסד',
-  grace_ends_at: 'סיום תקופת חסד',
-  storage_mode: 'מצב אחסון',
 };
 
 function formatDateTime(value) {
@@ -166,19 +123,8 @@ function normalizeFilter(value) {
   return String(value || '').trim().toLowerCase();
 }
 
-function humanizeFallback(value) {
-  const normalized = String(value || '').trim();
-  if (!normalized) return 'בוצעה פעולה מערכתית';
-
-  return normalized
-    .replace(/[._-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function describeAction(log) {
-  const normalizedAction = String(log?.action_type || '').trim().toLowerCase();
-  return ACTION_LABELS[normalizedAction] || humanizeFallback(normalizedAction);
+  return getAuditActionLabel(log?.action_type);
 }
 
 function resolveCategoryMeta(category) {
@@ -251,7 +197,7 @@ function extractDetails(details) {
     .filter(([key, value]) => key && value !== null && typeof value !== 'undefined')
     .slice(0, 4)
     .map(([key, value]) => ({
-      label: DETAIL_LABELS[key] || key,
+      label: getAuditDetailLabel(key),
       value: formatDetailValue(value),
     }));
 }
