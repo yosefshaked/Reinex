@@ -94,6 +94,8 @@ const CATEGORY_LABELS_HE = {
 const DETAIL_LABELS_HE = {
   student_id: 'תלמיד',
   student_name: 'שם תלמיד',
+  guardian_id: 'מזהה אפוטרופוס',
+  guardian: 'אפוטרופוס',
   instructor_employee_id: 'מדריך',
   service_id: 'שירות',
   valid_from: 'מתאריך',
@@ -106,6 +108,13 @@ const DETAIL_LABELS_HE = {
   storage_mode: 'מצב אחסון',
   role: 'תפקיד',
   status: 'סטטוס',
+  previous: 'לפני',
+  next: 'אחרי',
+  requested: 'התבקש',
+  success: 'הצליח',
+  action: 'פעולה',
+  error: 'שגיאה',
+  mode: 'מצב',
   default_notification_method: 'שיטת התראה ברירת מחדל',
   notification_method: 'שיטת התראה',
   updated_fields: 'שדות שעודכנו',
@@ -115,6 +124,67 @@ const DETAIL_LABELS_HE = {
   instance_count: 'כמות מופעים',
   from_date: 'מתאריך',
 };
+
+const VALUE_LABELS_BY_KEY = {
+  relationship: {
+    father: 'אב',
+    mother: 'אם',
+    guardian: 'אפוטרופוס',
+    grandparent: 'סב/סבתא',
+    other: 'אחר',
+  },
+  default_notification_method: {
+    whatsapp: 'וואטסאפ',
+    email: 'אימייל',
+    sms: 'SMS',
+    phone: 'טלפון',
+    none: 'ללא',
+  },
+  notification_method: {
+    whatsapp: 'וואטסאפ',
+    email: 'אימייל',
+    sms: 'SMS',
+    phone: 'טלפון',
+    none: 'ללא',
+  },
+  action: {
+    unchanged: 'ללא שינוי',
+    updated: 'עודכן',
+    linked: 'שויך',
+    cleared: 'הוסר',
+    update_failed: 'כשל בעדכון',
+    insert_failed: 'כשל בשיוך',
+    delete_failed: 'כשל בהסרה',
+    created: 'נוצר',
+    deleted: 'נמחק',
+    resolved: 'טופל',
+  },
+  mode: {
+    assign_existing: 'שיוך לתלמיד קיים',
+    create_and_assign: 'יצירה ושיוך לתלמיד',
+    reject_loose_report: 'דחיית דיווח',
+  },
+  status: {
+    scheduled: 'מתוכנן',
+    completed: 'הושלם',
+    cancelled_student: 'בוטל על ידי תלמיד',
+    cancelled_clinic: 'בוטל על ידי קליניקה',
+    no_show: 'לא הגיע',
+    active: 'פעיל',
+    inactive: 'לא פעיל',
+    pending: 'ממתין',
+    revoked: 'בוטל',
+  },
+  role: {
+    owner: 'בעלים',
+    admin: 'מנהל',
+    office: 'משרד',
+    member: 'חבר צוות',
+    system_admin: 'מנהל מערכת',
+  },
+};
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function normalizeActionToken(actionType) {
   return String(actionType || '').trim();
@@ -127,6 +197,156 @@ function humanizeToken(value) {
     .replace(/[._-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function formatDateLikeString(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+
+  // yyyy-mm-dd
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const parsedDate = new Date(`${trimmed}T00:00:00`);
+    if (!Number.isNaN(parsedDate.getTime())) {
+      return parsedDate.toLocaleDateString('he-IL');
+    }
+  }
+
+  // ISO-ish datetime
+  if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) {
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleString('he-IL');
+    }
+  }
+
+  return '';
+}
+
+function shortId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.length <= 18) return raw;
+  return `${raw.slice(0, 8)}...${raw.slice(-6)}`;
+}
+
+function tryParseStructuredString(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return null;
+    }
+  }
+
+  // Convert pseudo-json fragments like: next::{...},previous::{...}
+  const pseudoJson = trimmed.replace(/([A-Za-z_][\w]*)::/g, '"$1":');
+  if (pseudoJson !== trimmed) {
+    const wrapped = pseudoJson.trim().startsWith('{') ? pseudoJson : `{${pseudoJson}}`;
+    try {
+      return JSON.parse(wrapped);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function translateEnumValue(rawValue, key) {
+  const normalizedKey = String(key || '').trim().toLowerCase();
+  const normalizedValue = String(rawValue || '').trim().toLowerCase();
+  if (!normalizedValue) return '';
+
+  const byKey = VALUE_LABELS_BY_KEY[normalizedKey];
+  if (byKey && byKey[normalizedValue]) {
+    return byKey[normalizedValue];
+  }
+
+  return '';
+}
+
+function formatValueInternal(value, key, depth, seen) {
+  if (value === null || typeof value === 'undefined') {
+    return '—';
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'כן' : 'לא';
+  }
+
+  if (typeof value === 'number') {
+    return String(value);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return '—';
+
+    const translatedEnum = translateEnumValue(trimmed, key);
+    if (translatedEnum) return translatedEnum;
+
+    const parsedFromString = tryParseStructuredString(trimmed);
+    if (parsedFromString && depth < 3) {
+      return formatValueInternal(parsedFromString, key, depth + 1, seen);
+    }
+
+    const dateLike = formatDateLikeString(trimmed);
+    if (dateLike) return dateLike;
+
+    if ((String(key || '').endsWith('_id') || String(key || '').toLowerCase() === 'id') && UUID_PATTERN.test(trimmed)) {
+      return shortId(trimmed);
+    }
+
+    return trimmed;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '—';
+
+    if (String(key || '') === 'updated_fields') {
+      return value.map((item) => getAuditDetailLabel(item)).join(', ');
+    }
+
+    if (value.every((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item))) {
+      return value.map((item) => formatValueInternal(item, key, depth + 1, seen)).join(', ');
+    }
+
+    if (depth >= 2) {
+      return `${value.length} פריטים`;
+    }
+
+    return value
+      .map((item, idx) => `${idx + 1}) ${formatValueInternal(item, key, depth + 1, seen)}`)
+      .join(' ; ');
+  }
+
+  if (typeof value === 'object') {
+    if (seen.has(value)) {
+      return '...';
+    }
+    seen.add(value);
+
+    const entries = Object.entries(value).filter(([, itemValue]) => itemValue !== null && typeof itemValue !== 'undefined');
+    if (entries.length === 0) {
+      return '—';
+    }
+
+    if (depth >= 2) {
+      return entries
+        .slice(0, 4)
+        .map(([childKey, childValue]) => `${getAuditDetailLabel(childKey)}: ${formatValueInternal(childValue, childKey, depth + 1, seen)}`)
+        .join(' | ');
+    }
+
+    return entries
+      .map(([childKey, childValue]) => `${getAuditDetailLabel(childKey)}: ${formatValueInternal(childValue, childKey, depth + 1, seen)}`)
+      .join(' | ');
+  }
+
+  return String(value);
 }
 
 export function getAuditActionLabel(actionType) {
@@ -171,35 +391,6 @@ export function getAuditActionVariant(actionType) {
   return 'default';
 }
 
-export function formatAuditDetailValue(value) {
-  if (value === null || typeof value === 'undefined') {
-    return '—';
-  }
-
-  if (typeof value === 'boolean') {
-    return value ? 'כן' : 'לא';
-  }
-
-  if (typeof value === 'number') {
-    return String(value);
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    return trimmed || '—';
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) return '—';
-    if (value.every((item) => ['string', 'number', 'boolean'].includes(typeof item))) {
-      return value.map((item) => String(item)).join(', ');
-    }
-    return JSON.stringify(value);
-  }
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+export function formatAuditDetailValue(value, key = '') {
+  return formatValueInternal(value, key, 0, new WeakSet());
 }

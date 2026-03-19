@@ -14,7 +14,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { getAuditActionLabel, getAuditDetailLabel } from '@/lib/audit-log-ui.js';
+import { formatAuditDetailValue, getAuditActionLabel, getAuditDetailLabel } from '@/lib/audit-log-ui.js';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -157,37 +157,6 @@ function shortenIdentifier(value) {
   return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
 }
 
-function formatDetailValue(value) {
-  if (value === null || typeof value === 'undefined') {
-    return '—';
-  }
-
-  if (typeof value === 'number') {
-    return String(value);
-  }
-
-  if (typeof value === 'boolean') {
-    return value ? 'כן' : 'לא';
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return '—';
-
-    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
-      return formatDateTime(trimmed);
-    }
-
-    return shortenIdentifier(trimmed);
-  }
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
 function extractDetails(details) {
   if (!details || typeof details !== 'object' || Array.isArray(details)) {
     return [];
@@ -198,7 +167,7 @@ function extractDetails(details) {
     .slice(0, 4)
     .map(([key, value]) => ({
       label: getAuditDetailLabel(key),
-      value: formatDetailValue(value),
+      value: formatAuditDetailValue(value, key),
     }));
 }
 

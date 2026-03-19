@@ -145,11 +145,11 @@ export default function StudentHistoryTab({ studentId }) {
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div>
                   <p className="text-neutral-500">לפני</p>
-                  <p className="text-neutral-700 break-words">{formatAuditDetailValue(change.before)}</p>
+                  <p className="text-neutral-700 break-words whitespace-pre-wrap">{formatAuditDetailValue(change.before, change.field)}</p>
                 </div>
                 <div>
                   <p className="text-neutral-500">אחרי</p>
-                  <p className="text-neutral-700 break-words">{formatAuditDetailValue(change.after)}</p>
+                  <p className="text-neutral-700 break-words whitespace-pre-wrap">{formatAuditDetailValue(change.after, change.field)}</p>
                 </div>
               </div>
             </div>
@@ -169,7 +169,7 @@ export default function StudentHistoryTab({ studentId }) {
         {keys.map((key) => (
           <div key={key} className="flex justify-start gap-2 text-start">
             <span className="font-semibold text-neutral-600 min-w-[80px]">{getAuditDetailLabel(key)}:</span>
-            <span className="text-neutral-700 break-words whitespace-pre-wrap">{formatAuditDetailValue(details[key])}</span>
+            <span className="text-neutral-700 break-words whitespace-pre-wrap">{formatAuditDetailValue(details[key], key)}</span>
           </div>
         ))}
       </div>
