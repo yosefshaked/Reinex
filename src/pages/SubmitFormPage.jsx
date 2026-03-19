@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
-import { Loader2, ShieldCheck, FileCheck2 } from 'lucide-react';
+import { Loader2, ShieldCheck, FileCheck2, Info } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,8 @@ function normalizeSchema(schema) {
   return schema;
 }
 
+const LEGAL_NOTICE_DISMISSED_KEY = 'reinex_submit_legal_notice_dismissed';
+
 export default function SubmitFormPage() {
   const [step, setStep] = useState('login');
   const [identityNumber, setIdentityNumber] = useState('');
@@ -29,6 +31,7 @@ export default function SubmitFormPage() {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [showLegalNotice, setShowLegalNotice] = useState(false);
 
   const canVerify = Boolean(identityNumber.trim() && otp.trim().length === 6);
 
@@ -43,6 +46,24 @@ export default function SubmitFormPage() {
     if (step === 'form') return 'נא למלא את כל הפרטים הנדרשים ולשלוח.';
     return 'הזן ת.ז. תלמיד וקוד אימות כדי להמשיך.';
   }, [step]);
+
+  useEffect(() => {
+    try {
+      const dismissed = window?.localStorage?.getItem(LEGAL_NOTICE_DISMISSED_KEY) === '1';
+      setShowLegalNotice(!dismissed);
+    } catch {
+      setShowLegalNotice(true);
+    }
+  }, []);
+
+  const dismissLegalNotice = () => {
+    setShowLegalNotice(false);
+    try {
+      window?.localStorage?.setItem(LEGAL_NOTICE_DISMISSED_KEY, '1');
+    } catch {
+      // no-op
+    }
+  };
 
   const handleVerify = async (event) => {
     event.preventDefault();
@@ -114,7 +135,7 @@ export default function SubmitFormPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-8" dir="rtl">
+    <div className="min-h-screen bg-slate-50 px-4 py-8 pb-28" dir="rtl">
       <div className="mx-auto w-full max-w-2xl">
         <Card className="shadow-sm">
           <CardHeader className="text-end">
@@ -190,6 +211,23 @@ export default function SubmitFormPage() {
           </CardContent>
         </Card>
       </div>
+
+      {showLegalNotice && (
+        <div className="fixed inset-x-0 bottom-3 z-20 px-4">
+          <div className="mx-auto w-full max-w-2xl rounded-lg border border-slate-200 bg-white/95 px-3 py-2 shadow-md backdrop-blur">
+            <div className="flex items-start gap-2 text-xs text-slate-700">
+              <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-500" />
+              <p className="flex-1">
+                בהמשך השימוש באתר ושליחת הטופס, הנך מאשר/ת את תנאי השימוש ומדיניות הפרטיות של הארגון,
+                לרבות שימוש במידע הנמסר לצורך טיפול מנהלתי, רפואי ותפעולי.
+              </p>
+              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={dismissLegalNotice}>
+                הבנתי
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

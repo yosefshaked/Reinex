@@ -249,7 +249,11 @@ export default function StudentDetailPage() {
         </TabsContent>
 
         <TabsContent value="forms" className="space-y-4">
-          <StudentFormsTab />
+          <StudentFormsTab
+            studentId={studentId}
+            student={student}
+            canEdit={canEdit}
+          />
         </TabsContent>
       </Tabs>
 

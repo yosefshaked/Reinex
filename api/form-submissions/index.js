@@ -5,6 +5,7 @@ import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/s
 import {
   UUID_PATTERN,
   ensureMembership,
+  isAdminOrOffice,
   isAdminRole,
   normalizeString,
   parseRequestBody,
@@ -14,6 +15,7 @@ import {
   respond,
 } from '../_shared/org-bff.js';
 import { sendBrevoEmail } from '../_shared/brevo.js';
+import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 
 const OTP_DIGITS = 6;
 const OTP_TTL_MINUTES = 15;
@@ -63,6 +65,12 @@ function getNowIso() {
 
 function getFutureIso(minutes) {
   return new Date(Date.now() + (minutes * 60 * 1000)).toISOString();
+}
+
+function parseLimit(value, fallback = 50, max = 200) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
 }
 
 function readHeader(req, key) {
@@ -297,7 +305,7 @@ async function findActiveRoutingBySubmission(controlClient, submissionId, otp) {
   const nowIso = getNowIso();
   const { data, error } = await controlClient
     .from('active_routing')
-    .select('id, org_id, routing_info, expires_at, metadata')
+    .select('id, org_id, routing_info, expires_at, created_by, metadata')
     .eq('category', ROUTING_CATEGORY)
     .contains('routing_info', {
       submission_id: submissionId,
@@ -416,7 +424,128 @@ async function resolveOrganizationSenderName(controlClient, orgId, context) {
   }
 }
 
-async function initiateSubmission(context, req, { controlClient, env, orgId, userId, role }) {
+async function fetchStudentIdsByInstructor(tenantClient, instructorEmployeeId) {
+  if (!instructorEmployeeId) {
+    return { studentIds: [], error: null };
+  }
+
+  const { data, error } = await tenantClient
+    .from('lesson_templates')
+    .select('student_id')
+    .eq('instructor_employee_id', instructorEmployeeId)
+    .eq('is_active', true);
+
+  if (error) {
+    return { studentIds: [], error };
+  }
+
+  const studentIds = Array.from(new Set((data || []).map((row) => row.student_id).filter(Boolean)));
+  return { studentIds, error: null };
+}
+
+async function resolveAuditActorContext(controlClient, orgId, userId) {
+  if (!UUID_PATTERN.test(String(userId || ''))) {
+    return null;
+  }
+
+  let userEmail = 'unknown@reinex.local';
+  let userRole = 'member';
+
+  try {
+    const authResult = await controlClient.auth.admin.getUserById(userId);
+    if (!authResult.error && authResult.data?.user?.email) {
+      userEmail = authResult.data.user.email;
+    }
+  } catch {
+    // non-blocking
+  }
+
+  try {
+    const { data: membership } = await controlClient
+      .from('org_memberships')
+      .select('role')
+      .eq('org_id', orgId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (membership?.role) {
+      userRole = String(membership.role);
+    }
+  } catch {
+    // non-blocking
+  }
+
+  return { userId, userEmail, userRole };
+}
+
+async function listStudentSubmissions(context, req, { controlClient, env, orgId, userId, role }) {
+  const canManageRoster = isAdminOrOffice(role);
+  const studentId = normalizeString(req?.query?.student_id || req?.query?.studentId);
+  const limit = parseLimit(req?.query?.limit, 50, 200);
+
+  if (!UUID_PATTERN.test(studentId)) {
+    return respond(context, 400, { message: 'invalid_student_id' });
+  }
+
+  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
+  if (tenantError) return respond(context, tenantError.status, tenantError.body);
+
+  if (!canManageRoster) {
+    const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(tenantClient, userId);
+    if (lessonError) {
+      context.log?.error?.('form-submissions failed to resolve instructor student access', {
+        message: lessonError?.message,
+        userId,
+      });
+      return respond(context, 500, { message: 'failed_to_check_student_access' });
+    }
+    if (!studentIds.includes(studentId)) {
+      return respond(context, 403, { message: 'forbidden' });
+    }
+  }
+
+  const { data: submissions, error: submissionsError } = await tenantClient
+    .from('form_submissions')
+    .select('id, form_id, student_id, answers, alert_flags, otp_metadata, source, submitted_at, metadata')
+    .eq('student_id', studentId)
+    .order('submitted_at', { ascending: false })
+    .limit(limit);
+
+  if (submissionsError) {
+    context.log?.error?.('form-submissions failed loading student submissions', {
+      message: submissionsError?.message,
+      studentId,
+    });
+    return respond(context, 500, { message: 'failed_to_load_form_submissions' });
+  }
+
+  const rows = Array.isArray(submissions) ? submissions : [];
+  const formIds = Array.from(new Set(rows.map((row) => row.form_id).filter((id) => UUID_PATTERN.test(String(id || '')))));
+
+  let formsById = new Map();
+  if (formIds.length > 0) {
+    const { data: forms, error: formsError } = await tenantClient
+      .from('forms')
+      .select('id, name')
+      .in('id', formIds);
+
+    if (formsError) {
+      context.log?.warn?.('form-submissions failed loading form names for student submissions', {
+        message: formsError?.message,
+      });
+    } else {
+      formsById = new Map((forms || []).map((item) => [item.id, item]));
+    }
+  }
+
+  const payload = rows.map((row) => ({
+    ...row,
+    form_name: formsById.get(row.form_id)?.name || null,
+  }));
+
+  return respond(context, 200, payload);
+}
+
+async function initiateSubmission(context, req, { controlClient, env, orgId, userId, userEmail, role }) {
   if (!isAdminRole(role)) {
     return respond(context, 403, { message: 'forbidden' });
   }
@@ -599,6 +728,23 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     responseBody.phone = destination;
   }
 
+  await logAuditEvent(controlClient, {
+    orgId,
+    userId,
+    userEmail,
+    userRole: role,
+    actionType: AUDIT_ACTIONS.FORM_SUBMISSION_INITIATED,
+    actionCategory: AUDIT_CATEGORIES.FORMS,
+    resourceType: 'form_submission',
+    resourceId: submission.id,
+    details: {
+      student_id: studentId,
+      form_id: formId,
+      delivery_method: deliveryMethod,
+      source: deliveryMethod,
+    },
+  });
+
   return respond(context, 201, responseBody);
 }
 
@@ -664,7 +810,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   const { data: submission, error: submissionError } = await tenantClient
     .from('form_submissions')
-    .select('id, student_id, form_id')
+    .select('id, student_id, form_id, metadata')
     .eq('id', submissionId)
     .maybeSingle();
 
@@ -724,6 +870,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
         metadata: {
           ...normalizeJsonObject(otpChallenge.metadata, {}),
           verified_at: nowIso,
+          verify_ip: ipAddress || null,
         },
       })
       .eq('id', otpChallenge.id)
@@ -741,6 +888,27 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     await clearVerifyFailures(controlClient, identityNumber);
   } catch {
     // non-blocking cleanup
+  }
+
+  const verifyMetadata = normalizeJsonObject(submission.metadata, {});
+  const verifyNowIso = getNowIso();
+  const { error: updateVerifyMetaError } = await tenantClient
+    .from('form_submissions')
+    .update({
+      metadata: {
+        ...verifyMetadata,
+        verify_ip: ipAddress || null,
+        verify_ip_at: verifyNowIso,
+      },
+    })
+    .eq('id', submission.id);
+
+  if (updateVerifyMetaError) {
+    context.log?.error?.('form-submissions verify failed updating submission verify metadata', {
+      message: updateVerifyMetaError?.message,
+      submissionId: submission.id,
+    });
+    return respond(context, 500, { message: 'failed_to_verify_otp' });
   }
 
   const { data: form, error: formError } = await tenantClient
@@ -766,6 +934,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   const otpCode = normalizeOtp(body?.otp);
   const answers = normalizeJsonObject(body?.answers, {});
   const formSchema = normalizeJsonObject(body?.form_schema || body?.formSchema, {});
+  const ipAddress = resolveClientIp(req);
 
   if (!UUID_PATTERN.test(submissionId) || otpCode.length !== OTP_DIGITS) {
     return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
@@ -830,6 +999,8 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
         workflow_status: 'submitted',
         submitted_at: nowIso,
         schema_snapshot: formSchema,
+        submit_ip: ipAddress || null,
+        submit_ip_at: nowIso,
       },
     })
     .eq('id', submissionId);
@@ -851,6 +1022,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
       metadata: {
         ...normalizeJsonObject(otpChallenge.metadata, {}),
         consumed_at: nowIso,
+        submit_ip: ipAddress || null,
       },
     })
     .eq('id', otpChallenge.id);
@@ -876,6 +1048,25 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     return respond(context, 500, { message: 'failed_to_cleanup_routing' });
   }
 
+  const actorContext = await resolveAuditActorContext(controlClient, orgId, routingRow.created_by);
+  if (actorContext) {
+    await logAuditEvent(controlClient, {
+      orgId,
+      userId: actorContext.userId,
+      userEmail: actorContext.userEmail,
+      userRole: actorContext.userRole,
+      actionType: AUDIT_ACTIONS.FORM_SUBMISSION_COMPLETED,
+      actionCategory: AUDIT_CATEGORIES.FORMS,
+      resourceType: 'form_submission',
+      resourceId: submissionId,
+      details: {
+        student_id: submission.student_id,
+        form_id: routingRow?.metadata?.form_id || null,
+        delivery_method: routingRow?.metadata?.delivery_method || null,
+      },
+    });
+  }
+
   return respond(context, 200, {
     message: 'submitted',
     submission_id: submissionId,
@@ -898,7 +1089,7 @@ export default async function formSubmissions(context, req) {
     global: { headers: { 'Cache-Control': 'no-store' } },
   });
 
-  if (method === 'POST' && !action) {
+  if ((method === 'POST' && !action) || (method === 'GET' && !action)) {
     const authorization = resolveBearerAuthorization(req);
     if (!authorization?.token) return respond(context, 401, { message: 'missing_bearer' });
 
@@ -919,6 +1110,7 @@ export default async function formSubmissions(context, req) {
     if (!orgId) return respond(context, 400, { message: 'invalid_org_id' });
 
     const userId = authResult.data.user.id;
+    const userEmail = authResult.data.user.email || '';
 
     let role;
     try {
@@ -934,11 +1126,22 @@ export default async function formSubmissions(context, req) {
 
     if (!role) return respond(context, 403, { message: 'forbidden' });
 
+    if (method === 'GET') {
+      return listStudentSubmissions(context, req, {
+        controlClient,
+        env,
+        orgId,
+        userId,
+        role,
+      });
+    }
+
     return initiateSubmission(context, req, {
       controlClient,
       env,
       orgId,
       userId,
+      userEmail,
       role,
     });
   }

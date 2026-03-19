@@ -35,7 +35,7 @@ function buildWhatsAppLink(phone, otp, submitLink) {
   };
 }
 
-export default function SendFormDialog({ open, onOpenChange, student }) {
+export default function SendFormDialog({ open, onOpenChange, student, onSent }) {
   const { session } = useSupabase();
   const { activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
 
@@ -106,6 +106,7 @@ export default function SendFormDialog({ open, onOpenChange, student }) {
       if (deliveryMethod === 'email') {
         setResult({ mode: 'email' });
         toast.success('נשלח בהצלחה למייל');
+        onSent?.({ mode: 'email', response });
         return;
       }
 
@@ -124,6 +125,7 @@ export default function SendFormDialog({ open, onOpenChange, student }) {
         submitLink,
         waLink: wa.url,
       });
+      onSent?.({ mode: 'whatsapp', response, whatsapp: wa });
       toast.success('קוד אימות נוצר. אפשר לשלוח בוואטסאפ.');
     } catch (error) {
       console.error('Failed to initiate form submission', error);
