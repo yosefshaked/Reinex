@@ -54,7 +54,9 @@ function getLessonInstanceId(context, req, body) {
   return '';
 }
 
-function buildInstanceSelect() {
+function buildInstanceSelect(options = {}) {
+  const participantsJoin = options.participantsJoin || 'lesson_participants';
+
   return [
     'id',
     'template_id',
@@ -75,7 +77,7 @@ function buildInstanceSelect() {
     'metadata',
     'instructor:Employees(id, name)',
     'service:Services(id, name, color, duration_minutes)',
-    'participants:lesson_participants(id, student_id, participant_status, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, student:students(id, first_name, middle_name, last_name))',
+    `participants:${participantsJoin}(id, student_id, participant_status, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, student:students(id, first_name, middle_name, last_name))`,
   ].join(',');
 }
 
@@ -156,9 +158,13 @@ export default async function lessonInstances(context, req) {
     const requestedInstructorId = normalizeUuid(req?.query?.instructor_id || req?.query?.instructorId);
     const requestedStudentId = normalizeUuid(req?.query?.student_id || req?.query?.studentId);
 
+    const selectClause = requestedStudentId
+      ? buildInstanceSelect({ participantsJoin: 'lesson_participants!inner' })
+      : buildInstanceSelect();
+
     let builder = tenantClient
       .from('lesson_instances')
-      .select(buildInstanceSelect())
+      .select(selectClause)
       .gte('datetime_start', range.start)
       .lt('datetime_start', range.end)
       .order('datetime_start', { ascending: true });
@@ -169,12 +175,9 @@ export default async function lessonInstances(context, req) {
       builder = builder.eq('instructor_employee_id', requestedInstructorId);
     }
 
-    // Filter by student_id if provided (for StudentScheduleTab integration)
+    // Filter by student_id if provided. Use !inner join to enforce participant membership.
     if (requestedStudentId) {
-      // Need to join through lesson_participants to filter by student
-      builder = builder
-        .select(`${buildInstanceSelect()},lesson_participants(student_id)`)
-        .filter('lesson_participants.student_id', 'eq', requestedStudentId);
+      builder = builder.eq('participants.student_id', requestedStudentId);
     }
 
     const { data, error } = await builder;

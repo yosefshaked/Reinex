@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, AlertCircle, Phone, MessageCircle } from 'lucide-react';
+import { Loader2, AlertCircle, Phone, MessageCircle, CircleHelp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -7,12 +7,44 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 
 const DAY_NAMES_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+const DAY_NAME_TO_INDEX = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
 
 function formatDayOfWeek(dayToken) {
   if (dayToken == null) return '';
   const idx = Number(dayToken);
   if (idx >= 0 && idx < DAY_NAMES_HE.length) return `יום ${DAY_NAMES_HE[idx]}`;
+  const lower = String(dayToken).toLowerCase();
+  if (lower in DAY_NAME_TO_INDEX) {
+    return `יום ${DAY_NAMES_HE[DAY_NAME_TO_INDEX[lower]]}`;
+  }
   return String(dayToken);
+}
+
+function formatTemplateTime(timeValue) {
+  if (!timeValue) return '—';
+  const timeString = String(timeValue);
+  return timeString.length >= 5 ? timeString.slice(0, 5) : timeString;
+}
+
+function getInstructorFullName(item) {
+  const instructor = item?.instructor || item?.Employees;
+  if (!instructor) return '—';
+  const fromParts = [instructor.first_name, instructor.last_name].filter(Boolean).join(' ').trim();
+  if (fromParts) return fromParts;
+  if (instructor.name) return instructor.name;
+  return '—';
+}
+
+function getServiceName(item) {
+  return item?.service?.name || item?.Services?.name || item?.lesson_name || 'שיעור';
 }
 
 function formatDateTime(isoString) {
@@ -67,6 +99,7 @@ export default function StudentOverviewTab({ student }) {
   const { activeOrg } = useOrg();
   
   const [lessonTemplates, setLessonTemplates] = useState([]);
+  const [lessonInstances, setLessonInstances] = useState([]);
   const [nextLesson, setNextLesson] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -93,10 +126,11 @@ export default function StudentOverviewTab({ student }) {
           : [];
         setLessonTemplates(activeTemplates);
 
-        // Fetch next 7 days to find first upcoming lesson
+        // Fetch upcoming lesson instances for the next 14 days and pick the earliest future item.
         const today = new Date();
-        let upcoming = null;
-        for (let d = 0; d < 7 && !upcoming; d++) {
+        const now = new Date();
+        const allInstances = [];
+        for (let d = 0; d < 14; d++) {
           const date = new Date(today);
           date.setDate(today.getDate() + d);
           const dateStr = date.toISOString().split('T')[0];
@@ -105,10 +139,19 @@ export default function StudentOverviewTab({ student }) {
             { session }
           );
           if (Array.isArray(instances)) {
-            upcoming = instances.find((li) => new Date(li.datetime_start) > new Date());
+            allInstances.push(...instances);
           }
         }
-        setNextLesson(upcoming || null);
+
+        const upcoming = allInstances
+          .filter((item) => {
+            const dateValue = new Date(item?.datetime_start);
+            return !Number.isNaN(dateValue.getTime()) && dateValue > now;
+          })
+          .sort((a, b) => new Date(a.datetime_start).getTime() - new Date(b.datetime_start).getTime());
+
+        setLessonInstances(upcoming);
+        setNextLesson(upcoming[0] || null);
       } catch (err) {
         console.error('Failed to load overview data', err);
         setError(err?.message || 'טעינת נתוני הסקירה נכשלה');
@@ -175,17 +218,15 @@ export default function StudentOverviewTab({ student }) {
                 📋
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xl font-semibold">{nextLesson.service?.name || 'שיעור'}</p>
+                <p className="text-xl font-semibold">{getServiceName(nextLesson)}</p>
                 <p className="text-sm text-muted-foreground mt-1">{formatDateTime(nextLesson.datetime_start)}</p>
-                {nextLesson.instructor && (
-                  <p className="text-sm text-muted-foreground">
-                    מדריך/ה: {nextLesson.instructor.first_name} {nextLesson.instructor.last_name || ''}
-                  </p>
-                )}
+                <p className="text-sm text-muted-foreground">
+                  מדריך/ה: {getInstructorFullName(nextLesson)}
+                </p>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground py-4">לא נמצאו שיעורים קרובים</p>
+            <p className="text-sm text-muted-foreground py-4">אין שיעורים קרובים</p>
           )}
         </div>
       </div>
@@ -275,25 +316,15 @@ export default function StudentOverviewTab({ student }) {
                     <th className="pb-2.5 font-medium text-xs">שעה</th>
                     <th className="pb-2.5 font-medium text-xs">שירות</th>
                     <th className="pb-2.5 font-medium text-xs">מדריך/ה</th>
-                    <th className="pb-2.5 font-medium text-xs">סטטוס</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lessonTemplates.map((template) => (
                     <tr key={template.id} className="border-b border-border/60 hover:bg-gray-50/50 transition">
                       <td className="py-3 pe-2 font-medium">{formatDayOfWeek(template.day_of_week)}</td>
-                      <td className="py-3">{template.time_of_day || '—'}</td>
-                      <td className="py-3">{template.service?.name || '—'}</td>
-                      <td className="py-3">
-                        {template.instructor?.first_name
-                          ? `${template.instructor.first_name} ${template.instructor.last_name || ''}`
-                          : '—'}
-                      </td>
-                      <td className="py-3">
-                        <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 text-xs">
-                          קבוע
-                        </Badge>
-                      </td>
+                      <td className="py-3">{formatTemplateTime(template.time_of_day)}</td>
+                      <td className="py-3">{getServiceName(template)}</td>
+                      <td className="py-3">{getInstructorFullName(template)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -312,6 +343,10 @@ export default function StudentOverviewTab({ student }) {
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center text-lg">💰</div>
             <h3 className="font-semibold text-zinc-800">סיכום כספי</h3>
+            <CircleHelp
+              className="h-4 w-4 text-muted-foreground"
+              title="נתונים אלו הם להמחשה בלבד ויופעלו בשלב הכספים"
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-center">
@@ -323,7 +358,7 @@ export default function StudentOverviewTab({ student }) {
               <p className="text-xs text-amber-600 mt-0.5">חוב פתוח</p>
             </div>
             <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-center">
-              <p className="text-xl font-bold text-blue-700">{lessonTemplates.length * 4}</p>
+              <p className="text-xl font-bold text-blue-700">{lessonInstances.length || 0}</p>
               <p className="text-xs text-blue-600 mt-0.5">שיעורים/חודש (הערכה)</p>
             </div>
             <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-center">

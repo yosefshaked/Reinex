@@ -48,7 +48,7 @@ export default function StudentDetailPage() {
   const [studentError, setStudentError] = useState('');
 
   // Edit modal
-  const [studentForEdit, setStudentForEdit] = useState(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
   const [isUpdatingStudent, setIsUpdatingStudent] = useState(false);
   const [updateError, setUpdateError] = useState('');
 
@@ -104,13 +104,13 @@ export default function StudentDetailPage() {
   const handleOpenEdit = () => {
     if (student && canEdit) {
       setUpdateError('');
-      setStudentForEdit(student);
+      setIsEditOpen(true);
     }
   };
 
   const handleCloseEdit = () => {
     if (!isUpdatingStudent) {
-      setStudentForEdit(null);
+      setIsEditOpen(false);
       setUpdateError('');
     }
   };
@@ -141,7 +141,7 @@ export default function StudentDetailPage() {
       };
 
       await authenticatedFetch(`students-list/${payload.id}`, { method: 'PUT', body, session });
-      setStudentForEdit(null);
+      setIsEditOpen(false);
       toast.success('התלמיד עודכן בהצלחה');
       await loadStudent();
     } catch (error) {
@@ -208,7 +208,6 @@ export default function StudentDetailPage() {
         isUpdating={isUpdatingStudent}
         onEdit={handleOpenEdit}
         onSuspend={loadStudent}
-        onDelete={loadStudent}
       />
 
       {/* Tabbed content */}
@@ -256,9 +255,9 @@ export default function StudentDetailPage() {
 
       {/* Edit modal */}
       <EditStudentModal
-        student={studentForEdit}
-        isOpen={Boolean(studentForEdit)}
-        isLoading={isUpdatingStudent}
+        open={isEditOpen}
+        student={student}
+        isSubmitting={isUpdatingStudent}
         error={updateError}
         onClose={handleCloseEdit}
         onSubmit={handleUpdateStudent}

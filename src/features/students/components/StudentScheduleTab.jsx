@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, BookOpen, CalendarDays } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -128,7 +128,11 @@ export default function StudentScheduleTab({ studentId }) {
           return aTime - bTime;
         });
 
-        setInstances(allInstances);
+        // Keep a stable, deduplicated list in case backend returns the same instance more than once.
+        const deduped = Array.from(
+          new Map(allInstances.map((item) => [item.id, item])).values()
+        );
+        setInstances(deduped);
       } catch (err) {
         console.error('Failed to load lesson instances', err);
         setInstanceError(err?.message || 'טעינת שיעורים נכשלה');
@@ -148,9 +152,9 @@ export default function StudentScheduleTab({ studentId }) {
         <div className="p-5">
           <div className="flex items-center gap-2 mb-4">
             <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center text-lg">📚</div>
-            <h3 className="font-semibold text-zinc-800">קורסים בהרשמה</h3>
+            <h3 className="font-semibold text-zinc-800">מפגשים קבועים</h3>
             <span className="me-auto text-sm text-muted-foreground">
-              {isLoadingTemplates ? 'טוען...' : `${templates.length} קורסים פעילים`}
+              {isLoadingTemplates ? 'טוען...' : `${templates.length} מפגשים קבועים פעילים`}
             </span>
           </div>
           {isLoadingTemplates ? (
@@ -200,7 +204,7 @@ export default function StudentScheduleTab({ studentId }) {
           ) : (
             <div className="flex flex-col items-center justify-center py-8 text-neutral-500">
               <BookOpen className="h-10 w-10 mb-2 text-neutral-300" />
-              <p className="text-sm">אין קורסים פעילים</p>
+              <p className="text-sm">אין מפגשים קבועים פעילים</p>
             </div>
           )}
         </div>

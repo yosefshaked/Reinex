@@ -9,6 +9,10 @@ import { useOrg } from '@/org/OrgContext.jsx';
 
 /** Map technical action_type strings to readable Hebrew labels */
 const ACTION_LABELS = {
+  'student.created': 'יצירת תלמיד חדש',
+  'student.updated': 'עדכון פרטי תלמיד',
+  'status.changed': 'שינוי סטטוס תלמיד',
+  'lesson.cancelled': 'ביטול שיעור',
   STUDENT_CREATED: 'יצירת תלמיד',
   STUDENT_UPDATED: 'עדכון פרטי תלמיד',
   STUDENT_DELETED: 'מחיקת תלמיד',
@@ -28,7 +32,8 @@ const ACTION_LABELS = {
 
 function getActionLabel(actionType) {
   if (!actionType) return 'פעולה';
-  return ACTION_LABELS[actionType] || actionType.replace(/_/g, ' ');
+  const raw = String(actionType);
+  return ACTION_LABELS[raw] || ACTION_LABELS[raw.toUpperCase()] || raw;
 }
 
 function getActionVariant(actionType) {
@@ -52,6 +57,34 @@ function formatTimestamp(ts) {
   } catch {
     return ts;
   }
+}
+
+function getActorDisplay(entry) {
+  const metadata = entry?.metadata && typeof entry.metadata === 'object' ? entry.metadata : {};
+
+  const preferredName =
+    metadata.user_name ||
+    metadata.performed_by_name ||
+    metadata.actor_name ||
+    entry?.user_name ||
+    entry?.performed_by_name;
+
+  if (typeof preferredName === 'string' && preferredName.trim()) {
+    return preferredName.trim();
+  }
+
+  const emailCandidate =
+    entry?.user_email ||
+    entry?.performed_by_email ||
+    metadata.user_email ||
+    metadata.performed_by_email;
+
+  if (typeof emailCandidate === 'string' && emailCandidate.trim()) {
+    const [namePart] = emailCandidate.split('@');
+    return namePart || emailCandidate;
+  }
+
+  return 'מערכת';
 }
 
 /**
@@ -234,7 +267,7 @@ export default function StudentHistoryTab({ studentId }) {
                               )}
                             </div>
                             <p className="text-sm font-medium text-foreground">
-                              {entry.user_email || 'מערכת'}
+                              {getActorDisplay(entry)}
                             </p>
                             <p className="text-xs text-neutral-500 mt-0.5">
                               {formatTimestamp(entry.performed_at)}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, MoreVertical, Pencil, AlertCircle, Trash2, Pause, Play, Copy } from 'lucide-react';
+import { ArrowRight, MoreVertical, Pencil, AlertCircle, Pause, Play, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -10,16 +10,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatStudentName } from '@/features/students/utils/name-utils.js';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -39,13 +29,11 @@ export default function StudentHeader({
   isUpdating = false,
   onEdit,
   onSuspend,
-  onDelete,
 }) {
   const navigate = useNavigate();
   const { session } = useSupabase();
   const { activeOrg } = useOrg();
   
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
   const [isSuspendingOrDeleting, setIsSuspendingOrDeleting] = useState(false);
 
@@ -55,7 +43,7 @@ export default function StudentHeader({
   const medicalFlags = Array.isArray(student?.medical_flags) ? student.medical_flags : [];
   const activeOrgId = activeOrg?.id;
 
-  const handleBack = () => navigate(-1);
+  const handleBack = () => navigate('/students-list');
 
   const handleSuspend = async () => {
     if (!activeOrgId || isSuspendingOrDeleting) return;
@@ -74,29 +62,6 @@ export default function StudentHeader({
     } catch (error) {
       console.error('Failed to update student status', error);
       toast.error(error?.message || 'שגיאה בעדכון סטטוס התלמיד');
-    } finally {
-      setIsSuspendingOrDeleting(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!activeOrgId || isSuspendingOrDeleting) return;
-    
-    setIsSuspendingOrDeleting(true);
-    setDeleteDialogOpen(false);
-    try {
-      await authenticatedFetch(`students-list/${student.id}`, {
-        method: 'PATCH',
-        body: { org_id: activeOrgId, is_active: false },
-        session,
-      });
-      
-      toast.success('התלמיד הוסר בהצלחה');
-      onDelete?.();
-      setTimeout(() => navigate(-1), 500);
-    } catch (error) {
-      console.error('Failed to delete student', error);
-      toast.error(error?.message || 'שגיאה בהסרת התלמיד');
     } finally {
       setIsSuspendingOrDeleting(false);
     }
@@ -202,20 +167,15 @@ export default function StudentHeader({
                   <span>העתק מזהה</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => {
-                  if (isSuspended) { handleSuspend(); } else { setSuspendDialogOpen(true); }
-                }} disabled={isUpdating || isSuspendingOrDeleting} className="text-amber-600 focus:text-amber-600">
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (isSuspended) { handleSuspend(); } else { setSuspendDialogOpen(true); }
+                  }}
+                  disabled={isUpdating || isSuspendingOrDeleting}
+                  className="text-amber-600 focus:text-amber-600"
+                >
                   {isSuspended ? <Play className="h-4 w-4 ms-2" /> : <Pause className="h-4 w-4 ms-2" />}
                   <span>{isSuspended ? 'ביטול השהיה' : 'השהיה'}</span>
-                  {isSuspendingOrDeleting && <Loader2 className="h-3 w-3 animate-spin ms-2" />}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setDeleteDialogOpen(true)}
-                  disabled={isUpdating || isSuspendingOrDeleting}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 className="h-4 w-4 ms-2" />
-                  <span>מחיקה</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -229,38 +189,6 @@ export default function StudentHeader({
           </Button>
         )}
       </div>
-
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent className="text-end">
-          <AlertDialogHeader>
-            <AlertDialogTitle>מחיקת תלמיד</AlertDialogTitle>
-            <AlertDialogDescription>
-              האם אתה בטוח שברצונך למחוק את{' '}
-              <strong>{formatStudentName(student)}</strong>?
-              <br />
-              לא ניתן לשחזר פעולה זו.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="space-y-2 sm:flex sm:gap-2 sm:space-y-0">
-            <AlertDialogCancel>ביטול</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              disabled={isSuspendingOrDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {isSuspendingOrDeleting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin ms-2" />
-                  מחיקה...
-                </>
-              ) : (
-                'מחיקה סופית'
-              )}
-            </AlertDialogAction>
-          </div>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Suspend Dialog with Immediately / From Date modes */}
       <SuspendStudentDialog
