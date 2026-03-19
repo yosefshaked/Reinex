@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
+import { DragDropContext, Draggable, Droppable } from 'react-beautiful-dnd';
 import {
   ArrowRight,
   Loader2,
@@ -58,9 +59,23 @@ function buildEmptySchema() {
   };
 }
 
+/** Get ordered field keys from the schema */
+function getFieldOrder(schema) {
+  const properties = schema?.properties || {};
+  const propertyKeys = Object.keys(properties);
+
+  if (Array.isArray(schema?.['x-field-order']) && schema['x-field-order'].length > 0) {
+    const orderedExisting = schema['x-field-order'].filter((key) => propertyKeys.includes(key));
+    const missing = propertyKeys.filter((key) => !orderedExisting.includes(key));
+    return [...orderedExisting, ...missing];
+  }
+
+  return propertyKeys;
+}
+
 /** Build rjsf uiSchema from our formSchema metadata */
 function buildUiSchema(formSchema) {
-  const ui = { 'ui:order': formSchema?.['x-field-order'] || [] };
+  const ui = { 'ui:order': getFieldOrder(formSchema) };
   const props = formSchema?.properties || {};
   for (const [key, fieldDef] of Object.entries(props)) {
     if (fieldDef['x-ui-widget']) {
@@ -71,14 +86,6 @@ function buildUiSchema(formSchema) {
     }
   }
   return ui;
-}
-
-/** Get ordered field keys from the schema */
-function getFieldOrder(schema) {
-  if (Array.isArray(schema?.['x-field-order']) && schema['x-field-order'].length > 0) {
-    return schema['x-field-order'];
-  }
-  return Object.keys(schema?.properties || {});
 }
 
 // ── Toolbox (add field buttons) ─────────────────────────────────
@@ -269,6 +276,58 @@ function CanvasFieldTemplate(props) {
   );
 }
 
+function CanvasObjectFieldTemplate(props) {
+  const { properties } = props;
+
+  return (
+    <Droppable droppableId="form-builder-fields">
+      {(droppableProvided) => (
+        <div
+          ref={droppableProvided.innerRef}
+          {...droppableProvided.droppableProps}
+          className="space-y-3"
+        >
+          {properties.map((property, index) => {
+            if (property.hidden) {
+              return (
+                <div key={property.name} className="hidden">
+                  {property.content}
+                </div>
+              );
+            }
+
+            return (
+              <Draggable key={property.name} draggableId={property.name} index={index}>
+                {(draggableProvided, snapshot) => (
+                  <div
+                    ref={draggableProvided.innerRef}
+                    {...draggableProvided.draggableProps}
+                    className={cn(
+                      'relative rounded-md transition-shadow',
+                      snapshot.isDragging ? 'bg-white shadow-md' : 'bg-transparent',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      aria-label="גרור שדה לשינוי סדר"
+                      className="absolute start-1 top-1 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600"
+                      {...draggableProvided.dragHandleProps}
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </button>
+                    <div className="ps-8">{property.content}</div>
+                  </div>
+                )}
+              </Draggable>
+            );
+          })}
+          {droppableProvided.placeholder}
+        </div>
+      )}
+    </Droppable>
+  );
+}
+
 // ── Main Page Component ─────────────────────────────────────────
 
 export default function FormBuilderPage() {
@@ -330,7 +389,7 @@ export default function FormBuilderPage() {
       const schemaDef = { ...fieldType.schema, title: fieldType.label };
       if (fieldType.uiWidget) schemaDef['x-ui-widget'] = fieldType.uiWidget;
       properties[key] = schemaDef;
-      const order = [...(prev['x-field-order'] || Object.keys(prev.properties)), key];
+      const order = [...getFieldOrder(prev), key];
       return { ...prev, properties, 'x-field-order': order };
     });
     setSelectedField(key);
@@ -358,10 +417,31 @@ export default function FormBuilderPage() {
       const properties = { ...prev.properties };
       delete properties[key];
       const required = (prev.required || []).filter((r) => r !== key);
-      const order = (prev['x-field-order'] || []).filter((k) => k !== key);
+      const order = getFieldOrder(prev).filter((k) => k !== key);
       return { ...prev, properties, required, 'x-field-order': order };
     });
     setSelectedField(null);
+  }, [updateSchema]);
+
+  const handleDragEnd = useCallback((result) => {
+    const { source, destination } = result;
+    if (!destination) return;
+    if (source.index === destination.index) return;
+
+    updateSchema((prev) => {
+      const currentOrder = getFieldOrder(prev);
+      if (currentOrder.length < 2) return prev;
+
+      const nextOrder = [...currentOrder];
+      const [moved] = nextOrder.splice(source.index, 1);
+      if (!moved) return prev;
+      nextOrder.splice(destination.index, 0, moved);
+
+      return {
+        ...prev,
+        'x-field-order': nextOrder,
+      };
+    });
   }, [updateSchema]);
 
   // ── Save ────────────────────────────────────────────────────
@@ -453,6 +533,7 @@ export default function FormBuilderPage() {
       </div>
 
       {/* ── Two-pane layout ── */}
+      <DragDropContext onDragEnd={handleDragEnd}>
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar (Inspector / Toolbox) — appears on start side (right in RTL) */}
         <aside className="w-72 shrink-0 border-s border-border bg-surface overflow-y-auto p-4">
@@ -490,7 +571,10 @@ export default function FormBuilderPage() {
                     schema={formSchema}
                     uiSchema={uiSchema}
                     validator={validator}
-                    templates={{ FieldTemplate: CustomFieldTemplate }}
+                    templates={{
+                      FieldTemplate: CustomFieldTemplate,
+                      ObjectFieldTemplate: CanvasObjectFieldTemplate,
+                    }}
                     // Prevent actual submissions — this is a builder preview
                     onSubmit={(e) => e.preventDefault?.()}
                     // Suppress the default submit button
@@ -508,6 +592,7 @@ export default function FormBuilderPage() {
           </div>
         </main>
       </div>
+      </DragDropContext>
     </div>
   );
 }
