@@ -320,6 +320,22 @@ async function findActiveRoutingBySubmission(controlClient, submissionId, otp) {
   return rows[0] || null;
 }
 
+async function findActiveRoutingBySubmissionId(controlClient, submissionId) {
+  const nowIso = getNowIso();
+  const { data, error } = await controlClient
+    .from('active_routing')
+    .select('id, org_id, routing_info, expires_at, created_by, metadata')
+    .eq('category', ROUTING_CATEGORY)
+    .contains('routing_info', { submission_id: submissionId })
+    .gt('expires_at', nowIso)
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  if (error) throw error;
+  const rows = Array.isArray(data) ? data : [];
+  return rows[0] || null;
+}
+
 function parseRateLimitMetadata(value) {
   const metadata = normalizeJsonObject(value, {});
   const failedAttempts = Number.isFinite(Number(metadata.failed_attempts)) ? Number(metadata.failed_attempts) : 0;
@@ -422,6 +438,116 @@ async function resolveOrganizationSenderName(controlClient, orgId, context) {
     });
     return '';
   }
+}
+
+async function resolveSubmissionDestination(tenantClient, studentId, deliveryMethod) {
+  if (deliveryMethod === 'whatsapp') {
+    return normalizePhone(await resolveStudentDestination(tenantClient, studentId, 'phone'));
+  }
+
+  return normalizeString(await resolveStudentDestination(tenantClient, studentId, 'email')).toLowerCase();
+}
+
+function buildSubmissionAccessText(submitLink, otpCode, identityNumber) {
+  return `שלום, מצורף קישור למילוי טופס: ${submitLink}. קוד האימות שלך הוא: ${otpCode}. מזהה גישה: ${identityNumber}`;
+}
+
+function buildSubmissionAccessHtml(submitLink, otpCode, identityNumber) {
+  return `<p>שלום,</p><p>מצורף קישור למילוי טופס: <a href="${submitLink}">${submitLink}</a></p><p>קוד האימות שלך הוא: <strong>${otpCode}</strong></p><p>מזהה גישה: <strong>${identityNumber}</strong></p>`;
+}
+
+async function sendSubmissionDelivery(context, {
+  controlClient,
+  env,
+  orgId,
+  req,
+  deliveryMethod,
+  destination,
+  otpCode,
+  identityNumber,
+  formName,
+}) {
+  if (deliveryMethod !== 'email') {
+    return;
+  }
+
+  const organizationSenderName = await resolveOrganizationSenderName(controlClient, orgId, context);
+  const submitLink = `${resolveSubmitBaseUrl(req, env)}/#/submit`;
+  const text = buildSubmissionAccessText(submitLink, otpCode, identityNumber);
+  const html = buildSubmissionAccessHtml(submitLink, otpCode, identityNumber);
+
+  await sendBrevoEmail(
+    {
+      to: destination,
+      subject: `קישור למילוי טופס - ${formName || 'Reinex'}`,
+      textContent: text,
+      htmlContent: html,
+      senderName: organizationSenderName || undefined,
+    },
+    env,
+    context,
+  );
+}
+
+async function createSubmissionAccessArtifacts({
+  tenantClient,
+  controlClient,
+  orgId,
+  userId,
+  submissionId,
+  studentId,
+  formId,
+  identityNumber,
+  deliveryMethod,
+  destination,
+}) {
+  const otpCode = generateOtp();
+  const expiresAt = getFutureIso(OTP_TTL_MINUTES);
+
+  const { error: otpError } = await tenantClient
+    .from('otp_challenges')
+    .insert({
+      student_id: studentId,
+      channel: deliveryMethod,
+      destination,
+      token_hash: hashOtp(otpCode),
+      status: 'pending',
+      expires_at: expiresAt,
+      metadata: {
+        submission_id: submissionId,
+        form_id: formId,
+        org_id: orgId,
+      },
+    });
+
+  if (otpError) {
+    throw new Error(`failed_to_create_otp:${otpError.message}`);
+  }
+
+  const { error: routingError } = await controlClient
+    .from('active_routing')
+    .insert({
+      org_id: orgId,
+      category: ROUTING_CATEGORY,
+      routing_info: {
+        student_identity_number: identityNumber,
+        otp_code: otpCode,
+        submission_id: submissionId,
+      },
+      expires_at: expiresAt,
+      created_by: userId,
+      metadata: {
+        student_id: studentId,
+        form_id: formId,
+        delivery_method: deliveryMethod,
+      },
+    });
+
+  if (routingError) {
+    throw new Error(`failed_to_create_active_routing:${routingError.message}`);
+  }
+
+  return { otpCode, expiresAt };
 }
 
 async function fetchStudentIdsByInstructor(tenantClient, instructorEmployeeId) {
@@ -594,12 +720,9 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
 
   let destination = '';
   try {
-    if (deliveryMethod === 'whatsapp') {
-      destination = normalizePhone(await resolveStudentDestination(tenantClient, studentId, 'phone'));
-      if (!destination) return respond(context, 400, { message: 'student_phone_missing' });
-    } else {
-      destination = normalizeString(await resolveStudentDestination(tenantClient, studentId, 'email')).toLowerCase();
-      if (!destination) return respond(context, 400, { message: 'student_email_missing' });
+    destination = await resolveSubmissionDestination(tenantClient, studentId, deliveryMethod);
+    if (!destination) {
+      return respond(context, 400, { message: deliveryMethod === 'whatsapp' ? 'student_phone_missing' : 'student_email_missing' });
     }
   } catch (error) {
     context.log?.error?.('form-submissions failed resolving destination', { message: error?.message, studentId });
@@ -638,55 +761,32 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     return respond(context, 500, { message: 'failed_to_create_submission' });
   }
 
-  const otpCode = generateOtp();
-  const expiresAt = getFutureIso(OTP_TTL_MINUTES);
-
-  const { error: otpError } = await tenantClient
-    .from('otp_challenges')
-    .insert({
-      student_id: studentId,
-      channel: deliveryMethod,
-      destination,
-      token_hash: hashOtp(otpCode),
-      status: 'pending',
-      expires_at: expiresAt,
-      metadata: {
-        submission_id: submission.id,
-        form_id: formId,
-        org_id: orgId,
-      },
-    });
-
-  if (otpError) {
-    context.log?.error?.('form-submissions failed to create otp challenge', {
-      message: otpError?.message,
+  let otpCode;
+  try {
+    ({ otpCode } = await createSubmissionAccessArtifacts({
+      tenantClient,
+      controlClient,
+      orgId,
+      userId,
       submissionId: submission.id,
-    });
-    return respond(context, 500, { message: 'failed_to_create_otp' });
-  }
+      studentId,
+      formId,
+      identityNumber,
+      deliveryMethod,
+      destination,
+    }));
+  } catch (artifactError) {
+    const message = String(artifactError?.message || '');
+    if (message.startsWith('failed_to_create_otp:')) {
+      context.log?.error?.('form-submissions failed to create otp challenge', {
+        message: message.slice('failed_to_create_otp:'.length),
+        submissionId: submission.id,
+      });
+      return respond(context, 500, { message: 'failed_to_create_otp' });
+    }
 
-  const { error: routingError } = await controlClient
-    .from('active_routing')
-    .insert({
-      org_id: orgId,
-      category: ROUTING_CATEGORY,
-      routing_info: {
-        student_identity_number: identityNumber,
-        otp_code: otpCode,
-        submission_id: submission.id,
-      },
-      expires_at: expiresAt,
-      created_by: userId,
-      metadata: {
-        student_id: studentId,
-        form_id: formId,
-        delivery_method: deliveryMethod,
-      },
-    });
-
-  if (routingError) {
     context.log?.error?.('form-submissions failed to create active routing row', {
-      message: routingError?.message,
+      message: message.startsWith('failed_to_create_active_routing:') ? message.slice('failed_to_create_active_routing:'.length) : message,
       orgId,
       submissionId: submission.id,
     });
@@ -695,22 +795,17 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
 
   if (deliveryMethod === 'email') {
     try {
-      const organizationSenderName = await resolveOrganizationSenderName(controlClient, orgId, context);
-      const submitLink = `${resolveSubmitBaseUrl(req, env)}/#/submit`;
-      const text = `שלום, מצורף קישור למילוי טופס: ${submitLink}. קוד האימות שלך הוא: ${otpCode}. מזהה גישה: ${studentId}`;
-      const html = `<p>שלום,</p><p>מצורף קישור למילוי טופס: <a href="${submitLink}">${submitLink}</a></p><p>קוד האימות שלך הוא: <strong>${otpCode}</strong></p><p>מזהה גישה: <strong>${studentId}</strong></p>`;
-
-      await sendBrevoEmail(
-        {
-          to: destination,
-          subject: `קישור למילוי טופס - ${form.name || 'Reinex'}`,
-          textContent: text,
-          htmlContent: html,
-          senderName: organizationSenderName || undefined,
-        },
+      await sendSubmissionDelivery(context, {
+        controlClient,
         env,
-        context,
-      );
+        orgId,
+        req,
+        deliveryMethod,
+        destination,
+        otpCode,
+        identityNumber,
+        formName: form.name,
+      });
     } catch (emailError) {
       context.log?.error?.('form-submissions failed sending email via smtp connector', {
         message: emailError?.message,
@@ -721,6 +816,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
 
   const responseBody = {
     submission_id: submission.id,
+    access_identifier: identityNumber,
   };
 
   if (deliveryMethod === 'whatsapp') {
@@ -746,6 +842,248 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
   });
 
   return respond(context, 201, responseBody);
+}
+
+async function resendSubmission(context, req, { controlClient, env, orgId, userId, userEmail, role }) {
+  if (!isAdminRole(role)) {
+    return respond(context, 403, { message: 'forbidden' });
+  }
+
+  const body = parseRequestBody(req);
+  const submissionId = normalizeString(body?.submission_id || body?.submissionId);
+  const deliveryMethod = normalizeDeliveryMethod(body?.delivery_method || body?.deliveryMethod);
+
+  if (!UUID_PATTERN.test(submissionId)) return respond(context, 400, { message: 'invalid_submission_id' });
+  if (!deliveryMethod) return respond(context, 400, { message: 'invalid_delivery_method' });
+
+  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
+  if (tenantError) return respond(context, tenantError.status, tenantError.body);
+
+  const { data: submission, error: submissionError } = await tenantClient
+    .from('form_submissions')
+    .select('id, form_id, student_id, metadata, otp_metadata')
+    .eq('id', submissionId)
+    .maybeSingle();
+
+  if (submissionError) {
+    context.log?.error?.('form-submissions failed loading submission for resend', {
+      message: submissionError?.message,
+      submissionId,
+    });
+    return respond(context, 500, { message: 'failed_to_load_submission' });
+  }
+  if (!submission) return respond(context, 404, { message: 'submission_not_found' });
+
+  const currentMetadata = normalizeJsonObject(submission.metadata, {});
+  if (String(currentMetadata.workflow_status || '').toLowerCase() === 'submitted') {
+    return respond(context, 409, { message: 'submission_already_completed' });
+  }
+
+  const [{ data: form, error: formError }, { data: student, error: studentError }] = await Promise.all([
+    tenantClient
+      .from('forms')
+      .select('id, name')
+      .eq('id', submission.form_id)
+      .maybeSingle(),
+    tenantClient
+      .from('students')
+      .select('id, identity_number, phone, email')
+      .eq('id', submission.student_id)
+      .maybeSingle(),
+  ]);
+
+  if (formError) {
+    context.log?.error?.('form-submissions failed loading form for resend', {
+      message: formError?.message,
+      submissionId,
+      formId: submission.form_id,
+    });
+    return respond(context, 500, { message: 'failed_to_load_form' });
+  }
+  if (!form) return respond(context, 404, { message: 'form_not_found' });
+
+  if (studentError) {
+    context.log?.error?.('form-submissions failed loading student for resend', {
+      message: studentError?.message,
+      submissionId,
+      studentId: submission.student_id,
+    });
+    return respond(context, 500, { message: 'failed_to_load_student' });
+  }
+  if (!student) return respond(context, 404, { message: 'student_not_found' });
+
+  const identityNumber = normalizeIdentityNumber(student.identity_number);
+  if (!identityNumber) {
+    return respond(context, 400, { message: 'student_identity_number_missing' });
+  }
+
+  let destination = '';
+  try {
+    destination = await resolveSubmissionDestination(tenantClient, submission.student_id, deliveryMethod);
+    if (!destination) {
+      return respond(context, 400, { message: deliveryMethod === 'whatsapp' ? 'student_phone_missing' : 'student_email_missing' });
+    }
+  } catch (destinationError) {
+    context.log?.error?.('form-submissions failed resolving destination for resend', {
+      message: destinationError?.message,
+      submissionId,
+      studentId: submission.student_id,
+    });
+    return respond(context, 500, { message: 'failed_to_resolve_destination' });
+  }
+
+  let routingRow;
+  try {
+    routingRow = await findActiveRoutingBySubmissionId(controlClient, submissionId);
+  } catch (routingError) {
+    context.log?.error?.('form-submissions failed loading active routing for resend', {
+      message: routingError?.message,
+      orgId,
+      submissionId,
+    });
+    return respond(context, 500, { message: 'failed_to_load_active_routing' });
+  }
+
+  if (!routingRow?.id) {
+    return respond(context, 409, { message: 'otp_not_active_for_resend' });
+  }
+
+  if (normalizeString(routingRow.org_id) !== orgId) {
+    return respond(context, 403, { message: 'forbidden' });
+  }
+
+  const otpCode = normalizeOtp(routingRow?.routing_info?.otp_code);
+  if (otpCode.length !== OTP_DIGITS) {
+    context.log?.error?.('form-submissions resend found invalid active routing otp', {
+      orgId,
+      submissionId,
+      routingId: routingRow.id,
+    });
+    return respond(context, 409, { message: 'otp_not_active_for_resend' });
+  }
+
+  const routedIdentityNumber = normalizeIdentityNumber(routingRow?.routing_info?.student_identity_number);
+  if (routedIdentityNumber && routedIdentityNumber !== identityNumber) {
+    context.log?.warn?.('form-submissions resend identity mismatch against active routing', {
+      orgId,
+      submissionId,
+      routingId: routingRow.id,
+    });
+    return respond(context, 409, { message: 'otp_not_active_for_resend' });
+  }
+
+  const nowIso = getNowIso();
+  const existingRoutingMetadata = normalizeJsonObject(routingRow.metadata, {});
+  const { error: updateRoutingError } = await controlClient
+    .from('active_routing')
+    .update({
+      metadata: {
+        ...existingRoutingMetadata,
+        delivery_method: deliveryMethod,
+        resent_at: nowIso,
+        resent_by: userId,
+      },
+      created_by: userId,
+    })
+    .eq('id', routingRow.id);
+
+  if (updateRoutingError) {
+    context.log?.error?.('form-submissions failed updating active routing during resend', {
+      message: updateRoutingError?.message,
+      orgId,
+      submissionId,
+      routingId: routingRow.id,
+    });
+    return respond(context, 500, { message: 'failed_to_update_active_routing' });
+  }
+
+  const existingOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
+  const priorResendCount = Number(existingOtpMetadata.resend_count || currentMetadata.resend_count || 0);
+  const nextResendCount = priorResendCount + 1;
+
+  const { error: updateSubmissionError } = await tenantClient
+    .from('form_submissions')
+    .update({
+      submitted_at: nowIso,
+      source: deliveryMethod,
+      otp_metadata: {
+        ...existingOtpMetadata,
+        delivery_method: deliveryMethod,
+        otp_status: 'pending',
+        verified_at: null,
+        consumed_at: null,
+        resent_at: nowIso,
+        resend_count: nextResendCount,
+      },
+      metadata: {
+        ...currentMetadata,
+        workflow_status: 'pending',
+        delivery_method: deliveryMethod,
+        resent_at: nowIso,
+        resent_by: userId,
+        resend_count: nextResendCount,
+      },
+    })
+    .eq('id', submissionId);
+
+  if (updateSubmissionError) {
+    context.log?.error?.('form-submissions failed updating submission during resend', {
+      message: updateSubmissionError?.message,
+      submissionId,
+    });
+    return respond(context, 500, { message: 'failed_to_update_submission' });
+  }
+
+  if (deliveryMethod === 'email') {
+    try {
+      await sendSubmissionDelivery(context, {
+        controlClient,
+        env,
+        orgId,
+        req,
+        deliveryMethod,
+        destination,
+        otpCode,
+        identityNumber,
+        formName: form.name,
+      });
+    } catch (emailError) {
+      context.log?.error?.('form-submissions failed sending resend email via smtp connector', {
+        message: emailError?.message,
+        submissionId,
+      });
+      return respond(context, 502, { message: 'failed_to_send_email' });
+    }
+  }
+
+  await logAuditEvent(controlClient, {
+    orgId,
+    userId,
+    userEmail,
+    userRole: role,
+    actionType: AUDIT_ACTIONS.FORM_SUBMISSION_RESENT,
+    actionCategory: AUDIT_CATEGORIES.FORMS,
+    resourceType: 'form_submission',
+    resourceId: submissionId,
+    details: {
+      student_id: submission.student_id,
+      form_id: submission.form_id,
+      delivery_method: deliveryMethod,
+      source: deliveryMethod,
+    },
+  });
+
+  const responseBody = {
+    submission_id: submissionId,
+    access_identifier: identityNumber,
+  };
+
+  if (deliveryMethod === 'whatsapp') {
+    responseBody.otp = otpCode;
+    responseBody.phone = destination;
+  }
+
+  return respond(context, 200, responseBody);
 }
 
 async function verifySubmissionAccess(context, req, { controlClient, env }) {
@@ -1117,7 +1455,7 @@ export default async function formSubmissions(context, req) {
     global: { headers: { 'Cache-Control': 'no-store' } },
   });
 
-  if ((method === 'POST' && !action) || (method === 'GET' && !action)) {
+  if ((method === 'POST' && (!action || action === 'resend')) || (method === 'GET' && !action)) {
     const authorization = resolveBearerAuthorization(req);
     if (!authorization?.token) return respond(context, 401, { message: 'missing_bearer' });
 
@@ -1160,6 +1498,17 @@ export default async function formSubmissions(context, req) {
         env,
         orgId,
         userId,
+        role,
+      });
+    }
+
+    if (method === 'POST' && action === 'resend') {
+      return resendSubmission(context, req, {
+        controlClient,
+        env,
+        orgId,
+        userId,
+        userEmail,
         role,
       });
     }

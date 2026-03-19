@@ -133,6 +133,7 @@ export const AUDIT_ACTIONS = {
   FORM_TEMPLATE_UPDATED: 'form_template.updated',
   FORM_TEMPLATE_DELETED: 'form_template.deleted',
   FORM_SUBMISSION_INITIATED: 'form_submission.initiated',
+  FORM_SUBMISSION_RESENT: 'form_submission.resent',
   FORM_SUBMISSION_COMPLETED: 'form_submission.completed',
 
   // Settings

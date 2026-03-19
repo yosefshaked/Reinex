@@ -25,6 +25,23 @@ CREATE INDEX IF NOT EXISTS active_routing_expires_at_idx
   ON public.active_routing (expires_at)
   WHERE expires_at IS NOT NULL;
 
+-- Ensure org-scoped routing rows reference a valid organization.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'active_routing_org_id_fkey'
+      AND conrelid = 'public.active_routing'::regclass
+  ) THEN
+    ALTER TABLE public.active_routing
+      ADD CONSTRAINT active_routing_org_id_fkey
+      FOREIGN KEY (org_id)
+      REFERENCES public.organizations(id);
+  END IF;
+END;
+$$;
+
 -- Security hardening: this table stores sensitive routing and OTP context.
 -- Access is intended only through backend code running with service_role.
 ALTER TABLE public.active_routing ENABLE ROW LEVEL SECURITY;

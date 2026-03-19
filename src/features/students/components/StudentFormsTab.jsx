@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Send, RefreshCcw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, Send, RefreshCcw, ChevronDown, ChevronUp, Mail, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -16,6 +16,25 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import SendFormDialog from '@/features/students/components/SendFormDialog.jsx';
+import { toast } from 'sonner';
+
+function normalizeWaPhone(value) {
+  return String(value || '').replace(/[^\d]/g, '');
+}
+
+function buildSubmissionLink() {
+  const origin = window?.location?.origin || '';
+  return `${origin}/#/submit`;
+}
+
+function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier) {
+  const normalizedPhone = normalizeWaPhone(phone);
+  const message = `שלום, מצורף קישור למילוי טופס: ${submitLink}. קוד האימות שלך הוא: ${otp}. מזהה גישה: ${accessIdentifier}`;
+  return {
+    normalizedPhone,
+    url: `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`,
+  };
+}
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -96,6 +115,7 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
   const [submissions, setSubmissions] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
   const [sendOpen, setSendOpen] = useState(false);
+  const [resendState, setResendState] = useState({ submissionId: '', deliveryMethod: '' });
 
   const activeOrgId = activeOrg?.id || null;
 
@@ -132,6 +152,52 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
       void loadSubmissions();
     }
   }, [canFetch, loadSubmissions]);
+
+  const handleResend = useCallback(async (submission, deliveryMethod) => {
+    if (!activeOrgId || !session || !submission?.id) return;
+
+    setResendState({ submissionId: submission.id, deliveryMethod });
+
+    try {
+      const response = await authenticatedFetch('form-submissions/resend', {
+        method: 'POST',
+        session,
+        body: {
+          org_id: activeOrgId,
+          submission_id: submission.id,
+          delivery_method: deliveryMethod,
+        },
+      });
+
+      if (deliveryMethod === 'email') {
+        toast.success('OTP נשלח מחדש במייל');
+      } else {
+        const otp = String(response?.otp || '');
+        const phone = String(response?.phone || '');
+        const accessIdentifier = String(response?.access_identifier || student?.identity_number || student?.national_id || '');
+        if (!otp || !phone) {
+          throw new Error('response_missing_whatsapp_payload');
+        }
+
+        const submitLink = buildSubmissionLink();
+        const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier);
+        window.open(wa.url, '_blank', 'noopener,noreferrer');
+        toast.success('OTP נוצר מחדש ונפתחה הודעת וואטסאפ');
+      }
+
+      await loadSubmissions();
+    } catch (resendError) {
+      console.error('Failed to resend form submission OTP', resendError);
+      const message = resendError?.message === 'submission_already_completed'
+        ? 'לא ניתן לשלוח שוב OTP לטופס שכבר הושלם'
+        : resendError?.message === 'otp_not_active_for_resend'
+          ? 'ה-OTP הקיים כבר פג תוקף. יש ליצור שליחה חדשה.'
+          : resendError?.message || 'שליחה חוזרת נכשלה';
+      toast.error(message);
+    } finally {
+      setResendState({ submissionId: '', deliveryMethod: '' });
+    }
+  }, [activeOrgId, loadSubmissions, session, student?.identity_number, student?.national_id]);
 
   const submissionsWithMeta = useMemo(() => submissions.map((submission) => ({
     ...submission,
@@ -200,6 +266,8 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
                 <TableBody>
                   {submissionsWithMeta.map((submission) => {
                     const isExpanded = expandedId === submission.id;
+                    const isSubmitted = String(submission?.metadata?.workflow_status || '').toLowerCase() === 'submitted';
+                    const isResending = resendState.submissionId === submission.id;
                     return (
                       <React.Fragment key={submission.id}>
                         <TableRow>
@@ -249,6 +317,36 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
                                         <p className="text-zinc-800 break-words whitespace-pre-wrap">{typeof value === 'string' ? value : JSON.stringify(value)}</p>
                                       </div>
                                     ))}
+                                  </div>
+                                )}
+
+                                {canEdit && !isSubmitted && (
+                                  <div className="pt-2 border-t border-border">
+                                    <p className="text-xs text-muted-foreground mb-1.5">שליחה חוזרת של OTP</p>
+                                    <div className="flex flex-wrap gap-2">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="gap-2"
+                                        disabled={isResending}
+                                        onClick={() => void handleResend(submission, 'whatsapp')}
+                                      >
+                                        {isResending && resendState.deliveryMethod === 'whatsapp' ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+                                        שלח שוב בוואטסאפ
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="gap-2"
+                                        disabled={isResending}
+                                        onClick={() => void handleResend(submission, 'email')}
+                                      >
+                                        {isResending && resendState.deliveryMethod === 'email' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                                        שלח שוב במייל
+                                      </Button>
+                                    </div>
                                   </div>
                                 )}
 
