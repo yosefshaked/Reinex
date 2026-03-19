@@ -137,7 +137,7 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg text-end">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>שלח טופס</DialogTitle>
           <DialogDescription>

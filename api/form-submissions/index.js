@@ -810,7 +810,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   const { data: submission, error: submissionError } = await tenantClient
     .from('form_submissions')
-    .select('id, student_id, form_id, metadata')
+    .select('id, student_id, form_id, metadata, otp_metadata')
     .eq('id', submissionId)
     .maybeSingle();
 
@@ -879,6 +879,27 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     if (updateOtpError) {
       context.log?.error?.('form-submissions verify failed marking otp as verified', {
         message: updateOtpError?.message,
+      });
+      return respond(context, 500, { message: 'failed_to_verify_otp' });
+    }
+
+    const currentOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
+    const { error: updateSubmissionOtpMetaError } = await tenantClient
+      .from('form_submissions')
+      .update({
+        otp_metadata: {
+          ...currentOtpMetadata,
+          otp_status: 'verified',
+          verified_at: nowIso,
+          verify_ip: ipAddress || null,
+        },
+      })
+      .eq('id', submission.id);
+
+    if (updateSubmissionOtpMetaError) {
+      context.log?.error?.('form-submissions verify failed updating submission otp_metadata', {
+        message: updateSubmissionOtpMetaError?.message,
+        submissionId: submission.id,
       });
       return respond(context, 500, { message: 'failed_to_verify_otp' });
     }
@@ -962,7 +983,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
 
   const { data: submission, error: submissionError } = await tenantClient
     .from('form_submissions')
-    .select('id, student_id, metadata')
+    .select('id, student_id, metadata, otp_metadata')
     .eq('id', submissionId)
     .maybeSingle();
 
@@ -994,6 +1015,13 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     .update({
       answers,
       submitted_at: nowIso,
+      otp_metadata: {
+        ...normalizeJsonObject(submission.otp_metadata, {}),
+        otp_status: 'verified',
+        verified_at: nowIso,
+        consumed_at: nowIso,
+        submit_ip: ipAddress || null,
+      },
       metadata: {
         ...currentMetadata,
         workflow_status: 'submitted',

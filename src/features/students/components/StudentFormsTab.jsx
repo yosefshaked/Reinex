@@ -58,6 +58,35 @@ function buildAnswerEntries(submission) {
   return Object.entries(answers).slice(0, 30);
 }
 
+function getSubmissionSchemaSnapshot(submission) {
+  const snapshot = submission?.metadata?.schema_snapshot;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return null;
+  }
+  return snapshot;
+}
+
+function resolveAnswerLabel(submission, fieldKey) {
+  const schema = getSubmissionSchemaSnapshot(submission);
+  const properties = schema?.properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+    return fieldKey;
+  }
+
+  const fieldSchema = properties[fieldKey];
+  if (!fieldSchema || typeof fieldSchema !== 'object' || Array.isArray(fieldSchema)) {
+    return fieldKey;
+  }
+
+  const title = typeof fieldSchema.title === 'string' ? fieldSchema.title.trim() : '';
+  if (title) return title;
+
+  const label = typeof fieldSchema.label === 'string' ? fieldSchema.label.trim() : '';
+  if (label) return label;
+
+  return fieldKey;
+}
+
 export default function StudentFormsTab({ studentId, student, canEdit = false }) {
   const { session } = useSupabase();
   const { activeOrg } = useOrg();
@@ -216,12 +245,39 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
                                     {submission.answersEntries.map(([key, value]) => (
                                       <div key={`${submission.id}-${key}`} className="rounded-md border bg-white p-2">
-                                        <p className="text-xs font-semibold text-zinc-600 mb-1">{key}</p>
+                                        <p className="text-xs font-semibold text-zinc-600 mb-1">{resolveAnswerLabel(submission, key)}</p>
                                         <p className="text-zinc-800 break-words whitespace-pre-wrap">{typeof value === 'string' ? value : JSON.stringify(value)}</p>
                                       </div>
                                     ))}
                                   </div>
                                 )}
+
+                                <div className="pt-2 border-t border-border">
+                                  <p className="text-xs text-muted-foreground mb-1.5">מעקב גישה (IP)</p>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
+                                    {submission.metadata?.verify_ip && (
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="font-medium text-zinc-500">IP אימות</span>
+                                        <span className="font-mono text-zinc-700">{submission.metadata.verify_ip}</span>
+                                        {submission.metadata.verify_ip_at && (
+                                          <span className="text-muted-foreground">{formatDateTime(submission.metadata.verify_ip_at)}</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    {submission.metadata?.submit_ip && (
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="font-medium text-zinc-500">IP שליחה</span>
+                                        <span className="font-mono text-zinc-700">{submission.metadata.submit_ip}</span>
+                                        {submission.metadata.submit_ip_at && (
+                                          <span className="text-muted-foreground">{formatDateTime(submission.metadata.submit_ip_at)}</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    {!submission.metadata?.verify_ip && !submission.metadata?.submit_ip && (
+                                      <span className="text-muted-foreground">לא נרשמו כתובות IP</span>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             </TableCell>
                           </TableRow>
