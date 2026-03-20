@@ -85,6 +85,22 @@ function getWorkflowStatus(submission) {
 
 function getOtpStatus(submission) {
   const otpStatus = String(submission?.otp_metadata?.otp_status || '').toLowerCase();
+
+  if (otpStatus === 'pending') {
+    const referenceIso =
+      submission?.otp_metadata?.resent_at ||
+      submission?.otp_metadata?.issued_at ||
+      submission?.metadata?.resent_at ||
+      submission?.metadata?.initiated_at ||
+      submission?.submitted_at ||
+      '';
+
+    const referenceMs = referenceIso ? new Date(referenceIso).getTime() : Number.NaN;
+    if (Number.isFinite(referenceMs) && (Date.now() - referenceMs) > (15 * 60 * 1000)) {
+      return { label: 'פג תוקף', variant: 'destructive' };
+    }
+  }
+
   if (otpStatus === 'verified') return { label: 'אומת', variant: 'secondary' };
   if (otpStatus === 'expired') return { label: 'פג תוקף', variant: 'destructive' };
   return { label: 'ממתין', variant: 'outline' };
@@ -195,6 +211,12 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
         },
       });
 
+      if (response?.can_resend === false || response?.message === 'otp_not_active_for_resend') {
+        toast.error('ה-OTP הקיים כבר פג תוקף. יש ליצור שליחה חדשה.');
+        await loadSubmissions();
+        return;
+      }
+
       if (deliveryMethod === 'email') {
         toast.success('OTP נשלח מחדש במייל');
       } else {
@@ -213,12 +235,13 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
 
       await loadSubmissions();
     } catch (resendError) {
-      console.error('Failed to resend form submission OTP', resendError);
+      const isExpectedBusinessError = resendError?.message === 'submission_already_completed';
+      if (!isExpectedBusinessError) {
+        console.error('Failed to resend form submission OTP', resendError);
+      }
       const message = resendError?.message === 'submission_already_completed'
         ? 'לא ניתן לשלוח שוב OTP לטופס שכבר הושלם'
-        : resendError?.message === 'otp_not_active_for_resend'
-          ? 'ה-OTP הקיים כבר פג תוקף. יש ליצור שליחה חדשה.'
-          : resendError?.message || 'שליחה חוזרת נכשלה';
+        : resendError?.message || 'שליחה חוזרת נכשלה';
       toast.error(message);
     } finally {
       setResendState({ submissionId: '', deliveryMethod: '' });

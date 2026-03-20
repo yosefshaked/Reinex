@@ -879,6 +879,33 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
     return respond(context, 409, { message: 'submission_already_completed' });
   }
 
+  const markSubmissionOtpExpired = async () => {
+    const nowIso = getNowIso();
+    const existingOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
+
+    const { error: markExpiredError } = await tenantClient
+      .from('form_submissions')
+      .update({
+        otp_metadata: {
+          ...existingOtpMetadata,
+          otp_status: 'expired',
+          expired_at: nowIso,
+        },
+        metadata: {
+          ...currentMetadata,
+          otp_expired_at: nowIso,
+        },
+      })
+      .eq('id', submissionId);
+
+    if (markExpiredError) {
+      context.log?.warn?.('form-submissions failed marking submission otp expired during resend', {
+        message: markExpiredError?.message,
+        submissionId,
+      });
+    }
+  };
+
   const [{ data: form, error: formError }, { data: student, error: studentError }] = await Promise.all([
     tenantClient
       .from('forms')
@@ -945,7 +972,12 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   }
 
   if (!routingRow?.id) {
-    return respond(context, 409, { message: 'otp_not_active_for_resend' });
+    await markSubmissionOtpExpired();
+    return respond(context, 200, {
+      message: 'otp_not_active_for_resend',
+      can_resend: false,
+      submission_id: submissionId,
+    });
   }
 
   if (normalizeString(routingRow.org_id) !== orgId) {
@@ -959,7 +991,12 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
       submissionId,
       routingId: routingRow.id,
     });
-    return respond(context, 409, { message: 'otp_not_active_for_resend' });
+    await markSubmissionOtpExpired();
+    return respond(context, 200, {
+      message: 'otp_not_active_for_resend',
+      can_resend: false,
+      submission_id: submissionId,
+    });
   }
 
   const routedIdentityNumber = normalizeIdentityNumber(routingRow?.routing_info?.student_identity_number);
@@ -969,7 +1006,12 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
       submissionId,
       routingId: routingRow.id,
     });
-    return respond(context, 409, { message: 'otp_not_active_for_resend' });
+    await markSubmissionOtpExpired();
+    return respond(context, 200, {
+      message: 'otp_not_active_for_resend',
+      can_resend: false,
+      submission_id: submissionId,
+    });
   }
 
   const nowIso = getNowIso();
