@@ -24,6 +24,7 @@ const RATE_LIMIT_CATEGORY = 'form_submission_rate_limit';
 const MAX_VERIFY_FAILURES = 5;
 const RATE_LIMIT_BLOCK_MINUTES = 60;
 const INVALID_VERIFY_MESSAGE = 'מזהה או קוד אימות שגויים';
+const OTP_INVALID_OR_EXPIRED_MESSAGE = 'קוד האימות שגוי או שפג תוקפו';
 
 function normalizeDeliveryMethod(value) {
   const normalized = normalizeString(value).toLowerCase();
@@ -280,6 +281,85 @@ async function findTenantOtpChallenge(tenantClient, { studentId, submissionId, o
 
   const rows = Array.isArray(data) ? data : [];
   return rows.find((row) => String(row?.metadata?.submission_id || '') === submissionId) || null;
+}
+
+async function findTenantPendingOtpChallenge(tenantClient, { studentId, submissionId, otp }) {
+  const tokenHash = hashOtp(otp);
+  const nowIso = getNowIso();
+
+  const { data, error } = await tenantClient
+    .from('otp_challenges')
+    .select('id, status, expires_at, metadata, attempts')
+    .eq('student_id', studentId)
+    .eq('token_hash', tokenHash)
+    .eq('status', 'pending')
+    .gt('expires_at', nowIso)
+    .order('expires_at', { ascending: false })
+    .limit(10);
+
+  if (error) throw error;
+
+  const rows = Array.isArray(data) ? data : [];
+  return rows.find((row) => String(row?.metadata?.submission_id || '') === submissionId) || null;
+}
+
+async function expirePendingOtps(tenantClient) {
+  const nowIso = getNowIso();
+  const { data: expiredRows, error: expireError } = await tenantClient
+    .from('otp_challenges')
+    .update({ status: 'expired' })
+    .eq('status', 'pending')
+    .lt('expires_at', nowIso)
+    .select('metadata');
+
+  if (expireError) {
+    throw expireError;
+  }
+
+  const submissionIds = Array.from(
+    new Set(
+      (Array.isArray(expiredRows) ? expiredRows : [])
+        .map((row) => normalizeString(row?.metadata?.submission_id))
+        .filter((id) => UUID_PATTERN.test(id)),
+    ),
+  );
+
+  if (!submissionIds.length) return;
+
+  const { data: submissions, error: submissionsError } = await tenantClient
+    .from('form_submissions')
+    .select('id, otp_metadata, metadata')
+    .in('id', submissionIds);
+
+  if (submissionsError) {
+    throw submissionsError;
+  }
+
+  await Promise.all((submissions || []).map(async (submission) => {
+    const currentOtpMetadata = normalizeJsonObject(submission?.otp_metadata, {});
+    if (String(currentOtpMetadata.otp_status || '').toLowerCase() === 'expired') {
+      return;
+    }
+
+    const { error: updateError } = await tenantClient
+      .from('form_submissions')
+      .update({
+        otp_metadata: {
+          ...currentOtpMetadata,
+          otp_status: 'expired',
+          expired_at: nowIso,
+        },
+        metadata: {
+          ...normalizeJsonObject(submission?.metadata, {}),
+          otp_expired_at: nowIso,
+        },
+      })
+      .eq('id', submission.id);
+
+    if (updateError) {
+      throw updateError;
+    }
+  }));
 }
 
 async function findActiveRoutingByIdentity(controlClient, identityNumber, otp) {
@@ -614,6 +694,16 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
 
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
   if (tenantError) return respond(context, tenantError.status, tenantError.body);
+
+  try {
+    await expirePendingOtps(tenantClient);
+  } catch (cleanupError) {
+    context.log?.error?.('form-submissions failed cleanup before listing submissions', {
+      message: cleanupError?.message,
+      orgId,
+    });
+    return respond(context, 500, { message: 'failed_to_load_form_submissions' });
+  }
 
   if (!canManageRoster) {
     const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(tenantClient, userId);
@@ -1188,6 +1278,17 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     return respond(context, tenantError.status, tenantError.body);
   }
 
+  try {
+    await expirePendingOtps(tenantClient);
+  } catch (cleanupError) {
+    context.log?.error?.('form-submissions verify failed cleanup before otp verification', {
+      message: cleanupError?.message,
+      orgId,
+      submissionId,
+    });
+    return respond(context, 500, { message: 'failed_to_verify_otp' });
+  }
+
   const { data: submission, error: submissionError } = await tenantClient
     .from('form_submissions')
     .select('id, student_id, form_id, metadata, otp_metadata')
@@ -1220,7 +1321,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   let otpChallenge;
   try {
-    otpChallenge = await findTenantOtpChallenge(tenantClient, {
+    otpChallenge = await findTenantPendingOtpChallenge(tenantClient, {
       studentId: submission.student_id,
       submissionId,
       otp: otpCode,
@@ -1236,53 +1337,51 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     } catch {
       // noop
     }
-    return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
+    return respond(context, 401, { message: OTP_INVALID_OR_EXPIRED_MESSAGE });
   }
 
-  if (otpChallenge.status === 'pending') {
-    const nowIso = getNowIso();
-    const { error: updateOtpError } = await tenantClient
-      .from('otp_challenges')
-      .update({
-        status: 'verified',
+  const nowIso = getNowIso();
+  const { error: updateOtpError } = await tenantClient
+    .from('otp_challenges')
+    .update({
+      status: 'verified',
+      verified_at: nowIso,
+      attempts: Number(otpChallenge.attempts || 0) + 1,
+      metadata: {
+        ...normalizeJsonObject(otpChallenge.metadata, {}),
         verified_at: nowIso,
-        attempts: Number(otpChallenge.attempts || 0) + 1,
-        metadata: {
-          ...normalizeJsonObject(otpChallenge.metadata, {}),
-          verified_at: nowIso,
-          verify_ip: ipAddress || null,
-        },
-      })
-      .eq('id', otpChallenge.id)
-      .eq('status', 'pending');
+        verify_ip: ipAddress || null,
+      },
+    })
+    .eq('id', otpChallenge.id)
+    .eq('status', 'pending');
 
-    if (updateOtpError) {
-      context.log?.error?.('form-submissions verify failed marking otp as verified', {
-        message: updateOtpError?.message,
-      });
-      return respond(context, 500, { message: 'failed_to_verify_otp' });
-    }
+  if (updateOtpError) {
+    context.log?.error?.('form-submissions verify failed marking otp as verified', {
+      message: updateOtpError?.message,
+    });
+    return respond(context, 500, { message: 'failed_to_verify_otp' });
+  }
 
-    const currentOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
-    const { error: updateSubmissionOtpMetaError } = await tenantClient
-      .from('form_submissions')
-      .update({
-        otp_metadata: {
-          ...currentOtpMetadata,
-          otp_status: 'verified',
-          verified_at: nowIso,
-          verify_ip: ipAddress || null,
-        },
-      })
-      .eq('id', submission.id);
+  const currentOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
+  const { error: updateSubmissionOtpMetaError } = await tenantClient
+    .from('form_submissions')
+    .update({
+      otp_metadata: {
+        ...currentOtpMetadata,
+        otp_status: 'verified',
+        verified_at: nowIso,
+        verify_ip: ipAddress || null,
+      },
+    })
+    .eq('id', submission.id);
 
-    if (updateSubmissionOtpMetaError) {
-      context.log?.error?.('form-submissions verify failed updating submission otp_metadata', {
-        message: updateSubmissionOtpMetaError?.message,
-        submissionId: submission.id,
-      });
-      return respond(context, 500, { message: 'failed_to_verify_otp' });
-    }
+  if (updateSubmissionOtpMetaError) {
+    context.log?.error?.('form-submissions verify failed updating submission otp_metadata', {
+      message: updateSubmissionOtpMetaError?.message,
+      submissionId: submission.id,
+    });
+    return respond(context, 500, { message: 'failed_to_verify_otp' });
   }
 
   try {

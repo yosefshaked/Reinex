@@ -86,24 +86,24 @@ function getWorkflowStatus(submission) {
 function getOtpStatus(submission) {
   const otpStatus = String(submission?.otp_metadata?.otp_status || '').toLowerCase();
 
-  if (otpStatus === 'pending') {
-    const referenceIso =
-      submission?.otp_metadata?.resent_at ||
-      submission?.otp_metadata?.issued_at ||
-      submission?.metadata?.resent_at ||
-      submission?.metadata?.initiated_at ||
-      submission?.submitted_at ||
-      '';
-
-    const referenceMs = referenceIso ? new Date(referenceIso).getTime() : Number.NaN;
-    if (Number.isFinite(referenceMs) && (Date.now() - referenceMs) > (15 * 60 * 1000)) {
-      return { label: 'פג תוקף', variant: 'destructive' };
-    }
+  if (otpStatus === 'expired') {
+    return {
+      label: 'פג תוקף',
+      className: 'border-red-200 bg-red-50 text-red-700 hover:bg-red-50',
+    };
   }
 
-  if (otpStatus === 'verified') return { label: 'אומת', variant: 'secondary' };
-  if (otpStatus === 'expired') return { label: 'פג תוקף', variant: 'destructive' };
-  return { label: 'ממתין', variant: 'outline' };
+  if (otpStatus === 'verified') {
+    return {
+      label: 'אומת',
+      className: 'border-emerald-200 bg-emerald-100 text-emerald-700 hover:bg-emerald-100',
+    };
+  }
+
+  return {
+    label: 'ממתין',
+    className: 'border-border bg-background text-foreground hover:bg-background',
+  };
 }
 
 function countAlerts(submission) {
@@ -326,7 +326,7 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
                             <Badge variant={submission.workflow.variant}>{submission.workflow.label}</Badge>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={submission.otp.variant}>{submission.otp.label}</Badge>
+                            <Badge className={submission.otp.className} variant="outline">{submission.otp.label}</Badge>
                           </TableCell>
                           <TableCell>
                             {submission.alertsCount > 0 ? (
