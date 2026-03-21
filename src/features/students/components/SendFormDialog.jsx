@@ -44,13 +44,11 @@ function buildSubmissionLink({ accessIdentifier = '', otp = '' } = {}) {
 function formatDateTime(value) {
   if (!value) return '—';
   try {
-    return new Date(value).toLocaleString('he-IL', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    return new Intl.DateTimeFormat('he-IL', {
+      timeZone: 'Asia/Jerusalem',
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(new Date(value));
   } catch {
     return String(value);
   }

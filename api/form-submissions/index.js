@@ -60,6 +60,25 @@ function normalizeJsonObject(value, fallback = {}) {
   return value;
 }
 
+function appendDeliveryMethod(value, deliveryMethod) {
+  const items = Array.isArray(value)
+    ? value
+    : typeof value === 'string' && value.trim()
+      ? [value.trim()]
+      : [];
+
+  const normalizedItems = items
+    .map((item) => normalizeDeliveryMethod(item))
+    .filter(Boolean);
+
+  const normalizedDeliveryMethod = normalizeDeliveryMethod(deliveryMethod);
+  if (normalizedDeliveryMethod) {
+    normalizedItems.push(normalizedDeliveryMethod);
+  }
+
+  return Array.from(new Set(normalizedItems));
+}
+
 function getNowIso() {
   return new Date().toISOString();
 }
@@ -316,7 +335,56 @@ async function findTenantPendingOtpChallenge(tenantClient, { studentId, submissi
   return rows.find((row) => String(row?.metadata?.submission_id || '') === submissionId) || null;
 }
 
-async function expirePendingOtps(tenantClient) {
+async function findActiveRoutingRowsBySubmission(controlClient, submissionId) {
+  const nowIso = getNowIso();
+  const { data, error } = await controlClient
+    .from('active_routing')
+    .select('id, org_id, routing_info, expires_at, created_by, metadata')
+    .eq('category', ROUTING_CATEGORY)
+    .contains('routing_info', { submission_id: submissionId })
+    .gt('expires_at', nowIso)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
+}
+
+async function findReusableSubmissionAccess(tenantClient, controlClient, { orgId, studentId, submissionId }) {
+  const routingRows = await findActiveRoutingRowsBySubmission(controlClient, submissionId);
+
+  for (const routingRow of routingRows) {
+    if (normalizeString(routingRow?.org_id) !== orgId) {
+      continue;
+    }
+
+    const otpCode = normalizeOtp(routingRow?.routing_info?.otp_code);
+    if (otpCode.length !== OTP_DIGITS) {
+      continue;
+    }
+
+    const otpChallenge = await findTenantPendingOtpChallenge(tenantClient, {
+      studentId,
+      submissionId,
+      otp: otpCode,
+    });
+
+    if (!otpChallenge) {
+      continue;
+    }
+
+    return {
+      otpCode,
+      expiresAt: normalizeString(otpChallenge.expires_at || routingRow.expires_at),
+      routingRow,
+      otpChallenge,
+    };
+  }
+
+  return null;
+}
+
+async function expirePendingOtps(tenantClient, controlClient, logger) {
   const nowIso = getNowIso();
   const { data: expiredRows, error: expireError } = await tenantClient
     .from('otp_challenges')
@@ -337,42 +405,65 @@ async function expirePendingOtps(tenantClient) {
     ),
   );
 
-  if (!submissionIds.length) return;
+  if (submissionIds.length) {
+    const { data: submissions, error: submissionsError } = await tenantClient
+      .from('form_submissions')
+      .select('id, otp_metadata, metadata')
+      .in('id', submissionIds);
 
-  const { data: submissions, error: submissionsError } = await tenantClient
-    .from('form_submissions')
-    .select('id, otp_metadata, metadata')
-    .in('id', submissionIds);
+    if (submissionsError) {
+      throw submissionsError;
+    }
 
-  if (submissionsError) {
-    throw submissionsError;
+    await Promise.all((submissions || []).map(async (submission) => {
+      const currentOtpMetadata = normalizeJsonObject(submission?.otp_metadata, {});
+      if (String(currentOtpMetadata.otp_status || '').toLowerCase() === 'expired') {
+        return;
+      }
+
+      const { error: updateError } = await tenantClient
+        .from('form_submissions')
+        .update({
+          otp_metadata: {
+            ...currentOtpMetadata,
+            otp_status: 'expired',
+            expired_at: nowIso,
+          },
+          metadata: {
+            ...normalizeJsonObject(submission?.metadata, {}),
+            otp_expired_at: nowIso,
+          },
+        })
+        .eq('id', submission.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+    }));
   }
 
-  await Promise.all((submissions || []).map(async (submission) => {
-    const currentOtpMetadata = normalizeJsonObject(submission?.otp_metadata, {});
-    if (String(currentOtpMetadata.otp_status || '').toLowerCase() === 'expired') {
-      return;
-    }
+  if (!controlClient) {
+    return;
+  }
 
-    const { error: updateError } = await tenantClient
-      .from('form_submissions')
-      .update({
-        otp_metadata: {
-          ...currentOtpMetadata,
-          otp_status: 'expired',
-          expired_at: nowIso,
-        },
-        metadata: {
-          ...normalizeJsonObject(submission?.metadata, {}),
-          otp_expired_at: nowIso,
-        },
-      })
-      .eq('id', submission.id);
+  try {
+    const { error: controlCleanupError } = await controlClient
+      .from('active_routing')
+      .delete()
+      .eq('category', ROUTING_CATEGORY)
+      .lt('expires_at', nowIso);
 
-    if (updateError) {
-      throw updateError;
+    if (controlCleanupError) {
+      throw controlCleanupError;
     }
-  }));
+  } catch (controlCleanupError) {
+    const message = controlCleanupError?.message || String(controlCleanupError || 'unknown_control_cleanup_error');
+    if (logger?.warn) {
+      logger.warn('form-submissions non-blocking control routing cleanup failed', { message });
+    } else {
+      console.warn('form-submissions non-blocking control routing cleanup failed', message);
+    }
+  }
 }
 
 async function findActiveRoutingByIdentity(controlClient, identityNumber, otp) {
@@ -530,13 +621,11 @@ async function resolveSubmissionDestination(tenantClient, studentId, deliveryMet
 function formatExpirationForDelivery(expiresAt) {
   if (!expiresAt) return '';
   try {
-    return new Date(expiresAt).toLocaleString('he-IL', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    return new Intl.DateTimeFormat('he-IL', {
+      timeZone: 'Asia/Jerusalem',
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(new Date(expiresAt));
   } catch {
     return String(expiresAt);
   }
@@ -648,6 +737,7 @@ async function createSubmissionAccessArtifacts({
         student_id: studentId,
         form_id: formId,
         delivery_method: deliveryMethod,
+        sent_via: [deliveryMethod],
       },
     });
 
@@ -724,7 +814,7 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
   if (tenantError) return respond(context, tenantError.status, tenantError.body);
 
   try {
-    await expirePendingOtps(tenantClient);
+    await expirePendingOtps(tenantClient, controlClient, context.log);
   } catch (cleanupError) {
     context.log?.error?.('form-submissions failed cleanup before listing submissions', {
       message: cleanupError?.message,
@@ -854,6 +944,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
   const submissionMetadata = {
     workflow_status: 'pending',
     delivery_method: deliveryMethod,
+    sent_via: [deliveryMethod],
     initiated_at: nowIso,
     initiated_by: userId,
   };
@@ -865,7 +956,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
       student_id: studentId,
       answers: {},
       alert_flags: {},
-      otp_metadata: { delivery_method: deliveryMethod, otp_status: 'pending' },
+      otp_metadata: { delivery_method: deliveryMethod, otp_status: 'pending', sent_via: [deliveryMethod] },
       source: deliveryMethod,
       submitted_at: nowIso,
       metadata: submissionMetadata,
@@ -922,6 +1013,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
       otp_metadata: {
         delivery_method: deliveryMethod,
         otp_status: 'pending',
+        sent_via: [deliveryMethod],
         expires_at: expiresAt,
       },
       metadata: {
@@ -964,6 +1056,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     submission_id: submission.id,
     access_identifier: identityNumber,
     expires_at: expiresAt,
+    expires_at_display: formatExpirationForDelivery(expiresAt),
   };
 
   if (deliveryMethod === 'whatsapp') {
@@ -1074,57 +1167,98 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
     return respond(context, 500, { message: 'failed_to_resolve_destination' });
   }
 
-  // Expire any existing pending OTP challenges for this submission before generating a new one.
-  const { error: expireOtpError } = await tenantClient
-    .from('otp_challenges')
-    .update({ status: 'expired' })
-    .eq('status', 'pending')
-    .contains('metadata', { submission_id: submissionId });
-
-  if (expireOtpError) {
-    context.log?.warn?.('form-submissions failed expiring old otp challenges during resend', {
-      message: expireOtpError?.message,
+  try {
+    await expirePendingOtps(tenantClient, controlClient, context.log);
+  } catch (cleanupError) {
+    context.log?.error?.('form-submissions failed cleanup before resend', {
+      message: cleanupError?.message,
+      orgId,
       submissionId,
     });
-    // Non-fatal; continue generating the new OTP.
+    return respond(context, 500, { message: 'failed_to_prepare_resend' });
   }
 
-  // Generate a new OTP and insert fresh otp_challenge + active_routing rows.
+  const existingOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
+  const existingSentVia = appendDeliveryMethod(
+    existingOtpMetadata.sent_via || currentMetadata.sent_via,
+    deliveryMethod,
+  );
+
   let otpCode;
   let expiresAt;
+  let reusedExistingOtp = false;
+
   try {
-    ({ otpCode, expiresAt } = await createSubmissionAccessArtifacts({
-      tenantClient,
-      controlClient,
+    const reusableAccess = await findReusableSubmissionAccess(tenantClient, controlClient, {
       orgId,
-      userId,
-      submissionId,
       studentId: submission.student_id,
-      formId: submission.form_id,
-      identityNumber,
-      deliveryMethod,
-      destination,
-      ttlMinutes,
-    }));
-  } catch (artifactError) {
-    const message = String(artifactError?.message || '');
-    if (message.startsWith('failed_to_create_otp:')) {
-      context.log?.error?.('form-submissions failed to create otp challenge during resend', {
-        message: message.slice('failed_to_create_otp:'.length),
-        submissionId,
-      });
-      return respond(context, 500, { message: 'failed_to_create_otp' });
+      submissionId,
+    });
+
+    if (reusableAccess) {
+      otpCode = reusableAccess.otpCode;
+      expiresAt = reusableAccess.expiresAt;
+      reusedExistingOtp = true;
     }
-    context.log?.error?.('form-submissions failed to create active routing row during resend', {
-      message: message.startsWith('failed_to_create_active_routing:') ? message.slice('failed_to_create_active_routing:'.length) : message,
+  } catch (reuseLookupError) {
+    context.log?.error?.('form-submissions failed checking reusable otp during resend', {
+      message: reuseLookupError?.message,
       orgId,
       submissionId,
     });
-    return respond(context, 500, { message: 'failed_to_create_active_routing' });
+    return respond(context, 500, { message: 'failed_to_prepare_resend' });
+  }
+
+  if (!reusedExistingOtp) {
+    const { error: expireOtpError } = await tenantClient
+      .from('otp_challenges')
+      .update({ status: 'expired' })
+      .eq('status', 'pending')
+      .contains('metadata', { submission_id: submissionId });
+
+    if (expireOtpError) {
+      context.log?.warn?.('form-submissions failed expiring old otp challenges during resend', {
+        message: expireOtpError?.message,
+        submissionId,
+      });
+    }
+  }
+
+  // Reuse the existing active OTP when possible; only rotate when no active pending OTP exists.
+  if (!reusedExistingOtp) {
+    try {
+      ({ otpCode, expiresAt } = await createSubmissionAccessArtifacts({
+        tenantClient,
+        controlClient,
+        orgId,
+        userId,
+        submissionId,
+        studentId: submission.student_id,
+        formId: submission.form_id,
+        identityNumber,
+        deliveryMethod,
+        destination,
+        ttlMinutes,
+      }));
+    } catch (artifactError) {
+      const message = String(artifactError?.message || '');
+      if (message.startsWith('failed_to_create_otp:')) {
+        context.log?.error?.('form-submissions failed to create otp challenge during resend', {
+          message: message.slice('failed_to_create_otp:'.length),
+          submissionId,
+        });
+        return respond(context, 500, { message: 'failed_to_create_otp' });
+      }
+      context.log?.error?.('form-submissions failed to create active routing row during resend', {
+        message: message.startsWith('failed_to_create_active_routing:') ? message.slice('failed_to_create_active_routing:'.length) : message,
+        orgId,
+        submissionId,
+      });
+      return respond(context, 500, { message: 'failed_to_create_active_routing' });
+    }
   }
 
   const nowIso = getNowIso();
-  const existingOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
   const priorResendCount = Number(existingOtpMetadata.resend_count || currentMetadata.resend_count || 0);
   const nextResendCount = priorResendCount + 1;
 
@@ -1137,9 +1271,10 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
         ...existingOtpMetadata,
         delivery_method: deliveryMethod,
         otp_status: 'pending',
+        sent_via: existingSentVia,
         expires_at: expiresAt,
-        verified_at: null,
-        consumed_at: null,
+        verified_at: reusedExistingOtp ? existingOtpMetadata.verified_at || null : null,
+        consumed_at: reusedExistingOtp ? existingOtpMetadata.consumed_at || null : null,
         resent_at: nowIso,
         resend_count: nextResendCount,
       },
@@ -1147,6 +1282,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
         ...currentMetadata,
         workflow_status: 'pending',
         delivery_method: deliveryMethod,
+        sent_via: existingSentVia,
         otp_expires_at: expiresAt,
         resent_at: nowIso,
         resent_by: userId,
@@ -1207,6 +1343,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
     submission_id: submissionId,
     access_identifier: identityNumber,
     expires_at: expiresAt,
+    expires_at_display: formatExpirationForDelivery(expiresAt),
   };
 
   if (deliveryMethod === 'whatsapp') {
@@ -1278,7 +1415,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
   }
 
   try {
-    await expirePendingOtps(tenantClient);
+    await expirePendingOtps(tenantClient, controlClient, context.log);
   } catch (cleanupError) {
     context.log?.error?.('form-submissions verify failed cleanup before otp verification', {
       message: cleanupError?.message,
