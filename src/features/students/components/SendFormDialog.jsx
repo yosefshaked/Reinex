@@ -41,8 +41,24 @@ function buildSubmissionLink({ accessIdentifier = '', otp = '' } = {}) {
   return `${origin}/#/submit${query ? `?${query}` : ''}`;
 }
 
-function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName) {
+function formatDateTime(value) {
+  if (!value) return '—';
+  try {
+    return new Date(value).toLocaleString('he-IL', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return String(value);
+  }
+}
+
+function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName, expiresAt) {
   const normalizedPhone = normalizeWaPhone(phone);
+  const expiryText = formatDateTime(expiresAt);
   const message = [
     'שלום,',
     '',
@@ -53,6 +69,7 @@ function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName) {
     '',
     `מזהה גישה: ${accessIdentifier}`,
     `קוד אימות: ${otp}`,
+    `תוקף הקישור עד: ${expiryText}`,
     '',
     'אפשר לפתוח את הקישור ולשלוח את הטופס.',
   ].join('\n');
@@ -140,7 +157,7 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
       });
 
       if (deliveryMethod === 'email') {
-        setResult({ mode: 'email' });
+        setResult({ mode: 'email', expiresAt: String(response?.expires_at || '') });
         toast.success('נשלח בהצלחה למייל');
         onSent?.({ mode: 'email', response });
         return;
@@ -153,12 +170,14 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
       }
 
       const accessIdentifier = String(response?.access_identifier || student?.identity_number || student?.national_id || '');
+      const expiresAt = String(response?.expires_at || '');
       const submitLink = buildSubmissionLink({ accessIdentifier, otp });
-      const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, selectedTemplate?.name || 'טופס');
+      const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, selectedTemplate?.name || 'טופס', expiresAt);
       setResult({
         mode: 'whatsapp',
         otp,
         phone: wa.normalizedPhone,
+        expiresAt,
         submitLink,
         waLink: wa.url,
       });
@@ -259,7 +278,10 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
 
           {result?.mode === 'email' && (
             <Alert>
-              <AlertDescription className="text-emerald-700">נשלח בהצלחה למייל</AlertDescription>
+              <AlertDescription className="text-emerald-700">
+                <p>נשלח בהצלחה למייל</p>
+                <p>תוקף הקישור עד: <strong>{formatDateTime(result?.expiresAt)}</strong></p>
+              </AlertDescription>
             </Alert>
           )}
 
@@ -269,6 +291,7 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
                 <AlertDescription className="space-y-1">
                   <p>קוד אימות: <strong>{result.otp}</strong></p>
                   <p>טלפון יעד: <strong>{result.phone}</strong></p>
+                  <p>תוקף הקישור עד: <strong>{formatDateTime(result?.expiresAt)}</strong></p>
                 </AlertDescription>
               </Alert>
 

@@ -514,12 +514,39 @@ async function resolveSubmissionDestination(tenantClient, studentId, deliveryMet
   return normalizeString(await resolveStudentDestination(tenantClient, studentId, 'email')).toLowerCase();
 }
 
-function buildSubmissionAccessText(submitLink, otpCode, identityNumber, formName) {
-  return `שלום, שם הטופס למילוי: ${formName || 'טופס'}. מצורף קישור למילוי טופס: ${submitLink}. קוד האימות שלך הוא: ${otpCode}. מזהה גישה: ${identityNumber}`;
+function formatExpirationForDelivery(expiresAt) {
+  if (!expiresAt) return '';
+  try {
+    return new Date(expiresAt).toLocaleString('he-IL', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return String(expiresAt);
+  }
 }
 
-function buildSubmissionAccessHtml(submitLink, otpCode, identityNumber, formName) {
-  return `<p>שלום,</p><p>שם הטופס למילוי: <strong>${formName || 'טופס'}</strong></p><p>מצורף קישור למילוי טופס: <a href="${submitLink}">${submitLink}</a></p><p>קוד האימות שלך הוא: <strong>${otpCode}</strong></p><p>מזהה גישה: <strong>${identityNumber}</strong></p>`;
+function buildSubmissionAccessText(submitLink, otpCode, identityNumber, formName, expiresAt) {
+  const expiresText = formatExpirationForDelivery(expiresAt);
+  return [
+    'שלום,',
+    `שם הטופס למילוי: ${formName || 'טופס'}`,
+    '',
+    'מצורף קישור למילוי טופס:',
+    submitLink,
+    '',
+    `מזהה גישה: ${identityNumber}`,
+    `קוד אימות: ${otpCode}`,
+    ...(expiresText ? [`תוקף הקישור עד: ${expiresText}`] : []),
+  ].join('\n');
+}
+
+function buildSubmissionAccessHtml(submitLink, otpCode, identityNumber, formName, expiresAt) {
+  const expiresText = formatExpirationForDelivery(expiresAt);
+  return `<p>שלום,</p><p>שם הטופס למילוי: <strong>${formName || 'טופס'}</strong></p><p>מצורף קישור למילוי טופס: <a href="${submitLink}">${submitLink}</a></p><p>מזהה גישה: <strong>${identityNumber}</strong></p><p>קוד אימות: <strong>${otpCode}</strong></p>${expiresText ? `<p>תוקף הקישור עד: <strong>${expiresText}</strong></p>` : ''}`;
 }
 
 async function sendSubmissionDelivery(context, {
@@ -532,6 +559,7 @@ async function sendSubmissionDelivery(context, {
   otpCode,
   identityNumber,
   formName,
+  expiresAt,
 }) {
   if (deliveryMethod !== 'email') {
     return;
@@ -539,8 +567,8 @@ async function sendSubmissionDelivery(context, {
 
   const organizationSenderName = await resolveOrganizationSenderName(controlClient, orgId, context);
   const submitLink = `${resolveSubmitBaseUrl(req, env)}/#/submit`;
-  const text = buildSubmissionAccessText(submitLink, otpCode, identityNumber, formName);
-  const html = buildSubmissionAccessHtml(submitLink, otpCode, identityNumber, formName);
+  const text = buildSubmissionAccessText(submitLink, otpCode, identityNumber, formName, expiresAt);
+  const html = buildSubmissionAccessHtml(submitLink, otpCode, identityNumber, formName, expiresAt);
 
   await sendBrevoEmail(
     {
@@ -842,8 +870,9 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
   }
 
   let otpCode;
+  let expiresAt;
   try {
-    ({ otpCode } = await createSubmissionAccessArtifacts({
+    ({ otpCode, expiresAt } = await createSubmissionAccessArtifacts({
       tenantClient,
       controlClient,
       orgId,
@@ -874,6 +903,28 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     return respond(context, 500, { message: 'failed_to_create_active_routing' });
   }
 
+  const { error: updateSubmissionExpirationError } = await tenantClient
+    .from('form_submissions')
+    .update({
+      otp_metadata: {
+        delivery_method: deliveryMethod,
+        otp_status: 'pending',
+        expires_at: expiresAt,
+      },
+      metadata: {
+        ...submissionMetadata,
+        otp_expires_at: expiresAt,
+      },
+    })
+    .eq('id', submission.id);
+
+  if (updateSubmissionExpirationError) {
+    context.log?.warn?.('form-submissions failed to persist otp expiration metadata on initiate', {
+      message: updateSubmissionExpirationError?.message,
+      submissionId: submission.id,
+    });
+  }
+
   if (deliveryMethod === 'email') {
     try {
       await sendSubmissionDelivery(context, {
@@ -886,6 +937,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
         otpCode,
         identityNumber,
         formName: form.name,
+        expiresAt,
       });
     } catch (emailError) {
       context.log?.error?.('form-submissions failed sending email via smtp connector', {
@@ -898,6 +950,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
   const responseBody = {
     submission_id: submission.id,
     access_identifier: identityNumber,
+    expires_at: expiresAt,
   };
 
   if (deliveryMethod === 'whatsapp') {
@@ -1025,8 +1078,9 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
 
   // Generate a new OTP and insert fresh otp_challenge + active_routing rows.
   let otpCode;
+  let expiresAt;
   try {
-    ({ otpCode } = await createSubmissionAccessArtifacts({
+    ({ otpCode, expiresAt } = await createSubmissionAccessArtifacts({
       tenantClient,
       controlClient,
       orgId,
@@ -1070,6 +1124,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
         ...existingOtpMetadata,
         delivery_method: deliveryMethod,
         otp_status: 'pending',
+        expires_at: expiresAt,
         verified_at: null,
         consumed_at: null,
         resent_at: nowIso,
@@ -1079,6 +1134,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
         ...currentMetadata,
         workflow_status: 'pending',
         delivery_method: deliveryMethod,
+        otp_expires_at: expiresAt,
         resent_at: nowIso,
         resent_by: userId,
         resend_count: nextResendCount,
@@ -1106,6 +1162,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
         otpCode,
         identityNumber,
         formName: form.name,
+        expiresAt,
       });
     } catch (emailError) {
       context.log?.error?.('form-submissions failed sending resend email via smtp connector', {
@@ -1136,6 +1193,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   const responseBody = {
     submission_id: submissionId,
     access_identifier: identityNumber,
+    expires_at: expiresAt,
   };
 
   if (deliveryMethod === 'whatsapp') {

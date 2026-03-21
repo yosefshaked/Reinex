@@ -42,8 +42,9 @@ function buildSubmissionLink({ accessIdentifier = '', otp = '' } = {}) {
   return `${origin}/#/submit${query ? `?${query}` : ''}`;
 }
 
-function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName) {
+function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName, expiresAt) {
   const normalizedPhone = normalizeWaPhone(phone);
+  const expiryText = formatDateTime(expiresAt);
   const message = [
     'שלום,',
     '',
@@ -54,6 +55,7 @@ function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName) {
     '',
     `מזהה גישה: ${accessIdentifier}`,
     `קוד אימות: ${otp}`,
+    `תוקף הקישור עד: ${expiryText}`,
     '',
     'אפשר לפתוח את הקישור ולשלוח את הטופס.',
   ].join('\n');
@@ -219,13 +221,14 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
       } else {
         const otp = String(response?.otp || '');
         const phone = String(response?.phone || '');
+        const expiresAt = String(response?.expires_at || '');
         const accessIdentifier = String(response?.access_identifier || student?.identity_number || student?.national_id || '');
         if (!otp || !phone) {
           throw new Error('response_missing_whatsapp_payload');
         }
 
         const submitLink = buildSubmissionLink({ accessIdentifier, otp });
-        const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, submission?.form_name || 'טופס');
+        const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, submission?.form_name || 'טופס', expiresAt);
         window.open(wa.url, '_blank', 'noopener,noreferrer');
         toast.success('OTP נוצר מחדש ונפתחה הודעת וואטסאפ');
       }
@@ -303,6 +306,7 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
                   <TableRow>
                     <TableHead>טופס</TableHead>
                     <TableHead>נשלח בתאריך</TableHead>
+                    <TableHead>תוקף עד</TableHead>
                     <TableHead>סטטוס</TableHead>
                     <TableHead>OTP</TableHead>
                     <TableHead>דגלים</TableHead>
@@ -319,6 +323,7 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
                         <TableRow>
                           <TableCell className="font-medium">{submission.form_name || 'טופס ללא שם'}</TableCell>
                           <TableCell>{formatDateTime(submission.submitted_at)}</TableCell>
+                          <TableCell>{formatDateTime(submission?.otp_metadata?.expires_at || submission?.metadata?.otp_expires_at)}</TableCell>
                           <TableCell>
                             <Badge variant={submission.workflow.variant}>{submission.workflow.label}</Badge>
                           </TableCell>
@@ -348,7 +353,7 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
 
                         {isExpanded && (
                           <TableRow>
-                            <TableCell colSpan={6}>
+                            <TableCell colSpan={7}>
                               <div className="rounded-md border bg-neutral-50 p-3 space-y-2">
                                 <p className="text-xs text-muted-foreground">
                                   תשובות ({submission.answersEntries.length})
