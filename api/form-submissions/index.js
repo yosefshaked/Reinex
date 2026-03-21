@@ -211,6 +211,19 @@ function resolveSubmitBaseUrl(req, env) {
   return 'https://reinex.app';
 }
 
+function buildSubmissionLink(req, env, { identityNumber = '', otpCode = '' } = {}) {
+  const baseUrl = resolveSubmitBaseUrl(req, env);
+  const params = new URLSearchParams();
+  const normalizedIdentityNumber = normalizeIdentityNumber(identityNumber);
+  const normalizedOtp = normalizeOtp(otpCode);
+
+  if (normalizedIdentityNumber) params.set('identity_number', normalizedIdentityNumber);
+  if (normalizedOtp) params.set('otp', normalizedOtp);
+
+  const query = params.toString();
+  return `${baseUrl}/#/submit${query ? `?${query}` : ''}`;
+}
+
 function resolveClientIp(req) {
   const headers = req?.headers || {};
   const xf = headers['x-forwarded-for'] || headers['X-Forwarded-For'] || '';
@@ -566,7 +579,7 @@ async function sendSubmissionDelivery(context, {
   }
 
   const organizationSenderName = await resolveOrganizationSenderName(controlClient, orgId, context);
-  const submitLink = `${resolveSubmitBaseUrl(req, env)}/#/submit`;
+  const submitLink = buildSubmissionLink(req, env, { identityNumber, otpCode });
   const text = buildSubmissionAccessText(submitLink, otpCode, identityNumber, formName, expiresAt);
   const html = buildSubmissionAccessHtml(submitLink, otpCode, identityNumber, formName, expiresAt);
 
