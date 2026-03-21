@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -69,6 +70,8 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [selectedFormId, setSelectedFormId] = useState('');
   const [deliveryMethod, setDeliveryMethod] = useState('whatsapp');
+  const [validityOption, setValidityOption] = useState('10080');
+  const [customDays, setCustomDays] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
 
@@ -99,6 +102,8 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
   useEffect(() => {
     if (open) {
       setResult(null);
+      setValidityOption('10080');
+      setCustomDays(1);
       void loadTemplates();
     }
   }, [open, loadTemplates]);
@@ -118,6 +123,10 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
     setResult(null);
 
     try {
+      const expiresInMinutes = validityOption === 'custom'
+        ? Math.min(20160, Math.max(15, (Number(customDays) || 1) * 24 * 60))
+        : Number(validityOption) || 10080;
+
       const response = await authenticatedFetch('form-submissions', {
         method: 'POST',
         session,
@@ -126,6 +135,7 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
           form_id: selectedFormId,
           student_id: student.id,
           delivery_method: deliveryMethod,
+          expires_in_minutes: expiresInMinutes,
         },
       });
 
@@ -208,6 +218,37 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
             </Select>
           </div>
 
+          <div className="space-y-2">
+            <Label>תוקף הקישור</Label>
+            <Select value={validityOption} onValueChange={setValidityOption} disabled={submitting}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="15">15 דקות</SelectItem>
+                <SelectItem value="60">שעה</SelectItem>
+                <SelectItem value="720">12 שעות</SelectItem>
+                <SelectItem value="1440">24 שעות</SelectItem>
+                <SelectItem value="10080">7 ימים</SelectItem>
+                <SelectItem value="custom">מותאם אישית</SelectItem>
+              </SelectContent>
+            </Select>
+            {validityOption === 'custom' && (
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  max={14}
+                  value={customDays}
+                  onChange={(e) => setCustomDays(Math.min(14, Math.max(1, Number(e.target.value) || 1)))}
+                  disabled={submitting}
+                  className="w-24"
+                />
+                <span className="text-sm text-muted-foreground">ימים (מקסימום 14)</span>
+              </div>
+            )}
+          </div>
+
           {selectedTemplate && (
             <Alert>
               <AlertDescription>
@@ -249,15 +290,17 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             סגור
           </Button>
-          <Button
-            type="button"
-            onClick={handleSend}
-            disabled={submitting || !selectedFormId || loadingTemplates || !templates.length}
-            className="gap-2"
-          >
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : deliveryMethod === 'email' ? <Mail className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
-            שלח טופס
-          </Button>
+          {!result && (
+            <Button
+              type="button"
+              onClick={handleSend}
+              disabled={submitting || !selectedFormId || loadingTemplates || !templates.length}
+              className="gap-2"
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : deliveryMethod === 'email' ? <Mail className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
+              שלח טופס
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

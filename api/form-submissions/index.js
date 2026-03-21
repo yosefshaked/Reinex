@@ -400,21 +400,7 @@ async function findActiveRoutingBySubmission(controlClient, submissionId, otp) {
   return rows[0] || null;
 }
 
-async function findActiveRoutingBySubmissionId(controlClient, submissionId) {
-  const nowIso = getNowIso();
-  const { data, error } = await controlClient
-    .from('active_routing')
-    .select('id, org_id, routing_info, expires_at, created_by, metadata')
-    .eq('category', ROUTING_CATEGORY)
-    .contains('routing_info', { submission_id: submissionId })
-    .gt('expires_at', nowIso)
-    .order('created_at', { ascending: false })
-    .limit(5);
 
-  if (error) throw error;
-  const rows = Array.isArray(data) ? data : [];
-  return rows[0] || null;
-}
 
 function parseRateLimitMetadata(value) {
   const metadata = normalizeJsonObject(value, {});
@@ -580,9 +566,10 @@ async function createSubmissionAccessArtifacts({
   identityNumber,
   deliveryMethod,
   destination,
+  ttlMinutes = OTP_TTL_MINUTES,
 }) {
   const otpCode = generateOtp();
-  const expiresAt = getFutureIso(OTP_TTL_MINUTES);
+  const expiresAt = getFutureIso(ttlMinutes);
 
   const { error: otpError } = await tenantClient
     .from('otp_challenges')
@@ -771,6 +758,9 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
   const studentId = normalizeString(body?.student_id || body?.studentId);
   const deliveryMethod = normalizeDeliveryMethod(body?.delivery_method || body?.deliveryMethod);
 
+  const rawTtl = Number(body?.expires_in_minutes ?? body?.expiresInMinutes);
+  const ttlMinutes = (Number.isFinite(rawTtl) && rawTtl > 0) ? Math.min(rawTtl, 20160) : 10080;
+
   if (!UUID_PATTERN.test(formId)) return respond(context, 400, { message: 'invalid_form_id' });
   if (!UUID_PATTERN.test(studentId)) return respond(context, 400, { message: 'invalid_student_id' });
   if (!deliveryMethod) return respond(context, 400, { message: 'invalid_delivery_method' });
@@ -864,6 +854,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
       identityNumber,
       deliveryMethod,
       destination,
+      ttlMinutes,
     }));
   } catch (artifactError) {
     const message = String(artifactError?.message || '');
@@ -943,6 +934,9 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   const submissionId = normalizeString(body?.submission_id || body?.submissionId);
   const deliveryMethod = normalizeDeliveryMethod(body?.delivery_method || body?.deliveryMethod);
 
+  const rawTtl = Number(body?.expires_in_minutes ?? body?.expiresInMinutes);
+  const ttlMinutes = (Number.isFinite(rawTtl) && rawTtl > 0) ? Math.min(rawTtl, 20160) : 10080;
+
   if (!UUID_PATTERN.test(submissionId)) return respond(context, 400, { message: 'invalid_submission_id' });
   if (!deliveryMethod) return respond(context, 400, { message: 'invalid_delivery_method' });
 
@@ -969,44 +963,9 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
     return respond(context, 409, { message: 'submission_already_completed' });
   }
 
-  const markSubmissionOtpExpired = async () => {
-    const nowIso = getNowIso();
-    const existingOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
-
-    const { error: markExpiredError } = await tenantClient
-      .from('form_submissions')
-      .update({
-        otp_metadata: {
-          ...existingOtpMetadata,
-          otp_status: 'expired',
-          expired_at: nowIso,
-        },
-        metadata: {
-          ...currentMetadata,
-          otp_expired_at: nowIso,
-        },
-      })
-      .eq('id', submissionId);
-
-    if (markExpiredError) {
-      context.log?.warn?.('form-submissions failed marking submission otp expired during resend', {
-        message: markExpiredError?.message,
-        submissionId,
-      });
-    }
-  };
-
   const [{ data: form, error: formError }, { data: student, error: studentError }] = await Promise.all([
-    tenantClient
-      .from('forms')
-      .select('id, name')
-      .eq('id', submission.form_id)
-      .maybeSingle(),
-    tenantClient
-      .from('students')
-      .select('id, identity_number, phone, email')
-      .eq('id', submission.student_id)
-      .maybeSingle(),
+    tenantClient.from('forms').select('id, name').eq('id', submission.form_id).maybeSingle(),
+    tenantClient.from('students').select('id, identity_number, phone, email').eq('id', submission.student_id).maybeSingle(),
   ]);
 
   if (formError) {
@@ -1049,86 +1008,55 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
     return respond(context, 500, { message: 'failed_to_resolve_destination' });
   }
 
-  let routingRow;
+  // Expire any existing pending OTP challenges for this submission before generating a new one.
+  const { error: expireOtpError } = await tenantClient
+    .from('otp_challenges')
+    .update({ status: 'expired' })
+    .eq('status', 'pending')
+    .contains('metadata', { submission_id: submissionId });
+
+  if (expireOtpError) {
+    context.log?.warn?.('form-submissions failed expiring old otp challenges during resend', {
+      message: expireOtpError?.message,
+      submissionId,
+    });
+    // Non-fatal; continue generating the new OTP.
+  }
+
+  // Generate a new OTP and insert fresh otp_challenge + active_routing rows.
+  let otpCode;
   try {
-    routingRow = await findActiveRoutingBySubmissionId(controlClient, submissionId);
-  } catch (routingError) {
-    context.log?.error?.('form-submissions failed loading active routing for resend', {
-      message: routingError?.message,
+    ({ otpCode } = await createSubmissionAccessArtifacts({
+      tenantClient,
+      controlClient,
+      orgId,
+      userId,
+      submissionId,
+      studentId: submission.student_id,
+      formId: submission.form_id,
+      identityNumber,
+      deliveryMethod,
+      destination,
+      ttlMinutes,
+    }));
+  } catch (artifactError) {
+    const message = String(artifactError?.message || '');
+    if (message.startsWith('failed_to_create_otp:')) {
+      context.log?.error?.('form-submissions failed to create otp challenge during resend', {
+        message: message.slice('failed_to_create_otp:'.length),
+        submissionId,
+      });
+      return respond(context, 500, { message: 'failed_to_create_otp' });
+    }
+    context.log?.error?.('form-submissions failed to create active routing row during resend', {
+      message: message.startsWith('failed_to_create_active_routing:') ? message.slice('failed_to_create_active_routing:'.length) : message,
       orgId,
       submissionId,
     });
-    return respond(context, 500, { message: 'failed_to_load_active_routing' });
-  }
-
-  if (!routingRow?.id) {
-    await markSubmissionOtpExpired();
-    return respond(context, 200, {
-      message: 'otp_not_active_for_resend',
-      can_resend: false,
-      submission_id: submissionId,
-    });
-  }
-
-  if (normalizeString(routingRow.org_id) !== orgId) {
-    return respond(context, 403, { message: 'forbidden' });
-  }
-
-  const otpCode = normalizeOtp(routingRow?.routing_info?.otp_code);
-  if (otpCode.length !== OTP_DIGITS) {
-    context.log?.error?.('form-submissions resend found invalid active routing otp', {
-      orgId,
-      submissionId,
-      routingId: routingRow.id,
-    });
-    await markSubmissionOtpExpired();
-    return respond(context, 200, {
-      message: 'otp_not_active_for_resend',
-      can_resend: false,
-      submission_id: submissionId,
-    });
-  }
-
-  const routedIdentityNumber = normalizeIdentityNumber(routingRow?.routing_info?.student_identity_number);
-  if (routedIdentityNumber && routedIdentityNumber !== identityNumber) {
-    context.log?.warn?.('form-submissions resend identity mismatch against active routing', {
-      orgId,
-      submissionId,
-      routingId: routingRow.id,
-    });
-    await markSubmissionOtpExpired();
-    return respond(context, 200, {
-      message: 'otp_not_active_for_resend',
-      can_resend: false,
-      submission_id: submissionId,
-    });
+    return respond(context, 500, { message: 'failed_to_create_active_routing' });
   }
 
   const nowIso = getNowIso();
-  const existingRoutingMetadata = normalizeJsonObject(routingRow.metadata, {});
-  const { error: updateRoutingError } = await controlClient
-    .from('active_routing')
-    .update({
-      metadata: {
-        ...existingRoutingMetadata,
-        delivery_method: deliveryMethod,
-        resent_at: nowIso,
-        resent_by: userId,
-      },
-      created_by: userId,
-    })
-    .eq('id', routingRow.id);
-
-  if (updateRoutingError) {
-    context.log?.error?.('form-submissions failed updating active routing during resend', {
-      message: updateRoutingError?.message,
-      orgId,
-      submissionId,
-      routingId: routingRow.id,
-    });
-    return respond(context, 500, { message: 'failed_to_update_active_routing' });
-  }
-
   const existingOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
   const priorResendCount = Number(existingOtpMetadata.resend_count || currentMetadata.resend_count || 0);
   const nextResendCount = priorResendCount + 1;

@@ -16,6 +16,7 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import SendFormDialog from '@/features/students/components/SendFormDialog.jsx';
+import ResendOtpDialog from '@/features/students/components/ResendOtpDialog.jsx';
 import { toast } from 'sonner';
 
 function normalizeWaPhone(value) {
@@ -158,6 +159,7 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
   const [expandedId, setExpandedId] = useState(null);
   const [sendOpen, setSendOpen] = useState(false);
   const [resendState, setResendState] = useState({ submissionId: '', deliveryMethod: '' });
+  const [resendDialog, setResendDialog] = useState({ open: false, submission: null, deliveryMethod: '' });
 
   const activeOrgId = activeOrg?.id || null;
 
@@ -195,7 +197,7 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
     }
   }, [canFetch, loadSubmissions]);
 
-  const handleResend = useCallback(async (submission, deliveryMethod) => {
+  const handleResend = useCallback(async (submission, deliveryMethod, expiresInMinutes = 10080) => {
     if (!activeOrgId || !session || !submission?.id) return;
 
     setResendState({ submissionId: submission.id, deliveryMethod });
@@ -208,14 +210,9 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
           org_id: activeOrgId,
           submission_id: submission.id,
           delivery_method: deliveryMethod,
+          expires_in_minutes: expiresInMinutes,
         },
       });
-
-      if (response?.can_resend === false || response?.message === 'otp_not_active_for_resend') {
-        toast.error('ה-OTP הקיים כבר פג תוקף. יש ליצור שליחה חדשה.');
-        await loadSubmissions();
-        return;
-      }
 
       if (deliveryMethod === 'email') {
         toast.success('OTP נשלח מחדש במייל');
@@ -379,7 +376,7 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
                                         variant="outline"
                                         className="gap-2"
                                         disabled={isResending}
-                                        onClick={() => void handleResend(submission, 'whatsapp')}
+                                        onClick={() => setResendDialog({ open: true, submission, deliveryMethod: 'whatsapp' })}
                                       >
                                         {isResending && resendState.deliveryMethod === 'whatsapp' ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
                                         שלח שוב בוואטסאפ
@@ -390,7 +387,7 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
                                         variant="outline"
                                         className="gap-2"
                                         disabled={isResending}
-                                        onClick={() => void handleResend(submission, 'email')}
+                                        onClick={() => setResendDialog({ open: true, submission, deliveryMethod: 'email' })}
                                       >
                                         {isResending && resendState.deliveryMethod === 'email' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
                                         שלח שוב במייל
@@ -445,6 +442,19 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
         student={student}
         onSent={() => {
           void loadSubmissions();
+        }}
+      />
+
+      <ResendOtpDialog
+        open={resendDialog.open}
+        onOpenChange={(open) => setResendDialog((prev) => ({ ...prev, open }))}
+        submission={resendDialog.submission}
+        deliveryMethod={resendDialog.deliveryMethod}
+        loading={Boolean(resendState.submissionId)}
+        onConfirm={(expiresInMinutes) => {
+          const { submission, deliveryMethod } = resendDialog;
+          setResendDialog({ open: false, submission: null, deliveryMethod: '' });
+          void handleResend(submission, deliveryMethod, expiresInMinutes);
         }}
       />
     </div>
