@@ -90,6 +90,7 @@ function useOrgDataResource({
   const { activeOrgId } = useOrg();
 
   const { orgId, session } = resolveOrgAndSession({ orgId: orgIdOverride, session: sessionOverride }, activeOrgId, contextSession);
+  const sessionAccessToken = session?.access_token || null;
 
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -165,7 +166,7 @@ function useOrgDataResource({
     } finally {
       setLoading(false);
     }
-  }, [enabled, orgId, resetOnDisable, queryString, session, stableMapResponse, path]);
+  }, [enabled, orgId, resetOnDisable, queryString, sessionAccessToken, stableMapResponse, path]);
 
   // Auto-fetch when dependencies change
   useEffect(() => {

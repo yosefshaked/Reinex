@@ -216,6 +216,7 @@ export function OrgProvider({ children }) {
   const [configStatus, setConfigStatus] = useState('idle');
   const [activeOrgConfig, setActiveOrgConfig] = useState(null);
   const [directoryEnabled, setDirectoryEnabled] = useState(false);
+  const sessionAccessToken = session?.access_token || null;
 
   // Stable toggles for directory fetching lifecycle
   const enableDirectory = useCallback(() => {
@@ -316,7 +317,7 @@ export function OrgProvider({ children }) {
     } finally {
       loadingRef.current = false;
     }
-  }, [authClient, session, user, resetState]);
+  }, [authClient, sessionAccessToken, user, resetState]);
 
   const loadOrgDirectory = useCallback(
     async (orgId, { signal } = {}) => {
@@ -365,7 +366,7 @@ export function OrgProvider({ children }) {
         setOrgInvites([]);
       }
     },
-    [session],
+    [sessionAccessToken],
   );
 
   const fetchOrgRuntimeConfig = useCallback(async (orgId) => {
@@ -479,11 +480,11 @@ export function OrgProvider({ children }) {
   }, [authClient, setSupabaseActiveOrg]);
 
   const determineStatus = useCallback(
-    (orgList) => {
+    (orgList, currentOrgId = activeOrgId) => {
       if (!user) return 'idle';
       if (loadingRef.current) return 'loading';
       if (!orgList.length) return 'needs-org';
-      if (!activeOrgId) return 'needs-selection';
+      if (!currentOrgId) return 'needs-selection';
       return 'ready';
     },
     [activeOrgId, user],
@@ -541,26 +542,18 @@ export function OrgProvider({ children }) {
 
         const storedOrgId = readStoredOrgId(user.id);
         const existing = orgList.find((item) => item.id === storedOrgId) || orgList[0] || null;
+        const currentOrgId = existing?.id || null;
         if (existing) {
           applyActiveOrg(existing);
           writeStoredOrgId(user?.id ?? null, existing.id);
-          if (
-            configStatus === 'success' &&
-            activeOrgConfig?.orgId === existing.id &&
-            activeOrgConfig?.supabaseUrl &&
-            activeOrgConfig?.supabaseAnonKey
-          ) {
-            await loadOrgDirectory(existing.id);
-          } else {
-            setOrgMembers([]);
-            setOrgInvites([]);
-          }
+          setOrgMembers([]);
+          setOrgInvites([]);
         } else {
           applyActiveOrg(null);
           setOrgMembers([]);
           setOrgInvites([]);
         }
-        setStatus(determineStatus(orgList));
+        setStatus(determineStatus(orgList, currentOrgId));
       } catch (initError) {
         if (!isActive) return;
         console.error('Failed to initialize organization context', initError);
@@ -581,10 +574,7 @@ export function OrgProvider({ children }) {
     determineStatus,
     resetState,
     applyActiveOrg,
-    loadOrgDirectory,
     hasRuntimeConfig,
-    configStatus,
-    activeOrgConfig,
   ]);
 
   useEffect(() => {
@@ -626,7 +616,7 @@ export function OrgProvider({ children }) {
     return () => {
       abortController.abort();
     };
-  }, [activeOrgId, session, loadOrgDirectory, hasRuntimeConfig, directoryEnabled]);
+  }, [activeOrgId, sessionAccessToken, loadOrgDirectory, hasRuntimeConfig, directoryEnabled]);
 
   useEffect(() => {
     if (!activeOrgId) return;
@@ -638,7 +628,7 @@ export function OrgProvider({ children }) {
       if (!orgId) {
         applyActiveOrg(null);
         writeStoredOrgId(user?.id ?? null, '');
-        setStatus(determineStatus(organizations));
+        setStatus(determineStatus(organizations, null));
         return;
       }
 
@@ -651,7 +641,7 @@ export function OrgProvider({ children }) {
       applyActiveOrg(next);
       writeStoredOrgId(user?.id ?? null, orgId);
       await loadOrgDirectory(orgId);
-      setStatus(determineStatus(organizations));
+      setStatus(determineStatus(organizations, orgId));
     },
     [organizations, user, determineStatus, applyActiveOrg, loadOrgDirectory],
   );
@@ -664,6 +654,7 @@ export function OrgProvider({ children }) {
       const nextActive = keepSelection && previousOrgId
         ? orgList.find((org) => org.id === previousOrgId)
         : orgList[0] || null;
+      const nextActiveOrgId = nextActive?.id || null;
 
       if (nextActive) {
         applyActiveOrg(nextActive);
@@ -674,7 +665,7 @@ export function OrgProvider({ children }) {
         setOrgMembers([]);
         setOrgInvites([]);
       }
-      setStatus(determineStatus(orgList));
+      setStatus(determineStatus(orgList, nextActiveOrgId));
     },
     [user, activeOrgId, loadMemberships, applyActiveOrg, loadOrgDirectory, determineStatus],
   );
@@ -867,7 +858,7 @@ export function OrgProvider({ children }) {
         throw new Error(message);
       }
     },
-    [requireAuthClient, user, session, refreshOrganizations, selectOrg, syncOrgSettings],
+    [requireAuthClient, user, sessionAccessToken, refreshOrganizations, selectOrg, syncOrgSettings],
   );
 
   const updateOrganizationMetadata = useCallback(

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -41,6 +42,7 @@ export default function StudentDetailPage() {
 
   const { loading: supabaseLoading, session } = useSupabase();
   const { activeOrg, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const sessionAccessToken = session?.access_token || null;
 
   // Student data state
   const [studentState, setStudentState] = useState(REQUEST_STATE.idle);
@@ -55,6 +57,7 @@ export default function StudentDetailPage() {
   const activeOrgId = activeOrg?.id || null;
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role);
   const canEdit = isAdminRole(membershipRole);
+  const isFetchingStudent = studentState === REQUEST_STATE.loading;
 
   const canFetch = Boolean(
     studentId &&
@@ -65,8 +68,9 @@ export default function StudentDetailPage() {
   );
 
   // Fetch core student data with guardian
-  const loadStudent = useCallback(async () => {
+  const loadStudent = useCallback(async ({ shouldApply = () => true } = {}) => {
     if (!canFetch) return;
+    if (!shouldApply()) return null;
 
     setStudentState(REQUEST_STATE.loading);
     setStudentError('');
@@ -77,27 +81,39 @@ export default function StudentDetailPage() {
       const endpoint = `students-list/${studentId}${params ? `?${params}` : ''}`;
 
       const match = await authenticatedFetch(endpoint, { session });
+      if (!shouldApply()) return match ?? null;
+
       if (!match || !match.id) {
         setStudent(null);
         setStudentState(REQUEST_STATE.error);
         setStudentError('התלמיד לא נמצא.');
-        return;
+        return null;
       }
 
       setStudent(match);
       setStudentState(REQUEST_STATE.idle);
+      return match;
     } catch (error) {
+      if (!shouldApply()) return null;
+
       console.error('Failed to load student', error);
       setStudent(null);
       setStudentState(REQUEST_STATE.error);
       setStudentError(error?.message || 'טעינת פרטי התלמיד נכשלה.');
+      return null;
     }
-  }, [canFetch, studentId, activeOrgId, session]);
+  }, [canFetch, studentId, activeOrgId, sessionAccessToken]);
 
   useEffect(() => {
+    let isMounted = true;
+
     if (canFetch) {
-      void loadStudent();
+      void loadStudent({ shouldApply: () => isMounted });
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [canFetch, loadStudent]);
 
   // Handle edit modal
@@ -184,12 +200,11 @@ export default function StudentDetailPage() {
     );
   }
 
-  // Loading state
-  if (studentState === REQUEST_STATE.loading) {
+  if (!canFetch || isFetchingStudent) {
     return (
-      <div className="flex items-center justify-center gap-2 py-12">
-        <Loader2 className="h-5 w-5 animate-spin" />
-        <span>טוען פרטי תלמיד...</span>
+      <div className="p-8 space-y-4">
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-64 w-full" />
       </div>
     );
   }
