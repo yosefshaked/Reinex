@@ -1565,49 +1565,6 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     return respond(context, 401, { message: OTP_INVALID_OR_EXPIRED_MESSAGE });
   }
 
-  const nowIso = getNowIso();
-  const { error: updateOtpError } = await tenantClient
-    .from('otp_challenges')
-    .update({
-      status: 'verified',
-      verified_at: nowIso,
-      metadata: {
-        ...normalizeJsonObject(otpChallenge.metadata, {}),
-        verified_at: nowIso,
-        verify_ip: ipAddress || null,
-      },
-    })
-    .eq('id', otpChallenge.id)
-    .eq('status', 'pending');
-
-  if (updateOtpError) {
-    context.log?.error?.('form-submissions verify failed marking otp as verified', {
-      message: updateOtpError?.message,
-    });
-    return respond(context, 500, { message: 'failed_to_verify_otp' });
-  }
-
-  const currentOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
-  const { error: updateSubmissionOtpMetaError } = await tenantClient
-    .from('form_submissions')
-    .update({
-      otp_metadata: {
-        ...currentOtpMetadata,
-        otp_status: 'verified',
-        verified_at: nowIso,
-        verify_ip: ipAddress || null,
-      },
-    })
-    .eq('id', submission.id);
-
-  if (updateSubmissionOtpMetaError) {
-    context.log?.error?.('form-submissions verify failed updating submission otp_metadata', {
-      message: updateSubmissionOtpMetaError?.message,
-      submissionId: submission.id,
-    });
-    return respond(context, 500, { message: 'failed_to_verify_otp' });
-  }
-
   const verifyMetadata = normalizeJsonObject(submission.metadata, {});
   const verifyNowIso = getNowIso();
   const { error: updateVerifyMetaError } = await tenantClient
@@ -1617,6 +1574,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
         ...verifyMetadata,
         verify_ip: ipAddress || null,
         verify_ip_at: verifyNowIso,
+        form_accessed_at: verifyNowIso,
       },
     })
     .eq('id', submission.id);
