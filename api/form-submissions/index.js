@@ -20,11 +20,11 @@ import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit
 const OTP_DIGITS = 6;
 const OTP_TTL_MINUTES = 15;
 const ROUTING_CATEGORY = 'form_submission';
-const RATE_LIMIT_CATEGORY = 'form_submission_rate_limit';
+const FAILED_VERIFY_WINDOW_MINUTES = 5;
 const MAX_VERIFY_FAILURES = 5;
-const RATE_LIMIT_BLOCK_MINUTES = 60;
 const INVALID_VERIFY_MESSAGE = 'מזהה או קוד אימות שגויים';
 const OTP_INVALID_OR_EXPIRED_MESSAGE = 'קוד האימות שגוי או שפג תוקפו';
+const VERIFY_LOCKDOWN_MESSAGE = 'מטעמי אבטחה, כל הקישורים הפעילים עבור תלמיד זה בוטלו עקב יותר מדי נסיונות כושלים. יש ליצור קשר עם המרפאה לקבלת קוד חדש.';
 
 function normalizeDeliveryMethod(value) {
   const normalized = normalizeString(value).toLowerCase();
@@ -301,7 +301,7 @@ async function findTenantOtpChallenge(tenantClient, { studentId, submissionId, o
 
   const { data, error } = await tenantClient
     .from('otp_challenges')
-    .select('id, status, expires_at, metadata, attempts')
+    .select('id, status, expires_at, metadata')
     .eq('student_id', studentId)
     .eq('token_hash', tokenHash)
     .in('status', ['pending', 'verified'])
@@ -321,7 +321,7 @@ async function findTenantPendingOtpChallenge(tenantClient, { studentId, submissi
 
   const { data, error } = await tenantClient
     .from('otp_challenges')
-    .select('id, status, expires_at, metadata, attempts')
+    .select('id, status, expires_at, metadata')
     .eq('student_id', studentId)
     .eq('token_hash', tokenHash)
     .eq('status', 'pending')
@@ -506,89 +506,143 @@ async function findActiveRoutingBySubmission(controlClient, submissionId, otp) {
 
 
 
-function parseRateLimitMetadata(value) {
+function parseFailedAttemptMetadata(value) {
   const metadata = normalizeJsonObject(value, {});
-  const failedAttempts = Number.isFinite(Number(metadata.failed_attempts)) ? Number(metadata.failed_attempts) : 0;
-  const blockedUntil = normalizeString(metadata.blocked_until);
-  return { metadata, failedAttempts, blockedUntil };
+  const failedAttempts = Array.isArray(metadata.failed_attempts)
+    ? metadata.failed_attempts
+      .map((item) => normalizeString(item))
+      .filter(Boolean)
+    : [];
+  return { metadata, failedAttempts };
 }
 
-function isStillBlocked(blockedUntilIso) {
-  if (!blockedUntilIso) return false;
-  const until = new Date(blockedUntilIso).getTime();
-  if (Number.isNaN(until)) return false;
-  return until > Date.now();
+function filterRecentFailedAttempts(attempts, nowMs = Date.now()) {
+  const windowStart = nowMs - (FAILED_VERIFY_WINDOW_MINUTES * 60 * 1000);
+  return attempts
+    .map((item) => normalizeString(item))
+    .filter(Boolean)
+    .filter((item) => {
+      const parsed = new Date(item).getTime();
+      return !Number.isNaN(parsed) && parsed >= windowStart && parsed <= nowMs;
+    })
+    .sort();
 }
 
-async function findRateLimitRow(controlClient, identityNumber) {
+async function findActiveRoutingRowsByIdentity(controlClient, identityNumber) {
   const nowIso = getNowIso();
   const { data, error } = await controlClient
     .from('active_routing')
-    .select('id, metadata, expires_at')
-    .eq('category', RATE_LIMIT_CATEGORY)
+    .select('id, org_id, routing_info, expires_at, metadata')
+    .eq('category', ROUTING_CATEGORY)
     .contains('routing_info', { student_identity_number: identityNumber })
     .gt('expires_at', nowIso)
-    .order('created_at', { ascending: false })
-    .limit(5);
+    .order('created_at', { ascending: false });
 
   if (error) throw error;
-  const rows = Array.isArray(data) ? data : [];
-  return rows[0] || null;
+  return Array.isArray(data) ? data : [];
 }
 
-async function registerVerifyFailure(controlClient, identityNumber, ipAddress) {
+async function appendFailedAttemptToActiveRoutes(controlClient, identityNumber, ipAddress) {
   const nowIso = getNowIso();
-  const existing = await findRateLimitRow(controlClient, identityNumber);
+  const nowMs = Date.now();
+  const routingRows = await findActiveRoutingRowsByIdentity(controlClient, identityNumber);
 
-  const existingMeta = parseRateLimitMetadata(existing?.metadata);
-  const nextAttempts = existingMeta.failedAttempts + 1;
-  const blockedUntil = nextAttempts >= MAX_VERIFY_FAILURES ? getFutureIso(RATE_LIMIT_BLOCK_MINUTES) : null;
+  if (!routingRows.length) {
+    return { routingRows: [], failedAttempts: [], shouldLockDown: false };
+  }
 
-  const metadata = {
-    failed_attempts: nextAttempts,
-    blocked_until: blockedUntil,
-    last_failed_at: nowIso,
-    ip: ipAddress || null,
-  };
+  const combinedFailedAttempts = Array.from(
+    new Set(
+      routingRows.flatMap((row) => parseFailedAttemptMetadata(row?.metadata).failedAttempts),
+    ),
+  );
+  const failedAttempts = filterRecentFailedAttempts([...combinedFailedAttempts, nowIso], nowMs);
 
-  const expiresAt = blockedUntil || getFutureIso(RATE_LIMIT_BLOCK_MINUTES);
-
-  if (existing?.id) {
+  await Promise.all(routingRows.map(async (row) => {
+    const currentMetadata = normalizeJsonObject(row?.metadata, {});
     const { error } = await controlClient
       .from('active_routing')
       .update({
-        metadata,
-        expires_at: expiresAt,
+        metadata: {
+          ...currentMetadata,
+          failed_attempts: failedAttempts,
+          last_failed_at: nowIso,
+          last_failed_ip: ipAddress || null,
+        },
       })
-      .eq('id', existing.id);
+      .eq('id', row.id);
 
     if (error) throw error;
-    return { blockedUntil };
-  }
+  }));
 
-  const { error } = await controlClient
-    .from('active_routing')
-    .insert({
-      org_id: null,
-      category: RATE_LIMIT_CATEGORY,
-      routing_info: { student_identity_number: identityNumber },
-      expires_at: expiresAt,
-      created_by: null,
-      metadata,
-    });
-
-  if (error) throw error;
-  return { blockedUntil };
+  return {
+    routingRows,
+    failedAttempts,
+    shouldLockDown: failedAttempts.length >= MAX_VERIFY_FAILURES,
+  };
 }
 
-async function clearVerifyFailures(controlClient, identityNumber) {
+async function deleteActiveRoutingRowsByIdentity(controlClient, identityNumber) {
   const { error } = await controlClient
     .from('active_routing')
     .delete()
-    .eq('category', RATE_LIMIT_CATEGORY)
+    .eq('category', ROUTING_CATEGORY)
     .contains('routing_info', { student_identity_number: identityNumber });
 
   if (error) throw error;
+}
+
+async function cancelPendingOtpsForLockdown(context, controlClient, env, routingRows) {
+  const targetsByOrg = new Map();
+
+  for (const row of routingRows || []) {
+    const orgId = normalizeString(row?.org_id);
+    const studentId = normalizeString(row?.metadata?.student_id);
+    if (!UUID_PATTERN.test(orgId) || !UUID_PATTERN.test(studentId)) {
+      continue;
+    }
+
+    const orgTargets = targetsByOrg.get(orgId) || new Set();
+    orgTargets.add(studentId);
+    targetsByOrg.set(orgId, orgTargets);
+  }
+
+  for (const [orgId, studentIds] of targetsByOrg.entries()) {
+    const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
+    if (tenantError) {
+      context.log?.warn?.('form-submissions lockdown failed resolving tenant client', {
+        orgId,
+        status: tenantError.status,
+      });
+      continue;
+    }
+
+    const { error } = await tenantClient
+      .from('otp_challenges')
+      .update({ status: 'cancelled' })
+      .in('student_id', Array.from(studentIds))
+      .eq('status', 'pending');
+
+    if (error) {
+      context.log?.warn?.('form-submissions lockdown failed cancelling tenant otp challenges', {
+        orgId,
+        message: error?.message,
+      });
+    }
+  }
+}
+
+async function processFailedVerifyAttempt(context, { controlClient, env, identityNumber, ipAddress }) {
+  const result = await appendFailedAttemptToActiveRoutes(controlClient, identityNumber, ipAddress);
+
+  if (!result.shouldLockDown) {
+    return { shouldLockDown: false };
+  }
+
+  await deleteActiveRoutingRowsByIdentity(controlClient, identityNumber);
+  await cancelPendingOtpsForLockdown(context, controlClient, env, result.routingRows);
+
+  return { shouldLockDown: true };
 }
 
 async function resolveOrganizationSenderName(controlClient, orgId, context) {
@@ -1365,19 +1419,6 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   const ipAddress = resolveClientIp(req);
 
-  let rateLimitRow;
-  try {
-    rateLimitRow = await findRateLimitRow(controlClient, identityNumber);
-  } catch (error) {
-    context.log?.error?.('form-submissions verify failed reading rate limit', { message: error?.message });
-    return respond(context, 500, { message: 'failed_to_verify_otp' });
-  }
-
-  const rateMeta = parseRateLimitMetadata(rateLimitRow?.metadata);
-  if (isStillBlocked(rateMeta.blockedUntil)) {
-    return respond(context, 429, { message: 'בוצעו יותר מדי נסיונות. נסו שוב בעוד שעה.' });
-  }
-
   let routingRow;
   try {
     routingRow = await findActiveRoutingByIdentity(controlClient, identityNumber, otpCode);
@@ -1388,9 +1429,17 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   if (!routingRow) {
     try {
-      await registerVerifyFailure(controlClient, identityNumber, ipAddress);
+      const result = await processFailedVerifyAttempt(context, {
+        controlClient,
+        env,
+        identityNumber,
+        ipAddress,
+      });
+      if (result.shouldLockDown) {
+        return respond(context, 429, { message: VERIFY_LOCKDOWN_MESSAGE });
+      }
     } catch (rateError) {
-      context.log?.warn?.('form-submissions verify failed to register rate-limit failure', {
+      context.log?.warn?.('form-submissions verify failed to process failed attempt', {
         message: rateError?.message,
       });
     }
@@ -1402,9 +1451,19 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   if (!UUID_PATTERN.test(orgId) || !UUID_PATTERN.test(submissionId)) {
     try {
-      await registerVerifyFailure(controlClient, identityNumber, ipAddress);
-    } catch {
-      // noop
+      const result = await processFailedVerifyAttempt(context, {
+        controlClient,
+        env,
+        identityNumber,
+        ipAddress,
+      });
+      if (result.shouldLockDown) {
+        return respond(context, 429, { message: VERIFY_LOCKDOWN_MESSAGE });
+      }
+    } catch (rateError) {
+      context.log?.warn?.('form-submissions verify failed to process invalid routing attempt', {
+        message: rateError?.message,
+      });
     }
     return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
   }
@@ -1433,9 +1492,19 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   if (submissionError || !submission) {
     try {
-      await registerVerifyFailure(controlClient, identityNumber, ipAddress);
-    } catch {
-      // noop
+      const result = await processFailedVerifyAttempt(context, {
+        controlClient,
+        env,
+        identityNumber,
+        ipAddress,
+      });
+      if (result.shouldLockDown) {
+        return respond(context, 429, { message: VERIFY_LOCKDOWN_MESSAGE });
+      }
+    } catch (rateError) {
+      context.log?.warn?.('form-submissions verify failed to process missing submission attempt', {
+        message: rateError?.message,
+      });
     }
     return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
   }
@@ -1448,9 +1517,19 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   if (studentError || !student || normalizeIdentityNumber(student.identity_number) !== identityNumber) {
     try {
-      await registerVerifyFailure(controlClient, identityNumber, ipAddress);
-    } catch {
-      // noop
+      const result = await processFailedVerifyAttempt(context, {
+        controlClient,
+        env,
+        identityNumber,
+        ipAddress,
+      });
+      if (result.shouldLockDown) {
+        return respond(context, 429, { message: VERIFY_LOCKDOWN_MESSAGE });
+      }
+    } catch (rateError) {
+      context.log?.warn?.('form-submissions verify failed to process student mismatch attempt', {
+        message: rateError?.message,
+      });
     }
     return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
   }
@@ -1469,9 +1548,19 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   if (!otpChallenge) {
     try {
-      await registerVerifyFailure(controlClient, identityNumber, ipAddress);
-    } catch {
-      // noop
+      const result = await processFailedVerifyAttempt(context, {
+        controlClient,
+        env,
+        identityNumber,
+        ipAddress,
+      });
+      if (result.shouldLockDown) {
+        return respond(context, 429, { message: VERIFY_LOCKDOWN_MESSAGE });
+      }
+    } catch (rateError) {
+      context.log?.warn?.('form-submissions verify failed to process invalid otp attempt', {
+        message: rateError?.message,
+      });
     }
     return respond(context, 401, { message: OTP_INVALID_OR_EXPIRED_MESSAGE });
   }
@@ -1482,7 +1571,6 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     .update({
       status: 'verified',
       verified_at: nowIso,
-      attempts: Number(otpChallenge.attempts || 0) + 1,
       metadata: {
         ...normalizeJsonObject(otpChallenge.metadata, {}),
         verified_at: nowIso,
@@ -1518,12 +1606,6 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
       submissionId: submission.id,
     });
     return respond(context, 500, { message: 'failed_to_verify_otp' });
-  }
-
-  try {
-    await clearVerifyFailures(controlClient, identityNumber);
-  } catch {
-    // non-blocking cleanup
   }
 
   const verifyMetadata = normalizeJsonObject(submission.metadata, {});
@@ -1661,7 +1743,6 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     .update({
       status: 'verified',
       verified_at: nowIso,
-      attempts: Number(otpChallenge.attempts || 0) + 1,
       metadata: {
         ...normalizeJsonObject(otpChallenge.metadata, {}),
         consumed_at: nowIso,
@@ -1681,7 +1762,9 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   const { error: cleanupError } = await controlClient
     .from('active_routing')
     .delete()
-    .eq('id', routingRow.id);
+    .eq('id', routingRow.id)
+    .eq('category', ROUTING_CATEGORY)
+    .contains('routing_info', { submission_id: submissionId });
 
   if (cleanupError) {
     context.log?.error?.('form-submissions submit failed cleaning active_routing', {
