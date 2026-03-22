@@ -49,6 +49,13 @@ function buildEventGradient(color) {
   return `linear-gradient(135deg, ${baseColor} 0%, ${baseColor}dd 100%)`;
 }
 
+function getEventDensityClass(durationMinutes) {
+  if (durationMinutes <= 20) return 'reinex-calendar-event--xs';
+  if (durationMinutes <= 30) return 'reinex-calendar-event--compact';
+  if (durationMinutes <= 45) return 'reinex-calendar-event--mid';
+  return '';
+}
+
 function renderEventContent(arg) {
   const instance = arg.event.extendedProps?.instance;
   if (!instance) {
@@ -57,12 +64,15 @@ function renderEventContent(arg) {
 
   const firstStudentName = instance.participants?.[0]?.student?.full_name || 'ללא תלמיד';
   const additionalCount = Math.max(0, (instance.participants?.length || 1) - 1);
-  const endDate = new Date(new Date(instance.datetime_start).getTime() + (instance.duration_minutes || 0) * 60000);
   const statusInfo = getInstanceStatusIcon(instance.status, instance.documentation_status);
+  const durationMinutes = Number(instance.duration_minutes) || 0;
+  const densityClass = getEventDensityClass(durationMinutes);
+  const studentLabel = `${firstStudentName}${additionalCount > 0 ? ` +${additionalCount}` : ''}`;
+  const timeLabel = arg.timeText || formatTimeDisplay(instance.datetime_start);
 
   return (
     <div
-      className="reinex-calendar-event"
+      className={`reinex-calendar-event ${densityClass}`.trim()}
       style={{ background: buildEventGradient(instance.service?.color) }}
       title={`${instance.service?.service_name || 'שיעור'} • ${firstStudentName}`}
     >
@@ -70,20 +80,15 @@ function renderEventContent(arg) {
         <span className="reinex-calendar-event__service">
           {instance.service?.service_name || 'שיעור'}
         </span>
-        <span aria-label={statusInfo.label} title={statusInfo.label}>
+        <span className="reinex-calendar-event__status" aria-label={statusInfo.label} title={statusInfo.label}>
           {statusInfo.icon}
         </span>
       </div>
 
-      <div className="reinex-calendar-event__student">
-        {firstStudentName}
-        {additionalCount > 0 ? ` +${additionalCount}` : ''}
-      </div>
+      <div className="reinex-calendar-event__student">{studentLabel}</div>
 
       <div className="reinex-calendar-event__meta">
-        <span className="reinex-calendar-event__time">
-          {formatTimeDisplay(instance.datetime_start)} - {formatTimeDisplay(endDate.toISOString())}
-        </span>
+        <span className="reinex-calendar-event__time">{timeLabel}</span>
         {instance.documentation_status === 'undocumented' && instance.status === 'completed' ? (
           <span className="reinex-calendar-event__badge">לא תועד</span>
         ) : null}
@@ -309,6 +314,8 @@ export default function ReinexFullCalendar({
           selectMirror
           select={handleDateSelect}
           allDaySlot={false}
+          eventMinHeight={12}
+          eventShortHeight={18}
           nowIndicator
           slotMinTime="06:00:00"
           slotMaxTime="22:00:00"
