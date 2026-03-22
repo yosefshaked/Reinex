@@ -2,6 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { authenticatedFetch } from '@/lib/api-client.js';
 
+function toLocalDateString(dateObj) {
+  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 /**
  * Hook for fetching calendar instances
  */
@@ -25,8 +33,8 @@ export function useCalendarInstances(date, viewMode = 'day', instructorId = null
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
       return {
-        start_date: weekStart.toISOString().split('T')[0],
-        end_date: weekEnd.toISOString().split('T')[0],
+        start_date: toLocalDateString(weekStart),
+        end_date: toLocalDateString(weekEnd),
       };
     }
     return { date: dateString };

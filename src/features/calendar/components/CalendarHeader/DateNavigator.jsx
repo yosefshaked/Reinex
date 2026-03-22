@@ -1,6 +1,14 @@
 import { ChevronRight, ChevronLeft, Calendar } from 'lucide-react';
 import { Button } from '../../../../components/ui/button';
 
+function toLocalDateString(dateObj) {
+  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 /**
  * DateNavigator component - navigate between days/weeks and select date
  */
@@ -9,18 +17,18 @@ export function DateNavigator({ currentDate, onDateChange, viewMode = 'day' }) {
     const date = new Date(currentDate);
     const days = viewMode === 'week' ? 7 : 1;
     date.setDate(date.getDate() - days);
-    onDateChange(date.toISOString().split('T')[0]);
+    onDateChange(toLocalDateString(date));
   };
 
   const handleNext = () => {
     const date = new Date(currentDate);
     const days = viewMode === 'week' ? 7 : 1;
     date.setDate(date.getDate() + days);
-    onDateChange(date.toISOString().split('T')[0]);
+    onDateChange(toLocalDateString(date));
   };
 
   const handleToday = () => {
-    onDateChange(new Date().toISOString().split('T')[0]);
+    onDateChange(toLocalDateString(new Date()));
   };
 
   const formatDate = (dateString) => {
@@ -41,7 +49,7 @@ export function DateNavigator({ currentDate, onDateChange, viewMode = 'day' }) {
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekEnd.getDate() + 6);
     
-    return `${formatDate(weekStart.toISOString().split('T')[0])} - ${formatDate(weekEnd.toISOString().split('T')[0])}`;
+    return `${formatDate(toLocalDateString(weekStart))} - ${formatDate(toLocalDateString(weekEnd))}`;
   };
 
   const displayText = viewMode === 'week' 
