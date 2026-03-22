@@ -314,6 +314,7 @@ export default function ReinexFullCalendar({
           selectMirror
           select={handleDateSelect}
           allDaySlot={false}
+          slotEventOverlap={false}
           eventMinHeight={12}
           eventShortHeight={18}
           nowIndicator
