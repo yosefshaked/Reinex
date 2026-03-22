@@ -1,15 +1,14 @@
 import { useState, useEffect } from 'react';
 import PageLayout from '@/components/ui/PageLayout';
 import { Button } from '@/components/ui/button';
-import { Plus, LayoutTemplate, Loader2, Wand2 } from 'lucide-react';
+import { Plus, LayoutTemplate, Wand2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarHeader } from '../components/CalendarHeader/CalendarHeader';
-import { CalendarGrid } from '../components/CalendarGrid/CalendarGrid';
-import { WeekCalendarGrid } from '../components/CalendarGrid/WeekCalendarGrid';
 import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
 import { AddLessonDialog } from '../components/AddLessonDialog';
 import { ManualGenerationDialog } from '../components/ManualGenerationDialog';
 import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
+import ReinexFullCalendar from '../components/ReinexFullCalendar';
 
 const CALENDAR_DATE_KEY = 'reinex_calendar_date';
 const CALENDAR_VIEW_KEY = 'reinex_calendar_view'; // 'day' or 'week'
@@ -73,6 +72,7 @@ export default function CalendarPage() {
 
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
   const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(dateForQuery, viewMode);
+  const isCalendarLoading = instructorsLoading || instancesLoading;
 
   const handleInstanceClick = (instance) => {
     setSelectedInstance(instance);
@@ -141,13 +141,6 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        {/* Loading State */}
-        {(instructorsLoading || instancesLoading) && (
-          <div className="flex items-center justify-center h-96">
-            <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
-          </div>
-        )}
-
         {/* Error State */}
         {(instructorsError || instancesError) && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
@@ -155,24 +148,18 @@ export default function CalendarPage() {
           </div>
         )}
 
-        {/* Calendar Grid */}
-        {!instructorsLoading && !instancesLoading && !instructorsError && !instancesError && (
-          viewMode === 'week' ? (
-            <WeekCalendarGrid
-              instructors={instructors}
-              instances={instances}
-              onInstanceClick={handleInstanceClick}
-              onRescheduleSuccess={handleRescheduleSuccess}
-              weekStartDate={dateForQuery}
-            />
-          ) : (
-            <CalendarGrid
-              instructors={instructors}
-              instances={instances}
-              onInstanceClick={handleInstanceClick}
-              onRescheduleSuccess={handleRescheduleSuccess}
-            />
-          )
+        {!instructorsError && !instancesError && (
+          <ReinexFullCalendar
+            currentDate={currentDate}
+            viewMode={viewMode}
+            instances={instances}
+            instructors={instructors}
+            isLoading={isCalendarLoading}
+            onDateChange={setCurrentDate}
+            onViewModeChange={setViewMode}
+            onEventClick={handleInstanceClick}
+            onEventRescheduled={handleRescheduleSuccess}
+          />
         )}
       </div>
 

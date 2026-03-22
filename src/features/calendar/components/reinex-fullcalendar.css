@@ -1,0 +1,133 @@
+.reinex-fullcalendar-shell {
+  position: relative;
+  min-height: 36rem;
+}
+
+.reinex-fullcalendar {
+  --fc-border-color: rgb(209 213 219);
+  --fc-page-bg-color: rgb(255 255 255);
+  --fc-neutral-bg-color: rgb(249 250 251);
+  --fc-list-event-hover-bg-color: rgb(243 244 246);
+  --fc-today-bg-color: rgb(239 246 255);
+}
+
+.reinex-fullcalendar .fc {
+  direction: rtl;
+  font-family: inherit;
+}
+
+.reinex-fullcalendar .fc-theme-standard .fc-scrollgrid {
+  border: 1px solid rgb(209 213 219);
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.reinex-fullcalendar .fc .fc-datagrid-header,
+.reinex-fullcalendar .fc .fc-timeline-header,
+.reinex-fullcalendar .fc .fc-datagrid-cell-frame,
+.reinex-fullcalendar .fc .fc-timeline-slot-frame {
+  background-color: rgb(249 250 251);
+}
+
+.reinex-fullcalendar .fc .fc-datagrid-cell-cushion,
+.reinex-fullcalendar .fc .fc-timeline-slot-cushion {
+  padding: 0.625rem 0.5rem;
+}
+
+.reinex-fullcalendar .fc .fc-datagrid-cell-main {
+  font-weight: 600;
+  color: rgb(17 24 39);
+}
+
+.reinex-fullcalendar .fc .fc-timeline-lane-frame {
+  min-height: 5rem;
+}
+
+.reinex-fullcalendar .fc .fc-event,
+.reinex-fullcalendar .fc .fc-timeline-event {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.reinex-fullcalendar .fc .fc-event-main {
+  padding: 0;
+  height: 100%;
+}
+
+.reinex-calendar-event {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.375rem;
+  height: 100%;
+  min-height: 4.5rem;
+  border-radius: 0.875rem;
+  padding: 0.625rem 0.75rem;
+  color: rgb(255 255 255);
+  box-shadow: 0 10px 24px -16px rgb(15 23 42 / 0.75);
+  overflow: hidden;
+}
+
+.reinex-calendar-event__top,
+.reinex-calendar-event__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.reinex-calendar-event__service,
+.reinex-calendar-event__student {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reinex-calendar-event__service {
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.reinex-calendar-event__student {
+  font-size: 0.8125rem;
+  opacity: 0.95;
+}
+
+.reinex-calendar-event__time,
+.reinex-calendar-event__badge {
+  font-size: 0.75rem;
+}
+
+.reinex-calendar-event__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.16);
+  padding: 0.125rem 0.5rem;
+}
+
+.reinex-fullcalendar-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20rem;
+  border: 1px dashed rgb(209 213 219);
+  border-radius: 1rem;
+  background: rgb(255 255 255);
+  color: rgb(107 114 128);
+}
+
+.reinex-fullcalendar-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 0.68);
+  backdrop-filter: blur(2px);
+  z-index: 20;
+}

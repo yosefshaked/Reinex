@@ -9,6 +9,7 @@ import { Badge } from '../../../components/ui/badge';
 import { useOrg } from '@/org/OrgContext';
 import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
+import { authenticatedFetch } from '@/lib/api-client.js';
 import { Pencil, X, Check, XCircle, Loader2, AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 
@@ -72,14 +73,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
     try {
       const datetime_start = `${formData.date}T${formData.time}:00`;
-      
-      const response = await fetch('/api/calendar/instances', {
+
+      await authenticatedFetch('calendar/instances', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify({
+        body: {
           id: instance.id,
           org_id: org.id,
           datetime_start,
@@ -88,13 +85,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           service_id: formData.service_id,
           status: formData.status,
           cancellation_reason: formData.cancellation_reason || null,
-        }),
+        },
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to update lesson');
-      }
 
       setIsEditMode(false);
       onUpdate?.();
@@ -115,24 +107,15 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setError(null);
 
     try {
-      const response = await fetch('/api/calendar/attendance', {
+      await authenticatedFetch('calendar/attendance', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify({
+        body: {
           org_id: org.id,
           instance_id: instance.id,
           participant_id: participantId,
           participant_status: status,
-        }),
+        },
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to mark attendance');
-      }
 
       onUpdate?.();
     } catch (err) {
@@ -152,24 +135,15 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setError(null);
 
     try {
-      const response = await fetch('/api/calendar/instances', {
+      await authenticatedFetch('calendar/instances', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify({
+        body: {
           id: instance.id,
           org_id: org.id,
           status: 'cancelled',
           cancellation_reason: reason,
-        }),
+        },
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to cancel lesson');
-      }
 
       onUpdate?.();
       onClose();
@@ -190,23 +164,14 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setError(null);
 
     try {
-      const response = await fetch('/api/calendar/instances', {
+      await authenticatedFetch('calendar/instances', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify({
+        body: {
           id: instance.id,
           org_id: org.id,
           status,
-        }),
+        },
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to update status');
-      }
 
       onUpdate?.();
       onClose();
