@@ -12,6 +12,14 @@ import { formatTimeDisplay, getInstanceStatusIcon } from '../utils/timeGrid';
 import { mapInstancesToEvents, mapInstructorsToResources } from '../utils/fullcalendar-adapter.js';
 import './reinex-fullcalendar.css';
 
+function toLocalDateString(dateObj) {
+  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function resolveCalendarView(viewMode) {
   return viewMode === 'week' ? 'resourceTimelineWeek' : 'resourceTimelineDay';
 }
@@ -85,6 +93,7 @@ export default function ReinexFullCalendar({
   onEventRescheduled,
 }) {
   const calendarRef = useRef(null);
+  const isProgrammaticMoveRef = useRef(false);
   const runtimeConfig = useRuntimeConfig();
   const { activeOrgId } = useOrg();
   const [updatingEventId, setUpdatingEventId] = useState(null);
@@ -106,12 +115,22 @@ export default function ReinexFullCalendar({
       return;
     }
 
+    isProgrammaticMoveRef.current = true;
+
     if (api.view.type !== fullCalendarView) {
       api.changeView(fullCalendarView, currentDate);
-      return;
+    } else {
+      api.gotoDate(currentDate);
     }
 
-    api.gotoDate(currentDate);
+    const releaseTimer = window.setTimeout(() => {
+      isProgrammaticMoveRef.current = false;
+    }, 50);
+
+    return () => {
+      window.clearTimeout(releaseTimer);
+      isProgrammaticMoveRef.current = false;
+    };
   }, [currentDate, fullCalendarView]);
 
   const handleDatesSet = useCallback((info) => {
@@ -122,11 +141,9 @@ export default function ReinexFullCalendar({
 
     if (typeof onDateChange === 'function' && nextViewMode === 'day') {
       const activeDate = info.view.currentStart || info.start;
-      if (activeDate instanceof Date && !Number.isNaN(activeDate.getTime())) {
-        const nextDate = activeDate.toISOString().split('T')[0];
-        if (nextDate !== currentDate) {
-          onDateChange(nextDate);
-        }
+      const nextDate = toLocalDateString(activeDate);
+      if (!isProgrammaticMoveRef.current && nextDate && nextDate !== currentDate) {
+        onDateChange(nextDate);
       }
     }
   }, [currentDate, onDateChange, onViewModeChange, viewMode]);
@@ -218,7 +235,7 @@ export default function ReinexFullCalendar({
           plugins={[resourceTimelinePlugin, interactionPlugin]}
           initialView={fullCalendarView}
           initialDate={currentDate}
-          schedulerLicenseKey={schedulerLicenseKey}
+          schedulerLicenseKey={schedulerLicenseKey || 'GPL-v3'}
           locale={heLocale}
           direction="rtl"
           headerToolbar={false}

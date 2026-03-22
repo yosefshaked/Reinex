@@ -13,14 +13,22 @@ import ReinexFullCalendar from '../components/ReinexFullCalendar';
 const CALENDAR_DATE_KEY = 'reinex_calendar_date';
 const CALENDAR_VIEW_KEY = 'reinex_calendar_view'; // 'day' or 'week'
 
+function toLocalDateString(dateObj) {
+  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export default function CalendarPage() {
   const [currentDate, setCurrentDateState] = useState(() => {
     // Try to get saved date from sessionStorage, fall back to today
     if (typeof window !== 'undefined') {
       const saved = sessionStorage.getItem(CALENDAR_DATE_KEY);
-      return saved || new Date().toISOString().split('T')[0];
+      return saved || toLocalDateString(new Date());
     }
-    return new Date().toISOString().split('T')[0];
+    return toLocalDateString(new Date());
   });
 
   const [viewMode, setViewModeState] = useState(() => {
@@ -64,8 +72,8 @@ export default function CalendarPage() {
     const day = date.getDay();
     // Sunday is 0, we want Monday as start (day 1)
     const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-    const weekStart = new Date(date.setDate(diff));
-    return weekStart.toISOString().split('T')[0];
+    date.setDate(diff);
+    return toLocalDateString(date);
   };
 
   const dateForQuery = viewMode === 'week' ? getWeekStartDate(currentDate) : currentDate;
