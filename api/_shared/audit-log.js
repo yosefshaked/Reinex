@@ -105,6 +105,9 @@ export const AUDIT_ACTIONS = {
   SESSION_CREATED: 'session.created',
   SESSION_RESOLVED: 'session.resolved',
   SESSION_DELETED: 'session.deleted',
+  CALENDAR_INSTANCE_CREATED: 'calendar.instance_created',
+  CALENDAR_INSTANCE_UPDATED: 'calendar.instance_updated',
+  CALENDAR_INSTANCE_CANCELLED: 'calendar.instance_cancelled',
 
   // Calendar Templates
   TEMPLATE_CREATED: 'template.created',

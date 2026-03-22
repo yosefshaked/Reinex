@@ -13,11 +13,47 @@ import { ComboBoxField } from '@/components/ui/forms-ui';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 
+function toLocalDateString(dateObj) {
+  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function toLocalTimeString(dateObj) {
+  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
+  const hours = String(dateObj.getHours()).padStart(2, '0');
+  const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+function buildInitialFormData(defaultDate, defaultSelection) {
+  const baseDate = defaultSelection?.start instanceof Date
+    ? toLocalDateString(defaultSelection.start)
+    : (defaultDate || toLocalDateString(new Date()));
+  const baseTime = defaultSelection?.start instanceof Date
+    ? toLocalTimeString(defaultSelection.start)
+    : '09:00';
+  const durationMinutes = defaultSelection?.start instanceof Date && defaultSelection?.end instanceof Date
+    ? Math.max(15, Math.round((defaultSelection.end.getTime() - defaultSelection.start.getTime()) / 60000))
+    : 60;
+
+  return {
+    student_ids: [],
+    instructor_employee_id: defaultSelection?.resourceId ? String(defaultSelection.resourceId) : '',
+    service_id: '',
+    date: baseDate,
+    time: baseTime,
+    duration_minutes: durationMinutes,
+  };
+}
+
 /**
  * AddLessonDialog - Create new lesson instance
  * Flow: Select student → Auto-fetch their service/instructor → Add more students if group session → Set date/time
  */
-export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
+export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, defaultSelection = null }) {
   const { activeOrgId } = useOrg();
   const { session } = useAuth();
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
@@ -33,20 +69,25 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate }) {
   });
   const [isGroupSession, setIsGroupSession] = useState(false);
   
-  const [formData, setFormData] = useState({
-    student_ids: [],
-    instructor_employee_id: '',
-    service_id: '',
-    date: defaultDate || new Date().toISOString().split('T')[0],
-    time: '09:00',
-    duration_minutes: 60,
-  });
+  const [formData, setFormData] = useState(() => buildInitialFormData(defaultDate, defaultSelection));
 
   const [conflicts, setConflicts] = useState([]);
   const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [studentDetails, setStudentDetails] = useState(null); // Cache first student details
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setFormData(buildInitialFormData(defaultDate, defaultSelection));
+    setConflicts([]);
+    setError(null);
+    setStudentDetails(null);
+    setIsGroupSession(false);
+  }, [open, defaultDate, defaultSelection]);
 
   useEffect(() => {
     if (!open || !activeOrgId || !session) return;

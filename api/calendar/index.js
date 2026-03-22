@@ -1,6 +1,7 @@
 /* eslint-env node */
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import {
   ensureMembership,
   isAdminOrOffice,
@@ -92,11 +93,23 @@ export default async function (context, req) {
   }
 
   if (method === 'POST') {
-    return await handleCreateInstance(context, body, tenantClient, userId, canManageAll);
+    return await handleCreateInstance(context, body, tenantClient, supabase, {
+      orgId,
+      userId,
+      userEmail: authResult.data.user.email || '',
+      role,
+      canManageAll,
+    });
   }
 
   if (method === 'PUT') {
-    return await handleUpdateInstance(context, body, tenantClient, userId, canManageAll);
+    return await handleUpdateInstance(context, body, tenantClient, supabase, {
+      orgId,
+      userId,
+      userEmail: authResult.data.user.email || '',
+      role,
+      canManageAll,
+    });
   }
 
   return respond(context, 405, { message: 'method not allowed' });
@@ -300,7 +313,8 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
   return respond(context, 200, transformedInstances);
 }
 
-async function handleCreateInstance(context, body, tenantClient, userId, isAdmin) {
+async function handleCreateInstance(context, body, tenantClient, supabase, authContext) {
+  const { orgId, userId, userEmail, role, canManageAll: isAdmin } = authContext;
   // Validate required fields
   if (!body.datetime_start) {
     return respond(context, 400, { message: 'missing datetime_start' });
@@ -420,10 +434,38 @@ async function handleCreateInstance(context, body, tenantClient, userId, isAdmin
     });
   }
 
+  try {
+    await logAuditEvent(supabase, {
+      orgId,
+      userId,
+      userEmail,
+      userRole: role,
+      actionType: AUDIT_ACTIONS.CALENDAR_INSTANCE_CREATED,
+      actionCategory: AUDIT_CATEGORIES.CALENDAR,
+      resourceType: 'lesson_instance',
+      resourceId: instance.id,
+      details: {
+        action_label_he: 'נוצר שיעור',
+        datetime_start: instance.datetime_start,
+        duration_minutes: instance.duration_minutes,
+        instructor_employee_id: instance.instructor_employee_id,
+        service_id: instance.service_id,
+        student_ids: body.student_ids,
+        created_source: instance.created_source,
+      },
+    });
+  } catch (auditError) {
+    context.log?.error?.('calendar/instances failed to write audit event (create)', {
+      message: auditError?.message,
+      instanceId: instance?.id,
+    });
+  }
+
   return respond(context, 201, { id: instance.id, message: 'instance created successfully' });
 }
 
-async function handleUpdateInstance(context, body, tenantClient, userId, canManageAll) {
+async function handleUpdateInstance(context, body, tenantClient, supabase, authContext) {
+  const { orgId, userId, userEmail, role, canManageAll } = authContext;
   if (!body.id) {
     return respond(context, 400, { message: 'missing instance id' });
   }
@@ -504,6 +546,40 @@ async function handleUpdateInstance(context, body, tenantClient, userId, canMana
       code: updateError.code,
     });
     return respond(context, 500, { message: 'failed_to_update_instance' });
+  }
+
+  const normalizedStatus = typeof updateData.status === 'string' ? updateData.status.trim().toLowerCase() : '';
+  const isCancellationUpdate = normalizedStatus.startsWith('cancelled');
+
+  try {
+    await logAuditEvent(supabase, {
+      orgId,
+      userId,
+      userEmail,
+      userRole: role,
+      actionType: isCancellationUpdate
+        ? AUDIT_ACTIONS.CALENDAR_INSTANCE_CANCELLED
+        : AUDIT_ACTIONS.CALENDAR_INSTANCE_UPDATED,
+      actionCategory: AUDIT_CATEGORIES.CALENDAR,
+      resourceType: 'lesson_instance',
+      resourceId: body.id,
+      details: {
+        action_label_he: isCancellationUpdate ? 'בוטל שיעור' : 'עודכן שיעור',
+        previous_status: existingInstance.status,
+        updated_fields: Object.keys(updateData),
+        datetime_start: updateData.datetime_start || null,
+        duration_minutes: updateData.duration_minutes || null,
+        instructor_employee_id: updateData.instructor_employee_id || null,
+        service_id: updateData.service_id || null,
+        status: updateData.status || null,
+        cancellation_reason: updateData.cancellation_reason || null,
+      },
+    });
+  } catch (auditError) {
+    context.log?.error?.('calendar/instances failed to write audit event (update)', {
+      message: auditError?.message,
+      instanceId: body?.id,
+    });
   }
 
   return respond(context, 200, { message: 'instance updated successfully' });

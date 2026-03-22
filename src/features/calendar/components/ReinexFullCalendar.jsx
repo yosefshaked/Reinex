@@ -1,13 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import interactionPlugin from '@fullcalendar/interaction';
-import resourceTimelinePlugin from '@fullcalendar/resource-timeline';
+import timeGridPlugin from '@fullcalendar/timegrid';
+import resourceTimeGridPlugin from '@fullcalendar/resource-timegrid';
 import heLocale from '@fullcalendar/core/locales/he';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useRuntimeConfig } from '@/runtime/RuntimeConfigContext.jsx';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog.jsx';
 import { formatTimeDisplay, getInstanceStatusIcon } from '../utils/timeGrid';
 import { mapInstancesToEvents, mapInstructorsToResources } from '../utils/fullcalendar-adapter.js';
 import './reinex-fullcalendar.css';
@@ -21,7 +32,7 @@ function toLocalDateString(dateObj) {
 }
 
 function resolveCalendarView(viewMode) {
-  return viewMode === 'week' ? 'resourceTimelineWeek' : 'resourceTimelineDay';
+  return viewMode === 'week' ? 'timeGridWeek' : 'resourceTimeGridDay';
 }
 
 function resolveSchedulerLicenseKey(runtimeConfig) {
@@ -89,6 +100,7 @@ export default function ReinexFullCalendar({
   isLoading = false,
   onDateChange,
   onViewModeChange,
+  onSlotSelect,
   onEventClick,
   onEventRescheduled,
 }) {
@@ -97,6 +109,7 @@ export default function ReinexFullCalendar({
   const runtimeConfig = useRuntimeConfig();
   const { activeOrgId } = useOrg();
   const [updatingEventId, setUpdatingEventId] = useState(null);
+  const [pendingDropInfo, setPendingDropInfo] = useState(null);
 
   const mappedEvents = useMemo(() => mapInstancesToEvents(instances), [instances]);
   const mappedResources = useMemo(() => mapInstructorsToResources(instructors), [instructors]);
@@ -134,7 +147,7 @@ export default function ReinexFullCalendar({
   }, [currentDate, fullCalendarView]);
 
   const handleDatesSet = useCallback((info) => {
-    const nextViewMode = info.view.type === 'resourceTimelineWeek' ? 'week' : 'day';
+    const nextViewMode = info.view.type === 'timeGridWeek' ? 'week' : 'day';
     if (nextViewMode !== viewMode) {
       onViewModeChange?.(nextViewMode);
     }
@@ -155,7 +168,22 @@ export default function ReinexFullCalendar({
     }
   }, [onEventClick]);
 
-  const handleEventDrop = useCallback(async (info) => {
+  const handleDateSelect = useCallback((selectInfo) => {
+    const startDate = selectInfo.start instanceof Date ? selectInfo.start : null;
+    const endDate = selectInfo.end instanceof Date ? selectInfo.end : null;
+
+    onSlotSelect?.({
+      startStr: selectInfo.startStr,
+      endStr: selectInfo.endStr,
+      resourceId: selectInfo.resource?.id || null,
+      start: startDate,
+      end: endDate,
+    });
+
+    selectInfo.view.calendar.unselect();
+  }, [onSlotSelect]);
+
+  const handleEventDrop = useCallback((info) => {
     const instance = info.event.extendedProps?.instance;
     const nextStart = info.event.start;
     const nextResourceId = info.newResource?.id
@@ -168,8 +196,32 @@ export default function ReinexFullCalendar({
       return;
     }
 
-    setUpdatingEventId(instance.id);
+    setPendingDropInfo(info);
+  }, [activeOrgId]);
 
+  const clearPendingDrop = useCallback(() => {
+    setPendingDropInfo(null);
+  }, []);
+
+  const confirmPendingDrop = useCallback(async () => {
+    if (!pendingDropInfo) {
+      return;
+    }
+
+    const instance = pendingDropInfo.event.extendedProps?.instance;
+    const nextStart = pendingDropInfo.event.start;
+    const nextResourceId = pendingDropInfo.newResource?.id
+      || pendingDropInfo.event.getResources?.()?.[0]?.id
+      || instance?.instructor_employee_id;
+
+    if (!activeOrgId || !instance?.id || !nextStart || !nextResourceId) {
+      pendingDropInfo.revert();
+      clearPendingDrop();
+      toast.error('לא ניתן לעדכן את השיעור כרגע.');
+      return;
+    }
+
+    setUpdatingEventId(instance.id);
     try {
       const conflictResponse = await authenticatedFetch('calendar/conflicts/check', {
         method: 'POST',
@@ -186,8 +238,9 @@ export default function ReinexFullCalendar({
 
       if (conflictResponse?.has_conflicts || (conflictResponse?.conflicts || []).length > 0) {
         const firstMessage = conflictResponse?.conflicts?.[0]?.message || 'נמצאה התנגשות. השיעור לא הועבר.';
-        info.revert();
+        pendingDropInfo.revert();
         toast.error(firstMessage);
+        clearPendingDrop();
         return;
       }
 
@@ -204,14 +257,21 @@ export default function ReinexFullCalendar({
       });
 
       toast.success('השיעור עודכן.');
+      clearPendingDrop();
       onEventRescheduled?.();
     } catch (error) {
-      info.revert();
+      pendingDropInfo.revert();
       toast.error(error?.message || 'העברת השיעור נכשלה.');
+      clearPendingDrop();
     } finally {
       setUpdatingEventId(null);
     }
-  }, [activeOrgId, onEventRescheduled]);
+  }, [activeOrgId, clearPendingDrop, onEventRescheduled, pendingDropInfo]);
+
+  const cancelPendingDrop = useCallback(() => {
+    pendingDropInfo?.revert?.();
+    clearPendingDrop();
+  }, [clearPendingDrop, pendingDropInfo]);
 
   if (!mappedResources.length && !isLoading) {
     return (
@@ -232,22 +292,23 @@ export default function ReinexFullCalendar({
       <div className="reinex-fullcalendar">
         <FullCalendar
           ref={calendarRef}
-          plugins={[resourceTimelinePlugin, interactionPlugin]}
+          plugins={[resourceTimeGridPlugin, timeGridPlugin, interactionPlugin]}
           initialView={fullCalendarView}
           initialDate={currentDate}
           schedulerLicenseKey={schedulerLicenseKey || 'GPL-v3'}
           locale={heLocale}
           direction="rtl"
           headerToolbar={false}
-          resourceAreaHeaderContent="מדריכים"
-          resourceAreaWidth="18rem"
           resources={mappedResources}
           events={mappedEvents}
           editable
           eventStartEditable
           eventDurationEditable={false}
           eventResourceEditable
-          selectable={false}
+          selectable
+          selectMirror
+          select={handleDateSelect}
+          allDaySlot={false}
           nowIndicator
           slotMinTime="06:00:00"
           slotMaxTime="22:00:00"
@@ -258,26 +319,40 @@ export default function ReinexFullCalendar({
           datesSet={handleDatesSet}
           eventContent={renderEventContent}
           views={{
-            resourceTimelineDay: {
+            resourceTimeGridDay: {
               slotDuration: '00:15:00',
               slotLabelInterval: '01:00:00',
-              slotMinWidth: 18,
               slotLabelFormat: [
                 { hour: '2-digit', minute: '2-digit', hour12: false },
               ],
+              dayHeaderFormat: { weekday: 'long', day: 'numeric', month: 'numeric' },
             },
-            resourceTimelineWeek: {
-              slotDuration: '01:00:00',
-              slotLabelInterval: '06:00:00',
-              slotMinWidth: 28,
+            timeGridWeek: {
+              slotDuration: '00:15:00',
+              slotLabelInterval: '01:00:00',
               slotLabelFormat: [
-                { weekday: 'short', day: 'numeric', month: 'numeric' },
                 { hour: '2-digit', minute: '2-digit', hour12: false },
               ],
+              dayHeaderFormat: { weekday: 'short', day: 'numeric', month: 'numeric' },
             },
           }}
         />
       </div>
+
+      <AlertDialog open={!!pendingDropInfo} onOpenChange={(open) => { if (!open) cancelPendingDrop(); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>האם להעביר את השיעור למועד זה?</AlertDialogTitle>
+            <AlertDialogDescription>
+              הפעולה תעדכן את מועד השיעור ותבדוק התנגשויות לפני השמירה.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelPendingDrop}>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmPendingDrop}>אישור</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

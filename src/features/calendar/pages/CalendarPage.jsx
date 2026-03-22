@@ -43,6 +43,7 @@ export default function CalendarPage() {
   const [selectedInstance, setSelectedInstance] = useState(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showGenerationDialog, setShowGenerationDialog] = useState(false);
+  const [pendingSlotSelection, setPendingSlotSelection] = useState(null);
 
   // Save date to sessionStorage whenever it changes
   useEffect(() => {
@@ -92,6 +93,7 @@ export default function CalendarPage() {
 
   const handleAddSuccess = () => {
     refetchInstances();
+    setPendingSlotSelection(null);
   };
 
   const handleUpdateSuccess = () => {
@@ -108,6 +110,11 @@ export default function CalendarPage() {
 
   const handleGenerationApplied = () => {
     refetchInstances();
+  };
+
+  const handleSlotSelect = (selection) => {
+    setPendingSlotSelection(selection);
+    setShowAddDialog(true);
   };
 
   return (
@@ -165,6 +172,7 @@ export default function CalendarPage() {
             isLoading={isCalendarLoading}
             onDateChange={setCurrentDate}
             onViewModeChange={setViewMode}
+            onSlotSelect={handleSlotSelect}
             onEventClick={handleInstanceClick}
             onEventRescheduled={handleRescheduleSuccess}
           />
@@ -182,9 +190,13 @@ export default function CalendarPage() {
       {/* Add Lesson Dialog */}
       <AddLessonDialog
         open={showAddDialog}
-        onClose={() => setShowAddDialog(false)}
+        onClose={() => {
+          setShowAddDialog(false);
+          setPendingSlotSelection(null);
+        }}
         onSuccess={handleAddSuccess}
         defaultDate={currentDate}
+        defaultSelection={pendingSlotSelection}
       />
 
       <ManualGenerationDialog
