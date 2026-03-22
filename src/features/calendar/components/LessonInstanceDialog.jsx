@@ -13,6 +13,41 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { Pencil, X, Check, XCircle, Loader2, AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 
+function toLocalDateString(dateObj) {
+  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function toUtcIsoString(dateString, timeString) {
+  if (!dateString || !timeString) {
+    return null;
+  }
+
+  const [year, month, day] = String(dateString).split('-').map(Number);
+  const [hours, minutes] = String(timeString).split(':').map(Number);
+  const localDate = new Date(year, (month || 1) - 1, day || 1, hours || 0, minutes || 0, 0, 0);
+
+  if (Number.isNaN(localDate.getTime())) {
+    return null;
+  }
+
+  return localDate.toISOString();
+}
+
+function isCancellationStatus(status) {
+  return status === 'cancelled_student' || status === 'cancelled_clinic';
+}
+
+function getCancellationStatusLabel(status) {
+  if (status === 'cancelled_student') return 'בוטל ע"י תלמיד';
+  if (status === 'cancelled_clinic') return 'בוטל ע"י המרפאה';
+  if (status === 'no_show') return 'אי הגעה';
+  return 'ביטול';
+}
+
 /**
  * LessonInstanceDialog component - displays and edits lesson instance details
  */
@@ -36,7 +71,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     time: '',
     duration_minutes: 60,
     status: 'scheduled',
-    cancellation_reason: '',
+    closed_reason: '',
   });
 
   // Initialize form data when instance changes
@@ -46,11 +81,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       setFormData({
         instructor_employee_id: instance.instructor_employee_id || '',
         service_id: instance.service_id || '',
-        date: dateTime.toISOString().split('T')[0],
+        date: toLocalDateString(dateTime),
         time: dateTime.toTimeString().slice(0, 5),
         duration_minutes: instance.duration_minutes || 60,
         status: instance.status || 'scheduled',
-        cancellation_reason: instance.cancellation_reason || '',
+        closed_reason: instance.closed_reason || '',
       });
     }
   }, [instance]);
@@ -72,20 +107,28 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setError(null);
 
     try {
-      const datetime_start = `${formData.date}T${formData.time}:00`;
+      const datetime_start = toUtcIsoString(formData.date, formData.time);
+      if (!datetime_start) {
+        throw new Error('תאריך או שעה אינם תקינים.');
+      }
+
+      const body = {
+        id: instance.id,
+        org_id: org.id,
+        datetime_start,
+        duration_minutes: formData.duration_minutes,
+        instructor_employee_id: formData.instructor_employee_id,
+        service_id: formData.service_id,
+        status: formData.status,
+      };
+
+      if (isCancellationStatus(formData.status) || formData.status === 'no_show') {
+        body.closed_reason = formData.closed_reason || null;
+      }
 
       await authenticatedFetch('calendar/instances', {
         method: 'PUT',
-        body: {
-          id: instance.id,
-          org_id: org.id,
-          datetime_start,
-          duration_minutes: formData.duration_minutes,
-          instructor_employee_id: formData.instructor_employee_id,
-          service_id: formData.service_id,
-          status: formData.status,
-          cancellation_reason: formData.cancellation_reason || null,
-        },
+        body,
       });
 
       setIsEditMode(false);
@@ -126,7 +169,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
-  async function handleCancel(reason) {
+  async function handleCancel(status, closedReason) {
     if (!org?.id) {
       setError('Organization not found');
       return;
@@ -140,8 +183,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         body: {
           id: instance.id,
           org_id: org.id,
-          status: 'cancelled',
-          cancellation_reason: reason,
+          status,
+          closed_reason: closedReason || null,
         },
       });
 
@@ -184,7 +227,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   }
 
   const activeServices = services?.filter(s => s.is_active) || [];
-  const isReportable = instance.status === 'scheduled' || instance.status === 'rescheduled';
+  const isReportable = instance.status === 'scheduled';
   const canEdit = canManageAll && isReportable;
   const canMarkAttendance = isReportable;
   const canQuickReport = isReportable;
@@ -307,29 +350,30 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="scheduled">מתוכנן</SelectItem>
-                  <SelectItem value="rescheduled">נדחה</SelectItem>
-                  <SelectItem value="cancelled">בוטל</SelectItem>
+                  <SelectItem value="cancelled_student">בוטל ע"י תלמיד</SelectItem>
+                  <SelectItem value="cancelled_clinic">בוטל ע"י המרפאה</SelectItem>
                   <SelectItem value="completed">הושלם</SelectItem>
                   {canManageAll && <SelectItem value="no_show">אי הגעה</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Cancellation Reason (if cancelled) */}
-            {formData.status === 'cancelled' && (
+            {/* Closed Reason (if cancelled / no-show) */}
+            {(isCancellationStatus(formData.status) || formData.status === 'no_show') && (
               <div>
-                <Label htmlFor="cancellation_reason">סיבת ביטול</Label>
+                <Label htmlFor="closed_reason">פירוט</Label>
                 <Select
-                  value={formData.cancellation_reason}
-                  onValueChange={(value) => setFormData({ ...formData, cancellation_reason: value })}
+                  value={formData.closed_reason}
+                  onValueChange={(value) => setFormData({ ...formData, closed_reason: value })}
                 >
-                  <SelectTrigger id="cancellation_reason">
+                  <SelectTrigger id="closed_reason">
                     <SelectValue placeholder="בחר סיבה" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="student_request">בקשת תלמיד</SelectItem>
                     <SelectItem value="clinic_closure">סגירת מרפאה</SelectItem>
                     <SelectItem value="instructor_unavailable">מדריך לא זמין</SelectItem>
+                    <SelectItem value="doctor_note">אישור רופא</SelectItem>
                     <SelectItem value="no_show">אי הגעה</SelectItem>
                     <SelectItem value="other">אחר</SelectItem>
                   </SelectContent>
@@ -490,10 +534,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             )}
 
             {/* Cancellation Reason */}
-            {instance.cancellation_reason && (
+            {instance.closed_reason && (
               <div>
-                <label className="text-sm font-medium text-gray-700">סיבת ביטול</label>
-                <p className="mt-1 text-gray-900">{instance.cancellation_reason}</p>
+                <label className="text-sm font-medium text-gray-700">
+                  {getCancellationStatusLabel(instance.status)}
+                </label>
+                <p className="mt-1 text-gray-900">{instance.closed_reason}</p>
               </div>
             )}
 
@@ -505,21 +551,19 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             )}
 
             {/* Cancel Button */}
-            {canEdit && instance.status !== 'cancelled' && (
+            {canEdit && !isCancellationStatus(instance.status) && instance.status !== 'no_show' && (
               <div className="pt-4 border-t">
                 <Button
                   variant="destructive"
                   onClick={() => {
-                    const reason = prompt('סיבת ביטול:\n\n1. בקשת תלמיד\n2. סגירת מרפאה\n3. מדריך לא זמין\n4. אי הגעה\n5. אחר\n\nהכנס מספר (1-5):');
-                    const reasonMap = {
-                      '1': 'student_request',
-                      '2': 'clinic_closure',
-                      '3': 'instructor_unavailable',
-                      '4': 'no_show',
-                      '5': 'other',
+                    const selection = prompt('בחר סטטוס:\n\n1. בוטל ע"י תלמיד\n2. בוטל ע"י המרפאה\n3. אי הגעה\n\nהכנס מספר (1-3):');
+                    const statusMap = {
+                      '1': { status: 'cancelled_student', closed_reason: 'student_request' },
+                      '2': { status: 'cancelled_clinic', closed_reason: 'clinic_closure' },
+                      '3': { status: 'no_show', closed_reason: 'no_show' },
                     };
-                    if (reason && reasonMap[reason]) {
-                      handleCancel(reasonMap[reason]);
+                    if (selection && statusMap[selection]) {
+                      handleCancel(statusMap[selection].status, statusMap[selection].closed_reason);
                     }
                   }}
                   disabled={isSaving}

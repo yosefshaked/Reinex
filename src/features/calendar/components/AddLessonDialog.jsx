@@ -28,6 +28,22 @@ function toLocalTimeString(dateObj) {
   return `${hours}:${minutes}`;
 }
 
+function toUtcIsoString(dateString, timeString) {
+  if (!dateString || !timeString) {
+    return null;
+  }
+
+  const [year, month, day] = String(dateString).split('-').map(Number);
+  const [hours, minutes] = String(timeString).split(':').map(Number);
+  const localDate = new Date(year, (month || 1) - 1, day || 1, hours || 0, minutes || 0, 0, 0);
+
+  if (Number.isNaN(localDate.getTime())) {
+    return null;
+  }
+
+  return localDate.toISOString();
+}
+
 function buildInitialFormData(defaultDate, defaultSelection) {
   const baseDate = defaultSelection?.start instanceof Date
     ? toLocalDateString(defaultSelection.start)
@@ -128,7 +144,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   useEffect(() => {
     if (formData.student_ids.length === 0) {
       setStudentDetails(null);
-      setFormData(prev => ({ ...prev, instructor_employee_id: '', service_id: '' }));
+      setFormData(prev => ({ ...prev, service_id: '' }));
       return;
     }
 
@@ -161,7 +177,11 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     if (!activeOrgId) return;
     setIsCheckingConflicts(true);
     try {
-      const datetime_start = `${formData.date}T${formData.time}:00`;
+      const datetime_start = toUtcIsoString(formData.date, formData.time);
+      if (!datetime_start) {
+        setConflicts([]);
+        return;
+      }
       const serviceIds = new Set(
         (services || [])
           .filter((svc) => svc?.is_active === true)
@@ -224,7 +244,11 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         setError('יש לבחור שירות מהרשימה.');
         return;
       }
-      const datetime_start = `${formData.date}T${formData.time}:00`;
+      const datetime_start = toUtcIsoString(formData.date, formData.time);
+      if (!datetime_start) {
+        setError('תאריך או שעה אינם תקינים.');
+        return;
+      }
 
       await authenticatedFetch('calendar/instances', {
         method: 'POST',
@@ -430,10 +454,10 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             <Select
               value={formData.instructor_employee_id}
               onValueChange={(value) => setFormData({ ...formData, instructor_employee_id: String(value) })}
-              disabled={instructorsLoading || !formData.student_ids.length}
+              disabled={instructorsLoading}
             >
               <SelectTrigger id="instructor">
-                <SelectValue placeholder={formData.student_ids.length ? "בחר מדריך" : "בחר תלמיד תחילה"} />
+                <SelectValue placeholder="בחר מדריך" />
               </SelectTrigger>
               <SelectContent>
                 {instructors.map((instructor) => (

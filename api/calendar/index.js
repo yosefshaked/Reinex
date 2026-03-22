@@ -14,6 +14,7 @@ import {
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
+const INSTANCE_STATUSES = new Set(['scheduled', 'completed', 'cancelled_student', 'cancelled_clinic', 'no_show']);
 
 /**
  * GET /api/calendar/instances
@@ -163,6 +164,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
       service_id,
       status,
       documentation_status,
+      closed_reason,
       created_source,
       metadata,
       created_at,
@@ -286,6 +288,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
       service_id: instance.service_id,
       status: instance.status,
       documentation_status: instance.documentation_status,
+      closed_reason: instance.closed_reason || null,
       created_source: instance.created_source,
       metadata: instance.metadata,
       created_at: instance.created_at,
@@ -332,6 +335,11 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     return respond(context, 400, { message: 'missing or invalid student_ids array' });
   }
 
+  const requestedStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : 'scheduled';
+  if (!INSTANCE_STATUSES.has(requestedStatus)) {
+    return respond(context, 400, { message: 'invalid status' });
+  }
+
   // Non-admin users can only create lessons for themselves
   if (!isAdmin) {
     const { data: instructors } = await tenantClient
@@ -376,7 +384,7 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     duration_minutes: body.duration_minutes,
     instructor_employee_id: body.instructor_employee_id,
     service_id: body.service_id,
-    status: body.status || 'scheduled',
+    status: requestedStatus,
     documentation_status: body.documentation_status || 'undocumented',
     created_source: body.created_source || 'manual',
     metadata: body.metadata || {},
@@ -473,7 +481,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   // Fetch existing instance
   const { data: existingInstance, error: fetchError } = await tenantClient
     .from('lesson_instances')
-    .select('id, instructor_employee_id, status')
+    .select('id, instructor_employee_id, status, closed_reason')
     .eq('id', body.id)
     .single();
 
@@ -500,7 +508,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
       'duration_minutes',
       'instructor_employee_id',
       'service_id',
-      'cancellation_reason',
+      'closed_reason',
       'documentation_status',
       'metadata',
     ].some((field) => Object.prototype.hasOwnProperty.call(body, field));
@@ -513,11 +521,19 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
       return respond(context, 400, { message: 'invalid status update' });
     }
 
-    if (!['scheduled', 'rescheduled'].includes(existingInstance.status)) {
+    if (existingInstance.status !== 'scheduled') {
       return respond(context, 409, { message: 'instance not in reportable state' });
     }
 
     body.status = requestedStatus;
+  }
+
+  if (body.status !== undefined) {
+    const normalizedStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
+    if (!INSTANCE_STATUSES.has(normalizedStatus)) {
+      return respond(context, 400, { message: 'invalid status' });
+    }
+    body.status = normalizedStatus;
   }
 
   // Build update object (only update provided fields)
@@ -528,11 +544,24 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   if (body.instructor_employee_id !== undefined) updateData.instructor_employee_id = body.instructor_employee_id;
   if (body.service_id !== undefined) updateData.service_id = body.service_id;
   if (body.status !== undefined) updateData.status = body.status;
-  if (body.cancellation_reason !== undefined) updateData.cancellation_reason = body.cancellation_reason;
+  if (body.closed_reason !== undefined) updateData.closed_reason = body.closed_reason;
   if (body.documentation_status !== undefined) updateData.documentation_status = body.documentation_status;
   if (body.metadata !== undefined) updateData.metadata = body.metadata;
   
   updateData.updated_at = new Date().toISOString();
+
+  if ((updateData.status === 'cancelled_student' || updateData.status === 'cancelled_clinic' || updateData.status === 'no_show') &&
+      updateData.closed_reason === undefined &&
+      existingInstance.closed_reason) {
+    updateData.closed_reason = existingInstance.closed_reason;
+  }
+
+  // Billing policy will hang off these statuses later:
+  // - cancelled_clinic: never charge
+  // - no_show: charge by default, with explicit override support
+  // - cancelled_student: charge only after grace-threshold logic + approval flow
+  // The current schema can represent the status and closed_reason, but not the eventual
+  // financial decision trail yet. That should be modeled in the future billing layer.
 
   // Update instance
   const { error: updateError } = await tenantClient
@@ -572,7 +601,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
         instructor_employee_id: updateData.instructor_employee_id || null,
         service_id: updateData.service_id || null,
         status: updateData.status || null,
-        cancellation_reason: updateData.cancellation_reason || null,
+        closed_reason: updateData.closed_reason || null,
       },
     });
   } catch (auditError) {

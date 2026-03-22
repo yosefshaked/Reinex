@@ -74,8 +74,12 @@ export function formatDateDisplay(dateString) {
  * Get status icon and color for instance
  */
 export function getInstanceStatusIcon(status, documentationStatus) {
-  if (status?.startsWith('cancelled')) {
-    return { icon: '❌', color: 'text-red-600', label: 'מבוטל' };
+  if (status === 'cancelled_student') {
+    return { icon: '❌', color: 'text-red-600', label: 'בוטל ע"י תלמיד' };
+  }
+
+  if (status === 'cancelled_clinic') {
+    return { icon: '❌', color: 'text-red-600', label: 'בוטל ע"י המרפאה' };
   }
   
   if (status === 'completed') {
