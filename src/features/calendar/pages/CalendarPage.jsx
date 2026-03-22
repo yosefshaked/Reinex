@@ -21,6 +21,13 @@ function toLocalDateString(dateObj) {
   return `${year}-${month}-${day}`;
 }
 
+function getWeekStartDate(dateString) {
+  const date = new Date(dateString);
+  const day = date.getDay();
+  date.setDate(date.getDate() - day);
+  return toLocalDateString(date);
+}
+
 export default function CalendarPage() {
   const [currentDate, setCurrentDateState] = useState(() => {
     // Try to get saved date from sessionStorage, fall back to today
@@ -65,16 +72,6 @@ export default function CalendarPage() {
 
   const setViewMode = (mode) => {
     setViewModeState(mode);
-  };
-
-  // For week view, get date range
-  const getWeekStartDate = (dateString) => {
-    const date = new Date(dateString);
-    const day = date.getDay();
-    // Sunday is 0, we want Monday as start (day 1)
-    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-    date.setDate(diff);
-    return toLocalDateString(date);
   };
 
   const dateForQuery = viewMode === 'week' ? getWeekStartDate(currentDate) : currentDate;

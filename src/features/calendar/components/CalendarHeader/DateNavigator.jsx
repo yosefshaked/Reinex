@@ -9,6 +9,13 @@ function toLocalDateString(dateObj) {
   return `${year}-${month}-${day}`;
 }
 
+function getWeekStart(dateString) {
+  const date = new Date(dateString);
+  const day = date.getDay();
+  date.setDate(date.getDate() - day);
+  return date;
+}
+
 /**
  * DateNavigator component - navigate between days/weeks and select date
  */
@@ -42,10 +49,7 @@ export function DateNavigator({ currentDate, onDateChange, viewMode = 'day' }) {
   };
 
   const getWeekRange = (dateString) => {
-    const date = new Date(dateString);
-    const day = date.getDay();
-    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-    const weekStart = new Date(date.setDate(diff));
+    const weekStart = getWeekStart(dateString);
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekEnd.getDate() + 6);
     

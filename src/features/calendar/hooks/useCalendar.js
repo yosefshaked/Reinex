@@ -10,6 +10,13 @@ function toLocalDateString(dateObj) {
   return `${year}-${month}-${day}`;
 }
 
+function getWeekStart(dateString) {
+  const date = new Date(dateString);
+  const day = date.getDay();
+  date.setDate(date.getDate() - day);
+  return date;
+}
+
 /**
  * Hook for fetching calendar instances
  */
@@ -26,10 +33,7 @@ export function useCalendarInstances(date, viewMode = 'day', instructorId = null
 
   const getDateRange = (dateString, mode) => {
     if (mode === 'week') {
-      const date = new Date(dateString);
-      const day = date.getDay();
-      const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-      const weekStart = new Date(date.setDate(diff));
+      const weekStart = getWeekStart(dateString);
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
       return {
