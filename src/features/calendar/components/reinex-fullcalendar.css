@@ -100,6 +100,29 @@
   line-height: 1;
 }
 
+.reinex-calendar-event__inline {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  height: 100%;
+}
+
+.reinex-calendar-event__inline-main {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.reinex-calendar-event__separator {
+  flex: 0 0 auto;
+  opacity: 0.75;
+  font-size: 0.625rem;
+}
+
 .reinex-calendar-event__service {
   font-size: 0.8125rem;
   font-weight: 700;
@@ -135,55 +158,64 @@
   padding: 0.25rem 0.4375rem;
 }
 
-.reinex-calendar-event--compact .reinex-calendar-event__student {
-  font-size: 0.6875rem;
-}
-
 .reinex-calendar-event--compact .reinex-calendar-event__badge {
   display: none;
 }
 
 .reinex-calendar-event--xs {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "service icon"
-    "student time";
-  align-items: center;
-  gap: 0.125rem 0.375rem;
   padding: 0.1875rem 0.375rem;
   border-radius: 0.75rem;
 }
 
-.reinex-calendar-event--xs .reinex-calendar-event__top,
-.reinex-calendar-event--xs .reinex-calendar-event__meta {
-  display: contents;
-}
-
-.reinex-calendar-event--xs .reinex-calendar-event__service {
-  grid-area: service;
-  font-size: 0.6875rem;
-}
-
-.reinex-calendar-event--xs .reinex-calendar-event__status {
-  grid-area: icon;
-  justify-self: end;
-  font-size: 0.6875rem;
-}
-
-.reinex-calendar-event--xs .reinex-calendar-event__student {
-  grid-area: student;
-  font-size: 0.625rem;
-}
-
-.reinex-calendar-event--xs .reinex-calendar-event__time {
-  grid-area: time;
-  justify-self: end;
-  font-size: 0.625rem;
-}
-
 .reinex-calendar-event--xs .reinex-calendar-event__badge {
   display: none;
+}
+
+.reinex-calendar-event--inline {
+  justify-content: center;
+}
+
+.reinex-calendar-event--inline .reinex-calendar-event__service,
+.reinex-calendar-event--inline .reinex-calendar-event__student {
+  font-size: 0.6875rem;
+  line-height: 1;
+}
+
+.reinex-calendar-event--inline .reinex-calendar-event__time {
+  flex: 0 0 auto;
+  font-size: 0.625rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.reinex-calendar-event--inline .reinex-calendar-event__status {
+  font-size: 0.6875rem;
+}
+
+.reinex-calendar-event--xs.reinex-calendar-event--inline .reinex-calendar-event__service,
+.reinex-calendar-event--xs.reinex-calendar-event--inline .reinex-calendar-event__student,
+.reinex-calendar-event--xs.reinex-calendar-event--inline .reinex-calendar-event__time {
+  font-size: 0.625rem;
+}
+
+.reinex-calendar-event--student-only .reinex-calendar-event__inline-main {
+  flex: 1 1 auto;
+}
+
+.reinex-calendar-event--student-only .reinex-calendar-event__student {
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.reinex-calendar-event--student-only .reinex-calendar-event__service,
+.reinex-calendar-event--student-only .reinex-calendar-event__separator,
+.reinex-calendar-event--student-only .reinex-calendar-event__time,
+.reinex-calendar-event--student-only .reinex-calendar-event__badge {
+  display: none;
+}
+
+.reinex-calendar-event--xs.reinex-calendar-event--student-only .reinex-calendar-event__student {
+  font-size: 0.625rem;
 }
 
 .reinex-fullcalendar-empty {

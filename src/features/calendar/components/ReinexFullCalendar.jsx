@@ -56,8 +56,31 @@ function getEventDensityClass(durationMinutes) {
   return '';
 }
 
-function renderEventContent(arg) {
+function EventContent({ arg }) {
   const instance = arg.event.extendedProps?.instance;
+  const rootRef = useRef(null);
+  const [contentWidth, setContentWidth] = useState(null);
+
+  useEffect(() => {
+    if (!rootRef.current || typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+
+    const element = rootRef.current;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      const nextWidth = entry?.contentRect?.width;
+      setContentWidth((currentWidth) => {
+        const roundedCurrent = currentWidth == null ? null : Math.round(currentWidth);
+        const roundedNext = nextWidth == null ? null : Math.round(nextWidth);
+        return roundedCurrent === roundedNext ? currentWidth : nextWidth;
+      });
+    });
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   if (!instance) {
     return <div className="reinex-calendar-event">פריט חסר</div>;
   }
@@ -67,18 +90,45 @@ function renderEventContent(arg) {
   const statusInfo = getInstanceStatusIcon(instance.status, instance.documentation_status);
   const durationMinutes = Number(instance.duration_minutes) || 0;
   const densityClass = getEventDensityClass(durationMinutes);
+  const isVeryNarrow = contentWidth != null && contentWidth < 115;
+  const isNarrow = contentWidth != null && contentWidth < 175;
+  const isStudentOnlySummary = durationMinutes <= 20 || isVeryNarrow;
+  const isInlineSummary = !isStudentOnlySummary && (durationMinutes <= 30 || isNarrow);
   const studentLabel = `${firstStudentName}${additionalCount > 0 ? ` +${additionalCount}` : ''}`;
-  const timeLabel = arg.timeText || formatTimeDisplay(instance.datetime_start);
+  const serviceLabel = instance.service?.service_name || 'שיעור';
 
   return (
     <div
-      className={`reinex-calendar-event ${densityClass}`.trim()}
+      ref={rootRef}
+      className={`reinex-calendar-event ${densityClass} ${isInlineSummary ? 'reinex-calendar-event--inline' : ''} ${isStudentOnlySummary ? 'reinex-calendar-event--student-only' : ''}`.trim()}
       style={{ background: buildEventGradient(instance.service?.color) }}
       title={`${instance.service?.service_name || 'שיעור'} • ${firstStudentName}`}
     >
+      {isStudentOnlySummary ? (
+        <div className="reinex-calendar-event__inline">
+          <span className="reinex-calendar-event__status" aria-label={statusInfo.label} title={statusInfo.label}>
+            {statusInfo.icon}
+          </span>
+          <span className="reinex-calendar-event__inline-main">
+            <span className="reinex-calendar-event__student">{studentLabel}</span>
+          </span>
+        </div>
+      ) : isInlineSummary ? (
+        <div className="reinex-calendar-event__inline">
+          <span className="reinex-calendar-event__status" aria-label={statusInfo.label} title={statusInfo.label}>
+            {statusInfo.icon}
+          </span>
+          <span className="reinex-calendar-event__inline-main">
+            <span className="reinex-calendar-event__student">{studentLabel}</span>
+            <span className="reinex-calendar-event__separator">•</span>
+            <span className="reinex-calendar-event__service">{serviceLabel}</span>
+          </span>
+        </div>
+      ) : (
+        <>
       <div className="reinex-calendar-event__top">
         <span className="reinex-calendar-event__service">
-          {instance.service?.service_name || 'שיעור'}
+          {serviceLabel}
         </span>
         <span className="reinex-calendar-event__status" aria-label={statusInfo.label} title={statusInfo.label}>
           {statusInfo.icon}
@@ -88,13 +138,19 @@ function renderEventContent(arg) {
       <div className="reinex-calendar-event__student">{studentLabel}</div>
 
       <div className="reinex-calendar-event__meta">
-        <span className="reinex-calendar-event__time">{timeLabel}</span>
+        <span className="reinex-calendar-event__time">{arg.timeText || formatTimeDisplay(instance.datetime_start)}</span>
         {instance.documentation_status === 'undocumented' && instance.status === 'completed' ? (
           <span className="reinex-calendar-event__badge">לא תועד</span>
         ) : null}
       </div>
+        </>
+      )}
     </div>
   );
+}
+
+function renderEventContent(arg) {
+  return <EventContent arg={arg} />;
 }
 
 export default function ReinexFullCalendar({
