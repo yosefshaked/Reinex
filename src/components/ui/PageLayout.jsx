@@ -24,7 +24,7 @@ function PageLayout({
           fullHeight ? "min-h-screen" : "min-h-full",
           className,
         )}
-        style={{ maxWidth: "min(1440px, calc(100vw - 1.5rem))" }}
+        style={{ maxWidth: "min(1680px, calc(100vw - 1.5rem))" }}
         {...props}
       >
         {(title || description || actions) && (
