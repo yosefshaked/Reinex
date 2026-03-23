@@ -1,7 +1,7 @@
 # Employees Feature Implementation Plan
 
 **Date:** 2026-03-23  
-**Status:** In Progress  
+**Status:** Phase 1 - First Pass Implemented  
 **Primary Direction:** Option A information architecture with a calmer, row-based detail UI and a new overview layer before deep employee management.
 
 ## 1. Schema Check
@@ -89,6 +89,26 @@ We will keep `/employees` as the route for now and implement two layers inside i
 
 ## 3. Phase 1 Scope
 
+### 3.0 Current Delivery Status
+
+Implemented in the first pass:
+- widened `/api/instructors` contract to surface real `Employees` columns already present in schema
+- widened create/update validation for employee profile fields
+- replaced the shallow employee edit flow with a fuller employee profile editor
+- expanded employee creation to support `employee_type` and `start_date`
+- rebuilt `/employees` into:
+  - overview summary band
+  - searchable employee selector
+  - selected employee workspace
+  - communication actions
+  - first-pass scheduled/completed instance visibility for instructors
+
+Still intentionally pending:
+- dedicated leave workflow over `LeaveBalances` / `WorkSessions`
+- accountant export and financial reporting flows
+- richer unlinked-member assignment UX
+- documents / certifications / communication history
+
 ### 3.1 API alignment
 - Expand `GET /api/instructors` payload to include real employee columns already present in `Employees`
 - Expand `POST /api/instructors` to accept:
@@ -148,3 +168,19 @@ We will keep `/employees` as the route for now and implement two layers inside i
 - Prefer reusing current dialogs where practical, but replace shallow ones if they block the new UX
 - Continue using the existing employees endpoint (`/api/instructors`) until a dedicated domain rename is planned
 - Do not invent non-existent schema fields
+
+## 6. Next Implementation Steps
+
+1. Deepen the unlinked-member flow
+   - support linking an org member to an existing manual employee
+   - surface pending invitations more clearly
+
+2. Add a dedicated leave management section
+   - policy summary
+   - balance timeline using `LeaveBalances`
+   - later: request/approval workflow once backing persistence is designed
+
+3. Add finance/report actions
+   - employee earnings summary
+   - accountant export entry point
+   - payroll history drill-down

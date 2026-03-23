@@ -4,7 +4,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import resourceTimeGridPlugin from '@fullcalendar/resource-timegrid';
 import heLocale from '@fullcalendar/core/locales/he';
-import { Loader2, MessageCircle } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { Button } from '@/components/ui/button.jsx';
@@ -55,6 +55,14 @@ function resolveSchedulerLicenseKey(runtimeConfig) {
 function buildEventGradient(color) {
   const baseColor = typeof color === 'string' && color.trim() ? color.trim() : '#4F46E5';
   return `linear-gradient(135deg, ${baseColor} 0%, ${baseColor}dd 100%)`;
+}
+
+function WhatsAppIcon({ className = 'h-3.5 w-3.5' }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
+      <path d="M19.05 4.94A9.87 9.87 0 0 0 12.03 2C6.56 2 2.11 6.45 2.1 11.92c0 1.75.46 3.46 1.32 4.97L2 22l5.25-1.38a9.88 9.88 0 0 0 4.77 1.22h.01c5.47 0 9.92-4.45 9.92-9.92a9.84 9.84 0 0 0-2.9-6.98Zm-7.02 15.23h-.01a8.2 8.2 0 0 1-4.18-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.18 8.18 0 0 1-1.26-4.38c0-4.52 3.68-8.2 8.21-8.2 2.19 0 4.24.85 5.79 2.4a8.14 8.14 0 0 1 2.4 5.8c0 4.52-3.68 8.21-8.16 8.21Zm4.5-6.15c-.25-.12-1.47-.72-1.7-.8-.23-.09-.4-.12-.57.12-.17.25-.65.8-.8.97-.15.17-.3.19-.55.07-.25-.12-1.04-.38-1.98-1.21-.73-.65-1.23-1.45-1.38-1.7-.14-.24-.01-.38.11-.5.11-.11.25-.3.37-.45.12-.15.16-.25.25-.42.08-.17.04-.32-.02-.45-.06-.12-.57-1.37-.78-1.88-.21-.5-.42-.43-.57-.44-.15-.01-.32-.01-.5-.01a.96.96 0 0 0-.68.32c-.23.25-.88.86-.88 2.09 0 1.22.9 2.41 1.02 2.57.12.17 1.76 2.69 4.26 3.77.59.26 1.06.41 1.42.52.6.19 1.15.16 1.58.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.11-.23-.17-.48-.29Z" />
+    </svg>
+  );
 }
 
 function getEventDensityClass(durationMinutes) {
@@ -396,8 +404,8 @@ export default function ReinexFullCalendar({
             openInstructorWhatsApp(instructor, 'day');
           }}
         >
-          <MessageCircle className="h-3.5 w-3.5" />
-          שלח
+          <WhatsAppIcon className="h-3.5 w-3.5" />
+          וואטסאפ
         </Button>
       </div>
     );
@@ -430,7 +438,7 @@ export default function ReinexFullCalendar({
               className="reinex-fullcalendar-week-actions__button"
               onClick={() => openInstructorWhatsApp(instructor, 'week')}
             >
-              <MessageCircle className="h-3.5 w-3.5" />
+              <WhatsAppIcon className="h-3.5 w-3.5" />
               {instructor.full_name}
             </Button>
           ))}

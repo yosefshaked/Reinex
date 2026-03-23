@@ -24,6 +24,13 @@ function formatTimeLabel(dateInput) {
   return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+function addMinutes(dateInput, durationMinutes) {
+  const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const duration = Number(durationMinutes) || 0;
+  return new Date(date.getTime() + duration * 60 * 1000);
+}
+
 function getWeekStartDate(dateString) {
   const date = new Date(dateString);
   const day = date.getDay();
@@ -55,7 +62,9 @@ function getStudentNames(instance) {
 
 function buildLessonLine(instance) {
   const serviceName = instance?.service?.service_name || 'שיעור';
-  return `${formatTimeLabel(instance?.datetime_start)} - ${getStudentNames(instance)} | ${serviceName}`;
+  const endDate = addMinutes(instance?.datetime_start, instance?.duration_minutes);
+  const timeRange = `${formatTimeLabel(instance?.datetime_start)}-${formatTimeLabel(endDate)}`;
+  return `${timeRange} - ${getStudentNames(instance)} | ${serviceName}`;
 }
 
 export function normalizeWhatsAppPhone(value) {
