@@ -447,21 +447,21 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
           ) : (
             <>
               {/* ── Hero card ─────────────────────── */}
-              <section className="rounded-2xl border border-slate-200 bg-gradient-to-bl from-white to-blue-50/30 px-4 py-3 shadow-sm">
+              <section className="rounded-2xl border border-slate-200 bg-gradient-to-bl from-white to-blue-50/30 px-4 py-3 shadow-sm [font-family:inherit]">
                 <div className="flex flex-col gap-2.5 xl:flex-row xl:items-center xl:justify-between">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-14 w-14 shrink-0 rounded-2xl">
-                      <AvatarFallback className="rounded-2xl bg-gradient-to-br from-blue-500 to-blue-400 text-lg font-extrabold font-sans tracking-tight text-white">
+                      <AvatarFallback className="rounded-2xl bg-gradient-to-br from-blue-500 to-blue-400 text-lg font-bold [font-family:inherit] tracking-tight text-white">
                         {getInitials(currentEmployee)}
                       </AvatarFallback>
                     </Avatar>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                        <Badge variant="default" className="font-sans">{getEmployeeTypeLabel(currentEmployee)}</Badge>
-                        <Badge variant={currentEmployee.is_active ? 'default' : 'secondary'} className="font-sans">{currentEmployee.is_active ? 'פעיל' : 'מושבת'}</Badge>
-                        {currentEmployee.user_id ? <Badge variant="outline" className="font-sans">משתמש מחובר</Badge> : null}
+                        <Badge variant="default" className="[font-family:inherit]">{getEmployeeTypeLabel(currentEmployee)}</Badge>
+                        <Badge variant={currentEmployee.is_active ? 'default' : 'secondary'} className="[font-family:inherit]">{currentEmployee.is_active ? 'פעיל' : 'מושבת'}</Badge>
+                        {currentEmployee.user_id ? <Badge variant="outline" className="[font-family:inherit]">משתמש מחובר</Badge> : null}
                       </div>
-                      <h2 className="text-xl font-extrabold text-slate-950 sm:text-2xl leading-tight">{getEmployeeName(currentEmployee)}</h2>
+                      <h2 className="text-xl font-bold [font-family:inherit] text-slate-950 sm:text-2xl leading-tight">{getEmployeeName(currentEmployee)}</h2>
                       <p className="text-xs text-slate-500">
                         {currentEmployee.phone || ''}{currentEmployee.phone && currentEmployee.email ? ' • ' : ''}{currentEmployee.email || ''}{(currentEmployee.phone || currentEmployee.email) && currentEmployee.start_date ? ' • ' : ''}{currentEmployee.start_date ? `התחלה: ${formatDate(currentEmployee.start_date)}` : ''}
                       </p>
@@ -520,11 +520,11 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
               </div>
 
               {/* ── Two-column detail panels ──────── */}
-              <div className="grid gap-2.5 xl:grid-cols-[1.2fr_0.8fr]">
+              <div className="grid gap-2.5 xl:grid-cols-2 xl:items-start">
                 {/* LEFT column */}
                 <div className="space-y-2.5">
                   {/* Employee details */}
-                  <section className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+                  <section className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm xl:w-fit xl:min-w-[25rem] xl:max-w-[62ch]">
                     <h3 className="mb-1.5 text-[13px] font-bold text-slate-900">פרטי עובד וניהול משתמש</h3>
                     <div className="space-y-0">
                       <Row label="שם מלא" value={getEmployeeName(currentEmployee)} />
@@ -540,19 +540,8 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                     </div>
                   </section>
 
-                  {/* Leave & absence */}
-                  <section className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
-                    <h3 className="mb-1.5 text-[13px] font-bold text-slate-900">חופשות והיעדרויות</h3>
-                    <Row label="ימי חופשה שנתיים" value={currentEmployee.annual_leave_days != null ? `${currentEmployee.annual_leave_days}` : '—'} />
-                    <Row label="שיטת תשלום חופשה" value={currentEmployee.leave_pay_method} />
-                    <Row label="ערך יום חופשה" value={currentEmployee.leave_fixed_day_rate != null ? `₪${currentEmployee.leave_fixed_day_rate}` : '—'} />
-                    <div className="mt-2 rounded-xl border border-amber-200/80 bg-amber-50/60 px-2.5 py-1.5 text-xs text-amber-800">
-                      כאן כדאי להוסיף בעתיד גם יתרות חופשה, אישורים ומסמכים.
-                    </div>
-                  </section>
-
                   {/* Scheduled lessons */}
-                  <section className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+                  <section className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm xl:w-fit xl:min-w-[25rem] xl:max-w-[62ch]">
                     <h3 className="mb-1.5 text-[13px] font-bold text-slate-900">שיעורים מתוזמנים</h3>
                     {instancesLoading ? (
                       <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />טוען מופעים...</div>
@@ -561,8 +550,8 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                     ) : (
                       <div className="space-y-1.5">
                         {upcomingInstances.map((inst) => (
-                          <div key={inst.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2">
-                            <div className="min-w-0 flex-1 text-end">
+                          <div key={inst.id} dir="rtl" className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2">
+                            <div className="min-w-0">
                               <div className="text-sm font-bold text-slate-900">
                                 {formatDate(inst.datetime_start, { hour: '2-digit', minute: '2-digit' })}
                               </div>
@@ -584,8 +573,8 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                   <section className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
                     <h3 className="mb-1.5 text-[13px] font-bold text-slate-900">תקשורת מהירה</h3>
                     {currentEmployee.phone ? (
-                      <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 mb-1.5">
-                        <div className="min-w-0 flex-1 text-end">
+                      <div dir="rtl" className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 mb-1.5">
+                        <div className="min-w-0">
                           <div className="text-[13px] font-bold text-slate-900">WhatsApp</div>
                           <div className="text-xs text-slate-500">שלח הודעה מהירה</div>
                         </div>
@@ -595,8 +584,8 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                       </div>
                     ) : null}
                     {currentEmployee.phone ? (
-                      <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 mb-1.5">
-                        <div className="min-w-0 flex-1 text-end">
+                      <div dir="rtl" className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 mb-1.5">
+                        <div className="min-w-0">
                           <div className="text-[13px] font-bold text-slate-900">טלפון</div>
                           <div className="text-xs text-slate-500">{currentEmployee.phone}</div>
                         </div>
@@ -606,8 +595,8 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                       </div>
                     ) : null}
                     {currentEmployee.email ? (
-                      <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2">
-                        <div className="min-w-0 flex-1 text-end">
+                      <div dir="rtl" className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2">
+                        <div className="min-w-0">
                           <div className="text-[13px] font-bold text-slate-900">דוא״ל</div>
                           <div className="text-xs text-slate-500">{currentEmployee.email}</div>
                         </div>
@@ -621,14 +610,25 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                     ) : null}
                   </section>
 
+                  {/* Leave & absence */}
+                  <section className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm xl:w-fit xl:min-w-[23rem] xl:max-w-[56ch]">
+                    <h3 className="mb-1.5 text-[13px] font-bold text-slate-900">חופשות והיעדרויות</h3>
+                    <Row label="ימי חופשה שנתיים" value={currentEmployee.annual_leave_days != null ? `${currentEmployee.annual_leave_days}` : '—'} />
+                    <Row label="שיטת תשלום חופשה" value={currentEmployee.leave_pay_method} />
+                    <Row label="ערך יום חופשה" value={currentEmployee.leave_fixed_day_rate != null ? `₪${currentEmployee.leave_fixed_day_rate}` : '—'} />
+                    <div className="mt-2 rounded-xl border border-amber-200/80 bg-amber-50/60 px-2.5 py-1.5 text-xs text-amber-800">
+                      כאן כדאי להוסיף בעתיד גם יתרות חופשה, אישורים ומסמכים.
+                    </div>
+                  </section>
+
                   {/* Completed lessons & finances */}
                   <section className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
                     <h3 className="mb-1.5 text-[13px] font-bold text-slate-900">פיננסים ודיווחים</h3>
                     {completedInstances.length > 0 ? (
                       <div className="space-y-1.5 mb-3">
                         {completedInstances.slice(0, 3).map((inst) => (
-                          <div key={inst.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2">
-                            <div className="min-w-0 flex-1 text-end">
+                          <div key={inst.id} dir="rtl" className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2">
+                            <div className="min-w-0">
                               <div className="text-sm font-bold text-slate-900">
                                 {inst.participants?.[0]?.student?.full_name || 'שיעור'}
                               </div>
