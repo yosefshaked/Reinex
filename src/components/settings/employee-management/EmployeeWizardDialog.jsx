@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { TextField } from '@/components/ui/forms-ui';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { UserPlus, Mail, ArrowRight, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client';
@@ -16,10 +19,12 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
   const [step, setStep] = useState(STEPS.DETAILS);
   const [formData, setFormData] = useState({
     employeeId: '',
+    employeeType: 'instructor',
     firstName: '',
     lastName: '',
     email: '',
     phone: '',
+    startDate: '',
   });
   const [inviteEmail, setInviteEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -27,7 +32,7 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
 
   const handleReset = () => {
     setStep(STEPS.DETAILS);
-    setFormData({ employeeId: '', firstName: '', lastName: '', email: '', phone: '' });
+    setFormData({ employeeId: '', employeeType: 'instructor', firstName: '', lastName: '', email: '', phone: '', startDate: '' });
     setInviteEmail('');
     setCreatedEmployeeId(null);
   };
@@ -54,10 +59,12 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
         body: {
           org_id: orgId,
           employee_id: formData.employeeId.trim(),
+          employee_type: formData.employeeType,
           first_name: formData.firstName.trim(),
           last_name: formData.lastName.trim() || undefined,
           email: formData.email.trim() || undefined,
           phone: formData.phone.trim() || undefined,
+          start_date: formData.startDate || undefined,
         },
       });
 
@@ -132,6 +139,22 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
                 disabled={isSubmitting}
                 description='הזן תעודת זהות או מספר עובד'
               />
+
+              <div className="space-y-2">
+                <Label className="text-end">סוג עובד</Label>
+                <Select
+                  value={formData.employeeType}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, employeeType: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="בחר סוג עובד" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="instructor">מדריך/ה</SelectItem>
+                    <SelectItem value="office">עובד/ת משרד</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <TextField
@@ -170,6 +193,17 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
                 disabled={isSubmitting}
                 dir="ltr"
               />
+
+              <div className="space-y-2 text-end">
+                <Label htmlFor="startDate">תאריך התחלה (אופציונלי)</Label>
+                <Input
+                  id="startDate"
+                  type="date"
+                  value={formData.startDate}
+                  onChange={(e) => setFormData(prev => ({ ...prev, startDate: e.target.value }))}
+                  disabled={isSubmitting}
+                />
+              </div>
 
               <DialogFooter className="sm:justify-start">
                 <div className="flex flex-row-reverse gap-2 w-full">

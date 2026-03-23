@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Employees UX Directions</title>
+    <style>
+      :root {
+        --bg: #f4f6fb;
+        --card: #ffffff;
+        --ink: #111827;
+        --muted: #6b7280;
+        --line: #d8deea;
+        --accent: #2f6fed;
+        --accent-soft: #e8f0ff;
+        --green: #0f9f6e;
+        --amber: #c77d12;
+        --red: #d9485f;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        background: linear-gradient(180deg, #eef3ff 0%, var(--bg) 38%);
+        color: var(--ink);
+      }
+      .shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+      .hero {
+        background: rgba(255,255,255,0.76);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(216,222,234,0.9);
+        border-radius: 28px;
+        padding: 28px;
+        box-shadow: 0 24px 60px -42px rgba(31,41,55,0.45);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 38px;
+        line-height: 1.05;
+      }
+      .lead {
+        margin: 0;
+        color: var(--muted);
+        font-size: 17px;
+        max-width: 760px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+        margin-top: 24px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 22px;
+        box-shadow: 0 20px 48px -40px rgba(17,24,39,0.5);
+      }
+      .eyebrow {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      h2 {
+        margin: 14px 0 10px;
+        font-size: 24px;
+      }
+      ul {
+        margin: 0 0 16px;
+        padding-inline-start: 18px;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+      a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 11px 14px;
+        border-radius: 12px;
+        text-decoration: none;
+        background: var(--accent);
+        color: white;
+        font-weight: 700;
+      }
+      .recommended {
+        border-color: rgba(47,111,237,0.35);
+        background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
+      }
+      @media (max-width: 900px) {
+        .grid { grid-template-columns: 1fr; }
+        h1 { font-size: 30px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <span class="eyebrow">Mock Directions</span>
+        <h1>כיווני UX לעמוד עובדים</h1>
+        <p class="lead">
+          שלושה כיוונים שונים לעמוד ניהול עובדים מקצועי ונוח: רוסטר + סביבת עבודה,
+          לוח תפעולי, ומרכז פרופיל אישי. כולם כוללים עובדים עם משתמש ובלי משתמש,
+          מדריכים ועובדי משרד, ושטחים עתידיים לדוחות ולפיננסים.
+        </p>
+      </section>
+
+      <section class="grid">
+        <article class="card recommended">
+          <span class="eyebrow">Recommended</span>
+          <h2>אפשרות A: Directory + Workspace</h2>
+          <ul>
+            <li>רשימת עובדים משמאל, סביבת עבודה של העובד מימין</li>
+            <li>מאוזן בין ניווט מהיר לניהול עמוק</li>
+            <li>מתאים במיוחד למוצר שצריך לגדול סביב תפעול, חופשות ודוחות</li>
+          </ul>
+          <a href="./option-a-directory-workspace.html">פתח דוגמה</a>
+        </article>
+
+        <article class="card">
+          <span class="eyebrow">Hybrid</span>
+          <h2>אפשרות D: Reinex Hybrid Workspace</h2>
+          <ul>
+            <li>מבנה עבודה של A עם טון עיצובי רגוע ומדויק יותר</li>
+            <li>שומר על ניווט מהיר בין עובדים, בלי להרגיש כמו דאשבורד עמוס</li>
+            <li>כנראה הכיוון הכי נכון למוצר הסופי</li>
+          </ul>
+          <a href="./option-d-reinex-hybrid-workspace.html">פתח דוגמה</a>
+        </article>
+
+        <article class="card">
+          <span class="eyebrow">Operations First</span>
+          <h2>אפשרות B: Operations Board</h2>
+          <ul>
+            <li>דגש על פעולות מהירות, תקשורת, חופשות וחריגים</li>
+            <li>טוב אם עמוד העובדים הוא כלי עבודה יומי לצוות משרד</li>
+            <li>פחות "HR profile", יותר "control room"</li>
+          </ul>
+          <a href="./option-b-operations-board.html">פתח דוגמה</a>
+        </article>
+
+        <article class="card">
+          <span class="eyebrow">Profile First</span>
+          <h2>אפשרות C: Profile Hub</h2>
+          <ul>
+            <li>מתמקד בעובד יחיד כקובץ עבודה מלא</li>
+            <li>חזק במיוחד למסמכים, היסטוריה, דוחות וציר זמן</li>
+            <li>פחות אידיאלי לניווט מהיר בין הרבה עובדים</li>
+          </ul>
+          <a href="./option-c-profile-hub.html">פתח דוגמה</a>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

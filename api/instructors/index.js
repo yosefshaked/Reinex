@@ -95,7 +95,7 @@ export default async function (context, req) {
 
     const buildRosterQuery = (includeInstructorTypes = true) => {
       // Start with base columns that should always exist
-      const baseColumns = 'id, user_id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata';
+      const baseColumns = 'id, user_id, first_name, middle_name, last_name, employee_id, employee_type, current_rate, phone, email, start_date, is_active, notes, annual_leave_days, leave_pay_method, leave_fixed_day_rate, employment_scope, metadata';
       const selectColumns = includeInstructorTypes 
         ? `${baseColumns}, instructor_types`
         : baseColumns;
@@ -290,17 +290,23 @@ export default async function (context, req) {
       middle_name: providedMiddleName || (nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : null),
       last_name: providedLastName || fallbackLast || (isManual ? '' : targetUserId),
       employee_id: validation.employeeId,
+      employee_type: validation.employeeType || 'instructor',
+      current_rate: validation.currentRate,
       email: providedEmail || profileEmail || null,
       phone: providedPhone || null,
+      start_date: validation.startDate,
       notes: notes || null,
       is_active: true,
-      employee_type: 'instructor',
+      annual_leave_days: validation.annualLeaveDays,
+      leave_pay_method: validation.leavePayMethod || null,
+      leave_fixed_day_rate: validation.leaveFixedDayRate,
+      employment_scope: validation.employmentScope || null,
     };
 
     const { data, error } = await tenantClient
       .from('Employees')
       .insert(insertPayload)
-      .select('id, user_id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
+      .select('id, user_id, first_name, middle_name, last_name, employee_id, employee_type, current_rate, email, phone, start_date, is_active, notes, annual_leave_days, leave_pay_method, leave_fixed_day_rate, employment_scope, metadata, instructor_types')
       .single();
 
     if (error) {
@@ -429,7 +435,7 @@ export default async function (context, req) {
       .from('Employees')
       .update(updates)
       .eq('id', instructorId)
-      .select('id, first_name, middle_name, last_name, email, phone, is_active, notes, metadata, instructor_types')
+      .select('id, user_id, first_name, middle_name, last_name, employee_id, employee_type, current_rate, email, phone, start_date, is_active, notes, annual_leave_days, leave_pay_method, leave_fixed_day_rate, employment_scope, metadata, instructor_types')
       .maybeSingle();
 
     if (error) {

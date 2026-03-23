@@ -222,6 +222,39 @@ export function validateSessionWrite(body) {
 
 // ----- Instructors write validation (SOT) -----
 const PHONE_PATTERN = /^[0-9+\-()\s]{6,20}$/;
+const SIMPLE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function coerceOptionalDateString(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return { valid: true, value: null };
+  }
+  if (!SIMPLE_DATE_PATTERN.test(normalized)) {
+    return { valid: false, value: null };
+  }
+  return { valid: true, value: normalized };
+}
+
+function coerceOptionalNumberValue(value) {
+  if (value === undefined) {
+    return { present: false, valid: true, value: null };
+  }
+  if (value === null) {
+    return { present: true, valid: true, value: null };
+  }
+
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return { present: true, valid: true, value: null };
+  }
+
+  const numeric = Number(normalized);
+  if (!Number.isFinite(numeric)) {
+    return { present: true, valid: false, value: null };
+  }
+
+  return { present: true, valid: true, value: numeric };
+}
 
 export function validateInstructorCreate(body) {
   const userId = normalizeString(body?.user_id || body?.userId);
@@ -249,6 +282,25 @@ export function validateInstructorCreate(body) {
   if (!notesResult.valid) {
     return { error: 'invalid_notes' };
   }
+  const startDateResult = coerceOptionalDateString(body?.start_date ?? body?.startDate);
+  if (!startDateResult.valid) {
+    return { error: 'invalid_start_date' };
+  }
+  const currentRateResult = coerceOptionalNumberValue(body?.current_rate ?? body?.currentRate);
+  if (!currentRateResult.valid) {
+    return { error: 'invalid_current_rate' };
+  }
+  const annualLeaveDaysResult = coerceOptionalNumberValue(body?.annual_leave_days ?? body?.annualLeaveDays);
+  if (!annualLeaveDaysResult.valid) {
+    return { error: 'invalid_annual_leave_days' };
+  }
+  const leaveFixedDayRateResult = coerceOptionalNumberValue(body?.leave_fixed_day_rate ?? body?.leaveFixedDayRate);
+  if (!leaveFixedDayRateResult.valid) {
+    return { error: 'invalid_leave_fixed_day_rate' };
+  }
+  const employeeType = normalizeString(body?.employee_type ?? body?.employeeType).toLowerCase() || '';
+  const leavePayMethod = normalizeString(body?.leave_pay_method ?? body?.leavePayMethod).toLowerCase() || '';
+  const employmentScope = normalizeString(body?.employment_scope ?? body?.employmentScope) || '';
 
   // employee_id is required (national ID or worker number)
   const employeeId = normalizeString(body?.employee_id || body?.employeeId);
@@ -267,6 +319,13 @@ export function validateInstructorCreate(body) {
     phone,
     notes: notesResult.value,
     employeeId,
+    employeeType,
+    startDate: startDateResult.value,
+    currentRate: currentRateResult.value,
+    annualLeaveDays: annualLeaveDaysResult.value,
+    leavePayMethod,
+    leaveFixedDayRate: leaveFixedDayRateResult.value,
+    employmentScope,
   };
 }
 
@@ -338,6 +397,74 @@ export function validateInstructorUpdate(body, orgPermissions = {}) {
       return { error: 'invalid_notes' };
     }
     updates.notes = notesResult.value;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'employee_id') || Object.prototype.hasOwnProperty.call(body, 'employeeId')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'employee_id') ? body.employee_id : body.employeeId
+    );
+    updates.employee_id = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'employee_type') || Object.prototype.hasOwnProperty.call(body, 'employeeType')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'employee_type') ? body.employee_type : body.employeeType
+    ).toLowerCase();
+    updates.employee_type = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'start_date') || Object.prototype.hasOwnProperty.call(body, 'startDate')) {
+    const result = coerceOptionalDateString(
+      Object.prototype.hasOwnProperty.call(body, 'start_date') ? body.start_date : body.startDate
+    );
+    if (!result.valid) {
+      return { error: 'invalid_start_date' };
+    }
+    updates.start_date = result.value;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'current_rate') || Object.prototype.hasOwnProperty.call(body, 'currentRate')) {
+    const result = coerceOptionalNumberValue(
+      Object.prototype.hasOwnProperty.call(body, 'current_rate') ? body.current_rate : body.currentRate
+    );
+    if (!result.valid) {
+      return { error: 'invalid_current_rate' };
+    }
+    updates.current_rate = result.value;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'annual_leave_days') || Object.prototype.hasOwnProperty.call(body, 'annualLeaveDays')) {
+    const result = coerceOptionalNumberValue(
+      Object.prototype.hasOwnProperty.call(body, 'annual_leave_days') ? body.annual_leave_days : body.annualLeaveDays
+    );
+    if (!result.valid) {
+      return { error: 'invalid_annual_leave_days' };
+    }
+    updates.annual_leave_days = result.value;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'leave_pay_method') || Object.prototype.hasOwnProperty.call(body, 'leavePayMethod')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'leave_pay_method') ? body.leave_pay_method : body.leavePayMethod
+    ).toLowerCase();
+    updates.leave_pay_method = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'leave_fixed_day_rate') || Object.prototype.hasOwnProperty.call(body, 'leaveFixedDayRate')) {
+    const result = coerceOptionalNumberValue(
+      Object.prototype.hasOwnProperty.call(body, 'leave_fixed_day_rate') ? body.leave_fixed_day_rate : body.leaveFixedDayRate
+    );
+    if (!result.valid) {
+      return { error: 'invalid_leave_fixed_day_rate' };
+    }
+    updates.leave_fixed_day_rate = result.value;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'employment_scope') || Object.prototype.hasOwnProperty.call(body, 'employmentScope')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'employment_scope') ? body.employment_scope : body.employmentScope
+    );
+    updates.employment_scope = v || null;
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'is_active')) {
