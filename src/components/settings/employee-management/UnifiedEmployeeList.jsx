@@ -307,16 +307,9 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-lg font-bold text-slate-950 sm:text-xl">עובדים</h1>
-          <p className="text-xs text-slate-500">רוסטר ארגוני + סביבת עבודה לעובד</p>
+          <p className="text-xs text-slate-500">סביבת עבודה לניהול ובקרת פרטי עובדי הארגון</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => setShowWizard(true)} size="sm">
-            <UserPlus className="me-2 h-4 w-4" />עובד חדש
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setShowInactive((prev) => !prev)}>
-            {showInactive ? 'הסתר מושבתים' : 'הצג מושבתים'}
-          </Button>
-        </div>
+        <div />
       </div>
 
       {/* ── Master-detail grid ─────────────────────────────── */}
@@ -325,6 +318,17 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
         {/* ════ SIDEBAR ════ */}
         <aside className="rounded-2xl border border-slate-200 bg-blue-50/30 shadow-sm lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-hidden lg:flex lg:flex-col">
           <div className="p-2.5 space-y-1.5">
+            {/* Actions: create employee + toggle inactive */}
+            <div className="mb-2">
+              <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm space-y-2">
+                <Button onClick={() => setShowWizard(true)} size="sm" className="w-full justify-center">
+                  <UserPlus className="me-2 h-4 w-4" />עובד חדש
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setShowInactive((prev) => !prev)} className="w-full">
+                  {showInactive ? 'הסתר מושבתים' : 'הצג מושבתים'}
+                </Button>
+              </div>
+            </div>
             {/* search */}
             <div className="relative">
               <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -424,7 +428,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                 <div className="mt-1 space-y-1">
                   {unlinkedMembers.slice(0, 3).map((member) => (
                     <div key={member.user_id} className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white/70 px-2.5 py-1">
-                      <div className="min-w-0 flex-1 text-end">
+                      <div className="min-w-0 flex-1">
                         <div className="truncate text-xs font-medium text-slate-900">{member.profile?.full_name || member.profile?.email || member.user_id}</div>
                       </div>
                       <Button size="sm" variant="outline" onClick={() => handleCreateEmployeeForMember(member)} disabled={actionState === REQUEST.loading}>
