@@ -61,7 +61,7 @@ function Section({ title, icon: Icon, description, children }) {
   return (
     <section className="space-y-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="text-end">
+        <div>
           <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
           {description ? <p className="text-xs text-slate-500">{description}</p> : null}
         </div>
@@ -149,7 +149,7 @@ export default function EditEmployeeDialog({ open, onOpenChange, employee, orgId
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
-        <DialogHeader className="text-end">
+        <DialogHeader>
           <DialogTitle>עריכת עובד</DialogTitle>
           <DialogDescription>
             ניהול פרטי בסיס, סטטוס העסקה, תקשורת והגדרות מדריך מתוך חלון אחד.
@@ -299,7 +299,7 @@ export default function EditEmployeeDialog({ open, onOpenChange, employee, orgId
                   disabled={!isInstructor || isSaving}
                 />
               </div>
-              <div className="flex items-end justify-end">
+              <div className="flex items-end">
                 <Badge variant={isInstructor ? 'default' : 'outline'} className="rounded-full px-3 py-1 text-xs">
                   {isInstructor ? 'מוגדר כמדריך/ה' : 'עובד/ת משרד - פרופיל מדריך כבוי'}
                 </Badge>
