@@ -255,159 +255,160 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr] w-full h-full overflow-hidden">
-      <div className="border-e border-border bg-slate-50 h-full overflow-y-auto p-4 flex flex-col gap-4">
-        <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="space-y-6">
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-950">ניהול עובדים</h2>
+            <p className="text-sm text-slate-500">מבט מהיר על עובדים, חוסרים תפעוליים וכניסה ישירה לכרטיס עובד מלא.</p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button onClick={() => setShowWizard(true)} size="sm"><UserPlus className="me-2 h-4 w-4" />עובד חדש</Button>
             <Button variant="outline" size="sm" onClick={() => setShowInactive((prev) => !prev)}>{showInactive ? 'הסתר מושבתים' : 'הצג מושבתים'}</Button>
           </div>
-          <div className="relative mt-4">
-            <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="חיפוש לפי שם, דוא״ל, טלפון או מספר עובד" className="pe-9" />
-          </div>
         </div>
-
-        <div className="space-y-2">
-          {filteredEmployees.map((employee) => (
-            <button key={employee.id} type="button" onClick={() => setSelectedEmployeeId(employee.id)} className={cn('flex w-full items-center gap-3 rounded-[1.4rem] border bg-white p-3 transition', selectedEmployeeId === employee.id ? 'border-blue-200 bg-blue-50/70' : 'border-slate-200 hover:border-slate-300')}>
-              <Avatar className="h-11 w-11"><AvatarFallback className={employee.is_active ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-600'}>{getInitials(employee)}</AvatarFallback></Avatar>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold text-slate-900">{getEmployeeName(employee)}</div>
-                <div className="truncate text-xs text-slate-500">{employee.email || employee.phone || employee.employee_id || 'ללא פרטי קשר'}</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Badge variant={employee.is_active ? 'default' : 'secondary'}>{employee.is_active ? 'פעיל' : 'מושבת'}</Badge>
-                  {!employee.user_id ? <Badge variant="outline">ידני</Badge> : null}
-                </div>
-              </div>
-            </button>
+        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {[['עובדים פעילים', summary.activeEmployees], ['ללא משתמש מקושר', summary.missingUser], ['אירועים קרובים השבוע', summary.upcomingLessons], ['חוסרים בפרטים', summary.missingDetails]].map(([label, value]) => (
+            <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4"><div className="text-2xl font-semibold text-slate-900">{value}</div><div className="mt-1 text-sm text-slate-500">{label}</div></div>
           ))}
         </div>
-      </div>
-
-      <div className="bg-white h-full overflow-y-auto p-6 space-y-6">
-        <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-slate-950">ניהול עובדים</h2>
-              <p className="text-sm text-slate-500">מבט מהיר על עובדים, חוסרים תפעוליים וכניסה ישירה לכרטיס עובד מלא.</p>
+        <div className="mt-6 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+          {filteredEmployees.slice(0, 6).map((employee) => {
+            const activity = employeeActivities.get(employee.id) || { scheduled: 0, completed: 0 };
+            return (
+              <button key={employee.id} type="button" onClick={() => setSelectedEmployeeId(employee.id)} className={cn('rounded-2xl border px-4 py-4 transition', selectedEmployeeId === employee.id ? 'border-blue-200 bg-blue-50/70' : 'border-slate-200 bg-white hover:border-slate-300')}>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-xs text-slate-500">{activity.scheduled} מתוכננים • {activity.completed} הושלמו</div>
+                  <div className="flex items-center gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">{getEmployeeName(employee)}</div>
+                      <div className="text-xs text-slate-500">{getEmployeeTypeLabel(employee)} • {employee.email || employee.phone || 'ללא פרטי קשר'}</div>
+                    </div>
+                    <Avatar className="h-11 w-11"><AvatarFallback className="bg-blue-100 text-blue-700">{getInitials(employee)}</AvatarFallback></Avatar>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {unlinkedMembers.length > 0 ? (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+            <div className="text-sm font-medium text-amber-900">חברי ארגון ללא כרטיס עובד</div>
+            <div className="mt-1 text-sm text-amber-800">יש {unlinkedMembers.length} משתמשים שטרם קיבלו כרטיס עובד.</div>
+            <div className="mt-3 space-y-2">
+              {unlinkedMembers.slice(0, 3).map((member) => (
+                <div key={member.user_id} className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-white/70 px-3 py-2">
+                  <Button size="sm" variant="outline" onClick={() => handleCreateEmployeeForMember(member)} disabled={actionState === REQUEST.loading}>
+                    <UserPlus className="me-2 h-4 w-4" />
+                    צור עובד
+                  </Button>
+                  <div>
+                    <div className="text-sm font-medium text-slate-900">{member.profile?.full_name || member.profile?.email || member.user_id}</div>
+                    <div className="text-xs text-slate-500">{member.profile?.email || 'ללא דוא״ל'}</div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {[['עובדים פעילים', summary.activeEmployees], ['ללא משתמש מקושר', summary.missingUser], ['אירועים קרובים השבוע', summary.upcomingLessons], ['חוסרים בפרטים', summary.missingDetails]].map(([label, value]) => (
-              <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4"><div className="text-2xl font-semibold text-slate-900">{value}</div><div className="mt-1 text-sm text-slate-500">{label}</div></div>
-            ))}
-          </div>
-          <div className="mt-6 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-            {filteredEmployees.slice(0, 6).map((employee) => {
-              const activity = employeeActivities.get(employee.id) || { scheduled: 0, completed: 0 };
-              return (
-                <button key={employee.id} type="button" onClick={() => setSelectedEmployeeId(employee.id)} className={cn('rounded-2xl border px-4 py-4 transition', selectedEmployeeId === employee.id ? 'border-blue-200 bg-blue-50/70' : 'border-slate-200 bg-white hover:border-slate-300')}>
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="text-xs text-slate-500">{activity.scheduled} מתוכננים • {activity.completed} הושלמו</div>
-                    <div className="flex items-center gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-slate-900">{getEmployeeName(employee)}</div>
-                        <div className="text-xs text-slate-500">{getEmployeeTypeLabel(employee)} • {employee.email || employee.phone || 'ללא פרטי קשר'}</div>
-                      </div>
-                      <Avatar className="h-11 w-11"><AvatarFallback className="bg-blue-100 text-blue-700">{getInitials(employee)}</AvatarFallback></Avatar>
+        ) : null}
+      </section>
+
+      <div className="grid gap-6 2xl:grid-cols-[minmax(300px,360px),minmax(0,1fr)]">
+        <aside className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm 2xl:sticky 2xl:top-6 2xl:self-start">
+          <div className="space-y-4">
+            <div className="relative">
+              <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="חיפוש לפי שם, דוא״ל, טלפון או מספר עובד" className="pe-9" />
+            </div>
+            <div className="space-y-2">
+              {filteredEmployees.map((employee) => (
+                <button key={employee.id} type="button" onClick={() => setSelectedEmployeeId(employee.id)} className={cn('flex w-full items-center gap-3 rounded-2xl border p-3 transition', selectedEmployeeId === employee.id ? 'border-blue-200 bg-blue-50/70' : 'border-slate-200 bg-white hover:border-slate-300')}>
+                  <Avatar className="h-11 w-11"><AvatarFallback className={employee.is_active ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-600'}>{getInitials(employee)}</AvatarFallback></Avatar>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-slate-900">{getEmployeeName(employee)}</div>
+                    <div className="truncate text-xs text-slate-500">{employee.email || employee.phone || employee.employee_id || 'ללא פרטי קשר'}</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Badge variant={employee.is_active ? 'default' : 'secondary'}>{employee.is_active ? 'פעיל' : 'מושבת'}</Badge>
+                      {!employee.user_id ? <Badge variant="outline">ידני</Badge> : null}
                     </div>
                   </div>
                 </button>
-              );
-            })}
+              ))}
+            </div>
           </div>
-          {unlinkedMembers.length > 0 ? (
-            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
-              <div className="text-sm font-medium text-amber-900">חברי ארגון ללא כרטיס עובד</div>
-              <div className="mt-1 text-sm text-amber-800">יש {unlinkedMembers.length} משתמשים שטרם קיבלו כרטיס עובד.</div>
-              <div className="mt-3 space-y-2">
-                {unlinkedMembers.slice(0, 3).map((member) => (
-                  <div key={member.user_id} className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-white/70 px-3 py-2">
-                    <Button size="sm" variant="outline" onClick={() => handleCreateEmployeeForMember(member)} disabled={actionState === REQUEST.loading}>
-                      <UserPlus className="me-2 h-4 w-4" />
-                      צור עובד
-                    </Button>
-                    <div>
-                      <div className="text-sm font-medium text-slate-900">{member.profile?.full_name || member.profile?.email || member.user_id}</div>
-                      <div className="text-xs text-slate-500">{member.profile?.email || 'ללא דוא״ל'}</div>
+        </aside>
+
+        <div className="space-y-5">
+          {!currentEmployee ? <div className="rounded-[2rem] border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500">בחר עובד כדי לצפות בכרטיס המלא.</div> : (
+            <>
+              <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr),auto] xl:items-start">
+                  <div className="flex items-start gap-4">
+                    <Avatar className="h-16 w-16"><AvatarFallback className="bg-blue-100 text-lg font-semibold text-blue-700">{getInitials(currentEmployee)}</AvatarFallback></Avatar>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant={currentEmployee.is_active ? 'default' : 'secondary'}>{currentEmployee.is_active ? 'פעיל' : 'מושבת'}</Badge>
+                        <Badge variant="outline">{getEmployeeTypeLabel(currentEmployee)}</Badge>
+                        {!currentEmployee.user_id ? <Badge variant="outline">ללא משתמש</Badge> : null}
+                      </div>
+                      <h2 className="mt-2 text-2xl font-semibold text-slate-950">{getEmployeeName(currentEmployee)}</h2>
+                      <p className="text-sm text-slate-500">{currentEmployee.email || 'אין כתובת דוא״ל'} • התחלה: {formatDate(currentEmployee.start_date)}</p>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </section>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {!currentEmployee.user_id ? <Button size="sm" variant="outline" onClick={() => handleLinkUser(currentEmployee)} disabled={actionState === REQUEST.loading}><MailPlus className="me-2 h-4 w-4" />הזמן משתמש</Button> : null}
+                    {currentEmployee.phone ? <Button size="sm" variant="outline" onClick={() => window.open(getWhatsAppLink(currentEmployee), '_blank', 'noopener,noreferrer')}><MessageCircle className="me-2 h-4 w-4" />WhatsApp</Button> : null}
+                    {currentEmployee.phone ? <Button size="sm" variant="outline" asChild><a href={`tel:${currentEmployee.phone}`}><Phone className="me-2 h-4 w-4" />התקשר</a></Button> : null}
+                    {currentEmployee.email ? <Button size="sm" variant="outline" asChild><a href={`mailto:${currentEmployee.email}`}><Mail className="me-2 h-4 w-4" />מייל</a></Button> : null}
+                    <Button size="sm" variant="outline" onClick={() => { setSelectedEmployee(currentEmployee); setShowEditDialog(true); }}><Settings className="me-2 h-4 w-4" />ערוך</Button>
+                    {currentEmployee.is_active ? <Button size="sm" variant="outline" onClick={() => handleToggleActive(currentEmployee, false)} disabled={actionState === REQUEST.loading}><UserX className="me-2 h-4 w-4 text-red-600" />השבת</Button> : <Button size="sm" variant="outline" onClick={() => handleToggleActive(currentEmployee, true)} disabled={actionState === REQUEST.loading}><RotateCcw className="me-2 h-4 w-4 text-green-600" />הפעל מחדש</Button>}
+                  </div>
+                </div>
+              </section>
 
-        {!currentEmployee ? <div className="rounded-[2rem] border border-dashed border-slate-200 bg-white p-10 text-sm text-slate-500">בחר עובד כדי לצפות בכרטיס המלא.</div> : (
-          <>
-            <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr),auto] xl:items-start">
-                <div className="flex items-start gap-4">
-                  <Avatar className="h-16 w-16"><AvatarFallback className="bg-blue-100 text-lg font-semibold text-blue-700">{getInitials(currentEmployee)}</AvatarFallback></Avatar>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap gap-2">
-                      <Badge variant={currentEmployee.is_active ? 'default' : 'secondary'}>{currentEmployee.is_active ? 'פעיל' : 'מושבת'}</Badge>
-                      <Badge variant="outline">{getEmployeeTypeLabel(currentEmployee)}</Badge>
-                      {!currentEmployee.user_id ? <Badge variant="outline">ללא משתמש</Badge> : null}
+              <div className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
+                <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="mb-4 text-base font-semibold text-slate-900">פרטי עובד</h3>
+                  <Row label="מספר עובד / תעודה" value={currentEmployee.employee_id} />
+                  <Row label="סוג עובד" value={getEmployeeTypeLabel(currentEmployee)} />
+                  <Row label="תאריך התחלה" value={formatDate(currentEmployee.start_date)} />
+                  <Row label="היקף העסקה" value={currentEmployee.employment_scope} />
+                  <Row label="תעריף נוכחי" value={currentEmployee.current_rate != null ? `₪${currentEmployee.current_rate}` : '—'} />
+                  <Row label="הערות" value={currentEmployee.notes} />
+                </section>
+
+                <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="mb-4 text-base font-semibold text-slate-900">תקשורת וחופשות</h3>
+                  <Row label="דוא״ל" value={currentEmployee.email} />
+                  <Row label="טלפון" value={currentEmployee.phone} />
+                  <Row label="משתמש מקושר" value={currentEmployee.user_id ? 'כן' : 'לא'} />
+                  <Row label="ימי חופשה שנתיים" value={currentEmployee.annual_leave_days != null ? `${currentEmployee.annual_leave_days}` : '—'} />
+                  <Row label="שיטת תשלום חופשה" value={currentEmployee.leave_pay_method} />
+                  <Row label="ערך יום חופשה" value={currentEmployee.leave_fixed_day_rate != null ? `₪${currentEmployee.leave_fixed_day_rate}` : '—'} />
+                </section>
+
+                <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="mb-4 text-base font-semibold text-slate-900">מופעים מתוכננים</h3>
+                  {instancesLoading ? <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />טוען מופעים...</div> : upcomingInstances.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">אין מופעים מתוכננים בטווח שנבדק.</div> : (
+                    <div className="space-y-3">
+                      {upcomingInstances.map((instance) => <div key={instance.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3"><div className="text-sm font-semibold text-slate-900">{instance.participants?.[0]?.student?.full_name || 'ללא תלמיד'}</div><div className="text-xs text-slate-500">{instance.service?.service_name || services.find((service) => service.id === instance.service_id)?.service_name || 'שירות'} • {formatDate(instance.datetime_start, { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}</div></div>)}
                     </div>
-                    <h2 className="mt-2 text-2xl font-semibold text-slate-950">{getEmployeeName(currentEmployee)}</h2>
-                    <p className="text-sm text-slate-500">{currentEmployee.email || 'אין כתובת דוא״ל'} • התחלה: {formatDate(currentEmployee.start_date)}</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {!currentEmployee.user_id ? <Button size="sm" variant="outline" onClick={() => handleLinkUser(currentEmployee)} disabled={actionState === REQUEST.loading}><MailPlus className="me-2 h-4 w-4" />הזמן משתמש</Button> : null}
-                  {currentEmployee.phone ? <Button size="sm" variant="outline" onClick={() => window.open(getWhatsAppLink(currentEmployee), '_blank', 'noopener,noreferrer')}><MessageCircle className="me-2 h-4 w-4" />WhatsApp</Button> : null}
-                  {currentEmployee.phone ? <Button size="sm" variant="outline" asChild><a href={`tel:${currentEmployee.phone}`}><Phone className="me-2 h-4 w-4" />התקשר</a></Button> : null}
-                  {currentEmployee.email ? <Button size="sm" variant="outline" asChild><a href={`mailto:${currentEmployee.email}`}><Mail className="me-2 h-4 w-4" />מייל</a></Button> : null}
-                  <Button size="sm" variant="outline" onClick={() => { setSelectedEmployee(currentEmployee); setShowEditDialog(true); }}><Settings className="me-2 h-4 w-4" />ערוך</Button>
-                  {currentEmployee.is_active ? <Button size="sm" variant="outline" onClick={() => handleToggleActive(currentEmployee, false)} disabled={actionState === REQUEST.loading}><UserX className="me-2 h-4 w-4 text-red-600" />השבת</Button> : <Button size="sm" variant="outline" onClick={() => handleToggleActive(currentEmployee, true)} disabled={actionState === REQUEST.loading}><RotateCcw className="me-2 h-4 w-4 text-green-600" />הפעל מחדש</Button>}
-                </div>
+                  )}
+                </section>
+
+                <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2 2xl:col-span-2">
+                  <h3 className="mb-4 text-base font-semibold text-slate-900">מופעים שהושלמו ופיננסים</h3>
+                  {completedInstances.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">אין מופעים שהושלמו בטווח שנבדק.</div> : (
+                    <div className="grid gap-3 xl:grid-cols-2">
+                      {completedInstances.map((instance) => <div key={instance.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3"><div className="text-sm font-semibold text-slate-900">{instance.participants?.[0]?.student?.full_name || 'ללא תלמיד'}</div><div className="text-xs text-slate-500">{instance.service?.service_name || services.find((service) => service.id === instance.service_id)?.service_name || 'שירות'} • {formatDate(instance.datetime_start, { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}</div></div>)}
+                    </div>
+                  )}
+                  <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">שכבת דוחות שכר וייצוא לרו״ח תתווסף בשלב הבא על בסיס `RateHistory`, `WorkSessions` ו-`LeaveBalances`.</div>
+                </section>
               </div>
-            </section>
-
-            <div className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
-              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 className="mb-4 text-base font-semibold text-slate-900">פרטי עובד</h3>
-                <Row label="מספר עובד / תעודה" value={currentEmployee.employee_id} />
-                <Row label="סוג עובד" value={getEmployeeTypeLabel(currentEmployee)} />
-                <Row label="תאריך התחלה" value={formatDate(currentEmployee.start_date)} />
-                <Row label="היקף העסקה" value={currentEmployee.employment_scope} />
-                <Row label="תעריף נוכחי" value={currentEmployee.current_rate != null ? `₪${currentEmployee.current_rate}` : '—'} />
-                <Row label="הערות" value={currentEmployee.notes} />
-              </section>
-
-              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 className="mb-4 text-base font-semibold text-slate-900">תקשורת וחופשות</h3>
-                <Row label="דוא״ל" value={currentEmployee.email} />
-                <Row label="טלפון" value={currentEmployee.phone} />
-                <Row label="משתמש מקושר" value={currentEmployee.user_id ? 'כן' : 'לא'} />
-                <Row label="ימי חופשה שנתיים" value={currentEmployee.annual_leave_days != null ? `${currentEmployee.annual_leave_days}` : '—'} />
-                <Row label="שיטת תשלום חופשה" value={currentEmployee.leave_pay_method} />
-                <Row label="ערך יום חופשה" value={currentEmployee.leave_fixed_day_rate != null ? `₪${currentEmployee.leave_fixed_day_rate}` : '—'} />
-              </section>
-
-              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 className="mb-4 text-base font-semibold text-slate-900">מופעים מתוכננים</h3>
-                {instancesLoading ? <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />טוען מופעים...</div> : upcomingInstances.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">אין מופעים מתוכננים בטווח שנבדק.</div> : (
-                  <div className="space-y-3">
-                    {upcomingInstances.map((instance) => <div key={instance.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3"><div className="text-sm font-semibold text-slate-900">{instance.participants?.[0]?.student?.full_name || 'ללא תלמיד'}</div><div className="text-xs text-slate-500">{instance.service?.service_name || services.find((service) => service.id === instance.service_id)?.service_name || 'שירות'} • {formatDate(instance.datetime_start, { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}</div></div>)}
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2 2xl:col-span-2">
-                <h3 className="mb-4 text-base font-semibold text-slate-900">מופעים שהושלמו ופיננסים</h3>
-                {completedInstances.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">אין מופעים שהושלמו בטווח שנבדק.</div> : (
-                  <div className="grid gap-3 xl:grid-cols-2">
-                    {completedInstances.map((instance) => <div key={instance.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3"><div className="text-sm font-semibold text-slate-900">{instance.participants?.[0]?.student?.full_name || 'ללא תלמיד'}</div><div className="text-xs text-slate-500">{instance.service?.service_name || services.find((service) => service.id === instance.service_id)?.service_name || 'שירות'} • {formatDate(instance.datetime_start, { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}</div></div>)}
-                  </div>
-                )}
-                <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">שכבת דוחות שכר וייצוא לרו״ח תתווסף בשלב הבא על בסיס `RateHistory`, `WorkSessions` ו-`LeaveBalances`.</div>
-              </section>
-            </div>
-          </>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       <EmployeeWizardDialog open={showWizard} onOpenChange={setShowWizard} orgId={orgId} session={session} onSuccess={async () => { await refetchInstructors(); await fetchOverviewInstances(); }} />
