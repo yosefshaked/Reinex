@@ -12,7 +12,7 @@ export default function EmployeesPage() {
     <PageLayout
       title="עובדים"
       description="ניהול מצבת כוח אדם, פרטים אישיים ומסמכים"
-      style={{ maxWidth: 'min(1880px, calc(100vw - 1.5rem))' }}
+      style={{ maxWidth: 'min(1680px, 100vw)' }}
     >
       <InstructorManagementHub
         session={session}

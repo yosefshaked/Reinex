@@ -1,8 +1,8 @@
 # Employees Feature Implementation Plan
 
 **Date:** 2026-03-23  
-**Status:** Phase 1 - Implemented and re-aligned toward Option A  
-**Primary Direction:** Option A information architecture with a broad workspace, a right-side directory for RTL usage, row-based section details, and a new overview layer before deep employee management.
+**Status:** Phase 1 - First Pass Implemented  
+**Primary Direction:** Option A information architecture with a calmer, row-based detail UI and a new overview layer before deep employee management.
 
 ## 1. Schema Check
 
@@ -102,11 +102,6 @@ Implemented in the first pass:
   - selected employee workspace
   - communication actions
   - first-pass scheduled/completed instance visibility for instructors
-  - broad Option A-style split layout with:
-    - right-side directory in RTL flow
-    - wide operational workspace for the selected employee
-    - hero header + metrics + operational sections
-    - field rows ordered for Hebrew usage: label on the right, value on the left
 
 Still intentionally pending:
 - dedicated leave workflow over `LeaveBalances` / `WorkSessions`
@@ -143,7 +138,6 @@ Still intentionally pending:
   - selected employee workspace
 - Avoid field-per-card UI
 - Use section cards with row-based details
-- Preserve RTL semantics in layout order instead of relying on forced text alignment utilities
 
 ### 3.3 Communication
 - Quick call / mail / WhatsApp actions
@@ -190,4 +184,3 @@ Still intentionally pending:
    - employee earnings summary
    - accountant export entry point
    - payroll history drill-down
-
