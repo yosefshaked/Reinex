@@ -84,7 +84,7 @@ export default async function (context, req) {
   // Build query for instructors
   let instructorsQuery = tenantClient
     .from('Employees')
-    .select('id, first_name, middle_name, last_name, email, metadata')
+    .select('id, first_name, middle_name, last_name, email, phone, metadata')
     .order('first_name', { ascending: true });
 
   if (!includeInactive) {
@@ -141,6 +141,7 @@ export default async function (context, req) {
       .filter(Boolean)
       .join(' '),
     email: instructor.email,
+    phone: instructor.phone || null,
     metadata: instructor.metadata,
     color: instructor.metadata?.color || null,
     service_capabilities: capabilitiesMap.get(instructor.id) || [],
