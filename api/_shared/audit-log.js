@@ -87,6 +87,7 @@ export const AUDIT_ACTIONS = {
   
   // Membership
   MEMBER_INVITED: 'member.invited',
+  MEMBER_LINKED_TO_EMPLOYEE: 'member.linked_to_employee',
   MEMBER_REMOVED: 'member.removed',
   MEMBER_ROLE_CHANGED: 'member.role_changed',
   INVITATION_REVOKED: 'invitation.revoked',

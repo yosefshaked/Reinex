@@ -24,6 +24,7 @@ const ACTION_LABELS_HE = {
 
   // Membership / Invitations
   'member.invited': 'נשלחה הזמנה לחבר צוות',
+  'member.linked_to_employee': 'חבר ארגון שויך לעובד קיים',
   'member.removed': 'חבר צוות הוסר מהארגון',
   'member.role_changed': 'תפקיד חבר צוות שונה',
   'invitation.revoked': 'הזמנה בוטלה',

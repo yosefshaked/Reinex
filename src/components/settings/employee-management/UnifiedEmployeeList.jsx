@@ -8,6 +8,7 @@ import {
   Briefcase,
   Calendar,
   Clock,
+  Link2,
   Loader2,
   MailPlus,
   MessageCircle,
@@ -23,9 +24,11 @@ import { authenticatedFetch } from '@/lib/api-client';
 import { useInstructors, useServices } from '@/hooks/useOrgData.js';
 import { cn } from '@/lib/utils';
 import EmployeeWizardDialog from './EmployeeWizardDialog.jsx';
+import EmployeeActivityTimeline from './EmployeeActivityTimeline.jsx';
 import EditEmployeeDialog from './EditEmployeeDialog.jsx';
 import EditInstructorProfileDialog from './EditInstructorProfileDialog.jsx';
 import EditServiceCapabilitiesDialog from './EditServiceCapabilitiesDialog.jsx';
+import LinkEmployeeMemberDialog from './LinkEmployeeMemberDialog.jsx';
 
 const REQUEST = { idle: 'idle', loading: 'loading' };
 const TAB_KEYS = {
@@ -127,8 +130,15 @@ function getServiceName(services, serviceId, fallbackName) {
   return fallbackName || services.find((service) => service.id === serviceId)?.name || 'שירות';
 }
 
+function getEmployeeWorkingDays(employee) {
+  if (getEmployeeType(employee) === 'instructor') {
+    return Array.isArray(employee?.instructor_profile?.working_days) ? employee.instructor_profile.working_days : [];
+  }
+  return Array.isArray(employee?.working_days) ? employee.working_days : [];
+}
+
 function getWorkingDaysSummary(employee) {
-  const workingDays = employee?.instructor_profile?.working_days;
+  const workingDays = getEmployeeWorkingDays(employee);
   if (!Array.isArray(workingDays) || workingDays.length === 0) return 'לא הוגדרו ימי עבודה';
   return workingDays
     .slice()
@@ -278,24 +288,6 @@ function MonthGroup({ groups, services, emptyTitle, emptyBody }) {
   );
 }
 
-function LeaveLedgerRow({ entry }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-bold text-slate-900">{entry.leave_type || 'רישום חופשה'}</div>
-          <div className="mt-1 text-xs text-slate-500">
-            {formatDate(entry.effective_date)}{entry.notes ? ` • ${entry.notes}` : ''}
-          </div>
-        </div>
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700">
-          {entry.balance ?? '—'}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const sessionAccessToken = session?.access_token || null;
   const authSession = useMemo(() => (sessionAccessToken ? { access_token: sessionAccessToken } : null), [sessionAccessToken]);
@@ -304,6 +296,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showProfileDialog, setShowProfileDialog] = useState(false);
   const [showCapabilitiesDialog, setShowCapabilitiesDialog] = useState(false);
+  const [showLinkDialog, setShowLinkDialog] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
@@ -314,8 +307,6 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const [overviewInstances, setOverviewInstances] = useState([]);
   const [employeeInstances, setEmployeeInstances] = useState([]);
   const [instancesLoading, setInstancesLoading] = useState(false);
-  const [leaveSnapshot, setLeaveSnapshot] = useState(null);
-  const [leaveLoading, setLeaveLoading] = useState(false);
 
   const { instructors, unlinkedMembers, loadingInstructors, instructorsError, refetchInstructors } = useInstructors({
     includeInactive: true,
@@ -413,34 +404,6 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     };
   }, [authSession, canLoad, currentEmployee, orgId]);
 
-  useEffect(() => {
-    if (!canLoad || !orgId || !currentEmployee?.id) {
-      setLeaveSnapshot(null);
-      return;
-    }
-
-    let isActive = true;
-    const load = async () => {
-      setLeaveLoading(true);
-      try {
-        const payload = await authenticatedFetch(`employee-leave?org_id=${orgId}&employee_id=${currentEmployee.id}`, { session: authSession });
-        if (isActive) {
-          setLeaveSnapshot(payload || null);
-        }
-      } catch (error) {
-        console.error('Failed to load leave snapshot', error);
-        if (isActive) setLeaveSnapshot(null);
-      } finally {
-        if (isActive) setLeaveLoading(false);
-      }
-    };
-
-    void load();
-    return () => {
-      isActive = false;
-    };
-  }, [authSession, canLoad, currentEmployee, orgId]);
-
   const summary = useMemo(() => ({
     activeEmployees: instructors.filter((employee) => employee.is_active).length,
     missingUser: instructors.filter((employee) => employee.is_active && !employee.user_id).length,
@@ -491,36 +454,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     return fields.filter((value) => !value).length;
   }, [currentEmployee]);
 
-  const leavePolicy = leaveSnapshot?.policy || {
-    annual_leave_days: currentEmployee?.annual_leave_days ?? null,
-    leave_pay_method: currentEmployee?.leave_pay_method || null,
-    leave_fixed_day_rate: currentEmployee?.leave_fixed_day_rate ?? null,
-  };
-
-  const leaveEntryGroups = useMemo(() => {
-    const entries = Array.isArray(leaveSnapshot?.entries) ? leaveSnapshot.entries : [];
-    const groups = new Map();
-    entries
-      .slice()
-      .sort((left, right) => {
-        const leftTime = new Date(left.effective_date || left.created_at).getTime();
-        const rightTime = new Date(right.effective_date || right.created_at).getTime();
-        return rightTime - leftTime;
-      })
-      .forEach((entry) => {
-        const basis = entry.effective_date || entry.created_at;
-        const key = basis ? basis.slice(0, 7) : 'unknown';
-        if (!groups.has(key)) {
-          groups.set(key, {
-            key,
-            label: basis ? formatMonthLabel(basis) : 'ללא חודש',
-            items: [],
-          });
-        }
-        groups.get(key).items.push(entry);
-      });
-    return Array.from(groups.values()).sort((left, right) => right.key.localeCompare(left.key));
-  }, [leaveSnapshot]);
+  const currentEmployeeSetupIncomplete = Boolean(currentEmployee?.setup_incomplete);
 
   const handleLinkUser = async (employee) => {
     const email = window.prompt('הזן כתובת דוא"ל להזמנת משתמש:', employee.email || '');
@@ -568,6 +502,10 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     } finally {
       setActionState(REQUEST.idle);
     }
+  };
+
+  const handleLinkDialogSuccess = async () => {
+    await refetchInstructors();
   };
 
   const handleToggleActive = async (employee, nextIsActive) => {
@@ -794,6 +732,12 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                       </Button>
                     ) : null}
                     {!currentEmployee.user_id ? (
+                      <Button size="sm" variant="outline" onClick={() => setShowLinkDialog(true)} disabled={actionState === REQUEST.loading || unlinkedMembers.length === 0}>
+                        <Link2 className="me-2 h-4 w-4" />
+                        קשר לחבר ארגון
+                      </Button>
+                    ) : null}
+                    {!currentEmployee.user_id ? (
                       <Button size="sm" variant="outline" onClick={() => handleLinkUser(currentEmployee)} disabled={actionState === REQUEST.loading}>
                         <MailPlus className="me-2 h-4 w-4" />
                         הזמן משתמש
@@ -831,6 +775,23 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                   <TabsTrigger value={TAB_KEYS.activity} className="rounded-xl px-4 py-2 text-xs">פעילות</TabsTrigger>
                 </TabsList>
                 <TabsContent value={TAB_KEYS.overview} className="space-y-3">
+                  {currentEmployeeSetupIncomplete ? (
+                    <SectionCard title="השלמת הגדרת מדריך" description="העובד מסומן כמדריך אבל חסרים לו ימי עבודה או שירותים">
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-3 py-3 text-sm text-amber-900">
+                        כדי שהעובד יהיה מוכן לשיבוץ, יש להשלים ימי עבודה ולפחות שירות אחד.
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setShowProfileDialog(true)}>
+                          <Clock className="me-2 h-4 w-4" />
+                          השלם זמינות
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setShowCapabilitiesDialog(true)}>
+                          <Briefcase className="me-2 h-4 w-4" />
+                          השלם שירותים
+                        </Button>
+                      </div>
+                    </SectionCard>
+                  ) : null}
                   <div className="grid gap-3 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
                     <SectionCard
                       title="כרטיס עובד"
@@ -902,14 +863,19 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
 
                   <div className="grid gap-3 xl:grid-cols-2">
                     <SectionCard
-                      title="זמינות מדריך"
-                      description="ימי עבודה והפסקה בין שיעורים"
+                      title="זמינות"
+                      description={getEmployeeType(currentEmployee) === 'instructor' ? 'ימי עבודה והפסקה בין שיעורים' : 'ימי עבודה שבועיים של העובד'}
                       action={getEmployeeType(currentEmployee) === 'instructor' ? (
                         <Button size="sm" variant="outline" onClick={() => setShowProfileDialog(true)}>
                           <Clock className="me-2 h-4 w-4" />
                           נהל זמינות
                         </Button>
-                      ) : null}
+                      ) : (
+                        <Button size="sm" variant="outline" onClick={() => openEmployeeEditor(currentEmployee)}>
+                          <Clock className="me-2 h-4 w-4" />
+                          ערוך ימי עבודה
+                        </Button>
+                      )}
                     >
                       {getEmployeeType(currentEmployee) === 'instructor' ? (
                         <div className="grid gap-x-4 gap-y-0 md:grid-cols-2">
@@ -917,7 +883,10 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                           <Row label="משך הפסקה" value={currentEmployee.instructor_profile?.break_time_minutes != null ? `${currentEmployee.instructor_profile.break_time_minutes} דקות` : 'לא הוגדר'} />
                         </div>
                       ) : (
-                        <EmptyState title="עובד משרד" body="כרטיס זה אינו משתמש בפרופיל זמינות של מדריך." />
+                        <div className="space-y-0">
+                          <Row label="ימי עבודה" value={getWorkingDaysSummary(currentEmployee)} />
+                          <Row label="מקור הנתונים" value="Employees.working_days" muted />
+                        </div>
                       )}
                     </SectionCard>
 
@@ -1043,62 +1012,8 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                 </TabsContent>
 
                 <TabsContent value={TAB_KEYS.leaves} className="space-y-3">
-                  <div className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                    <SectionCard
-                      title="מדיניות חופשה"
-                      description="שדות policy מתוך כרטיס העובד, לא יתרה מחושבת"
-                      action={<Button size="sm" variant="outline" onClick={() => openEmployeeEditor(currentEmployee)}><Settings className="me-2 h-4 w-4" />ערוך מדיניות</Button>}
-                    >
-                      <div className="space-y-0">
-                        <Row label="ימי חופשה שנתיים" value={leavePolicy.annual_leave_days != null ? `${leavePolicy.annual_leave_days}` : '—'} />
-                        <Row label="שיטת תשלום חופשה" value={leavePolicy.leave_pay_method} />
-                        <Row label="ערך יום חופשה" value={leavePolicy.leave_fixed_day_rate != null ? `₪${leavePolicy.leave_fixed_day_rate}` : '—'} />
-                      </div>
-                      <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-900">
-                        נתונים אלו הם הגדרות policy בלבד. לא מוצגת כאן יתרת חופשה מחייבת עד להשלמת התאמת leave ledger ל-Reinex.
-                      </div>
-                    </SectionCard>
-
-                    <SectionCard title="סטטוס ledger" description="review של LeaveBalances הישן לפני אימוץ מלא">
-                      {leaveLoading ? (
-                        <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />טוען נתוני חופשה...</div>
-                      ) : (
-                        <>
-                          <div className="space-y-0">
-                            <Row label="מקור policy" value={leaveSnapshot?.policy_source || 'Employees'} />
-                            <Row label="מצב ledger" value={leaveSnapshot?.ledger_status || 'unavailable'} />
-                            <Row label="מספר רשומות" value={`${leaveSnapshot?.entry_count || 0}`} />
-                          </div>
-                          <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-600">
-                            ה-endpoint החדש הוא read-only ונועד לעזור בבדיקת reuse של LeaveBalances הקיים בלי להציג יתרות מחושבות כעובדה סופית.
-                          </div>
-                        </>
-                      )}
-                    </SectionCard>
-                  </div>
-
-                  <SectionCard title="רשומות ledger היסטוריות" description="מוצג רק אם קיימות רשומות LeaveBalances קיימות">
-                    {leaveLoading ? (
-                      <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />טוען רשומות...</div>
-                    ) : leaveEntryGroups.length === 0 ? (
-                      <EmptyState title="אין רשומות ledger זמינות" body="כרגע מוצגת רק מדיניות חופשה. יתרות והיסטוריה יתווספו אחרי review מלא של ה-ledger הישן." />
-                    ) : (
-                      <div className="space-y-4">
-                        {leaveEntryGroups.map((group) => (
-                          <div key={group.key} className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">{group.label}</h4>
-                              <span className="text-[11px] text-slate-400">{group.items.length}</span>
-                            </div>
-                            <div className="space-y-2">
-                              {group.items.map((entry) => (
-                                <LeaveLedgerRow key={entry.id} entry={entry} />
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                  <SectionCard title="חופשות" description="הפיצ'ר יעבור מימוש מלא יחד עם finance בשלב הבא">
+                    <EmptyState title="ניהול חופשות נדחה לשלב הבא" body="בשלב הזה מחזקים קודם את בסיס העובדים: עריכה, זמינות שבועית, שירותים, שיוך משתמש ופעילות." />
                   </SectionCard>
                 </TabsContent>
 
@@ -1109,20 +1024,14 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                 </TabsContent>
 
                 <TabsContent value={TAB_KEYS.activity} className="space-y-3">
-                  <div className="grid gap-3 xl:grid-cols-2">
-                    <SectionCard title="פעילות שבועית" description="תקציר מהיר לפי lesson_instances נטענים">
-                      <div className="grid gap-2 sm:grid-cols-3">
-                        <DenseStat label="שיעורים היום" value={employeeActivities.get(currentEmployee.id)?.scheduled ?? 0} accent="blue" />
-                        <DenseStat label="היסטוריה" value={historyInstances.length} accent="slate" />
-                        <DenseStat label="שירותים" value={currentEmployeeServices.length} accent="emerald" />
-                      </div>
-                    </SectionCard>
-                    <SectionCard title="מעקב עתידי" description="אירועים ודגלים שעדיין לא חוברו">
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-3 py-3 text-xs text-amber-900">
-                        כאן יופיעו בעתיד audit trail, מסמכים חסרים, חריגי no_show ומדדי תיעוד.
-                      </div>
-                    </SectionCard>
-                  </div>
+                  <SectionCard title="ציר פעילות" description="אירועים תפעוליים ומערכתיים שלא מוצגים במלואם בטאבים האחרים">
+                    <EmployeeActivityTimeline
+                      employeeId={currentEmployee.id}
+                      orgId={orgId}
+                      session={authSession}
+                      enabled={Boolean(canLoad && currentEmployee?.id)}
+                    />
+                  </SectionCard>
                 </TabsContent>
               </Tabs>
             </>
@@ -1146,6 +1055,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
         employee={selectedEmployee}
         orgId={orgId}
         session={session}
+        availableServices={services}
         onSaved={async () => {
           await refetchInstructors();
           await fetchOverviewInstances();
@@ -1172,6 +1082,15 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
           await refetchInstructors();
           await fetchOverviewInstances();
         }}
+      />
+      <LinkEmployeeMemberDialog
+        open={showLinkDialog}
+        onOpenChange={setShowLinkDialog}
+        employee={currentEmployee}
+        members={unlinkedMembers}
+        orgId={orgId}
+        session={session}
+        onLinked={handleLinkDialogSuccess}
       />
     </div>
   );

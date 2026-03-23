@@ -11,23 +11,208 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
+import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 
-/**
- * POST /api/instructors-link-user
- * Links an existing manual employee to a system user by sending an invitation.
- * 
- * Body: { org_id, instructor_id, email }
- * 
- * Process:
- * 1. Verify employee exists and has no user_id
- * 2. Send invitation to email
- * 3. Store invitation_pending metadata
- * 4. When user accepts, the invitation system will link the employee
- */
+async function loadEmployee(tenantClient, employeeId) {
+  const { data, error } = await tenantClient
+    .from('Employees')
+    .select('id, user_id, first_name, last_name, email, metadata')
+    .eq('id', employeeId)
+    .maybeSingle();
+
+  return { employee: data, error };
+}
+
+async function sendInvitationFlow({
+  context,
+  supabase,
+  tenantClient,
+  authResult,
+  role,
+  orgId,
+  userId,
+  employee,
+  employeeId,
+  email,
+}) {
+  const invitationPayload = {
+    org_id: orgId,
+    email,
+    invited_by: userId,
+    role: 'member',
+    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    metadata: {
+      link_to_employee_id: employeeId,
+      employee_name: `${employee.first_name || ''} ${employee.last_name || ''}`.trim(),
+    },
+  };
+
+  const { error: inviteError } = await supabase
+    .from('invitations')
+    .insert(invitationPayload);
+
+  if (inviteError) {
+    throw new Error(inviteError.message);
+  }
+
+  const { error: authError } = await supabase.auth.admin.inviteUserByEmail(email, {
+    data: { org_id: orgId },
+    redirectTo: `${process.env.VITE_PUBLIC_APP_URL || process.env.VITE_APP_BASE_URL}/#/complete-registration`,
+  });
+
+  if (authError) {
+    context.log?.warn?.('instructors-link-user auth invitation failed', { message: authError.message });
+  }
+
+  const updatedMetadata = {
+    ...(employee.metadata && typeof employee.metadata === 'object' ? employee.metadata : {}),
+    invitation_pending: {
+      email,
+      invited_at: new Date().toISOString(),
+      invited_by: userId,
+    },
+  };
+
+  await tenantClient
+    .from('Employees')
+    .update({ metadata: updatedMetadata, email })
+    .eq('id', employeeId);
+
+  await logAuditEvent(supabase, {
+    orgId,
+    userId,
+    userEmail: authResult.data.user.email || '',
+    userRole: role,
+    actionType: AUDIT_ACTIONS.MEMBER_INVITED,
+    actionCategory: AUDIT_CATEGORIES.MEMBERSHIP,
+    resourceType: 'instructor',
+    resourceId: employeeId,
+    details: {
+      employee_id: employeeId,
+      employee_name: `${employee.first_name || ''} ${employee.last_name || ''}`.trim(),
+      invited_email: email,
+    },
+  });
+
+  return respond(context, 200, {
+    message: 'invitation_sent',
+    email,
+    employee_id: employeeId,
+  });
+}
+
+async function directLinkFlow({
+  context,
+  supabase,
+  tenantClient,
+  authResult,
+  role,
+  orgId,
+  userId,
+  employee,
+  employeeId,
+  memberUserId,
+}) {
+  const { data: membership, error: membershipLookupError } = await supabase
+    .from('org_memberships')
+    .select('user_id, role')
+    .eq('org_id', orgId)
+    .eq('user_id', memberUserId)
+    .maybeSingle();
+
+  if (membershipLookupError) {
+    context.log?.error?.('instructors-link-user failed to verify target member', {
+      message: membershipLookupError.message,
+      orgId,
+      memberUserId,
+    });
+    return respond(context, 500, { message: 'failed_to_verify_target_member' });
+  }
+
+  if (!membership) {
+    return respond(context, 404, { message: 'member_not_found_in_org' });
+  }
+
+  const { data: conflictingEmployee, error: conflictError } = await tenantClient
+    .from('Employees')
+    .select('id')
+    .eq('user_id', memberUserId)
+    .neq('id', employeeId)
+    .maybeSingle();
+
+  if (conflictError) {
+    context.log?.error?.('instructors-link-user failed to verify existing employee link', {
+      message: conflictError.message,
+      orgId,
+      memberUserId,
+    });
+    return respond(context, 500, { message: 'failed_to_verify_existing_link' });
+  }
+
+  if (conflictingEmployee) {
+    return respond(context, 409, { message: 'member_already_linked' });
+  }
+
+  const metadata = {
+    ...(employee.metadata && typeof employee.metadata === 'object' ? employee.metadata : {}),
+  };
+  delete metadata.invitation_pending;
+
+  const { data: updatedEmployee, error: updateError } = await tenantClient
+    .from('Employees')
+    .update({
+      user_id: memberUserId,
+      metadata,
+    })
+    .eq('id', employeeId)
+    .select('id, user_id, first_name, last_name, email')
+    .maybeSingle();
+
+  if (updateError || !updatedEmployee) {
+    context.log?.error?.('instructors-link-user failed to direct-link employee', {
+      message: updateError?.message,
+      orgId,
+      employeeId,
+      memberUserId,
+    });
+    return respond(context, 500, { message: 'failed_to_link_member_to_employee' });
+  }
+
+  const { data: memberProfile } = await supabase
+    .from('profiles')
+    .select('id, email, full_name')
+    .eq('id', memberUserId)
+    .maybeSingle();
+
+  await logAuditEvent(supabase, {
+    orgId,
+    userId,
+    userEmail: authResult.data.user.email || '',
+    userRole: role,
+    actionType: AUDIT_ACTIONS.MEMBER_LINKED_TO_EMPLOYEE,
+    actionCategory: AUDIT_CATEGORIES.MEMBERSHIP,
+    resourceType: 'instructor',
+    resourceId: employeeId,
+    details: {
+      employee_id: employeeId,
+      employee_name: `${employee.first_name || ''} ${employee.last_name || ''}`.trim(),
+      member_user_id: memberUserId,
+      member_email: memberProfile?.email || null,
+      member_name: memberProfile?.full_name || null,
+    },
+  });
+
+  return respond(context, 200, {
+    message: 'member_linked',
+    employee: updatedEmployee,
+    member: memberProfile || { id: memberUserId, role: membership.role },
+  });
+}
+
 export default async function (context, req) {
   const method = String(req.method || 'POST').toUpperCase();
 
-  if (method !== 'POST') {
+  if (method !== 'POST' && method !== 'PUT') {
     return respond(context, 405, { message: 'method_not_allowed' });
   }
 
@@ -85,16 +270,16 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const isAdmin = isAdminRole(role);
-  if (!isAdmin) {
+  if (!isAdminRole(role)) {
     return respond(context, 403, { message: 'admin_required' });
   }
 
-  const instructorId = normalizeString(body?.instructor_id);
+  const employeeId = normalizeString(body?.employee_id || body?.instructor_id);
   const email = normalizeString(body?.email).toLowerCase();
+  const memberUserId = normalizeString(body?.member_user_id || body?.memberUserId);
 
-  if (!instructorId || !email) {
-    return respond(context, 400, { message: 'missing_instructor_id_or_email' });
+  if (!employeeId) {
+    return respond(context, 400, { message: 'missing_employee_id' });
   }
 
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
@@ -102,13 +287,7 @@ export default async function (context, req) {
     return respond(context, tenantError.status, tenantError.body);
   }
 
-  // Verify employee exists and has no user_id
-  const { data: employee, error: fetchError } = await tenantClient
-    .from('Employees')
-    .select('id, user_id, first_name, last_name, email, metadata')
-    .eq('id', instructorId)
-    .maybeSingle();
-
+  const { employee, error: fetchError } = await loadEmployee(tenantClient, employeeId);
   if (fetchError) {
     context.log?.error?.('instructors-link-user failed to fetch employee', { message: fetchError.message });
     return respond(context, 500, { message: 'failed_to_fetch_employee' });
@@ -122,58 +301,40 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'employee_already_linked' });
   }
 
-  // Send invitation
-  try {
-    const invitationPayload = {
-      org_id: orgId,
-      email,
-      invited_by: userId,
-      role: 'member',
-      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
-      metadata: {
-        link_to_employee_id: instructorId,
-        employee_name: `${employee.first_name || ''} ${employee.last_name || ''}`.trim(),
-      },
-    };
-
-    // Create invitation record
-    const { error: inviteError } = await supabase
-      .from('invitations')
-      .insert(invitationPayload);
-
-    if (inviteError) {
-      throw new Error(inviteError.message);
+  if (method === 'PUT') {
+    if (!memberUserId) {
+      return respond(context, 400, { message: 'missing_member_user_id' });
     }
-
-    // Send Supabase auth invitation
-    const { error: authError } = await supabase.auth.admin.inviteUserByEmail(email, {
-      data: { org_id: orgId },
-      redirectTo: `${process.env.VITE_PUBLIC_APP_URL || process.env.VITE_APP_BASE_URL}/#/complete-registration`,
+    return directLinkFlow({
+      context,
+      supabase,
+      tenantClient,
+      authResult,
+      role,
+      orgId,
+      userId,
+      employee,
+      employeeId,
+      memberUserId,
     });
+  }
 
-    if (authError) {
-      context.log?.warn?.('instructors-link-user auth invitation failed', { message: authError.message });
-    }
+  if (!email) {
+    return respond(context, 400, { message: 'missing_email' });
+  }
 
-    // Update employee metadata to track pending invitation
-    const updatedMetadata = {
-      ...(employee.metadata || {}),
-      invitation_pending: {
-        email,
-        invited_at: new Date().toISOString(),
-        invited_by: userId,
-      },
-    };
-
-    await tenantClient
-      .from('Employees')
-      .update({ metadata: updatedMetadata, email })
-      .eq('id', instructorId);
-
-    return respond(context, 200, {
-      message: 'invitation_sent',
+  try {
+    return await sendInvitationFlow({
+      context,
+      supabase,
+      tenantClient,
+      authResult,
+      role,
+      orgId,
+      userId,
+      employee,
+      employeeId,
       email,
-      employee_id: instructorId,
     });
   } catch (error) {
     context.log?.error?.('instructors-link-user failed to send invitation', { message: error?.message });
