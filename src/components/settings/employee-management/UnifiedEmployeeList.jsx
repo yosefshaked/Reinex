@@ -70,18 +70,18 @@ function getWhatsAppLink(employee) {
 
 function Row({ label, value }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-2.5 last:border-b-0">
-      <div className="shrink-0 text-xs font-medium text-slate-500">{label}</div>
-      <div className="min-w-0 flex-1 text-sm text-slate-900">{value || '—'}</div>
+    <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-1.5 last:border-b-0">
+      <div className="shrink-0 text-[13px] font-medium text-slate-500">{label}</div>
+      <div className="min-w-0 flex-1 text-[13px] text-slate-900">{value || '—'}</div>
     </div>
   );
 }
 
 function StatCard({ value, label }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-      <div className="text-2xl font-extrabold text-slate-900">{value}</div>
-      <div className="mt-1 text-[13px] text-slate-500">{label}</div>
+    <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-3 shadow-sm">
+      <div className="text-xl font-extrabold text-slate-900">{value}</div>
+      <div className="mt-0.5 text-xs text-slate-500">{label}</div>
     </div>
   );
 }
@@ -302,12 +302,12 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
      RENDER  –  Option A: directory sidebar + workspace
      ═══════════════════════════════════════════════════════ */
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 font-sans antialiased text-foreground">
       {/* ── Page header + toolbar ──────────────────────────── */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-slate-950 sm:text-2xl">עובדים</h1>
-          <p className="text-sm text-slate-500">רוסטר ארגוני + סביבת עבודה לעובד</p>
+          <h1 className="text-lg font-bold text-slate-950 sm:text-xl">עובדים</h1>
+          <p className="text-xs text-slate-500">רוסטר ארגוני + סביבת עבודה לעובד</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => setShowWizard(true)} size="sm">
@@ -320,11 +320,11 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
       </div>
 
       {/* ── Master-detail grid ─────────────────────────────── */}
-      <div className="grid gap-5 lg:grid-cols-[minmax(280px,320px)_minmax(0,1fr)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(260px,300px)_minmax(0,1fr)]">
 
         {/* ════ SIDEBAR ════ */}
-        <aside className="rounded-[1.5rem] border border-slate-200 bg-blue-50/30 shadow-sm lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-hidden lg:flex lg:flex-col">
-          <div className="p-4 space-y-3">
+        <aside className="rounded-2xl border border-slate-200 bg-blue-50/30 shadow-sm lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-hidden lg:flex lg:flex-col">
+          <div className="p-3 space-y-2">
             {/* search */}
             <div className="relative">
               <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -357,7 +357,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
           </div>
 
           {/* employee rows (scrollable on desktop) */}
-          <div className="px-4 pb-4 space-y-2 lg:overflow-y-auto lg:flex-1 lg:min-h-0">
+          <div className="px-3 pb-3 space-y-1.5 lg:overflow-y-auto lg:flex-1 lg:min-h-0">
             {filteredEmployees.length === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-4 text-center text-sm text-slate-500">
                 לא נמצאו עובדים.
@@ -378,37 +378,37 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                   type="button"
                   onClick={() => setSelectedEmployeeId(employee.id)}
                   className={cn(
-                    'w-full rounded-2xl border p-3.5 text-start transition',
+                    'w-full rounded-xl border p-2.5 text-start transition',
                     isSelected
-                      ? 'border-blue-300/60 bg-gradient-to-b from-white to-blue-50/40 shadow-[0_18px_40px_-34px_rgba(15,23,42,0.25)]'
+                      ? 'border-blue-300/60 bg-gradient-to-b from-white to-blue-50/40 shadow-[0_12px_28px_-20px_rgba(15,23,42,0.25)]'
                       : 'border-slate-200 bg-white hover:border-slate-300 shadow-sm',
                   )}
                 >
-                  <div className="font-extrabold text-sm text-slate-900">{getEmployeeName(employee)}</div>
-                  <div className="mt-0.5 text-[13px] text-slate-500">{statusParts.join(' • ')}</div>
+                  <div className="font-bold text-[13px] text-slate-900">{getEmployeeName(employee)}</div>
+                  <div className="text-xs text-slate-500">{statusParts.join(' • ')}</div>
 
                   {/* chips row */}
-                  <div className="mt-2 flex flex-wrap gap-1.5">
+                  <div className="mt-1.5 flex flex-wrap gap-1">
                     {(employee.service_capabilities || []).slice(0, 2).map((cap) => {
                       const svc = services.find((s) => s.id === cap.service_id);
                       return svc ? (
-                        <span key={cap.service_id} className="rounded-full bg-blue-100/80 px-2.5 py-0.5 text-[11px] font-bold text-blue-700">
+                        <span key={cap.service_id} className="rounded-full bg-blue-100/80 px-2 py-px text-[10px] font-bold text-blue-700">
                           {svc.service_name}
                         </span>
                       ) : null;
                     })}
                     {activity && activity.scheduled > 0 && (
-                      <span className="rounded-full bg-green-100/80 px-2.5 py-0.5 text-[11px] font-bold text-green-700">
+                      <span className="rounded-full bg-green-100/80 px-2 py-px text-[10px] font-bold text-green-700">
                         היום {activity.scheduled} שיעורים
                       </span>
                     )}
                     {!employee.user_id && (
-                      <span className="rounded-full bg-amber-100/80 px-2.5 py-0.5 text-[11px] font-bold text-amber-700">
+                      <span className="rounded-full bg-amber-100/80 px-2 py-px text-[10px] font-bold text-amber-700">
                         צריך הזמנה
                       </span>
                     )}
                     {!employee.is_active && (
-                      <span className="rounded-full bg-red-100/80 px-2.5 py-0.5 text-[11px] font-bold text-red-700">
+                      <span className="rounded-full bg-red-100/80 px-2 py-px text-[10px] font-bold text-red-700">
                         מושבת
                       </span>
                     )}
@@ -419,11 +419,11 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
 
             {/* unlinked members banner */}
             {unlinkedMembers.length > 0 && (
-              <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-                <div className="text-xs font-bold text-amber-900">{unlinkedMembers.length} חברי ארגון ללא כרטיס עובד</div>
-                <div className="mt-2 space-y-1.5">
+              <div className="mt-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                <div className="text-[11px] font-bold text-amber-900">{unlinkedMembers.length} חברי ארגון ללא כרטיס עובד</div>
+                <div className="mt-1.5 space-y-1">
                   {unlinkedMembers.slice(0, 3).map((member) => (
-                    <div key={member.user_id} className="flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-white/70 px-3 py-1.5">
+                    <div key={member.user_id} className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white/70 px-2.5 py-1">
                       <Button size="sm" variant="outline" onClick={() => handleCreateEmployeeForMember(member)} disabled={actionState === REQUEST.loading}>
                         <UserPlus className="me-1.5 h-3.5 w-3.5" />צור
                       </Button>
@@ -439,42 +439,42 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
         </aside>
 
         {/* ════ WORKSPACE ════ */}
-        <div className="min-w-0 space-y-5">
+        <div className="min-w-0 space-y-3">
           {!currentEmployee ? (
-            <div className="flex min-h-[50vh] items-center justify-center rounded-[1.5rem] border border-dashed border-slate-200 bg-white p-10">
+            <div className="flex min-h-[40vh] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white p-8">
               <p className="text-sm text-slate-500">בחר עובד מהרשימה כדי לצפות בפרטים.</p>
             </div>
           ) : (
             <>
               {/* ── Hero card ─────────────────────── */}
-              <section className="rounded-[1.5rem] border border-slate-200 bg-gradient-to-bl from-white to-blue-50/30 p-5 shadow-sm sm:p-6">
-                <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="flex items-start gap-4">
-                    <Avatar className="h-[68px] w-[68px] rounded-2xl">
-                      <AvatarFallback className="rounded-2xl bg-gradient-to-br from-blue-500 to-blue-400 text-xl font-extrabold text-white">
+              <section className="rounded-2xl border border-slate-200 bg-gradient-to-bl from-white to-blue-50/30 px-5 py-4 shadow-sm">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-14 w-14 shrink-0 rounded-2xl">
+                      <AvatarFallback className="rounded-2xl bg-gradient-to-br from-blue-500 to-blue-400 text-lg font-extrabold text-white">
                         {getInitials(currentEmployee)}
                       </AvatarFallback>
                     </Avatar>
                     <div className="min-w-0">
-                      <div className="flex flex-wrap gap-1.5 mb-2">
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1">
                         <Badge variant="default">{getEmployeeTypeLabel(currentEmployee)}</Badge>
                         <Badge variant={currentEmployee.is_active ? 'default' : 'secondary'}>{currentEmployee.is_active ? 'פעיל' : 'מושבת'}</Badge>
                         {currentEmployee.user_id ? <Badge variant="outline">משתמש מחובר</Badge> : null}
                       </div>
-                      <h2 className="text-2xl font-extrabold text-slate-950 sm:text-[32px] leading-tight">{getEmployeeName(currentEmployee)}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
+                      <h2 className="text-xl font-extrabold text-slate-950 sm:text-2xl leading-tight">{getEmployeeName(currentEmployee)}</h2>
+                      <p className="text-xs text-slate-500">
                         {currentEmployee.phone || ''}{currentEmployee.phone && currentEmployee.email ? ' • ' : ''}{currentEmployee.email || ''}{(currentEmployee.phone || currentEmployee.email) && currentEmployee.start_date ? ' • ' : ''}{currentEmployee.start_date ? `התחלה: ${formatDate(currentEmployee.start_date)}` : ''}
                       </p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
+                      <div className="mt-1 flex flex-wrap gap-1">
                         {currentEmployee.employee_id && (
-                          <span className="rounded-full bg-blue-100/80 px-2.5 py-0.5 text-[11px] font-bold text-blue-700">
+                          <span className="rounded-full bg-blue-100/80 px-2 py-px text-[10px] font-bold text-blue-700">
                             עובד #{currentEmployee.employee_id}
                           </span>
                         )}
                         {(currentEmployee.service_capabilities || []).map((cap) => {
                           const svc = services.find((s) => s.id === cap.service_id);
                           return svc ? (
-                            <span key={cap.service_id} className="rounded-full bg-blue-100/80 px-2.5 py-0.5 text-[11px] font-bold text-blue-700">
+                            <span key={cap.service_id} className="rounded-full bg-blue-100/80 px-2 py-px text-[10px] font-bold text-blue-700">
                               {svc.service_name}
                             </span>
                           ) : null;
@@ -484,7 +484,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                   </div>
 
                   {/* quick actions */}
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <Button size="sm" onClick={() => { setSelectedEmployee(currentEmployee); setShowEditDialog(true); }}>
                       <Settings className="me-2 h-4 w-4" />עריכת פרטים
                     </Button>
@@ -512,7 +512,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
               </section>
 
               {/* ── Stats row ─────────────────────── */}
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                 <StatCard value={employeeActivities.get(currentEmployee.id)?.scheduled ?? 0} label="שיעורים היום" />
                 <StatCard value={upcomingInstances.length} label="מופעים מתוכננים" />
                 <StatCard value={completedInstances.length} label="מופעים שהושלמו" />
@@ -520,12 +520,12 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
               </div>
 
               {/* ── Two-column detail panels ──────── */}
-              <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+              <div className="grid gap-3 xl:grid-cols-[1.2fr_0.8fr]">
                 {/* LEFT column */}
-                <div className="space-y-5">
+                <div className="space-y-3">
                   {/* Employee details */}
-                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
-                    <h3 className="mb-3 text-lg font-extrabold text-slate-900">פרטי עובד וניהול משתמש</h3>
+                  <section className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm">
+                    <h3 className="mb-2 text-sm font-bold text-slate-900">פרטי עובד וניהול משתמש</h3>
                     <div className="space-y-0">
                       <Row label="שם מלא" value={getEmployeeName(currentEmployee)} />
                       <Row label="טלפון" value={currentEmployee.phone} />
@@ -541,27 +541,27 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                   </section>
 
                   {/* Leave & absence */}
-                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
-                    <h3 className="mb-3 text-lg font-extrabold text-slate-900">חופשות והיעדרויות</h3>
+                  <section className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm">
+                    <h3 className="mb-2 text-sm font-bold text-slate-900">חופשות והיעדרויות</h3>
                     <Row label="ימי חופשה שנתיים" value={currentEmployee.annual_leave_days != null ? `${currentEmployee.annual_leave_days}` : '—'} />
                     <Row label="שיטת תשלום חופשה" value={currentEmployee.leave_pay_method} />
                     <Row label="ערך יום חופשה" value={currentEmployee.leave_fixed_day_rate != null ? `₪${currentEmployee.leave_fixed_day_rate}` : '—'} />
-                    <div className="mt-4 rounded-2xl border border-amber-200/80 bg-amber-50/60 px-4 py-3 text-[13px] text-amber-800">
+                    <div className="mt-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3 py-2 text-xs text-amber-800">
                       כאן כדאי להוסיף בעתיד גם יתרות חופשה, אישורים ומסמכים.
                     </div>
                   </section>
 
                   {/* Scheduled lessons */}
-                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
-                    <h3 className="mb-3 text-lg font-extrabold text-slate-900">שיעורים מתוזמנים</h3>
+                  <section className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm">
+                    <h3 className="mb-2 text-sm font-bold text-slate-900">שיעורים מתוזמנים</h3>
                     {instancesLoading ? (
                       <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />טוען מופעים...</div>
                     ) : upcomingInstances.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">אין מופעים מתוכננים.</div>
                     ) : (
-                      <div className="space-y-2">
+                      <div className="space-y-1.5">
                         {upcomingInstances.map((inst) => (
-                          <div key={inst.id} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/50 px-4 py-3">
+                          <div key={inst.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2">
                             <span className="text-xs text-slate-500">פתח שיעור</span>
                             <div className="min-w-0 flex-1 text-end">
                               <div className="text-sm font-bold text-slate-900">
@@ -579,39 +579,39 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                 </div>
 
                 {/* RIGHT column */}
-                <div className="space-y-5">
+                <div className="space-y-3">
                   {/* Quick communication */}
-                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
-                    <h3 className="mb-3 text-lg font-extrabold text-slate-900">תקשורת מהירה</h3>
+                  <section className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm">
+                    <h3 className="mb-2 text-sm font-bold text-slate-900">תקשורת מהירה</h3>
                     {currentEmployee.phone ? (
-                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/50 px-4 py-3 mb-2">
+                      <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 mb-1.5">
                         <Button size="sm" variant="outline" onClick={() => window.open(getWhatsAppLink(currentEmployee), '_blank', 'noopener,noreferrer')}>
                           שלח
                         </Button>
                         <div className="min-w-0 flex-1 text-end">
-                          <div className="text-sm font-bold text-slate-900">WhatsApp</div>
+                          <div className="text-[13px] font-bold text-slate-900">WhatsApp</div>
                           <div className="text-xs text-slate-500">שלח הודעה מהירה</div>
                         </div>
                       </div>
                     ) : null}
                     {currentEmployee.phone ? (
-                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/50 px-4 py-3 mb-2">
+                      <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 mb-1.5">
                         <Button size="sm" variant="outline" asChild>
                           <a href={`tel:${currentEmployee.phone}`}>התקשר</a>
                         </Button>
                         <div className="min-w-0 flex-1 text-end">
-                          <div className="text-sm font-bold text-slate-900">טלפון</div>
+                          <div className="text-[13px] font-bold text-slate-900">טלפון</div>
                           <div className="text-xs text-slate-500">{currentEmployee.phone}</div>
                         </div>
                       </div>
                     ) : null}
                     {currentEmployee.email ? (
-                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/50 px-4 py-3">
+                      <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2">
                         <Button size="sm" variant="outline" asChild>
                           <a href={`mailto:${currentEmployee.email}`}>פתח</a>
                         </Button>
                         <div className="min-w-0 flex-1 text-end">
-                          <div className="text-sm font-bold text-slate-900">דוא״ל</div>
+                          <div className="text-[13px] font-bold text-slate-900">דוא״ל</div>
                           <div className="text-xs text-slate-500">{currentEmployee.email}</div>
                         </div>
                       </div>
@@ -622,12 +622,12 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                   </section>
 
                   {/* Completed lessons & finances */}
-                  <section className="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
-                    <h3 className="mb-3 text-lg font-extrabold text-slate-900">פיננסים ודיווחים</h3>
+                  <section className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm">
+                    <h3 className="mb-2 text-sm font-bold text-slate-900">פיננסים ודיווחים</h3>
                     {completedInstances.length > 0 ? (
-                      <div className="space-y-2 mb-4">
+                      <div className="space-y-1.5 mb-3">
                         {completedInstances.slice(0, 3).map((inst) => (
-                          <div key={inst.id} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/50 px-4 py-3">
+                          <div key={inst.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2">
                             <span className="text-xs text-slate-500">פתח</span>
                             <div className="min-w-0 flex-1 text-end">
                               <div className="text-sm font-bold text-slate-900">
@@ -641,7 +641,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                         ))}
                       </div>
                     ) : null}
-                    <div className="rounded-2xl border border-amber-200/80 bg-amber-50/60 px-4 py-3 text-[13px] text-amber-800">
+                    <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-3 py-2 text-xs text-amber-800">
                       כאן נכון לשלב בעתיד דוח תשלומים, שעות, ביטולים, no-show וחריגים לחשבונאות.
                     </div>
                   </section>
