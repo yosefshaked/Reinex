@@ -10,9 +10,10 @@ export default function EmployeesPage() {
 
   return (
     <PageLayout
+      variant="workspace"
       title="עובדים"
       description="ניהול מצבת כוח אדם, פרטים אישיים ומסמכים"
-      style={{ maxWidth: 'min(1680px, 100vw)' }}
+      fullHeight={true}
     >
       <InstructorManagementHub
         session={session}
