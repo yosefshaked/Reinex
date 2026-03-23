@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Employees Tabbed Workspace Option</title>
+    <style>
+      :root {
+        --bg: #eef4ff;
+        --card: #ffffff;
+        --line: #d7e3f4;
+        --text: #10213a;
+        --muted: #5f6f86;
+        --brand: #3b82f6;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Arial, sans-serif;
+        background: linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
+        color: var(--text);
+      }
+      .shell {
+        max-width: 1500px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        gap: 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 16px;
+      }
+      .row, .tabs, .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+      .metric, .pill, .tab {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+        padding: 10px 12px;
+        font-size: 0.82rem;
+      }
+      .metric {
+        border-radius: 18px;
+      }
+      .metric strong {
+        display: block;
+        font-size: 1.35rem;
+      }
+      .tab.active, .pill.primary {
+        background: var(--brand);
+        border-color: var(--brand);
+        color: #fff;
+      }
+      .workspace {
+        display: grid;
+        gap: 16px;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+      }
+      .panel-grid {
+        display: grid;
+        grid-template-columns: 1.2fr 0.85fr;
+        gap: 16px;
+      }
+      @media (max-width: 1100px) {
+        .layout, .stats, .panel-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="layout">
+        <aside class="card">
+          <div class="metric-grid">
+            <div class="metric"><strong>12</strong>פעילים</div>
+            <div class="metric"><strong>3</strong>חסרי משתמש</div>
+          </div>
+          <div class="metric" style="margin-top:10px"><strong>18</strong>שיעורים השבוע</div>
+          <div class="row" style="margin-top:10px">
+            <div class="pill primary">עובד חדש</div>
+            <div class="pill">הצג מושבתים</div>
+          </div>
+          <div class="card" style="margin-top:12px;padding:12px">
+            <strong>שקד יוסף</strong>
+            <div>מדריך/ה • פעיל</div>
+            <div class="chips" style="margin-top:8px">
+              <div class="pill">בדיקה בדקה</div>
+              <div class="pill">היום 4</div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="workspace">
+          <div class="card">
+            <div class="chips">
+              <div class="pill">מדריך/ה</div>
+              <div class="pill">פעיל</div>
+              <div class="pill">משתמש מחובר</div>
+            </div>
+            <h1 style="margin:12px 0 4px">שקד יוסף</h1>
+            <div>עובד #1 • 0509750011 • התחלה 1.1.2025</div>
+          </div>
+
+          <div class="stats">
+            <div class="metric"><strong>4</strong>שיעורים היום</div>
+            <div class="metric"><strong>11</strong>שיעורים עתידיים</div>
+            <div class="metric"><strong>26</strong>היסטוריה</div>
+            <div class="metric"><strong>1</strong>חוסרים בכרטיס</div>
+          </div>
+
+          <div class="tabs card">
+            <div class="tab active">סקירה</div>
+            <div class="tab">לו״ז</div>
+            <div class="tab">פיננסים</div>
+            <div class="tab">חופשות</div>
+            <div class="tab">מסמכים</div>
+            <div class="tab">פעילות</div>
+          </div>
+
+          <div class="panel-grid">
+            <div class="card">
+              <h2>כרטיס עובד</h2>
+              <p>פרטי זהות, העסקה, זמינות מדריך ושירותים.</p>
+            </div>
+            <div class="card">
+              <h2>תקשורת מהירה</h2>
+              <p>טלפון, WhatsApp ודוא״ל בגובה נמוך וללא כרטיסים מבוזבזים.</p>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

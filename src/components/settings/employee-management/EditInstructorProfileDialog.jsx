@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,12 @@ export default function EditInstructorProfileDialog({ open, onOpenChange, instru
   const [workingDays, setWorkingDays] = useState(instructor?.instructor_profile?.working_days || []);
   const [breakTimeMinutes, setBreakTimeMinutes] = useState(instructor?.instructor_profile?.break_time_minutes || 0);
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setWorkingDays(instructor?.instructor_profile?.working_days || []);
+    setBreakTimeMinutes(instructor?.instructor_profile?.break_time_minutes || 0);
+  }, [instructor, open]);
 
   const toggleDay = (dayValue) => {
     setWorkingDays((prev) =>
