@@ -308,7 +308,7 @@ export default function ServicesPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{formValues.id ? 'עריכת שירות' : 'שירות חדש'}</DialogTitle>
-            <DialogDescription className="text-end">
+            <DialogDescription>
               עדכנו את פרטי השירות הזמין במערכת.
             </DialogDescription>
           </DialogHeader>
@@ -369,7 +369,7 @@ export default function ServicesPage() {
             />
 
             <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2">
-              <div className="text-end">
+              <div>
                 <span className="block text-sm font-medium text-foreground">שירות פעיל</span>
                 <span className="text-xs text-neutral-500">אפשר להשבית שירות בלי למחוק אותו.</span>
               </div>

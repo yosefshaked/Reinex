@@ -153,8 +153,8 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-end">ניהול יכולות שירות</DialogTitle>
-          <DialogDescription className="text-end">
+          <DialogTitle>ניהול יכולות שירות</DialogTitle>
+          <DialogDescription>
             הגדר את השירותים שהעובד יכול לספק, מספר תלמידים מקסימלי ותעריף בסיס
           </DialogDescription>
         </DialogHeader>
@@ -211,9 +211,6 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
                             ))}
                           </SelectContent>
                         </Select>
-                        <p className="text-[11px] text-slate-500">
-                          השירות נבחר מתוך קטלוג `Services`. כאן מגדירים את ההחרגה לעובד: קיבולת ותעריף בפועל.
-                        </p>
                       </div>
 
                       {/* Max Students */}
