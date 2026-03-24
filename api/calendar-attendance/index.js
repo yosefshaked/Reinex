@@ -10,6 +10,7 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
+import { syncLessonFinancialArtifacts } from '../_shared/employee-finance.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -145,6 +146,8 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     }
 
     participantUpdate.participant_status = participantStatus;
+    participantUpdate.attendance_confirmed_at = new Date().toISOString();
+    participantUpdate.attendance_confirmed_by = userId;
   }
 
   const { error: updateError } = await tenantClient
@@ -187,6 +190,16 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
           .eq('id', body.instance_id);
       }
     }
+  }
+
+  try {
+    await syncLessonFinancialArtifacts(tenantClient, body.instance_id, userId);
+  } catch (syncError) {
+    context.log?.error?.('calendar/attendance failed to sync financial artifacts', {
+      message: syncError?.message,
+      instanceId: body.instance_id,
+    });
+    return respond(context, 500, { message: 'failed_to_sync_financial_artifacts' });
   }
 
   return respond(context, 200, { message: 'participant updated successfully' });

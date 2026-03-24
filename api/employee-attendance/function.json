@@ -6,7 +6,7 @@
       "direction": "in",
       "name": "req",
       "methods": ["get", "post", "put", "delete"],
-      "route": "employee-leave"
+      "route": "employee-attendance"
     },
     {
       "type": "http",

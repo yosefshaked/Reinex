@@ -223,6 +223,18 @@ export function validateSessionWrite(body) {
 // ----- Instructors write validation (SOT) -----
 const PHONE_PATTERN = /^[0-9+\-()\s]{6,20}$/;
 const SIMPLE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const PAYROLL_MODELS = new Set(['hourly', 'monthly_salary', 'lesson_based']);
+const LEAVE_PAY_METHODS = new Set(['legal', 'avg_hourly_x_avg_day_hours', 'fixed_rate']);
+
+function normalizePayrollModel(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return PAYROLL_MODELS.has(normalized) ? normalized : '';
+}
+
+function normalizeLeavePayMethod(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return LEAVE_PAY_METHODS.has(normalized) ? normalized : '';
+}
 
 function coerceOptionalDateString(value) {
   const normalized = normalizeString(value);
@@ -294,12 +306,17 @@ export function validateInstructorCreate(body) {
   if (!annualLeaveDaysResult.valid) {
     return { error: 'invalid_annual_leave_days' };
   }
+  const monthlySalaryAmountResult = coerceOptionalNumberValue(body?.monthly_salary_amount ?? body?.monthlySalaryAmount);
+  if (!monthlySalaryAmountResult.valid) {
+    return { error: 'invalid_monthly_salary_amount' };
+  }
   const leaveFixedDayRateResult = coerceOptionalNumberValue(body?.leave_fixed_day_rate ?? body?.leaveFixedDayRate);
   if (!leaveFixedDayRateResult.valid) {
     return { error: 'invalid_leave_fixed_day_rate' };
   }
   const employeeType = normalizeString(body?.employee_type ?? body?.employeeType).toLowerCase() || '';
-  const leavePayMethod = normalizeString(body?.leave_pay_method ?? body?.leavePayMethod).toLowerCase() || '';
+  const payrollModel = normalizePayrollModel(body?.payroll_model ?? body?.payrollModel);
+  const leavePayMethod = normalizeLeavePayMethod(body?.leave_pay_method ?? body?.leavePayMethod);
   const employmentScope = normalizeString(body?.employment_scope ?? body?.employmentScope) || '';
 
   // employee_id is required (national ID or worker number)
@@ -322,6 +339,8 @@ export function validateInstructorCreate(body) {
     employeeType,
     startDate: startDateResult.value,
     currentRate: currentRateResult.value,
+    payrollModel,
+    monthlySalaryAmount: monthlySalaryAmountResult.value,
     annualLeaveDays: annualLeaveDaysResult.value,
     leavePayMethod,
     leaveFixedDayRate: leaveFixedDayRateResult.value,
@@ -433,6 +452,23 @@ export function validateInstructorUpdate(body, orgPermissions = {}) {
     updates.current_rate = result.value;
   }
 
+  if (Object.prototype.hasOwnProperty.call(body, 'payroll_model') || Object.prototype.hasOwnProperty.call(body, 'payrollModel')) {
+    const v = normalizePayrollModel(
+      Object.prototype.hasOwnProperty.call(body, 'payroll_model') ? body.payroll_model : body.payrollModel
+    );
+    updates.payroll_model = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'monthly_salary_amount') || Object.prototype.hasOwnProperty.call(body, 'monthlySalaryAmount')) {
+    const result = coerceOptionalNumberValue(
+      Object.prototype.hasOwnProperty.call(body, 'monthly_salary_amount') ? body.monthly_salary_amount : body.monthlySalaryAmount
+    );
+    if (!result.valid) {
+      return { error: 'invalid_monthly_salary_amount' };
+    }
+    updates.monthly_salary_amount = result.value;
+  }
+
   if (Object.prototype.hasOwnProperty.call(body, 'annual_leave_days') || Object.prototype.hasOwnProperty.call(body, 'annualLeaveDays')) {
     const result = coerceOptionalNumberValue(
       Object.prototype.hasOwnProperty.call(body, 'annual_leave_days') ? body.annual_leave_days : body.annualLeaveDays
@@ -444,9 +480,9 @@ export function validateInstructorUpdate(body, orgPermissions = {}) {
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'leave_pay_method') || Object.prototype.hasOwnProperty.call(body, 'leavePayMethod')) {
-    const v = normalizeString(
+    const v = normalizeLeavePayMethod(
       Object.prototype.hasOwnProperty.call(body, 'leave_pay_method') ? body.leave_pay_method : body.leavePayMethod
-    ).toLowerCase();
+    );
     updates.leave_pay_method = v || null;
   }
 

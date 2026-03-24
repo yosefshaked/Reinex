@@ -14,7 +14,27 @@ import { parseJsonBodyWithLimit, validateInstructorCreate, validateInstructorUpd
 import { ensureInstructorColors } from '../_shared/instructor-colors.js';
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 
-const EMPLOYEE_SELECT_COLUMNS = 'id, user_id, first_name, middle_name, last_name, employee_id, employee_type, current_rate, phone, email, start_date, is_active, notes, working_days, annual_leave_days, leave_pay_method, leave_fixed_day_rate, employment_scope, metadata, instructor_types';
+const EMPLOYEE_SELECT_COLUMNS = 'id, user_id, first_name, middle_name, last_name, employee_id, employee_type, payroll_model, current_rate, monthly_salary_amount, phone, email, start_date, is_active, notes, working_days, annual_leave_days, leave_pay_method, leave_fixed_day_rate, employment_scope, metadata, instructor_types';
+
+function resolveDefaultPayrollModel(employeeType) {
+  if (employeeType === 'instructor') {
+    return 'lesson_based';
+  }
+  return 'hourly';
+}
+
+function validatePayrollModelForEmployeeType(employeeType, payrollModel) {
+  if (!employeeType || !payrollModel) {
+    return true;
+  }
+  if (employeeType === 'instructor') {
+    return payrollModel === 'lesson_based';
+  }
+  if (employeeType === 'office') {
+    return payrollModel === 'hourly' || payrollModel === 'monthly_salary';
+  }
+  return true;
+}
 
 function normalizeWorkingDaysInput(value) {
   if (value === undefined) {
@@ -368,6 +388,10 @@ export default async function (context, req) {
     const fallbackLast = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
 
     const employeeType = validation.employeeType || 'instructor';
+    const payrollModel = validation.payrollModel || resolveDefaultPayrollModel(employeeType);
+    if (!validatePayrollModelForEmployeeType(employeeType, payrollModel)) {
+      return respond(context, 400, { message: 'invalid_payroll_model_for_employee_type' });
+    }
     const insertPayload = {
       ...(validation.userId ? { user_id: validation.userId } : {}),
       first_name: validation.firstName || fallbackFirst,
@@ -375,7 +399,9 @@ export default async function (context, req) {
       last_name: validation.lastName || fallbackLast || (validation.isManual ? '' : validation.userId),
       employee_id: validation.employeeId,
       employee_type: employeeType,
+      payroll_model: payrollModel,
       current_rate: validation.currentRate,
+      monthly_salary_amount: validation.monthlySalaryAmount,
       email: validation.email || profileEmail || null,
       phone: validation.phone || null,
       start_date: validation.startDate,
@@ -525,7 +551,18 @@ export default async function (context, req) {
 
     const targetEmployeeType = normalizeString(updates.employee_type ?? existingEmployee.employee_type).toLowerCase();
     const existingEmployeeType = normalizeString(existingEmployee.employee_type).toLowerCase();
+    const targetPayrollModel = normalizeString(
+      updates.payroll_model ?? existingEmployee.payroll_model ?? resolveDefaultPayrollModel(targetEmployeeType || existingEmployeeType)
+    ).toLowerCase();
     const isRoleConversionToInstructor = existingEmployeeType !== 'instructor' && targetEmployeeType === 'instructor';
+
+    if (targetEmployeeType && targetPayrollModel && !validatePayrollModelForEmployeeType(targetEmployeeType, targetPayrollModel)) {
+      return respond(context, 400, { message: 'invalid_payroll_model_for_employee_type' });
+    }
+
+    if (!existingEmployee.payroll_model && !updates.payroll_model) {
+      updates.payroll_model = resolveDefaultPayrollModel(targetEmployeeType || existingEmployeeType || 'office');
+    }
 
     if (isRoleConversionToInstructor) {
       if (!workingDaysInput.provided || !Array.isArray(workingDaysInput.value) || workingDaysInput.value.length === 0) {

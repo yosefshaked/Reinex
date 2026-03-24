@@ -12,6 +12,7 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
+import { assertNoLeaveForLesson, syncLessonFinancialArtifacts, toDateKey } from '../_shared/employee-finance.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 const INSTANCE_STATUSES = new Set(['scheduled', 'completed', 'cancelled_student', 'cancelled_clinic', 'no_show']);
@@ -377,6 +378,15 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     return respond(context, 400, { message: 'invalid service_id' });
   }
 
+  const leaveConflict = await assertNoLeaveForLesson(tenantClient, {
+    employeeId: body.instructor_employee_id,
+    date: toDateKey(body.datetime_start),
+  });
+
+  if (leaveConflict) {
+    return respond(context, 409, leaveConflict);
+  }
+
   // Create lesson instance
   const instanceData = {
     template_id: body.template_id || null,
@@ -469,6 +479,15 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     });
   }
 
+  try {
+    await syncLessonFinancialArtifacts(tenantClient, instance.id, userId);
+  } catch (syncError) {
+    context.log?.error?.('calendar/instances failed to sync financial artifacts after create', {
+      message: syncError?.message,
+      instanceId: instance?.id,
+    });
+  }
+
   return respond(context, 201, { id: instance.id, message: 'instance created successfully' });
 }
 
@@ -481,7 +500,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   // Fetch existing instance
   const { data: existingInstance, error: fetchError } = await tenantClient
     .from('lesson_instances')
-    .select('id, instructor_employee_id, status, closed_reason')
+    .select('id, instructor_employee_id, datetime_start, status, closed_reason')
     .eq('id', body.id)
     .single();
 
@@ -534,6 +553,19 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
       return respond(context, 400, { message: 'invalid status' });
     }
     body.status = normalizedStatus;
+  }
+
+  const targetInstructorId = body.instructor_employee_id || existingInstance.instructor_employee_id;
+  const targetDate = toDateKey(body.datetime_start || existingInstance.datetime_start);
+  if (targetInstructorId && targetDate) {
+    const leaveConflict = await assertNoLeaveForLesson(tenantClient, {
+      employeeId: targetInstructorId,
+      date: targetDate,
+    });
+
+    if (leaveConflict) {
+      return respond(context, 409, leaveConflict);
+    }
   }
 
   // Build update object (only update provided fields)
@@ -609,6 +641,16 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
       message: auditError?.message,
       instanceId: body?.id,
     });
+  }
+
+  try {
+    await syncLessonFinancialArtifacts(tenantClient, body.id, userId);
+  } catch (syncError) {
+    context.log?.error?.('calendar/instances failed to sync financial artifacts after update', {
+      message: syncError?.message,
+      instanceId: body?.id,
+    });
+    return respond(context, 500, { message: 'failed_to_sync_financial_artifacts' });
   }
 
   return respond(context, 200, { message: 'instance updated successfully' });

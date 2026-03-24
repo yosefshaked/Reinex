@@ -42,8 +42,6 @@ export default function StudentDetailPage() {
 
   const { loading: supabaseLoading, session } = useSupabase();
   const { activeOrg, activeOrgHasConnection, tenantClientReady } = useOrg();
-  const sessionAccessToken = session?.access_token || null;
-
   // Student data state
   const [studentState, setStudentState] = useState(REQUEST_STATE.idle);
   const [student, setStudent] = useState(null);
@@ -102,7 +100,7 @@ export default function StudentDetailPage() {
       setStudentError(error?.message || 'טעינת פרטי התלמיד נכשלה.');
       return null;
     }
-  }, [canFetch, studentId, activeOrgId, sessionAccessToken]);
+  }, [canFetch, studentId, activeOrgId, session]);
 
   useEffect(() => {
     let isMounted = true;
@@ -260,7 +258,7 @@ export default function StudentDetailPage() {
         </TabsContent>
 
         <TabsContent value="financial" className="space-y-4">
-          <StudentFinancialTab />
+          <StudentFinancialTab studentId={studentId} student={student} />
         </TabsContent>
 
         <TabsContent value="forms" className="space-y-4">

@@ -45,9 +45,11 @@ function getSourceWorkingDays(employee) {
 
 function buildInitialState(employee) {
   const employeeType = deriveEmployeeType(employee);
+  const payrollModel = employee?.payroll_model || (employeeType === 'instructor' ? 'lesson_based' : 'hourly');
   return {
     employeeId: employee?.employee_id || '',
     employeeType,
+    payrollModel,
     sourceType: employeeType,
     firstName: employee?.first_name || '',
     middleName: employee?.middle_name || '',
@@ -56,6 +58,10 @@ function buildInitialState(employee) {
     phone: employee?.phone || '',
     startDate: employee?.start_date || '',
     currentRate: employee?.current_rate ?? '',
+    monthlySalaryAmount: employee?.monthly_salary_amount ?? '',
+    annualLeaveDays: employee?.annual_leave_days ?? '',
+    leavePayMethod: employee?.leave_pay_method || '',
+    leaveFixedDayRate: employee?.leave_fixed_day_rate ?? '',
     employmentScope: employee?.employment_scope || '',
     notes: employee?.notes || '',
     officeWorkingDays: employeeType === 'office' ? getSourceWorkingDays(employee) : [],
@@ -262,6 +268,7 @@ export default function EditEmployeeDialog({
         instructor_id: employee.id,
         employee_id: form.employeeId,
         employee_type: form.employeeType,
+        payroll_model: form.payrollModel,
         first_name: form.firstName,
         middle_name: form.middleName || null,
         last_name: form.lastName || null,
@@ -269,6 +276,10 @@ export default function EditEmployeeDialog({
         phone: form.phone || null,
         start_date: form.startDate || null,
         current_rate: form.currentRate === '' ? null : Number(form.currentRate),
+        monthly_salary_amount: form.monthlySalaryAmount === '' ? null : Number(form.monthlySalaryAmount),
+        annual_leave_days: form.annualLeaveDays === '' ? null : Number(form.annualLeaveDays),
+        leave_pay_method: form.leavePayMethod || null,
+        leave_fixed_day_rate: form.leaveFixedDayRate === '' ? null : Number(form.leaveFixedDayRate),
         employment_scope: form.employmentScope || null,
         notes: form.notes || null,
       };
@@ -323,20 +334,52 @@ export default function EditEmployeeDialog({
             icon={UserRound}
             description="שדות זהות, סוג העובד ותיעוד בסיסי"
           >
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               <div className="space-y-2">
                 <Label htmlFor="employee_id" className="text-xs text-slate-600">מספר עובד / תעודה</Label>
                 <Input id="employee_id" value={form.employeeId} onChange={(e) => updateField('employeeId', e.target.value)} disabled={isSaving} />
               </div>
               <div className="space-y-2">
                 <Label className="text-xs text-slate-600">סוג עובד</Label>
-                <Select value={form.employeeType} onValueChange={(value) => updateField('employeeType', value)}>
+                <Select
+                  value={form.employeeType}
+                  onValueChange={(value) => {
+                    updateField('employeeType', value);
+                    if (value === 'instructor') {
+                      updateField('payrollModel', 'lesson_based');
+                    } else if (form.payrollModel === 'lesson_based') {
+                      updateField('payrollModel', 'hourly');
+                    }
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="בחר סוג עובד" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="instructor">מדריך/ה</SelectItem>
                     <SelectItem value="office">עובד/ת משרד</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-600">מודל שכר</Label>
+                <Select
+                  value={form.employeeType === 'instructor' ? 'lesson_based' : form.payrollModel}
+                  onValueChange={(value) => updateField('payrollModel', value)}
+                  disabled={isSaving || form.employeeType === 'instructor'}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="בחר מודל שכר" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {form.employeeType === 'instructor' ? (
+                      <SelectItem value="lesson_based">מבוסס שיעורים</SelectItem>
+                    ) : (
+                      <>
+                        <SelectItem value="hourly">שעתי</SelectItem>
+                        <SelectItem value="monthly_salary">שכר חודשי</SelectItem>
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -405,9 +448,41 @@ export default function EditEmployeeDialog({
                   </SelectContent>
                 </Select>
               </div>
+              {form.payrollModel === 'monthly_salary' ? (
+                <div className="space-y-2">
+                  <Label htmlFor="monthly_salary_amount" className="text-xs text-slate-600">שכר חודשי</Label>
+                  <Input id="monthly_salary_amount" type="number" min="0" step="0.01" value={form.monthlySalaryAmount} onChange={(e) => updateField('monthlySalaryAmount', e.target.value)} disabled={isSaving} />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="current_rate" className="text-xs text-slate-600">תעריף שעתי</Label>
+                  <Input id="current_rate" type="number" min="0" step="0.01" value={form.currentRate} onChange={(e) => updateField('currentRate', e.target.value)} disabled={isSaving} />
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
-                <Label htmlFor="current_rate" className="text-xs text-slate-600">תעריף נוכחי</Label>
-                <Input id="current_rate" type="number" min="0" step="0.01" value={form.currentRate} onChange={(e) => updateField('currentRate', e.target.value)} disabled={isSaving} />
+                <Label htmlFor="annual_leave_days" className="text-xs text-slate-600">מכסת חופשה שנתית</Label>
+                <Input id="annual_leave_days" type="number" min="0" step="0.5" value={form.annualLeaveDays} onChange={(e) => updateField('annualLeaveDays', e.target.value)} disabled={isSaving} />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-600">שיטת תשלום חופשה</Label>
+                <Select value={form.leavePayMethod || '__default__'} onValueChange={(value) => updateField('leavePayMethod', value === '__default__' ? '' : value)} disabled={isSaving}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="ברירת מחדל ארגונית" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">ברירת מחדל ארגונית</SelectItem>
+                    <SelectItem value="legal">ממוצע חוקי</SelectItem>
+                    <SelectItem value="avg_hourly_x_avg_day_hours">ממוצע היסטורי</SelectItem>
+                    <SelectItem value="fixed_rate">ערך קבוע</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="leave_fixed_day_rate" className="text-xs text-slate-600">ערך חופשה קבוע</Label>
+                <Input id="leave_fixed_day_rate" type="number" min="0" step="0.01" value={form.leaveFixedDayRate} onChange={(e) => updateField('leaveFixedDayRate', e.target.value)} disabled={isSaving} />
               </div>
             </div>
 

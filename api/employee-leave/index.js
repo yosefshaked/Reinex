@@ -3,7 +3,6 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
   ensureMembership,
-  isAdminRole,
   normalizeString,
   readEnv,
   respond,
@@ -11,36 +10,117 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
+import {
+  HALF_DAY_PARTS,
+  LEAVE_DURATION_MODES,
+  LEAVE_ENTRY_STATUSES,
+  LEAVE_TYPES,
+  assertNoOperationalConflictsForLeave,
+  buildLeaveDayRows,
+  canManageEmployeeOps,
+  computeLeaveSummary,
+  deleteLeaveArtifacts,
+  fetchApprovedLeaveDays,
+  isYmdDate,
+  loadFinancePolicies,
+  resolveEmployeeRecord,
+  toDateKey,
+  upsertLeaveBalanceUsage,
+} from '../_shared/employee-finance.js';
 
-const MAX_BODY_BYTES = 32 * 1024;
+const MAX_BODY_BYTES = 64 * 1024;
 
-function computeRecordedBalances(entries) {
-  const ordered = [...entries].sort((left, right) => {
-    const leftTime = new Date(left.effective_date || left.created_at).getTime();
-    const rightTime = new Date(right.effective_date || right.created_at).getTime();
-    return rightTime - leftTime;
-  });
+function normalizeLeaveType(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return LEAVE_TYPES.has(normalized) ? normalized : '';
+}
 
-  const balances = new Map();
-  ordered.forEach((entry) => {
-    if (!entry.leave_type || balances.has(entry.leave_type)) return;
-    balances.set(entry.leave_type, {
-      leave_type: entry.leave_type,
-      recorded_balance: entry.balance,
-      effective_date: entry.effective_date,
-      source: 'LeaveBalances',
-    });
-  });
+function normalizeDurationMode(value, leaveType) {
+  if (leaveType === 'half_day') {
+    return 'half_day';
+  }
+  const normalized = normalizeString(value).toLowerCase();
+  return LEAVE_DURATION_MODES.has(normalized) ? normalized : 'full_day';
+}
 
-  return Array.from(balances.values());
+function normalizeEntryStatus(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return LEAVE_ENTRY_STATUSES.has(normalized) ? normalized : 'approved';
+}
+
+function normalizeHalfDayPart(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return HALF_DAY_PARTS.has(normalized) ? normalized : '';
+}
+
+function computeRecordedBalances(summary) {
+  return [{
+    leave_type: 'employee_paid',
+    recorded_balance: summary.remaining,
+    effective_date: toDateKey(new Date()),
+    source: 'employee_leave_balance_events',
+  }];
+}
+
+async function fetchLeaveEntry(tenantClient, leaveEntryId) {
+  const { data, error } = await tenantClient
+    .from('employee_leave_entries')
+    .select('id, employee_id, leave_type, status, duration_mode, half_day_part, start_date, end_date, reason, notes, source_type, approved_by, created_by, updated_by, created_at, updated_at, metadata')
+    .eq('id', leaveEntryId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
+async function fetchBalanceEvents(tenantClient, employeeId) {
+  const { data, error } = await tenantClient
+    .from('employee_leave_balance_events')
+    .select('id, employee_id, leave_entry_id, leave_day_id, event_type, leave_type, quantity_days, effective_date, notes, created_by, created_at, metadata')
+    .eq('employee_id', employeeId)
+    .order('effective_date', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    if (error.code === '42P01') {
+      return [];
+    }
+    throw error;
+  }
+
+  return data || [];
+}
+
+async function fetchLeaveEntriesForEmployee(tenantClient, employeeId, { startDate = '', endDate = '' } = {}) {
+  let query = tenantClient
+    .from('employee_leave_entries')
+    .select('id, employee_id, leave_type, status, duration_mode, half_day_part, start_date, end_date, reason, notes, source_type, approved_by, created_by, updated_by, created_at, updated_at, metadata')
+    .eq('employee_id', employeeId)
+    .order('start_date', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (startDate) {
+    query = query.gte('end_date', startDate);
+  }
+  if (endDate) {
+    query = query.lte('start_date', endDate);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    if (error.code === '42P01') {
+      return [];
+    }
+    throw error;
+  }
+  return data || [];
 }
 
 export default async function (context, req) {
   const method = String(req.method || 'GET').toUpperCase();
-  if (method !== 'GET') {
-    return respond(context, 405, { message: 'method not allowed' });
-  }
-
   const env = readEnv(context);
   const adminConfig = readSupabaseAdminConfig(env);
 
@@ -51,7 +131,6 @@ export default async function (context, req) {
 
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    context.log?.warn?.('employee-leave missing bearer token');
     return respond(context, 401, { message: 'missing bearer' });
   }
 
@@ -70,7 +149,9 @@ export default async function (context, req) {
   }
 
   const userId = authResult.data.user.id;
-  const body = parseJsonBodyWithLimit(req, MAX_BODY_BYTES, { mode: 'observe', context, endpoint: 'employee-leave' });
+  const body = method === 'GET'
+    ? {}
+    : parseJsonBodyWithLimit(req, MAX_BODY_BYTES, { mode: 'observe', context, endpoint: 'employee-leave' });
   const orgId = resolveOrgId(req, body);
 
   if (!orgId) {
@@ -93,61 +174,71 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const isAdmin = isAdminRole(role);
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
   if (tenantError) {
     return respond(context, tenantError.status, tenantError.body);
   }
 
-  const employeeIdParam = normalizeString(req?.query?.employee_id || body?.employee_id);
-  let employeeQuery = tenantClient
-    .from('Employees')
-    .select('id, user_id, annual_leave_days, leave_pay_method, leave_fixed_day_rate')
-    .limit(1);
+  const canManageAll = canManageEmployeeOps(role);
 
-  if (employeeIdParam) {
-    employeeQuery = employeeQuery.eq('id', employeeIdParam);
-  } else if (!isAdmin) {
-    employeeQuery = employeeQuery.eq('user_id', userId);
-  } else {
-    return respond(context, 400, { message: 'missing employee_id' });
+  if (method === 'GET') {
+    return handleGet(context, req, tenantClient, userId, canManageAll);
   }
 
-  const { data: employees, error: employeeError } = await employeeQuery;
-  if (employeeError) {
-    context.log?.error?.('employee-leave failed to load employee', { message: employeeError.message });
-    return respond(context, 500, { message: 'failed_to_load_employee' });
-  }
-
-  const employee = Array.isArray(employees) ? employees[0] : null;
-  if (!employee) {
-    return respond(context, 404, { message: 'employee_not_found' });
-  }
-
-  if (!isAdmin && employee.user_id !== userId) {
+  if (!canManageAll) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  let entries = [];
-  let ledgerStatus = 'unavailable';
-
-  const { data: leaveEntries, error: leaveError } = await tenantClient
-    .from('LeaveBalances')
-    .select('id, created_at, leave_type, balance, effective_date, notes, work_session_id, metadata')
-    .eq('employee_id', employee.id)
-    .order('effective_date', { ascending: false })
-    .order('created_at', { ascending: false })
-    .limit(120);
-
-  if (leaveError) {
-    if (leaveError.code !== '42P01' && leaveError.code !== '42703') {
-      context.log?.error?.('employee-leave failed to load leave ledger', { message: leaveError.message, code: leaveError.code });
-      return respond(context, 500, { message: 'failed_to_load_leave_ledger' });
-    }
-  } else if (Array.isArray(leaveEntries) && leaveEntries.length > 0) {
-    entries = leaveEntries;
-    ledgerStatus = 'legacy';
+  if (method === 'POST' || method === 'PUT') {
+    return handleUpsert(context, tenantClient, body, userId, method);
   }
+
+  if (method === 'DELETE') {
+    return handleDelete(context, tenantClient, body, userId);
+  }
+
+  return respond(context, 405, { message: 'method not allowed' });
+}
+
+async function handleGet(context, req, tenantClient, userId, canManageAll) {
+  const employeeIdParam = normalizeString(req?.query?.employee_id);
+  const startDate = normalizeString(req?.query?.start_date);
+  const endDate = normalizeString(req?.query?.end_date);
+  const employeeResult = await resolveEmployeeRecord(tenantClient, {
+    employeeId: employeeIdParam,
+    userId,
+    canManageAll,
+  });
+
+  if (employeeResult.error) {
+    if (employeeResult.error === 'missing_employee_id') return respond(context, 400, { message: 'missing_employee_id' });
+    if (employeeResult.error === 'employee_not_found') return respond(context, 404, { message: 'employee_not_found' });
+    if (employeeResult.error === 'forbidden') return respond(context, 403, { message: 'forbidden' });
+    context.log?.error?.('employee-leave failed to resolve employee', { employeeIdParam, message: employeeResult.error.message });
+    return respond(context, 500, { message: 'failed_to_load_employee' });
+  }
+
+  const employee = employeeResult.employee;
+  const policies = await loadFinancePolicies(tenantClient);
+  const [balanceEvents, leaveEntries, leaveDays] = await Promise.all([
+    fetchBalanceEvents(tenantClient, employee.id),
+    fetchLeaveEntriesForEmployee(tenantClient, employee.id, {
+      startDate: isYmdDate(startDate) ? startDate : '',
+      endDate: isYmdDate(endDate) ? endDate : '',
+    }),
+    fetchApprovedLeaveDays(tenantClient, {
+      employeeId: employee.id,
+      startDate: isYmdDate(startDate) ? startDate : `${new Date().getFullYear()}-01-01`,
+      endDate: isYmdDate(endDate) ? endDate : `${new Date().getFullYear()}-12-31`,
+    }),
+  ]);
+
+  const summary = computeLeaveSummary({
+    employee,
+    balanceEvents,
+    targetDate: endDate || new Date(),
+    leavePolicy: policies.leavePolicy,
+  });
 
   return respond(context, 200, {
     employee_id: employee.id,
@@ -157,9 +248,205 @@ export default async function (context, req) {
       leave_pay_method: employee.leave_pay_method || null,
       leave_fixed_day_rate: employee.leave_fixed_day_rate ?? null,
     },
-    ledger_status: ledgerStatus,
-    entry_count: entries.length,
-    recorded_balances: entries.length > 0 ? computeRecordedBalances(entries) : [],
-    entries,
+    ledger_status: balanceEvents.length > 0 ? 'employee_leave_balance_events' : 'unavailable',
+    entry_count: balanceEvents.length,
+    recorded_balances: computeRecordedBalances(summary),
+    entries: balanceEvents,
+    leave_entries: leaveEntries,
+    leave_days: leaveDays,
+    summary,
+    leave_policy: policies.leavePolicy,
+    leave_pay_policy: policies.leavePayPolicy,
   });
 }
+
+async function handleUpsert(context, tenantClient, body, userId, method) {
+  const leaveType = normalizeLeaveType(body?.leave_type);
+  const employeeId = normalizeString(body?.employee_id);
+  const startDate = normalizeString(body?.start_date);
+  const endDate = normalizeString(body?.end_date || body?.start_date);
+  const durationMode = normalizeDurationMode(body?.duration_mode, leaveType);
+  const halfDayPart = normalizeHalfDayPart(body?.half_day_part);
+  const reason = normalizeString(body?.reason) || null;
+  const notes = normalizeString(body?.notes) || null;
+  const status = normalizeEntryStatus(body?.status);
+
+  if (!employeeId) {
+    return respond(context, 400, { message: 'missing_employee_id' });
+  }
+  if (!leaveType) {
+    return respond(context, 400, { message: 'invalid_leave_type' });
+  }
+  if (!isYmdDate(startDate) || !isYmdDate(endDate) || startDate > endDate) {
+    return respond(context, 400, { message: 'invalid_date_range' });
+  }
+  if (durationMode === 'half_day' && startDate !== endDate) {
+    return respond(context, 400, { message: 'half_day_requires_single_date' });
+  }
+  if (durationMode === 'half_day' && !halfDayPart) {
+    return respond(context, 400, { message: 'missing_half_day_part' });
+  }
+
+  let existingEntry = null;
+  if (method === 'PUT') {
+    const leaveEntryId = normalizeString(body?.id);
+    if (!leaveEntryId) {
+      return respond(context, 400, { message: 'missing_leave_entry_id' });
+    }
+
+    existingEntry = await fetchLeaveEntry(tenantClient, leaveEntryId);
+    if (!existingEntry) {
+      return respond(context, 404, { message: 'leave_entry_not_found' });
+    }
+  }
+
+  const overlappingLeaveDays = await fetchApprovedLeaveDays(tenantClient, {
+    employeeId,
+    startDate,
+    endDate,
+    excludeEntryId: existingEntry?.id || '',
+  });
+
+  if (overlappingLeaveDays.length > 0) {
+    return respond(context, 409, {
+      code: 'leave_conflict',
+      message: 'leave_conflicts_with_existing_leave',
+      leave_days: overlappingLeaveDays,
+    });
+  }
+
+  const operationalConflict = await assertNoOperationalConflictsForLeave(tenantClient, {
+    employeeId,
+    startDate,
+    endDate,
+    excludeEntryId: existingEntry?.id || '',
+  });
+
+  if (operationalConflict) {
+    return respond(context, 409, operationalConflict);
+  }
+
+  const payload = {
+    employee_id: employeeId,
+    leave_type: leaveType,
+    status,
+    duration_mode: durationMode,
+    half_day_part: durationMode === 'half_day' ? halfDayPart : null,
+    start_date: startDate,
+    end_date: endDate,
+    reason,
+    notes,
+    source_type: normalizeString(body?.source_type).toLowerCase() || 'admin_manual',
+    approved_by: userId,
+    updated_by: userId,
+    updated_at: new Date().toISOString(),
+    metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+  };
+
+  let leaveEntryId = existingEntry?.id || '';
+  try {
+    if (!existingEntry) {
+      payload.created_by = userId;
+      payload.created_at = new Date().toISOString();
+      const { data, error } = await tenantClient
+        .from('employee_leave_entries')
+        .insert(payload)
+        .select('id')
+        .single();
+
+      if (error) {
+        throw error;
+      }
+      leaveEntryId = data.id;
+    } else {
+      const { error } = await tenantClient
+        .from('employee_leave_entries')
+        .update(payload)
+        .eq('id', leaveEntryId);
+
+      if (error) {
+        throw error;
+      }
+
+      await deleteLeaveArtifacts(tenantClient, leaveEntryId);
+    }
+
+    if (status === 'approved') {
+      const leaveDaysPayload = buildLeaveDayRows({
+        employeeId,
+        leaveEntryId,
+        leaveType,
+        startDate,
+        endDate,
+        durationMode,
+        halfDayPart,
+      });
+
+      const { data: leaveDays, error: leaveDaysError } = await tenantClient
+        .from('employee_leave_days')
+        .insert(leaveDaysPayload)
+        .select('id, leave_entry_id, employee_id, leave_date, day_portion, leave_type, balance_days_delta, pay_fraction, metadata');
+
+      if (leaveDaysError) {
+        throw leaveDaysError;
+      }
+
+      await upsertLeaveBalanceUsage(tenantClient, leaveDays || [], {
+        leaveEntryId,
+        employeeId,
+        leaveType,
+        notes,
+        createdBy: userId,
+      });
+    }
+  } catch (error) {
+    context.log?.error?.('employee-leave failed to persist leave entry', {
+      message: error.message,
+      code: error.code,
+    });
+
+    if (!existingEntry && leaveEntryId) {
+      await tenantClient.from('employee_leave_entries').delete().eq('id', leaveEntryId);
+    }
+    return respond(context, 500, { message: 'failed_to_save_leave_entry' });
+  }
+
+  const savedEntry = await fetchLeaveEntry(tenantClient, leaveEntryId);
+  return respond(context, existingEntry ? 200 : 201, savedEntry);
+}
+
+async function handleDelete(context, tenantClient, body, userId) {
+  const leaveEntryId = normalizeString(body?.id);
+  if (!leaveEntryId) {
+    return respond(context, 400, { message: 'missing_leave_entry_id' });
+  }
+
+  const existingEntry = await fetchLeaveEntry(tenantClient, leaveEntryId);
+  if (!existingEntry) {
+    return respond(context, 404, { message: 'leave_entry_not_found' });
+  }
+
+  try {
+    await deleteLeaveArtifacts(tenantClient, leaveEntryId);
+    const { data, error } = await tenantClient
+      .from('employee_leave_entries')
+      .update({
+        status: 'cancelled',
+        updated_by: userId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', leaveEntryId)
+      .select('id, employee_id, leave_type, status, duration_mode, half_day_part, start_date, end_date, reason, notes, source_type, approved_by, created_by, updated_by, created_at, updated_at, metadata')
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return respond(context, 200, data);
+  } catch (error) {
+    context.log?.error?.('employee-leave failed to cancel leave entry', { message: error.message });
+    return respond(context, 500, { message: 'failed_to_cancel_leave_entry' });
+  }
+}
+

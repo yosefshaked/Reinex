@@ -9,7 +9,7 @@ export const SETUP_SQL_SCRIPT = String.raw`-- ==================================
 -- 3. Forms & Submissions (with alert rules, visibility rules, OTP metadata)
 -- 4. Commitments & Consumption (prepaid packages, HMO support)
 -- 5. Waiting List (with priority, preferences, conflict detection)
--- 6. Instructors & Payroll (Employees, Services, RateHistory, LessonEarnings, LeaveBalances, WorkSessions)
+-- 6. Instructors, Payroll, Attendance & Leave (Employees, Services, RateHistory, LessonEarnings, Attendance, Leave, Finance Corrections)
 -- 7. Settings (cross-feature configuration)
 -- 8. Documents (polymorphic file storage)
 --
@@ -259,7 +259,9 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
   "last_name" text,
   "employee_id" text NOT NULL,
   "employee_type" text,
+  "payroll_model" text,
   "current_rate" numeric,
+  "monthly_salary_amount" numeric,
   "phone" text,
   "email" text,
   "start_date" date,
@@ -282,7 +284,9 @@ ALTER TABLE public."Employees"
   ADD COLUMN IF NOT EXISTS "last_name" text,
   ADD COLUMN IF NOT EXISTS "employee_id" text,
   ADD COLUMN IF NOT EXISTS "employee_type" text,
+  ADD COLUMN IF NOT EXISTS "payroll_model" text,
   ADD COLUMN IF NOT EXISTS "current_rate" numeric,
+  ADD COLUMN IF NOT EXISTS "monthly_salary_amount" numeric,
   ADD COLUMN IF NOT EXISTS "phone" text,
   ADD COLUMN IF NOT EXISTS "email" text,
   ADD COLUMN IF NOT EXISTS "start_date" date,
@@ -298,6 +302,16 @@ ALTER TABLE public."Employees"
 
 CREATE INDEX IF NOT EXISTS "Employees_name_idx" ON public."Employees" ("first_name", "last_name");
 CREATE INDEX IF NOT EXISTS "Employees_user_id_idx" ON public."Employees" ("user_id");
+
+DO $$
+BEGIN
+  ALTER TABLE public."Employees"
+    ADD CONSTRAINT "Employees_payroll_model_check"
+    CHECK ("payroll_model" IS NULL OR "payroll_model" IN ('hourly', 'monthly_salary', 'lesson_based'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
 
 -- -----------------------------------------------------------------
 -- public.Services (service catalog)
@@ -372,77 +386,387 @@ END;
 $$;
 
 -- -----------------------------------------------------------------
--- public.WorkSessions (work/leave tracking)
+-- Legacy cleanup: public.WorkSessions / public.LeaveBalances
 -- -----------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS public."WorkSessions" (
-  "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-  "employee_id" uuid NOT NULL,
-  "service_id" uuid,
-  "date" date NOT NULL,
-  "session_type" text,
-  "hours" numeric,
-  "sessions_count" bigint,
-  "students_count" bigint,
-  "rate_used" numeric,
-  "total_payment" numeric,
-  "notes" text,
-  "created_at" timestamptz DEFAULT now(),
-  "entry_type" text NOT NULL DEFAULT 'hours',
-  "payable" boolean,
-  "metadata" jsonb,
-  "deleted" boolean NOT NULL DEFAULT false,
-  "deleted_at" timestamptz,
-  CONSTRAINT "WorkSessions_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT "WorkSessions_employee_id_fkey" FOREIGN KEY ("employee_id") REFERENCES public."Employees"("id"),
-  CONSTRAINT "WorkSessions_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES public."Services"("id")
+DROP INDEX IF EXISTS "WorkSessions_employee_date_idx";
+DROP INDEX IF EXISTS "WorkSessions_service_idx";
+DROP INDEX IF EXISTS "WorkSessions_deleted_idx";
+DROP INDEX IF EXISTS "LeaveBalances_employee_date_idx";
+
+ALTER TABLE IF EXISTS public.lesson_earnings
+  DROP CONSTRAINT IF EXISTS lesson_earnings_work_session_id_fkey;
+
+ALTER TABLE IF EXISTS public.lesson_earnings
+  DROP COLUMN IF EXISTS work_session_id;
+
+DROP TABLE IF EXISTS public."LeaveBalances";
+DROP TABLE IF EXISTS public."WorkSessions";
+
+-- -----------------------------------------------------------------
+-- public.employee_attendance_records
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id uuid NOT NULL,
+  attendance_date date NOT NULL,
+  status text NOT NULL DEFAULT 'present',
+  worked_minutes integer NULL,
+  notes text NULL,
+  source_type text NOT NULL DEFAULT 'manual',
+  created_by uuid NULL,
+  updated_by uuid NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
 );
 
-ALTER TABLE public."WorkSessions"
-  ADD COLUMN IF NOT EXISTS "employee_id" uuid,
-  ADD COLUMN IF NOT EXISTS "service_id" uuid,
-  ADD COLUMN IF NOT EXISTS "date" date,
-  ADD COLUMN IF NOT EXISTS "session_type" text,
-  ADD COLUMN IF NOT EXISTS "hours" numeric,
-  ADD COLUMN IF NOT EXISTS "sessions_count" bigint,
-  ADD COLUMN IF NOT EXISTS "students_count" bigint,
-  ADD COLUMN IF NOT EXISTS "rate_used" numeric,
-  ADD COLUMN IF NOT EXISTS "total_payment" numeric,
-  ADD COLUMN IF NOT EXISTS "notes" text,
-  ADD COLUMN IF NOT EXISTS "created_at" timestamptz,
-  ADD COLUMN IF NOT EXISTS "entry_type" text,
-  ADD COLUMN IF NOT EXISTS "payable" boolean,
-  ADD COLUMN IF NOT EXISTS "metadata" jsonb,
-  ADD COLUMN IF NOT EXISTS "deleted" boolean,
-  ADD COLUMN IF NOT EXISTS "deleted_at" timestamptz;
+ALTER TABLE public.employee_attendance_records
+  ADD COLUMN IF NOT EXISTS employee_id uuid,
+  ADD COLUMN IF NOT EXISTS attendance_date date,
+  ADD COLUMN IF NOT EXISTS status text,
+  ADD COLUMN IF NOT EXISTS worked_minutes integer,
+  ADD COLUMN IF NOT EXISTS notes text,
+  ADD COLUMN IF NOT EXISTS source_type text,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS updated_by uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_attendance_records
+    ADD CONSTRAINT employee_attendance_records_employee_id_fkey
+    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_attendance_records
+    ADD CONSTRAINT employee_attendance_records_status_check
+    CHECK (status IN ('present', 'partial', 'absent', 'remote'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_attendance_records
+    ADD CONSTRAINT employee_attendance_records_source_type_check
+    CHECK (source_type IN ('manual', 'import', 'system'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS employee_attendance_records_employee_date_uidx
+  ON public.employee_attendance_records (employee_id, attendance_date);
+
+CREATE INDEX IF NOT EXISTS employee_attendance_records_date_idx
+  ON public.employee_attendance_records (attendance_date);
 
 -- -----------------------------------------------------------------
--- public.LeaveBalances (leave allocation and usage ledger)
+-- public.employee_leave_entries
 -- -----------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS public."LeaveBalances" (
-  "id" bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  "created_at" timestamptz NOT NULL DEFAULT now(),
-  "employee_id" uuid NOT NULL,
-  "leave_type" text NOT NULL,
-  "balance" numeric NOT NULL DEFAULT 0,
-  "effective_date" date NOT NULL,
-  "notes" text,
-  "work_session_id" uuid,
-  "metadata" jsonb,
-  CONSTRAINT "LeaveBalances_employee_id_fkey" FOREIGN KEY ("employee_id") REFERENCES public."Employees"("id"),
-  CONSTRAINT "LeaveBalances_work_session_id_fkey" FOREIGN KEY ("work_session_id") REFERENCES public."WorkSessions"("id") ON DELETE SET NULL
+CREATE TABLE IF NOT EXISTS public.employee_leave_entries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id uuid NOT NULL,
+  leave_type text NOT NULL,
+  status text NOT NULL DEFAULT 'approved',
+  duration_mode text NOT NULL DEFAULT 'full_day',
+  half_day_part text NULL,
+  start_date date NOT NULL,
+  end_date date NOT NULL,
+  reason text NULL,
+  notes text NULL,
+  source_type text NOT NULL DEFAULT 'admin_manual',
+  approved_by uuid NULL,
+  created_by uuid NULL,
+  updated_by uuid NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
 );
 
-ALTER TABLE public."LeaveBalances"
-  ADD COLUMN IF NOT EXISTS "created_at" timestamptz,
-  ADD COLUMN IF NOT EXISTS "employee_id" uuid,
-  ADD COLUMN IF NOT EXISTS "leave_type" text,
-  ADD COLUMN IF NOT EXISTS "balance" numeric,
-  ADD COLUMN IF NOT EXISTS "effective_date" date,
-  ADD COLUMN IF NOT EXISTS "notes" text,
-  ADD COLUMN IF NOT EXISTS "work_session_id" uuid,
-  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
+ALTER TABLE public.employee_leave_entries
+  ADD COLUMN IF NOT EXISTS employee_id uuid,
+  ADD COLUMN IF NOT EXISTS leave_type text,
+  ADD COLUMN IF NOT EXISTS status text,
+  ADD COLUMN IF NOT EXISTS duration_mode text,
+  ADD COLUMN IF NOT EXISTS half_day_part text,
+  ADD COLUMN IF NOT EXISTS start_date date,
+  ADD COLUMN IF NOT EXISTS end_date date,
+  ADD COLUMN IF NOT EXISTS reason text,
+  ADD COLUMN IF NOT EXISTS notes text,
+  ADD COLUMN IF NOT EXISTS source_type text,
+  ADD COLUMN IF NOT EXISTS approved_by uuid,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS updated_by uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_entries
+    ADD CONSTRAINT employee_leave_entries_employee_id_fkey
+    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_entries
+    ADD CONSTRAINT employee_leave_entries_leave_type_check
+    CHECK (leave_type IN ('employee_paid', 'system_paid', 'unpaid', 'half_day'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_entries
+    ADD CONSTRAINT employee_leave_entries_status_check
+    CHECK (status IN ('approved', 'cancelled'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_entries
+    ADD CONSTRAINT employee_leave_entries_duration_mode_check
+    CHECK (duration_mode IN ('full_day', 'half_day'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_entries
+    ADD CONSTRAINT employee_leave_entries_half_day_part_check
+    CHECK (half_day_part IS NULL OR half_day_part IN ('first_half', 'second_half'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS employee_leave_entries_employee_range_idx
+  ON public.employee_leave_entries (employee_id, start_date, end_date);
+
+-- -----------------------------------------------------------------
+-- public.employee_leave_days
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.employee_leave_days (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  leave_entry_id uuid NOT NULL,
+  employee_id uuid NOT NULL,
+  leave_date date NOT NULL,
+  day_portion text NOT NULL DEFAULT 'full_day',
+  leave_type text NOT NULL,
+  balance_days_delta numeric NOT NULL DEFAULT 0,
+  pay_fraction numeric NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.employee_leave_days
+  ADD COLUMN IF NOT EXISTS leave_entry_id uuid,
+  ADD COLUMN IF NOT EXISTS employee_id uuid,
+  ADD COLUMN IF NOT EXISTS leave_date date,
+  ADD COLUMN IF NOT EXISTS day_portion text,
+  ADD COLUMN IF NOT EXISTS leave_type text,
+  ADD COLUMN IF NOT EXISTS balance_days_delta numeric,
+  ADD COLUMN IF NOT EXISTS pay_fraction numeric,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_days
+    ADD CONSTRAINT employee_leave_days_leave_entry_id_fkey
+    FOREIGN KEY (leave_entry_id) REFERENCES public.employee_leave_entries(id) ON DELETE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_days
+    ADD CONSTRAINT employee_leave_days_employee_id_fkey
+    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_days
+    ADD CONSTRAINT employee_leave_days_day_portion_check
+    CHECK (day_portion IN ('full_day', 'first_half', 'second_half'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_days
+    ADD CONSTRAINT employee_leave_days_leave_type_check
+    CHECK (leave_type IN ('employee_paid', 'system_paid', 'unpaid', 'half_day'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS employee_leave_days_employee_date_uidx
+  ON public.employee_leave_days (employee_id, leave_date);
+
+CREATE INDEX IF NOT EXISTS employee_leave_days_entry_idx
+  ON public.employee_leave_days (leave_entry_id);
+
+-- -----------------------------------------------------------------
+-- public.employee_leave_balance_events
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.employee_leave_balance_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id uuid NOT NULL,
+  leave_entry_id uuid NULL,
+  leave_day_id uuid NULL,
+  event_type text NOT NULL,
+  leave_type text NULL,
+  quantity_days numeric NOT NULL,
+  effective_date date NOT NULL,
+  notes text NULL,
+  created_by uuid NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.employee_leave_balance_events
+  ADD COLUMN IF NOT EXISTS employee_id uuid,
+  ADD COLUMN IF NOT EXISTS leave_entry_id uuid,
+  ADD COLUMN IF NOT EXISTS leave_day_id uuid,
+  ADD COLUMN IF NOT EXISTS event_type text,
+  ADD COLUMN IF NOT EXISTS leave_type text,
+  ADD COLUMN IF NOT EXISTS quantity_days numeric,
+  ADD COLUMN IF NOT EXISTS effective_date date,
+  ADD COLUMN IF NOT EXISTS notes text,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_balance_events
+    ADD CONSTRAINT employee_leave_balance_events_employee_id_fkey
+    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_balance_events
+    ADD CONSTRAINT employee_leave_balance_events_leave_entry_id_fkey
+    FOREIGN KEY (leave_entry_id) REFERENCES public.employee_leave_entries(id) ON DELETE SET NULL;
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_balance_events
+    ADD CONSTRAINT employee_leave_balance_events_leave_day_id_fkey
+    FOREIGN KEY (leave_day_id) REFERENCES public.employee_leave_days(id) ON DELETE SET NULL;
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.employee_leave_balance_events
+    ADD CONSTRAINT employee_leave_balance_events_event_type_check
+    CHECK (event_type IN ('allocation', 'carryover', 'adjustment', 'usage', 'reversal', 'correction'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS employee_leave_balance_events_employee_date_idx
+  ON public.employee_leave_balance_events (employee_id, effective_date);
+
+-- -----------------------------------------------------------------
+-- public.finance_corrections
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.finance_corrections (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id uuid NOT NULL,
+  correction_type text NOT NULL,
+  amount numeric NOT NULL,
+  effective_date date NOT NULL,
+  notes text NULL,
+  created_by uuid NULL,
+  updated_by uuid NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.finance_corrections
+  ADD COLUMN IF NOT EXISTS employee_id uuid,
+  ADD COLUMN IF NOT EXISTS correction_type text,
+  ADD COLUMN IF NOT EXISTS amount numeric,
+  ADD COLUMN IF NOT EXISTS effective_date date,
+  ADD COLUMN IF NOT EXISTS notes text,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS updated_by uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.finance_corrections
+    ADD CONSTRAINT finance_corrections_employee_id_fkey
+    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.finance_corrections
+    ADD CONSTRAINT finance_corrections_correction_type_check
+    CHECK (correction_type IN ('bonus', 'deduction', 'adjustment', 'correction'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS finance_corrections_employee_date_idx
+  ON public.finance_corrections (employee_id, effective_date);
 
 -- -----------------------------------------------------------------
 -- public.instructor_profiles
@@ -966,9 +1290,14 @@ CREATE TABLE IF NOT EXISTS public.commitments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   student_id uuid NOT NULL,
   service_id uuid NOT NULL,
+  commitment_type text NOT NULL DEFAULT 'package',
   total_amount numeric NOT NULL,
+  default_charge_amount numeric NULL,
   transfer_ref uuid NULL,
+  notes text NULL,
+  is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NULL,
   metadata jsonb NULL
 );
@@ -976,9 +1305,14 @@ CREATE TABLE IF NOT EXISTS public.commitments (
 ALTER TABLE public.commitments
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
+  ADD COLUMN IF NOT EXISTS commitment_type text,
   ADD COLUMN IF NOT EXISTS total_amount numeric,
+  ADD COLUMN IF NOT EXISTS default_charge_amount numeric,
   ADD COLUMN IF NOT EXISTS transfer_ref uuid,
+  ADD COLUMN IF NOT EXISTS notes text,
+  ADD COLUMN IF NOT EXISTS is_active boolean,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
   ADD COLUMN IF NOT EXISTS expires_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
@@ -1005,8 +1339,28 @@ END $$;
 DO $$
 BEGIN
   ALTER TABLE public.commitments
+    ADD CONSTRAINT commitments_commitment_type_check
+    CHECK (commitment_type IN ('package', 'subscription', 'hmo', 'manual_credit'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.commitments
     ADD CONSTRAINT commitments_total_amount_non_negative_check
     CHECK (total_amount >= 0);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.commitments
+    ADD CONSTRAINT commitments_default_charge_amount_non_negative_check
+    CHECK (default_charge_amount IS NULL OR default_charge_amount >= 0);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -1037,6 +1391,8 @@ CREATE TABLE IF NOT EXISTS public.consumption_entries (
   commitment_id uuid NULL,
   transfer_ref uuid NULL,
   amount_charged numeric NOT NULL,
+  effective_date date NULL,
+  notes text NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL
 );
@@ -1048,6 +1404,8 @@ ALTER TABLE public.consumption_entries
   ADD COLUMN IF NOT EXISTS commitment_id uuid,
   ADD COLUMN IF NOT EXISTS transfer_ref uuid,
   ADD COLUMN IF NOT EXISTS amount_charged numeric,
+  ADD COLUMN IF NOT EXISTS effective_date date,
+  ADD COLUMN IF NOT EXISTS notes text,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
@@ -1109,6 +1467,16 @@ BEGIN
   ALTER TABLE public.consumption_entries
     ADD CONSTRAINT consumption_entries_source_type_check
     CHECK (source_type IN ('lesson','transfer','adjustment'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.consumption_entries
+    ADD CONSTRAINT consumption_entries_lesson_source_unique
+    UNIQUE (lesson_participant_id, source_type);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -1289,7 +1657,6 @@ CREATE TABLE IF NOT EXISTS public.lesson_earnings (
   lesson_instance_id uuid NOT NULL,
   rate_used numeric NOT NULL,
   payout_amount numeric NOT NULL,
-  work_session_id uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL
 );
@@ -1299,7 +1666,6 @@ ALTER TABLE public.lesson_earnings
   ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
   ADD COLUMN IF NOT EXISTS rate_used numeric,
   ADD COLUMN IF NOT EXISTS payout_amount numeric,
-  ADD COLUMN IF NOT EXISTS work_session_id uuid,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
@@ -1323,21 +1689,21 @@ EXCEPTION
     NULL;
 END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_earnings
-    ADD CONSTRAINT lesson_earnings_work_session_id_fkey
-    FOREIGN KEY (work_session_id) REFERENCES public."WorkSessions"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
 CREATE INDEX IF NOT EXISTS lesson_earnings_employee_id_idx
   ON public.lesson_earnings (employee_id);
 
 CREATE INDEX IF NOT EXISTS lesson_earnings_lesson_instance_id_idx
   ON public.lesson_earnings (lesson_instance_id);
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_earnings
+    ADD CONSTRAINT lesson_earnings_employee_lesson_unique
+    UNIQUE (employee_id, lesson_instance_id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
 
 -- -----------------------------------------------------------------
 -- public.forms
@@ -1617,6 +1983,14 @@ ALTER TABLE public."Settings"
   ADD COLUMN IF NOT EXISTS "created_at" timestamptz,
   ADD COLUMN IF NOT EXISTS "updated_at" timestamptz;
 
+INSERT INTO public."Settings" ("key", "settings_value")
+VALUES
+  ('leave_policy', '{"carryover_enabled":false,"carryover_cap_days":null,"holiday_rules":[]}'::jsonb),
+  ('leave_pay_policy', '{"default_method":"legal","lookback_months":3,"legal_allow_12m_if_better":true,"fixed_rate_default":0}'::jsonb),
+  ('billing_consumption_policy', '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb),
+  ('instructor_earnings_policy', '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
+ON CONFLICT ("key") DO NOTHING;
+
 -- -----------------------------------------------------------------
 -- public."Documents" (polymorphic file metadata)
 -- -----------------------------------------------------------------
@@ -1676,10 +2050,9 @@ CREATE INDEX IF NOT EXISTS "Documents_hash_idx" ON public."Documents" ("hash") W
 
 -- Add indexes for payroll tables
 CREATE INDEX IF NOT EXISTS "RateHistory_employee_service_idx" ON public."RateHistory" ("employee_id", "service_id", "effective_date");
-CREATE INDEX IF NOT EXISTS "LeaveBalances_employee_date_idx" ON public."LeaveBalances" ("employee_id", "effective_date");
-CREATE INDEX IF NOT EXISTS "WorkSessions_employee_date_idx" ON public."WorkSessions" ("employee_id", "date");
-CREATE INDEX IF NOT EXISTS "WorkSessions_service_idx" ON public."WorkSessions" ("service_id");
-CREATE INDEX IF NOT EXISTS "WorkSessions_deleted_idx" ON public."WorkSessions" ("deleted") WHERE "deleted" = true;
+CREATE INDEX IF NOT EXISTS employee_leave_entries_status_idx ON public.employee_leave_entries (status);
+CREATE INDEX IF NOT EXISTS employee_leave_days_date_idx ON public.employee_leave_days (leave_date);
+CREATE INDEX IF NOT EXISTS finance_corrections_type_idx ON public.finance_corrections (correction_type);
 
 -- Enable RLS on all tables (both domain and payroll)
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
@@ -1688,8 +2061,11 @@ ALTER TABLE public.student_guardians ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."Employees" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."Services" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."RateHistory" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public."WorkSessions" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public."LeaveBalances" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.employee_attendance_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.employee_leave_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.employee_leave_days ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.employee_leave_balance_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.finance_corrections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instructor_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instructor_service_capabilities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_templates ENABLE ROW LEVEL SECURITY;
@@ -1718,8 +2094,11 @@ BEGIN
     'Employees',
     'Services',
     'RateHistory',
-    'WorkSessions',
-    'LeaveBalances',
+    'employee_attendance_records',
+    'employee_leave_entries',
+    'employee_leave_days',
+    'employee_leave_balance_events',
+    'finance_corrections',
     'instructor_profiles',
     'instructor_service_capabilities',
     'lesson_templates',
@@ -1772,8 +2151,11 @@ GRANT ALL ON TABLE public.student_guardians TO app_user;
 GRANT ALL ON TABLE public."Employees" TO app_user;
 GRANT ALL ON TABLE public."Services" TO app_user;
 GRANT ALL ON TABLE public."RateHistory" TO app_user;
-GRANT ALL ON TABLE public."WorkSessions" TO app_user;
-GRANT ALL ON TABLE public."LeaveBalances" TO app_user;
+GRANT ALL ON TABLE public.employee_attendance_records TO app_user;
+GRANT ALL ON TABLE public.employee_leave_entries TO app_user;
+GRANT ALL ON TABLE public.employee_leave_days TO app_user;
+GRANT ALL ON TABLE public.employee_leave_balance_events TO app_user;
+GRANT ALL ON TABLE public.finance_corrections TO app_user;
 GRANT ALL ON TABLE public.instructor_profiles TO app_user;
 GRANT ALL ON TABLE public.instructor_service_capabilities TO app_user;
 GRANT ALL ON TABLE public.lesson_templates TO app_user;
@@ -1804,8 +2186,11 @@ DECLARE
     'Employees',
     'Services',
     'RateHistory',
-    'WorkSessions',
-    'LeaveBalances',
+    'employee_attendance_records',
+    'employee_leave_entries',
+    'employee_leave_days',
+    'employee_leave_balance_events',
+    'finance_corrections',
     'instructor_profiles',
     'instructor_service_capabilities',
     'lesson_templates',
