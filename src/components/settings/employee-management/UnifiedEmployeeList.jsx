@@ -1049,7 +1049,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                           ))}
                         </div>
                       ) : (
-                        <EmptyState title="אין תעריפים לפי שירות" body="service_capabilities טרם הוגדרו לעובד זה." />
+                        <EmptyState title="אין תעריפים לפי שירות" body="עדיין לא שוייכו שירותים לעובד זה." />
                       )}
                     </SectionCard>
 
