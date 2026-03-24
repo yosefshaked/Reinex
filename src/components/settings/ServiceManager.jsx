@@ -3,9 +3,10 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, Loader2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Plus, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { upsertSetting } from '@/features/settings/api/settings.js';
+import { authenticatedFetch } from '@/lib/api-client.js';
 import { useServices } from '@/hooks/useOrgData.js';
 
 const SAVE_STATE = {
@@ -35,27 +36,18 @@ export default function ServiceManager({ session, orgId, activeOrgHasConnection,
     }
   }, [canLoad, hookServices]);
 
-  const handleAddService = () => {
+  const handleAddService = async () => {
     const trimmed = newService.trim();
     if (!trimmed) {
       toast.error('יש להזין שם שירות.');
       return;
     }
 
-    if (services.includes(trimmed)) {
+    if (services.some((service) => service?.name === trimmed)) {
       toast.error('שירות זה כבר קיים ברשימה.');
       return;
     }
 
-    setServices([...services, trimmed]);
-    setNewService('');
-  };
-
-  const handleRemoveService = (index) => {
-    setServices(services.filter((_, i) => i !== index));
-  };
-
-  const handleSave = async () => {
     if (!canLoad) {
       return;
     }
@@ -64,20 +56,52 @@ export default function ServiceManager({ session, orgId, activeOrgHasConnection,
     setSaveError('');
 
     try {
-      await upsertSetting({
+      await authenticatedFetch('services', {
         session,
-        orgId,
-        key: 'available_services',
-        value: services,
+        method: 'POST',
+        body: {
+          org_id: orgId,
+          name: trimmed,
+          is_active: true,
+        },
       });
+      setNewService('');
       setSaveState(SAVE_STATE.idle);
-      toast.success('השירותים נשמרו בהצלחה.');
+      toast.success('השירות נוסף בהצלחה.');
       await refetchServices();
     } catch (error) {
-      console.error('Failed to save services', error);
-      setSaveError(error?.message || 'שמירת השירותים נכשלה.');
+      console.error('Failed to create service', error);
+      setSaveError(error?.message || 'יצירת השירות נכשלה.');
       setSaveState(SAVE_STATE.error);
-      toast.error('שמירת השירותים נכשלה.');
+      toast.error('יצירת השירות נכשלה.');
+    }
+  };
+
+  const handleToggleService = async (service) => {
+    if (!service?.id || !canLoad) {
+      return;
+    }
+
+    setSaveState(SAVE_STATE.saving);
+    setSaveError('');
+
+    try {
+      await authenticatedFetch(`services/${service.id}`, {
+        session,
+        method: 'PUT',
+        body: {
+          org_id: orgId,
+          is_active: service.is_active === false,
+        },
+      });
+      setSaveState(SAVE_STATE.idle);
+      toast.success(service.is_active === false ? 'השירות הופעל.' : 'השירות הושבת.');
+      await refetchServices();
+    } catch (error) {
+      console.error('Failed to update service state', error);
+      setSaveError(error?.message || 'עדכון השירות נכשל.');
+      setSaveState(SAVE_STATE.error);
+      toast.error('עדכון השירות נכשל.');
     }
   };
 
@@ -105,7 +129,7 @@ export default function ServiceManager({ session, orgId, activeOrgHasConnection,
       <CardHeader>
         <CardTitle className="text-base sm:text-lg">ניהול שירותים</CardTitle>
         <p className="text-xs text-slate-600 mt-xs sm:mt-sm sm:text-sm">
-          הגדר את רשימת השירותים הזמינים בארגון. השירותים יופיעו בטופס הוספת תלמיד.
+          שירותים מנוהלים ישירות מתוך טבלת `Services`. אפשר להוסיף שירותים חדשים ולהשבית שירותים קיימים בלי למחוק אותם.
         </p>
       </CardHeader>
       <CardContent className="space-y-sm sm:space-y-md">
@@ -139,7 +163,7 @@ export default function ServiceManager({ session, orgId, activeOrgHasConnection,
                 />
                 <Button
                   type="button"
-                  onClick={handleAddService}
+                  onClick={() => { void handleAddService(); }}
                   disabled={isSaving}
                   size="sm"
                   className="gap-xs text-sm"
@@ -154,21 +178,26 @@ export default function ServiceManager({ session, orgId, activeOrgHasConnection,
               <div className="space-y-xs sm:space-y-sm">
                 <Label className="text-xs sm:text-sm">שירותים זמינים ({services.length})</Label>
                 <div className="space-y-xs max-h-64 overflow-y-auto border rounded-md p-sm sm:space-y-sm sm:p-md">
-                  {services.map((service, index) => (
+                  {services.map((service) => (
                     <div
-                      key={index}
+                      key={service.id}
                       className="flex items-center justify-between gap-2 p-2 bg-slate-50 rounded-md"
                     >
-                      <span className="text-sm">{service}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">{service.name}</span>
+                        <Badge variant={service.is_active === false ? 'secondary' : 'default'}>
+                          {service.is_active === false ? 'מושהה' : 'פעיל'}
+                        </Badge>
+                      </div>
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleRemoveService(index)}
+                        onClick={() => { void handleToggleService(service); }}
                         disabled={isSaving}
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        className="text-slate-700 hover:bg-slate-200"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        {service.is_active === false ? 'הפעל' : 'השבת'}
                       </Button>
                     </div>
                   ))}
@@ -185,17 +214,6 @@ export default function ServiceManager({ session, orgId, activeOrgHasConnection,
                 {saveError}
               </div>
             )}
-
-            <div className="flex justify-end pt-4">
-              <Button
-                onClick={handleSave}
-                disabled={isSaving || services.length === 0}
-                className="gap-2"
-              >
-                {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                שמור שירותים
-              </Button>
-            </div>
           </>
         )}
       </CardContent>

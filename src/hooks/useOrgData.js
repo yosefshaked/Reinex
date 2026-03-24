@@ -130,9 +130,8 @@ function useOrgDataResource({
 
   // Create stable query string from params - only changes when actual param values change
   const queryString = useMemo(() => {
-    if (!paramsKey || !stableParams || Object.keys(stableParams).length === 0) return '';
     return buildSearchParamsString(stableParams, orgId);
-  }, [paramsKey, stableParams, orgId]);
+  }, [stableParams, orgId]);
 
   // Fetch function - stable reference, only recreates when critical deps change
   const fetchResource = useCallback(async () => {
@@ -220,17 +219,26 @@ export function useInstructors(options = {}) {
 
 export function useServices(options = {}) {
   const { enabled = true, orgId, session, resetOnDisable = true } = options;
-
-  const mapResponse = useCallback((payload) => payload?.settings?.available_services, []);
+  const mapResponse = useCallback((payload) => {
+    const rows = Array.isArray(payload) ? payload : [];
+    return rows.map((service) => {
+      const name = typeof service?.name === 'string' ? service.name.trim() : '';
+      return {
+        ...service,
+        name,
+        service_name: name || (typeof service?.service_name === 'string' ? service.service_name.trim() : ''),
+      };
+    });
+  }, []);
 
   const { data, loading, error, refetch } = useOrgDataResource({
     resource: 'services',
-    path: 'settings',
+    path: 'services',
     enabled,
     orgId,
     session,
     resetOnDisable,
-    params: { keys: 'available_services' },
+    params: {},
     mapResponse,
   });
 
@@ -239,6 +247,9 @@ export function useServices(options = {}) {
     loadingServices: loading,
     servicesError: error,
     refetchServices: refetch,
+    isLoading: loading,
+    error,
+    refetch,
   };
 }
 

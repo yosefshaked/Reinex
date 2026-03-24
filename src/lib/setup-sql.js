@@ -322,6 +322,16 @@ ALTER TABLE public."Services"
   ADD COLUMN IF NOT EXISTS "is_active" boolean,
   ADD COLUMN IF NOT EXISTS "metadata" jsonb;
 
+DO $$
+BEGIN
+  ALTER TABLE public."Services"
+    ADD CONSTRAINT "Services_payment_model_check"
+    CHECK ("payment_model" IS NULL OR "payment_model" IN ('fixed_rate', 'per_student'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
 -- Seed the generic, non-deletable service for general rates
 INSERT INTO public."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata")
 VALUES ('00000000-0000-0000-0000-000000000000', 'תעריף כללי *לא למחוק או לשנות*', NULL, 'fixed_rate', '#84CC16', NULL)

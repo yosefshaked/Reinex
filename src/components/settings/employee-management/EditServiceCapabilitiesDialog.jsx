@@ -27,9 +27,11 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
   const loadServices = async () => {
     setLoadingServices(true);
     try {
-      const params = new URLSearchParams({ org_id: orgId });
-      const data = await authenticatedFetch(`settings/services?${params.toString()}`, { session });
-      setServices(Array.isArray(data) ? data : []);
+      const payload = await authenticatedFetch('services', {
+        session,
+        params: { org_id: orgId },
+      });
+      setServices(Array.isArray(payload) ? payload : []);
     } catch (error) {
       console.error('Failed to load services', error);
       toast.error('טעינת השירותים נכשלה.');
@@ -110,7 +112,9 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
     return services.find((s) => s.id === serviceId)?.name || serviceId;
   };
 
-  const availableServices = services.filter((s) => !capabilities.some((c) => c.service_id === s.id));
+  const availableServices = services.filter(
+    (service) => service?.is_active !== false && !capabilities.some((capability) => capability.service_id === service.id)
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

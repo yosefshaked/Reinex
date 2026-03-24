@@ -119,7 +119,7 @@ useEffect(() => {
 
 ### 1.3 Services Data Loading
 
-**Files with duplicated services fetching (6 total):**
+**Files with duplicated services fetching (historical, 6 total):**
 1. `src/features/admin/components/AddStudentForm.jsx` (lines 34, 61-100)
 2. `src/features/admin/components/EditStudentForm.jsx` (lines 37, 61-110)
 3. `src/features/sessions/components/NewSessionModal.jsx` (lines 229, 428-445)
@@ -127,17 +127,18 @@ useEffect(() => {
 5. `src/features/students/pages/StudentDetailPage.jsx` (line 184)
 6. `src/components/settings/ServiceManager.jsx` (line 24)
 
-**Example from ResolvePendingReportDialog.jsx (lines 110-124):**
+**Historical example from ResolvePendingReportDialog.jsx (lines 110-124):**
 ```javascript
-// Duplicated in 6 files with slight variations
+// Legacy pattern duplicated in 6 files with slight variations
 useEffect(() => {
   async function loadServices() {
     if (!session || !activeOrgId) return;
     try {
-      const qp = buildQueryParams(activeOrgId, { keys: 'available_services' });
-      const payload = await authenticatedFetch(`settings?${qp.toString()}`, { session });
-      const settingsValue = payload?.settings?.available_services;
-      setServices(Array.isArray(settingsValue) ? settingsValue : []);
+      const payload = await authenticatedFetch('services', {
+        session,
+        params: { org_id: activeOrgId },
+      });
+      setServices(Array.isArray(payload) ? payload : []);
     } catch (err) {
       console.error('Failed to load services for resolution', err);
       setServices([]);
@@ -360,7 +361,7 @@ export function useStudents(options = {}) {
 }
 
 export function useInstructors() { /* similar pattern */ }
-export function useServices() { /* similar pattern */ }
+export function useServices() { /* similar pattern over GET /api/services */ }
 ```
 
 **Impact:**

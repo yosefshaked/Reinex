@@ -40,6 +40,28 @@ function normalizeOptionalText(value) {
   return { value: trimmed || null, valid: true };
 }
 
+const PAYMENT_MODELS = new Set(['fixed_rate', 'per_student']);
+
+function normalizePaymentModel(value) {
+  if (value === null || value === undefined || value === '') {
+    return { value: null, valid: true };
+  }
+  if (typeof value !== 'string') {
+    return { value: null, valid: false };
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return { value: null, valid: true };
+  }
+
+  if (!PAYMENT_MODELS.has(normalized)) {
+    return { value: null, valid: false };
+  }
+
+  return { value: normalized, valid: true };
+}
+
 function normalizeOptionalJson(value) {
   if (value === null || value === undefined) {
     return { value: null, valid: true };
@@ -162,7 +184,7 @@ export default async function services(context, req) {
       return respond(context, 400, { message: 'invalid_duration_minutes' });
     }
 
-    const paymentModelResult = normalizeOptionalText(body?.payment_model ?? body?.paymentModel);
+    const paymentModelResult = normalizePaymentModel(body?.payment_model ?? body?.paymentModel);
     if (!paymentModelResult.valid) {
       return respond(context, 400, { message: 'invalid_payment_model' });
     }
@@ -228,7 +250,7 @@ export default async function services(context, req) {
     }
 
     if (Object.prototype.hasOwnProperty.call(body, 'payment_model') || Object.prototype.hasOwnProperty.call(body, 'paymentModel')) {
-      const paymentModelResult = normalizeOptionalText(body?.payment_model ?? body?.paymentModel);
+      const paymentModelResult = normalizePaymentModel(body?.payment_model ?? body?.paymentModel);
       if (!paymentModelResult.valid) {
         return respond(context, 400, { message: 'invalid_payment_model' });
       }

@@ -41,7 +41,7 @@ PUT /api/instructors
 **Purpose**: Manage which services an instructor can provide, with capacity and rate per service
 
 **Features**:
-- Loads available services from `/settings/services` API
+- Loads available services from `GET /api/services`
 - Dynamic capabilities list (add/remove)
 - Each capability includes:
   - Service selection (dropdown)

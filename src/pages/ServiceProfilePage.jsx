@@ -14,6 +14,16 @@ const REQUEST_STATE = Object.freeze({
   error: 'error',
 });
 
+function getPaymentModelLabel(paymentModel) {
+  if (paymentModel === 'fixed_rate') {
+    return 'תעריף קבוע';
+  }
+  if (paymentModel === 'per_student') {
+    return 'תעריף לתלמיד';
+  }
+  return 'לא הוגדר';
+}
+
 export default function ServiceProfilePage() {
   const { id } = useParams();
   const serviceId = typeof id === 'string' ? id : '';
@@ -126,7 +136,7 @@ export default function ServiceProfilePage() {
                   <Badge variant="secondary">מזהה: {service.id}</Badge>
                 </div>
                 <div>משך: {service.duration_minutes ? `${service.duration_minutes} דק׳` : 'לא הוגדר'}</div>
-                <div>מודל תשלום: {service.payment_model || 'לא הוגדר'}</div>
+                <div>מודל תשלום: {getPaymentModelLabel(service.payment_model)}</div>
                 <div className="flex items-center gap-2">
                   <span>צבע:</span>
                   {service.color ? (

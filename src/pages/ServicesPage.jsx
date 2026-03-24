@@ -6,19 +6,33 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { TextField } from '@/components/ui/forms-ui';
+import { SelectField, TextField } from '@/components/ui/forms-ui';
 import { Switch } from '@/components/ui/switch';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 
+const PAYMENT_MODEL_OPTIONS = [
+  { value: 'fixed_rate', label: 'תעריף קבוע' },
+  { value: 'per_student', label: 'תעריף לתלמיד' },
+];
+
+function normalizePaymentModel(paymentModel) {
+  return PAYMENT_MODEL_OPTIONS.some((option) => option.value === paymentModel) ? paymentModel : '';
+}
+
+function getPaymentModelLabel(paymentModel) {
+  const match = PAYMENT_MODEL_OPTIONS.find((option) => option.value === paymentModel);
+  return match?.label || '—';
+}
+
 function buildInitialForm(service) {
   return {
     id: service?.id || '',
     name: service?.name || '',
     durationMinutes: service?.duration_minutes ?? '',
-    paymentModel: service?.payment_model || '',
+    paymentModel: normalizePaymentModel(service?.payment_model || ''),
     color: service?.color || '#3b82f6',
     isActive: service?.is_active ?? true,
   };
@@ -115,7 +129,7 @@ export default function ServicesPage() {
       org_id: activeOrgId,
       name: formValues.name.trim(),
       duration_minutes: durationNumber,
-      payment_model: formValues.paymentModel.trim() || null,
+      payment_model: formValues.paymentModel || null,
       color: formValues.color || null,
       is_active: formValues.isActive,
     };
@@ -249,7 +263,7 @@ export default function ServicesPage() {
                       <TableCell>
                         {service.duration_minutes ? `${service.duration_minutes} דק׳` : '—'}
                       </TableCell>
-                      <TableCell>{service.payment_model || '—'}</TableCell>
+                      <TableCell>{getPaymentModelLabel(service.payment_model)}</TableCell>
                       <TableCell>
                         {service.color ? (
                           <span className="inline-flex items-center gap-2">
@@ -331,14 +345,15 @@ export default function ServicesPage() {
               description="אופציונלי"
             />
 
-            <TextField
+            <SelectField
               id="service-payment-model"
-              name="paymentModel"
               label="מודל תשלום"
               value={formValues.paymentModel}
-              onChange={handleChange}
-              onBlur={handleBlur}
+              onChange={(value) => setFormValues((prev) => ({ ...prev, paymentModel: value }))}
+              options={PAYMENT_MODEL_OPTIONS}
+              placeholder="בחר מודל תשלום"
               disabled={isSubmitting}
+              error={error === 'invalid_payment_model' ? 'יש לבחור מודל תשלום תקין.' : ''}
               description="אופציונלי"
             />
 

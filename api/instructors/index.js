@@ -555,19 +555,23 @@ export default async function (context, req) {
       }
     }
 
-    const { data, error } = await tenantClient
-      .from('Employees')
-      .update(updates)
-      .eq('id', instructorId)
-      .select(EMPLOYEE_SELECT_COLUMNS)
-      .maybeSingle();
+    let employeeRecord = existingEmployee;
+    if (Object.keys(updates).length > 0) {
+      const { data, error } = await tenantClient
+        .from('Employees')
+        .update(updates)
+        .eq('id', instructorId)
+        .select(EMPLOYEE_SELECT_COLUMNS)
+        .maybeSingle();
 
-    if (error) {
-      context.log?.error?.('instructors failed to update employee', { message: error.message, instructorId });
-      return respond(context, 500, { message: 'failed_to_update_instructor' });
-    }
-    if (!data) {
-      return respond(context, 404, { message: 'instructor_not_found' });
+      if (error) {
+        context.log?.error?.('instructors failed to update employee', { message: error.message, instructorId });
+        return respond(context, 500, { message: 'failed_to_update_instructor' });
+      }
+      if (!data) {
+        return respond(context, 404, { message: 'instructor_not_found' });
+      }
+      employeeRecord = data;
     }
 
     if (targetEmployeeType === 'instructor' && (workingDaysInput.provided || body?.break_time_minutes !== undefined)) {
@@ -611,12 +615,28 @@ export default async function (context, req) {
       resourceId: instructorId,
       details: {
         updated_fields: Array.from(new Set(changedFields)),
-        instructor_name: `${data.first_name} ${data.last_name || ''}`.trim(),
+        instructor_name: `${employeeRecord.first_name} ${employeeRecord.last_name || ''}`.trim(),
       },
     });
 
-    const [enriched] = await enrichEmployees({ tenantClient, employees: [data] });
-    return respond(context, 200, enriched || data);
+    const [{ data: refreshedEmployee, error: refreshedEmployeeError }] = await Promise.all([
+      tenantClient
+        .from('Employees')
+        .select(EMPLOYEE_SELECT_COLUMNS)
+        .eq('id', instructorId)
+        .maybeSingle(),
+    ]);
+
+    if (refreshedEmployeeError || !refreshedEmployee) {
+      context.log?.error?.('instructors failed to refresh employee after update', {
+        message: refreshedEmployeeError?.message,
+        instructorId,
+      });
+      return respond(context, 500, { message: 'failed_to_refresh_instructor' });
+    }
+
+    const [enriched] = await enrichEmployees({ tenantClient, employees: [refreshedEmployee] });
+    return respond(context, 200, enriched || refreshedEmployee);
   }
 
   if (method === 'DELETE') {
