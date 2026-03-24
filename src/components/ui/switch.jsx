@@ -5,44 +5,7 @@ import * as SwitchPrimitives from "@radix-ui/react-switch"
 
 import { cn } from "@/lib/utils"
 
-const DOCUMENT_DIRECTION_ATTRIBUTE = "dir"
-
-const getDocumentDirection = () => {
-  if (typeof document === "undefined") {
-    return "ltr"
-  }
-  const root = document.documentElement
-  const declaredDirection = root?.getAttribute(DOCUMENT_DIRECTION_ATTRIBUTE)
-  return declaredDirection === "rtl" ? "rtl" : "ltr"
-}
-
 const Switch = React.forwardRef(({ className, ...props }, ref) => {
-  const [direction, setDirection] = React.useState(getDocumentDirection)
-
-  React.useEffect(() => {
-    if (typeof document === "undefined" || typeof MutationObserver === "undefined") {
-      return
-    }
-
-    const root = document.documentElement
-    if (!root) return
-
-    const observer = new MutationObserver(() => {
-      setDirection(getDocumentDirection())
-    })
-
-    observer.observe(root, { attributes: true, attributeFilter: [DOCUMENT_DIRECTION_ATTRIBUTE] })
-
-    return () => observer.disconnect()
-  }, [])
-
-  const isRtl = direction === "rtl"
-
-  const thumbAnchorClass = isRtl ? "end-0" : "start-0"
-  const thumbCheckedTranslate = isRtl
-    ? "data-[state=checked]:-translate-x-[1.25rem]"
-    : "data-[state=checked]:translate-x-[1.25rem]"
-
   return (
     <SwitchPrimitives.Root
       className={cn(
@@ -54,9 +17,10 @@ const Switch = React.forwardRef(({ className, ...props }, ref) => {
       <SwitchPrimitives.Thumb
         className={cn(
           "pointer-events-none absolute top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ease-out",
-          thumbAnchorClass,
+          "start-0",
           "data-[state=unchecked]:translate-x-0",
-          thumbCheckedTranslate
+          "ltr:data-[state=checked]:translate-x-[1.25rem]",
+          "rtl:data-[state=checked]:-translate-x-[1.25rem]"
         )}
       />
     </SwitchPrimitives.Root>
