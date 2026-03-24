@@ -3,8 +3,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from '@/components/ui/button';
 import { TextField, SelectField, DayOfWeekField, TimeField } from '@/components/ui/forms-ui';
 import { normalizeDayToken } from '@/lib/day-of-week.js';
-
-const DEFAULT_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 const DEFAULT_DURATION_MINUTES = 45;
 
 function formatEmployeeName(employee) {
@@ -26,7 +24,7 @@ function buildInitialState(template, defaultServiceId) {
   const dayOfWeek = normalizeDayToken(template?.day_of_week);
   return {
     instructorEmployeeId: template?.instructor_employee_id || '',
-    serviceId: template?.service_id || defaultServiceId || DEFAULT_SERVICE_ID,
+    serviceId: template?.service_id || defaultServiceId || '',
     dayOfWeek,
     timeOfDay: formatTimeValue(template?.time_of_day),
     durationMinutes: template?.duration_minutes || DEFAULT_DURATION_MINUTES,
@@ -72,10 +70,6 @@ export default function StudentScheduleDialog({
     }));
   }, [services]);
 
-  const resolvedServiceOptions = serviceOptions.length
-    ? serviceOptions
-    : [{ value: DEFAULT_SERVICE_ID, label: 'תעריף כללי' }];
-
   const handleChange = (event) => {
     const { name, value } = event.target;
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -103,7 +97,7 @@ export default function StudentScheduleDialog({
     };
     setTouched(nextTouched);
 
-    if (!values.instructorEmployeeId || !values.dayOfWeek || !values.timeOfDay || !values.validFrom) {
+    if (!values.instructorEmployeeId || !values.serviceId || !values.dayOfWeek || !values.timeOfDay || !values.validFrom) {
       return;
     }
 
@@ -120,7 +114,7 @@ export default function StudentScheduleDialog({
     onSubmit?.({
       templateId: template?.id || null,
       instructorEmployeeId: values.instructorEmployeeId,
-      serviceId: values.serviceId || DEFAULT_SERVICE_ID,
+      serviceId: values.serviceId,
       dayOfWeek: normalizedDay,
       timeOfDay: values.timeOfDay,
       durationMinutes: duration,
@@ -130,6 +124,7 @@ export default function StudentScheduleDialog({
   };
 
   const showInstructorError = touched.instructorEmployeeId && !values.instructorEmployeeId;
+  const showServiceError = touched.serviceId && !values.serviceId;
   const showDayError = touched.dayOfWeek && !values.dayOfWeek;
   const showTimeError = touched.timeOfDay && !values.timeOfDay;
   const showDurationError = touched.durationMinutes && (!values.durationMinutes || Number(values.durationMinutes) <= 0);
@@ -171,11 +166,12 @@ export default function StudentScheduleDialog({
             label="שירות"
             value={values.serviceId}
             onChange={(value) => handleSelectChange('serviceId', value)}
-            options={resolvedServiceOptions}
+            options={serviceOptions}
             placeholder={servicesLoading ? 'טוען...' : 'בחר שירות'}
             required
             disabled={isSubmitting || servicesLoading}
-            description={servicesError ? servicesError : 'אם אין שירותים, ייבחר השירות הכללי.'}
+            error={showServiceError ? 'יש לבחור שירות.' : ''}
+            description={servicesError ? servicesError : serviceOptions.length === 0 ? 'אין שירותים זמינים. יש ליצור שירות לפני הגדרת שיבוץ.' : ''}
           />
 
           <div className="grid gap-4 sm:grid-cols-2">

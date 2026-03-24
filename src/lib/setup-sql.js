@@ -332,11 +332,6 @@ EXCEPTION
     NULL;
 END $$;
 
--- Seed the generic, non-deletable service for general rates
-INSERT INTO public."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata")
-VALUES ('00000000-0000-0000-0000-000000000000', 'תעריף כללי *לא למחוק או לשנות*', NULL, 'fixed_rate', '#84CC16', NULL)
-ON CONFLICT DO NOTHING;
-
 -- -----------------------------------------------------------------
 -- public.RateHistory (rate tracking per employee/service/date)
 -- -----------------------------------------------------------------

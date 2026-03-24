@@ -15,8 +15,6 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 
-const DEFAULT_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
-
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
   if (!normalized) return '';
@@ -189,6 +187,24 @@ async function resolveInstructorEmployeeIdsForUser(tenantClient, userId) {
   };
 }
 
+async function serviceExists(tenantClient, serviceId) {
+  if (!serviceId) {
+    return false;
+  }
+
+  const { data, error } = await tenantClient
+    .from('Services')
+    .select('id')
+    .eq('id', serviceId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return Boolean(data?.id);
+}
+
 export default async function lessonTemplates(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
 
@@ -355,7 +371,7 @@ export default async function lessonTemplates(context, req) {
   if (method === 'POST') {
     const studentId = normalizeUuid(body?.student_id || body?.studentId);
     const instructorEmployeeId = normalizeUuid(body?.instructor_employee_id || body?.instructorEmployeeId);
-    const serviceId = normalizeUuid(body?.service_id || body?.serviceId) || DEFAULT_SERVICE_ID;
+    const serviceId = normalizeUuid(body?.service_id || body?.serviceId);
     const dayOfWeek = normalizeDayOfWeek(body?.day_of_week ?? body?.dayOfWeek);
     const timeOfDay = normalizeTime(body?.time_of_day || body?.timeOfDay);
     const durationMinutes = Number(body?.duration_minutes ?? body?.durationMinutes);
@@ -372,6 +388,18 @@ export default async function lessonTemplates(context, req) {
 
     if (!serviceId) {
       return respond(context, 400, { message: 'invalid_service_id' });
+    }
+
+    try {
+      if (!(await serviceExists(tenantClient, serviceId))) {
+        return respond(context, 400, { message: 'invalid_service_id' });
+      }
+    } catch (serviceLookupError) {
+      context.log?.error?.('lesson-templates failed to validate service on create', {
+        message: serviceLookupError.message,
+        serviceId,
+      });
+      return respond(context, 500, { message: 'failed_to_create_lesson_template' });
     }
 
     if (dayOfWeek === null) {
@@ -526,9 +554,22 @@ export default async function lessonTemplates(context, req) {
     }
 
     if (Object.prototype.hasOwnProperty.call(body, 'service_id') || Object.prototype.hasOwnProperty.call(body, 'serviceId')) {
-      const serviceId = normalizeUuid(body?.service_id || body?.serviceId) || DEFAULT_SERVICE_ID;
+      const serviceId = normalizeUuid(body?.service_id || body?.serviceId);
       if (!serviceId) {
         return respond(context, 400, { message: 'invalid_service_id' });
+      }
+
+      try {
+        if (!(await serviceExists(tenantClient, serviceId))) {
+          return respond(context, 400, { message: 'invalid_service_id' });
+        }
+      } catch (serviceLookupError) {
+        context.log?.error?.('lesson-templates failed to validate service on update', {
+          message: serviceLookupError.message,
+          serviceId,
+          templateId,
+        });
+        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
       }
       updates.service_id = serviceId;
     }

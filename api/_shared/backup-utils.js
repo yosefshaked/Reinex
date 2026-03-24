@@ -160,8 +160,7 @@ export async function restoreTenantData(tenantClient, manifest, { clearExisting 
       if (clearExisting) {
         const { error: deleteError } = await tenantClient
           .from(table)
-          .delete()
-          .neq('id', '00000000-0000-0000-0000-000000000000'); // delete all
+          .delete();
 
         if (deleteError) {
           results.errors.push({ table, operation: 'clear', message: deleteError.message });
