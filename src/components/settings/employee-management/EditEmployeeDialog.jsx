@@ -121,6 +121,26 @@ function getServiceName(services, serviceId) {
   return services.find((service) => service.id === serviceId)?.name || 'שירות';
 }
 
+function getSelectableServices(services, capabilities, index) {
+  const currentServiceId = capabilities[index]?.service_id || '';
+  return services.filter((service) => {
+    if (!service?.id) {
+      return false;
+    }
+    const isCurrentSelection = service.id === currentServiceId;
+    const assignedElsewhere = capabilities.some(
+      (capability, capabilityIndex) => capabilityIndex !== index && capability.service_id === service.id
+    );
+    if (assignedElsewhere) {
+      return false;
+    }
+    if (service?.is_active === false && !isCurrentSelection) {
+      return false;
+    }
+    return true;
+  });
+}
+
 export default function EditEmployeeDialog({
   open,
   onOpenChange,
@@ -170,9 +190,16 @@ export default function EditEmployeeDialog({
   };
 
   const addConversionCapability = () => {
-    const existingIds = new Set(form.conversionCapabilities.map((capability) => capability.service_id));
-    const nextService = availableServices.find((service) => !existingIds.has(service.id));
-    if (!nextService) {
+    const existingIds = new Set(form.conversionCapabilities.map((capability) => capability.service_id).filter(Boolean));
+    const hasUnselectedRow = form.conversionCapabilities.some((capability) => !capability.service_id);
+    const remainingServices = availableServices.filter((service) => !existingIds.has(service.id));
+
+    if (hasUnselectedRow) {
+      toast.error('בחר שירות בשורה הפתוחה לפני הוספת שורה נוספת.');
+      return;
+    }
+
+    if (remainingServices.length === 0) {
       toast.error('כל השירותים הזמינים כבר הוגדרו.');
       return;
     }
@@ -182,7 +209,7 @@ export default function EditEmployeeDialog({
       conversionCapabilities: [
         ...prev.conversionCapabilities,
         {
-          service_id: nextService.id,
+          service_id: '',
           max_students: 1,
           base_rate: 0,
           metadata: {},
@@ -446,20 +473,23 @@ export default function EditEmployeeDialog({
                         <div className="space-y-2">
                           <Label className="text-xs text-slate-600">שירות</Label>
                           <Select
-                            value={capability.service_id}
+                            value={capability.service_id || undefined}
                             onValueChange={(value) => updateConversionCapability(index, 'service_id', value)}
                           >
                             <SelectTrigger>
                               <SelectValue placeholder="בחר שירות" />
                             </SelectTrigger>
                             <SelectContent>
-                              {availableServices.map((service) => (
+                              {getSelectableServices(availableServices, form.conversionCapabilities, index).map((service) => (
                                 <SelectItem key={service.id} value={service.id}>
                                   {service.name}
                                 </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
+                          <div className="text-[11px] text-slate-500">
+                            `Services` מגדיר את התקן הארגוני. כאן מגדירים את ההחרגה לעובד: כמה תלמידים יוכל ללמד ומה יהיה התעריף שלו.
+                          </div>
                         </div>
                         <div className="space-y-2">
                           <Label className="text-xs text-slate-600">מספר תלמידים מקסימלי</Label>

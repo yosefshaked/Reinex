@@ -42,15 +42,24 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
   };
 
   const addCapability = () => {
-    const availableService = services.find((s) => !capabilities.some((c) => c.service_id === s.id));
-    if (!availableService) {
+    const selectedServiceIds = new Set(capabilities.map((capability) => capability.service_id).filter(Boolean));
+    const hasUnselectedRow = capabilities.some((capability) => !capability.service_id);
+    const remainingServices = services.filter((service) => service?.is_active !== false && !selectedServiceIds.has(service.id));
+
+    if (hasUnselectedRow) {
+      toast.error('בחר שירות בשורה הפתוחה לפני הוספת שורה נוספת.');
+      return;
+    }
+
+    if (remainingServices.length === 0) {
       toast.error('כל השירותים כבר מוגדרים לעובד זה.');
       return;
     }
+
     setCapabilities([
       ...capabilities,
       {
-        service_id: availableService.id,
+        service_id: '',
         max_students: 1,
         base_rate: 0,
         metadata: {},
@@ -82,6 +91,10 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
         toast.error('מספר התלמידים המקסימלי חייב להיות לפחות 1.');
         return;
       }
+    }
+    if (new Set(capabilities.map((capability) => capability.service_id)).size !== capabilities.length) {
+      toast.error('אין לבחור את אותו שירות יותר מפעם אחת.');
+      return;
     }
 
     setIsSaving(true);
@@ -116,6 +129,26 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
     (service) => service?.is_active !== false && !capabilities.some((capability) => capability.service_id === service.id)
   );
 
+  const getSelectableServices = (index) => {
+    const currentServiceId = capabilities[index]?.service_id || '';
+    return services.filter((service) => {
+      if (!service?.id) {
+        return false;
+      }
+      const isCurrentSelection = service.id === currentServiceId;
+      const assignedElsewhere = capabilities.some(
+        (capability, capabilityIndex) => capabilityIndex !== index && capability.service_id === service.id
+      );
+      if (assignedElsewhere) {
+        return false;
+      }
+      if (service?.is_active === false && !isCurrentSelection) {
+        return false;
+      }
+      return true;
+    });
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
@@ -141,7 +174,7 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
                       <div className="flex items-center gap-2 flex-1">
                         <Briefcase className="h-4 w-4 text-slate-600" />
                         <span className="font-medium text-sm">
-                          {getServiceName(capability.service_id)}
+                          {capability.service_id ? getServiceName(capability.service_id) : 'שירות חדש'}
                         </span>
                       </div>
                       <Button
@@ -156,7 +189,33 @@ export default function EditServiceCapabilitiesDialog({ open, onOpenChange, inst
                       </Button>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-end flex items-center gap-1">
+                          <Briefcase className="h-3 w-3" />
+                          שירות
+                        </Label>
+                        <Select
+                          value={capability.service_id || undefined}
+                          onValueChange={(value) => updateCapability(index, 'service_id', value)}
+                          disabled={isSaving || loadingServices}
+                        >
+                          <SelectTrigger className="text-end">
+                            <SelectValue placeholder="בחר שירות" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {getSelectableServices(index).map((service) => (
+                              <SelectItem key={service.id} value={service.id}>
+                                {service.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[11px] text-slate-500">
+                          השירות נבחר מתוך קטלוג `Services`. כאן מגדירים את ההחרגה לעובד: קיבולת ותעריף בפועל.
+                        </p>
+                      </div>
+
                       {/* Max Students */}
                       <div className="space-y-1">
                         <Label className="text-xs text-end flex items-center gap-1">
