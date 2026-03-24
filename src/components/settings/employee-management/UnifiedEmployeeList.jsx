@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+
 import {
   Briefcase,
   Calendar,
@@ -772,19 +772,22 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                 <DenseStat label="שיעורים עתידיים" value={upcomingInstances.length} accent="emerald" />
                 <DenseStat label="שיעורי עבר" value={historyInstances.length} accent="slate" />
                 <Popover>
-                  <div className={cn('rounded-2xl border px-3 py-3 shadow-sm', currentEmployeeMissingCount > 0 ? 'border-amber-200 bg-amber-50/70 text-amber-950' : 'border-slate-200 bg-white text-slate-900')}>
-                    <div className="text-[11px] font-medium text-slate-500">חוסרים בכרטיס</div>
-                    <div className="mt-1 flex items-end justify-between gap-2">
-                      <span className="text-xl font-extrabold leading-none">{currentEmployeeMissingCount}</span>
-                      {currentEmployeeMissingCount > 0 ? (
-                        <PopoverTrigger asChild>
-                          <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]">
-                            הצג חוסרים
-                          </Button>
-                        </PopoverTrigger>
-                      ) : null}
+                  <PopoverTrigger asChild>
+                    <div
+                      role={currentEmployeeMissingCount > 0 ? 'button' : undefined}
+                      className={cn(
+                        'rounded-2xl border px-3 py-3 shadow-sm transition-all duration-150',
+                        currentEmployeeMissingCount > 0
+                          ? 'cursor-pointer border-amber-200 bg-amber-50/70 text-amber-950 hover:shadow-md hover:scale-[1.02] active:scale-[0.99]'
+                          : 'pointer-events-none border-slate-200 bg-white text-slate-900'
+                      )}
+                    >
+                      <div className="text-[11px] font-medium text-slate-500">חוסרים בכרטיס</div>
+                      <div className="mt-1">
+                        <span className="text-xl font-extrabold leading-none">{currentEmployeeMissingCount}</span>
+                      </div>
                     </div>
-                  </div>
+                  </PopoverTrigger>
                   <PopoverContent align="end" className="w-56 space-y-3 p-3">
                     <p className="text-xs font-semibold text-slate-700">שדות חסרים בכרטיס:</p>
                     <ul className="space-y-1">
@@ -992,18 +995,16 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                   <SectionCard
                     title="היסטוריית שיעורים"
                     action={
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button type="button" className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:text-slate-600">
-                              <HelpCircle className="h-4 w-4" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-[220px] text-center">
-                            כולל שיעורים שהתקיימו ושיעורים שהתלמיד לא הגיע אליהם, מחולקים לפי חודש
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button type="button" className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:text-slate-600">
+                            <HelpCircle className="h-4 w-4" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent side="top" align="end" className="max-w-[220px] p-2 text-center text-xs text-slate-700">
+                          כולל שיעורים שהתקיימו ושיעורים שהתלמיד לא הגיע אליהם, מחולקים לפי חודש
+                        </PopoverContent>
+                      </Popover>
                     }
                   >
                     {instancesLoading ? (
