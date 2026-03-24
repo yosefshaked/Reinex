@@ -31,6 +31,11 @@ function getServiceName(services, serviceId) {
   return services.find((service) => service.id === serviceId)?.service_name || services.find((service) => service.id === serviceId)?.name || 'שירות';
 }
 
+function getCommitmentLabel(commitment, services) {
+  if (!commitment) return 'התחייבות';
+  return `${getServiceName(services, commitment.service_id)} • ${formatCurrency(commitment.remaining_amount)}`;
+}
+
 export default function StudentFinancialTab({ studentId }) {
   const { session } = useAuth();
   const { activeOrgId } = useOrg();
@@ -42,15 +47,19 @@ export default function StudentFinancialTab({ studentId }) {
   const [entries, setEntries] = useState([]);
   const [saving, setSaving] = useState(false);
   const [commitmentForm, setCommitmentForm] = useState({
+    id: '',
     serviceId: '',
     commitmentType: 'package',
     totalAmount: '',
     defaultChargeAmount: '',
     expiresAt: '',
     notes: '',
+    isActive: true,
   });
   const [entryForm, setEntryForm] = useState({
+    id: '',
     sourceType: 'adjustment',
+    commitmentId: '',
     amountCharged: '',
     effectiveDate: '',
     notes: '',
@@ -89,14 +98,41 @@ export default function StudentFinancialTab({ studentId }) {
     void loadData();
   }, [loadData]);
 
-  async function handleCreateCommitment() {
+  function resetCommitmentForm() {
+    setCommitmentForm({
+      id: '',
+      serviceId: '',
+      commitmentType: 'package',
+      totalAmount: '',
+      defaultChargeAmount: '',
+      expiresAt: '',
+      notes: '',
+      isActive: true,
+    });
+  }
+
+  function startEditingCommitment(commitment) {
+    setCommitmentForm({
+      id: commitment.id,
+      serviceId: commitment.service_id || '',
+      commitmentType: commitment.commitment_type || 'package',
+      totalAmount: commitment.total_amount ?? '',
+      defaultChargeAmount: commitment.default_charge_amount ?? '',
+      expiresAt: commitment.expires_at || '',
+      notes: commitment.notes || '',
+      isActive: commitment.is_active !== false,
+    });
+  }
+
+  async function handleSaveCommitment() {
     if (!studentId || !activeOrgId) return;
     setSaving(true);
     try {
       await authenticatedFetch('commitments', {
         session,
-        method: 'POST',
+        method: commitmentForm.id ? 'PUT' : 'POST',
         body: {
+          id: commitmentForm.id || undefined,
           org_id: activeOrgId,
           student_id: studentId,
           service_id: commitmentForm.serviceId,
@@ -105,21 +141,40 @@ export default function StudentFinancialTab({ studentId }) {
           default_charge_amount: commitmentForm.defaultChargeAmount === '' ? null : Number(commitmentForm.defaultChargeAmount),
           expires_at: commitmentForm.expiresAt || null,
           notes: commitmentForm.notes || null,
+          is_active: commitmentForm.isActive,
         },
       });
-      setCommitmentForm({
-        serviceId: '',
-        commitmentType: 'package',
-        totalAmount: '',
-        defaultChargeAmount: '',
-        expiresAt: '',
-        notes: '',
-      });
+      resetCommitmentForm();
       await loadData();
-      toast.success('התחייבות נשמרה.');
+      toast.success(commitmentForm.id ? 'ההתחייבות עודכנה.' : 'התחייבות נשמרה.');
     } catch (error) {
-      console.error('Failed to create commitment', error);
+      console.error('Failed to save commitment', error);
       toast.error(error?.message || 'שמירת ההתחייבות נכשלה.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteCommitment(commitmentId) {
+    if (!activeOrgId || !commitmentId) return;
+    setSaving(true);
+    try {
+      await authenticatedFetch('commitments', {
+        session,
+        method: 'DELETE',
+        body: {
+          org_id: activeOrgId,
+          id: commitmentId,
+        },
+      });
+      if (commitmentForm.id === commitmentId) {
+        resetCommitmentForm();
+      }
+      await loadData();
+      toast.success('ההתחייבות הוסרה.');
+    } catch (error) {
+      console.error('Failed to delete commitment', error);
+      toast.error(error?.message || 'מחיקת ההתחייבות נכשלה.');
     } finally {
       setSaving(false);
     }
@@ -150,33 +205,78 @@ export default function StudentFinancialTab({ studentId }) {
     }
   }
 
-  async function handleCreateManualEntry() {
+  function resetEntryForm() {
+    setEntryForm({
+      id: '',
+      sourceType: 'adjustment',
+      commitmentId: '',
+      amountCharged: '',
+      effectiveDate: '',
+      notes: '',
+    });
+  }
+
+  function startEditingEntry(entry) {
+    if (entry.source_type === 'lesson') return;
+    setEntryForm({
+      id: entry.id,
+      sourceType: entry.source_type || 'adjustment',
+      commitmentId: entry.commitment_id || '',
+      amountCharged: entry.amount_charged ?? '',
+      effectiveDate: entry.effective_date || '',
+      notes: entry.notes || '',
+    });
+  }
+
+  async function handleSaveManualEntry() {
     if (!activeOrgId) return;
     setSaving(true);
     try {
       await authenticatedFetch('consumption-entries', {
         session,
-        method: 'POST',
+        method: entryForm.id ? 'PUT' : 'POST',
         body: {
+          id: entryForm.id || undefined,
           org_id: activeOrgId,
           student_id: studentId,
           source_type: entryForm.sourceType,
+          commitment_id: entryForm.commitmentId || null,
           amount_charged: Number(entryForm.amountCharged),
           effective_date: entryForm.effectiveDate || null,
           notes: entryForm.notes || null,
         },
       });
-      setEntryForm({
-        sourceType: 'adjustment',
-        amountCharged: '',
-        effectiveDate: '',
-        notes: '',
-      });
+      resetEntryForm();
       await loadData();
-      toast.success('תנועת חיוב נשמרה.');
+      toast.success(entryForm.id ? 'תנועת החיוב עודכנה.' : 'תנועת חיוב נשמרה.');
     } catch (error) {
-      console.error('Failed to create manual entry', error);
+      console.error('Failed to save manual entry', error);
       toast.error(error?.message || 'שמירת תנועת החיוב נכשלה.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteEntry(entryId) {
+    if (!activeOrgId || !entryId) return;
+    setSaving(true);
+    try {
+      await authenticatedFetch('consumption-entries', {
+        session,
+        method: 'DELETE',
+        body: {
+          org_id: activeOrgId,
+          id: entryId,
+        },
+      });
+      if (entryForm.id === entryId) {
+        resetEntryForm();
+      }
+      await loadData();
+      toast.success('תנועת החיוב הוסרה.');
+    } catch (error) {
+      console.error('Failed to delete manual entry', error);
+      toast.error(error?.message || 'מחיקת תנועת החיוב נכשלה.');
     } finally {
       setSaving(false);
     }
@@ -213,7 +313,12 @@ export default function StudentFinancialTab({ studentId }) {
                           {commitment.commitment_type} • חיוב ברירת מחדל {formatCurrency(commitment.default_charge_amount)}
                         </div>
                       </div>
-                      <Badge variant="outline">{formatCurrency(commitment.remaining_amount)}</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">{formatCurrency(commitment.remaining_amount)}</Badge>
+                        <Badge variant="outline" className={commitment.is_active === false ? 'border-slate-300 bg-slate-100 text-slate-700' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}>
+                          {commitment.is_active === false ? 'לא פעיל' : 'פעיל'}
+                        </Badge>
+                      </div>
                     </div>
                     <div className="mt-3 grid gap-2 md:grid-cols-3 text-sm">
                       <div className="rounded-lg bg-white p-3">
@@ -228,6 +333,16 @@ export default function StudentFinancialTab({ studentId }) {
                         <div className="text-[11px] text-muted-foreground">פג תוקף</div>
                         <div className="mt-1 font-semibold">{formatDate(commitment.expires_at)}</div>
                       </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button type="button" size="sm" variant="outline" onClick={() => startEditingCommitment(commitment)} disabled={saving}>
+                        ערוך
+                      </Button>
+                      {Number(commitment.consumed_amount || 0) === 0 ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteCommitment(commitment.id)} disabled={saving}>
+                          מחק
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 ))}
@@ -245,7 +360,7 @@ export default function StudentFinancialTab({ studentId }) {
           <div className="h-1.5 bg-blue-500" />
           <div className="p-5 space-y-4">
             <div>
-              <h3 className="text-lg font-semibold text-zinc-800">התחייבות חדשה</h3>
+              <h3 className="text-lg font-semibold text-zinc-800">{commitmentForm.id ? 'עריכת התחייבות' : 'התחייבות חדשה'}</h3>
               <p className="text-sm text-muted-foreground">יצירת יתרה כספית חדשה עם מחיר ברירת מחדל לשיעור.</p>
             </div>
 
@@ -300,10 +415,26 @@ export default function StudentFinancialTab({ studentId }) {
               <Input id="commitment-notes" value={commitmentForm.notes} onChange={(event) => setCommitmentForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
             </div>
 
-            <Button onClick={handleCreateCommitment} disabled={saving || !commitmentForm.serviceId || commitmentForm.totalAmount === ''}>
-              {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-              צור התחייבות
-            </Button>
+            <div className="space-y-2">
+              <Label className="text-xs text-slate-600">סטטוס</Label>
+              <Select value={commitmentForm.isActive ? 'active' : 'inactive'} onValueChange={(value) => setCommitmentForm((current) => ({ ...current, isActive: value === 'active' }))} disabled={saving}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">פעיל</SelectItem>
+                  <SelectItem value="inactive">לא פעיל</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={handleSaveCommitment} disabled={saving || !commitmentForm.serviceId || commitmentForm.totalAmount === ''}>
+                {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+                {commitmentForm.id ? 'עדכן התחייבות' : 'צור התחייבות'}
+              </Button>
+              <Button type="button" variant="ghost" onClick={resetCommitmentForm} disabled={saving}>נקה טופס</Button>
+            </div>
           </div>
         </section>
       </div>
@@ -323,7 +454,10 @@ export default function StudentFinancialTab({ studentId }) {
           ) : (
             <div className="space-y-3">
               {filteredQueue.map((item) => {
-                const candidateCommitments = commitments.filter((commitment) => !item.lesson_instance?.service_id || commitment.service_id === item.lesson_instance.service_id);
+                const candidateCommitments = commitments.filter((commitment) => (
+                  commitment.is_active !== false
+                  && (!item.lesson_instance?.service_id || commitment.service_id === item.lesson_instance.service_id)
+                ));
                 return (
                   <div key={item.id} className="rounded-xl border border-border bg-slate-50/70 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -362,8 +496,8 @@ export default function StudentFinancialTab({ studentId }) {
           <div className="h-1.5 bg-zinc-800" />
           <div className="p-5 space-y-4">
             <div>
-              <h3 className="text-lg font-semibold text-zinc-800">תנועה ידנית</h3>
-              <p className="text-sm text-muted-foreground">הוספת התאמה או העברה שלא מגיעה משיעור.</p>
+              <h3 className="text-lg font-semibold text-zinc-800">{entryForm.id ? 'עריכת תנועה ידנית' : 'תנועה ידנית'}</h3>
+              <p className="text-sm text-muted-foreground">הוספת התאמה ידנית שלא מגיעה משיעור.</p>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -384,6 +518,23 @@ export default function StudentFinancialTab({ studentId }) {
               </div>
             </div>
 
+            <div className="space-y-2">
+              <Label className="text-xs text-slate-600">התחייבות משויכת</Label>
+              <Select value={entryForm.commitmentId || '__none__'} onValueChange={(value) => setEntryForm((current) => ({ ...current, commitmentId: value === '__none__' ? '' : value }))} disabled={saving}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">ללא התחייבות</SelectItem>
+                  {commitments.map((commitment) => (
+                    <SelectItem key={commitment.id} value={commitment.id}>
+                      {getCommitmentLabel(commitment, services)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="entry-date" className="text-xs text-slate-600">תאריך</Label>
@@ -395,10 +546,13 @@ export default function StudentFinancialTab({ studentId }) {
               </div>
             </div>
 
-            <Button onClick={handleCreateManualEntry} disabled={saving || entryForm.amountCharged === ''}>
-              {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-              הוסף תנועה
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={handleSaveManualEntry} disabled={saving || entryForm.amountCharged === ''}>
+                {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+                {entryForm.id ? 'עדכן תנועה' : 'הוסף תנועה'}
+              </Button>
+              <Button type="button" variant="ghost" onClick={resetEntryForm} disabled={saving}>נקה תנועה</Button>
+            </div>
           </div>
         </section>
 
@@ -416,9 +570,25 @@ export default function StudentFinancialTab({ studentId }) {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <div className="text-sm font-semibold text-zinc-900">{entry.source_type} • {formatCurrency(entry.amount_charged)}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">{formatDate(entry.effective_date || entry.created_at)} • {entry.notes || 'ללא הערות'}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {formatDate(entry.effective_date || entry.created_at)}
+                        {entry.commitment_id ? ` • ${getCommitmentLabel(commitments.find((item) => item.id === entry.commitment_id), services)}` : ''}
+                        {entry.notes ? ` • ${entry.notes}` : ' • ללא הערות'}
+                      </div>
                     </div>
-                    <Badge variant="outline">{entry.commitment_id ? 'משויך להתחייבות' : 'ללא התחייבות'}</Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{entry.commitment_id ? 'משויך להתחייבות' : 'ללא התחייבות'}</Badge>
+                      {entry.source_type !== 'lesson' ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => startEditingEntry(entry)} disabled={saving}>
+                          ערוך
+                        </Button>
+                      ) : null}
+                      {entry.source_type !== 'lesson' ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteEntry(entry.id)} disabled={saving}>
+                          מחק
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               ))}

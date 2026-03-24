@@ -29,6 +29,7 @@ import {
 } from '../_shared/employee-finance.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
+const MUTABLE_BALANCE_EVENT_TYPES = new Set(['allocation', 'carryover', 'adjustment', 'reversal', 'correction']);
 
 function normalizeLeaveType(value) {
   const normalized = normalizeString(value).toLowerCase();
@@ -51,6 +52,15 @@ function normalizeEntryStatus(value) {
 function normalizeHalfDayPart(value) {
   const normalized = normalizeString(value).toLowerCase();
   return HALF_DAY_PARTS.has(normalized) ? normalized : '';
+}
+
+function isBalanceEventRequest(body) {
+  return normalizeString(body?.entity_type).toLowerCase() === 'balance_event';
+}
+
+function normalizeBalanceEventType(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return MUTABLE_BALANCE_EVENT_TYPES.has(normalized) ? normalized : '';
 }
 
 function computeRecordedBalances(summary) {
@@ -92,6 +102,30 @@ async function fetchBalanceEvents(tenantClient, employeeId) {
   }
 
   return data || [];
+}
+
+async function fetchBalanceEvent(tenantClient, balanceEventId) {
+  const { data, error } = await tenantClient
+    .from('employee_leave_balance_events')
+    .select('id, employee_id, leave_entry_id, leave_day_id, event_type, leave_type, quantity_days, effective_date, notes, created_by, created_at, metadata')
+    .eq('id', balanceEventId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
+function isManualBalanceEvent(event) {
+  if (!event) {
+    return false;
+  }
+
+  return !event.leave_entry_id
+    && !event.leave_day_id
+    && normalizeString(event.event_type).toLowerCase() !== 'usage';
 }
 
 async function fetchLeaveEntriesForEmployee(tenantClient, employeeId, { startDate = '', endDate = '' } = {}) {
@@ -190,10 +224,16 @@ export default async function (context, req) {
   }
 
   if (method === 'POST' || method === 'PUT') {
+    if (isBalanceEventRequest(body)) {
+      return handleBalanceEventUpsert(context, tenantClient, body, userId, method);
+    }
     return handleUpsert(context, tenantClient, body, userId, method);
   }
 
   if (method === 'DELETE') {
+    if (isBalanceEventRequest(body)) {
+      return handleBalanceEventDelete(context, tenantClient, body);
+    }
     return handleDelete(context, tenantClient, body, userId);
   }
 
@@ -252,6 +292,7 @@ async function handleGet(context, req, tenantClient, userId, canManageAll) {
     entry_count: balanceEvents.length,
     recorded_balances: computeRecordedBalances(summary),
     entries: balanceEvents,
+    balance_events: balanceEvents,
     leave_entries: leaveEntries,
     leave_days: leaveDays,
     summary,
@@ -450,3 +491,137 @@ async function handleDelete(context, tenantClient, body, userId) {
   }
 }
 
+
+async function handleBalanceEventUpsert(context, tenantClient, body, userId, method) {
+  const employeeId = normalizeString(body?.employee_id);
+  const eventType = normalizeBalanceEventType(body?.event_type);
+  const effectiveDate = normalizeString(body?.effective_date);
+  const notes = normalizeString(body?.notes) || null;
+  const quantityDays = Number(body?.quantity_days);
+  const leaveType = normalizeLeaveType(body?.leave_type) || 'employee_paid';
+
+  if (!employeeId) {
+    return respond(context, 400, { message: 'missing_employee_id' });
+  }
+  if (!eventType) {
+    return respond(context, 400, { message: 'invalid_balance_event_type' });
+  }
+  if (!isYmdDate(effectiveDate)) {
+    return respond(context, 400, { message: 'invalid_effective_date' });
+  }
+  if (!Number.isFinite(quantityDays) || quantityDays === 0) {
+    return respond(context, 400, { message: 'invalid_quantity_days' });
+  }
+  if ((eventType === 'allocation' || eventType === 'carryover') && quantityDays < 0) {
+    return respond(context, 400, { message: 'balance_event_requires_positive_quantity' });
+  }
+
+  let existingEvent = null;
+  if (method === 'PUT') {
+    const balanceEventId = normalizeString(body?.id);
+    if (!balanceEventId) {
+      return respond(context, 400, { message: 'missing_balance_event_id' });
+    }
+
+    existingEvent = await fetchBalanceEvent(tenantClient, balanceEventId);
+    if (!existingEvent) {
+      return respond(context, 404, { message: 'balance_event_not_found' });
+    }
+    if (!isManualBalanceEvent(existingEvent)) {
+      return respond(context, 409, { message: 'generated_balance_event_is_immutable' });
+    }
+  }
+
+  const payload = {
+    employee_id: employeeId,
+    leave_entry_id: null,
+    leave_day_id: null,
+    event_type: eventType,
+    leave_type: leaveType,
+    quantity_days: quantityDays,
+    effective_date: effectiveDate,
+    notes,
+    metadata: body?.metadata && typeof body.metadata === 'object'
+      ? body.metadata
+      : {},
+  };
+
+  try {
+    if (!existingEvent) {
+      payload.created_by = userId;
+      payload.created_at = new Date().toISOString();
+      const { data, error } = await tenantClient
+        .from('employee_leave_balance_events')
+        .insert(payload)
+        .select('id, employee_id, leave_entry_id, leave_day_id, event_type, leave_type, quantity_days, effective_date, notes, created_by, created_at, metadata')
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      return respond(context, 201, data);
+    }
+
+    const { data, error } = await tenantClient
+      .from('employee_leave_balance_events')
+      .update(payload)
+      .eq('id', existingEvent.id)
+      .select('id, employee_id, leave_entry_id, leave_day_id, event_type, leave_type, quantity_days, effective_date, notes, created_by, created_at, metadata')
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+    if (!data) {
+      return respond(context, 404, { message: 'balance_event_not_found' });
+    }
+
+    return respond(context, 200, data);
+  } catch (error) {
+    context.log?.error?.('employee-leave failed to persist balance event', {
+      message: error.message,
+      code: error.code,
+    });
+    return respond(context, 500, { message: 'failed_to_save_balance_event' });
+  }
+}
+
+async function handleBalanceEventDelete(context, tenantClient, body) {
+  const balanceEventId = normalizeString(body?.id);
+  if (!balanceEventId) {
+    return respond(context, 400, { message: 'missing_balance_event_id' });
+  }
+
+  const existingEvent = await fetchBalanceEvent(tenantClient, balanceEventId);
+  if (!existingEvent) {
+    return respond(context, 404, { message: 'balance_event_not_found' });
+  }
+  if (!isManualBalanceEvent(existingEvent)) {
+    return respond(context, 409, { message: 'generated_balance_event_is_immutable' });
+  }
+
+  try {
+    const { data, error } = await tenantClient
+      .from('employee_leave_balance_events')
+      .delete()
+      .eq('id', balanceEventId)
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+    if (!data) {
+      return respond(context, 404, { message: 'balance_event_not_found' });
+    }
+
+    return respond(context, 200, { id: balanceEventId, deleted: true });
+  } catch (error) {
+    context.log?.error?.('employee-leave failed to delete balance event', {
+      message: error.message,
+      code: error.code,
+    });
+    return respond(context, 500, { message: 'failed_to_delete_balance_event' });
+  }
+}
