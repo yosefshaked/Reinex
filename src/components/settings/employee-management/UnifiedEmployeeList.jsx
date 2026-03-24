@@ -845,7 +845,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                         <Row label="טלפון" value={currentEmployee.phone} />
                         <Row label="דוא״ל" value={currentEmployee.email} />
                         <Row label="תאריך התחלה" value={formatDate(currentEmployee.start_date)} />
-                        <Row label="היקף העסקה" value={currentEmployee.employment_scope} />
+                        {getEmployeeType(currentEmployee) === 'office' ? <Row label="היקף העסקה" value={currentEmployee.employment_scope} /> : null}
                         <Row label="מספר עובד" value={currentEmployee.employee_id} />
                         <Row label="סוג עובד" value={getEmployeeTypeLabel(currentEmployee)} />
                       </div>
@@ -1055,7 +1055,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
 
                     <SectionCard title="סיכום פיננסי" description="נתונים זמינים כיום מכרטיס העובד">
                       <div className="space-y-0">
-                        <Row label="תעריף נוכחי" value={currentEmployee.current_rate != null ? `₪${currentEmployee.current_rate}` : '—'} />
+                        {getEmployeeType(currentEmployee) === 'office' ? <Row label="תעריף נוכחי" value={currentEmployee.current_rate != null ? `₪${currentEmployee.current_rate}` : '—'} /> : null}
                         <Row label="מספר שירותים פעילים" value={`${currentEmployeeServices.length}`} />
                         <Row label="סוג עובד" value={getEmployeeTypeLabel(currentEmployee)} />
                       </div>

@@ -384,15 +384,26 @@ export default function EditEmployeeDialog({
             </div>
           </Section>
 
+          {isOfficeEditing ? (
           <Section
-            title="העסקה"
+            title="פרטי העסקה"
             icon={Calendar}
             description="פרטי העסקה בסיסיים וזמינות שבועית לעובדי משרד"
           >
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="employment_scope" className="text-xs text-slate-600">היקף העסקה</Label>
-                <Input id="employment_scope" value={form.employmentScope} onChange={(e) => updateField('employmentScope', e.target.value)} disabled={isSaving} />
+                <Label className="text-xs text-slate-600">היקף העסקה</Label>
+                <Select value={form.employmentScope || ''} onValueChange={(value) => updateField('employmentScope', value)} disabled={isSaving}>
+                  <SelectTrigger id="employment_scope">
+                    <SelectValue placeholder="בחר היקף" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="משרה מלאה">משרה מלאה</SelectItem>
+                    <SelectItem value="75% משרה">75% משרה</SelectItem>
+                    <SelectItem value="חצי משרה">חצי משרה</SelectItem>
+                    <SelectItem value="25% משרה">25% משרה</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="current_rate" className="text-xs text-slate-600">תעריף נוכחי</Label>
@@ -411,6 +422,7 @@ export default function EditEmployeeDialog({
               </div>
             )}
           </Section>
+          ) : null}
 
           {isRoleConversion ? (
             <Section
