@@ -3,11 +3,14 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar.jsx';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Briefcase,
   Calendar,
   Clock,
+  HelpCircle,
   Link2,
   Loader2,
   MailPlus,
@@ -448,11 +451,17 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     }))
   ), [currentEmployee, services]);
 
-  const currentEmployeeMissingCount = useMemo(() => {
-    if (!currentEmployee) return 0;
-    const fields = [currentEmployee.phone, currentEmployee.email, currentEmployee.start_date, currentEmployee.employee_id];
-    return fields.filter((value) => !value).length;
+  const currentEmployeeMissingItems = useMemo(() => {
+    if (!currentEmployee) return [];
+    const items = [];
+    if (!currentEmployee.phone) items.push('טלפון');
+    if (!currentEmployee.email) items.push('דוא״ל');
+    if (!currentEmployee.start_date) items.push('תאריך התחלה');
+    if (!currentEmployee.employee_id) items.push('מספר עובד');
+    return items;
   }, [currentEmployee]);
+
+  const currentEmployeeMissingCount = useMemo(() => currentEmployeeMissingItems.length, [currentEmployeeMissingItems]);
 
   const currentEmployeeSetupIncomplete = Boolean(currentEmployee?.setup_incomplete);
 
@@ -761,8 +770,37 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <DenseStat label="שיעורים היום" value={employeeActivities.get(currentEmployee.id)?.scheduled ?? 0} accent="blue" />
                 <DenseStat label="שיעורים עתידיים" value={upcomingInstances.length} accent="emerald" />
-                <DenseStat label="היסטוריה נטענת" value={historyInstances.length} accent="slate" />
-                <DenseStat label="חוסרים בכרטיס" value={currentEmployeeMissingCount} accent={currentEmployeeMissingCount > 0 ? 'amber' : 'slate'} />
+                <DenseStat label="שיעורי עבר" value={historyInstances.length} accent="slate" />
+                <Popover>
+                  <div className={cn('rounded-2xl border px-3 py-3 shadow-sm', currentEmployeeMissingCount > 0 ? 'border-amber-200 bg-amber-50/70 text-amber-950' : 'border-slate-200 bg-white text-slate-900')}>
+                    <div className="text-[11px] font-medium text-slate-500">חוסרים בכרטיס</div>
+                    <div className="mt-1 flex items-end justify-between gap-2">
+                      <span className="text-xl font-extrabold leading-none">{currentEmployeeMissingCount}</span>
+                      {currentEmployeeMissingCount > 0 ? (
+                        <PopoverTrigger asChild>
+                          <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]">
+                            הצג חוסרים
+                          </Button>
+                        </PopoverTrigger>
+                      ) : null}
+                    </div>
+                  </div>
+                  <PopoverContent align="end" className="w-56 space-y-3 p-3">
+                    <p className="text-xs font-semibold text-slate-700">שדות חסרים בכרטיס:</p>
+                    <ul className="space-y-1">
+                      {currentEmployeeMissingItems.map((item) => (
+                        <li key={item} className="flex items-center gap-2 text-xs text-slate-600">
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                    <Button size="sm" className="w-full" onClick={() => openEmployeeEditor(currentEmployee)}>
+                      <Settings className="me-2 h-3 w-3" />
+                      ערוך כרטיס עובד
+                    </Button>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -920,7 +958,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                   <div className="grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
                     <SectionCard
                       title="שיעורים קרובים"
-                      description="מקור הנתונים: lesson_instances בלבד"
+                      description="שיעורים ב-2 החודשים הקרובים"
                       action={getEmployeeType(currentEmployee) === 'instructor' ? (
                         <Button size="sm" variant="outline" onClick={() => setShowProfileDialog(true)}>
                           <Calendar className="me-2 h-4 w-4" />
@@ -951,7 +989,23 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                     </SectionCard>
                   </div>
 
-                  <SectionCard title="היסטוריית שיעורים" description="כולל completed ו-no_show, מחולק לפי חודשים">
+                  <SectionCard
+                    title="היסטוריית שיעורים"
+                    action={
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button type="button" className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:text-slate-600">
+                              <HelpCircle className="h-4 w-4" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-[220px] text-center">
+                            כולל שיעורים שהתקיימו ושיעורים שהתלמיד לא הגיע אליהם, מחולקים לפי חודש
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    }
+                  >
                     {instancesLoading ? (
                       <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />טוען היסטוריה...</div>
                     ) : getEmployeeType(currentEmployee) !== 'instructor' ? (
@@ -966,7 +1020,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                   <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
                     <SectionCard
                       title="תעריפים ושירותים"
-                      description="service_capabilities הם מקור האמת לתעריף בסיס, קיבולת ושירותים"
+                      description="כאן מוגדר התעריף לחישוב שכר המדריך ומספר התלמידים המקסימלי בכל שיעור"
                       action={getEmployeeType(currentEmployee) === 'instructor' ? (
                         <Button size="sm" variant="outline" onClick={() => setShowCapabilitiesDialog(true)}>
                           <Briefcase className="me-2 h-4 w-4" />
