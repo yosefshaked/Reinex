@@ -1,5 +1,9 @@
 /* eslint-env node */
 import { isAdminOrOffice, normalizeString } from './org-bff.js';
+import {
+  buildCommitmentRuntime,
+  computeCommitmentAttention,
+} from './commitment-behavior.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
   carryover_enabled: false,
@@ -745,7 +749,7 @@ export async function fetchCommitmentsWithBalances(tenantClient, filters = {}) {
 
   const { data: entries, error: entriesError } = await tenantClient
     .from('consumption_entries')
-    .select('id, commitment_id, amount_charged, source_type')
+    .select('id, commitment_id, amount_charged, source_type, metadata')
     .in('commitment_id', commitmentIds);
 
   if (entriesError && entriesError.code !== '42P01') {
@@ -753,14 +757,26 @@ export async function fetchCommitmentsWithBalances(tenantClient, filters = {}) {
   }
 
   const sums = new Map();
+  const entriesByCommitment = new Map();
   for (const entry of entries || []) {
     sums.set(entry.commitment_id, (sums.get(entry.commitment_id) || 0) + coerceNumber(entry.amount_charged, 0));
+    if (!entriesByCommitment.has(entry.commitment_id)) {
+      entriesByCommitment.set(entry.commitment_id, []);
+    }
+    entriesByCommitment.get(entry.commitment_id).push(entry);
   }
 
   return (commitments || []).map((commitment) => ({
     ...commitment,
     consumed_amount: roundCurrency(sums.get(commitment.id) || 0),
     remaining_amount: roundCurrency(Number(commitment.total_amount || 0) - (sums.get(commitment.id) || 0)),
+    runtime: (() => {
+      const runtime = buildCommitmentRuntime(commitment, entriesByCommitment.get(commitment.id) || []);
+      return {
+        ...runtime,
+        attention: computeCommitmentAttention(commitment, runtime),
+      };
+    })(),
   }));
 }
 
@@ -817,6 +833,7 @@ export async function syncLessonInstructorEarnings(
   actorUserId = null,
   { instance = null, participants = null, policies = null } = {},
 ) {
+  void actorUserId;
   let resolvedInstance = instance;
   if (!resolvedInstance) {
     const { data: instanceData, error: instanceError } = await tenantClient

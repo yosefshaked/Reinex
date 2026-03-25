@@ -157,6 +157,7 @@ export default async function (context, req) {
     const sourceType = normalizeSourceType(body?.source_type);
     const amountCharged = Number(body?.amount_charged);
     const effectiveDate = normalizeString(body?.effective_date);
+    const notes = normalizeString(body?.notes);
     if (!sourceType || sourceType === 'lesson') {
       return respond(context, 400, { message: 'invalid_source_type' });
     }
@@ -165,6 +166,9 @@ export default async function (context, req) {
     }
     if (effectiveDate && !isYmdDate(effectiveDate)) {
       return respond(context, 400, { message: 'invalid_effective_date' });
+    }
+    if (sourceType === 'adjustment' && !notes) {
+      return respond(context, 400, { message: 'notes_required_for_adjustment' });
     }
 
     const payload = {
@@ -175,7 +179,7 @@ export default async function (context, req) {
       transfer_ref: normalizeString(body?.transfer_ref) || null,
       amount_charged: amountCharged,
       effective_date: effectiveDate || null,
-      notes: normalizeString(body?.notes) || null,
+      notes: notes || null,
       metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
     };
 

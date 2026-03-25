@@ -7,12 +7,16 @@ import {
   toDateKey,
 } from './employee-finance.js';
 import { normalizeString } from './org-bff.js';
+import {
+  buildCommitmentRuntime,
+  computeCommitmentAttention,
+  resolveCommitmentCoverage,
+} from './commitment-behavior.js';
 
 const COMMITMENT_TYPES = new Set(['package', 'subscription', 'hmo', 'manual_credit']);
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const ACTIONABLE_BILLING_STATUSES = new Set(['pending_commitment', 'pending_commitment_configuration', 'invalid_commitment']);
 const BILLING_BREAKDOWN_VERSION = 1;
-const ATTENTION_EXPIRY_WINDOW_DAYS = 30;
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -35,41 +39,12 @@ function normalizeCommitmentType(value) {
   return COMMITMENT_TYPES.has(normalized) ? normalized : '';
 }
 
-function daysBetween(startDate, endDate) {
-  const start = new Date(`${startDate}T00:00:00Z`);
-  const end = new Date(`${endDate}T00:00:00Z`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return null;
-  }
-  return Math.floor((end.getTime() - start.getTime()) / 86400000);
-}
-
 function isCommitmentExpired(commitment, lessonDate) {
   const expiryDate = toDateKey(commitment?.expires_at);
   if (!expiryDate || !lessonDate) {
     return false;
   }
   return expiryDate < lessonDate;
-}
-
-function buildCommitmentAttention(commitment) {
-  const expiryDate = toDateKey(commitment?.expires_at);
-  const today = toDateKey(new Date());
-  const daysUntilExpiry = expiryDate ? daysBetween(today, expiryDate) : null;
-  const defaultChargeAmount = Number.isFinite(Number(commitment?.default_charge_amount))
-    ? Number(commitment.default_charge_amount)
-    : null;
-  const remainingAmount = roundCurrency(coerceNumber(commitment?.remaining_amount, 0));
-  const remainingLessonsEstimate = defaultChargeAmount && defaultChargeAmount > 0
-    ? Number((remainingAmount / defaultChargeAmount).toFixed(2))
-    : null;
-
-  return {
-    low_balance: remainingLessonsEstimate != null && remainingLessonsEstimate < 2,
-    expiring_soon: daysUntilExpiry != null && daysUntilExpiry >= 0 && daysUntilExpiry <= ATTENTION_EXPIRY_WINDOW_DAYS,
-    days_until_expiry: daysUntilExpiry,
-    remaining_lessons_estimate: remainingLessonsEstimate,
-  };
 }
 
 async function loadStudentsMap(tenantClient, studentIds = []) {
@@ -138,7 +113,33 @@ async function loadCommitmentsMap(tenantClient, commitmentIds = []) {
     throw error;
   }
 
-  return new Map((data || []).map((row) => [row.id, row]));
+  const { data: entries, error: entriesError } = await tenantClient
+    .from('consumption_entries')
+    .select('id, commitment_id, amount_charged, source_type, metadata')
+    .in('commitment_id', ids);
+
+  if (entriesError && entriesError.code !== '42P01') {
+    throw entriesError;
+  }
+
+  const entriesByCommitment = new Map();
+  for (const entry of entries || []) {
+    if (!entriesByCommitment.has(entry.commitment_id)) {
+      entriesByCommitment.set(entry.commitment_id, []);
+    }
+    entriesByCommitment.get(entry.commitment_id).push(entry);
+  }
+
+  return new Map((data || []).map((row) => {
+    const runtime = buildCommitmentRuntime(row, entriesByCommitment.get(row.id) || []);
+    return [row.id, {
+      ...row,
+      runtime: {
+        ...runtime,
+        attention: computeCommitmentAttention(row, runtime),
+      },
+    }];
+  }));
 }
 
 async function loadLessonInstancesForRange(tenantClient, { startDate = '', endDate = '' } = {}) {
@@ -190,9 +191,6 @@ function buildBillingDecision({ participant, instance, commitment, policies, syn
   const participantStatus = normalizeString(participant?.participant_status).toLowerCase();
   const lessonStatus = normalizeString(instance?.status).toLowerCase();
   const lessonDate = toDateKey(instance?.datetime_start);
-  const defaultChargeAmount = commitment && Number.isFinite(Number(commitment?.default_charge_amount))
-    ? roundCurrency(Number(commitment.default_charge_amount))
-    : null;
   const policyAllowsCharge = RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)
     ? Boolean(lessonStatus !== 'cancelled_clinic' && policies?.billingConsumptionPolicy?.[participantStatus])
     : false;
@@ -201,6 +199,7 @@ function buildBillingDecision({ participant, instance, commitment, policies, syn
   let billingReason = 'participant_not_resolved';
   let chargeAmount = null;
   let requiresAttention = false;
+  let coverage = null;
 
   if (!RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)) {
     billingStatus = 'pending_attendance';
@@ -230,19 +229,20 @@ function buildBillingDecision({ participant, instance, commitment, policies, syn
     billingStatus = 'invalid_commitment';
     billingReason = 'expired_commitment';
     requiresAttention = true;
-  } else if (defaultChargeAmount == null) {
-    billingStatus = 'pending_commitment_configuration';
-    billingReason = 'missing_default_charge_amount';
+  } else if (!(coverage = resolveCommitmentCoverage(commitment, instance?.service_id, commitment?.runtime || null)).eligible) {
+    billingStatus = 'invalid_commitment';
+    billingReason = coverage.code;
     requiresAttention = true;
   } else {
     billingStatus = 'charged';
     billingReason = 'chargeable';
-    chargeAmount = defaultChargeAmount;
+    chargeAmount = coverage.student_charge_amount;
   }
 
   return {
     shouldCharge: chargeAmount != null,
     chargeAmount,
+    coverage,
     billingStatus,
     billingReason,
     requiresAttention,
@@ -257,8 +257,11 @@ function buildBillingDecision({ participant, instance, commitment, policies, syn
       selected_commitment_service_id: commitment?.service_id || null,
       selected_commitment_active: commitment ? commitment.is_active !== false : null,
       selected_commitment_expires_at: commitment?.expires_at || null,
-      default_charge_amount: defaultChargeAmount,
+      default_charge_amount: commitment?.runtime?.default_charge_amount ?? null,
       charge_amount: chargeAmount,
+      covered_service_id: coverage?.covered_service_id || null,
+      student_charge_amount: coverage?.student_charge_amount ?? null,
+      insurer_claim_amount: coverage?.insurer_claim_amount ?? null,
       billing_status: billingStatus,
       billing_reason: billingReason,
       policy_allowed: policyAllowsCharge,
@@ -272,7 +275,7 @@ function enrichCommitment(commitment, studentMap, serviceMap) {
     ...commitment,
     student: studentMap.get(commitment.student_id) || null,
     service: serviceMap.get(commitment.service_id) || null,
-    attention: buildCommitmentAttention(commitment),
+    attention: commitment?.runtime?.attention || computeCommitmentAttention(commitment, commitment?.runtime || null),
   };
 }
 
@@ -640,8 +643,13 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
         metadata: {
           participant_status: normalizeString(participant.participant_status).toLowerCase(),
           lesson_instance_id: lessonInstanceId,
+          lesson_service_id: instance.service_id,
           billing_status: decision.billingStatus,
           billing_reason: decision.billingReason,
+          covered_service_id: decision.coverage?.covered_service_id || null,
+          student_charge_amount: decision.coverage?.student_charge_amount ?? null,
+          insurer_claim_amount: decision.coverage?.insurer_claim_amount ?? null,
+          ...(decision.coverage?.metadata || {}),
         },
       });
     } else {
@@ -703,14 +711,15 @@ export async function assignLessonParticipantCommitment(tenantClient, {
   if (commitment.student_id !== participant.student_id) {
     return { error: 'commitment_belongs_to_different_student' };
   }
-  if (commitment.service_id && participant.lesson_instance?.service_id && commitment.service_id !== participant.lesson_instance.service_id) {
-    return { error: 'commitment_service_mismatch' };
-  }
   if (commitment.is_active === false) {
     return { error: 'commitment_inactive' };
   }
   if (isCommitmentExpired(commitment, lessonDate)) {
     return { error: 'commitment_expired' };
+  }
+  const coverage = resolveCommitmentCoverage(commitment, participant.lesson_instance?.service_id, commitment?.runtime || null);
+  if (!coverage.eligible) {
+    return { error: coverage.code === 'service_mismatch' ? 'commitment_service_mismatch' : coverage.code };
   }
 
   const { error: updateError } = await tenantClient

@@ -49,6 +49,8 @@ function mapBillingActionError(errorCode) {
     case 'commitment_service_mismatch':
     case 'commitment_inactive':
     case 'commitment_expired':
+    case 'commitment_service_exhausted':
+    case 'authorization_exhausted':
     case 'transfer_amount_exceeds_remaining_balance':
       return { status: 409, body: { message: errorCode } };
     default:

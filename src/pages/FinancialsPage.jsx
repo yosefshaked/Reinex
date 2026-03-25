@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Settings2 } from 'lucide-react';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import Card from '@/components/ui/CustomCard.jsx';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -8,12 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -113,9 +114,24 @@ function getBillingReasonLabel(reason) {
       return 'תוקף ההתחייבות פג.';
     case 'commitment_belongs_to_different_student':
       return 'ההתחייבות שייכת לתלמיד אחר.';
+    case 'commitment_service_exhausted':
+      return 'השירות הזה כבר מוצה בהתחייבות.';
+    case 'authorization_exhausted':
+      return 'כמות האישורים של הגורם המממן נוצלה.';
     default:
       return 'דורש טיפול.';
   }
+}
+
+function getBreakdownTypeLabel(row) {
+  const type = row?.commitment?.commitment_type || row?.commitment?.runtime?.type || 'manual_credit';
+  if (type === 'package') return 'חבילה';
+  if (type === 'subscription') return 'מנוי';
+  if (type === 'hmo') {
+    const providerName = row?.commitment?.runtime?.hmo?.provider_name || 'גורם מממן';
+    return `גורם מממן: ${providerName}`;
+  }
+  return 'הוספת יתרה מותאמת אישית';
 }
 
 function buildQueueByStudent(billingQueue = []) {
@@ -165,6 +181,67 @@ function buildQueueByStudent(billingQueue = []) {
     });
 }
 
+function buildBillingOverview(snapshot) {
+  const lessonHistory = Array.isArray(snapshot?.lesson_history) ? snapshot.lesson_history : [];
+  const commitments = Array.isArray(snapshot?.commitments) ? snapshot.commitments : [];
+  const manualEntries = Array.isArray(snapshot?.entries) ? snapshot.entries : [];
+
+  const chargedLessons = lessonHistory.filter((row) => row.billing_status === 'charged');
+  const pendingQueueCount = snapshot?.summary?.pending_queue_count ?? 0;
+  const expiredOrExhaustedCount = commitments.filter((row) => row?.attention?.expired || row?.attention?.exhausted).length;
+  const monthRevenue = chargedLessons.reduce((sum, row) => sum + Number(row?.resolved_charge_amount ?? row?.price_charged ?? 0), 0)
+    + manualEntries
+      .filter((row) => row.source_type === 'adjustment')
+      .reduce((sum, row) => sum + Number(row?.amount_charged ?? 0), 0);
+
+  return {
+    charged_lessons_count: chargedLessons.length,
+    consumed_lessons_count: chargedLessons.length,
+    pending_queue_count: pendingQueueCount,
+    expired_or_exhausted_commitments_count: expiredOrExhaustedCount,
+    month_revenue: monthRevenue,
+  };
+}
+
+function buildConsumedLessonsBreakdown(snapshot) {
+  const chargedLessons = (Array.isArray(snapshot?.lesson_history) ? snapshot.lesson_history : [])
+    .filter((row) => row.billing_status === 'charged');
+  const serviceMap = new Map();
+
+  for (const row of chargedLessons) {
+    const serviceName = row?.service?.service_name || 'שירות';
+    const typeLabel = getBreakdownTypeLabel(row);
+    const serviceBucket = serviceMap.get(serviceName) || {
+      service_name: serviceName,
+      total_count: 0,
+      total_amount: 0,
+      by_type: new Map(),
+    };
+
+    serviceBucket.total_count += 1;
+    serviceBucket.total_amount += Number(row?.resolved_charge_amount ?? row?.price_charged ?? 0);
+
+    const typeBucket = serviceBucket.by_type.get(typeLabel) || {
+      type_label: typeLabel,
+      count: 0,
+      amount: 0,
+    };
+    typeBucket.count += 1;
+    typeBucket.amount += Number(row?.resolved_charge_amount ?? row?.price_charged ?? 0);
+    serviceBucket.by_type.set(typeLabel, typeBucket);
+    serviceMap.set(serviceName, serviceBucket);
+  }
+
+  return Array.from(serviceMap.values())
+    .map((service) => ({
+      service_name: service.service_name,
+      total_count: service.total_count,
+      total_amount: service.total_amount,
+      by_type: Array.from(service.by_type.values()).sort((left, right) => right.count - left.count),
+    }))
+    .sort((left, right) => right.total_count - left.total_count);
+}
+
 export default function FinancialsPage() {
   const { session } = useAuth();
   const { activeOrg, activeOrgId } = useOrg();
@@ -181,12 +258,14 @@ export default function FinancialsPage() {
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
   const [savingPolicy, setSavingPolicy] = useState(false);
+  const [isBillingPolicyOpen, setIsBillingPolicyOpen] = useState(false);
+  const [isConsumedLessonsOpen, setIsConsumedLessonsOpen] = useState(false);
 
   const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
   const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
   const loading = loadingPayroll || loadingBilling;
 
-  const { students, loadingStudents } = useStudents({
+  const { students } = useStudents({
     enabled: Boolean(activeOrgId && canViewFinancials),
     orgId: activeOrgId,
     session,
@@ -253,10 +332,10 @@ export default function FinancialsPage() {
     return undefined;
   }, [canViewFinancials, loadBillingOverview, loadPayroll]);
 
-  const queueByStudent = useMemo(
-    () => buildQueueByStudent(billingSnapshot?.billing_queue || []),
-    [billingSnapshot],
-  );
+  const queueByStudent = useMemo(() => buildQueueByStudent(billingSnapshot?.billing_queue || []), [billingSnapshot]);
+  const queueByStudentMap = useMemo(() => new Map(queueByStudent.map((row) => [row.student_id, row])), [queueByStudent]);
+  const overviewStats = useMemo(() => buildBillingOverview(billingSnapshot), [billingSnapshot]);
+  const consumedLessonsBreakdown = useMemo(() => buildConsumedLessonsBreakdown(billingSnapshot), [billingSnapshot]);
 
   const studentOptions = useMemo(() => {
     const map = new Map();
@@ -317,6 +396,25 @@ export default function FinancialsPage() {
     () => studentOptions.find((student) => student.id === selectedStudentId) || null,
     [selectedStudentId, studentOptions],
   );
+  const studentCards = useMemo(() => (
+    studentOptions
+      .map((student) => {
+        const queueInfo = queueByStudentMap.get(student.id);
+        return {
+          ...student,
+          awaiting_count: queueInfo?.count ?? 0,
+          latest_date: queueInfo?.latest_date || '',
+          reasons: queueInfo?.reasons || [],
+          services: queueInfo?.services || [],
+        };
+      })
+      .sort((left, right) => {
+        if (right.awaiting_count !== left.awaiting_count) {
+          return right.awaiting_count - left.awaiting_count;
+        }
+        return left.full_name.localeCompare(right.full_name, 'he');
+      })
+  ), [queueByStudentMap, studentOptions]);
 
   async function handleSaveBillingPolicy() {
     if (!activeOrgId || !canMutateBillingPolicy) {
@@ -356,10 +454,16 @@ export default function FinancialsPage() {
 
   return (
     <PageLayout title="כספים" description="שכר עובדים וחיובי תלמידים">
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, -1))}>הקודם</Button>
-        <div className="min-w-[160px] text-center text-sm font-semibold text-zinc-700">{formatMonth(monthDate)}</div>
-        <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, 1))}>הבא</Button>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, -1))}>הקודם</Button>
+          <div className="min-w-[160px] text-center text-sm font-semibold text-zinc-700">{formatMonth(monthDate)}</div>
+          <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, 1))}>הבא</Button>
+        </div>
+        <Button type="button" variant="outline" onClick={() => setIsBillingPolicyOpen(true)}>
+          <Settings2 className="me-2 h-4 w-4" />
+          הגדרות חיוב
+        </Button>
       </div>
 
       <Tabs defaultValue="payroll" className="space-y-4">
@@ -435,92 +539,35 @@ export default function FinancialsPage() {
         </TabsContent>
 
         <TabsContent value="billing" className="space-y-4">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-zinc-900">תמונת מצב ארגונית</h3>
-                  <p className="text-sm text-muted-foreground">סיכום חיובים והיתרות עבור {formatMonth(monthDate)}.</p>
-                </div>
-                {loadingBilling ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    טוען חיובים...
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                  <div className="text-xs text-emerald-700">יתרה כוללת</div>
-                  <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(billingSnapshot?.summary?.total_remaining)}</div>
-                </div>
-                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-                  <div className="text-xs text-blue-700">התחייבויות פעילות</div>
-                  <div className="mt-1 text-xl font-bold text-blue-950">{billingSnapshot?.summary?.active_commitments_count ?? 0}</div>
-                </div>
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                  <div className="text-xs text-amber-700">ממתינים לטיפול</div>
-                  <div className="mt-1 text-xl font-bold text-amber-950">{billingSnapshot?.summary?.pending_queue_count ?? 0}</div>
-                </div>
-                <div className="rounded-xl border border-violet-200 bg-violet-50 p-4">
-                  <div className="text-xs text-violet-700">התאמות והעברות</div>
-                  <div className="mt-1 text-xl font-bold text-violet-950">
-                    {(billingSnapshot?.summary?.manual_entry_count ?? 0) + (billingSnapshot?.summary?.transfer_count ?? 0)}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs text-slate-600">התחייבויות עם יתרה נמוכה</div>
-                  <div className="mt-1 text-lg font-semibold text-slate-900">
-                    {billingSnapshot?.summary?.low_balance_commitments_count ?? 0}
-                  </div>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs text-slate-600">התחייבויות שפגות בקרוב</div>
-                  <div className="mt-1 text-lg font-semibold text-slate-900">
-                    {billingSnapshot?.summary?.expiring_soon_commitments_count ?? 0}
-                  </div>
-                </div>
-              </div>
+              <div className="text-xs text-emerald-700">שיעורים שחויבו</div>
+              <div className="mt-1 text-2xl font-bold text-emerald-950">{overviewStats.charged_lessons_count}</div>
+              <p className="mt-2 text-sm text-muted-foreground">שיעורים שהחיוב שלהם כבר הוכרע ונרשם בחודש הזה.</p>
             </Card>
-
+            <button
+              type="button"
+              onClick={() => setIsConsumedLessonsOpen(true)}
+              className="rounded-2xl border border-border bg-surface p-lg text-start shadow-sm transition hover:border-zinc-400"
+            >
+              <div className="text-xs text-violet-700">סך שיעורים שנצרכו</div>
+              <div className="mt-1 text-2xl font-bold text-violet-950">{overviewStats.consumed_lessons_count}</div>
+              <p className="mt-2 text-sm text-muted-foreground">לחיצה תציג פירוט לפי שירות ולפי סוג התחייבות, כולל פירוט נפרד לכל גורם מממן.</p>
+            </button>
             <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-zinc-900">מדיניות חיוב לפי סטטוס</h3>
-                  <p className="text-sm text-muted-foreground">כך המערכת מחליטה אם שיעור נצרך מתוך התחייבות.</p>
-                </div>
-                {canMutateBillingPolicy ? (
-                  <Button onClick={handleSaveBillingPolicy} disabled={savingPolicy || loadingBilling}>
-                    {savingPolicy ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-                    שמור מדיניות
-                  </Button>
-                ) : (
-                  <div className="text-sm text-muted-foreground">צפייה בלבד</div>
-                )}
-              </div>
-
-              <div className="mt-4 space-y-3">
-                {BILLING_POLICY_FIELDS.map((field) => (
-                  <div key={field.key} className="flex items-start justify-between gap-4 rounded-xl border border-border bg-slate-50 p-4">
-                    <div>
-                      <div className="text-sm font-semibold text-zinc-900">{field.label}</div>
-                      <div className="mt-1 text-sm text-muted-foreground">{field.description}</div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Label className="text-xs text-slate-600">{billingPolicy[field.key] ? 'מחויב' : 'לא מחויב'}</Label>
-                      <Switch
-                        checked={Boolean(billingPolicy[field.key])}
-                        onCheckedChange={(checked) => setBillingPolicy((current) => ({ ...current, [field.key]: checked }))}
-                        disabled={!canMutateBillingPolicy || savingPolicy}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <div className="text-xs text-amber-700">ממתינים לטיפול</div>
+              <div className="mt-1 text-2xl font-bold text-amber-950">{overviewStats.pending_queue_count}</div>
+              <p className="mt-2 text-sm text-muted-foreground">שיעורים שחסרה להם התחייבות תקינה או הגדרת חיוב.</p>
+            </Card>
+            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+              <div className="text-xs text-red-700">התחייבויות שפגו / נגמר התקציב</div>
+              <div className="mt-1 text-2xl font-bold text-red-950">{overviewStats.expired_or_exhausted_commitments_count}</div>
+              <p className="mt-2 text-sm text-muted-foreground">כולל התחייבויות שפגו בפועל או כאלה שמיצו את יתרת המפגשים או התקציב שלהן.</p>
+            </Card>
+            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+              <div className="text-xs text-blue-700">רווח החודש</div>
+              <div className="mt-1 text-2xl font-bold text-blue-950">{formatCurrency(overviewStats.month_revenue)}</div>
+              <p className="mt-2 text-sm text-muted-foreground">חיובי שיעורים בחודש בתוספת התאמות ידניות, ללא העברות פנימיות.</p>
             </Card>
           </div>
 
@@ -542,60 +589,37 @@ export default function FinancialsPage() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-xs text-slate-600">תלמיד נבחר</Label>
-                  <Select value={selectedStudentId || '__none__'} onValueChange={(value) => setSelectedStudentId(value === '__none__' ? '' : value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="בחר תלמיד" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">ללא בחירה</SelectItem>
-                      {studentOptions.map((studentOption) => (
-                        <SelectItem key={studentOption.id} value={studentOption.id}>
-                          {studentOption.full_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {loadingStudents ? (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      טוען תלמידים...
-                    </div>
-                  ) : null}
-                </div>
-
                 <div className="space-y-3">
-                  {queueByStudent.map((row) => (
+                  {studentCards.map((row) => (
                     <button
-                      key={row.student_id}
+                      key={row.id}
                       type="button"
-                      onClick={() => setSelectedStudentId(row.student_id)}
+                      onClick={() => setSelectedStudentId(row.id)}
                       className={`w-full rounded-xl border p-4 text-start transition ${
-                        row.student_id === selectedStudentId
+                        row.id === selectedStudentId
                           ? 'border-zinc-900 bg-zinc-900 text-white'
                           : 'border-border bg-slate-50 hover:border-zinc-400'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="text-sm font-semibold">
-                          {buildStudentName(row.student)}
+                          {row.full_name}
                         </div>
-                        <div className={`rounded-full px-2 py-0.5 text-xs ${row.student_id === selectedStudentId ? 'bg-white/15 text-white' : 'bg-amber-100 text-amber-900'}`}>
-                          {row.count} ממתינים
+                        <div className={`rounded-full px-2 py-0.5 text-xs ${row.id === selectedStudentId ? 'bg-white/15 text-white' : row.awaiting_count > 0 ? 'bg-amber-100 text-amber-900' : 'bg-slate-200 text-slate-700'}`}>
+                          {row.awaiting_count > 0 ? `${row.awaiting_count} ממתינים` : 'ללא המתנה'}
                         </div>
                       </div>
-                      <div className={`mt-2 text-xs ${row.student_id === selectedStudentId ? 'text-white/80' : 'text-muted-foreground'}`}>
-                        {row.reasons.slice(0, 2).map(getBillingReasonLabel).join(' • ') || 'דורש טיפול'}
+                      <div className={`mt-2 text-xs ${row.id === selectedStudentId ? 'text-white/80' : 'text-muted-foreground'}`}>
+                        {row.awaiting_count > 0 ? (row.reasons.slice(0, 2).map(getBillingReasonLabel).join(' • ') || 'דורש טיפול') : 'אין פעולות פתוחות כרגע'}
                       </div>
-                      <div className={`mt-1 text-xs ${row.student_id === selectedStudentId ? 'text-white/70' : 'text-muted-foreground'}`}>
-                        {row.services.length > 0 ? row.services.join(', ') : 'ללא שירות משויך'} • שיעור אחרון {formatDate(row.latest_date)}
+                      <div className={`mt-1 text-xs ${row.id === selectedStudentId ? 'text-white/70' : 'text-muted-foreground'}`}>
+                        {row.services.length > 0 ? row.services.join(', ') : 'ללא שיעורים ממתינים'}{row.latest_date ? ` • שיעור אחרון ${formatDate(row.latest_date)}` : ''}
                       </div>
                     </button>
                   ))}
-                  {!loadingBilling && queueByStudent.length === 0 ? (
+                  {!loadingBilling && studentCards.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
-                      אין שיעורים שממתינים לטיפול בחודש זה.
+                      אין תלמידים להצגה עבור החיפוש הנוכחי.
                     </div>
                   ) : null}
                 </div>
@@ -632,6 +656,88 @@ export default function FinancialsPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={isBillingPolicyOpen} onOpenChange={setIsBillingPolicyOpen}>
+        <DialogContent footer={(
+          <DialogFooter>
+            {canMutateBillingPolicy ? (
+              <Button onClick={handleSaveBillingPolicy} disabled={savingPolicy || loadingBilling}>
+                {savingPolicy ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+                שמור מדיניות
+              </Button>
+            ) : null}
+            <Button type="button" variant="outline" onClick={() => setIsBillingPolicyOpen(false)}>
+              סגור
+            </Button>
+          </DialogFooter>
+        )}>
+          <DialogHeader>
+            <DialogTitle>הגדרות חיוב שיעורים</DialogTitle>
+            <DialogDescription>
+              המדיניות כאן קובעת באילו סטטוסים שיעור ייצר צריכה מהתחייבות. המסך הראשי נשאר ממוקד בעבודה ולא בהגדרות.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {BILLING_POLICY_FIELDS.map((field) => (
+              <div key={field.key} className="flex items-start justify-between gap-4 rounded-xl border border-border bg-slate-50 p-4">
+                <div>
+                  <div className="text-sm font-semibold text-zinc-900">{field.label}</div>
+                  <div className="mt-1 text-sm text-muted-foreground">{field.description}</div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Label className="text-xs text-slate-600">{billingPolicy[field.key] ? 'מחויב' : 'לא מחויב'}</Label>
+                  <Switch
+                    checked={Boolean(billingPolicy[field.key])}
+                    onCheckedChange={(checked) => setBillingPolicy((current) => ({ ...current, [field.key]: checked }))}
+                    disabled={!canMutateBillingPolicy || savingPolicy}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isConsumedLessonsOpen} onOpenChange={setIsConsumedLessonsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>פירוט שיעורים שנצרכו</DialogTitle>
+            <DialogDescription>
+              הפירוט מוצג לפי שירות, ובתוך כל שירות לפי סוג התחייבות. גורמים מממנים מפורטים לפי שם הגורם ולא כקבוצה אחת.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {consumedLessonsBreakdown.map((service) => (
+              <div key={service.service_name} className="rounded-xl border border-border bg-slate-50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-zinc-900">{service.service_name}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {service.total_count} שיעורים • {formatCurrency(service.total_amount)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  {service.by_type.map((typeRow) => (
+                    <div key={typeRow.type_label} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-white px-3 py-2 text-sm">
+                      <div className="font-medium text-zinc-900">{typeRow.type_label}</div>
+                      <div className="text-muted-foreground">{typeRow.count} שיעורים • {formatCurrency(typeRow.amount)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {consumedLessonsBreakdown.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
+                אין שיעורים שנצרכו בחודש הנבחר.
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </PageLayout>
   );
 }
