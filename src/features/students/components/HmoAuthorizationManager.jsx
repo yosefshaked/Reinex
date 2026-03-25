@@ -399,9 +399,9 @@ export default function HmoAuthorizationManager({
       ) : null}
 
       {canMutateBilling ? (
-        <section className={`${embedded ? 'rounded-xl border border-border bg-slate-50' : 'rounded-xl border border-border bg-white shadow-sm overflow-hidden'}`}>
-          <div className="h-1.5 bg-indigo-600" />
-          <div className="p-5 space-y-4">
+        <section className={embedded ? '' : 'rounded-xl border border-border bg-white shadow-sm overflow-hidden'}>
+          {!embedded ? <div className="h-1.5 bg-indigo-600" /> : null}
+          <div className={embedded ? 'space-y-4' : 'p-5 space-y-4'}>
             {availableTracks.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-slate-50 p-4 text-sm text-muted-foreground">
                 <div>לפני יצירת אישור צריך להגדיר לפחות מסלול גורם מממן אחד במסך ההגדרות.</div>
@@ -413,19 +413,12 @@ export default function HmoAuthorizationManager({
               </div>
             ) : (
               <>
-                <div>
-                  <h3 className="text-lg font-semibold text-zinc-800">{form.id ? 'עריכת אישור' : 'אישור חדש'}</h3>
-                  <p className="text-sm text-muted-foreground">
-                    בוחרים מסלול שכבר הוגדר במערכת, בודקים את התנאים שלו, ואז מוסיפים רק את פרטי האישור של התלמיד.
-                  </p>
-                </div>
-
-                {embedded ? (
-                  <div className="rounded-xl border border-border bg-white p-4 text-sm">
-                    <div className="font-semibold text-zinc-900">איך זה עובד</div>
-                    <div className="mt-2 text-muted-foreground">
-                      בוחרים מסלול קיים, מוסיפים את פרטי האישור של התלמיד, והמערכת יוצרת או מעדכנת אוטומטית את התחייבות הגורם המממן ברשימת ההתחייבויות והיתרות.
-                    </div>
+                {!embedded ? (
+                  <div>
+                    <h3 className="text-lg font-semibold text-zinc-800">{form.id ? 'עריכת אישור' : 'אישור חדש'}</h3>
+                    <p className="text-sm text-muted-foreground">
+                      בוחרים מסלול שכבר הוגדר במערכת, בודקים את התנאים שלו, ואז מוסיפים רק את פרטי האישור של התלמיד.
+                    </p>
                   </div>
                 ) : null}
 
