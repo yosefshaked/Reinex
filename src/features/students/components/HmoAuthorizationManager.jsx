@@ -68,12 +68,14 @@ export default function HmoAuthorizationManager({
   onChanged = null,
   embedded = false,
   selectedAuthorizationId = '',
+  onRequestSetup = null,
 }) {
   const { session } = useAuth();
   const { activeOrgId } = useOrg();
   const {
     providers,
     loadingProviders,
+    providersError,
     providersNotice,
     loadProviders,
   } = useMedicalProviders();
@@ -83,14 +85,25 @@ export default function HmoAuthorizationManager({
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => buildEmptyAuthorizationForm());
 
-  const selectedProvider = useMemo(
-    () => providers.find((provider) => provider.id === form.providerId) || null,
-    [providers, form.providerId],
+  const availableTracks = useMemo(
+    () => providers.flatMap((provider) => (
+      Array.isArray(provider?.tracks)
+        ? provider.tracks
+          .filter((track) => track.is_active !== false || track.id === form.providerTrackId)
+          .map((track) => ({ ...track, provider }))
+        : []
+    )),
+    [providers, form.providerTrackId],
   );
 
-  const availableTracks = useMemo(
-    () => Array.isArray(selectedProvider?.tracks) ? selectedProvider.tracks.filter((track) => track.is_active !== false || track.id === form.providerTrackId) : [],
-    [selectedProvider, form.providerTrackId],
+  const selectedTrack = useMemo(
+    () => availableTracks.find((track) => track.id === form.providerTrackId) || null,
+    [availableTracks, form.providerTrackId],
+  );
+
+  const selectedProvider = useMemo(
+    () => selectedTrack?.provider || providers.find((provider) => provider.id === form.providerId) || null,
+    [providers, selectedTrack, form.providerId],
   );
 
   const activeAuthorizations = useMemo(
@@ -177,11 +190,10 @@ export default function HmoAuthorizationManager({
       toast.error('לפני יצירת אישור צריך להגדיר גורם מממן ומסלול.');
       return;
     }
-    if (!form.providerId || !form.providerTrackId) {
-      toast.error('יש לבחור גורם מממן ומסלול.');
+    if (!form.providerTrackId) {
+      toast.error('יש לבחור מסלול גורם מממן.');
       return;
     }
-    const selectedTrack = availableTracks.find((track) => track.id === form.providerTrackId) || null;
     if (!selectedTrack?.service_id) {
       toast.error('למסלול שנבחר חייב להיות שירות משויך.');
       return;
@@ -201,7 +213,7 @@ export default function HmoAuthorizationManager({
           org_id: activeOrgId,
           student_id: studentId,
           service_id: selectedTrack.service_id,
-          provider_id: form.providerId,
+          provider_id: selectedTrack.provider?.id || form.providerId,
           provider_track_id: form.providerTrackId,
           authorization_reference: form.authorizationReference || null,
           authorized_lessons: Number(form.authorizedLessons),
@@ -287,9 +299,20 @@ export default function HmoAuthorizationManager({
             </div>
           ) : null}
 
-          {!loadingProviders && providers.length === 0 ? (
+          {!loadingProviders && providersError ? (
+            <div className="rounded-xl border border-dashed border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+              {providersError}
+            </div>
+          ) : null}
+
+          {!loadingProviders && !providersError && availableTracks.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-slate-50 p-4 text-sm text-muted-foreground">
-              {providersNotice || 'עדיין לא הוגדרו גורמים מממנים בארגון. לפני יצירת אישור צריך להגדיר גורם מממן ומסלול.'}
+              <div>{providersNotice || 'עדיין לא הוגדרו מסלולי גורם מממן בארגון.'}</div>
+              {typeof onRequestSetup === 'function' ? (
+                <Button type="button" variant="outline" size="sm" className="mt-3" onClick={onRequestSetup}>
+                  פתח הגדרות גורמים מממנים
+                </Button>
+              ) : null}
             </div>
           ) : null}
 
@@ -372,126 +395,164 @@ export default function HmoAuthorizationManager({
         <section className={`${embedded ? 'rounded-xl border border-border bg-slate-50/70' : 'rounded-xl border border-border bg-white shadow-sm overflow-hidden'}`}>
           <div className="h-1.5 bg-indigo-600" />
           <div className="p-5 space-y-4">
-            <div>
-              <h3 className="text-lg font-semibold text-zinc-800">{form.id ? 'עריכת אישור' : 'אישור חדש'}</h3>
-              <p className="text-sm text-muted-foreground">
-                האישור הוא הרשומה התפעולית. ההתחייבות הכספית של ה-HMO נוצרת ומתעדכנת אוטומטית מהרשומה הזו.
-              </p>
-            </div>
+            {availableTracks.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border bg-slate-50 p-4 text-sm text-muted-foreground">
+                <div>לפני יצירת אישור צריך להגדיר לפחות מסלול גורם מממן אחד במסך ההגדרות.</div>
+                {typeof onRequestSetup === 'function' ? (
+                  <Button type="button" variant="outline" size="sm" className="mt-3" onClick={onRequestSetup}>
+                    פתח הגדרות גורמים מממנים
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              <>
+                <div>
+                  <h3 className="text-lg font-semibold text-zinc-800">{form.id ? 'עריכת אישור' : 'אישור חדש'}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    בוחרים מסלול שכבר הוגדר במערכת, בודקים את התנאים שלו, ואז מוסיפים רק את פרטי האישור של התלמיד.
+                  </p>
+                </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-600">גורם מממן</Label>
-                <Select value={form.providerId || '__none__'} onValueChange={(value) => setForm((current) => ({ ...current, providerId: value === '__none__' ? '' : value, providerTrackId: '' }))} disabled={saving}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="בחר גורם מממן" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">בחר גורם מממן</SelectItem>
-                    {providers.filter((provider) => provider.is_active !== false || provider.id === form.providerId).map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-600">מסלול</Label>
+                  <Select
+                    value={form.providerTrackId || '__none__'}
+                    onValueChange={(value) => {
+                      if (value === '__none__') {
+                        setForm((current) => ({ ...current, providerId: '', providerTrackId: '' }));
+                        return;
+                      }
+                      const track = availableTracks.find((item) => item.id === value) || null;
+                      setForm((current) => ({
+                        ...current,
+                        providerId: track?.provider?.id || '',
+                        providerTrackId: value,
+                      }));
+                    }}
+                    disabled={saving}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="בחר מסלול" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">בחר מסלול</SelectItem>
+                      {availableTracks.map((track) => (
+                        <SelectItem key={track.id} value={track.id}>
+                          {track.provider?.name || 'גורם מממן'} • {track.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div className="rounded-lg border border-border bg-white p-3 text-sm">
-              <div className="text-[11px] text-muted-foreground">שירות משויך למסלול</div>
-              <div className="mt-1 font-semibold text-zinc-900">
-                {services.find((service) => service.id === (availableTracks.find((track) => track.id === form.providerTrackId)?.service_id || ''))?.service_name
-                  || services.find((service) => service.id === (availableTracks.find((track) => track.id === form.providerTrackId)?.service_id || ''))?.name
-                  || 'השירות ייקבע לפי המסלול'}
-              </div>
-            </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-lg border border-border bg-white p-3 text-sm">
+                    <div className="text-[11px] text-muted-foreground">גורם מממן</div>
+                    <div className="mt-1 font-semibold text-zinc-900">{selectedProvider?.name || 'ייבחר לפי המסלול'}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-white p-3 text-sm">
+                    <div className="text-[11px] text-muted-foreground">שירות המסלול</div>
+                    <div className="mt-1 font-semibold text-zinc-900">
+                      {services.find((service) => service.id === selectedTrack?.service_id)?.service_name
+                        || services.find((service) => service.id === selectedTrack?.service_id)?.name
+                        || 'ייבחר לפי המסלול'}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-white p-3 text-sm">
+                    <div className="text-[11px] text-muted-foreground">אופן תשלום</div>
+                    <div className="mt-1 font-semibold text-zinc-900">{selectedTrack?.payment_mode || '—'}</div>
+                  </div>
+                </div>
 
-            <div className="space-y-2">
-              <Label className="text-xs text-slate-600">מסלול</Label>
-              <Select value={form.providerTrackId || '__none__'} onValueChange={(value) => setForm((current) => ({ ...current, providerTrackId: value === '__none__' ? '' : value }))} disabled={saving || !form.providerId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="בחר מסלול" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">בחר מסלול</SelectItem>
-                  {availableTracks.map((track) => (
-                    <SelectItem key={track.id} value={track.id}>{track.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-lg border border-border bg-white p-3 text-sm">
+                    <div className="text-[11px] text-muted-foreground">חיוב לקוח לפי המסלול</div>
+                    <div className="mt-1 font-semibold">{formatCurrency(selectedTrack?.default_customer_charge_amount)}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-white p-3 text-sm">
+                    <div className="text-[11px] text-muted-foreground">תביעה לקופה לפי המסלול</div>
+                    <div className="mt-1 font-semibold">{formatCurrency(selectedTrack?.default_insurer_claim_amount)}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-white p-3 text-sm">
+                    <div className="text-[11px] text-muted-foreground">הערת זרימה במסלול</div>
+                    <div className="mt-1 text-zinc-800">{selectedTrack?.default_workflow_notes || '—'}</div>
+                  </div>
+                </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="authorization-reference">מספר אישור / טופס</Label>
-                <Input id="authorization-reference" value={form.authorizationReference} onChange={(event) => setForm((current) => ({ ...current, authorizationReference: event.target.value }))} disabled={saving} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="authorized-lessons">כמות מפגשים מאושרת</Label>
-                <Input id="authorized-lessons" type="number" min="0" step="1" value={form.authorizedLessons} onChange={(event) => setForm((current) => ({ ...current, authorizedLessons: event.target.value }))} disabled={saving} />
-              </div>
-            </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="authorization-reference">מספר אישור / טופס</Label>
+                    <Input id="authorization-reference" value={form.authorizationReference} onChange={(event) => setForm((current) => ({ ...current, authorizationReference: event.target.value }))} disabled={saving} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="authorized-lessons">כמות מפגשים מאושרת</Label>
+                    <Input id="authorized-lessons" type="number" min="0" step="1" value={form.authorizedLessons} onChange={(event) => setForm((current) => ({ ...current, authorizedLessons: event.target.value }))} disabled={saving} />
+                  </div>
+                </div>
 
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="valid-from">תקף מ־</Label>
-                <Input id="valid-from" type="date" value={form.validFrom} onChange={(event) => setForm((current) => ({ ...current, validFrom: event.target.value }))} disabled={saving} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="expires-at">תוקף עד</Label>
-                <Input id="expires-at" type="date" value={form.expiresAt} onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={saving} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reminder-date">תזכורת פעולה</Label>
-                <Input id="reminder-date" type="date" value={form.reminderDate} onChange={(event) => setForm((current) => ({ ...current, reminderDate: event.target.value }))} disabled={saving} />
-              </div>
-            </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="valid-from">תקף מ־</Label>
+                    <Input id="valid-from" type="date" value={form.validFrom} onChange={(event) => setForm((current) => ({ ...current, validFrom: event.target.value }))} disabled={saving} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="expires-at">תוקף עד</Label>
+                    <Input id="expires-at" type="date" value={form.expiresAt} onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={saving} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reminder-date">תזכורת פעולה</Label>
+                    <Input id="reminder-date" type="date" value={form.reminderDate} onChange={(event) => setForm((current) => ({ ...current, reminderDate: event.target.value }))} disabled={saving} />
+                  </div>
+                </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="customer-charge-override">חיוב לקוח מותאם</Label>
-                <Input id="customer-charge-override" type="number" min="0" step="0.01" value={form.customerChargeAmountOverride} onChange={(event) => setForm((current) => ({ ...current, customerChargeAmountOverride: event.target.value }))} disabled={saving} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="insurer-claim-override">תביעה לקופה מותאמת</Label>
-                <Input id="insurer-claim-override" type="number" min="0" step="0.01" value={form.insurerClaimAmountOverride} onChange={(event) => setForm((current) => ({ ...current, insurerClaimAmountOverride: event.target.value }))} disabled={saving} />
-              </div>
-            </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="customer-charge-override">חיוב לקוח מותאם</Label>
+                    <Input id="customer-charge-override" type="number" min="0" step="0.01" value={form.customerChargeAmountOverride} onChange={(event) => setForm((current) => ({ ...current, customerChargeAmountOverride: event.target.value }))} disabled={saving} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="insurer-claim-override">תביעה לקופה מותאמת</Label>
+                    <Input id="insurer-claim-override" type="number" min="0" step="0.01" value={form.insurerClaimAmountOverride} onChange={(event) => setForm((current) => ({ ...current, insurerClaimAmountOverride: event.target.value }))} disabled={saving} />
+                  </div>
+                </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="workflow-notes-override">הערת זרימה מותאמת</Label>
-              <Input id="workflow-notes-override" value={form.workflowNotesOverride} onChange={(event) => setForm((current) => ({ ...current, workflowNotesOverride: event.target.value }))} disabled={saving} />
-            </div>
+                <div className="space-y-2">
+                  <Label htmlFor="workflow-notes-override">הערת זרימה מותאמת</Label>
+                  <Input id="workflow-notes-override" value={form.workflowNotesOverride} onChange={(event) => setForm((current) => ({ ...current, workflowNotesOverride: event.target.value }))} disabled={saving} />
+                </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-600">סטטוס</Label>
-                <Select value={form.status} onValueChange={(value) => setForm((current) => ({ ...current, status: value }))} disabled={saving}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">פעיל</SelectItem>
-                    <SelectItem value="completed">הושלם</SelectItem>
-                    <SelectItem value="expired">פג תוקף</SelectItem>
-                    <SelectItem value="cancelled">בוטל</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="authorization-notes">הערות</Label>
-                <Input id="authorization-notes" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
-              </div>
-            </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-600">סטטוס</Label>
+                    <Select value={form.status} onValueChange={(value) => setForm((current) => ({ ...current, status: value }))} disabled={saving}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">פעיל</SelectItem>
+                        <SelectItem value="completed">הושלם</SelectItem>
+                        <SelectItem value="expired">פג תוקף</SelectItem>
+                        <SelectItem value="cancelled">בוטל</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="authorization-notes">הערות</Label>
+                    <Input id="authorization-notes" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
+                  </div>
+                </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={handleSave} disabled={saving}>
-                {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-                {form.id ? 'עדכן אישור' : 'צור אישור'}
-              </Button>
-              <Button type="button" variant="outline" onClick={resetForm} disabled={saving}>
-                נקה
-              </Button>
-            </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" onClick={handleSave} disabled={saving}>
+                    {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+                    {form.id ? 'עדכן אישור' : 'צור אישור'}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={resetForm} disabled={saving}>
+                    נקה
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </section>
       ) : null}

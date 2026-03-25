@@ -762,6 +762,7 @@ export default function FinancialsPage() {
                   student={selectedStudent}
                   startDate={monthStart}
                   endDate={monthEnd}
+                  onRequestBillingSettings={() => setIsBillingPolicyOpen(true)}
                   onDataChanged={loadBillingOverview}
                 />
               ) : (
@@ -787,23 +788,24 @@ export default function FinancialsPage() {
       </Tabs>
 
       <Sheet open={isBillingPolicyOpen} onOpenChange={setIsBillingPolicyOpen}>
-        <SheetContent side="left" className="w-full overflow-y-auto border-slate-200 bg-white p-0 sm:max-w-3xl">
-          <div className="p-6">
-            <SheetHeader className="text-end">
-              <SheetTitle>הגדרות חיוב שיעורים</SheetTitle>
-              <SheetDescription>
-                המדיניות כאן קובעת באילו סטטוסים שיעור ייצר צריכה מהתחייבות. מסך העבודה נשאר ממוקד בטיפול בחיובים.
-              </SheetDescription>
-            </SheetHeader>
-          <BillingSettingsWorkspace
-            billingPolicy={billingPolicy}
-            setBillingPolicy={setBillingPolicy}
-            canMutateBillingPolicy={canMutateBillingPolicy}
-            savingPolicy={savingPolicy}
-            loadingPolicy={loadingBilling}
-            onSaveBillingPolicy={handleSaveBillingPolicy}
-            onChanged={loadBillingOverview}
-          />
+        <SheetContent side="left" className="w-full sm:max-w-3xl">
+          <SheetHeader>
+            <SheetTitle className="text-end">הגדרות חיוב שיעורים</SheetTitle>
+            <SheetDescription className="text-end">
+              המדיניות כאן קובעת באילו סטטוסים שיעור ייצר צריכה מהתחייבות. מסך העבודה נשאר ממוקד בטיפול בחיובים.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="mt-6 h-[calc(100vh-180px)] overflow-y-auto pe-4">
+            <BillingSettingsWorkspace
+              billingPolicy={billingPolicy}
+              setBillingPolicy={setBillingPolicy}
+              canMutateBillingPolicy={canMutateBillingPolicy}
+              savingPolicy={savingPolicy}
+              loadingPolicy={loadingBilling}
+              onSaveBillingPolicy={handleSaveBillingPolicy}
+              onChanged={loadBillingOverview}
+            />
           </div>
         </SheetContent>
       </Sheet>

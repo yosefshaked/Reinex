@@ -31,6 +31,15 @@ import {
   COMMITMENT_TYPE_OPTIONS,
 } from '@/features/students/components/student-billing-helpers.js';
 
+const CREATION_ACTION_OPTIONS = [
+  ...COMMITMENT_TYPE_OPTIONS,
+  {
+    value: 'manual_adjustment',
+    label: 'התאמה ידנית',
+    description: 'פעולת כסף ישירה להוספה או להפחתה של יתרה, עם תיעוד ברור של הסיבה.',
+  },
+];
+
 function formatCurrency(value) {
   if (value == null || Number.isNaN(Number(value))) return '—';
   return `₪${Number(value).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -211,6 +220,7 @@ export default function StudentBillingWorkspace({
   startDate = '',
   endDate = '',
   onDataChanged = null,
+  onRequestBillingSettings = null,
 }) {
   const { session } = useAuth();
   const { activeOrg, activeOrgId } = useOrg();
@@ -233,6 +243,7 @@ export default function StudentBillingWorkspace({
     id: '',
     sourceType: 'adjustment',
     commitmentId: '',
+    direction: 'credit',
     amountCharged: '',
     effectiveDate: '',
     notes: '',
@@ -258,8 +269,8 @@ export default function StudentBillingWorkspace({
     () => new Map(transfers.map((transfer) => [transfer.transfer_ref, transfer])),
     [transfers],
   );
-  const editableCommitmentTypeOptions = useMemo(
-    () => COMMITMENT_TYPE_OPTIONS,
+  const creationActionOptions = useMemo(
+    () => CREATION_ACTION_OPTIONS,
     [],
   );
   const currentCommitmentAmounts = useMemo(
@@ -314,10 +325,16 @@ export default function StudentBillingWorkspace({
   }
 
   function startEditingCommitment(commitment) {
+    resetEntryForm();
     setCommitmentForm(createCommitmentFormFromCommitment(commitment));
   }
 
   function handleCommitmentTypeChange(value) {
+    if (value === 'manual_adjustment') {
+      resetCommitmentForm();
+      setSelectedHmoAuthorizationId('');
+      return;
+    }
     setCommitmentForm((current) => {
       const next = {
         ...buildInitialCommitmentForm(),
@@ -503,6 +520,7 @@ export default function StudentBillingWorkspace({
       id: '',
       sourceType: 'adjustment',
       commitmentId: '',
+      direction: 'credit',
       amountCharged: '',
       effectiveDate: '',
       notes: '',
@@ -511,11 +529,14 @@ export default function StudentBillingWorkspace({
 
   function startEditingEntry(entry) {
     if (entry.source_type !== 'adjustment') return;
+    resetCommitmentForm();
+    setSelectedHmoAuthorizationId('');
     setEntryForm({
       id: entry.id,
       sourceType: entry.source_type || 'adjustment',
       commitmentId: entry.commitment_id || '',
-      amountCharged: entry.amount_charged ?? '',
+      direction: Number(entry.amount_charged || 0) < 0 ? 'debit' : 'credit',
+      amountCharged: Math.abs(Number(entry.amount_charged || 0)) || '',
       effectiveDate: entry.effective_date || '',
       notes: entry.notes || '',
     });
@@ -538,12 +559,13 @@ export default function StudentBillingWorkspace({
           student_id: studentId,
           source_type: entryForm.sourceType,
           commitment_id: entryForm.commitmentId || null,
-          amount_charged: Number(entryForm.amountCharged),
+          amount_charged: (entryForm.direction === 'debit' ? -1 : 1) * Math.abs(Number(entryForm.amountCharged)),
           effective_date: entryForm.effectiveDate || null,
           notes: entryForm.notes || null,
         },
       });
       resetEntryForm();
+      resetCommitmentForm();
       await loadData();
       await notifyDataChanged();
       toast.success(entryForm.id ? 'התאמת החיוב עודכנה.' : 'התאמת החיוב נשמרה.');
@@ -569,6 +591,7 @@ export default function StudentBillingWorkspace({
       });
       if (entryForm.id === entryId) {
         resetEntryForm();
+        resetCommitmentForm();
       }
       await loadData();
       await notifyDataChanged();
@@ -833,31 +856,144 @@ export default function StudentBillingWorkspace({
             <div className="h-1.5 bg-blue-500" />
             <div className="p-5 space-y-4">
               <div>
-                <h3 className="text-lg font-semibold text-zinc-800">{commitmentForm.id ? 'עריכת התחייבות' : 'התחייבות חדשה'}</h3>
-                <p className="text-sm text-muted-foreground">כל סוג התחייבות מייצר התנהגות אחרת בבילינג, לכן ההגדרות כאן תלויות סוג.</p>
+                <h3 className="text-lg font-semibold text-zinc-800">
+                  {commitmentForm.commitmentType === 'manual_adjustment'
+                    ? (entryForm.id ? 'עריכת תנועה ידנית' : 'פעולה כספית חדשה')
+                    : (commitmentForm.id ? 'עריכת התחייבות' : 'פעולה כספית חדשה')}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  כאן מוסיפים התחייבות, גורם מממן או תנועה ידנית של כסף, לפי סוג הפעולה הרצוי.
+                </p>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label className="text-xs text-slate-600">סוג התחייבות</Label>
-                    <Select value={commitmentForm.commitmentType} onValueChange={handleCommitmentTypeChange} disabled={saving}>
+                  <Label className="text-xs text-slate-600">סוג פעולה</Label>
+                  <Select value={commitmentForm.commitmentType} onValueChange={handleCommitmentTypeChange} disabled={saving}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {creationActionOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-600">מה הפעולה הזו עושה</Label>
+                  <div className="rounded-xl border border-border bg-slate-50 px-3 py-2 text-sm text-muted-foreground">
+                    {creationActionOptions.find((option) => option.value === commitmentForm.commitmentType)?.description}
+                  </div>
+                </div>
+              </div>
+
+              {commitmentForm.commitmentType === 'manual_adjustment' ? (
+                <>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">כיוון הפעולה</Label>
+                      <Select
+                        value={entryForm.direction}
+                        onValueChange={(value) => setEntryForm((current) => ({ ...current, direction: value }))}
+                        disabled={saving}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="credit">הוספת כסף / זיכוי</SelectItem>
+                          <SelectItem value="debit">הפחתת כסף / חיוב</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="manual-entry-amount-inline" className="text-xs text-slate-600">סכום הפעולה</Label>
+                      <Input
+                        id="manual-entry-amount-inline"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={entryForm.amountCharged}
+                        onChange={(event) => setEntryForm((current) => ({ ...current, amountCharged: event.target.value }))}
+                        disabled={saving}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-slate-50 px-3 py-3 text-sm text-zinc-800">
+                    {entryForm.amountCharged === ''
+                      ? 'בחרו האם להוסיף או להפחית כסף, ואז הזינו סכום.'
+                      : `${entryForm.direction === 'debit' ? 'תופחת' : 'תתווסף'} ${formatCurrency(Number(entryForm.amountCharged || 0))} ${entryForm.commitmentId ? 'מההתחייבות שנבחרה' : 'ברמת התלמיד'}.`}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-600">התחייבות משויכת</Label>
+                    <Select
+                      value={entryForm.commitmentId || '__none__'}
+                      onValueChange={(value) => setEntryForm((current) => ({ ...current, commitmentId: value === '__none__' ? '' : value }))}
+                      disabled={saving}
+                    >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                      {editableCommitmentTypeOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                      ))}
+                        <SelectItem value="__none__">ללא התחייבות ספציפית</SelectItem>
+                        {commitments.map((commitment) => (
+                          <SelectItem key={commitment.id} value={commitment.id}>
+                            {getCommitmentLabel(commitment, services)}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
+                    <div className="text-xs text-muted-foreground">
+                      בחרו התחייבות אם ההתאמה צריכה להשפיע על יתרה מסוימת. אם לא, היא תישמר כתנועת כסף כללית לתלמיד.
+                    </div>
                   </div>
-                <div className="space-y-2">
-                  <Label className="text-xs text-slate-600">משמעות הסוג</Label>
-                  <div className="rounded-xl border border-border bg-slate-50 px-3 py-2 text-sm text-muted-foreground">
-                    {editableCommitmentTypeOptions.find((option) => option.value === commitmentForm.commitmentType)?.description}
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="manual-entry-date-inline" className="text-xs text-slate-600">תאריך הפעולה</Label>
+                      <Input
+                        id="manual-entry-date-inline"
+                        type="date"
+                        value={entryForm.effectiveDate}
+                        onChange={(event) => setEntryForm((current) => ({ ...current, effectiveDate: event.target.value }))}
+                        disabled={saving}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="manual-entry-notes-inline" className="text-xs text-slate-600">הערות חובה</Label>
+                      <Input
+                        id="manual-entry-notes-inline"
+                        value={entryForm.notes}
+                        onChange={(event) => setEntryForm((current) => ({ ...current, notes: event.target.value }))}
+                        disabled={saving}
+                        placeholder="למשל: זיכוי עקב תקלה, החזר חלקי, תיקון יתרה"
+                      />
+                    </div>
                   </div>
-                </div>
-              </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleSaveManualEntry} disabled={saving || entryForm.amountCharged === '' || !entryForm.notes.trim()}>
+                      {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+                      {entryForm.id ? 'עדכן תנועה ידנית' : 'שמור תנועה ידנית'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        resetEntryForm();
+                        setSelectedHmoAuthorizationId('');
+                        resetCommitmentForm();
+                      }}
+                      disabled={saving}
+                    >
+                      נקה טופס
+                    </Button>
+                  </div>
+                </>
+              ) : null}
 
               {commitmentForm.commitmentType === 'package' ? (
                 <div className="space-y-3 rounded-xl border border-border bg-slate-50 p-4">
@@ -960,7 +1096,7 @@ export default function StudentBillingWorkspace({
                 </>
               ) : null}
 
-              {commitmentForm.commitmentType !== 'hmo' ? (
+              {commitmentForm.commitmentType !== 'hmo' && commitmentForm.commitmentType !== 'manual_adjustment' ? (
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="text-xs text-slate-600">סך התחייבות מחושב</Label>
@@ -975,14 +1111,14 @@ export default function StudentBillingWorkspace({
               </div>
               ) : null}
 
-              {commitmentForm.commitmentType !== 'hmo' ? (
+              {commitmentForm.commitmentType !== 'hmo' && commitmentForm.commitmentType !== 'manual_adjustment' ? (
               <div className="space-y-2">
                 <Label htmlFor="billing-commitment-notes" className="text-xs text-slate-600">הערות</Label>
                 <Input id="billing-commitment-notes" value={commitmentForm.notes} onChange={(event) => setCommitmentForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
               </div>
               ) : null}
 
-              {commitmentForm.commitmentType !== 'hmo' ? (
+              {commitmentForm.commitmentType !== 'hmo' && commitmentForm.commitmentType !== 'manual_adjustment' ? (
               <div className="space-y-2">
                 <Label className="text-xs text-slate-600">סטטוס</Label>
                 <Select value={commitmentForm.isActive ? 'active' : 'inactive'} onValueChange={(value) => setCommitmentForm((current) => ({ ...current, isActive: value === 'active' }))} disabled={saving}>
@@ -1004,13 +1140,16 @@ export default function StudentBillingWorkspace({
                   canMutateBilling={canMutateBilling}
                   embedded
                   selectedAuthorizationId={selectedHmoAuthorizationId}
+                  onRequestSetup={onRequestBillingSettings}
                   onChanged={async () => {
                     setSelectedHmoAuthorizationId('');
                     await loadData();
                     await notifyDataChanged();
                   }}
                 />
-              ) : (
+              ) : null}
+
+              {commitmentForm.commitmentType !== 'hmo' && commitmentForm.commitmentType !== 'manual_adjustment' ? (
               <div className="flex flex-wrap gap-2">
                 <Button onClick={handleSaveCommitment} disabled={saving}>
                   {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
@@ -1018,10 +1157,11 @@ export default function StudentBillingWorkspace({
                 </Button>
                 <Button type="button" variant="ghost" onClick={() => {
                   setSelectedHmoAuthorizationId('');
+                  resetEntryForm();
                   resetCommitmentForm();
                 }} disabled={saving}>נקה טופס</Button>
               </div>
-              )}
+              ) : null}
             </div>
           </section>
         ) : (
@@ -1207,73 +1347,7 @@ export default function StudentBillingWorkspace({
         ) : null}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        {canMutateBilling ? (
-          <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
-            <div className="h-1.5 bg-zinc-800" />
-            <div className="p-5 space-y-4">
-              <div>
-                <h3 className="text-lg font-semibold text-zinc-800">{entryForm.id ? 'עריכת התאמה ידנית' : 'התאמה ידנית'}</h3>
-                <p className="text-sm text-muted-foreground">תנועה כספית שאינה מגיעה משיעור, למשל זיכוי או חיוב ידני.</p>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label className="text-xs text-slate-600">סוג תנועה</Label>
-                  <Select value={entryForm.sourceType} onValueChange={(value) => setEntryForm((current) => ({ ...current, sourceType: value }))} disabled={saving}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="adjustment">התאמה</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="manual-entry-amount" className="text-xs text-slate-600">סכום</Label>
-                  <Input id="manual-entry-amount" type="number" step="0.01" value={entryForm.amountCharged} onChange={(event) => setEntryForm((current) => ({ ...current, amountCharged: event.target.value }))} disabled={saving} />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-600">התחייבות משויכת</Label>
-                <Select value={entryForm.commitmentId || '__none__'} onValueChange={(value) => setEntryForm((current) => ({ ...current, commitmentId: value === '__none__' ? '' : value }))} disabled={saving}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">ללא התחייבות</SelectItem>
-                    {commitments.map((commitment) => (
-                      <SelectItem key={commitment.id} value={commitment.id}>
-                        {getCommitmentLabel(commitment, services)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="manual-entry-date" className="text-xs text-slate-600">תאריך</Label>
-                  <Input id="manual-entry-date" type="date" value={entryForm.effectiveDate} onChange={(event) => setEntryForm((current) => ({ ...current, effectiveDate: event.target.value }))} disabled={saving} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="manual-entry-notes" className="text-xs text-slate-600">הערות חובה</Label>
-                  <Input id="manual-entry-notes" value={entryForm.notes} onChange={(event) => setEntryForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={handleSaveManualEntry} disabled={saving || entryForm.amountCharged === '' || !entryForm.notes.trim()}>
-                  {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-                  {entryForm.id ? 'עדכן התאמה' : 'שמור התאמה'}
-                </Button>
-                <Button type="button" variant="ghost" onClick={resetEntryForm} disabled={saving}>נקה</Button>
-              </div>
-            </div>
-          </section>
-        ) : null}
-
+      <div className="grid gap-4">
         <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
           <div className="h-1.5 bg-purple-500" />
           <div className="p-5 space-y-4">
