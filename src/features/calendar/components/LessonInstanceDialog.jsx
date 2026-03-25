@@ -10,7 +10,7 @@ import { useOrg } from '@/org/OrgContext';
 import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { Pencil, X, Check, XCircle, Loader2, AlertCircle } from 'lucide-react';
+import { Pencil, X, Check, XCircle, Loader2, AlertCircle, MessageCircle, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 
 function toLocalDateString(dateObj) {
@@ -62,6 +62,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isMarkingAttendance, setIsMarkingAttendance] = useState(false);
+  const [reminderUpdating, setReminderUpdating] = useState(false);
+  const [localReminderState, setLocalReminderState] = useState({});
   const [error, setError] = useState(null);
   
   const [formData, setFormData] = useState({
@@ -90,7 +92,28 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }, [instance]);
 
+  // Reset local reminder optimistic state when a different instance is opened
+  useEffect(() => {
+    setLocalReminderState({});
+  }, [instance?.id]);
+
   if (!instance) return null;
+
+  function formatPhoneForWhatsApp(phone) {
+    if (!phone) return null;
+    const digits = String(phone).replace(/\D/g, '');
+    if (!digits) return null;
+    if (digits.startsWith('972')) return digits;
+    if (digits.startsWith('0')) return '972' + digits.slice(1);
+    return '972' + digits;
+  }
+
+  function buildReminderMessage(lessonInstance, studentName) {
+    const date = formatDateDisplay(lessonInstance.datetime_start);
+    const time = formatTimeDisplay(lessonInstance.datetime_start);
+    const service = lessonInstance.service?.service_name || 'שיעור';
+    return `שלום ${studentName} 😊\nרצינו להזכיר לך שיש לך ${service} ב-${date} בשעה ${time}.\nנשמח לאישור הגעתך 🙏`;
+  }
 
   const statusInfo = getInstanceStatusIcon(instance.status, instance.documentation_status);
   const startTime = formatTimeDisplay(instance.datetime_start);
@@ -223,6 +246,81 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       setError(err.message);
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleSendReminder(participant) {
+    const waPhone = formatPhoneForWhatsApp(participant.student?.phone);
+    if (!waPhone || !org?.id) return;
+
+    const studentName = participant.student?.full_name
+      || [participant.student?.first_name, participant.student?.last_name].filter(Boolean).join(' ')
+      || 'תלמיד';
+
+    const message = buildReminderMessage(instance, studentName);
+    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
+
+    setReminderUpdating(true);
+    try {
+      await authenticatedFetch('calendar/attendance', {
+        method: 'POST',
+        body: {
+          org_id: org.id,
+          instance_id: instance.id,
+          participant_id: participant.id,
+          action: 'update-reminder',
+          reminder_sent: true,
+        },
+      });
+      setLocalReminderState((prev) => ({
+        ...prev,
+        [participant.id]: { ...(prev[participant.id] || {}), reminder_sent: true },
+      }));
+      onUpdate?.();
+    } catch (err) {
+      console.error('Error marking reminder sent:', err);
+    } finally {
+      setReminderUpdating(false);
+    }
+  }
+
+  async function handleSetReminderConfirmation(participant, approved) {
+    if (!org?.id) return;
+    setReminderUpdating(true);
+    setError(null);
+    try {
+      if (approved) {
+        await authenticatedFetch('calendar/attendance', {
+          method: 'POST',
+          body: {
+            org_id: org.id,
+            instance_id: instance.id,
+            participant_id: participant.id,
+            action: 'update-reminder',
+            reminder_seen: true,
+          },
+        });
+        setLocalReminderState((prev) => ({
+          ...prev,
+          [participant.id]: { ...(prev[participant.id] || {}), reminder_seen: true },
+        }));
+      } else {
+        await authenticatedFetch('calendar/attendance', {
+          method: 'POST',
+          body: {
+            org_id: org.id,
+            instance_id: instance.id,
+            participant_id: participant.id,
+            participant_status: 'cancelled_student',
+          },
+        });
+      }
+      onUpdate?.();
+    } catch (err) {
+      console.error('Error setting reminder confirmation:', err);
+      setError(err.message);
+    } finally {
+      setReminderUpdating(false);
     }
   }
 
@@ -474,48 +572,106 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                 משתתפים ({instance.participants?.length || 0})
               </label>
               <div className="mt-2 space-y-2">
-                {(instance.participants || []).map((participant) => (
-                  <div
-                    key={participant.id}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                  >
-                    <div className="flex-1">
-                      <p className="font-medium">{participant.student?.full_name || 'לא ידוע'}</p>
-                      <div className="text-sm text-gray-600">
-                        {participant.participant_status === 'attended' && '✓ נכח'}
-                        {participant.participant_status === 'no_show' && '✗ לא הגיע'}
-                        {participant.participant_status === 'scheduled' && 'מתוכנן'}
-                        {participant.participant_status === 'cancelled_student' && 'בוטל ע"י תלמיד'}
-                        {participant.participant_status === 'cancelled_clinic' && 'בוטל ע"י המכון'}
+                {(instance.participants || []).map((participant) => {
+                  const rs = localReminderState[participant.id] || {};
+                  const hasSent = rs.reminder_sent ?? participant.reminder_sent ?? false;
+                  const hasConfirmed = rs.reminder_seen ?? participant.reminder_seen ?? false;
+                  const waPhone = formatPhoneForWhatsApp(participant.student?.phone);
+                  const isScheduled = participant.participant_status === 'scheduled';
+                  return (
+                    <div key={participant.id} className="p-3 bg-gray-50 rounded-lg space-y-2">
+                      {/* Main info + attendance buttons */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <p className="font-medium">{participant.student?.full_name || 'לא ידוע'}</p>
+                          <div className="text-sm text-gray-600">
+                            {participant.participant_status === 'attended' && '✓ נכח'}
+                            {participant.participant_status === 'no_show' && '✗ לא הגיע'}
+                            {participant.participant_status === 'scheduled' && 'מתוכנן'}
+                            {participant.participant_status === 'cancelled_student' && 'בוטל ע"י תלמיד'}
+                            {participant.participant_status === 'cancelled_clinic' && 'בוטל ע"י המכון'}
+                          </div>
+                        </div>
+                        {participant.price_charged && (
+                          <Badge variant="outline" className="ms-2">₪{participant.price_charged}</Badge>
+                        )}
+                        {canMarkAttendance && isScheduled && (
+                          <div className="flex gap-1 ms-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleMarkAttendance(participant.id, 'attended')}
+                              disabled={isMarkingAttendance}
+                              title="נכח"
+                            >
+                              <Check className="h-4 w-4 text-green-600" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleMarkAttendance(participant.id, 'no_show')}
+                              disabled={isMarkingAttendance}
+                              title="לא הגיע"
+                            >
+                              <XCircle className="h-4 w-4 text-red-600" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
+                      {/* Reminder row — admins only, scheduled participants only */}
+                      {isScheduled && canManageAll && (
+                        <div className="flex items-center gap-2 pt-1.5 border-t border-gray-200 flex-wrap">
+                          <Button
+                            size="sm"
+                            variant={hasSent ? 'outline' : 'secondary'}
+                            onClick={() => handleSendReminder(participant)}
+                            disabled={reminderUpdating || !waPhone}
+                            title={!waPhone ? 'לא נמצא טלפון לתלמיד' : 'שלח תזכורת ב-WhatsApp'}
+                            className="h-7 text-xs gap-1"
+                          >
+                            <MessageCircle className="h-3 w-3" />
+                            {hasSent ? 'שלח שוב' : 'תזכורת WA'}
+                          </Button>
+                          {hasSent && !hasConfirmed && (
+                            <>
+                              <span className="text-xs text-gray-500">ממתין לאישור</span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs gap-1 text-green-700 hover:text-green-800 hover:bg-green-50"
+                                onClick={() => handleSetReminderConfirmation(participant, true)}
+                                disabled={reminderUpdating}
+                                title="אישר הגעה"
+                              >
+                                <ThumbsUp className="h-3 w-3" />
+                                אישר
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs gap-1 text-red-700 hover:text-red-800 hover:bg-red-50"
+                                onClick={() => handleSetReminderConfirmation(participant, false)}
+                                disabled={reminderUpdating}
+                                title="לא יגיע — יבטל השתתפות"
+                              >
+                                <ThumbsDown className="h-3 w-3" />
+                                לא יגיע
+                              </Button>
+                            </>
+                          )}
+                          {hasSent && hasConfirmed && (
+                            <Badge className="text-xs bg-green-100 text-green-800 border-green-200 font-normal">
+                              ✓ אישר הגעה
+                            </Badge>
+                          )}
+                          {!waPhone && (
+                            <span className="text-xs text-gray-400">אין מספר טלפון</span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    {participant.price_charged && (
-                      <Badge variant="outline" className="ms-2">₪{participant.price_charged}</Badge>
-                    )}
-                    {canMarkAttendance && participant.participant_status === 'scheduled' && (
-                      <div className="flex gap-1 me-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleMarkAttendance(participant.id, 'attended')}
-                          disabled={isMarkingAttendance}
-                          title="נכח"
-                        >
-                          <Check className="h-4 w-4 text-green-600" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleMarkAttendance(participant.id, 'no_show')}
-                          disabled={isMarkingAttendance}
-                          title="לא הגיע"
-                        >
-                          <XCircle className="h-4 w-4 text-red-600" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

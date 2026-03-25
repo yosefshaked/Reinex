@@ -89,7 +89,45 @@ export default async function (context, req) {
   return await handleMarkAttendance(context, body, tenantClient, userId, isAdmin);
 }
 
+async function handleUpdateReminder(context, body, tenantClient) {
+  if (!body.instance_id) {
+    return respond(context, 400, { message: 'missing instance_id' });
+  }
+  if (!body.participant_id) {
+    return respond(context, 400, { message: 'missing participant_id' });
+  }
+
+  const update = {};
+  if (typeof body.reminder_sent === 'boolean') {
+    update.reminder_sent = body.reminder_sent;
+  }
+  if (typeof body.reminder_seen === 'boolean') {
+    update.reminder_seen = body.reminder_seen;
+  }
+
+  if (Object.keys(update).length === 0) {
+    return respond(context, 400, { message: 'no reminder fields to update' });
+  }
+
+  const { error } = await tenantClient
+    .from('lesson_participants')
+    .update(update)
+    .eq('id', body.participant_id)
+    .eq('lesson_instance_id', body.instance_id);
+
+  if (error) {
+    context.log?.error?.('calendar/attendance update-reminder failed', { message: error.message });
+    return respond(context, 500, { message: 'failed_to_update_reminder' });
+  }
+
+  return respond(context, 200, { message: 'reminder updated' });
+}
+
 async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin) {
+  if (body.action === 'update-reminder') {
+    return handleUpdateReminder(context, body, tenantClient);
+  }
+
   // Validate required fields
   if (!body.instance_id) {
     return respond(context, 400, { message: 'missing instance_id' });

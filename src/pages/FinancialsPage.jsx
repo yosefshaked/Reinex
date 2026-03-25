@@ -211,10 +211,12 @@ function buildBillingOverview(snapshot) {
   const chargedLessons = lessonHistory.filter((row) => row.billing_status === 'charged');
   const pendingQueueCount = snapshot?.summary?.pending_queue_count ?? 0;
   const expiredOrExhaustedCount = commitments.filter((row) => row?.attention?.expired || row?.attention?.exhausted).length;
-  const monthRevenue = chargedLessons.reduce((sum, row) => sum + Number(row?.resolved_charge_amount ?? row?.price_charged ?? 0), 0)
+  const monthRevenue = chargedLessons.reduce((sum, row) => sum + Number(row?.pricing_breakdown?.student_charge_amount ?? row?.resolved_charge_amount ?? row?.price_charged ?? 0), 0)
     + manualEntries
       .filter((row) => row.source_type === 'adjustment')
       .reduce((sum, row) => sum + Number(row?.amount_charged ?? 0), 0);
+  const monthHmoAmount = chargedLessons.reduce((sum, row) => sum + Number(row?.pricing_breakdown?.insurer_claim_amount ?? 0), 0);
+  const pendingHmoAmount = commitments.reduce((sum, row) => sum + Number(row?.runtime?.hmo?.pending_claim_amount ?? 0), 0);
 
   return {
     charged_lessons_count: chargedLessons.length,
@@ -222,6 +224,8 @@ function buildBillingOverview(snapshot) {
     pending_queue_count: pendingQueueCount,
     expired_or_exhausted_commitments_count: expiredOrExhaustedCount,
     month_revenue: monthRevenue,
+    month_hmo_amount: monthHmoAmount,
+    pending_hmo_amount: pendingHmoAmount,
   };
 }
 
@@ -696,6 +700,16 @@ export default function FinancialsPage() {
                 <HelpTooltip text="שיעורים שהחיוב שלהם כבר הוכרע ונרשם בחודש הזה." />
               </div>
               <div className="mt-1 text-2xl font-bold text-emerald-950">{overviewStats.charged_lessons_count}</div>
+              <div className="mt-3 space-y-1 text-xs">
+                <div className="flex items-center justify-between gap-2 text-muted-foreground">
+                  <span>חיוב תלמידים</span>
+                  <span className="font-semibold text-zinc-900">{formatCurrency(overviewStats.month_revenue)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-muted-foreground">
+                  <span>השתתפות גורם מממן</span>
+                  <span className="font-semibold text-emerald-900">{formatCurrency(overviewStats.month_hmo_amount)}</span>
+                </div>
+              </div>
             </Card>
             <button
               type="button"
@@ -728,6 +742,14 @@ export default function FinancialsPage() {
                 <HelpTooltip text="חיובי שיעורים בחודש בתוספת התאמות ידניות, ללא העברות פנימיות." />
               </div>
               <div className="mt-1 text-2xl font-bold text-blue-950">{formatCurrency(overviewStats.month_revenue)}</div>
+              <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>השתתפות גורם מממן</span>
+                <span className="font-semibold text-blue-900">{formatCurrency(overviewStats.month_hmo_amount)}</span>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>תביעות פתוחות</span>
+                <span className="font-semibold text-blue-900">{formatCurrency(overviewStats.pending_hmo_amount)}</span>
+              </div>
             </Card>
           </div>
 

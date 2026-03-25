@@ -187,7 +187,8 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
           id,
           first_name,
           middle_name,
-          last_name
+          last_name,
+          phone
         )
       ),
       service:Services(

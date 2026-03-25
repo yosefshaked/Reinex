@@ -574,6 +574,18 @@ function buildSnapshotSummary({ commitments = [], billingQueue = [], lessonHisto
   const lowBalanceCount = commitments.filter((row) => row.attention?.low_balance).length;
   const expiringSoonCount = commitments.filter((row) => row.attention?.expiring_soon).length;
   const manualEntryCount = entries.filter((row) => row.source_type === 'adjustment').length;
+  const studentChargedAmount = roundCurrency(lessonHistory.reduce(
+    (sum, row) => sum + coerceNumber(row?.pricing_breakdown?.student_charge_amount ?? row?.resolved_charge_amount ?? row?.price_charged, 0),
+    0,
+  ));
+  const insurerClaimAmount = roundCurrency(lessonHistory.reduce(
+    (sum, row) => sum + coerceNumber(row?.pricing_breakdown?.insurer_claim_amount, 0),
+    0,
+  ));
+  const pendingInsurerClaimAmount = roundCurrency(commitments.reduce(
+    (sum, row) => sum + coerceNumber(row?.runtime?.hmo?.pending_claim_amount, 0),
+    0,
+  ));
 
   return {
     total_committed: totalCommitted,
@@ -586,6 +598,9 @@ function buildSnapshotSummary({ commitments = [], billingQueue = [], lessonHisto
     transfer_count: transfers.length,
     low_balance_commitments_count: lowBalanceCount,
     expiring_soon_commitments_count: expiringSoonCount,
+    student_charged_amount: studentChargedAmount,
+    insurer_claim_amount: insurerClaimAmount,
+    pending_insurer_claim_amount: pendingInsurerClaimAmount,
   };
 }
 

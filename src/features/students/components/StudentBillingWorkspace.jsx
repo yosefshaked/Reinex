@@ -742,7 +742,7 @@ export default function StudentBillingWorkspace({
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-5">
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
               <div className="text-xs text-emerald-700">יתרה כוללת</div>
               <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(summary?.total_remaining)}</div>
@@ -758,6 +758,13 @@ export default function StudentBillingWorkspace({
             <div className="rounded-xl border border-violet-200 bg-violet-50 p-4">
               <div className="text-xs text-violet-700">העברות / התאמות</div>
               <div className="mt-1 text-xl font-bold text-violet-950">{(summary?.transfer_count ?? 0) + (summary?.manual_entry_count ?? 0)}</div>
+            </div>
+            <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4">
+              <div className="text-xs text-cyan-700">השתתפות גורם מממן</div>
+              <div className="mt-1 text-xl font-bold text-cyan-950">{formatCurrency(summary?.insurer_claim_amount)}</div>
+              <div className="mt-2 text-xs text-cyan-900">
+                פתוח לתביעה: {formatCurrency(summary?.pending_insurer_claim_amount)}
+              </div>
             </div>
           </div>
         </div>
@@ -799,7 +806,7 @@ export default function StudentBillingWorkspace({
                         ) : null}
                       </div>
                     </div>
-                    <div className="mt-3 grid gap-2 md:grid-cols-3 text-sm">
+                    <div className="mt-3 grid gap-2 md:grid-cols-4 text-sm">
                       <div className="rounded-lg bg-white p-3">
                         <div className="text-[11px] text-muted-foreground">סך התחייבות</div>
                         <div className="mt-1 font-semibold">{formatCurrency(commitment.total_amount)}</div>
@@ -814,6 +821,14 @@ export default function StudentBillingWorkspace({
                         </div>
                         <div className="mt-1 font-semibold">
                           {commitment.runtime?.remaining_lessons != null ? commitment.runtime.remaining_lessons : formatDate(commitment.expires_at)}
+                        </div>
+                      </div>
+                      <div className="rounded-lg bg-white p-3">
+                        <div className="text-[11px] text-muted-foreground">השתתפות גורם מממן</div>
+                        <div className="mt-1 font-semibold">
+                          {commitment.commitment_type === 'hmo'
+                            ? formatCurrency(commitment.runtime?.hmo?.insurer_claim_amount ?? 0)
+                            : '—'}
                         </div>
                       </div>
                     </div>
