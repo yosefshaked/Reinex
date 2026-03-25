@@ -54,7 +54,12 @@ function formatMonth(date) {
 
 function formatDate(dateString) {
   if (!dateString) return '—';
-  return new Intl.DateTimeFormat('he-IL', { day: 'numeric', month: 'numeric', year: 'numeric' }).format(new Date(dateString));
+  return new Intl.DateTimeFormat('he-IL', {
+    timeZone: 'Asia/Jerusalem',
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+  }).format(new Date(dateString));
 }
 
 function formatIsraelDateTime(dateString) {
