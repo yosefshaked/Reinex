@@ -375,8 +375,16 @@ ALTER TABLE public."RateHistory"
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
+    SELECT 1
+    FROM pg_constraint
     WHERE conname = 'RateHistory_employee_service_effective_date_key'
+      AND conrelid = 'public."RateHistory"'::regclass
+  ) AND NOT EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relname = 'RateHistory_employee_service_effective_date_key'
+      AND n.nspname = 'public'
   ) THEN
     ALTER TABLE public."RateHistory"
       ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
@@ -1985,12 +1993,22 @@ CREATE INDEX IF NOT EXISTS lesson_earnings_lesson_instance_id_idx
 
 DO $$
 BEGIN
-  ALTER TABLE public.lesson_earnings
-    ADD CONSTRAINT lesson_earnings_employee_lesson_unique
-    UNIQUE (employee_id, lesson_instance_id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'lesson_earnings_employee_lesson_unique'
+      AND conrelid = 'public.lesson_earnings'::regclass
+  ) AND NOT EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relname = 'lesson_earnings_employee_lesson_unique'
+      AND n.nspname = 'public'
+  ) THEN
+    ALTER TABLE public.lesson_earnings
+      ADD CONSTRAINT lesson_earnings_employee_lesson_unique
+      UNIQUE (employee_id, lesson_instance_id);
+  END IF;
 END $$;
 
 -- -----------------------------------------------------------------
