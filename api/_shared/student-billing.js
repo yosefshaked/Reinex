@@ -6,6 +6,12 @@ import {
   loadFinancePolicies,
   toDateKey,
 } from './employee-finance.js';
+import {
+  attachHmoContextToCommitments,
+  ensureSystemManagedHmoCommitment,
+  loadHmoAuthorizations,
+  resolveActiveAuthorizationForStudentService,
+} from './hmo.js';
 import { normalizeString } from './org-bff.js';
 import {
   buildCommitmentRuntime,
@@ -103,7 +109,7 @@ async function loadCommitmentsMap(tenantClient, commitmentIds = []) {
 
   const { data, error } = await tenantClient
     .from('commitments')
-    .select('id, student_id, service_id, commitment_type, total_amount, default_charge_amount, transfer_ref, notes, is_active, created_at, updated_at, expires_at, metadata')
+    .select('*')
     .in('id', ids);
 
   if (error) {
@@ -130,7 +136,9 @@ async function loadCommitmentsMap(tenantClient, commitmentIds = []) {
     entriesByCommitment.get(entry.commitment_id).push(entry);
   }
 
-  return new Map((data || []).map((row) => {
+  const commitmentsWithHmoContext = await attachHmoContextToCommitments(tenantClient, data || []);
+
+  return new Map(commitmentsWithHmoContext.map((row) => {
     const runtime = buildCommitmentRuntime(row, entriesByCommitment.get(row.id) || []);
     return [row.id, {
       ...row,
@@ -191,6 +199,7 @@ function buildBillingDecision({ participant, instance, commitment, policies, syn
   const participantStatus = normalizeString(participant?.participant_status).toLowerCase();
   const lessonStatus = normalizeString(instance?.status).toLowerCase();
   const lessonDate = toDateKey(instance?.datetime_start);
+  const storedPricingBreakdown = isPlainObject(participant?.pricing_breakdown) ? participant.pricing_breakdown : null;
   const policyAllowsCharge = RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)
     ? Boolean(lessonStatus !== 'cancelled_clinic' && policies?.billingConsumptionPolicy?.[participantStatus])
     : false;
@@ -200,6 +209,41 @@ function buildBillingDecision({ participant, instance, commitment, policies, syn
   let chargeAmount = null;
   let requiresAttention = false;
   let coverage = null;
+
+  const shouldPreserveStoredCharge = Boolean(
+    commitment?.id
+    && storedPricingBreakdown?.billing_status === 'charged'
+    && normalizeString(storedPricingBreakdown?.selected_commitment_id) === commitment.id
+    && Number.isFinite(Number(participant?.price_charged)),
+  );
+
+  if (shouldPreserveStoredCharge) {
+    const preservedChargeAmount = roundCurrency(Number(participant.price_charged));
+    return {
+      shouldCharge: true,
+      chargeAmount: preservedChargeAmount,
+      coverage: {
+        eligible: true,
+        covered_service_id: storedPricingBreakdown?.covered_service_id || instance?.service_id || null,
+        student_charge_amount: preservedChargeAmount,
+        insurer_claim_amount: roundCurrency(storedPricingBreakdown?.insurer_claim_amount ?? 0),
+        metadata: storedPricingBreakdown,
+      },
+      billingStatus: 'charged',
+      billingReason: storedPricingBreakdown?.billing_reason || 'chargeable',
+      requiresAttention: false,
+      pricingBreakdown: {
+        ...storedPricingBreakdown,
+        synced_at: syncedAt,
+        charge_amount: preservedChargeAmount,
+        student_charge_amount: preservedChargeAmount,
+        insurer_claim_amount: roundCurrency(storedPricingBreakdown?.insurer_claim_amount ?? 0),
+        billing_status: 'charged',
+        policy_allowed: true,
+        requires_attention: false,
+      },
+    };
+  }
 
   if (!RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)) {
     billingStatus = 'pending_attendance';
@@ -592,6 +636,61 @@ async function deleteLessonConsumptionEntry(tenantClient, lessonParticipantId) {
   }
 }
 
+async function resolveParticipantCommitmentForSync(tenantClient, {
+  participant,
+  instance,
+  commitmentMap,
+  actorUserId = null,
+} = {}) {
+  let commitment = participant?.commitment_id
+    ? commitmentMap.get(participant.commitment_id) || null
+    : null;
+
+  if (commitment) {
+    return commitment;
+  }
+
+  const authorization = await resolveActiveAuthorizationForStudentService(tenantClient, {
+    studentId: participant?.student_id,
+    serviceId: instance?.service_id,
+    lessonDate: instance?.datetime_start,
+  });
+
+  if (!authorization) {
+    return null;
+  }
+
+  const linkedCommitment = await ensureSystemManagedHmoCommitment(tenantClient, authorization, actorUserId);
+  if (!linkedCommitment?.id) {
+    return null;
+  }
+
+  const refreshedCommitmentMap = await loadCommitmentsMap(tenantClient, [linkedCommitment.id]);
+  const resolvedCommitment = refreshedCommitmentMap.get(linkedCommitment.id) || null;
+  if (!resolvedCommitment) {
+    return null;
+  }
+
+  commitmentMap.set(resolvedCommitment.id, resolvedCommitment);
+
+  const { error: participantUpdateError } = await tenantClient
+    .from('lesson_participants')
+    .update({
+      commitment_id: resolvedCommitment.id,
+      pricing_breakdown: null,
+      price_charged: null,
+    })
+    .eq('id', participant.id)
+    .is('commitment_id', null);
+
+  if (participantUpdateError && participantUpdateError.code !== '42P01') {
+    throw participantUpdateError;
+  }
+
+  participant.commitment_id = resolvedCommitment.id;
+  return resolvedCommitment;
+}
+
 export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId, actorUserId = null) {
   if (!lessonInstanceId) {
     return null;
@@ -619,13 +718,16 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
   let updatedParticipants = 0;
 
   for (const participant of participants || []) {
-    const commitment = participant.commitment_id
-      ? commitmentMap.get(participant.commitment_id) || null
-      : null;
+    const commitment = await resolveParticipantCommitmentForSync(tenantClient, {
+      participant,
+      instance,
+      commitmentMap,
+      actorUserId,
+    });
     const decision = buildBillingDecision({
       participant,
       instance,
-      commitment,
+      commitment: commitment || null,
       policies,
       syncedAt,
     });
@@ -636,7 +738,7 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
         lesson_participant_id: participant.id,
         student_id: participant.student_id,
         source_type: 'lesson',
-        commitment_id: commitment.id,
+        commitment_id: commitment?.id || null,
         amount_charged: decision.chargeAmount,
         effective_date: toDateKey(instance.datetime_start),
         notes: null,
@@ -662,6 +764,7 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
     };
 
     const participantPayload = {
+      commitment_id: commitment?.id || null,
       price_charged: decision.chargeAmount,
       pricing_breakdown: pricingBreakdown,
       attendance_confirmed_at: participant.participant_status !== 'scheduled'
@@ -816,6 +919,9 @@ export async function createCommitmentTransfer(tenantClient, {
   if (!targetService) {
     return { error: 'missing_target_service_id' };
   }
+  if (normalizedCommitmentType === 'hmo') {
+    return { error: 'hmo_commitments_managed_via_authorizations' };
+  }
   if (resolvedDefaultChargeAmount !== null && (!Number.isFinite(Number(resolvedDefaultChargeAmount)) || Number(resolvedDefaultChargeAmount) < 0)) {
     return { error: 'invalid_target_default_charge_amount' };
   }
@@ -942,7 +1048,7 @@ export async function fetchBillingSnapshot(tenantClient, {
   const commitments = rawCommitments.map((row) => enrichCommitment(row, studentMap, serviceMap));
   const commitmentBalanceMap = new Map(commitments.map((row) => [row.id, row]));
 
-  const [lessonHistory, allEntries] = await Promise.all([
+  const [lessonHistory, allEntries, hmoAuthorizations] = await Promise.all([
     fetchLessonBillingHistory(tenantClient, {
       studentId: normalizedStudentId,
       startDate: normalizedStartDate,
@@ -954,6 +1060,9 @@ export async function fetchBillingSnapshot(tenantClient, {
       studentId: normalizedStudentId,
       commitmentBalanceMap,
     }),
+    normalizedStudentId
+      ? loadHmoAuthorizations(tenantClient, { studentId: normalizedStudentId })
+      : Promise.resolve([]),
   ]);
 
   const filteredEntries = allEntries.filter((entry) => {
@@ -988,6 +1097,7 @@ export async function fetchBillingSnapshot(tenantClient, {
       billing_consumption_policy: policies.billingConsumptionPolicy,
     },
     commitments,
+    hmo_authorizations: hmoAuthorizations,
     billing_queue: billingQueue,
     lesson_history: lessonHistory,
     entries: manualEntries,

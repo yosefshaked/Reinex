@@ -12,68 +12,66 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
+import { HMO_PAYMENT_MODES, loadHmoProviders } from '../_shared/hmo.js';
 
-const SETTINGS_KEY = 'medical_providers';
+const MAX_BODY_BYTES = 48 * 1024;
 
-function createProviderId() {
-  if (typeof randomUUID === 'function') {
-    try {
-      return randomUUID();
-    } catch {
-      // fall through to fallback
-    }
-  }
-  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}-${Math.random().toString(16).slice(2, 10)}`;
+function normalizeTrackPayload(body = {}) {
+  const paymentMode = normalizeString(body?.payment_mode).toLowerCase();
+  return {
+    provider_id: normalizeString(body?.provider_id),
+    name: normalizeString(body?.name),
+    payment_mode: HMO_PAYMENT_MODES.has(paymentMode) ? paymentMode : '',
+    default_customer_charge_amount: body?.default_customer_charge_amount === '' || body?.default_customer_charge_amount == null
+      ? 0
+      : Number(body.default_customer_charge_amount),
+    default_insurer_claim_amount: body?.default_insurer_claim_amount === '' || body?.default_insurer_claim_amount == null
+      ? 0
+      : Number(body.default_insurer_claim_amount),
+    default_workflow_notes: normalizeString(body?.default_workflow_notes) || '',
+    is_active: body?.is_active !== false,
+    metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+  };
 }
 
-function normalizeProviderEntries(candidate) {
-  if (!Array.isArray(candidate)) {
-    return [];
-  }
-
-  const normalized = [];
-  const seen = new Set();
-
-  for (const entry of candidate) {
-    if (!entry) {
-      continue;
-    }
-
-    if (typeof entry === 'object') {
-      const id = typeof entry.id === 'string' ? entry.id.trim() : '';
-      const name = typeof entry.name === 'string' ? entry.name.trim() : '';
-      if (id && name && !seen.has(id)) {
-        seen.add(id);
-        normalized.push({ id, name });
-      }
-      continue;
-    }
-
-    if (typeof entry === 'string') {
-      const value = entry.trim();
-      if (value && !seen.has(value)) {
-        seen.add(value);
-        normalized.push({ id: value, name: value });
-      }
-    }
-  }
-
-  return normalized;
-}
-
-async function loadExistingProviders(tenantClient) {
+async function loadFallbackProvidersFromSettings(tenantClient) {
   const { data, error } = await tenantClient
     .from('Settings')
     .select('settings_value')
-    .eq('key', SETTINGS_KEY)
+    .eq('key', 'medical_providers')
     .maybeSingle();
 
-  if (error && error.code !== 'PGRST116') {
+  if (error && error.code !== 'PGRST116' && error.code !== '42P01') {
     throw error;
   }
 
   const payload = data?.settings_value ?? [];
-  return normalizeProviderEntries(Array.isArray(payload) ? payload : payload?.providers);
+  const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.providers) ? payload.providers : [];
+  return rows
+    .map((entry) => {
+      if (!entry) return null;
+      if (typeof entry === 'string') {
+        const name = entry.trim();
+        return name ? { id: name, name, is_active: true, tracks: [] } : null;
+      }
+      const name = normalizeString(entry?.name);
+      const id = normalizeString(entry?.id) || name;
+      return name ? { id, name, is_active: true, tracks: [] } : null;
+    })
+    .filter(Boolean);
+}
+
+async function respondWithProviders(context, tenantClient) {
+  try {
+    const providers = await loadHmoProviders(tenantClient);
+    return respond(context, 200, { providers }, { 'Cache-Control': 'no-store' });
+  } catch (error) {
+    if (error?.code === '42P01') {
+      const providers = await loadFallbackProvidersFromSettings(tenantClient);
+      return respond(context, 200, { providers }, { 'Cache-Control': 'no-store' });
+    }
+    throw error;
+  }
 }
 
 export default async function (context, req) {
@@ -81,43 +79,30 @@ export default async function (context, req) {
 
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    context.log?.warn?.('settings-medical-providers: missing bearer token');
     return respond(context, 401, { message: 'missing bearer' });
   }
 
   const env = readEnv(context);
   const adminConfig = readSupabaseAdminConfig(env);
-
   if (!adminConfig.supabaseUrl || !adminConfig.serviceRoleKey) {
-    context.log?.error?.('settings-medical-providers: missing Supabase admin credentials');
     return respond(context, 500, { message: 'server_misconfigured' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
-
-  let authResult;
-  try {
-    authResult = await supabase.auth.getUser(authorization.token);
-  } catch (error) {
-    context.log?.error?.('settings-medical-providers: failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
-  }
-
+  const authResult = await supabase.auth.getUser(authorization.token);
   if (authResult.error || !authResult.data?.user?.id) {
-    context.log?.warn?.('settings-medical-providers: token did not resolve to user');
     return respond(context, 401, { message: 'invalid or expired token' });
   }
 
   const method = String(req.method || 'GET').toUpperCase();
-  if (!['GET', 'POST'].includes(method)) {
-    return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET,POST' });
+  if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method)) {
+    return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET,POST,PUT,DELETE' });
   }
 
   const body = method === 'GET'
     ? {}
-    : parseJsonBodyWithLimit(req, 16 * 1024, { mode: 'observe', context, endpoint: 'settings-medical-providers' });
+    : parseJsonBodyWithLimit(req, MAX_BODY_BYTES, { mode: 'observe', context, endpoint: 'settings-medical-providers' });
   const orgId = resolveOrgId(req, body);
-
   if (!orgId) {
     return respond(context, 400, { message: 'invalid org id' });
   }
@@ -126,11 +111,7 @@ export default async function (context, req) {
   try {
     role = await ensureMembership(supabase, orgId, authResult.data.user.id);
   } catch (membershipError) {
-    context.log?.error?.('settings-medical-providers: failed to verify membership', {
-      message: membershipError?.message,
-      orgId,
-      userId: authResult.data.user.id,
-    });
+    context.log?.error?.('settings-medical-providers: failed to verify membership', { message: membershipError?.message });
     return respond(context, 500, { message: 'failed_to_verify_membership' });
   }
 
@@ -145,11 +126,10 @@ export default async function (context, req) {
 
   if (method === 'GET') {
     try {
-      const providers = await loadExistingProviders(tenantClient);
-      return respond(context, 200, { providers }, { 'Cache-Control': 'no-store' });
+      return await respondWithProviders(context, tenantClient);
     } catch (error) {
       context.log?.error?.('settings-medical-providers: failed to load providers', { message: error?.message });
-      return respond(context, 500, { message: 'failed_to_load_providers' });
+      return respond(context, 500, { message: error?.code === '42P01' ? 'schema_upgrade_required' : 'failed_to_load_providers' });
     }
   }
 
@@ -157,44 +137,221 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const nameInput = normalizeString(body?.name);
-  if (!nameInput) {
-    return respond(context, 400, { message: 'missing_provider_name' });
-  }
-  if (nameInput.length > 120) {
-    return respond(context, 400, { message: 'provider_name_too_long' });
-  }
-
-  let existingProviders;
-  try {
-    existingProviders = await loadExistingProviders(tenantClient);
-  } catch (error) {
-    context.log?.error?.('settings-medical-providers: failed to load providers before insert', { message: error?.message });
-    return respond(context, 500, { message: 'failed_to_load_providers' });
-  }
-
-  const duplicate = existingProviders.find((provider) => provider.name.toLowerCase() === nameInput.toLowerCase());
-  if (duplicate) {
-    return respond(context, 409, { message: 'provider_already_exists', duplicate: duplicate });
-  }
-
-  const newProvider = { id: createProviderId(), name: nameInput };
-  const updated = [...existingProviders, newProvider];
-
-  const { error: upsertError } = await tenantClient
-    .from('Settings')
-    .upsert({ key: SETTINGS_KEY, settings_value: updated }, { onConflict: 'key' });
-
-  if (upsertError) {
-    context.log?.error?.('settings-medical-providers: failed to save provider', { message: upsertError.message });
-    return respond(context, 500, { message: 'failed_to_save_provider' });
-  }
+  const entity = normalizeString(body?.entity).toLowerCase() || 'provider';
 
   try {
-    const refreshed = await loadExistingProviders(tenantClient);
-    return respond(context, 200, { providers: refreshed, created: newProvider });
+    if (method === 'POST' && entity === 'provider') {
+      const name = normalizeString(body?.name);
+      if (!name) {
+        return respond(context, 400, { message: 'missing_provider_name' });
+      }
+      if (name.length > 120) {
+        return respond(context, 400, { message: 'provider_name_too_long' });
+      }
+
+      const payload = {
+        id: normalizeString(body?.id) || randomUUID(),
+        name,
+        is_active: body?.is_active !== false,
+        metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+      };
+
+      const { data, error } = await tenantClient
+        .from('hmo_providers')
+        .insert(payload)
+        .select('id, name, is_active, metadata, created_at, updated_at')
+        .maybeSingle();
+
+      if (error) {
+        if (error.code === '23505') {
+          return respond(context, 409, { message: 'provider_already_exists' });
+        }
+        throw error;
+      }
+
+      const providers = await loadHmoProviders(tenantClient);
+      return respond(context, 201, { providers, created: data });
+    }
+
+    if (method === 'POST' && entity === 'track') {
+      const track = normalizeTrackPayload(body);
+      if (!track.provider_id) {
+        return respond(context, 400, { message: 'missing_provider_id' });
+      }
+      if (!track.name) {
+        return respond(context, 400, { message: 'missing_track_name' });
+      }
+      if (!track.payment_mode) {
+        return respond(context, 400, { message: 'invalid_payment_mode' });
+      }
+      if (!Number.isFinite(track.default_customer_charge_amount) || track.default_customer_charge_amount < 0) {
+        return respond(context, 400, { message: 'invalid_default_customer_charge_amount' });
+      }
+      if (!Number.isFinite(track.default_insurer_claim_amount) || track.default_insurer_claim_amount < 0) {
+        return respond(context, 400, { message: 'invalid_default_insurer_claim_amount' });
+      }
+
+      const { data, error } = await tenantClient
+        .from('hmo_provider_tracks')
+        .insert({
+          id: normalizeString(body?.id) || randomUUID(),
+          ...track,
+        })
+        .select('id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
+        .maybeSingle();
+
+      if (error) {
+        if (error.code === '23505') {
+          return respond(context, 409, { message: 'track_already_exists' });
+        }
+        throw error;
+      }
+
+      const providers = await loadHmoProviders(tenantClient);
+      return respond(context, 201, { providers, created: data });
+    }
+
+    if (method === 'PUT' && entity === 'provider') {
+      const id = normalizeString(body?.id);
+      const name = normalizeString(body?.name);
+      if (!id) {
+        return respond(context, 400, { message: 'missing_provider_id' });
+      }
+      if (!name) {
+        return respond(context, 400, { message: 'missing_provider_name' });
+      }
+
+      const { data, error } = await tenantClient
+        .from('hmo_providers')
+        .update({
+          name,
+          is_active: body?.is_active !== false,
+          metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .select('id, name, is_active, metadata, created_at, updated_at')
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+      if (!data) {
+        return respond(context, 404, { message: 'provider_not_found' });
+      }
+
+      const providers = await loadHmoProviders(tenantClient);
+      return respond(context, 200, { providers, updated: data });
+    }
+
+    if (method === 'PUT' && entity === 'track') {
+      const id = normalizeString(body?.id);
+      if (!id) {
+        return respond(context, 400, { message: 'missing_track_id' });
+      }
+      const track = normalizeTrackPayload(body);
+      if (!track.provider_id) {
+        return respond(context, 400, { message: 'missing_provider_id' });
+      }
+      if (!track.name) {
+        return respond(context, 400, { message: 'missing_track_name' });
+      }
+      if (!track.payment_mode) {
+        return respond(context, 400, { message: 'invalid_payment_mode' });
+      }
+
+      const { data, error } = await tenantClient
+        .from('hmo_provider_tracks')
+        .update({
+          ...track,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .select('id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+      if (!data) {
+        return respond(context, 404, { message: 'track_not_found' });
+      }
+
+      const providers = await loadHmoProviders(tenantClient);
+      return respond(context, 200, { providers, updated: data });
+    }
+
+    if (method === 'DELETE' && entity === 'provider') {
+      const id = normalizeString(body?.id);
+      if (!id) {
+        return respond(context, 400, { message: 'missing_provider_id' });
+      }
+
+      const [{ data: trackRows, error: trackError }, { data: authRows, error: authError }, { data: commitmentRows, error: commitmentError }] = await Promise.all([
+        tenantClient.from('hmo_provider_tracks').select('id').eq('provider_id', id).limit(1),
+        tenantClient.from('hmo_authorizations').select('id').eq('provider_id', id).limit(1),
+        tenantClient.from('commitments').select('id').eq('hmo_provider_id', id).limit(1),
+      ]);
+
+      if (trackError && trackError.code !== '42P01') throw trackError;
+      if (authError && authError.code !== '42P01') throw authError;
+      if (commitmentError && commitmentError.code !== '42P01') throw commitmentError;
+      if ((trackRows || []).length > 0 || (authRows || []).length > 0 || (commitmentRows || []).length > 0) {
+        return respond(context, 409, { message: 'provider_in_use' });
+      }
+
+      const { data, error } = await tenantClient
+        .from('hmo_providers')
+        .delete()
+        .eq('id', id)
+        .select('id')
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) {
+        return respond(context, 404, { message: 'provider_not_found' });
+      }
+
+      const providers = await loadHmoProviders(tenantClient);
+      return respond(context, 200, { providers, deleted: { id } });
+    }
+
+    if (method === 'DELETE' && entity === 'track') {
+      const id = normalizeString(body?.id);
+      if (!id) {
+        return respond(context, 400, { message: 'missing_track_id' });
+      }
+
+      const [{ data: authRows, error: authError }, { data: commitmentRows, error: commitmentError }] = await Promise.all([
+        tenantClient.from('hmo_authorizations').select('id').eq('provider_track_id', id).limit(1),
+        tenantClient.from('commitments').select('id').eq('hmo_provider_track_id', id).limit(1),
+      ]);
+
+      if (authError && authError.code !== '42P01') throw authError;
+      if (commitmentError && commitmentError.code !== '42P01') throw commitmentError;
+      if ((authRows || []).length > 0 || (commitmentRows || []).length > 0) {
+        return respond(context, 409, { message: 'track_in_use' });
+      }
+
+      const { data, error } = await tenantClient
+        .from('hmo_provider_tracks')
+        .delete()
+        .eq('id', id)
+        .select('id')
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) {
+        return respond(context, 404, { message: 'track_not_found' });
+      }
+
+      const providers = await loadHmoProviders(tenantClient);
+      return respond(context, 200, { providers, deleted: { id } });
+    }
+
+    return respond(context, 400, { message: 'invalid_entity' });
   } catch (error) {
-    context.log?.warn?.('settings-medical-providers: provider saved but reload failed', { message: error?.message });
-    return respond(context, 200, { providers: updated, created: newProvider });
+    context.log?.error?.('settings-medical-providers: request failed', { message: error?.message, code: error?.code });
+    return respond(context, 500, { message: error?.code === '42P01' ? 'schema_upgrade_required' : 'failed_to_manage_providers' });
   }
 }

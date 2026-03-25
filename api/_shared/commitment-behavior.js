@@ -74,29 +74,81 @@ export function normalizeCommitmentBehavior(commitment) {
   }
 
   if (commitmentType === 'hmo') {
-    const paymentMode = normalizeString(metadata?.hmo?.payment_mode).toLowerCase() || 'partially_paid_by_hmo';
-    const authorizedLessons = Math.max(0, Math.round(coerceNumber(metadata?.hmo?.authorized_lessons, 0)));
-    const customerChargeAmount = Number.isFinite(Number(metadata?.hmo?.customer_charge_amount))
-      ? roundCurrency(Number(metadata.hmo.customer_charge_amount))
+    const authorization = isPlainObject(commitment?.hmo_authorization) ? commitment.hmo_authorization : null;
+    const providerTrack = isPlainObject(commitment?.hmo_provider_track)
+      ? commitment.hmo_provider_track
+      : isPlainObject(authorization?.provider_track)
+        ? authorization.provider_track
+        : null;
+    const provider = isPlainObject(commitment?.hmo_provider)
+      ? commitment.hmo_provider
+      : isPlainObject(authorization?.provider)
+        ? authorization.provider
+        : null;
+    const paymentMode = normalizeString(
+      authorization?.resolved_payment_mode
+      || authorization?.payment_mode_override
+      || providerTrack?.payment_mode
+      || metadata?.hmo?.payment_mode,
+    ).toLowerCase() || 'partially_paid_by_hmo';
+    const authorizedLessons = Math.max(0, Math.round(coerceNumber(
+      authorization?.authorized_lessons ?? metadata?.hmo?.authorized_lessons,
+      0,
+    )));
+    const customerChargeAmount = Number.isFinite(Number(
+      authorization?.resolved_customer_charge_amount
+      ?? authorization?.customer_charge_amount_override
+      ?? providerTrack?.default_customer_charge_amount
+      ?? metadata?.hmo?.customer_charge_amount,
+    ))
+      ? roundCurrency(Number(
+        authorization?.resolved_customer_charge_amount
+        ?? authorization?.customer_charge_amount_override
+        ?? providerTrack?.default_customer_charge_amount
+        ?? metadata?.hmo?.customer_charge_amount,
+      ))
       : (Number.isFinite(Number(commitment?.default_charge_amount)) ? roundCurrency(Number(commitment.default_charge_amount)) : 0);
-    const insurerClaimAmount = Number.isFinite(Number(metadata?.hmo?.insurer_claim_amount))
-      ? roundCurrency(Number(metadata.hmo.insurer_claim_amount))
+    const insurerClaimAmount = Number.isFinite(Number(
+      authorization?.resolved_insurer_claim_amount
+      ?? authorization?.insurer_claim_amount_override
+      ?? providerTrack?.default_insurer_claim_amount
+      ?? metadata?.hmo?.insurer_claim_amount,
+    ))
+      ? roundCurrency(Number(
+        authorization?.resolved_insurer_claim_amount
+        ?? authorization?.insurer_claim_amount_override
+        ?? providerTrack?.default_insurer_claim_amount
+        ?? metadata?.hmo?.insurer_claim_amount,
+      ))
       : 0;
+    const workflowNotes = normalizeString(
+      authorization?.resolved_workflow_notes
+      || authorization?.workflow_notes_override
+      || providerTrack?.default_workflow_notes
+      || metadata?.hmo?.workflow_notes,
+    );
 
     return {
       type: 'hmo',
       package_items: [],
       subscription: null,
       hmo: {
+        provider_id: provider?.id || commitment?.hmo_provider_id || null,
+        provider_track_id: providerTrack?.id || commitment?.hmo_provider_track_id || null,
+        authorization_id: authorization?.id || commitment?.hmo_authorization_id || null,
         suggestion_id: normalizeString(metadata?.hmo?.suggestion_id) || 'custom',
-        provider_name: normalizeString(metadata?.hmo?.provider_name) || 'גורם מממן',
+        provider_name: normalizeString(provider?.name || authorization?.provider?.name || metadata?.hmo?.provider_name) || 'גורם מממן',
+        provider_track_name: normalizeString(providerTrack?.name) || '',
         payment_mode: paymentMode,
         customer_charge_amount: customerChargeAmount,
         insurer_claim_amount: insurerClaimAmount,
-        authorization_reference: normalizeString(metadata?.hmo?.authorization_reference) || '',
+        authorization_reference: normalizeString(authorization?.authorization_reference || metadata?.hmo?.authorization_reference) || '',
         authorized_lessons: authorizedLessons,
-        reminder_date: normalizeString(metadata?.hmo?.reminder_date) || '',
-        workflow_notes: normalizeString(metadata?.hmo?.workflow_notes) || '',
+        reminder_date: normalizeString(authorization?.reminder_date || metadata?.hmo?.reminder_date) || '',
+        valid_from: normalizeString(authorization?.valid_from) || '',
+        expires_at: normalizeString(authorization?.expires_at || commitment?.expires_at) || '',
+        status: normalizeString(authorization?.status) || '',
+        workflow_notes: workflowNotes || '',
       },
       manual_credit: null,
     };

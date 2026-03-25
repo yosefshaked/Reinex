@@ -19,12 +19,20 @@ import DocumentRulesManager from '@/components/settings/DocumentRulesManager.jsx
 import MyInstructorDocuments from '@/components/settings/MyInstructorDocuments.jsx';
 import OrgDocumentsManager from '@/components/settings/OrgDocumentsManager.jsx';
 import AuditLogViewer from '@/components/settings/AuditLogViewer.jsx';
+import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
 import { fetchSettingsValue } from '@/features/settings/api/settings.js';
 import { upsertSetting } from '@/features/settings/api/settings.js';
 import { OnboardingCard } from '@/features/onboarding/components/OnboardingCard.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import PageLayout from '@/components/ui/PageLayout.jsx';
+
+const DEFAULT_BILLING_POLICY = {
+  attended: true,
+  no_show: false,
+  cancelled_student: false,
+  cancelled_clinic: false,
+};
 
 export default function Settings() {
   const { activeOrg, activeOrgHasConnection, tenantClientReady, activeOrgId, enableDirectory, disableDirectory, refreshOrganizations } = useOrg();
@@ -35,13 +43,15 @@ export default function Settings() {
   const setupDialogAutoOpenRef = useRef(!activeOrgHasConnection);
   const orgIdSyncCompletedRef = useRef(new Set());
   const orgIdSyncInFlightRef = useRef(new Set());
-  const [selectedModule, setSelectedModule] = useState(null); // 'setup' | 'orgMembers' | 'sessionForm' | 'services' | 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs'
+  const [selectedModule, setSelectedModule] = useState(null); // 'setup' | 'orgMembers' | 'sessionForm' | 'services' | 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
   const [backupEnabled, setBackupEnabled] = useState(false);
   const [logoEnabled, setLogoEnabled] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
   const [orgDocsVisibility, setOrgDocsVisibility] = useState(false);
   const [refreshingPermissions, setRefreshingPermissions] = useState(false);
   const [isInstructor, setIsInstructor] = useState(false);
+  const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
+  const [savingBillingPolicy, setSavingBillingPolicy] = useState(false);
 
   // Fetch backup permissions and initialize if empty using the proper RPC function
   useEffect(() => {
@@ -261,6 +271,40 @@ export default function Settings() {
   }, [session, activeOrgId, activeOrgHasConnection]);
 
   useEffect(() => {
+    if (!session || !activeOrgId || !activeOrgHasConnection || !canManageSessionForm) {
+      setBillingPolicy(DEFAULT_BILLING_POLICY);
+      return;
+    }
+
+    let cancelled = false;
+    const loadBillingPolicy = async () => {
+      try {
+        const response = await fetchSettingsValue({
+          session,
+          orgId: activeOrgId,
+          key: 'billing_consumption_policy',
+        });
+        if (!cancelled) {
+          setBillingPolicy({
+            ...DEFAULT_BILLING_POLICY,
+            ...(response?.value && typeof response.value === 'object' ? response.value : {}),
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load billing policy in settings', error);
+        if (!cancelled) {
+          setBillingPolicy(DEFAULT_BILLING_POLICY);
+        }
+      }
+    };
+
+    void loadBillingPolicy();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, activeOrgId, activeOrgHasConnection, canManageSessionForm]);
+
+  useEffect(() => {
     if (activeOrgHasConnection) {
       setupDialogAutoOpenRef.current = false;
   // close any open module dialog
@@ -354,6 +398,28 @@ export default function Settings() {
       toast.error('שגיאה בעדכון הרשאות');
     } finally {
       setRefreshingPermissions(false);
+    }
+  };
+
+  const handleSaveBillingPolicy = async () => {
+    if (!session || !activeOrgId || !canManageSessionForm) {
+      return;
+    }
+
+    setSavingBillingPolicy(true);
+    try {
+      await upsertSetting({
+        session,
+        orgId: activeOrgId,
+        key: 'billing_consumption_policy',
+        value: billingPolicy,
+      });
+      toast.success('מדיניות החיוב נשמרה.');
+    } catch (error) {
+      console.error('Failed to save billing policy from settings', error);
+      toast.error('שמירת מדיניות החיוב נכשלה.');
+    } finally {
+      setSavingBillingPolicy(false);
     }
   };
 
@@ -594,6 +660,33 @@ export default function Settings() {
                 variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
               >
                 <EyeOff className="h-4 w-4" /> ניהול תצוגת תלמידים
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
+            <CardHeader className="space-y-2 pb-3 flex-1">
+              <div className="flex items-start gap-2">
+                <div className="rounded-lg bg-indigo-100 p-2 text-indigo-600 transition-colors group-hover:bg-indigo-600 group-hover:text-white">
+                  <Briefcase className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <CardTitle className="text-lg font-bold text-slate-900">
+                  חיובים וגורמים מממנים
+                </CardTitle>
+              </div>
+              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
+                מדיניות חיוב שיעורים, הגדרת גורמים מממנים ומסלולי מימון קבועים.
+              </p>
+            </CardHeader>
+            <CardContent className="pt-0 mt-auto">
+              <Button
+                size="sm"
+                className="w-full gap-2"
+                onClick={() => setSelectedModule('billingSettings')}
+                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
+                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+              >
+                <Briefcase className="h-4 w-4" /> פתיחת הגדרות חיוב
               </Button>
             </CardContent>
           </Card>
@@ -878,6 +971,7 @@ export default function Settings() {
                 selectedModule === 'tags' ? <Tag /> :
                 selectedModule === 'studentVisibility' ? <EyeOff /> :
                 selectedModule === 'storage' ? <HardDrive /> :
+                selectedModule === 'billingSettings' ? <Briefcase /> :
                 selectedModule === 'documents' ? <FileText /> :
                 selectedModule === 'orgDocuments' ? <Briefcase /> :
                 selectedModule === 'myDocuments' ? <FileText /> :
@@ -894,6 +988,7 @@ export default function Settings() {
                 selectedModule === 'tags' ? 'ניהול תגיות וסיווגים' :
                 selectedModule === 'studentVisibility' ? 'תצוגת תלמידים לא פעילים' :
                 selectedModule === 'storage' ? 'הגדרות אחסון' :
+                selectedModule === 'billingSettings' ? 'חיובים וגורמים מממנים' :
                 selectedModule === 'documents' ? 'ניהול מסמכים' :
                 selectedModule === 'orgDocuments' ? 'מסמכי הארגון' :
                 selectedModule === 'myDocuments' ? 'המסמכים שלי' :
@@ -951,6 +1046,15 @@ export default function Settings() {
                 )}
                 {selectedModule === 'storage' && (
                   <StorageSettingsCard session={session} orgId={activeOrgId} />
+                )}
+                {selectedModule === 'billingSettings' && (
+                  <BillingSettingsWorkspace
+                    billingPolicy={billingPolicy}
+                    setBillingPolicy={setBillingPolicy}
+                    canMutateBillingPolicy={canManageSessionForm}
+                    savingPolicy={savingBillingPolicy}
+                    onSaveBillingPolicy={handleSaveBillingPolicy}
+                  />
                 )}
                 {selectedModule === 'documents' && (
                   <DocumentRulesManager session={session} orgId={activeOrgId} />

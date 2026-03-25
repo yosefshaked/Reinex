@@ -52,6 +52,7 @@ function mapBillingActionError(errorCode) {
     case 'commitment_service_exhausted':
     case 'authorization_exhausted':
     case 'transfer_amount_exceeds_remaining_balance':
+    case 'hmo_commitments_managed_via_authorizations':
       return { status: 409, body: { message: errorCode } };
     default:
       return { status: 400, body: { message: errorCode || 'invalid_billing_action' } };

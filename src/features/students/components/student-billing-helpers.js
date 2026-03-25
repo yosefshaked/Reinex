@@ -251,9 +251,10 @@ export function getCommitmentCoverageSummary(commitment, services = []) {
 
   if (type === 'hmo') {
     const providerName = runtime?.hmo?.provider_name || 'גורם מממן';
+    const trackName = runtime?.hmo?.provider_track_name || '';
     const remainingLessons = runtime?.hmo?.remaining_lessons ?? 0;
     const authorizedLessons = runtime?.hmo?.authorized_lessons ?? 0;
-    return `${providerName} • נותרו ${remainingLessons} מתוך ${authorizedLessons}`;
+    return `${providerName}${trackName ? ` • ${trackName}` : ''} • נותרו ${remainingLessons} מתוך ${authorizedLessons}`;
   }
 
   return 'יתרה מותאמת אישית ללא לוגיקה מיוחדת';
@@ -262,7 +263,9 @@ export function getCommitmentCoverageSummary(commitment, services = []) {
 export function getCommitmentActionHint(commitment) {
   const type = commitment?.commitment_type || commitment?.runtime?.type;
   if (type === 'hmo') {
-    return commitment?.runtime?.hmo?.workflow_notes || 'המשך הטיפול נקבע ידנית לפי הגדרת הגורם המממן.';
+    const authorizationReference = commitment?.runtime?.hmo?.authorization_reference || '';
+    const workflowNotes = commitment?.runtime?.hmo?.workflow_notes || 'אישור גורם מממן פעיל מנהל את ההתחייבות הזו.';
+    return authorizationReference ? `${workflowNotes} • מס׳ אישור ${authorizationReference}` : workflowNotes;
   }
   if (type === 'package') {
     return 'החיוב ייקבע לפי השירות של השיעור והשורה המתאימה בחבילה.';

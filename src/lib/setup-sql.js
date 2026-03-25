@@ -1283,6 +1283,245 @@ CREATE INDEX IF NOT EXISTS lesson_participants_locked_at_idx
   ON public.lesson_participants (locked_at) WHERE locked_at IS NOT NULL;
 
 -- -----------------------------------------------------------------
+-- public.hmo_providers
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.hmo_providers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  metadata jsonb NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.hmo_providers
+  ADD COLUMN IF NOT EXISTS name text,
+  ADD COLUMN IF NOT EXISTS is_active boolean,
+  ADD COLUMN IF NOT EXISTS metadata jsonb,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+
+CREATE UNIQUE INDEX IF NOT EXISTS hmo_providers_name_uidx
+  ON public.hmo_providers (lower(name));
+
+-- -----------------------------------------------------------------
+-- public.hmo_provider_tracks
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.hmo_provider_tracks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_id uuid NOT NULL,
+  name text NOT NULL,
+  payment_mode text NOT NULL DEFAULT 'partially_paid_by_hmo',
+  default_customer_charge_amount numeric NOT NULL DEFAULT 0,
+  default_insurer_claim_amount numeric NOT NULL DEFAULT 0,
+  default_workflow_notes text NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  metadata jsonb NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.hmo_provider_tracks
+  ADD COLUMN IF NOT EXISTS provider_id uuid,
+  ADD COLUMN IF NOT EXISTS name text,
+  ADD COLUMN IF NOT EXISTS payment_mode text,
+  ADD COLUMN IF NOT EXISTS default_customer_charge_amount numeric,
+  ADD COLUMN IF NOT EXISTS default_insurer_claim_amount numeric,
+  ADD COLUMN IF NOT EXISTS default_workflow_notes text,
+  ADD COLUMN IF NOT EXISTS is_active boolean,
+  ADD COLUMN IF NOT EXISTS metadata jsonb,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_provider_tracks
+    ADD CONSTRAINT hmo_provider_tracks_provider_id_fkey
+    FOREIGN KEY (provider_id) REFERENCES public.hmo_providers(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_provider_tracks
+    ADD CONSTRAINT hmo_provider_tracks_payment_mode_check
+    CHECK (payment_mode IN ('fully_paid_by_hmo', 'partially_paid_by_hmo', 'fully_paid_by_customer'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_provider_tracks
+    ADD CONSTRAINT hmo_provider_tracks_customer_charge_non_negative_check
+    CHECK (default_customer_charge_amount >= 0);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_provider_tracks
+    ADD CONSTRAINT hmo_provider_tracks_insurer_claim_non_negative_check
+    CHECK (default_insurer_claim_amount >= 0);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS hmo_provider_tracks_provider_name_uidx
+  ON public.hmo_provider_tracks (provider_id, lower(name));
+
+CREATE INDEX IF NOT EXISTS hmo_provider_tracks_provider_id_idx
+  ON public.hmo_provider_tracks (provider_id);
+
+-- -----------------------------------------------------------------
+-- public.hmo_authorizations
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.hmo_authorizations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id uuid NOT NULL,
+  service_id uuid NOT NULL,
+  provider_id uuid NOT NULL,
+  provider_track_id uuid NOT NULL,
+  authorization_reference text NULL,
+  authorized_lessons int NOT NULL DEFAULT 0,
+  valid_from date NULL,
+  expires_at date NULL,
+  reminder_date date NULL,
+  customer_charge_amount_override numeric NULL,
+  insurer_claim_amount_override numeric NULL,
+  workflow_notes_override text NULL,
+  status text NOT NULL DEFAULT 'active',
+  notes text NULL,
+  metadata jsonb NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.hmo_authorizations
+  ADD COLUMN IF NOT EXISTS student_id uuid,
+  ADD COLUMN IF NOT EXISTS service_id uuid,
+  ADD COLUMN IF NOT EXISTS provider_id uuid,
+  ADD COLUMN IF NOT EXISTS provider_track_id uuid,
+  ADD COLUMN IF NOT EXISTS authorization_reference text,
+  ADD COLUMN IF NOT EXISTS authorized_lessons int,
+  ADD COLUMN IF NOT EXISTS valid_from date,
+  ADD COLUMN IF NOT EXISTS expires_at date,
+  ADD COLUMN IF NOT EXISTS reminder_date date,
+  ADD COLUMN IF NOT EXISTS customer_charge_amount_override numeric,
+  ADD COLUMN IF NOT EXISTS insurer_claim_amount_override numeric,
+  ADD COLUMN IF NOT EXISTS workflow_notes_override text,
+  ADD COLUMN IF NOT EXISTS status text,
+  ADD COLUMN IF NOT EXISTS notes text,
+  ADD COLUMN IF NOT EXISTS metadata jsonb,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_authorizations
+    ADD CONSTRAINT hmo_authorizations_student_id_fkey
+    FOREIGN KEY (student_id) REFERENCES public.students(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_authorizations
+    ADD CONSTRAINT hmo_authorizations_service_id_fkey
+    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_authorizations
+    ADD CONSTRAINT hmo_authorizations_provider_id_fkey
+    FOREIGN KEY (provider_id) REFERENCES public.hmo_providers(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_authorizations
+    ADD CONSTRAINT hmo_authorizations_provider_track_id_fkey
+    FOREIGN KEY (provider_track_id) REFERENCES public.hmo_provider_tracks(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_authorizations
+    ADD CONSTRAINT hmo_authorizations_status_check
+    CHECK (status IN ('active', 'cancelled', 'completed', 'expired'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_authorizations
+    ADD CONSTRAINT hmo_authorizations_authorized_lessons_non_negative_check
+    CHECK (authorized_lessons >= 0);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_authorizations
+    ADD CONSTRAINT hmo_authorizations_customer_override_non_negative_check
+    CHECK (customer_charge_amount_override IS NULL OR customer_charge_amount_override >= 0);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_authorizations
+    ADD CONSTRAINT hmo_authorizations_insurer_override_non_negative_check
+    CHECK (insurer_claim_amount_override IS NULL OR insurer_claim_amount_override >= 0);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS hmo_authorizations_student_id_idx
+  ON public.hmo_authorizations (student_id);
+
+CREATE INDEX IF NOT EXISTS hmo_authorizations_service_id_idx
+  ON public.hmo_authorizations (service_id);
+
+CREATE INDEX IF NOT EXISTS hmo_authorizations_provider_id_idx
+  ON public.hmo_authorizations (provider_id);
+
+CREATE INDEX IF NOT EXISTS hmo_authorizations_provider_track_id_idx
+  ON public.hmo_authorizations (provider_track_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS hmo_authorizations_active_student_service_uidx
+  ON public.hmo_authorizations (student_id, service_id)
+  WHERE status = 'active';
+
+-- -----------------------------------------------------------------
 -- public.commitments
 -- -----------------------------------------------------------------
 
@@ -1299,7 +1538,10 @@ CREATE TABLE IF NOT EXISTS public.commitments (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NULL,
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  hmo_provider_id uuid NULL,
+  hmo_provider_track_id uuid NULL,
+  hmo_authorization_id uuid NULL
 );
 
 ALTER TABLE public.commitments
@@ -1314,7 +1556,10 @@ ALTER TABLE public.commitments
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS updated_at timestamptz,
   ADD COLUMN IF NOT EXISTS expires_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+  ADD COLUMN IF NOT EXISTS metadata jsonb,
+  ADD COLUMN IF NOT EXISTS hmo_provider_id uuid,
+  ADD COLUMN IF NOT EXISTS hmo_provider_track_id uuid,
+  ADD COLUMN IF NOT EXISTS hmo_authorization_id uuid;
 
 DO $$
 BEGIN
@@ -1331,6 +1576,36 @@ BEGIN
   ALTER TABLE public.commitments
     ADD CONSTRAINT commitments_service_id_fkey
     FOREIGN KEY (service_id) REFERENCES public."Services"(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.commitments
+    ADD CONSTRAINT commitments_hmo_provider_id_fkey
+    FOREIGN KEY (hmo_provider_id) REFERENCES public.hmo_providers(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.commitments
+    ADD CONSTRAINT commitments_hmo_provider_track_id_fkey
+    FOREIGN KEY (hmo_provider_track_id) REFERENCES public.hmo_provider_tracks(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.commitments
+    ADD CONSTRAINT commitments_hmo_authorization_id_fkey
+    FOREIGN KEY (hmo_authorization_id) REFERENCES public.hmo_authorizations(id);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -1368,6 +1643,9 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS commitments_student_id_idx ON public.commitments (student_id);
 CREATE INDEX IF NOT EXISTS commitments_transfer_ref_idx ON public.commitments (transfer_ref) WHERE transfer_ref IS NOT NULL;
+CREATE INDEX IF NOT EXISTS commitments_hmo_provider_id_idx ON public.commitments (hmo_provider_id) WHERE hmo_provider_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS commitments_hmo_provider_track_id_idx ON public.commitments (hmo_provider_track_id) WHERE hmo_provider_track_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS commitments_hmo_authorization_id_uidx ON public.commitments (hmo_authorization_id) WHERE hmo_authorization_id IS NOT NULL;
 
 DO $$
 BEGIN
@@ -1992,6 +2270,381 @@ VALUES
 ON CONFLICT ("key") DO NOTHING;
 
 -- -----------------------------------------------------------------
+-- HMO provider / authorization compatibility backfill
+-- -----------------------------------------------------------------
+
+WITH legacy_provider_entries AS (
+  SELECT
+    CASE
+      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'id'), '')
+      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
+    END AS legacy_key,
+    CASE
+      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'name'), '')
+      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
+    END AS provider_name
+  FROM public."Settings" s
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE
+      WHEN jsonb_typeof(s.settings_value) = 'array' THEN s.settings_value
+      WHEN jsonb_typeof(s.settings_value) = 'object' AND jsonb_typeof(s.settings_value->'providers') = 'array' THEN s.settings_value->'providers'
+      ELSE '[]'::jsonb
+    END
+  ) AS entry
+  WHERE s.key = 'medical_providers'
+),
+normalized_legacy_providers AS (
+  SELECT DISTINCT
+    COALESCE(legacy_key, provider_name) AS provider_seed,
+    provider_name
+  FROM legacy_provider_entries
+  WHERE COALESCE(legacy_key, provider_name) IS NOT NULL
+    AND provider_name IS NOT NULL
+)
+INSERT INTO public.hmo_providers (id, name, is_active, metadata)
+SELECT
+  (
+    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 1, 8) || '-' ||
+    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 9, 4) || '-' ||
+    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 13, 4) || '-' ||
+    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 17, 4) || '-' ||
+    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 21, 12)
+  )::uuid,
+  provider_name,
+  true,
+  jsonb_build_object('legacy_source', 'settings.medical_providers', 'legacy_provider_seed', provider_seed)
+FROM normalized_legacy_providers
+ON CONFLICT (id) DO NOTHING;
+
+WITH legacy_provider_entries AS (
+  SELECT
+    CASE
+      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'id'), '')
+      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
+    END AS legacy_key,
+    CASE
+      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'name'), '')
+      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
+    END AS provider_name
+  FROM public."Settings" s
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE
+      WHEN jsonb_typeof(s.settings_value) = 'array' THEN s.settings_value
+      WHEN jsonb_typeof(s.settings_value) = 'object' AND jsonb_typeof(s.settings_value->'providers') = 'array' THEN s.settings_value->'providers'
+      ELSE '[]'::jsonb
+    END
+  ) AS entry
+  WHERE s.key = 'medical_providers'
+)
+UPDATE public.students st
+SET medical_provider = (
+  (
+    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 1, 8) || '-' ||
+    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 9, 4) || '-' ||
+    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 13, 4) || '-' ||
+    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 17, 4) || '-' ||
+    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 21, 12)
+  )::uuid
+)::text
+FROM legacy_provider_entries lp
+WHERE COALESCE(lp.legacy_key, lp.provider_name) IS NOT NULL
+  AND (
+    st.medical_provider = lp.legacy_key
+    OR st.medical_provider = lp.provider_name
+  );
+
+WITH legacy_hmo_commitments AS (
+  SELECT
+    c.id AS commitment_id,
+    c.student_id,
+    c.service_id,
+    c.created_at,
+    c.updated_at,
+    c.expires_at,
+    c.notes,
+    c.is_active,
+    c.default_charge_amount,
+    c.metadata,
+    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'provider_name'), ''), 'גורם מממן') AS provider_name,
+    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'payment_mode'), ''), 'partially_paid_by_hmo') AS payment_mode,
+    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'customer_charge_amount'), '')::numeric, c.default_charge_amount, 0) AS customer_charge_amount,
+    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'insurer_claim_amount'), '')::numeric, 0) AS insurer_claim_amount,
+    NULLIF(trim(c.metadata->'hmo'->>'workflow_notes'), '') AS workflow_notes,
+    NULLIF(trim(c.metadata->'hmo'->>'authorization_reference'), '') AS authorization_reference,
+    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'authorized_lessons'), '')::int, 0) AS authorized_lessons,
+    NULLIF(trim(c.metadata->'hmo'->>'reminder_date'), '')::date AS reminder_date,
+    COALESCE(c.hmo_authorization_id, c.id) AS authorization_id
+  FROM public.commitments c
+  WHERE c.commitment_type = 'hmo'
+),
+provider_rows AS (
+  SELECT DISTINCT
+    provider_name,
+    (
+      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
+      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
+      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
+      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
+      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
+    )::uuid AS provider_id
+  FROM legacy_hmo_commitments
+),
+inserted_providers AS (
+  INSERT INTO public.hmo_providers (id, name, is_active, metadata)
+  SELECT provider_id, provider_name, true, jsonb_build_object('legacy_source', 'commitments.metadata.hmo')
+  FROM provider_rows
+  ON CONFLICT (id) DO NOTHING
+  RETURNING id
+),
+track_rows AS (
+  SELECT DISTINCT
+    lhc.provider_name,
+    pr.provider_id,
+    lhc.payment_mode,
+    lhc.customer_charge_amount,
+    lhc.insurer_claim_amount,
+    lhc.workflow_notes,
+    (
+      substr(md5(
+        pr.provider_id::text || '|' ||
+        lhc.payment_mode || '|' ||
+        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
+        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
+        COALESCE(lhc.workflow_notes, '')
+      ), 1, 8) || '-' ||
+      substr(md5(
+        pr.provider_id::text || '|' ||
+        lhc.payment_mode || '|' ||
+        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
+        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
+        COALESCE(lhc.workflow_notes, '')
+      ), 9, 4) || '-' ||
+      substr(md5(
+        pr.provider_id::text || '|' ||
+        lhc.payment_mode || '|' ||
+        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
+        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
+        COALESCE(lhc.workflow_notes, '')
+      ), 13, 4) || '-' ||
+      substr(md5(
+        pr.provider_id::text || '|' ||
+        lhc.payment_mode || '|' ||
+        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
+        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
+        COALESCE(lhc.workflow_notes, '')
+      ), 17, 4) || '-' ||
+      substr(md5(
+        pr.provider_id::text || '|' ||
+        lhc.payment_mode || '|' ||
+        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
+        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
+        COALESCE(lhc.workflow_notes, '')
+      ), 21, 12)
+    )::uuid AS track_id
+  FROM legacy_hmo_commitments lhc
+  JOIN provider_rows pr ON pr.provider_name = lhc.provider_name
+),
+inserted_tracks AS (
+  INSERT INTO public.hmo_provider_tracks (
+    id,
+    provider_id,
+    name,
+    payment_mode,
+    default_customer_charge_amount,
+    default_insurer_claim_amount,
+    default_workflow_notes,
+    is_active,
+    metadata
+  )
+  SELECT
+    track_id,
+    provider_id,
+    'מסלול שהוסב • ' ||
+      CASE
+        WHEN payment_mode = 'fully_paid_by_hmo' THEN 'ממומן מלא'
+        WHEN payment_mode = 'fully_paid_by_customer' THEN 'לקוח משלם'
+        ELSE 'מימון חלקי'
+      END ||
+      ' • לקוח ' || COALESCE(customer_charge_amount, 0)::text ||
+      ' • קופה ' || COALESCE(insurer_claim_amount, 0)::text,
+    payment_mode,
+    COALESCE(customer_charge_amount, 0),
+    COALESCE(insurer_claim_amount, 0),
+    workflow_notes,
+    true,
+    jsonb_build_object('generated_from', 'legacy_hmo_commitment')
+  FROM track_rows
+  ON CONFLICT (id) DO NOTHING
+  RETURNING id
+),
+authorization_source AS (
+  SELECT
+    lhc.*,
+    pr.provider_id,
+    tr.track_id,
+    CASE
+      WHEN row_number() OVER (
+        PARTITION BY lhc.student_id, lhc.service_id
+        ORDER BY CASE WHEN lhc.is_active THEN 0 ELSE 1 END, COALESCE(lhc.updated_at, lhc.created_at) DESC, lhc.commitment_id DESC
+      ) = 1 AND lhc.is_active THEN 'active'
+      WHEN lhc.expires_at IS NOT NULL AND lhc.expires_at < now() THEN 'expired'
+      WHEN lhc.is_active = false THEN 'cancelled'
+      ELSE 'completed'
+    END AS authorization_status
+  FROM legacy_hmo_commitments lhc
+  JOIN provider_rows pr ON pr.provider_name = lhc.provider_name
+  JOIN track_rows tr ON tr.provider_id = pr.provider_id
+    AND tr.payment_mode = lhc.payment_mode
+    AND tr.customer_charge_amount = lhc.customer_charge_amount
+    AND tr.insurer_claim_amount = lhc.insurer_claim_amount
+    AND COALESCE(tr.workflow_notes, '') = COALESCE(lhc.workflow_notes, '')
+)
+INSERT INTO public.hmo_authorizations (
+  id,
+  student_id,
+  service_id,
+  provider_id,
+  provider_track_id,
+  authorization_reference,
+  authorized_lessons,
+  valid_from,
+  expires_at,
+  reminder_date,
+  status,
+  notes,
+  metadata
+)
+SELECT
+  authorization_id,
+  student_id,
+  service_id,
+  provider_id,
+  track_id,
+  authorization_reference,
+  GREATEST(authorized_lessons, 0),
+  created_at::date,
+  expires_at::date,
+  reminder_date,
+  authorization_status,
+  notes,
+  jsonb_build_object('generated_from', 'legacy_hmo_commitment', 'legacy_commitment_id', commitment_id)
+FROM authorization_source
+ON CONFLICT (id) DO NOTHING;
+
+WITH legacy_hmo_commitments AS (
+  SELECT
+    c.id AS commitment_id,
+    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'provider_name'), ''), 'גורם מממן') AS provider_name,
+    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'payment_mode'), ''), 'partially_paid_by_hmo') AS payment_mode,
+    COALESCE((c.metadata->'hmo'->>'customer_charge_amount')::numeric, c.default_charge_amount, 0) AS customer_charge_amount,
+    COALESCE((c.metadata->'hmo'->>'insurer_claim_amount')::numeric, 0) AS insurer_claim_amount,
+    NULLIF(trim(c.metadata->'hmo'->>'workflow_notes'), '') AS workflow_notes,
+    COALESCE(c.hmo_authorization_id, c.id) AS authorization_id
+  FROM public.commitments c
+  WHERE c.commitment_type = 'hmo'
+)
+UPDATE public.commitments c
+SET
+  hmo_provider_id = provider_rows.provider_id,
+  hmo_provider_track_id = track_rows.track_id,
+  hmo_authorization_id = legacy_hmo_commitments.authorization_id
+FROM legacy_hmo_commitments
+JOIN (
+  SELECT DISTINCT
+    provider_name,
+    (
+      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
+      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
+      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
+      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
+      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
+    )::uuid AS provider_id
+  FROM legacy_hmo_commitments
+) AS provider_rows ON provider_rows.provider_name = legacy_hmo_commitments.provider_name
+JOIN (
+  SELECT DISTINCT
+    provider_name,
+    payment_mode,
+    customer_charge_amount,
+    insurer_claim_amount,
+    workflow_notes,
+    (
+      substr(md5(
+        (
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
+        ) || '|' ||
+        payment_mode || '|' ||
+        COALESCE(customer_charge_amount, 0)::text || '|' ||
+        COALESCE(insurer_claim_amount, 0)::text || '|' ||
+        COALESCE(workflow_notes, '')
+      ), 1, 8) || '-' ||
+      substr(md5(
+        (
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
+        ) || '|' ||
+        payment_mode || '|' ||
+        COALESCE(customer_charge_amount, 0)::text || '|' ||
+        COALESCE(insurer_claim_amount, 0)::text || '|' ||
+        COALESCE(workflow_notes, '')
+      ), 9, 4) || '-' ||
+      substr(md5(
+        (
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
+        ) || '|' ||
+        payment_mode || '|' ||
+        COALESCE(customer_charge_amount, 0)::text || '|' ||
+        COALESCE(insurer_claim_amount, 0)::text || '|' ||
+        COALESCE(workflow_notes, '')
+      ), 13, 4) || '-' ||
+      substr(md5(
+        (
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
+        ) || '|' ||
+        payment_mode || '|' ||
+        COALESCE(customer_charge_amount, 0)::text || '|' ||
+        COALESCE(insurer_claim_amount, 0)::text || '|' ||
+        COALESCE(workflow_notes, '')
+      ), 17, 4) || '-' ||
+      substr(md5(
+        (
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
+          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
+        ) || '|' ||
+        payment_mode || '|' ||
+        COALESCE(customer_charge_amount, 0)::text || '|' ||
+        COALESCE(insurer_claim_amount, 0)::text || '|' ||
+        COALESCE(workflow_notes, '')
+      ), 21, 12)
+    )::uuid AS track_id
+  FROM legacy_hmo_commitments
+) AS track_rows
+  ON track_rows.provider_name = legacy_hmo_commitments.provider_name
+ AND track_rows.payment_mode = legacy_hmo_commitments.payment_mode
+ AND track_rows.customer_charge_amount = legacy_hmo_commitments.customer_charge_amount
+ AND track_rows.insurer_claim_amount = legacy_hmo_commitments.insurer_claim_amount
+ AND COALESCE(track_rows.workflow_notes, '') = COALESCE(legacy_hmo_commitments.workflow_notes, '')
+WHERE c.id = legacy_hmo_commitments.commitment_id;
+
+-- -----------------------------------------------------------------
 -- public."Documents" (polymorphic file metadata)
 -- -----------------------------------------------------------------
 
@@ -2050,6 +2703,9 @@ CREATE INDEX IF NOT EXISTS "Documents_hash_idx" ON public."Documents" ("hash") W
 
 -- Add indexes for payroll tables
 CREATE INDEX IF NOT EXISTS "RateHistory_employee_service_idx" ON public."RateHistory" ("employee_id", "service_id", "effective_date");
+CREATE INDEX IF NOT EXISTS hmo_providers_is_active_idx ON public.hmo_providers (is_active);
+CREATE INDEX IF NOT EXISTS hmo_provider_tracks_is_active_idx ON public.hmo_provider_tracks (is_active);
+CREATE INDEX IF NOT EXISTS hmo_authorizations_status_idx ON public.hmo_authorizations (status);
 CREATE INDEX IF NOT EXISTS employee_leave_entries_status_idx ON public.employee_leave_entries (status);
 CREATE INDEX IF NOT EXISTS employee_leave_days_date_idx ON public.employee_leave_days (leave_date);
 CREATE INDEX IF NOT EXISTS finance_corrections_type_idx ON public.finance_corrections (correction_type);
@@ -2061,6 +2717,9 @@ ALTER TABLE public.student_guardians ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."Employees" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."Services" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."RateHistory" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.hmo_providers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.hmo_provider_tracks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.hmo_authorizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.employee_attendance_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.employee_leave_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.employee_leave_days ENABLE ROW LEVEL SECURITY;
@@ -2094,6 +2753,9 @@ BEGIN
     'Employees',
     'Services',
     'RateHistory',
+    'hmo_providers',
+    'hmo_provider_tracks',
+    'hmo_authorizations',
     'employee_attendance_records',
     'employee_leave_entries',
     'employee_leave_days',
@@ -2151,6 +2813,9 @@ GRANT ALL ON TABLE public.student_guardians TO app_user;
 GRANT ALL ON TABLE public."Employees" TO app_user;
 GRANT ALL ON TABLE public."Services" TO app_user;
 GRANT ALL ON TABLE public."RateHistory" TO app_user;
+GRANT ALL ON TABLE public.hmo_providers TO app_user;
+GRANT ALL ON TABLE public.hmo_provider_tracks TO app_user;
+GRANT ALL ON TABLE public.hmo_authorizations TO app_user;
 GRANT ALL ON TABLE public.employee_attendance_records TO app_user;
 GRANT ALL ON TABLE public.employee_leave_entries TO app_user;
 GRANT ALL ON TABLE public.employee_leave_days TO app_user;

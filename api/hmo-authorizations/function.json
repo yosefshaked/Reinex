@@ -11,7 +11,7 @@
         "put",
         "delete"
       ],
-      "route": "settings/medical-providers"
+      "route": "hmo-authorizations"
     },
     {
       "type": "http",

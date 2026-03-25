@@ -6,6 +6,15 @@ import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/
 
 const EMPTY_ARRAY = [];
 
+function normalizeProviders(payload) {
+  const providers = Array.isArray(payload?.providers) ? payload.providers : Array.isArray(payload) ? payload : [];
+  return providers.map((provider) => ({
+    ...provider,
+    tracks: Array.isArray(provider?.tracks) ? provider.tracks : [],
+    is_active: provider?.is_active !== false,
+  }));
+}
+
 export function useMedicalProviders() {
   const { session } = useAuth();
   const { activeOrg, activeOrgId } = useOrg();
@@ -30,12 +39,12 @@ export function useMedicalProviders() {
     try {
       const searchParams = new URLSearchParams({ org_id: activeOrgId });
       const payload = await authenticatedFetch(`settings/medical-providers?${searchParams.toString()}`, { session });
-      const normalized = Array.isArray(payload?.providers) ? payload.providers : Array.isArray(payload) ? payload : [];
+      const normalized = normalizeProviders(payload);
       setProviders(normalized);
       return normalized;
     } catch (error) {
       console.error('Failed to load medical providers', error);
-      setProvidersError('טעינת קופות החולים נכשלה.');
+      setProvidersError('טעינת הגורמים המממנים נכשלה.');
       setProviders([]);
       return [];
     } finally {
@@ -43,32 +52,66 @@ export function useMedicalProviders() {
     }
   }, [session, activeOrgId]);
 
-  const createProvider = useCallback(async (name) => {
+  const mutateProviders = useCallback(async (method, body) => {
     if (!session || !activeOrgId) {
       throw new Error('לא נמצאה ישות ארגון פעילה.');
     }
     if (!canManageProviders) {
-      const error = new Error('אין לך הרשאה להוסיף קופות חולים.');
+      const error = new Error('אין לך הרשאה לנהל גורמים מממנים.');
       error.status = 403;
       throw error;
     }
 
-    const trimmed = typeof name === 'string' ? name.trim() : '';
-    if (!trimmed) {
-      throw new Error('יש להזין שם קופת חולים.');
-    }
-
     const payload = await authenticatedFetch('settings/medical-providers', {
       session,
-      method: 'POST',
+      method,
       body: {
         org_id: activeOrgId,
-        name: trimmed,
+        ...body,
       },
     });
 
+    const normalized = normalizeProviders(payload);
+    if (normalized.length > 0 || method === 'DELETE') {
+      setProviders(normalized);
+    }
     return payload;
   }, [session, activeOrgId, canManageProviders]);
+
+  const createProvider = useCallback(async (input) => {
+    const name = typeof input === 'string' ? input.trim() : `${input?.name || ''}`.trim();
+    if (!name) {
+      throw new Error('יש להזין שם גורם מממן.');
+    }
+    return mutateProviders('POST', typeof input === 'string'
+      ? { entity: 'provider', name }
+      : { entity: 'provider', ...input, name });
+  }, [mutateProviders]);
+
+  const updateProvider = useCallback(async (payload) => mutateProviders('PUT', {
+    entity: 'provider',
+    ...payload,
+  }), [mutateProviders]);
+
+  const deleteProvider = useCallback(async (id) => mutateProviders('DELETE', {
+    entity: 'provider',
+    id,
+  }), [mutateProviders]);
+
+  const createTrack = useCallback(async (payload) => mutateProviders('POST', {
+    entity: 'track',
+    ...payload,
+  }), [mutateProviders]);
+
+  const updateTrack = useCallback(async (payload) => mutateProviders('PUT', {
+    entity: 'track',
+    ...payload,
+  }), [mutateProviders]);
+
+  const deleteTrack = useCallback(async (id) => mutateProviders('DELETE', {
+    entity: 'track',
+    id,
+  }), [mutateProviders]);
 
   return {
     providers,
@@ -76,6 +119,11 @@ export function useMedicalProviders() {
     providersError,
     loadProviders,
     createProvider,
+    updateProvider,
+    deleteProvider,
+    createTrack,
+    updateTrack,
+    deleteTrack,
     canManageProviders,
   };
 }

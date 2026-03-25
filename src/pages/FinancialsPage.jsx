@@ -1,12 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Settings2 } from 'lucide-react';
+import { Download, Loader2, Settings2 } from 'lucide-react';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import Card from '@/components/ui/CustomCard.jsx';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -21,6 +19,7 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { useStudents } from '@/hooks/useOrgData.js';
 import { upsertSetting } from '@/features/settings/api/settings.js';
 import StudentBillingWorkspace from '@/features/students/components/StudentBillingWorkspace.jsx';
+import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 import { toast } from 'sonner';
 
@@ -30,29 +29,7 @@ const DEFAULT_BILLING_POLICY = {
   cancelled_student: false,
   cancelled_clinic: false,
 };
-
-const BILLING_POLICY_FIELDS = [
-  {
-    key: 'attended',
-    label: 'נכח',
-    description: 'השיעור יחויב כאשר התלמיד הגיע בפועל.',
-  },
-  {
-    key: 'no_show',
-    label: 'לא הגיע',
-    description: 'השיעור יחויב כאשר התלמיד לא הגיע ללא ביטול תקין.',
-  },
-  {
-    key: 'cancelled_student',
-    label: 'בוטל על ידי תלמיד',
-    description: 'השיעור יחויב גם כאשר הביטול הגיע מצד התלמיד.',
-  },
-  {
-    key: 'cancelled_clinic',
-    label: 'בוטל על ידי המכון',
-    description: 'השיעור יחויב גם כאשר המכון ביטל את השיעור.',
-  },
-];
+const ISRAEL_TIME_ZONE = 'Asia/Jerusalem';
 
 function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -77,6 +54,24 @@ function formatMonth(date) {
 function formatDate(dateString) {
   if (!dateString) return '—';
   return new Intl.DateTimeFormat('he-IL', { day: 'numeric', month: 'numeric', year: 'numeric' }).format(new Date(dateString));
+}
+
+function formatIsraelDateTime(dateString) {
+  if (!dateString) return '—';
+  return new Intl.DateTimeFormat('he-IL', {
+    timeZone: ISRAEL_TIME_ZONE,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(new Date(dateString));
+}
+
+function escapeCsvCell(value) {
+  const stringValue = `${value ?? ''}`.replace(/"/g, '""');
+  return `"${stringValue}"`;
 }
 
 function formatCurrency(value) {
@@ -242,6 +237,108 @@ function buildConsumedLessonsBreakdown(snapshot) {
     .sort((left, right) => right.total_count - left.total_count);
 }
 
+function buildHmoMonthEndExportRows(snapshot) {
+  const rows = (Array.isArray(snapshot?.lesson_history) ? snapshot.lesson_history : [])
+    .filter((row) => row?.billing_status === 'charged' && row?.commitment?.commitment_type === 'hmo')
+    .map((row) => {
+      const hmoRuntime = row?.commitment?.runtime?.hmo || {};
+      const paymentMode = hmoRuntime.payment_mode || '';
+      let paymentModeLabel = 'מותאם אישית';
+      if (paymentMode === 'fully_paid_by_hmo') paymentModeLabel = 'ממומן במלואו על ידי הגורם המממן';
+      if (paymentMode === 'partially_paid_by_hmo') paymentModeLabel = 'ממומן חלקית על ידי הגורם המממן והיתרה על הלקוח';
+      if (paymentMode === 'fully_paid_by_customer') paymentModeLabel = 'הלקוח משלם במלואו ופועל מול הגורם המממן';
+
+      return {
+        provider_name: hmoRuntime.provider_name || 'גורם מממן',
+        student_name: buildStudentName(row.student),
+        service_name: row?.service?.service_name || 'שירות',
+        lesson_datetime: row?.lesson_instance?.datetime_start || '',
+        lesson_datetime_israel: formatIsraelDateTime(row?.lesson_instance?.datetime_start || ''),
+        timezone: ISRAEL_TIME_ZONE,
+        participant_status: row?.participant_status === 'attended'
+          ? 'נכח'
+          : row?.participant_status === 'no_show'
+            ? 'לא הגיע'
+            : row?.participant_status === 'cancelled_student'
+              ? 'בוטל על ידי תלמיד'
+              : row?.participant_status === 'cancelled_clinic'
+                ? 'בוטל על ידי המכון'
+                : row?.participant_status || '',
+        payment_mode_label: paymentModeLabel,
+        customer_charge_amount: Number(row?.resolved_charge_amount ?? row?.price_charged ?? 0),
+        insurer_claim_amount: Number(row?.pricing_breakdown?.insurer_claim_amount ?? hmoRuntime.insurer_claim_amount ?? 0),
+        authorization_reference: hmoRuntime.authorization_reference || '',
+        authorized_lessons: hmoRuntime.authorized_lessons ?? '',
+        reminder_date: hmoRuntime.reminder_date ? formatDate(hmoRuntime.reminder_date) : '',
+        workflow_notes: hmoRuntime.workflow_notes || '',
+        commitment_expires_at: row?.commitment?.expires_at ? formatDate(row.commitment.expires_at) : '',
+      };
+    })
+    .sort((left, right) => {
+      const providerCompare = left.provider_name.localeCompare(right.provider_name, 'he');
+      if (providerCompare !== 0) {
+        return providerCompare;
+      }
+      return String(left.lesson_datetime).localeCompare(String(right.lesson_datetime));
+    });
+
+  return rows;
+}
+
+function exportHmoMonthEndCsv({ snapshot, monthDate }) {
+  const rows = buildHmoMonthEndExportRows(snapshot);
+  if (rows.length === 0) {
+    return false;
+  }
+
+  const csvRows = [
+    [
+      'שם הגורם המממן',
+      'שם תלמיד',
+      'שירות',
+      'תאריך ושעה בישראל',
+      'אזור זמן',
+      'אופן התחשבנות',
+      'סטטוס תלמיד בשיעור',
+      'סכום לחיוב לקוח',
+      'סכום לדיווח לגורם מממן',
+      'מספר אישור / טופס',
+      'כמות מפגשים מאושרת',
+      'תאריך תזכורת להמשך טיפול',
+      'תוקף התחייבות',
+      'הערות תפעול',
+    ],
+    ...rows.map((row) => ([
+      row.provider_name,
+      row.student_name,
+      row.service_name,
+      row.lesson_datetime_israel,
+      row.timezone,
+      row.payment_mode_label,
+      row.participant_status,
+      row.customer_charge_amount,
+      row.insurer_claim_amount,
+      row.authorization_reference,
+      row.authorized_lessons,
+      row.reminder_date,
+      row.commitment_expires_at,
+      row.workflow_notes,
+    ])),
+  ];
+
+  const csv = ['\uFEFF', ...csvRows.map((row) => row.map(escapeCsvCell).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `hmo-month-end-${toLocalDateString(startOfMonth(monthDate)).slice(0, 7)}.csv`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+  return true;
+}
+
 export default function FinancialsPage() {
   const { session } = useAuth();
   const { activeOrg, activeOrgId } = useOrg();
@@ -336,6 +433,7 @@ export default function FinancialsPage() {
   const queueByStudentMap = useMemo(() => new Map(queueByStudent.map((row) => [row.student_id, row])), [queueByStudent]);
   const overviewStats = useMemo(() => buildBillingOverview(billingSnapshot), [billingSnapshot]);
   const consumedLessonsBreakdown = useMemo(() => buildConsumedLessonsBreakdown(billingSnapshot), [billingSnapshot]);
+  const hmoMonthEndRows = useMemo(() => buildHmoMonthEndExportRows(billingSnapshot), [billingSnapshot]);
 
   const studentOptions = useMemo(() => {
     const map = new Map();
@@ -439,6 +537,20 @@ export default function FinancialsPage() {
     }
   }
 
+  function handleExportHmoMonthEnd() {
+    const exported = exportHmoMonthEndCsv({
+      snapshot: billingSnapshot,
+      monthDate,
+    });
+
+    if (!exported) {
+      toast.error('אין בחודש הנבחר שיעורים מחויבים של גורמים מממנים לייצוא.');
+      return;
+    }
+
+    toast.success('קובץ ה-CSV של הגורמים המממנים הופק.');
+  }
+
   if (!canViewFinancials) {
     return (
       <PageLayout title="כספים" description="שכר עובדים וחיובי תלמידים">
@@ -460,10 +572,21 @@ export default function FinancialsPage() {
           <div className="min-w-[160px] text-center text-sm font-semibold text-zinc-700">{formatMonth(monthDate)}</div>
           <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, 1))}>הבא</Button>
         </div>
-        <Button type="button" variant="outline" onClick={() => setIsBillingPolicyOpen(true)}>
-          <Settings2 className="me-2 h-4 w-4" />
-          הגדרות חיוב
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleExportHmoMonthEnd}
+            disabled={loadingBilling || hmoMonthEndRows.length === 0}
+          >
+            <Download className="me-2 h-4 w-4" />
+            ייצוא סוף חודש לגורמים מממנים
+          </Button>
+          <Button type="button" variant="outline" onClick={() => setIsBillingPolicyOpen(true)}>
+            <Settings2 className="me-2 h-4 w-4" />
+            הגדרות חיוב
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="payroll" className="space-y-4">
@@ -660,12 +783,6 @@ export default function FinancialsPage() {
       <Dialog open={isBillingPolicyOpen} onOpenChange={setIsBillingPolicyOpen}>
         <DialogContent footer={(
           <DialogFooter>
-            {canMutateBillingPolicy ? (
-              <Button onClick={handleSaveBillingPolicy} disabled={savingPolicy || loadingBilling}>
-                {savingPolicy ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-                שמור מדיניות
-              </Button>
-            ) : null}
             <Button type="button" variant="outline" onClick={() => setIsBillingPolicyOpen(false)}>
               סגור
             </Button>
@@ -677,25 +794,15 @@ export default function FinancialsPage() {
               המדיניות כאן קובעת באילו סטטוסים שיעור ייצר צריכה מהתחייבות. המסך הראשי נשאר ממוקד בעבודה ולא בהגדרות.
             </DialogDescription>
           </DialogHeader>
-
-          <div className="space-y-3">
-            {BILLING_POLICY_FIELDS.map((field) => (
-              <div key={field.key} className="flex items-start justify-between gap-4 rounded-xl border border-border bg-slate-50 p-4">
-                <div>
-                  <div className="text-sm font-semibold text-zinc-900">{field.label}</div>
-                  <div className="mt-1 text-sm text-muted-foreground">{field.description}</div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Label className="text-xs text-slate-600">{billingPolicy[field.key] ? 'מחויב' : 'לא מחויב'}</Label>
-                  <Switch
-                    checked={Boolean(billingPolicy[field.key])}
-                    onCheckedChange={(checked) => setBillingPolicy((current) => ({ ...current, [field.key]: checked }))}
-                    disabled={!canMutateBillingPolicy || savingPolicy}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+          <BillingSettingsWorkspace
+            billingPolicy={billingPolicy}
+            setBillingPolicy={setBillingPolicy}
+            canMutateBillingPolicy={canMutateBillingPolicy}
+            savingPolicy={savingPolicy}
+            loadingPolicy={loadingBilling}
+            onSaveBillingPolicy={handleSaveBillingPolicy}
+            onChanged={loadBillingOverview}
+          />
         </DialogContent>
       </Dialog>
 

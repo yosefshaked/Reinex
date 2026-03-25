@@ -4,6 +4,7 @@ import {
   buildCommitmentRuntime,
   computeCommitmentAttention,
 } from './commitment-behavior.js';
+import { attachHmoContextToCommitments } from './hmo.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
   carryover_enabled: false,
@@ -724,7 +725,7 @@ export async function listFinanceCorrections(tenantClient, { employeeId = '', st
 export async function fetchCommitmentsWithBalances(tenantClient, filters = {}) {
   let query = tenantClient
     .from('commitments')
-    .select('id, student_id, service_id, commitment_type, total_amount, default_charge_amount, transfer_ref, notes, is_active, created_at, updated_at, expires_at, metadata')
+    .select('*')
     .order('created_at', { ascending: false });
 
   if (filters.studentId) {
@@ -766,7 +767,9 @@ export async function fetchCommitmentsWithBalances(tenantClient, filters = {}) {
     entriesByCommitment.get(entry.commitment_id).push(entry);
   }
 
-  return (commitments || []).map((commitment) => ({
+  const enrichedCommitments = await attachHmoContextToCommitments(tenantClient, commitments || []);
+
+  return enrichedCommitments.map((commitment) => ({
     ...commitment,
     consumed_amount: roundCurrency(sums.get(commitment.id) || 0),
     remaining_amount: roundCurrency(Number(commitment.total_amount || 0) - (sums.get(commitment.id) || 0)),

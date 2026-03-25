@@ -17,6 +17,7 @@ import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useServices } from '@/hooks/useOrgData.js';
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
+import HmoAuthorizationManager from '@/features/students/components/HmoAuthorizationManager.jsx';
 import {
   buildCommitmentMetadataPayload,
   buildInitialCommitmentForm,
@@ -27,8 +28,6 @@ import {
   getCommitmentActionHint,
   getCommitmentCoverageSummary,
   getCommitmentTypeLabel,
-  HMO_PAYMENT_MODE_OPTIONS,
-  HMO_SUGGESTION_OPTIONS,
   COMMITMENT_TYPE_OPTIONS,
 } from '@/features/students/components/student-billing-helpers.js';
 
@@ -258,6 +257,10 @@ export default function StudentBillingWorkspace({
     () => new Map(transfers.map((transfer) => [transfer.transfer_ref, transfer])),
     [transfers],
   );
+  const editableCommitmentTypeOptions = useMemo(
+    () => COMMITMENT_TYPE_OPTIONS.filter((option) => option.value !== 'hmo'),
+    [],
+  );
   const currentCommitmentAmounts = useMemo(
     () => computeCommitmentAmounts(commitmentForm),
     [commitmentForm],
@@ -315,40 +318,21 @@ export default function StudentBillingWorkspace({
 
   function handleCommitmentTypeChange(value) {
     setCommitmentForm((current) => {
+      const resolvedValue = value === 'hmo' ? 'package' : value;
       const next = {
         ...buildInitialCommitmentForm(),
         ...current,
-        commitmentType: value,
+        commitmentType: resolvedValue,
         id: current.id,
         notes: current.notes,
         expiresAt: current.expiresAt,
         isActive: current.isActive,
       };
-      if (value === 'manual_credit') {
+      if (resolvedValue === 'manual_credit') {
         next.serviceId = current.serviceId;
       }
       return next;
     });
-  }
-
-  function handleHmoSuggestionChange(value) {
-    const preset = HMO_SUGGESTION_OPTIONS.find((option) => option.value === value) || HMO_SUGGESTION_OPTIONS.find((option) => option.value === 'custom');
-    setCommitmentForm((current) => ({
-      ...current,
-      hmoSuggestionId: value,
-      hmoProviderName: preset?.providerName || current.hmoProviderName,
-      hmoPaymentMode: preset?.paymentMode || current.hmoPaymentMode,
-      hmoWorkflowNotes: preset?.workflowNotes || current.hmoWorkflowNotes,
-      hmoCustomerChargeAmount: preset?.paymentMode === 'fully_paid_by_hmo' ? '0' : current.hmoCustomerChargeAmount,
-    }));
-  }
-
-  function handleHmoPaymentModeChange(value) {
-    setCommitmentForm((current) => ({
-      ...current,
-      hmoPaymentMode: value,
-      hmoCustomerChargeAmount: value === 'fully_paid_by_hmo' ? '0' : current.hmoCustomerChargeAmount,
-    }));
   }
 
   function updatePackageItem(itemId, field, value) {
@@ -379,6 +363,10 @@ export default function StudentBillingWorkspace({
 
   async function handleSaveCommitment() {
     if (!studentId || !activeOrgId || !canMutateBilling) return;
+    if (commitmentForm.commitmentType === 'hmo') {
+      toast.error('התחייבות HMO נוצרת רק דרך אישור גורם מממן.');
+      return;
+    }
     const computedAmounts = computeCommitmentAmounts(commitmentForm);
     const metadata = buildCommitmentMetadataPayload(commitmentForm);
     const resolvedServiceId = commitmentForm.commitmentType === 'package'
@@ -796,13 +784,18 @@ export default function StudentBillingWorkspace({
                           תביעות פתוחות {formatCurrency(commitment.runtime.hmo.pending_claim_amount)}
                         </Badge>
                       ) : null}
+                      {commitment.commitment_type === 'hmo' && commitment.hmo_authorization_id ? (
+                        <Badge variant="outline" className="border-indigo-200 bg-indigo-50 text-indigo-900">מנוהל דרך אישור</Badge>
+                      ) : null}
                     </div>
                     {canMutateBilling ? (
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <Button type="button" size="sm" variant="outline" onClick={() => startEditingCommitment(commitment)} disabled={saving}>
-                          ערוך
-                        </Button>
-                        {Number(commitment.consumed_amount || 0) === 0 && !commitment.transfer_ref ? (
+                        {commitment.commitment_type !== 'hmo' ? (
+                          <Button type="button" size="sm" variant="outline" onClick={() => startEditingCommitment(commitment)} disabled={saving}>
+                            ערוך
+                          </Button>
+                        ) : null}
+                        {Number(commitment.consumed_amount || 0) === 0 && !commitment.transfer_ref && commitment.commitment_type !== 'hmo' ? (
                           <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteCommitment(commitment.id)} disabled={saving}>
                             מחק
                           </Button>
@@ -833,21 +826,21 @@ export default function StudentBillingWorkspace({
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="text-xs text-slate-600">סוג התחייבות</Label>
-                  <Select value={commitmentForm.commitmentType} onValueChange={handleCommitmentTypeChange} disabled={saving}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {COMMITMENT_TYPE_OPTIONS.map((option) => (
+                    <Select value={commitmentForm.commitmentType} onValueChange={handleCommitmentTypeChange} disabled={saving}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                      {editableCommitmentTypeOptions.map((option) => (
                         <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                       ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 <div className="space-y-2">
                   <Label className="text-xs text-slate-600">משמעות הסוג</Label>
                   <div className="rounded-xl border border-border bg-slate-50 px-3 py-2 text-sm text-muted-foreground">
-                    {COMMITMENT_TYPE_OPTIONS.find((option) => option.value === commitmentForm.commitmentType)?.description}
+                    {editableCommitmentTypeOptions.find((option) => option.value === commitmentForm.commitmentType)?.description}
                   </div>
                 </div>
               </div>
@@ -922,124 +915,6 @@ export default function StudentBillingWorkspace({
                     </div>
                   </div>
                 </>
-              ) : null}
-
-              {commitmentForm.commitmentType === 'hmo' ? (
-                <div className="space-y-3 rounded-xl border border-border bg-slate-50 p-4">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label className="text-xs text-slate-600">שירות</Label>
-                      <Select value={commitmentForm.serviceId || '__none__'} onValueChange={(value) => setCommitmentForm((current) => ({ ...current, serviceId: value === '__none__' ? '' : value }))} disabled={saving}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="בחר שירות" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">בחר שירות</SelectItem>
-                          {services.map((service) => (
-                            <SelectItem key={service.id} value={service.id}>{service.service_name || service.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs text-slate-600">הצעת התחלה</Label>
-                      <Select value={commitmentForm.hmoSuggestionId} onValueChange={handleHmoSuggestionChange} disabled={saving}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {HMO_SUGGESTION_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="hmo-provider-name" className="text-xs text-slate-600">שם הגורם המממן</Label>
-                    <Input id="hmo-provider-name" value={commitmentForm.hmoProviderName} onChange={(event) => setCommitmentForm((current) => ({ ...current, hmoProviderName: event.target.value }))} disabled={saving} />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-600">מודל תשלום</Label>
-                    <Select value={commitmentForm.hmoPaymentMode} onValueChange={handleHmoPaymentModeChange} disabled={saving}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {HMO_PAYMENT_MODE_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="hmo-authorized-lessons" className="text-xs text-slate-600">כמות מפגשים מאושרת</Label>
-                      <Input id="hmo-authorized-lessons" type="number" min="0" step="1" value={commitmentForm.hmoAuthorizedLessons} onChange={(event) => setCommitmentForm((current) => ({ ...current, hmoAuthorizedLessons: event.target.value }))} disabled={saving} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="hmo-auth-ref" className="text-xs text-slate-600">מספר אישור / טופס 17</Label>
-                      <Input id="hmo-auth-ref" value={commitmentForm.hmoAuthorizationReference} onChange={(event) => setCommitmentForm((current) => ({ ...current, hmoAuthorizationReference: event.target.value }))} disabled={saving} />
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="hmo-customer-charge" className="text-xs text-slate-600">חיוב תלמיד לשיעור</Label>
-                      <Input id="hmo-customer-charge" type="number" min="0" step="0.01" value={commitmentForm.hmoCustomerChargeAmount} onChange={(event) => setCommitmentForm((current) => ({ ...current, hmoCustomerChargeAmount: event.target.value }))} disabled={saving || commitmentForm.hmoPaymentMode === 'fully_paid_by_hmo'} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="hmo-insurer-claim" className="text-xs text-slate-600">סכום לתביעה מהקופה לשיעור</Label>
-                      <Input id="hmo-insurer-claim" type="number" min="0" step="0.01" value={commitmentForm.hmoInsurerClaimAmount} onChange={(event) => setCommitmentForm((current) => ({ ...current, hmoInsurerClaimAmount: event.target.value }))} disabled={saving} />
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="hmo-reminder-date" className="text-xs text-slate-600">תזכורת פעולה הבאה</Label>
-                      <Input id="hmo-reminder-date" type="date" value={commitmentForm.hmoReminderDate} onChange={(event) => setCommitmentForm((current) => ({ ...current, hmoReminderDate: event.target.value }))} disabled={saving} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs text-slate-600">הסבר מסלול</Label>
-                      <Input value={commitmentForm.hmoWorkflowNotes} onChange={(event) => setCommitmentForm((current) => ({ ...current, hmoWorkflowNotes: event.target.value }))} disabled={saving} />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-600">מודל החיוב בפועל</Label>
-                    <div className="rounded-xl border border-border bg-white px-3 py-2 text-sm text-muted-foreground">
-                      {commitmentForm.hmoPaymentMode === 'fully_paid_by_hmo'
-                        ? 'התלמיד לא משלם, והחיוב נשמר כמעקב מול הגורם המממן.'
-                        : commitmentForm.hmoPaymentMode === 'fully_paid_by_customer'
-                          ? 'התלמיד משלם מלא, והגורם המממן נשמר כמעקב/החזר.'
-                          : 'התלמיד משלם חלקית, ושאר הסכום נשמר לתביעה מול הגורם המממן.'}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-600">אומדן יתרת לקוח</Label>
-                    <div className="rounded-xl border border-border bg-white px-3 py-2 text-sm font-semibold text-zinc-900">
-                      {formatCurrency(currentCommitmentAmounts.totalAmount)}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-600">סכום שיישלח לתביעה לכל שיעור</Label>
-                    <div className="rounded-xl border border-border bg-white px-3 py-2 text-sm font-semibold text-zinc-900">
-                      {formatCurrency(commitmentForm.hmoInsurerClaimAmount)}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-600">הערת עיצוב</Label>
-                    <div className="rounded-xl border border-dashed border-border bg-white px-3 py-2 text-xs text-muted-foreground">
-                      ההצעה מקלה על ההגדרה הראשונית, אבל המודל בפועל נקבע רק לפי השדות שבחרת כאן.
-                    </div>
-                  </div>
-                </div>
               ) : null}
 
               {commitmentForm.commitmentType === 'manual_credit' ? (
@@ -1123,6 +998,16 @@ export default function StudentBillingWorkspace({
           </section>
         )}
       </div>
+
+      <HmoAuthorizationManager
+        studentId={studentId}
+        services={services}
+        canMutateBilling={canMutateBilling}
+        onChanged={async () => {
+          await loadData();
+          await notifyDataChanged();
+        }}
+      />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
@@ -1263,7 +1148,6 @@ export default function StudentBillingWorkspace({
                       <SelectItem value="manual_credit">הוספת יתרה מותאמת אישית</SelectItem>
                       <SelectItem value="package">חבילה</SelectItem>
                       <SelectItem value="subscription">מנוי</SelectItem>
-                      <SelectItem value="hmo">גורם מממן</SelectItem>
                     </SelectContent>
                   </Select>
               </div>

@@ -14,9 +14,43 @@ export default function MedicalProviderField({ value, onChange, disabled = false
   const [dialogError, setDialogError] = useState('');
   const [isSavingProvider, setIsSavingProvider] = useState(false);
 
+  const resolvedProviderValue = useMemo(() => {
+    if (!value) {
+      return NONE_VALUE;
+    }
+
+    const directMatch = providers.find((provider) => provider.id === value);
+    if (directMatch) {
+      return directMatch.id;
+    }
+
+    const legacyNameMatch = providers.find((provider) => provider.name === value);
+    if (legacyNameMatch) {
+      return legacyNameMatch.id;
+    }
+
+    return value;
+  }, [providers, value]);
+
   useEffect(() => {
     void loadProviders();
   }, [loadProviders]);
+
+  useEffect(() => {
+    if (!value || loadingProviders || providers.length === 0) {
+      return;
+    }
+
+    const hasDirectIdMatch = providers.some((provider) => provider.id === value);
+    if (hasDirectIdMatch) {
+      return;
+    }
+
+    const legacyNameMatch = providers.find((provider) => provider.name === value);
+    if (legacyNameMatch?.id) {
+      onChange(legacyNameMatch.id);
+    }
+  }, [loadingProviders, onChange, providers, value]);
 
   const handleSelectChange = useCallback((nextValue) => {
     onChange(nextValue === NONE_VALUE ? '' : nextValue);
@@ -114,7 +148,7 @@ export default function MedicalProviderField({ value, onChange, disabled = false
         <SelectField
           id="medical-provider"
           label="קופת חולים"
-          value={value || NONE_VALUE}
+          value={resolvedProviderValue}
           onChange={handleSelectChange}
           options={options}
           placeholder={placeholder}

@@ -132,7 +132,7 @@ export default async function (context, req) {
       const { data, error } = await tenantClient
         .from('commitments')
         .insert(payload)
-        .select('id, student_id, service_id, commitment_type, total_amount, default_charge_amount, transfer_ref, notes, is_active, created_at, updated_at, expires_at, metadata')
+        .select('*')
         .single();
 
       if (error) {
@@ -152,7 +152,7 @@ export default async function (context, req) {
       .from('commitments')
       .update(payload)
       .eq('id', id)
-      .select('id, student_id, service_id, commitment_type, total_amount, default_charge_amount, transfer_ref, notes, is_active, created_at, updated_at, expires_at, metadata')
+      .select('*')
       .maybeSingle();
 
     if (error) {
@@ -174,7 +174,7 @@ export default async function (context, req) {
 
     const { data: commitment, error: commitmentError } = await tenantClient
       .from('commitments')
-      .select('id, transfer_ref')
+      .select('*')
       .eq('id', id)
       .maybeSingle();
 
@@ -184,6 +184,9 @@ export default async function (context, req) {
     }
     if (!commitment) {
       return respond(context, 404, { message: 'commitment_not_found' });
+    }
+    if (commitment.commitment_type === 'hmo') {
+      return respond(context, 409, { message: 'hmo_commitments_managed_via_authorizations' });
     }
 
     const { data: usageRows, error: usageError } = await tenantClient
