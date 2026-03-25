@@ -10,7 +10,7 @@ import { useOrg } from '@/org/OrgContext';
 import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { Pencil, X, Check, XCircle, Loader2, AlertCircle, MessageCircle, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Pencil, X, Check, XCircle, Loader2, AlertCircle, MessageCircle, Mail, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 
 function toLocalDateString(dateObj) {
@@ -113,6 +113,21 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     const time = formatTimeDisplay(lessonInstance.datetime_start);
     const service = lessonInstance.service?.service_name || 'שיעור';
     return `שלום ${studentName} 😊\nרצינו להזכיר לך שיש לך ${service} ב-${date} בשעה ${time}.\nנשמח לאישור הגעתך 🙏`;
+  }
+
+  function buildEmailReminderHref(lessonInstance, student) {
+    if (!student?.email) return null;
+    const date = formatDateDisplay(lessonInstance.datetime_start);
+    const time = formatTimeDisplay(lessonInstance.datetime_start);
+    const service = lessonInstance.service?.service_name || 'שיעור';
+    const studentName = student.full_name
+      || [student.first_name, student.last_name].filter(Boolean).join(' ')
+      || 'תלמיד';
+    const subject = encodeURIComponent(`תזכורת: ${service} – ${date}`);
+    const body = encodeURIComponent(
+      `שלום ${studentName},\n\nרצינו להזכיר לך שיש לך ${service} ב-${date} בשעה ${time}.\nנשמח לאישור הגעתך.\n\nתודה!`
+    );
+    return `mailto:${student.email}?subject=${subject}&body=${body}`;
   }
 
   const statusInfo = getInstanceStatusIcon(instance.status, instance.documentation_status);
@@ -249,17 +264,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
-  async function handleSendReminder(participant) {
-    const waPhone = formatPhoneForWhatsApp(participant.student?.phone);
-    if (!waPhone || !org?.id) return;
-
-    const studentName = participant.student?.full_name
-      || [participant.student?.first_name, participant.student?.last_name].filter(Boolean).join(' ')
-      || 'תלמיד';
-
-    const message = buildReminderMessage(instance, studentName);
-    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
-
+  async function markReminderSent(participantId) {
+    if (!org?.id) return;
     setReminderUpdating(true);
     try {
       await authenticatedFetch('calendar/attendance', {
@@ -267,14 +273,14 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         body: {
           org_id: org.id,
           instance_id: instance.id,
-          participant_id: participant.id,
+          participant_id: participantId,
           action: 'update-reminder',
           reminder_sent: true,
         },
       });
       setLocalReminderState((prev) => ({
         ...prev,
-        [participant.id]: { ...(prev[participant.id] || {}), reminder_sent: true },
+        [participantId]: { ...(prev[participantId] || {}), reminder_sent: true },
       }));
       onUpdate?.();
     } catch (err) {
@@ -282,6 +288,24 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     } finally {
       setReminderUpdating(false);
     }
+  }
+
+  async function handleSendWaReminder(participant) {
+    const waPhone = formatPhoneForWhatsApp(participant.student?.phone);
+    if (!waPhone || !org?.id) return;
+    const studentName = participant.student?.full_name
+      || [participant.student?.first_name, participant.student?.last_name].filter(Boolean).join(' ')
+      || 'תלמיד';
+    const message = buildReminderMessage(instance, studentName);
+    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
+    await markReminderSent(participant.id);
+  }
+
+  function handleSendEmailReminder(participant) {
+    const href = buildEmailReminderHref(instance, participant.student);
+    if (!href) return;
+    window.open(href, '_blank', 'noopener,noreferrer');
+    markReminderSent(participant.id);
   }
 
   async function handleSetReminderConfirmation(participant, approved) {
@@ -621,17 +645,32 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                       {/* Reminder row — admins only, scheduled participants only */}
                       {isScheduled && canManageAll && (
                         <div className="flex items-center gap-2 pt-1.5 border-t border-gray-200 flex-wrap">
-                          <Button
-                            size="sm"
-                            variant={hasSent ? 'outline' : 'secondary'}
-                            onClick={() => handleSendReminder(participant)}
-                            disabled={reminderUpdating || !waPhone}
-                            title={!waPhone ? 'לא נמצא טלפון לתלמיד' : 'שלח תזכורת ב-WhatsApp'}
-                            className="h-7 text-xs gap-1"
-                          >
-                            <MessageCircle className="h-3 w-3" />
-                            {hasSent ? 'שלח שוב' : 'תזכורת WA'}
-                          </Button>
+                          {waPhone && (
+                            <Button
+                              size="sm"
+                              variant={hasSent ? 'outline' : 'secondary'}
+                              onClick={() => handleSendWaReminder(participant)}
+                              disabled={reminderUpdating}
+                              title="שלח תזכורת ב-WhatsApp"
+                              className="h-7 text-xs gap-1"
+                            >
+                              <MessageCircle className="h-3 w-3" />
+                              {hasSent ? 'שלח שוב WA' : 'תזכורת WA'}
+                            </Button>
+                          )}
+                          {participant.student?.email && (
+                            <Button
+                              size="sm"
+                              variant={hasSent ? 'outline' : 'secondary'}
+                              onClick={() => handleSendEmailReminder(participant)}
+                              disabled={reminderUpdating}
+                              title="שלח תזכורת באימייל"
+                              className="h-7 text-xs gap-1"
+                            >
+                              <Mail className="h-3 w-3" />
+                              {hasSent ? 'שלח שוב מייל' : 'תזכורת מייל'}
+                            </Button>
+                          )}
                           {hasSent && !hasConfirmed && (
                             <>
                               <span className="text-xs text-gray-500">ממתין לאישור</span>
@@ -664,8 +703,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               ✓ אישר הגעה
                             </Badge>
                           )}
-                          {!waPhone && (
-                            <span className="text-xs text-gray-400">אין מספר טלפון</span>
+                          {!waPhone && !participant.student?.email && (
+                            <span className="text-xs text-gray-400">אין פרטי קשר</span>
                           )}
                         </div>
                       )}
