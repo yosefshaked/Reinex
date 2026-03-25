@@ -1752,12 +1752,22 @@ END $$;
 
 DO $$
 BEGIN
-  ALTER TABLE public.consumption_entries
-    ADD CONSTRAINT consumption_entries_lesson_source_unique
-    UNIQUE (lesson_participant_id, source_type);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'consumption_entries_lesson_source_unique'
+      AND conrelid = 'public.consumption_entries'::regclass
+  ) AND NOT EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relname = 'consumption_entries_lesson_source_unique'
+      AND n.nspname = 'public'
+  ) THEN
+    ALTER TABLE public.consumption_entries
+      ADD CONSTRAINT consumption_entries_lesson_source_unique
+      UNIQUE (lesson_participant_id, source_type);
+  END IF;
 END $$;
 
 DO $$
