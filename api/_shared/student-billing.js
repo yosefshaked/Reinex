@@ -1,0 +1,987 @@
+/* eslint-env node */
+import { randomUUID } from 'node:crypto';
+import {
+  fetchCommitmentsWithBalances,
+  isYmdDate,
+  loadFinancePolicies,
+  toDateKey,
+} from './employee-finance.js';
+import { normalizeString } from './org-bff.js';
+
+const COMMITMENT_TYPES = new Set(['package', 'subscription', 'hmo', 'manual_credit']);
+const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
+const ACTIONABLE_BILLING_STATUSES = new Set(['pending_commitment', 'pending_commitment_configuration', 'invalid_commitment']);
+const BILLING_BREAKDOWN_VERSION = 1;
+const ATTENTION_EXPIRY_WINDOW_DAYS = 30;
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function coerceNumber(value, fallback = 0) {
+  return Number.isFinite(Number(value)) ? Number(value) : fallback;
+}
+
+function roundCurrency(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
+function buildFullName(row) {
+  return [row?.first_name, row?.middle_name, row?.last_name].filter(Boolean).join(' ').trim();
+}
+
+function normalizeCommitmentType(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return COMMITMENT_TYPES.has(normalized) ? normalized : '';
+}
+
+function daysBetween(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return null;
+  }
+  return Math.floor((end.getTime() - start.getTime()) / 86400000);
+}
+
+function isCommitmentExpired(commitment, lessonDate) {
+  const expiryDate = toDateKey(commitment?.expires_at);
+  if (!expiryDate || !lessonDate) {
+    return false;
+  }
+  return expiryDate < lessonDate;
+}
+
+function buildCommitmentAttention(commitment) {
+  const expiryDate = toDateKey(commitment?.expires_at);
+  const today = toDateKey(new Date());
+  const daysUntilExpiry = expiryDate ? daysBetween(today, expiryDate) : null;
+  const defaultChargeAmount = Number.isFinite(Number(commitment?.default_charge_amount))
+    ? Number(commitment.default_charge_amount)
+    : null;
+  const remainingAmount = roundCurrency(coerceNumber(commitment?.remaining_amount, 0));
+  const remainingLessonsEstimate = defaultChargeAmount && defaultChargeAmount > 0
+    ? Number((remainingAmount / defaultChargeAmount).toFixed(2))
+    : null;
+
+  return {
+    low_balance: remainingLessonsEstimate != null && remainingLessonsEstimate < 2,
+    expiring_soon: daysUntilExpiry != null && daysUntilExpiry >= 0 && daysUntilExpiry <= ATTENTION_EXPIRY_WINDOW_DAYS,
+    days_until_expiry: daysUntilExpiry,
+    remaining_lessons_estimate: remainingLessonsEstimate,
+  };
+}
+
+async function loadStudentsMap(tenantClient, studentIds = []) {
+  const ids = Array.from(new Set((studentIds || []).map((id) => normalizeString(id)).filter(Boolean)));
+  if (ids.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await tenantClient
+    .from('students')
+    .select('id, first_name, middle_name, last_name, special_rate, is_active')
+    .in('id', ids);
+
+  if (error) {
+    if (error.code === '42P01') {
+      return new Map();
+    }
+    throw error;
+  }
+
+  return new Map((data || []).map((row) => [row.id, {
+    ...row,
+    full_name: buildFullName(row),
+  }]));
+}
+
+async function loadServicesMap(tenantClient, serviceIds = []) {
+  const ids = Array.from(new Set((serviceIds || []).map((id) => normalizeString(id)).filter(Boolean)));
+  if (ids.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await tenantClient
+    .from('Services')
+    .select('id, name, color, is_active')
+    .in('id', ids);
+
+  if (error) {
+    if (error.code === '42P01') {
+      return new Map();
+    }
+    throw error;
+  }
+
+  return new Map((data || []).map((row) => [row.id, {
+    ...row,
+    service_name: normalizeString(row?.name) || 'שירות',
+  }]));
+}
+
+async function loadCommitmentsMap(tenantClient, commitmentIds = []) {
+  const ids = Array.from(new Set((commitmentIds || []).map((id) => normalizeString(id)).filter(Boolean)));
+  if (ids.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await tenantClient
+    .from('commitments')
+    .select('id, student_id, service_id, commitment_type, total_amount, default_charge_amount, transfer_ref, notes, is_active, created_at, updated_at, expires_at, metadata')
+    .in('id', ids);
+
+  if (error) {
+    if (error.code === '42P01') {
+      return new Map();
+    }
+    throw error;
+  }
+
+  return new Map((data || []).map((row) => [row.id, row]));
+}
+
+async function loadLessonInstancesForRange(tenantClient, { startDate = '', endDate = '' } = {}) {
+  let query = tenantClient
+    .from('lesson_instances')
+    .select('id, datetime_start, duration_minutes, instructor_employee_id, service_id, status')
+    .order('datetime_start', { ascending: false });
+
+  if (startDate) {
+    query = query.gte('datetime_start', `${startDate}T00:00:00`);
+  }
+  if (endDate) {
+    query = query.lte('datetime_start', `${endDate}T23:59:59`);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    if (error.code === '42P01') {
+      return [];
+    }
+    throw error;
+  }
+
+  return data || [];
+}
+
+async function loadLessonInstancesByIds(tenantClient, lessonInstanceIds = []) {
+  const ids = Array.from(new Set((lessonInstanceIds || []).map((id) => normalizeString(id)).filter(Boolean)));
+  if (ids.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await tenantClient
+    .from('lesson_instances')
+    .select('id, datetime_start, duration_minutes, instructor_employee_id, service_id, status')
+    .in('id', ids);
+
+  if (error) {
+    if (error.code === '42P01') {
+      return new Map();
+    }
+    throw error;
+  }
+
+  return new Map((data || []).map((row) => [row.id, row]));
+}
+
+function buildBillingDecision({ participant, instance, commitment, policies, syncedAt = new Date().toISOString() }) {
+  const participantStatus = normalizeString(participant?.participant_status).toLowerCase();
+  const lessonStatus = normalizeString(instance?.status).toLowerCase();
+  const lessonDate = toDateKey(instance?.datetime_start);
+  const defaultChargeAmount = commitment && Number.isFinite(Number(commitment?.default_charge_amount))
+    ? roundCurrency(Number(commitment.default_charge_amount))
+    : null;
+  const policyAllowsCharge = RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)
+    ? Boolean(lessonStatus !== 'cancelled_clinic' && policies?.billingConsumptionPolicy?.[participantStatus])
+    : false;
+
+  let billingStatus = 'pending_attendance';
+  let billingReason = 'participant_not_resolved';
+  let chargeAmount = null;
+  let requiresAttention = false;
+
+  if (!RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)) {
+    billingStatus = 'pending_attendance';
+    billingReason = 'participant_not_resolved';
+  } else if (!policyAllowsCharge) {
+    billingStatus = 'not_chargeable';
+    billingReason = lessonStatus === 'cancelled_clinic'
+      ? 'lesson_cancelled_by_clinic'
+      : 'policy_excluded_status';
+  } else if (!commitment) {
+    billingStatus = 'pending_commitment';
+    billingReason = 'missing_commitment';
+    requiresAttention = true;
+  } else if (commitment.student_id !== participant.student_id) {
+    billingStatus = 'invalid_commitment';
+    billingReason = 'commitment_belongs_to_different_student';
+    requiresAttention = true;
+  } else if (commitment.service_id && instance?.service_id && commitment.service_id !== instance.service_id) {
+    billingStatus = 'invalid_commitment';
+    billingReason = 'service_mismatch';
+    requiresAttention = true;
+  } else if (commitment.is_active === false) {
+    billingStatus = 'invalid_commitment';
+    billingReason = 'inactive_commitment';
+    requiresAttention = true;
+  } else if (isCommitmentExpired(commitment, lessonDate)) {
+    billingStatus = 'invalid_commitment';
+    billingReason = 'expired_commitment';
+    requiresAttention = true;
+  } else if (defaultChargeAmount == null) {
+    billingStatus = 'pending_commitment_configuration';
+    billingReason = 'missing_default_charge_amount';
+    requiresAttention = true;
+  } else {
+    billingStatus = 'charged';
+    billingReason = 'chargeable';
+    chargeAmount = defaultChargeAmount;
+  }
+
+  return {
+    shouldCharge: chargeAmount != null,
+    chargeAmount,
+    billingStatus,
+    billingReason,
+    requiresAttention,
+    pricingBreakdown: {
+      version: BILLING_BREAKDOWN_VERSION,
+      synced_at: syncedAt,
+      lesson_status: lessonStatus || null,
+      lesson_date: lessonDate || null,
+      participant_status: participantStatus || null,
+      selected_commitment_id: commitment?.id || null,
+      selected_commitment_type: commitment?.commitment_type || null,
+      selected_commitment_service_id: commitment?.service_id || null,
+      selected_commitment_active: commitment ? commitment.is_active !== false : null,
+      selected_commitment_expires_at: commitment?.expires_at || null,
+      default_charge_amount: defaultChargeAmount,
+      charge_amount: chargeAmount,
+      billing_status: billingStatus,
+      billing_reason: billingReason,
+      policy_allowed: policyAllowsCharge,
+      requires_attention: requiresAttention,
+    },
+  };
+}
+
+function enrichCommitment(commitment, studentMap, serviceMap) {
+  return {
+    ...commitment,
+    student: studentMap.get(commitment.student_id) || null,
+    service: serviceMap.get(commitment.service_id) || null,
+    attention: buildCommitmentAttention(commitment),
+  };
+}
+
+async function fetchLessonBillingHistory(tenantClient, {
+  studentId = '',
+  startDate = '',
+  endDate = '',
+  policies,
+  commitmentBalanceMap = new Map(),
+} = {}) {
+  let instanceMap = new Map();
+  let scopedInstanceIds = [];
+
+  if (startDate || endDate || !studentId) {
+    const scopedInstances = await loadLessonInstancesForRange(tenantClient, { startDate, endDate });
+    instanceMap = new Map(scopedInstances.map((row) => [row.id, row]));
+    scopedInstanceIds = scopedInstances.map((row) => row.id);
+    if (scopedInstanceIds.length === 0) {
+      return [];
+    }
+  }
+
+  let query = tenantClient
+    .from('lesson_participants')
+    .select('id, lesson_instance_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id, attendance_confirmed_at, attendance_confirmed_by, metadata');
+
+  if (studentId) {
+    query = query.eq('student_id', studentId);
+  }
+  if (scopedInstanceIds.length > 0) {
+    query = query.in('lesson_instance_id', scopedInstanceIds);
+  }
+
+  const { data: participants, error } = await query;
+  if (error) {
+    if (error.code === '42P01') {
+      return [];
+    }
+    throw error;
+  }
+
+  const participantRows = participants || [];
+  if (participantRows.length === 0) {
+    return [];
+  }
+
+  if (instanceMap.size === 0) {
+    instanceMap = await loadLessonInstancesByIds(tenantClient, participantRows.map((row) => row.lesson_instance_id));
+  }
+
+  const missingCommitmentIds = participantRows
+    .map((row) => row.commitment_id)
+    .filter((id) => id && !commitmentBalanceMap.has(id));
+
+  const missingCommitmentsMap = await loadCommitmentsMap(tenantClient, missingCommitmentIds);
+  const commitmentMap = new Map(commitmentBalanceMap);
+  for (const [id, value] of missingCommitmentsMap.entries()) {
+    commitmentMap.set(id, value);
+  }
+
+  const studentIds = participantRows.map((row) => row.student_id);
+  const serviceIds = [];
+  for (const instance of instanceMap.values()) {
+    if (instance?.service_id) {
+      serviceIds.push(instance.service_id);
+    }
+  }
+  for (const commitment of commitmentMap.values()) {
+    if (commitment?.service_id) {
+      serviceIds.push(commitment.service_id);
+    }
+    if (commitment?.student_id) {
+      studentIds.push(commitment.student_id);
+    }
+  }
+
+  const [studentMap, serviceMap] = await Promise.all([
+    loadStudentsMap(tenantClient, studentIds),
+    loadServicesMap(tenantClient, serviceIds),
+  ]);
+
+  return participantRows
+    .map((participant) => {
+      const instance = instanceMap.get(participant.lesson_instance_id) || null;
+      if (!instance) {
+        return null;
+      }
+
+      const storedCommitment = participant.commitment_id
+        ? commitmentMap.get(participant.commitment_id) || null
+        : null;
+      const resolvedCommitment = storedCommitment
+        ? enrichCommitment(storedCommitment, studentMap, serviceMap)
+        : null;
+      const decision = buildBillingDecision({
+        participant,
+        instance,
+        commitment: storedCommitment,
+        policies,
+      });
+
+      return {
+        id: participant.id,
+        lesson_participant_id: participant.id,
+        lesson_instance_id: participant.lesson_instance_id,
+        lesson_date: toDateKey(instance.datetime_start),
+        student_id: participant.student_id,
+        student: studentMap.get(participant.student_id) || null,
+        lesson_instance: instance,
+        service: serviceMap.get(instance.service_id) || null,
+        participant_status: participant.participant_status,
+        attendance_confirmed_at: participant.attendance_confirmed_at || null,
+        commitment_id: participant.commitment_id || null,
+        commitment: resolvedCommitment,
+        price_charged: participant.price_charged,
+        resolved_charge_amount: decision.chargeAmount,
+        pricing_breakdown: decision.pricingBreakdown,
+        stored_pricing_breakdown: isPlainObject(participant.pricing_breakdown) ? participant.pricing_breakdown : null,
+        billing_status: decision.billingStatus,
+        billing_reason: decision.billingReason,
+        requires_attention: decision.requiresAttention,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftDate = left.lesson_instance?.datetime_start || '';
+      const rightDate = right.lesson_instance?.datetime_start || '';
+      return rightDate.localeCompare(leftDate);
+    });
+}
+
+async function fetchBillingEntries(tenantClient, { studentId = '', commitmentBalanceMap = new Map() } = {}) {
+  let query = tenantClient
+    .from('consumption_entries')
+    .select('id, lesson_participant_id, student_id, source_type, commitment_id, transfer_ref, amount_charged, effective_date, notes, created_at, metadata')
+    .order('effective_date', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false });
+
+  if (studentId) {
+    query = query.eq('student_id', studentId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    if (error.code === '42P01') {
+      return [];
+    }
+    throw error;
+  }
+
+  const rows = data || [];
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const missingCommitmentIds = rows
+    .map((row) => row.commitment_id)
+    .filter((id) => id && !commitmentBalanceMap.has(id));
+  const missingCommitmentsMap = await loadCommitmentsMap(tenantClient, missingCommitmentIds);
+
+  const combinedCommitmentMap = new Map(commitmentBalanceMap);
+  for (const [id, value] of missingCommitmentsMap.entries()) {
+    combinedCommitmentMap.set(id, value);
+  }
+
+  const studentIds = rows.map((row) => row.student_id);
+  const serviceIds = [];
+  for (const commitment of combinedCommitmentMap.values()) {
+    if (commitment?.student_id) {
+      studentIds.push(commitment.student_id);
+    }
+    if (commitment?.service_id) {
+      serviceIds.push(commitment.service_id);
+    }
+  }
+
+  const [studentMap, serviceMap] = await Promise.all([
+    loadStudentsMap(tenantClient, studentIds),
+    loadServicesMap(tenantClient, serviceIds),
+  ]);
+
+  return rows.map((entry) => {
+    const rawCommitment = entry.commitment_id
+      ? combinedCommitmentMap.get(entry.commitment_id) || null
+      : null;
+    const commitment = rawCommitment
+      ? enrichCommitment(rawCommitment, studentMap, serviceMap)
+      : null;
+
+    return {
+      ...entry,
+      student: studentMap.get(entry.student_id) || null,
+      commitment,
+    };
+  });
+}
+
+function buildTransferGroups({ commitments = [], entries = [], studentId = '' } = {}) {
+  const groups = new Map();
+
+  for (const entry of entries) {
+    if (entry?.source_type !== 'transfer' || !entry.transfer_ref) {
+      continue;
+    }
+
+    groups.set(entry.transfer_ref, {
+      transfer_ref: entry.transfer_ref,
+      source_entry: entry,
+      target_commitments: [],
+      created_at: entry.effective_date || entry.created_at || null,
+      amount: roundCurrency(coerceNumber(entry.amount_charged, 0)),
+    });
+  }
+
+  for (const commitment of commitments) {
+    if (!commitment?.transfer_ref) {
+      continue;
+    }
+
+    const existing = groups.get(commitment.transfer_ref) || {
+      transfer_ref: commitment.transfer_ref,
+      source_entry: null,
+      target_commitments: [],
+      created_at: commitment.created_at || null,
+      amount: roundCurrency(coerceNumber(commitment.total_amount, 0)),
+    };
+
+    existing.target_commitments.push(commitment);
+    if (!existing.created_at) {
+      existing.created_at = commitment.created_at || null;
+    }
+    groups.set(commitment.transfer_ref, existing);
+  }
+
+  return Array.from(groups.values())
+    .filter((group) => {
+      if (!studentId) {
+        return true;
+      }
+      const sourceMatches = group.source_entry?.student_id === studentId;
+      const targetMatches = group.target_commitments.some((commitment) => commitment.student_id === studentId);
+      return sourceMatches || targetMatches;
+    })
+    .sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')));
+}
+
+function buildSnapshotSummary({ commitments = [], billingQueue = [], lessonHistory = [], entries = [], transfers = [] } = {}) {
+  const totalCommitted = roundCurrency(commitments.reduce((sum, row) => sum + coerceNumber(row.total_amount, 0), 0));
+  const totalConsumed = roundCurrency(commitments.reduce((sum, row) => sum + coerceNumber(row.consumed_amount, 0), 0));
+  const totalRemaining = roundCurrency(commitments.reduce((sum, row) => sum + coerceNumber(row.remaining_amount, 0), 0));
+  const activeCommitments = commitments.filter((row) => row.is_active !== false);
+  const lowBalanceCount = commitments.filter((row) => row.attention?.low_balance).length;
+  const expiringSoonCount = commitments.filter((row) => row.attention?.expiring_soon).length;
+  const manualEntryCount = entries.filter((row) => row.source_type === 'adjustment').length;
+
+  return {
+    total_committed: totalCommitted,
+    total_consumed: totalConsumed,
+    total_remaining: totalRemaining,
+    active_commitments_count: activeCommitments.length,
+    pending_queue_count: billingQueue.length,
+    lesson_history_count: lessonHistory.length,
+    manual_entry_count: manualEntryCount,
+    transfer_count: transfers.length,
+    low_balance_commitments_count: lowBalanceCount,
+    expiring_soon_commitments_count: expiringSoonCount,
+  };
+}
+
+async function loadParticipantWithInstance(tenantClient, lessonParticipantId) {
+  const { data, error } = await tenantClient
+    .from('lesson_participants')
+    .select('id, lesson_instance_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id')
+    .eq('id', lessonParticipantId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    return null;
+  }
+
+  const instanceMap = await loadLessonInstancesByIds(tenantClient, [data.lesson_instance_id]);
+  return {
+    ...data,
+    lesson_instance: instanceMap.get(data.lesson_instance_id) || null,
+  };
+}
+
+async function upsertLessonConsumptionEntry(tenantClient, payload) {
+  const { data, error } = await tenantClient
+    .from('consumption_entries')
+    .upsert(payload, { onConflict: 'lesson_participant_id,source_type' })
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.id || null;
+}
+
+async function deleteLessonConsumptionEntry(tenantClient, lessonParticipantId) {
+  const { error } = await tenantClient
+    .from('consumption_entries')
+    .delete()
+    .eq('lesson_participant_id', lessonParticipantId)
+    .eq('source_type', 'lesson');
+
+  if (error && error.code !== '42P01') {
+    throw error;
+  }
+}
+
+export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId, actorUserId = null) {
+  if (!lessonInstanceId) {
+    return null;
+  }
+
+  const instanceMap = await loadLessonInstancesByIds(tenantClient, [lessonInstanceId]);
+  const instance = instanceMap.get(lessonInstanceId) || null;
+  if (!instance) {
+    return null;
+  }
+
+  const { data: participants, error: participantsError } = await tenantClient
+    .from('lesson_participants')
+    .select('id, lesson_instance_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id, attendance_confirmed_at')
+    .eq('lesson_instance_id', lessonInstanceId);
+
+  if (participantsError) {
+    throw participantsError;
+  }
+
+  const policies = await loadFinancePolicies(tenantClient);
+  const commitmentIds = Array.from(new Set((participants || []).map((row) => row.commitment_id).filter(Boolean)));
+  const commitmentMap = await loadCommitmentsMap(tenantClient, commitmentIds);
+  const syncedAt = new Date().toISOString();
+  let updatedParticipants = 0;
+
+  for (const participant of participants || []) {
+    const commitment = participant.commitment_id
+      ? commitmentMap.get(participant.commitment_id) || null
+      : null;
+    const decision = buildBillingDecision({
+      participant,
+      instance,
+      commitment,
+      policies,
+      syncedAt,
+    });
+
+    let lessonEntryId = null;
+    if (decision.shouldCharge) {
+      lessonEntryId = await upsertLessonConsumptionEntry(tenantClient, {
+        lesson_participant_id: participant.id,
+        student_id: participant.student_id,
+        source_type: 'lesson',
+        commitment_id: commitment.id,
+        amount_charged: decision.chargeAmount,
+        effective_date: toDateKey(instance.datetime_start),
+        notes: null,
+        metadata: {
+          participant_status: normalizeString(participant.participant_status).toLowerCase(),
+          lesson_instance_id: lessonInstanceId,
+          billing_status: decision.billingStatus,
+          billing_reason: decision.billingReason,
+        },
+      });
+    } else {
+      await deleteLessonConsumptionEntry(tenantClient, participant.id);
+    }
+
+    const pricingBreakdown = {
+      ...decision.pricingBreakdown,
+      lesson_entry_id: lessonEntryId,
+    };
+
+    const participantPayload = {
+      price_charged: decision.chargeAmount,
+      pricing_breakdown: pricingBreakdown,
+      attendance_confirmed_at: participant.participant_status !== 'scheduled'
+        ? (participant.attendance_confirmed_at || syncedAt)
+        : participant.attendance_confirmed_at,
+      attendance_confirmed_by: participant.participant_status !== 'scheduled'
+        ? (actorUserId || null)
+        : null,
+    };
+
+    const { error: updateError } = await tenantClient
+      .from('lesson_participants')
+      .update(participantPayload)
+      .eq('id', participant.id);
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    updatedParticipants += 1;
+  }
+
+  return {
+    lesson_instance_id: lessonInstanceId,
+    billing_synced: true,
+    updated_participants: updatedParticipants,
+  };
+}
+
+export async function assignLessonParticipantCommitment(tenantClient, {
+  lessonParticipantId,
+  commitmentId,
+  actorUserId = null,
+} = {}) {
+  const participant = await loadParticipantWithInstance(tenantClient, lessonParticipantId);
+  if (!participant) {
+    return { error: 'lesson_participant_not_found' };
+  }
+
+  const commitmentMap = await loadCommitmentsMap(tenantClient, [commitmentId]);
+  const commitment = commitmentMap.get(commitmentId) || null;
+  if (!commitment) {
+    return { error: 'commitment_not_found' };
+  }
+
+  const lessonDate = toDateKey(participant.lesson_instance?.datetime_start);
+  if (commitment.student_id !== participant.student_id) {
+    return { error: 'commitment_belongs_to_different_student' };
+  }
+  if (commitment.service_id && participant.lesson_instance?.service_id && commitment.service_id !== participant.lesson_instance.service_id) {
+    return { error: 'commitment_service_mismatch' };
+  }
+  if (commitment.is_active === false) {
+    return { error: 'commitment_inactive' };
+  }
+  if (isCommitmentExpired(commitment, lessonDate)) {
+    return { error: 'commitment_expired' };
+  }
+
+  const { error: updateError } = await tenantClient
+    .from('lesson_participants')
+    .update({
+      commitment_id: commitment.id,
+      pricing_breakdown: null,
+      price_charged: null,
+    })
+    .eq('id', lessonParticipantId);
+
+  if (updateError) {
+    throw updateError;
+  }
+
+  await syncLessonBillingArtifacts(tenantClient, participant.lesson_instance_id, actorUserId);
+  const refreshed = await loadParticipantWithInstance(tenantClient, lessonParticipantId);
+  return { participant: refreshed };
+}
+
+export async function clearLessonParticipantCommitment(tenantClient, {
+  lessonParticipantId,
+  actorUserId = null,
+} = {}) {
+  const participant = await loadParticipantWithInstance(tenantClient, lessonParticipantId);
+  if (!participant) {
+    return { error: 'lesson_participant_not_found' };
+  }
+
+  const { error: updateError } = await tenantClient
+    .from('lesson_participants')
+    .update({
+      commitment_id: null,
+      pricing_breakdown: null,
+      price_charged: null,
+    })
+    .eq('id', lessonParticipantId);
+
+  if (updateError) {
+    throw updateError;
+  }
+
+  await syncLessonBillingArtifacts(tenantClient, participant.lesson_instance_id, actorUserId);
+  const refreshed = await loadParticipantWithInstance(tenantClient, lessonParticipantId);
+  return { participant: refreshed };
+}
+
+export async function createCommitmentTransfer(tenantClient, {
+  sourceCommitmentId,
+  amount,
+  targetStudentId = '',
+  targetServiceId = '',
+  targetCommitmentType = '',
+  targetDefaultChargeAmount = null,
+  expiresAt = null,
+  notes = '',
+  actorUserId = null,
+} = {}) {
+  const normalizedSourceCommitmentId = normalizeString(sourceCommitmentId);
+  const sourceCommitmentMap = await loadCommitmentsMap(tenantClient, [normalizedSourceCommitmentId]);
+  const sourceCommitment = sourceCommitmentMap.get(normalizedSourceCommitmentId) || null;
+
+  if (!sourceCommitment) {
+    return { error: 'source_commitment_not_found' };
+  }
+
+  const sourceCommitments = await fetchCommitmentsWithBalances(tenantClient, { studentId: sourceCommitment.student_id });
+  const sourceWithBalance = sourceCommitments.find((row) => row.id === normalizedSourceCommitmentId) || null;
+  if (!sourceWithBalance) {
+    return { error: 'source_commitment_not_found' };
+  }
+
+  const transferAmount = roundCurrency(Number(amount));
+  if (!Number.isFinite(transferAmount) || transferAmount <= 0) {
+    return { error: 'invalid_transfer_amount' };
+  }
+  if (transferAmount > roundCurrency(coerceNumber(sourceWithBalance.remaining_amount, 0))) {
+    return { error: 'transfer_amount_exceeds_remaining_balance' };
+  }
+
+  const transferRef = randomUUID();
+  const targetStudent = normalizeString(targetStudentId) || sourceCommitment.student_id;
+  const targetService = normalizeString(targetServiceId) || sourceCommitment.service_id;
+  const normalizedCommitmentType = normalizeCommitmentType(targetCommitmentType) || 'manual_credit';
+  const resolvedDefaultChargeAmount = targetDefaultChargeAmount === null || targetDefaultChargeAmount === ''
+    ? (sourceCommitment.default_charge_amount ?? null)
+    : Number(targetDefaultChargeAmount);
+  const resolvedExpiresAt = normalizeString(expiresAt) || sourceCommitment.expires_at || null;
+  const trimmedNotes = normalizeString(notes) || null;
+
+  if (!targetStudent) {
+    return { error: 'missing_target_student_id' };
+  }
+  if (!targetService) {
+    return { error: 'missing_target_service_id' };
+  }
+  if (resolvedDefaultChargeAmount !== null && (!Number.isFinite(Number(resolvedDefaultChargeAmount)) || Number(resolvedDefaultChargeAmount) < 0)) {
+    return { error: 'invalid_target_default_charge_amount' };
+  }
+
+  const targetCommitmentPayload = {
+    student_id: targetStudent,
+    service_id: targetService,
+    commitment_type: normalizedCommitmentType,
+    total_amount: transferAmount,
+    default_charge_amount: resolvedDefaultChargeAmount === null ? null : roundCurrency(Number(resolvedDefaultChargeAmount)),
+    transfer_ref: transferRef,
+    notes: trimmedNotes,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    expires_at: resolvedExpiresAt || null,
+    metadata: {
+      transfer: {
+        source_commitment_id: sourceCommitment.id,
+        created_by: actorUserId || null,
+      },
+    },
+  };
+
+  const { data: targetCommitment, error: targetCommitmentError } = await tenantClient
+    .from('commitments')
+    .insert(targetCommitmentPayload)
+    .select('id, student_id, service_id, commitment_type, total_amount, default_charge_amount, transfer_ref, notes, is_active, created_at, updated_at, expires_at, metadata')
+    .single();
+
+  if (targetCommitmentError) {
+    throw targetCommitmentError;
+  }
+
+  const transferEntryPayload = {
+    lesson_participant_id: null,
+    student_id: sourceCommitment.student_id,
+    source_type: 'transfer',
+    commitment_id: sourceCommitment.id,
+    transfer_ref: transferRef,
+    amount_charged: transferAmount,
+    effective_date: toDateKey(new Date()),
+    notes: trimmedNotes,
+    created_at: new Date().toISOString(),
+    metadata: {
+      target_commitment_id: targetCommitment.id,
+      target_student_id: targetCommitment.student_id,
+      created_by: actorUserId || null,
+    },
+  };
+
+  const { data: sourceEntry, error: sourceEntryError } = await tenantClient
+    .from('consumption_entries')
+    .insert(transferEntryPayload)
+    .select('id, lesson_participant_id, student_id, source_type, commitment_id, transfer_ref, amount_charged, effective_date, notes, created_at, metadata')
+    .single();
+
+  if (sourceEntryError) {
+    await tenantClient
+      .from('commitments')
+      .delete()
+      .eq('id', targetCommitment.id);
+    throw sourceEntryError;
+  }
+
+  return {
+    transfer_ref: transferRef,
+    source_entry: sourceEntry,
+    target_commitment: targetCommitment,
+  };
+}
+
+export async function reconcileStudentBilling(tenantClient, {
+  studentId,
+  startDate = '',
+  endDate = '',
+  actorUserId = null,
+} = {}) {
+  const normalizedStudentId = normalizeString(studentId);
+  if (!normalizedStudentId) {
+    return { error: 'missing_student_id' };
+  }
+
+  const normalizedStartDate = isYmdDate(startDate) ? startDate : '';
+  const normalizedEndDate = isYmdDate(endDate) ? endDate : '';
+  const history = await fetchLessonBillingHistory(tenantClient, {
+    studentId: normalizedStudentId,
+    startDate: normalizedStartDate,
+    endDate: normalizedEndDate,
+    policies: await loadFinancePolicies(tenantClient),
+  });
+
+  const lessonInstanceIds = Array.from(new Set(history.map((row) => row.lesson_instance_id).filter(Boolean)));
+  for (const lessonInstanceId of lessonInstanceIds) {
+    await syncLessonBillingArtifacts(tenantClient, lessonInstanceId, actorUserId);
+  }
+
+  return {
+    student_id: normalizedStudentId,
+    reconciled_instances: lessonInstanceIds.length,
+  };
+}
+
+export async function fetchBillingSnapshot(tenantClient, {
+  studentId = '',
+  startDate = '',
+  endDate = '',
+} = {}) {
+  const normalizedStudentId = normalizeString(studentId);
+  const normalizedStartDate = isYmdDate(startDate) ? startDate : '';
+  const normalizedEndDate = isYmdDate(endDate) ? endDate : '';
+  const policies = await loadFinancePolicies(tenantClient);
+  const rawCommitments = await fetchCommitmentsWithBalances(tenantClient, {
+    studentId: normalizedStudentId,
+  });
+
+  const studentIds = rawCommitments.map((row) => row.student_id);
+  const serviceIds = rawCommitments.map((row) => row.service_id);
+  const [studentMap, serviceMap] = await Promise.all([
+    loadStudentsMap(tenantClient, studentIds),
+    loadServicesMap(tenantClient, serviceIds),
+  ]);
+
+  const commitments = rawCommitments.map((row) => enrichCommitment(row, studentMap, serviceMap));
+  const commitmentBalanceMap = new Map(commitments.map((row) => [row.id, row]));
+
+  const [lessonHistory, allEntries] = await Promise.all([
+    fetchLessonBillingHistory(tenantClient, {
+      studentId: normalizedStudentId,
+      startDate: normalizedStartDate,
+      endDate: normalizedEndDate,
+      policies,
+      commitmentBalanceMap,
+    }),
+    fetchBillingEntries(tenantClient, {
+      studentId: normalizedStudentId,
+      commitmentBalanceMap,
+    }),
+  ]);
+
+  const filteredEntries = allEntries.filter((entry) => {
+    const dateKey = toDateKey(entry.effective_date || entry.created_at);
+    if (normalizedStartDate && dateKey < normalizedStartDate) {
+      return false;
+    }
+    if (normalizedEndDate && dateKey > normalizedEndDate) {
+      return false;
+    }
+    return true;
+  });
+
+  const billingQueue = lessonHistory.filter((row) => ACTIONABLE_BILLING_STATUSES.has(row.billing_status));
+  const manualEntries = filteredEntries.filter((row) => row.source_type !== 'lesson');
+  const transfers = buildTransferGroups({
+    commitments,
+    entries: manualEntries,
+    studentId: normalizedStudentId,
+  });
+  const summary = buildSnapshotSummary({
+    commitments,
+    billingQueue,
+    lessonHistory,
+    entries: manualEntries,
+    transfers,
+  });
+
+  return {
+    summary,
+    policies: {
+      billing_consumption_policy: policies.billingConsumptionPolicy,
+    },
+    commitments,
+    billing_queue: billingQueue,
+    lesson_history: lessonHistory,
+    entries: manualEntries,
+    transfers,
+  };
+}

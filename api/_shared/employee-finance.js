@@ -811,6 +811,99 @@ export async function fetchLessonPendingBillingQueue(tenantClient, { startDate =
   }));
 }
 
+export async function syncLessonInstructorEarnings(
+  tenantClient,
+  lessonInstanceId,
+  actorUserId = null,
+  { instance = null, participants = null, policies = null } = {},
+) {
+  let resolvedInstance = instance;
+  if (!resolvedInstance) {
+    const { data: instanceData, error: instanceError } = await tenantClient
+      .from('lesson_instances')
+      .select('id, instructor_employee_id, service_id, duration_minutes, status, datetime_start')
+      .eq('id', lessonInstanceId)
+      .maybeSingle();
+
+    if (instanceError) {
+      throw instanceError;
+    }
+    if (!instanceData) {
+      return null;
+    }
+    resolvedInstance = instanceData;
+  }
+
+  let resolvedParticipants = participants;
+  if (!resolvedParticipants) {
+    const { data: participantRows, error: participantsError } = await tenantClient
+      .from('lesson_participants')
+      .select('id, student_id, participant_status, commitment_id, price_charged, attendance_confirmed_at')
+      .eq('lesson_instance_id', lessonInstanceId);
+
+    if (participantsError) {
+      throw participantsError;
+    }
+    resolvedParticipants = participantRows || [];
+  }
+
+  const resolvedPolicies = policies || await loadFinancePolicies(tenantClient);
+  const shouldInstructorEarn = resolvedInstance.status !== 'cancelled_clinic'
+    && (resolvedParticipants || []).some((participant) => resolvedPolicies.instructorEarningsPolicy[normalizeString(participant.participant_status).toLowerCase()]);
+
+  if (!shouldInstructorEarn || !resolvedInstance.instructor_employee_id) {
+    const { error: deleteError } = await tenantClient
+      .from('lesson_earnings')
+      .delete()
+      .eq('lesson_instance_id', lessonInstanceId);
+
+    if (deleteError && deleteError.code !== '42P01') {
+      throw deleteError;
+    }
+
+    return {
+      lesson_instance_id: lessonInstanceId,
+      instructor_earned: false,
+    };
+  }
+
+  const { data: capability, error: capabilityError } = await tenantClient
+    .from('instructor_service_capabilities')
+    .select('base_rate')
+    .eq('employee_id', resolvedInstance.instructor_employee_id)
+    .eq('service_id', resolvedInstance.service_id)
+    .maybeSingle();
+
+  if (capabilityError && capabilityError.code !== '42P01') {
+    throw capabilityError;
+  }
+
+  const rateUsed = Number.isFinite(Number(capability?.base_rate)) ? Number(capability.base_rate) : 0;
+  const payoutAmount = roundCurrency(rateUsed * (Number(resolvedInstance.duration_minutes || 0) / 60));
+  const { error: earningError } = await tenantClient
+    .from('lesson_earnings')
+    .upsert({
+      employee_id: resolvedInstance.instructor_employee_id,
+      lesson_instance_id: lessonInstanceId,
+      rate_used: rateUsed,
+      payout_amount: payoutAmount,
+      metadata: {
+        service_id: resolvedInstance.service_id,
+        lesson_date: toDateKey(resolvedInstance.datetime_start),
+      },
+    }, { onConflict: 'employee_id,lesson_instance_id' });
+
+  if (earningError) {
+    throw earningError;
+  }
+
+  return {
+    lesson_instance_id: lessonInstanceId,
+    instructor_earned: true,
+    payout_amount: payoutAmount,
+  };
+}
+
 export async function syncLessonFinancialArtifacts(tenantClient, lessonInstanceId, actorUserId = null) {
   if (!lessonInstanceId) {
     return null;
@@ -915,58 +1008,9 @@ export async function syncLessonFinancialArtifacts(tenantClient, lessonInstanceI
     }
   }
 
-  const shouldInstructorEarn = instance.status !== 'cancelled_clinic'
-    && (participants || []).some((participant) => policies.instructorEarningsPolicy[normalizeString(participant.participant_status).toLowerCase()]);
-
-  if (!shouldInstructorEarn || !instance.instructor_employee_id) {
-    const { error: deleteError } = await tenantClient
-      .from('lesson_earnings')
-      .delete()
-      .eq('lesson_instance_id', lessonInstanceId);
-
-    if (deleteError && deleteError.code !== '42P01') {
-      throw deleteError;
-    }
-
-    return {
-      lesson_instance_id: lessonInstanceId,
-      instructor_earned: false,
-    };
-  }
-
-  const { data: capability, error: capabilityError } = await tenantClient
-    .from('instructor_service_capabilities')
-    .select('base_rate')
-    .eq('employee_id', instance.instructor_employee_id)
-    .eq('service_id', instance.service_id)
-    .maybeSingle();
-
-  if (capabilityError && capabilityError.code !== '42P01') {
-    throw capabilityError;
-  }
-
-  const rateUsed = Number.isFinite(Number(capability?.base_rate)) ? Number(capability.base_rate) : 0;
-  const payoutAmount = roundCurrency(rateUsed * (Number(instance.duration_minutes || 0) / 60));
-  const { error: earningError } = await tenantClient
-    .from('lesson_earnings')
-    .upsert({
-      employee_id: instance.instructor_employee_id,
-      lesson_instance_id: lessonInstanceId,
-      rate_used: rateUsed,
-      payout_amount: payoutAmount,
-      metadata: {
-        service_id: instance.service_id,
-        lesson_date: toDateKey(instance.datetime_start),
-      },
-    }, { onConflict: 'employee_id,lesson_instance_id' });
-
-  if (earningError) {
-    throw earningError;
-  }
-
-  return {
-    lesson_instance_id: lessonInstanceId,
-    instructor_earned: true,
-    payout_amount: payoutAmount,
-  };
+  return syncLessonInstructorEarnings(tenantClient, lessonInstanceId, actorUserId, {
+    instance,
+    participants,
+    policies,
+  });
 }

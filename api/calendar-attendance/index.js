@@ -10,7 +10,8 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { syncLessonFinancialArtifacts } from '../_shared/employee-finance.js';
+import { syncLessonInstructorEarnings } from '../_shared/employee-finance.js';
+import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -193,7 +194,8 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
   }
 
   try {
-    await syncLessonFinancialArtifacts(tenantClient, body.instance_id, userId);
+    await syncLessonBillingArtifacts(tenantClient, body.instance_id, userId);
+    await syncLessonInstructorEarnings(tenantClient, body.instance_id, userId);
   } catch (syncError) {
     context.log?.error?.('calendar/attendance failed to sync financial artifacts', {
       message: syncError?.message,

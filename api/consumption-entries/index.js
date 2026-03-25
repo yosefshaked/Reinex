@@ -12,27 +12,17 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { BILLING_SOURCE_TYPES, isYmdDate, syncLessonFinancialArtifacts } from '../_shared/employee-finance.js';
+import { BILLING_SOURCE_TYPES, isYmdDate } from '../_shared/employee-finance.js';
+import {
+  assignLessonParticipantCommitment,
+  clearLessonParticipantCommitment,
+} from '../_shared/student-billing.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
 function normalizeSourceType(value) {
   const normalized = normalizeString(value).toLowerCase();
   return BILLING_SOURCE_TYPES.has(normalized) ? normalized : '';
-}
-
-async function loadParticipant(tenantClient, lessonParticipantId) {
-  const { data, error } = await tenantClient
-    .from('lesson_participants')
-    .select('id, lesson_instance_id, student_id, commitment_id, price_charged')
-    .eq('id', lessonParticipantId)
-    .maybeSingle();
-
-  if (error) {
-    throw error;
-  }
-
-  return data || null;
 }
 
 export default async function (context, req) {
@@ -126,44 +116,20 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'missing_assignment_target' });
     }
 
-    const participant = await loadParticipant(tenantClient, lessonParticipantId);
-    if (!participant) {
-      return respond(context, 404, { message: 'lesson_participant_not_found' });
+    const result = await assignLessonParticipantCommitment(tenantClient, {
+      lessonParticipantId,
+      commitmentId,
+      actorUserId: userId,
+    });
+
+    if (result?.error === 'lesson_participant_not_found' || result?.error === 'commitment_not_found') {
+      return respond(context, 404, { message: result.error });
+    }
+    if (result?.error) {
+      return respond(context, 409, { message: result.error });
     }
 
-    const { data: commitment, error: commitmentError } = await tenantClient
-      .from('commitments')
-      .select('id, student_id, default_charge_amount')
-      .eq('id', commitmentId)
-      .maybeSingle();
-
-    if (commitmentError) {
-      context.log?.error?.('consumption-entries failed to load commitment', { message: commitmentError.message });
-      return respond(context, 500, { message: 'failed_to_load_commitment' });
-    }
-    if (!commitment) {
-      return respond(context, 404, { message: 'commitment_not_found' });
-    }
-    if (commitment.student_id !== participant.student_id) {
-      return respond(context, 409, { message: 'commitment_belongs_to_different_student' });
-    }
-
-    const { error: updateError } = await tenantClient
-      .from('lesson_participants')
-      .update({
-        commitment_id: commitment.id,
-        price_charged: commitment.default_charge_amount ?? null,
-      })
-      .eq('id', lessonParticipantId);
-
-    if (updateError) {
-      context.log?.error?.('consumption-entries failed to assign commitment', { message: updateError.message });
-      return respond(context, 500, { message: 'failed_to_assign_commitment' });
-    }
-
-    await syncLessonFinancialArtifacts(tenantClient, participant.lesson_instance_id, userId);
-    const refreshed = await loadParticipant(tenantClient, lessonParticipantId);
-    return respond(context, 200, { participant: refreshed });
+    return respond(context, 200, result);
   }
 
   if (method === 'POST' && action === 'clear_participant_commitment') {
@@ -172,27 +138,19 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'missing_lesson_participant_id' });
     }
 
-    const participant = await loadParticipant(tenantClient, lessonParticipantId);
-    if (!participant) {
-      return respond(context, 404, { message: 'lesson_participant_not_found' });
+    const result = await clearLessonParticipantCommitment(tenantClient, {
+      lessonParticipantId,
+      actorUserId: userId,
+    });
+
+    if (result?.error === 'lesson_participant_not_found') {
+      return respond(context, 404, { message: result.error });
+    }
+    if (result?.error) {
+      return respond(context, 409, { message: result.error });
     }
 
-    const { error: updateError } = await tenantClient
-      .from('lesson_participants')
-      .update({
-        commitment_id: null,
-        price_charged: null,
-      })
-      .eq('id', lessonParticipantId);
-
-    if (updateError) {
-      context.log?.error?.('consumption-entries failed to clear commitment', { message: updateError.message });
-      return respond(context, 500, { message: 'failed_to_clear_commitment' });
-    }
-
-    await syncLessonFinancialArtifacts(tenantClient, participant.lesson_instance_id, userId);
-    const refreshed = await loadParticipant(tenantClient, lessonParticipantId);
-    return respond(context, 200, { participant: refreshed });
+    return respond(context, 200, result);
   }
 
   if (method === 'POST' || method === 'PUT') {

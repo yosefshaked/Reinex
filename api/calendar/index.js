@@ -12,7 +12,8 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { assertNoLeaveForLesson, syncLessonFinancialArtifacts, toDateKey } from '../_shared/employee-finance.js';
+import { assertNoLeaveForLesson, syncLessonInstructorEarnings, toDateKey } from '../_shared/employee-finance.js';
+import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 const INSTANCE_STATUSES = new Set(['scheduled', 'completed', 'cancelled_student', 'cancelled_clinic', 'no_show']);
@@ -480,7 +481,8 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
   }
 
   try {
-    await syncLessonFinancialArtifacts(tenantClient, instance.id, userId);
+    await syncLessonBillingArtifacts(tenantClient, instance.id, userId);
+    await syncLessonInstructorEarnings(tenantClient, instance.id, userId);
   } catch (syncError) {
     context.log?.error?.('calendar/instances failed to sync financial artifacts after create', {
       message: syncError?.message,
@@ -644,7 +646,8 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   }
 
   try {
-    await syncLessonFinancialArtifacts(tenantClient, body.id, userId);
+    await syncLessonBillingArtifacts(tenantClient, body.id, userId);
+    await syncLessonInstructorEarnings(tenantClient, body.id, userId);
   } catch (syncError) {
     context.log?.error?.('calendar/instances failed to sync financial artifacts after update', {
       message: syncError?.message,

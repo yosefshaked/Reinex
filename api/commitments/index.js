@@ -172,6 +172,20 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'missing_commitment_id' });
     }
 
+    const { data: commitment, error: commitmentError } = await tenantClient
+      .from('commitments')
+      .select('id, transfer_ref')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (commitmentError) {
+      context.log?.error?.('commitments failed to load record before delete', { message: commitmentError.message });
+      return respond(context, 500, { message: 'failed_to_load_commitment' });
+    }
+    if (!commitment) {
+      return respond(context, 404, { message: 'commitment_not_found' });
+    }
+
     const { data: usageRows, error: usageError } = await tenantClient
       .from('consumption_entries')
       .select('id')
@@ -185,6 +199,24 @@ export default async function (context, req) {
 
     if ((usageRows || []).length > 0) {
       return respond(context, 409, { message: 'commitment_has_consumption_entries' });
+    }
+
+    if (commitment.transfer_ref) {
+      const { data: transferRows, error: transferError } = await tenantClient
+        .from('consumption_entries')
+        .select('id')
+        .eq('source_type', 'transfer')
+        .eq('transfer_ref', commitment.transfer_ref)
+        .limit(1);
+
+      if (transferError && transferError.code !== '42P01') {
+        context.log?.error?.('commitments failed to verify transfer linkage', { message: transferError.message });
+        return respond(context, 500, { message: 'failed_to_verify_commitment_usage' });
+      }
+
+      if ((transferRows || []).length > 0) {
+        return respond(context, 409, { message: 'commitment_has_transfer_entries' });
+      }
     }
 
     const { data, error } = await tenantClient
