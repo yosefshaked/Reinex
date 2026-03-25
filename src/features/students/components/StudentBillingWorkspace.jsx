@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { CircleHelp, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -212,6 +213,27 @@ function exportBillingCsv({ student, commitments, lessonHistory, entries, transf
   anchor.click();
   document.body.removeChild(anchor);
   URL.revokeObjectURL(url);
+}
+
+function HelpTooltip({ text }) {
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition hover:bg-slate-100 hover:text-zinc-900"
+            aria-label="הסבר"
+          >
+            <CircleHelp className="h-4 w-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-xs text-end leading-6">
+          {text}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 export default function StudentBillingWorkspace({
@@ -881,9 +903,12 @@ export default function StudentBillingWorkspace({
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-xs text-slate-600">מה הפעולה הזו עושה</Label>
-                  <div className="rounded-xl border border-border bg-slate-50 px-3 py-2 text-sm text-muted-foreground">
-                    {creationActionOptions.find((option) => option.value === commitmentForm.commitmentType)?.description}
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs text-slate-600">מה הפעולה הזו עושה</Label>
+                    <HelpTooltip text={creationActionOptions.find((option) => option.value === commitmentForm.commitmentType)?.description || ''} />
+                  </div>
+                  <div className="rounded-xl border border-dashed border-border bg-slate-50 px-3 py-2 text-sm text-zinc-700">
+                    {creationActionOptions.find((option) => option.value === commitmentForm.commitmentType)?.label}
                   </div>
                 </div>
               </div>

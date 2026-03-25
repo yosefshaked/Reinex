@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, Loader2, Settings2 } from 'lucide-react';
+import { CircleHelp, Download, Loader2, Settings2 } from 'lucide-react';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import Card from '@/components/ui/CustomCard.jsx';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Dialog,
   DialogContent,
@@ -82,6 +83,27 @@ function escapeCsvCell(value) {
 function formatCurrency(value) {
   if (value == null || Number.isNaN(Number(value))) return '—';
   return `₪${Number(value).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function HelpTooltip({ text }) {
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition hover:bg-slate-100 hover:text-zinc-900"
+            aria-label="הסבר"
+          >
+            <CircleHelp className="h-4 w-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-xs text-end leading-6">
+          {text}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 function buildStudentName(student) {
@@ -667,35 +689,45 @@ export default function FinancialsPage() {
         </TabsContent>
 
         <TabsContent value="billing" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 xl:grid-cols-5">
             <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <div className="text-xs text-emerald-700">שיעורים שחויבו</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs text-emerald-700">שיעורים שחויבו</div>
+                <HelpTooltip text="שיעורים שהחיוב שלהם כבר הוכרע ונרשם בחודש הזה." />
+              </div>
               <div className="mt-1 text-2xl font-bold text-emerald-950">{overviewStats.charged_lessons_count}</div>
-              <p className="mt-2 text-sm text-muted-foreground">שיעורים שהחיוב שלהם כבר הוכרע ונרשם בחודש הזה.</p>
             </Card>
             <button
               type="button"
               onClick={() => setIsConsumedLessonsOpen(true)}
               className="rounded-2xl border border-border bg-surface p-lg text-start shadow-sm transition hover:border-zinc-400"
             >
-              <div className="text-xs text-violet-700">סך שיעורים שנצרכו</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs text-violet-700">סך שיעורים שנצרכו</div>
+                <HelpTooltip text="לחיצה תציג פירוט לפי שירות ולפי סוג התחייבות, כולל פירוט נפרד לכל גורם מממן." />
+              </div>
               <div className="mt-1 text-2xl font-bold text-violet-950">{overviewStats.consumed_lessons_count}</div>
-              <p className="mt-2 text-sm text-muted-foreground">לחיצה תציג פירוט לפי שירות ולפי סוג התחייבות, כולל פירוט נפרד לכל גורם מממן.</p>
             </button>
             <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <div className="text-xs text-amber-700">ממתינים לטיפול</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs text-amber-700">ממתינים לטיפול</div>
+                <HelpTooltip text="שיעורים שחסרה להם התחייבות תקינה או הגדרת חיוב." />
+              </div>
               <div className="mt-1 text-2xl font-bold text-amber-950">{overviewStats.pending_queue_count}</div>
-              <p className="mt-2 text-sm text-muted-foreground">שיעורים שחסרה להם התחייבות תקינה או הגדרת חיוב.</p>
             </Card>
             <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <div className="text-xs text-red-700">התחייבויות שפגו / נגמר התקציב</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs text-red-700">התחייבויות שפגו / נגמר התקציב</div>
+                <HelpTooltip text="כולל התחייבויות שפגו בפועל או כאלה שמיצו את יתרת המפגשים או התקציב שלהן." />
+              </div>
               <div className="mt-1 text-2xl font-bold text-red-950">{overviewStats.expired_or_exhausted_commitments_count}</div>
-              <p className="mt-2 text-sm text-muted-foreground">כולל התחייבויות שפגו בפועל או כאלה שמיצו את יתרת המפגשים או התקציב שלהן.</p>
             </Card>
             <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <div className="text-xs text-blue-700">רווח החודש</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs text-blue-700">רווח החודש</div>
+                <HelpTooltip text="חיובי שיעורים בחודש בתוספת התאמות ידניות, ללא העברות פנימיות." />
+              </div>
               <div className="mt-1 text-2xl font-bold text-blue-950">{formatCurrency(overviewStats.month_revenue)}</div>
-              <p className="mt-2 text-sm text-muted-foreground">חיובי שיעורים בחודש בתוספת התאמות ידניות, ללא העברות פנימיות.</p>
             </Card>
           </div>
 
