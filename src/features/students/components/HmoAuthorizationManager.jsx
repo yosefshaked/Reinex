@@ -111,6 +111,11 @@ export default function HmoAuthorizationManager({
     [authorizations],
   );
 
+  const editingAuthorization = useMemo(
+    () => authorizations.find((row) => row.id === form.id) || null,
+    [authorizations, form.id],
+  );
+
   const loadAuthorizations = useCallback(async () => {
     if (!studentId || !activeOrgId) {
       setAuthorizations([]);
@@ -268,7 +273,8 @@ export default function HmoAuthorizationManager({
   }
 
   return (
-    <div className={`grid gap-4 ${embedded ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : 'xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]'}`}>
+    <div className={embedded ? 'space-y-4' : 'grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]'}>
+      {!embedded ? (
       <section className={`${embedded ? 'rounded-xl border border-border bg-slate-50/70' : 'rounded-xl border border-border bg-white shadow-sm overflow-hidden'}`}>
         <div className="h-1.5 bg-indigo-500" />
         <div className="p-5 space-y-4">
@@ -390,9 +396,10 @@ export default function HmoAuthorizationManager({
           </div>
         </div>
       </section>
+      ) : null}
 
       {canMutateBilling ? (
-        <section className={`${embedded ? 'rounded-xl border border-border bg-slate-50/70' : 'rounded-xl border border-border bg-white shadow-sm overflow-hidden'}`}>
+        <section className={`${embedded ? 'rounded-xl border border-border bg-slate-50' : 'rounded-xl border border-border bg-white shadow-sm overflow-hidden'}`}>
           <div className="h-1.5 bg-indigo-600" />
           <div className="p-5 space-y-4">
             {availableTracks.length === 0 ? (
@@ -412,6 +419,15 @@ export default function HmoAuthorizationManager({
                     בוחרים מסלול שכבר הוגדר במערכת, בודקים את התנאים שלו, ואז מוסיפים רק את פרטי האישור של התלמיד.
                   </p>
                 </div>
+
+                {embedded ? (
+                  <div className="rounded-xl border border-border bg-white p-4 text-sm">
+                    <div className="font-semibold text-zinc-900">איך זה עובד</div>
+                    <div className="mt-2 text-muted-foreground">
+                      בוחרים מסלול קיים, מוסיפים את פרטי האישור של התלמיד, והמערכת יוצרת או מעדכנת אוטומטית את התחייבות הגורם המממן ברשימת ההתחייבויות והיתרות.
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="space-y-2">
                   <Label className="text-xs text-slate-600">מסלול</Label>
@@ -445,7 +461,7 @@ export default function HmoAuthorizationManager({
                   </Select>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className={`grid gap-3 ${embedded ? 'md:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-3'}`}>
                   <div className="rounded-lg border border-border bg-white p-3 text-sm">
                     <div className="text-[11px] text-muted-foreground">גורם מממן</div>
                     <div className="mt-1 font-semibold text-zinc-900">{selectedProvider?.name || 'ייבחר לפי המסלול'}</div>
@@ -462,9 +478,17 @@ export default function HmoAuthorizationManager({
                     <div className="text-[11px] text-muted-foreground">אופן תשלום</div>
                     <div className="mt-1 font-semibold text-zinc-900">{selectedTrack?.payment_mode || '—'}</div>
                   </div>
+                  {embedded ? (
+                    <div className="rounded-lg border border-border bg-white p-3 text-sm">
+                      <div className="text-[11px] text-muted-foreground">אישור קיים</div>
+                      <div className="mt-1 font-semibold text-zinc-900">
+                        {editingAuthorization?.authorization_reference || (form.id ? 'אישור קיים ללא מספר' : 'אישור חדש לתלמיד')}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className={`grid gap-3 ${embedded ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-3'}`}>
                   <div className="rounded-lg border border-border bg-white p-3 text-sm">
                     <div className="text-[11px] text-muted-foreground">חיוב לקוח לפי המסלול</div>
                     <div className="mt-1 font-semibold">{formatCurrency(selectedTrack?.default_customer_charge_amount)}</div>
@@ -479,7 +503,7 @@ export default function HmoAuthorizationManager({
                   </div>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className={`grid gap-3 ${embedded ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
                   <div className="space-y-2">
                     <Label htmlFor="authorization-reference">מספר אישור / טופס</Label>
                     <Input id="authorization-reference" value={form.authorizationReference} onChange={(event) => setForm((current) => ({ ...current, authorizationReference: event.target.value }))} disabled={saving} />
@@ -488,17 +512,25 @@ export default function HmoAuthorizationManager({
                     <Label htmlFor="authorized-lessons">כמות מפגשים מאושרת</Label>
                     <Input id="authorized-lessons" type="number" min="0" step="1" value={form.authorizedLessons} onChange={(event) => setForm((current) => ({ ...current, authorizedLessons: event.target.value }))} disabled={saving} />
                   </div>
+                  {embedded ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="expires-at-embedded">תוקף עד</Label>
+                      <Input id="expires-at-embedded" type="date" value={form.expiresAt} onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={saving} />
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className={`grid gap-3 ${embedded ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-3'}`}>
                   <div className="space-y-2">
                     <Label htmlFor="valid-from">תקף מ־</Label>
                     <Input id="valid-from" type="date" value={form.validFrom} onChange={(event) => setForm((current) => ({ ...current, validFrom: event.target.value }))} disabled={saving} />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="expires-at">תוקף עד</Label>
-                    <Input id="expires-at" type="date" value={form.expiresAt} onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={saving} />
-                  </div>
+                  {!embedded ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="expires-at">תוקף עד</Label>
+                      <Input id="expires-at" type="date" value={form.expiresAt} onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={saving} />
+                    </div>
+                  ) : null}
                   <div className="space-y-2">
                     <Label htmlFor="reminder-date">תזכורת פעולה</Label>
                     <Input id="reminder-date" type="date" value={form.reminderDate} onChange={(event) => setForm((current) => ({ ...current, reminderDate: event.target.value }))} disabled={saving} />

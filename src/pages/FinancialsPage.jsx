@@ -6,7 +6,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import {
   Dialog,
   DialogContent,
@@ -787,16 +786,16 @@ export default function FinancialsPage() {
         </TabsContent>
       </Tabs>
 
-      <Sheet open={isBillingPolicyOpen} onOpenChange={setIsBillingPolicyOpen}>
-        <SheetContent side="left" className="w-full sm:max-w-3xl">
-          <SheetHeader>
-            <SheetTitle className="text-end">הגדרות חיוב שיעורים</SheetTitle>
-            <SheetDescription className="text-end">
+      <Dialog open={isBillingPolicyOpen} onOpenChange={setIsBillingPolicyOpen}>
+        <DialogContent className="w-[min(96vw,88rem)] max-w-6xl">
+          <DialogHeader>
+            <DialogTitle className="text-end">הגדרות חיוב שיעורים</DialogTitle>
+            <DialogDescription className="text-end">
               המדיניות כאן קובעת באילו סטטוסים שיעור ייצר צריכה מהתחייבות. מסך העבודה נשאר ממוקד בטיפול בחיובים.
-            </SheetDescription>
-          </SheetHeader>
+            </DialogDescription>
+          </DialogHeader>
 
-          <div className="mt-6 h-[calc(100vh-180px)] overflow-y-auto pe-4">
+          <div className="mt-6 max-h-[78vh] overflow-y-auto pe-4">
             <BillingSettingsWorkspace
               billingPolicy={billingPolicy}
               setBillingPolicy={setBillingPolicy}
@@ -807,8 +806,8 @@ export default function FinancialsPage() {
               onChanged={loadBillingOverview}
             />
           </div>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isConsumedLessonsOpen} onOpenChange={setIsConsumedLessonsOpen}>
         <DialogContent>
