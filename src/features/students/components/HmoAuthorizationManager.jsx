@@ -72,6 +72,7 @@ export default function HmoAuthorizationManager({
   const {
     providers,
     loadingProviders,
+    providersNotice,
     loadProviders,
   } = useMedicalProviders();
 
@@ -160,6 +161,10 @@ export default function HmoAuthorizationManager({
 
   async function handleSave() {
     if (!activeOrgId || !studentId || !canMutateBilling) {
+      return;
+    }
+    if (providers.length === 0) {
+      toast.error('לפני יצירת אישור צריך להגדיר גורם מממן ומסלול.');
       return;
     }
     if (!form.serviceId || !form.providerId || !form.providerTrackId) {
@@ -264,6 +269,12 @@ export default function HmoAuthorizationManager({
                   </Badge>
                 ))}
               </div>
+            </div>
+          ) : null}
+
+          {!loadingProviders && providers.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-slate-50 p-4 text-sm text-muted-foreground">
+              {providersNotice || 'עדיין לא הוגדרו גורמים מממנים בארגון. לפני יצירת אישור צריך להגדיר גורם מממן ומסלול.'}
             </div>
           ) : null}
 

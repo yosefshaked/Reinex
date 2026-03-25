@@ -50,6 +50,7 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
     providers,
     loadingProviders,
     providersError,
+    providersNotice,
     loadProviders,
     createProvider,
     updateProvider,
@@ -329,7 +330,7 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
 
             {!loadingProviders && providers.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
-                עדיין לא הוגדרו גורמים מממנים.
+                {providersNotice || 'עדיין לא הוגדרו גורמים מממנים. התחילו ביצירת גורם מממן חדש ואז הוסיפו לו מסלול מתאים.'}
               </div>
             ) : null}
           </div>

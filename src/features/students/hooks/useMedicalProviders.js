@@ -24,33 +24,43 @@ export function useMedicalProviders() {
   const [providers, setProviders] = useState(EMPTY_ARRAY);
   const [loadingProviders, setLoadingProviders] = useState(false);
   const [providersError, setProvidersError] = useState('');
+  const [providersNotice, setProvidersNotice] = useState('');
 
   const loadProviders = useCallback(async () => {
     if (!session || !activeOrgId) {
       setProviders([]);
       setProvidersError('');
+      setProvidersNotice('');
       setLoadingProviders(false);
       return [];
     }
 
     setLoadingProviders(true);
     setProvidersError('');
+    setProvidersNotice('');
 
     try {
       const searchParams = new URLSearchParams({ org_id: activeOrgId });
       const payload = await authenticatedFetch(`settings/medical-providers?${searchParams.toString()}`, { session });
       const normalized = normalizeProviders(payload);
       setProviders(normalized);
+      if (normalized.length === 0) {
+        setProvidersNotice(
+          canManageProviders
+            ? 'עדיין לא הוגדרו גורמים מממנים בארגון. כדי להתחיל, הוסיפו גורם מממן חדש ואז צרו לו מסלול.'
+            : 'עדיין לא הוגדרו גורמים מממנים בארגון. כדי להמשיך, בקשו ממנהל להוסיף גורם מממן ומסלול.'
+        );
+      }
       return normalized;
     } catch (error) {
       console.error('Failed to load medical providers', error);
-      setProvidersError('טעינת הגורמים המממנים נכשלה.');
       setProviders([]);
+      setProvidersError('טעינת רשימת הגורמים המממנים נכשלה כרגע. נסו לרענן, ואם זה נמשך בדקו שהטבלאות החדשות של HMO נוצרו בהתקנת ה-SQL.');
       return [];
     } finally {
       setLoadingProviders(false);
     }
-  }, [session, activeOrgId]);
+  }, [session, activeOrgId, canManageProviders]);
 
   const mutateProviders = useCallback(async (method, body) => {
     if (!session || !activeOrgId) {
@@ -117,6 +127,7 @@ export function useMedicalProviders() {
     providers,
     loadingProviders,
     providersError,
+    providersNotice,
     loadProviders,
     createProvider,
     updateProvider,

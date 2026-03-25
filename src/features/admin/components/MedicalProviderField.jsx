@@ -8,7 +8,15 @@ import { useMedicalProviders } from '@/features/students/hooks/useMedicalProvide
 const NONE_VALUE = '__none__';
 
 export default function MedicalProviderField({ value, onChange, disabled = false, description }) {
-  const { providers, loadingProviders, providersError, loadProviders, createProvider, canManageProviders } = useMedicalProviders();
+  const {
+    providers,
+    loadingProviders,
+    providersError,
+    providersNotice,
+    loadProviders,
+    createProvider,
+    canManageProviders,
+  } = useMedicalProviders();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newProviderName, setNewProviderName] = useState('');
   const [dialogError, setDialogError] = useState('');
@@ -115,10 +123,12 @@ export default function MedicalProviderField({ value, onChange, disabled = false
       return description || '';
     }
     if (!loadingProviders && providers.length === 0) {
-      return 'לא קיימות קופות חולים זמינות. ניתן להוסיף חדשה.';
+      return providersNotice || (canManageProviders
+        ? 'עדיין לא הוגדרו קופות חולים. אפשר ללחוץ על הפלוס ולהוסיף קופה חדשה.'
+        : 'עדיין לא הוגדרו קופות חולים בארגון. בקשו ממנהל להוסיף קופה חדשה.');
     }
     return description || 'בחירת קופת חולים לתלמיד.';
-  }, [providersError, loadingProviders, providers.length, description]);
+  }, [providersError, providersNotice, loadingProviders, providers.length, description, canManageProviders]);
 
   const footer = (
     <DialogFooter>

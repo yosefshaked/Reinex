@@ -90,6 +90,94 @@ function normalizeTrackRow(row) {
   };
 }
 
+async function selectHmoProviders(tenantClient, { ids = [], activeOnly = false } = {}) {
+  const normalizedIds = Array.from(new Set((ids || []).map((id) => normalizeString(id)).filter(Boolean)));
+  const selectVariants = [
+    'id, name, is_active, metadata, created_at, updated_at',
+    'id, name, is_active, metadata',
+    'id, name, is_active',
+    'id, name',
+  ];
+
+  let lastError = null;
+  for (const selectClause of selectVariants) {
+    let query = tenantClient
+      .from('hmo_providers')
+      .select(selectClause)
+      .order('name', { ascending: true });
+
+    if (activeOnly) {
+      query = query.eq('is_active', true);
+    }
+    if (normalizedIds.length > 0) {
+      query = query.in('id', normalizedIds);
+    }
+
+    const { data, error } = await query;
+    if (!error) {
+      return (data || []).map((row) => ({
+        ...row,
+        is_active: row?.is_active !== false,
+        metadata: isPlainObject(row?.metadata) ? row.metadata : {},
+        created_at: row?.created_at || null,
+        updated_at: row?.updated_at || null,
+      }));
+    }
+    if (!['42P01', '42703', 'PGRST204', 'PGRST205'].includes(error.code || '')) {
+      throw error;
+    }
+    lastError = error;
+  }
+
+  if (lastError?.code === '42P01') {
+    return [];
+  }
+  throw lastError;
+}
+
+async function selectHmoTracks(tenantClient, { providerIds = [], trackIds = [], activeOnly = false } = {}) {
+  const normalizedProviderIds = Array.from(new Set((providerIds || []).map((id) => normalizeString(id)).filter(Boolean)));
+  const normalizedTrackIds = Array.from(new Set((trackIds || []).map((id) => normalizeString(id)).filter(Boolean)));
+  const selectVariants = [
+    'id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at',
+    'id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata',
+    'id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active',
+    'id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes',
+  ];
+
+  let lastError = null;
+  for (const selectClause of selectVariants) {
+    let query = tenantClient
+      .from('hmo_provider_tracks')
+      .select(selectClause)
+      .order('name', { ascending: true });
+
+    if (activeOnly) {
+      query = query.eq('is_active', true);
+    }
+    if (normalizedProviderIds.length > 0) {
+      query = query.in('provider_id', normalizedProviderIds);
+    }
+    if (normalizedTrackIds.length > 0) {
+      query = query.in('id', normalizedTrackIds);
+    }
+
+    const { data, error } = await query;
+    if (!error) {
+      return (data || []).map((row) => normalizeTrackRow(row));
+    }
+    if (!['42P01', '42703', 'PGRST204', 'PGRST205'].includes(error.code || '')) {
+      throw error;
+    }
+    lastError = error;
+  }
+
+  if (lastError?.code === '42P01') {
+    return [];
+  }
+  throw lastError;
+}
+
 export function resolveAuthorizationFinancials(authorization = null) {
   const track = authorization?.provider_track || authorization?.hmo_provider_track || null;
   return {
@@ -106,120 +194,12 @@ export function resolveAuthorizationFinancials(authorization = null) {
   };
 }
 
-export async function seedHmoProvidersFromLegacySettings(tenantClient) {
-  const { data: settingsRow, error } = await tenantClient
-    .from('Settings')
-    .select('settings_value')
-    .eq('key', 'medical_providers')
-    .maybeSingle();
-
-  if (error) {
-    if (error.code === '42P01') {
-      return [];
-    }
-    throw error;
-  }
-
-  const providerEntries = Array.isArray(settingsRow?.settings_value)
-    ? settingsRow.settings_value
-    : Array.isArray(settingsRow?.settings_value?.providers)
-      ? settingsRow.settings_value.providers
-      : [];
-
-  if (providerEntries.length === 0) {
-    return [];
-  }
-
-  const payload = providerEntries
-    .map((entry) => {
-      if (!entry) return null;
-      if (typeof entry === 'string') {
-        const name = normalizeString(entry);
-        if (!name) return null;
-        return {
-          id: buildDeterministicUuid(`legacy-hmo-provider:${name.toLowerCase()}`),
-          name,
-          is_active: true,
-          metadata: { legacy_source: 'settings.medical_providers' },
-        };
-      }
-
-      const name = normalizeString(entry?.name);
-      if (!name) return null;
-      return {
-        id: normalizeString(entry?.id) || buildDeterministicUuid(`legacy-hmo-provider:${name.toLowerCase()}`),
-        name,
-        is_active: true,
-        metadata: {
-          legacy_source: 'settings.medical_providers',
-        },
-      };
-    })
-    .filter(Boolean);
-
-  if (payload.length === 0) {
-    return [];
-  }
-
-  const { error: insertError } = await tenantClient
-    .from('hmo_providers')
-    .upsert(payload, { onConflict: 'id' });
-
-  if (insertError && insertError.code !== '42P01') {
-    throw insertError;
-  }
-
-  return payload;
-}
-
 export async function loadHmoProviders(tenantClient, { activeOnly = false } = {}) {
-  try {
-    await seedHmoProvidersFromLegacySettings(tenantClient);
-  } catch (error) {
-    if (error?.code !== '42P01') {
-      throw error;
-    }
-  }
-
-  let providerQuery = tenantClient
-    .from('hmo_providers')
-    .select('id, name, is_active, metadata, created_at, updated_at')
-    .order('name', { ascending: true });
-
-  if (activeOnly) {
-    providerQuery = providerQuery.eq('is_active', true);
-  }
-
-  const { data: providers, error } = await providerQuery;
-  if (error) {
-    if (error.code === '42P01') {
-      return [];
-    }
-    throw error;
-  }
-
-  const providerIds = (providers || []).map((row) => row.id);
-  let tracks = [];
-  if (providerIds.length > 0) {
-    let trackQuery = tenantClient
-      .from('hmo_provider_tracks')
-      .select('id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
-      .in('provider_id', providerIds)
-      .order('name', { ascending: true });
-
-    if (activeOnly) {
-      trackQuery = trackQuery.eq('is_active', true);
-    }
-
-    const { data: trackRows, error: trackError } = await trackQuery;
-    if (trackError) {
-      if (trackError.code !== '42P01') {
-        throw trackError;
-      }
-    } else {
-      tracks = trackRows || [];
-    }
-  }
+  const providers = await selectHmoProviders(tenantClient, { activeOnly });
+  const providerIds = providers.map((row) => row.id);
+  const tracks = providerIds.length > 0
+    ? await selectHmoTracks(tenantClient, { providerIds, activeOnly })
+    : [];
 
   const tracksByProvider = new Map();
   for (const track of tracks) {
@@ -231,8 +211,6 @@ export async function loadHmoProviders(tenantClient, { activeOnly = false } = {}
 
   return (providers || []).map((provider) => ({
     ...provider,
-    is_active: provider?.is_active !== false,
-    metadata: isPlainObject(provider?.metadata) ? provider.metadata : {},
     tracks: tracksByProvider.get(provider.id) || [],
   }));
 }
@@ -242,24 +220,8 @@ export async function loadHmoProviderMap(tenantClient, providerIds = []) {
   if (ids.length === 0) {
     return new Map();
   }
-
-  const { data, error } = await tenantClient
-    .from('hmo_providers')
-    .select('id, name, is_active, metadata, created_at, updated_at')
-    .in('id', ids);
-
-  if (error) {
-    if (error.code === '42P01') {
-      return new Map();
-    }
-    throw error;
-  }
-
-  return new Map((data || []).map((row) => [row.id, {
-    ...row,
-    is_active: row?.is_active !== false,
-    metadata: isPlainObject(row?.metadata) ? row.metadata : {},
-  }]));
+  const rows = await selectHmoProviders(tenantClient, { ids });
+  return new Map(rows.map((row) => [row.id, row]));
 }
 
 export async function loadHmoTrackMap(tenantClient, trackIds = []) {
@@ -267,20 +229,8 @@ export async function loadHmoTrackMap(tenantClient, trackIds = []) {
   if (ids.length === 0) {
     return new Map();
   }
-
-  const { data, error } = await tenantClient
-    .from('hmo_provider_tracks')
-    .select('id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
-    .in('id', ids);
-
-  if (error) {
-    if (error.code === '42P01') {
-      return new Map();
-    }
-    throw error;
-  }
-
-  return new Map((data || []).map((row) => [row.id, normalizeTrackRow(row)]));
+  const rows = await selectHmoTracks(tenantClient, { trackIds: ids });
+  return new Map(rows.map((row) => [row.id, row]));
 }
 
 export async function loadHmoAuthorizations(tenantClient, {

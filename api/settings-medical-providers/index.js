@@ -34,44 +34,9 @@ function normalizeTrackPayload(body = {}) {
   };
 }
 
-async function loadFallbackProvidersFromSettings(tenantClient) {
-  const { data, error } = await tenantClient
-    .from('Settings')
-    .select('settings_value')
-    .eq('key', 'medical_providers')
-    .maybeSingle();
-
-  if (error && error.code !== 'PGRST116' && error.code !== '42P01') {
-    throw error;
-  }
-
-  const payload = data?.settings_value ?? [];
-  const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.providers) ? payload.providers : [];
-  return rows
-    .map((entry) => {
-      if (!entry) return null;
-      if (typeof entry === 'string') {
-        const name = entry.trim();
-        return name ? { id: name, name, is_active: true, tracks: [] } : null;
-      }
-      const name = normalizeString(entry?.name);
-      const id = normalizeString(entry?.id) || name;
-      return name ? { id, name, is_active: true, tracks: [] } : null;
-    })
-    .filter(Boolean);
-}
-
 async function respondWithProviders(context, tenantClient) {
-  try {
-    const providers = await loadHmoProviders(tenantClient);
-    return respond(context, 200, { providers }, { 'Cache-Control': 'no-store' });
-  } catch (error) {
-    if (error?.code === '42P01') {
-      const providers = await loadFallbackProvidersFromSettings(tenantClient);
-      return respond(context, 200, { providers }, { 'Cache-Control': 'no-store' });
-    }
-    throw error;
-  }
+  const providers = await loadHmoProviders(tenantClient);
+  return respond(context, 200, { providers }, { 'Cache-Control': 'no-store' });
 }
 
 export default async function (context, req) {
@@ -128,7 +93,7 @@ export default async function (context, req) {
     try {
       return await respondWithProviders(context, tenantClient);
     } catch (error) {
-      context.log?.error?.('settings-medical-providers: failed to load providers', { message: error?.message });
+      context.log?.error?.('settings-medical-providers: failed to load providers', { message: error?.message, code: error?.code });
       return respond(context, 500, { message: error?.code === '42P01' ? 'schema_upgrade_required' : 'failed_to_load_providers' });
     }
   }
