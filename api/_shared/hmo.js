@@ -68,9 +68,10 @@ function buildLegacyTrackName({ paymentMode, customerChargeAmount, insurerClaimA
   return `מסלול שהוסב • ${modeLabel} • לקוח ${roundCurrency(customerChargeAmount)} • קופה ${roundCurrency(insurerClaimAmount)}`;
 }
 
-function buildLegacyTrackFingerprint({ providerId, paymentMode, customerChargeAmount, insurerClaimAmount, workflowNotes }) {
+function buildLegacyTrackFingerprint({ providerId, serviceId, paymentMode, customerChargeAmount, insurerClaimAmount, workflowNotes }) {
   return [
     normalizeString(providerId),
+    normalizeString(serviceId),
     normalizePaymentMode(paymentMode),
     roundCurrency(customerChargeAmount),
     roundCurrency(insurerClaimAmount),
@@ -81,6 +82,7 @@ function buildLegacyTrackFingerprint({ providerId, paymentMode, customerChargeAm
 function normalizeTrackRow(row) {
   return {
     ...row,
+    service_id: normalizeString(row?.service_id) || '',
     payment_mode: normalizePaymentMode(row?.payment_mode),
     default_customer_charge_amount: roundCurrency(coerceNumber(row?.default_customer_charge_amount, 0)),
     default_insurer_claim_amount: roundCurrency(coerceNumber(row?.default_insurer_claim_amount, 0)),
@@ -139,10 +141,10 @@ async function selectHmoTracks(tenantClient, { providerIds = [], trackIds = [], 
   const normalizedProviderIds = Array.from(new Set((providerIds || []).map((id) => normalizeString(id)).filter(Boolean)));
   const normalizedTrackIds = Array.from(new Set((trackIds || []).map((id) => normalizeString(id)).filter(Boolean)));
   const selectVariants = [
-    'id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at',
-    'id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata',
-    'id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active',
-    'id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes',
+    'id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at',
+    'id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata',
+    'id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active',
+    'id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes',
   ];
 
   let lastError = null;
@@ -384,6 +386,7 @@ export async function ensureProviderFromLegacyName(tenantClient, providerName) {
 
 export async function ensureTrackFromLegacyConfig(tenantClient, {
   providerId,
+  serviceId,
   paymentMode,
   customerChargeAmount,
   insurerClaimAmount,
@@ -400,6 +403,7 @@ export async function ensureTrackFromLegacyConfig(tenantClient, {
   const resolvedWorkflowNotes = normalizeString(workflowNotes);
   const fingerprint = buildLegacyTrackFingerprint({
     providerId: normalizedProviderId,
+    serviceId,
     paymentMode: normalizedPaymentMode,
     customerChargeAmount: resolvedCustomerCharge,
     insurerClaimAmount: resolvedInsurerClaim,
@@ -415,6 +419,7 @@ export async function ensureTrackFromLegacyConfig(tenantClient, {
   const payload = {
     id: deterministicId,
     provider_id: normalizedProviderId,
+    service_id: normalizeString(serviceId) || null,
     name: trackName,
     payment_mode: normalizedPaymentMode,
     default_customer_charge_amount: resolvedCustomerCharge,
@@ -465,6 +470,7 @@ export async function ensureAuthorizationFromLegacyCommitment(tenantClient, comm
 
   const track = await ensureTrackFromLegacyConfig(tenantClient, {
     providerId: provider.id,
+    serviceId: commitment.service_id,
     paymentMode: hmoMetadata.payment_mode,
     customerChargeAmount: hmoMetadata.customer_charge_amount ?? commitment.default_charge_amount,
     insurerClaimAmount: hmoMetadata.insurer_claim_amount,
@@ -498,7 +504,7 @@ export async function ensureAuthorizationFromLegacyCommitment(tenantClient, comm
   const { data, error } = await tenantClient
     .from('hmo_authorizations')
     .upsert(payload, { onConflict: 'id' })
-    .select('id, student_id, service_id, provider_id, provider_track_id, authorization_reference, authorized_lessons, valid_from, expires_at, reminder_date, customer_charge_amount_override, insurer_claim_amount_override, workflow_notes_override, status, notes, metadata, created_at, updated_at')
+      .select('id, student_id, service_id, provider_id, provider_track_id, authorization_reference, authorized_lessons, valid_from, expires_at, reminder_date, customer_charge_amount_override, insurer_claim_amount_override, workflow_notes_override, status, notes, metadata, created_at, updated_at')
     .maybeSingle();
 
   if (error) {

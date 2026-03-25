@@ -1320,6 +1320,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS hmo_providers_name_uidx
 CREATE TABLE IF NOT EXISTS public.hmo_provider_tracks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   provider_id uuid NOT NULL,
+  service_id uuid NULL,
   name text NOT NULL,
   payment_mode text NOT NULL DEFAULT 'partially_paid_by_hmo',
   default_customer_charge_amount numeric NOT NULL DEFAULT 0,
@@ -1333,6 +1334,7 @@ CREATE TABLE IF NOT EXISTS public.hmo_provider_tracks (
 
 ALTER TABLE public.hmo_provider_tracks
   ADD COLUMN IF NOT EXISTS provider_id uuid,
+  ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS name text,
   ADD COLUMN IF NOT EXISTS payment_mode text,
   ADD COLUMN IF NOT EXISTS default_customer_charge_amount numeric,
@@ -1348,6 +1350,16 @@ BEGIN
   ALTER TABLE public.hmo_provider_tracks
     ADD CONSTRAINT hmo_provider_tracks_provider_id_fkey
     FOREIGN KEY (provider_id) REFERENCES public.hmo_providers(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.hmo_provider_tracks
+    ADD CONSTRAINT hmo_provider_tracks_service_id_fkey
+    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -1383,11 +1395,16 @@ EXCEPTION
     NULL;
 END $$;
 
-CREATE UNIQUE INDEX IF NOT EXISTS hmo_provider_tracks_provider_name_uidx
-  ON public.hmo_provider_tracks (provider_id, lower(name));
+DROP INDEX IF EXISTS hmo_provider_tracks_provider_name_uidx;
+
+CREATE UNIQUE INDEX IF NOT EXISTS hmo_provider_tracks_provider_service_name_uidx
+  ON public.hmo_provider_tracks (provider_id, service_id, lower(name));
 
 CREATE INDEX IF NOT EXISTS hmo_provider_tracks_provider_id_idx
   ON public.hmo_provider_tracks (provider_id);
+
+CREATE INDEX IF NOT EXISTS hmo_provider_tracks_service_id_idx
+  ON public.hmo_provider_tracks (service_id);
 
 -- -----------------------------------------------------------------
 -- public.hmo_authorizations
@@ -2428,6 +2445,7 @@ track_rows AS (
   SELECT DISTINCT
     lhc.provider_name,
     pr.provider_id,
+    lhc.service_id,
     lhc.payment_mode,
     lhc.customer_charge_amount,
     lhc.insurer_claim_amount,
@@ -2435,6 +2453,7 @@ track_rows AS (
     (
       substr(md5(
         pr.provider_id::text || '|' ||
+        COALESCE(lhc.service_id::text, '') || '|' ||
         lhc.payment_mode || '|' ||
         COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
         COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
@@ -2442,6 +2461,7 @@ track_rows AS (
       ), 1, 8) || '-' ||
       substr(md5(
         pr.provider_id::text || '|' ||
+        COALESCE(lhc.service_id::text, '') || '|' ||
         lhc.payment_mode || '|' ||
         COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
         COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
@@ -2449,6 +2469,7 @@ track_rows AS (
       ), 9, 4) || '-' ||
       substr(md5(
         pr.provider_id::text || '|' ||
+        COALESCE(lhc.service_id::text, '') || '|' ||
         lhc.payment_mode || '|' ||
         COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
         COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
@@ -2456,6 +2477,7 @@ track_rows AS (
       ), 13, 4) || '-' ||
       substr(md5(
         pr.provider_id::text || '|' ||
+        COALESCE(lhc.service_id::text, '') || '|' ||
         lhc.payment_mode || '|' ||
         COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
         COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
@@ -2463,6 +2485,7 @@ track_rows AS (
       ), 17, 4) || '-' ||
       substr(md5(
         pr.provider_id::text || '|' ||
+        COALESCE(lhc.service_id::text, '') || '|' ||
         lhc.payment_mode || '|' ||
         COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
         COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
@@ -2476,6 +2499,7 @@ inserted_tracks AS (
   INSERT INTO public.hmo_provider_tracks (
     id,
     provider_id,
+    service_id,
     name,
     payment_mode,
     default_customer_charge_amount,
@@ -2487,6 +2511,7 @@ inserted_tracks AS (
   SELECT
     track_id,
     provider_id,
+    service_id,
     'מסלול שהוסב • ' ||
       CASE
         WHEN payment_mode = 'fully_paid_by_hmo' THEN 'ממומן מלא'
@@ -2522,6 +2547,7 @@ authorization_source AS (
   FROM legacy_hmo_commitments lhc
   JOIN provider_rows pr ON pr.provider_name = lhc.provider_name
   JOIN track_rows tr ON tr.provider_id = pr.provider_id
+    AND tr.service_id IS NOT DISTINCT FROM lhc.service_id
     AND tr.payment_mode = lhc.payment_mode
     AND tr.customer_charge_amount = lhc.customer_charge_amount
     AND tr.insurer_claim_amount = lhc.insurer_claim_amount
@@ -2562,6 +2588,7 @@ ON CONFLICT (id) DO NOTHING;
 WITH legacy_hmo_commitments AS (
   SELECT
     c.id AS commitment_id,
+    c.service_id,
     COALESCE(NULLIF(trim(c.metadata->'hmo'->>'provider_name'), ''), 'גורם מממן') AS provider_name,
     COALESCE(NULLIF(trim(c.metadata->'hmo'->>'payment_mode'), ''), 'partially_paid_by_hmo') AS payment_mode,
     COALESCE((c.metadata->'hmo'->>'customer_charge_amount')::numeric, c.default_charge_amount, 0) AS customer_charge_amount,
@@ -2592,6 +2619,7 @@ JOIN (
 JOIN (
   SELECT DISTINCT
     provider_name,
+    service_id,
     payment_mode,
     customer_charge_amount,
     insurer_claim_amount,
@@ -2605,6 +2633,7 @@ JOIN (
           substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
           substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
         ) || '|' ||
+        COALESCE(service_id::text, '') || '|' ||
         payment_mode || '|' ||
         COALESCE(customer_charge_amount, 0)::text || '|' ||
         COALESCE(insurer_claim_amount, 0)::text || '|' ||
@@ -2618,6 +2647,7 @@ JOIN (
           substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
           substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
         ) || '|' ||
+        COALESCE(service_id::text, '') || '|' ||
         payment_mode || '|' ||
         COALESCE(customer_charge_amount, 0)::text || '|' ||
         COALESCE(insurer_claim_amount, 0)::text || '|' ||
@@ -2631,6 +2661,7 @@ JOIN (
           substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
           substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
         ) || '|' ||
+        COALESCE(service_id::text, '') || '|' ||
         payment_mode || '|' ||
         COALESCE(customer_charge_amount, 0)::text || '|' ||
         COALESCE(insurer_claim_amount, 0)::text || '|' ||
@@ -2644,6 +2675,7 @@ JOIN (
           substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
           substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
         ) || '|' ||
+        COALESCE(service_id::text, '') || '|' ||
         payment_mode || '|' ||
         COALESCE(customer_charge_amount, 0)::text || '|' ||
         COALESCE(insurer_claim_amount, 0)::text || '|' ||
@@ -2657,6 +2689,7 @@ JOIN (
           substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
           substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
         ) || '|' ||
+        COALESCE(service_id::text, '') || '|' ||
         payment_mode || '|' ||
         COALESCE(customer_charge_amount, 0)::text || '|' ||
         COALESCE(insurer_claim_amount, 0)::text || '|' ||
@@ -2666,6 +2699,7 @@ JOIN (
   FROM legacy_hmo_commitments
 ) AS track_rows
   ON track_rows.provider_name = legacy_hmo_commitments.provider_name
+ AND track_rows.service_id IS NOT DISTINCT FROM legacy_hmo_commitments.service_id
  AND track_rows.payment_mode = legacy_hmo_commitments.payment_mode
  AND track_rows.customer_charge_amount = legacy_hmo_commitments.customer_charge_amount
  AND track_rows.insurer_claim_amount = legacy_hmo_commitments.insurer_claim_amount

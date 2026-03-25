@@ -138,7 +138,6 @@ export default async function (context, req) {
 
   if (method === 'POST' || method === 'PUT') {
     const studentId = normalizeString(body?.student_id);
-    const serviceId = normalizeString(body?.service_id);
     const providerId = normalizeString(body?.provider_id);
     const providerTrackId = normalizeString(body?.provider_track_id);
     const status = normalizeStatus(body?.status) || 'active';
@@ -146,9 +145,6 @@ export default async function (context, req) {
 
     if (!studentId) {
       return respond(context, 400, { message: 'missing_student_id' });
-    }
-    if (!serviceId) {
-      return respond(context, 400, { message: 'missing_service_id' });
     }
     if (!providerId) {
       return respond(context, 400, { message: 'missing_provider_id' });
@@ -168,10 +164,13 @@ export default async function (context, req) {
     if (providerTrack.provider_id !== providerId) {
       return respond(context, 409, { message: 'provider_track_provider_mismatch' });
     }
+    if (!providerTrack.service_id) {
+      return respond(context, 409, { message: 'provider_track_missing_service' });
+    }
 
     const payload = {
       student_id: studentId,
-      service_id: serviceId,
+      service_id: providerTrack.service_id,
       provider_id: providerId,
       provider_track_id: providerTrackId,
       authorization_reference: normalizeString(body?.authorization_reference) || null,

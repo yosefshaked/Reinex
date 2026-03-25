@@ -247,6 +247,7 @@ export default function StudentBillingWorkspace({
     notes: '',
   });
   const [assignmentValues, setAssignmentValues] = useState({});
+  const [selectedHmoAuthorizationId, setSelectedHmoAuthorizationId] = useState('');
 
   const actionableHistory = useMemo(
     () => billingQueue.filter((item) => item.student_id === studentId),
@@ -258,7 +259,7 @@ export default function StudentBillingWorkspace({
     [transfers],
   );
   const editableCommitmentTypeOptions = useMemo(
-    () => COMMITMENT_TYPE_OPTIONS.filter((option) => option.value !== 'hmo'),
+    () => COMMITMENT_TYPE_OPTIONS,
     [],
   );
   const currentCommitmentAmounts = useMemo(
@@ -318,17 +319,16 @@ export default function StudentBillingWorkspace({
 
   function handleCommitmentTypeChange(value) {
     setCommitmentForm((current) => {
-      const resolvedValue = value === 'hmo' ? 'package' : value;
       const next = {
         ...buildInitialCommitmentForm(),
         ...current,
-        commitmentType: resolvedValue,
+        commitmentType: value,
         id: current.id,
         notes: current.notes,
         expiresAt: current.expiresAt,
         isActive: current.isActive,
       };
-      if (resolvedValue === 'manual_credit') {
+      if (value === 'manual_credit') {
         next.serviceId = current.serviceId;
       }
       return next;
@@ -795,6 +795,20 @@ export default function StudentBillingWorkspace({
                             ערוך
                           </Button>
                         ) : null}
+                        {commitment.commitment_type === 'hmo' && commitment.hmo_authorization_id ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setCommitmentForm({ ...buildInitialCommitmentForm(), commitmentType: 'hmo' });
+                              setSelectedHmoAuthorizationId(commitment.hmo_authorization_id);
+                            }}
+                            disabled={saving}
+                          >
+                            ערוך אישור
+                          </Button>
+                        ) : null}
                         {Number(commitment.consumed_amount || 0) === 0 && !commitment.transfer_ref && commitment.commitment_type !== 'hmo' ? (
                           <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteCommitment(commitment.id)} disabled={saving}>
                             מחק
@@ -946,6 +960,7 @@ export default function StudentBillingWorkspace({
                 </>
               ) : null}
 
+              {commitmentForm.commitmentType !== 'hmo' ? (
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="text-xs text-slate-600">סך התחייבות מחושב</Label>
@@ -958,12 +973,16 @@ export default function StudentBillingWorkspace({
                   <Input id="billing-expires-at" type="date" value={commitmentForm.expiresAt} onChange={(event) => setCommitmentForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={saving} />
                 </div>
               </div>
+              ) : null}
 
+              {commitmentForm.commitmentType !== 'hmo' ? (
               <div className="space-y-2">
                 <Label htmlFor="billing-commitment-notes" className="text-xs text-slate-600">הערות</Label>
                 <Input id="billing-commitment-notes" value={commitmentForm.notes} onChange={(event) => setCommitmentForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
               </div>
+              ) : null}
 
+              {commitmentForm.commitmentType !== 'hmo' ? (
               <div className="space-y-2">
                 <Label className="text-xs text-slate-600">סטטוס</Label>
                 <Select value={commitmentForm.isActive ? 'active' : 'inactive'} onValueChange={(value) => setCommitmentForm((current) => ({ ...current, isActive: value === 'active' }))} disabled={saving}>
@@ -976,14 +995,33 @@ export default function StudentBillingWorkspace({
                   </SelectContent>
                 </Select>
               </div>
+              ) : null}
 
+              {commitmentForm.commitmentType === 'hmo' ? (
+                <HmoAuthorizationManager
+                  studentId={studentId}
+                  services={services}
+                  canMutateBilling={canMutateBilling}
+                  embedded
+                  selectedAuthorizationId={selectedHmoAuthorizationId}
+                  onChanged={async () => {
+                    setSelectedHmoAuthorizationId('');
+                    await loadData();
+                    await notifyDataChanged();
+                  }}
+                />
+              ) : (
               <div className="flex flex-wrap gap-2">
                 <Button onClick={handleSaveCommitment} disabled={saving}>
                   {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
                   {commitmentForm.id ? 'עדכן התחייבות' : 'צור התחייבות'}
                 </Button>
-                <Button type="button" variant="ghost" onClick={resetCommitmentForm} disabled={saving}>נקה טופס</Button>
+                <Button type="button" variant="ghost" onClick={() => {
+                  setSelectedHmoAuthorizationId('');
+                  resetCommitmentForm();
+                }} disabled={saving}>נקה טופס</Button>
               </div>
+              )}
             </div>
           </section>
         ) : (
@@ -998,16 +1036,6 @@ export default function StudentBillingWorkspace({
           </section>
         )}
       </div>
-
-      <HmoAuthorizationManager
-        studentId={studentId}
-        services={services}
-        canMutateBilling={canMutateBilling}
-        onChanged={async () => {
-          await loadData();
-          await notifyDataChanged();
-        }}
-      />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">

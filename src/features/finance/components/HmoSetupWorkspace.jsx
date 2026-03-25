@@ -4,6 +4,9 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useAuth } from '@/auth/AuthContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { useServices } from '@/hooks/useOrgData.js';
 import {
   Select,
   SelectContent,
@@ -30,6 +33,7 @@ function buildEmptyTrackForm(providerId = '') {
   return {
     id: '',
     providerId,
+    serviceId: '',
     name: '',
     paymentMode: 'partially_paid_by_hmo',
     defaultCustomerChargeAmount: '',
@@ -46,6 +50,9 @@ function formatCurrency(value) {
 }
 
 export default function HmoSetupWorkspace({ onChanged = null }) {
+  const { session } = useAuth();
+  const { activeOrgId } = useOrg();
+  const { services } = useServices({ enabled: Boolean(activeOrgId), orgId: activeOrgId, session });
   const {
     providers,
     loadingProviders,
@@ -88,6 +95,7 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
     setTrackForm({
       id: track.id,
       providerId: provider.id,
+      serviceId: track.service_id || '',
       name: track.name || '',
       paymentMode: track.payment_mode || 'partially_paid_by_hmo',
       defaultCustomerChargeAmount: track.default_customer_charge_amount ?? '',
@@ -164,12 +172,17 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
       toast.error('יש להזין שם מסלול.');
       return;
     }
+    if (!trackForm.serviceId) {
+      toast.error('יש לבחור שירות למסלול.');
+      return;
+    }
 
     setSaving(true);
     try {
       const payload = {
         id: trackForm.id || undefined,
         provider_id: trackForm.providerId,
+        service_id: trackForm.serviceId,
         name: trackForm.name.trim(),
         payment_mode: trackForm.paymentMode,
         default_customer_charge_amount: Number(trackForm.defaultCustomerChargeAmount || 0),
@@ -285,6 +298,7 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                           <div className="text-sm font-medium text-zinc-900">{track.name}</div>
                           <div className="mt-1 text-xs text-muted-foreground">
                             {HMO_PAYMENT_MODE_OPTIONS.find((option) => option.value === track.payment_mode)?.label || track.payment_mode}
+                            {track.service_id ? ` • ${(services.find((service) => service.id === track.service_id)?.service_name || services.find((service) => service.id === track.service_id)?.name || 'שירות')}` : ''}
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -396,6 +410,25 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                     <SelectItem value="__none__">בחר גורם מממן</SelectItem>
                     {activeProviders.map((provider) => (
                       <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-600">שירות המסלול</Label>
+                <Select
+                  value={trackForm.serviceId || '__none__'}
+                  onValueChange={(value) => setTrackForm((current) => ({ ...current, serviceId: value === '__none__' ? '' : value }))}
+                  disabled={!canManageProviders || saving}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="בחר שירות" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">בחר שירות</SelectItem>
+                    {services.map((service) => (
+                      <SelectItem key={service.id} value={service.id}>{service.service_name || service.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

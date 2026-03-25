@@ -6,11 +6,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -786,20 +786,15 @@ export default function FinancialsPage() {
         </TabsContent>
       </Tabs>
 
-      <Dialog open={isBillingPolicyOpen} onOpenChange={setIsBillingPolicyOpen}>
-        <DialogContent footer={(
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setIsBillingPolicyOpen(false)}>
-              סגור
-            </Button>
-          </DialogFooter>
-        )}>
-          <DialogHeader>
-            <DialogTitle>הגדרות חיוב שיעורים</DialogTitle>
-            <DialogDescription>
-              המדיניות כאן קובעת באילו סטטוסים שיעור ייצר צריכה מהתחייבות. המסך הראשי נשאר ממוקד בעבודה ולא בהגדרות.
-            </DialogDescription>
-          </DialogHeader>
+      <Sheet open={isBillingPolicyOpen} onOpenChange={setIsBillingPolicyOpen}>
+        <SheetContent side="left" className="w-full overflow-y-auto border-slate-200 bg-white p-0 sm:max-w-3xl">
+          <div className="p-6">
+            <SheetHeader className="text-end">
+              <SheetTitle>הגדרות חיוב שיעורים</SheetTitle>
+              <SheetDescription>
+                המדיניות כאן קובעת באילו סטטוסים שיעור ייצר צריכה מהתחייבות. מסך העבודה נשאר ממוקד בטיפול בחיובים.
+              </SheetDescription>
+            </SheetHeader>
           <BillingSettingsWorkspace
             billingPolicy={billingPolicy}
             setBillingPolicy={setBillingPolicy}
@@ -809,8 +804,9 @@ export default function FinancialsPage() {
             onSaveBillingPolicy={handleSaveBillingPolicy}
             onChanged={loadBillingOverview}
           />
-        </DialogContent>
-      </Dialog>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={isConsumedLessonsOpen} onOpenChange={setIsConsumedLessonsOpen}>
         <DialogContent>

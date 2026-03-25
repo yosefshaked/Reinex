@@ -66,6 +66,8 @@ export default function HmoAuthorizationManager({
   services,
   canMutateBilling,
   onChanged = null,
+  embedded = false,
+  selectedAuthorizationId = '',
 }) {
   const { session } = useAuth();
   const { activeOrgId } = useOrg();
@@ -129,6 +131,14 @@ export default function HmoAuthorizationManager({
     void loadAuthorizations();
   }, [loadAuthorizations]);
 
+  useEffect(() => {
+    if (!selectedAuthorizationId) return;
+    const selected = authorizations.find((row) => row.id === selectedAuthorizationId || row.linked_commitment?.id === selectedAuthorizationId);
+    if (selected) {
+      startEditingAuthorization(selected);
+    }
+  }, [authorizations, selectedAuthorizationId]);
+
   async function notifyChanged() {
     await loadAuthorizations();
     if (typeof onChanged === 'function') {
@@ -167,8 +177,13 @@ export default function HmoAuthorizationManager({
       toast.error('לפני יצירת אישור צריך להגדיר גורם מממן ומסלול.');
       return;
     }
-    if (!form.serviceId || !form.providerId || !form.providerTrackId) {
-      toast.error('יש לבחור שירות, גורם מממן ומסלול.');
+    if (!form.providerId || !form.providerTrackId) {
+      toast.error('יש לבחור גורם מממן ומסלול.');
+      return;
+    }
+    const selectedTrack = availableTracks.find((track) => track.id === form.providerTrackId) || null;
+    if (!selectedTrack?.service_id) {
+      toast.error('למסלול שנבחר חייב להיות שירות משויך.');
       return;
     }
     if (Number(form.authorizedLessons || 0) <= 0) {
@@ -185,7 +200,7 @@ export default function HmoAuthorizationManager({
           id: form.id || undefined,
           org_id: activeOrgId,
           student_id: studentId,
-          service_id: form.serviceId,
+          service_id: selectedTrack.service_id,
           provider_id: form.providerId,
           provider_track_id: form.providerTrackId,
           authorization_reference: form.authorizationReference || null,
@@ -241,13 +256,13 @@ export default function HmoAuthorizationManager({
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-      <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
+    <div className={`grid gap-4 ${embedded ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : 'xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]'}`}>
+      <section className={`${embedded ? 'rounded-xl border border-border bg-slate-50/70' : 'rounded-xl border border-border bg-white shadow-sm overflow-hidden'}`}>
         <div className="h-1.5 bg-indigo-500" />
         <div className="p-5 space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-lg font-semibold text-zinc-800">אישורי גורם מממן</h3>
+              <h3 className="text-lg font-semibold text-zinc-800">{embedded ? 'הגדרת גורם מממן' : 'אישורי גורם מממן'}</h3>
               <p className="text-sm text-muted-foreground">
                 כאן מנהלים את האישור התפעולי של התלמיד. ההתחייבות הכספית נוצרת ומתעדכנת אוטומטית ממנו.
               </p>
@@ -354,7 +369,7 @@ export default function HmoAuthorizationManager({
       </section>
 
       {canMutateBilling ? (
-        <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
+        <section className={`${embedded ? 'rounded-xl border border-border bg-slate-50/70' : 'rounded-xl border border-border bg-white shadow-sm overflow-hidden'}`}>
           <div className="h-1.5 bg-indigo-600" />
           <div className="p-5 space-y-4">
             <div>
@@ -365,21 +380,6 @@ export default function HmoAuthorizationManager({
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-600">שירות</Label>
-                <Select value={form.serviceId || '__none__'} onValueChange={(value) => setForm((current) => ({ ...current, serviceId: value === '__none__' ? '' : value }))} disabled={saving}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="בחר שירות" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">בחר שירות</SelectItem>
-                    {services.map((service) => (
-                      <SelectItem key={service.id} value={service.id}>{service.service_name || service.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
               <div className="space-y-2">
                 <Label className="text-xs text-slate-600">גורם מממן</Label>
                 <Select value={form.providerId || '__none__'} onValueChange={(value) => setForm((current) => ({ ...current, providerId: value === '__none__' ? '' : value, providerTrackId: '' }))} disabled={saving}>
@@ -393,6 +393,15 @@ export default function HmoAuthorizationManager({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border bg-white p-3 text-sm">
+              <div className="text-[11px] text-muted-foreground">שירות משויך למסלול</div>
+              <div className="mt-1 font-semibold text-zinc-900">
+                {services.find((service) => service.id === (availableTracks.find((track) => track.id === form.providerTrackId)?.service_id || ''))?.service_name
+                  || services.find((service) => service.id === (availableTracks.find((track) => track.id === form.providerTrackId)?.service_id || ''))?.name
+                  || 'השירות ייקבע לפי המסלול'}
               </div>
             </div>
 

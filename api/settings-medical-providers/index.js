@@ -20,6 +20,7 @@ function normalizeTrackPayload(body = {}) {
   const paymentMode = normalizeString(body?.payment_mode).toLowerCase();
   return {
     provider_id: normalizeString(body?.provider_id),
+    service_id: normalizeString(body?.service_id),
     name: normalizeString(body?.name),
     payment_mode: HMO_PAYMENT_MODES.has(paymentMode) ? paymentMode : '',
     default_customer_charge_amount: body?.default_customer_charge_amount === '' || body?.default_customer_charge_amount == null
@@ -146,6 +147,9 @@ export default async function (context, req) {
       if (!track.name) {
         return respond(context, 400, { message: 'missing_track_name' });
       }
+      if (!track.service_id) {
+        return respond(context, 400, { message: 'missing_service_id' });
+      }
       if (!track.payment_mode) {
         return respond(context, 400, { message: 'invalid_payment_mode' });
       }
@@ -162,7 +166,7 @@ export default async function (context, req) {
           id: normalizeString(body?.id) || randomUUID(),
           ...track,
         })
-        .select('id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
+        .select('id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
         .maybeSingle();
 
       if (error) {
@@ -221,6 +225,9 @@ export default async function (context, req) {
       if (!track.name) {
         return respond(context, 400, { message: 'missing_track_name' });
       }
+      if (!track.service_id) {
+        return respond(context, 400, { message: 'missing_service_id' });
+      }
       if (!track.payment_mode) {
         return respond(context, 400, { message: 'invalid_payment_mode' });
       }
@@ -232,7 +239,7 @@ export default async function (context, req) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', id)
-        .select('id, provider_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
+        .select('id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
         .maybeSingle();
 
       if (error) {
