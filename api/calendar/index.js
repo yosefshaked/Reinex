@@ -710,6 +710,24 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   const normalizedStatus = typeof updateData.status === 'string' ? updateData.status.trim().toLowerCase() : '';
   const isCancellationUpdate = normalizedStatus.startsWith('cancelled');
 
+  // When the lesson is marked completed, promote any still-scheduled participants to
+  // 'attended' so that the billing sync can process them (billing gates on participant status).
+  if (normalizedStatus === 'completed') {
+    const { error: promoteError } = await tenantClient
+      .from('lesson_participants')
+      .update({ participant_status: 'attended' })
+      .eq('lesson_instance_id', body.id)
+      .eq('participant_status', 'scheduled');
+
+    if (promoteError) {
+      context.log?.error?.('calendar/instances failed to promote scheduled participants to attended', {
+        message: promoteError.message,
+        instanceId: body.id,
+      });
+      // Non-fatal — continue; billing sync will just see pending_attendance for those participants
+    }
+  }
+
   try {
     await logAuditEvent(supabase, {
       orgId,
