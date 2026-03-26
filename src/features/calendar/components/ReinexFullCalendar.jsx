@@ -117,8 +117,13 @@ function EventContent({ arg }) {
   const remindersSent = participants.filter((participant) => participant?.reminder_sent).length;
   const remindersAccepted = participants.filter((participant) => participant?.reminder_seen).length;
   const remindersDeclined = participants.filter((participant) => participant?.participant_status === 'cancelled_student').length;
-  const reminderBadgeLabel = `🔔 ${remindersSent}/${remindersTotal} • ✅${remindersAccepted} • ❌${remindersDeclined}`;
-  const reminderBadgeTitle = `תזכורות: נשלח ${remindersSent}/${remindersTotal}, אישרו ${remindersAccepted}, לא מגיעים ${remindersDeclined}`;
+  const remindersUnsent = Math.max(0, remindersTotal - remindersSent);
+  const remindersPendingApproval = Math.max(0, remindersSent - remindersAccepted - remindersDeclined);
+  const showApprovalPhase = remindersTotal > 0 && remindersSent >= remindersTotal;
+  const reminderBadgeLabel = showApprovalPhase
+    ? `✅ ${remindersAccepted}/${remindersTotal}`
+    : `🔔 ${remindersSent}/${remindersTotal}`;
+  const reminderBadgeTitle = `תזכורות: נשלח ${remindersSent}/${remindersTotal} | אישרו ${remindersAccepted}/${remindersTotal} | לא מגיעים ${remindersDeclined} | ממתינים ${remindersPendingApproval} | לא נשלח ${remindersUnsent}`;
 
   return (
     <div
