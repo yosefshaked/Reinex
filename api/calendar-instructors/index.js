@@ -84,7 +84,7 @@ export default async function (context, req) {
   // Build query for instructors
   let instructorsQuery = tenantClient
     .from('Employees')
-    .select('id, first_name, middle_name, last_name, email, phone, metadata')
+    .select('id, first_name, middle_name, last_name, email, phone, metadata, employee_type')
     .order('first_name', { ascending: true });
 
   if (!includeInactive) {
@@ -110,12 +110,59 @@ export default async function (context, req) {
     return respond(context, 200, []);
   }
 
-  // Fetch service capabilities for all instructors
+  // Fetch instructor overlays for reliable instructor classification.
+  // We treat an employee as instructor if:
+  // 1) employee_type === 'instructor' OR
+  // 2) has instructor profile row OR
+  // 3) has at least one instructor service capability row.
   const instructorIds = instructors.map(i => i.id);
-  const { data: capabilities } = await tenantClient
-    .from('instructor_service_capabilities')
-    .select('employee_id, service_id, max_students, base_rate, metadata')
-    .in('employee_id', instructorIds);
+  const [profilesResult, capabilitiesResult] = await Promise.all([
+    tenantClient
+      .from('instructor_profiles')
+      .select('employee_id')
+      .in('employee_id', instructorIds),
+    tenantClient
+      .from('instructor_service_capabilities')
+      .select('employee_id, service_id, max_students, base_rate, metadata')
+      .in('employee_id', instructorIds),
+  ]);
+
+  if (profilesResult.error) {
+    context.log?.error?.('calendar/instructors failed to fetch instructor profiles', {
+      message: profilesResult.error.message,
+      code: profilesResult.error.code,
+    });
+    return respond(context, 500, { message: 'failed_to_load_instructor_profiles' });
+  }
+
+  if (capabilitiesResult.error) {
+    context.log?.error?.('calendar/instructors failed to fetch instructor capabilities', {
+      message: capabilitiesResult.error.message,
+      code: capabilitiesResult.error.code,
+    });
+    return respond(context, 500, { message: 'failed_to_load_instructor_capabilities' });
+  }
+
+  const profiles = profilesResult.data || [];
+  const capabilities = capabilitiesResult.data || [];
+
+  const profileEmployeeIds = new Set((profiles || []).map((row) => row.employee_id).filter(Boolean));
+  const capabilityEmployeeIds = new Set((capabilities || []).map((row) => row.employee_id).filter(Boolean));
+
+  const normalizedEmployeeType = (value) => String(value || '').trim().toLowerCase();
+
+  const instructorEmployees = instructors.filter((employee) => {
+    const employeeId = employee?.id;
+    if (!employeeId) return false;
+    if (normalizedEmployeeType(employee.employee_type) === 'instructor') return true;
+    if (profileEmployeeIds.has(employeeId)) return true;
+    if (capabilityEmployeeIds.has(employeeId)) return true;
+    return false;
+  });
+
+  if (instructorEmployees.length === 0) {
+    return respond(context, 200, []);
+  }
 
   // Build capabilities map
   const capabilitiesMap = new Map();
@@ -132,7 +179,7 @@ export default async function (context, req) {
   });
 
   // Transform instructors with capabilities
-  const transformedInstructors = instructors.map(instructor => ({
+  const transformedInstructors = instructorEmployees.map(instructor => ({
     id: instructor.id,
     first_name: instructor.first_name,
     middle_name: instructor.middle_name,
