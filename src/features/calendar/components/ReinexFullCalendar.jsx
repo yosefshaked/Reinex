@@ -8,6 +8,7 @@ import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { Button } from '@/components/ui/button.jsx';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useRuntimeConfig } from '@/runtime/RuntimeConfigContext.jsx';
 import {
@@ -123,15 +124,53 @@ function EventContent({ arg }) {
   const reminderBadgeLabel = showApprovalPhase
     ? `✅ ${remindersAccepted}/${remindersTotal}`
     : `🔔 ${remindersSent}/${remindersTotal}`;
-  const reminderBadgeTitle = `תזכורות: נשלח ${remindersSent}/${remindersTotal} | אישרו ${remindersAccepted}/${remindersTotal} | לא מגיעים ${remindersDeclined} | ממתינים ${remindersPendingApproval} | לא נשלח ${remindersUnsent}`;
+  const reminderA11yLabel = `סטטוס תזכורות: נשלח ${remindersSent}/${remindersTotal}, אישרו ${remindersAccepted}/${remindersTotal}, לא מגיעים ${remindersDeclined}, ממתינים ${remindersPendingApproval}, לא נשלח ${remindersUnsent}`;
+
+  const reminderBadge = remindersTotal > 0 ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="reinex-calendar-event__badge reinex-calendar-event__reminder-badge"
+          tabIndex={0}
+          aria-label={reminderA11yLabel}
+        >
+          <span className="reinex-calendar-event__reminder-main">{reminderBadgeLabel}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="end" className="reinex-calendar-event__tooltip-content" sideOffset={6}>
+        <div className="reinex-calendar-event__tooltip-title">סטטוס תזכורות</div>
+        <div className="reinex-calendar-event__tooltip-row">
+          <span>נשלח</span>
+          <strong>{remindersSent}/{remindersTotal}</strong>
+        </div>
+        <div className="reinex-calendar-event__tooltip-row">
+          <span>אישרו הגעה</span>
+          <strong>{remindersAccepted}/{remindersTotal}</strong>
+        </div>
+        <div className="reinex-calendar-event__tooltip-row">
+          <span>לא מגיעים</span>
+          <strong>{remindersDeclined}</strong>
+        </div>
+        <div className="reinex-calendar-event__tooltip-row">
+          <span>ממתינים</span>
+          <strong>{remindersPendingApproval}</strong>
+        </div>
+        <div className="reinex-calendar-event__tooltip-row">
+          <span>לא נשלח</span>
+          <strong>{remindersUnsent}</strong>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  ) : null;
 
   return (
-    <div
-      ref={rootRef}
-      className={`reinex-calendar-event ${densityClass} ${isInlineSummary ? 'reinex-calendar-event--inline' : ''} ${isStudentOnlySummary ? 'reinex-calendar-event--student-only' : ''}`.trim()}
-      style={{ background: buildEventGradient(instance.service?.color) }}
-      title={`${instance.service?.service_name || 'שיעור'} • ${firstStudentName}`}
-    >
+    <TooltipProvider delayDuration={120}>
+      <div
+        ref={rootRef}
+        className={`reinex-calendar-event ${densityClass} ${isInlineSummary ? 'reinex-calendar-event--inline' : ''} ${isStudentOnlySummary ? 'reinex-calendar-event--student-only' : ''}`.trim()}
+        style={{ background: buildEventGradient(instance.service?.color) }}
+        title={`${instance.service?.service_name || 'שיעור'} • ${firstStudentName}`}
+      >
       {isStudentOnlySummary ? (
         <div className="reinex-calendar-event__inline">
           <span className="reinex-calendar-event__status" aria-label={statusInfo.label} title={statusInfo.label}>
@@ -140,6 +179,7 @@ function EventContent({ arg }) {
           <span className="reinex-calendar-event__inline-main">
             <span className="reinex-calendar-event__student">{studentLabel}</span>
           </span>
+          {reminderBadge}
         </div>
       ) : isInlineSummary ? (
         <div className="reinex-calendar-event__inline">
@@ -151,6 +191,7 @@ function EventContent({ arg }) {
             <span className="reinex-calendar-event__separator">•</span>
             <span className="reinex-calendar-event__service">{serviceLabel}</span>
           </span>
+          {reminderBadge}
         </div>
       ) : (
         <>
@@ -168,9 +209,7 @@ function EventContent({ arg }) {
       <div className="reinex-calendar-event__meta">
         <span className="reinex-calendar-event__time">{arg.timeText || formatTimeDisplay(instance.datetime_start)}</span>
         <span className="reinex-calendar-event__badges">
-          {remindersTotal > 0 ? (
-            <span className="reinex-calendar-event__badge" title={reminderBadgeTitle}>{reminderBadgeLabel}</span>
-          ) : null}
+          {reminderBadge}
           {instance.documentation_status === 'undocumented' && instance.status === 'completed' ? (
             <span className="reinex-calendar-event__badge">לא תועד</span>
           ) : null}
@@ -178,7 +217,8 @@ function EventContent({ arg }) {
       </div>
         </>
       )}
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }
 

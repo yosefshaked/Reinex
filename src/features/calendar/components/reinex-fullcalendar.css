@@ -200,6 +200,43 @@
   padding: 0.125rem 0.5rem;
 }
 
+.reinex-calendar-event__reminder-badge {
+  cursor: help;
+  user-select: none;
+}
+
+.reinex-calendar-event__reminder-main {
+  white-space: nowrap;
+}
+
+.reinex-calendar-event__tooltip-content {
+  min-width: 11rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgb(148 163 184 / 0.35);
+  background: linear-gradient(180deg, rgb(15 23 42 / 0.96), rgb(30 41 59 / 0.96));
+  color: rgb(241 245 249);
+  box-shadow: 0 18px 36px -20px rgb(15 23 42 / 0.95);
+  padding: 0.45rem 0.55rem;
+  font-size: 0.65rem;
+}
+
+.reinex-calendar-event__tooltip-title {
+  font-size: 0.635rem;
+  font-weight: 700;
+  margin-bottom: 0.15rem;
+}
+
+.reinex-calendar-event__tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  line-height: 1.25;
+}
+
+.reinex-calendar-event__tooltip-row strong {
+  font-weight: 700;
+}
+
 .reinex-calendar-event--mid {
   padding: 0.3125rem 0.5rem;
 }
@@ -223,6 +260,14 @@
 
 .reinex-calendar-event--inline {
   justify-content: center;
+}
+
+.reinex-calendar-event--inline .reinex-calendar-event__reminder-badge {
+  flex: 0 0 auto;
+}
+
+.reinex-calendar-event--inline .reinex-calendar-event__reminder-main {
+  font-size: 0.6rem;
 }
 
 .reinex-calendar-event--inline .reinex-calendar-event__service,
@@ -292,6 +337,16 @@
 .reinex-calendar-event--student-only .reinex-calendar-event__time,
 .reinex-calendar-event--student-only .reinex-calendar-event__badge {
   display: none;
+}
+
+.reinex-calendar-event--student-only .reinex-calendar-event__reminder-badge {
+  display: inline-flex;
+  padding-inline: 0.36rem;
+  padding-block: 0.08rem;
+}
+
+.reinex-calendar-event--student-only .reinex-calendar-event__reminder-main {
+  font-size: 0.58rem;
 }
 
 .reinex-calendar-event--xs.reinex-calendar-event--student-only .reinex-calendar-event__student {
