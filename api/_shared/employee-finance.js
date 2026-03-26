@@ -1145,3 +1145,59 @@ export async function syncInstructorAttendanceFromLessons(
     lesson_count: completedLessons.length,
   };
 }
+
+/**
+ * Validates that the instructor has a base_rate configured for the lesson's service.
+ * Returns null when valid.
+ * Returns { code, instructor_employee_id, service_id } when validation fails.
+ *
+ * Call this BEFORE marking a lesson completed or recording attendance, so the user
+ * can be told exactly what to fix before proceeding.
+ */
+export async function validateInstructorRateForLesson(
+  tenantClient,
+  { lessonInstanceId, instructorEmployeeId, serviceId } = {},
+) {
+  let resolvedInstructorId = instructorEmployeeId || null;
+  let resolvedServiceId = serviceId || null;
+
+  if ((!resolvedInstructorId || !resolvedServiceId) && lessonInstanceId) {
+    const { data: instance, error: instanceError } = await tenantClient
+      .from('lesson_instances')
+      .select('instructor_employee_id, service_id')
+      .eq('id', lessonInstanceId)
+      .maybeSingle();
+
+    if (instanceError) throw instanceError;
+    resolvedInstructorId = resolvedInstructorId || instance?.instructor_employee_id || null;
+    resolvedServiceId = resolvedServiceId || instance?.service_id || null;
+  }
+
+  // If either is missing there is nothing to validate — downstream will handle it
+  if (!resolvedInstructorId || !resolvedServiceId) {
+    return null;
+  }
+
+  const { data: capability, error: capabilityError } = await tenantClient
+    .from('instructor_service_capabilities')
+    .select('base_rate')
+    .eq('employee_id', resolvedInstructorId)
+    .eq('service_id', resolvedServiceId)
+    .maybeSingle();
+
+  if (capabilityError && capabilityError.code !== '42P01') {
+    throw capabilityError;
+  }
+
+  // A base_rate of 0 is explicitly valid (volunteer / zero-rate service).
+  // Only a missing row or an explicit null base_rate is a configuration error.
+  if (!capability || capability.base_rate == null) {
+    return {
+      code: 'instructor_rate_not_configured',
+      instructor_employee_id: resolvedInstructorId,
+      service_id: resolvedServiceId,
+    };
+  }
+
+  return null;
+}

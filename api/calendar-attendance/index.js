@@ -10,7 +10,7 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons } from '../_shared/employee-finance.js';
+import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -151,7 +151,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
   // Fetch instance to verify permissions
   const { data: instance, error: instanceError } = await tenantClient
     .from('lesson_instances')
-    .select('id, instructor_employee_id, status')
+    .select('id, instructor_employee_id, service_id, status')
     .eq('id', body.instance_id)
     .single();
 
@@ -169,6 +169,24 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     
     if (!instructors || instructors.length === 0 || instructors[0].id !== instance.instructor_employee_id) {
       return respond(context, 403, { message: 'forbidden: can only mark attendance for your own lessons' });
+    }
+  }
+
+  // Instructor rate pre-flight: block attendance marking if the instructor has no base_rate
+  // for this service. Skip the check when the lesson is already cancelled by the clinic
+  // (in that case instructor earnings are not triggered regardless).
+  if (instance.status !== 'cancelled_clinic') {
+    const rateError = await validateInstructorRateForLesson(tenantClient, {
+      instructorEmployeeId: instance.instructor_employee_id,
+      serviceId: instance.service_id,
+    });
+    if (rateError) {
+      return respond(context, 422, {
+        message: 'לא ניתן לעדכן נוכחות: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
+        code: rateError.code,
+        instructor_employee_id: rateError.instructor_employee_id,
+        service_id: rateError.service_id,
+      });
     }
   }
 
@@ -231,10 +249,12 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     }
   }
 
+  let billingWarnings = [];
   try {
-    await syncLessonBillingArtifacts(tenantClient, body.instance_id, userId);
+    const billingResult = await syncLessonBillingArtifacts(tenantClient, body.instance_id, userId);
     await syncLessonInstructorEarnings(tenantClient, body.instance_id, userId);
     await syncInstructorAttendanceFromLessons(tenantClient, body.instance_id, userId);
+    billingWarnings = billingResult?.attention_required || [];
   } catch (syncError) {
     context.log?.error?.('calendar/attendance failed to sync financial artifacts', {
       message: syncError?.message,
@@ -243,5 +263,8 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     return respond(context, 500, { message: 'failed_to_sync_financial_artifacts' });
   }
 
-  return respond(context, 200, { message: 'participant updated successfully' });
+  return respond(context, 200, {
+    message: 'participant updated successfully',
+    ...(billingWarnings.length > 0 ? { billing_warnings: billingWarnings } : {}),
+  });
 }

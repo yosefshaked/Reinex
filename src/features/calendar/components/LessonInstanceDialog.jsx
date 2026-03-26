@@ -10,7 +10,7 @@ import { useOrg } from '@/org/OrgContext';
 import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { Pencil, X, Check, XCircle, Loader2, AlertCircle, MessageCircle, Mail, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, MessageCircle, Mail, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 
 function toLocalDateString(dateObj) {
@@ -65,6 +65,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [reminderUpdating, setReminderUpdating] = useState(false);
   const [localReminderState, setLocalReminderState] = useState({});
   const [error, setError] = useState(null);
+  const [billingWarnings, setBillingWarnings] = useState([]);
   
   const [formData, setFormData] = useState({
     instructor_employee_id: '',
@@ -95,6 +96,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   // Reset local reminder optimistic state when a different instance is opened
   useEffect(() => {
     setLocalReminderState({});
+    setBillingWarnings([]);
   }, [instance?.id]);
 
   if (!instance) return null;
@@ -226,7 +228,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setError(null);
 
     try {
-      await authenticatedFetch('calendar/attendance', {
+      const result = await authenticatedFetch('calendar/attendance', {
         method: 'POST',
         body: {
           org_id: org.id,
@@ -236,6 +238,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         },
       });
 
+      if (result?.billing_warnings?.length > 0) {
+        setBillingWarnings(result.billing_warnings);
+      }
       onUpdate?.();
     } catch (err) {
       console.error('Error marking attendance:', err);
@@ -281,9 +286,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
     setIsSaving(true);
     setError(null);
+    setBillingWarnings([]);
 
     try {
-      await authenticatedFetch('calendar/instances', {
+      const result = await authenticatedFetch('calendar/instances', {
         method: 'PUT',
         body: {
           id: instance.id,
@@ -293,7 +299,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       });
 
       onUpdate?.();
-      onClose();
+      if (result?.billing_warnings?.length > 0) {
+        // Keep dialog open so the user sees the billing warning
+        setBillingWarnings(result.billing_warnings);
+      } else {
+        onClose();
+      }
     } catch (err) {
       console.error('Error reporting lesson status:', err);
       setError(err.message);
@@ -414,6 +425,26 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
+
+        {billingWarnings.length > 0 && (() => {
+          const participantMap = new Map(
+            (instance.participants || []).map((p) => [p.student_id, p.student?.full_name || p.student?.first_name || 'תלמיד'])
+          );
+          const names = billingWarnings
+            .map((w) => participantMap.get(w.student_id) || 'תלמיד')
+            .filter((v, i, a) => a.indexOf(v) === i)
+            .join(', ');
+          return (
+            <Alert variant="warning" className="border-amber-400 bg-amber-50 text-amber-900">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <AlertDescription>
+                <strong>שיעור הושלם — אך ישנה בעיית חיוב</strong>
+                <br />
+                {`לא נמצאה התחייבות / אישור ביטוח עבור: ${names}. יש לסדר זאת בניהול הסטודנטים כדי שהחיוב יתבצע.`}
+              </AlertDescription>
+            </Alert>
+          );
+        })()}
 
         {isEditMode ? (
           // Edit Mode

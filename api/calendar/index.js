@@ -12,7 +12,7 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { assertNoLeaveForLesson, syncLessonInstructorEarnings, toDateKey } from '../_shared/employee-finance.js';
+import { assertNoLeaveForLesson, syncInstructorAttendanceFromLessons, syncLessonInstructorEarnings, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
@@ -579,7 +579,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   // Fetch existing instance
   const { data: existingInstance, error: fetchError } = await tenantClient
     .from('lesson_instances')
-    .select('id, instructor_employee_id, datetime_start, status, closed_reason')
+    .select('id, instructor_employee_id, service_id, datetime_start, status, closed_reason')
     .eq('id', body.id)
     .single();
 
@@ -644,6 +644,25 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
 
     if (leaveConflict) {
       return respond(context, 409, leaveConflict);
+    }
+  }
+
+  // Instructor rate pre-flight: block completion/no_show if no base_rate is configured.
+  // Other statuses (cancellations) do not trigger instructor earnings so no check needed.
+  const EARNING_STATUSES = new Set(['completed', 'no_show']);
+  const newStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
+  if (EARNING_STATUSES.has(newStatus)) {
+    const rateError = await validateInstructorRateForLesson(tenantClient, {
+      instructorEmployeeId: body.instructor_employee_id || existingInstance.instructor_employee_id,
+      serviceId: body.service_id || existingInstance.service_id,
+    });
+    if (rateError) {
+      return respond(context, 422, {
+        message: 'לא ניתן להשלים את השיעור: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
+        code: rateError.code,
+        instructor_employee_id: rateError.instructor_employee_id,
+        service_id: rateError.service_id,
+      });
     }
   }
 
@@ -722,9 +741,12 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
     });
   }
 
+  let billingWarnings = [];
   try {
-    await syncLessonBillingArtifacts(tenantClient, body.id, userId);
+    const billingResult = await syncLessonBillingArtifacts(tenantClient, body.id, userId);
     await syncLessonInstructorEarnings(tenantClient, body.id, userId);
+    await syncInstructorAttendanceFromLessons(tenantClient, body.id, userId);
+    billingWarnings = billingResult?.attention_required || [];
   } catch (syncError) {
     context.log?.error?.('calendar/instances failed to sync financial artifacts after update', {
       message: syncError?.message,
@@ -733,5 +755,8 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
     return respond(context, 500, { message: 'failed_to_sync_financial_artifacts' });
   }
 
-  return respond(context, 200, { message: 'instance updated successfully' });
+  return respond(context, 200, {
+    message: 'instance updated successfully',
+    ...(billingWarnings.length > 0 ? { billing_warnings: billingWarnings } : {}),
+  });
 }

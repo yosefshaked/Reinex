@@ -159,8 +159,8 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
   }
 
   return (
-    <div className="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] [font-family:inherit]">
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm [font-family:inherit]">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-bold text-slate-900">תצוגת שכר חיה</h3>
@@ -176,11 +176,11 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
         <div className="mb-4 grid gap-2 md:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
             <div className="text-[11px] text-slate-500">מודל שכר</div>
-            <div className="mt-1 text-lg font-extrabold text-slate-900">{getPayrollModelLabel(employee?.payroll_model || (employee?.employee_type === 'instructor' ? 'lesson_based' : 'hourly'))}</div>
+            <div className="mt-1 text-lg font-bold text-slate-900">{getPayrollModelLabel(employee?.payroll_model || (employee?.employee_type === 'instructor' ? 'lesson_based' : 'hourly'))}</div>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
             <div className="text-[11px] text-slate-500">תעריף / שכר</div>
-            <div className="mt-1 text-lg font-extrabold text-slate-900">
+            <div className="mt-1 text-lg font-bold text-slate-900">
               {employee?.payroll_model === 'monthly_salary'
                 ? formatCurrency(employee?.monthly_salary_amount)
                 : formatCurrency(employee?.current_rate)}
@@ -188,7 +188,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
             <div className="text-[11px] text-slate-500">שיטת חופשה</div>
-            <div className="mt-1 text-lg font-extrabold text-slate-900">{employee?.leave_pay_method || 'ברירת מחדל'}</div>
+            <div className="mt-1 text-lg font-bold text-slate-900">{employee?.leave_pay_method || 'ברירת מחדל'}</div>
           </div>
         </div>
 
@@ -208,19 +208,19 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
             <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-2xl border border-blue-200 bg-blue-50 px-3 py-3">
                 <div className="text-[11px] text-blue-700">בסיס</div>
-                <div className="mt-1 text-xl font-extrabold text-blue-950">{formatCurrency(preview.base_amount)}</div>
+                <div className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(preview.base_amount)}</div>
               </div>
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3">
                 <div className="text-[11px] text-emerald-700">חופשה בתשלום</div>
-                <div className="mt-1 text-xl font-extrabold text-emerald-950">{formatCurrency(preview.paid_leave_amount)}</div>
+                <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(preview.paid_leave_amount)}</div>
               </div>
               <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3">
                 <div className="text-[11px] text-amber-700">תיקונים</div>
-                <div className="mt-1 text-xl font-extrabold text-amber-950">{formatCurrency(preview.correction_amount)}</div>
+                <div className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(preview.correction_amount)}</div>
               </div>
               <div className="rounded-2xl border border-slate-900 bg-slate-900 px-3 py-3 text-white">
                 <div className="text-[11px] text-slate-300">סה״כ</div>
-                <div className="mt-1 text-xl font-extrabold">{formatCurrency(preview.total_amount)}</div>
+                <div className="mt-1 text-xl font-bold">{formatCurrency(preview.total_amount)}</div>
               </div>
             </div>
 
@@ -237,7 +237,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
         )}
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm [font-family:inherit]">
         <div className="mb-3">
           <h3 className="text-sm font-bold text-slate-900">תיקונים פיננסיים</h3>
           <p className="text-xs text-slate-500">בונוסים, ניכויים ותיקונים שלא מגיעים מזרימת עבודה אחרת.</p>
@@ -247,36 +247,36 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
           <div className="space-y-2">
             <Label className="text-xs text-slate-600">סוג תיקון</Label>
             <Select value={form.correctionType} onValueChange={(value) => setForm((current) => ({ ...current, correctionType: value }))} disabled={saving}>
-              <SelectTrigger>
+              <SelectTrigger className="[font-family:inherit]">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="bonus">בונוס</SelectItem>
-                <SelectItem value="deduction">ניכוי</SelectItem>
-                <SelectItem value="adjustment">התאמה</SelectItem>
-                <SelectItem value="correction">תיקון</SelectItem>
+              <SelectContent className="[font-family:inherit]">
+                <SelectItem value="bonus" className="[font-family:inherit]">בונוס</SelectItem>
+                <SelectItem value="deduction" className="[font-family:inherit]">ניכוי</SelectItem>
+                <SelectItem value="adjustment" className="[font-family:inherit]">התאמה</SelectItem>
+                <SelectItem value="correction" className="[font-family:inherit]">תיקון</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
             <Label htmlFor="finance-amount" className="text-xs text-slate-600">סכום</Label>
-            <Input id="finance-amount" type="number" step="0.01" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} disabled={saving} />
+            <Input id="finance-amount" type="number" step="0.01" className="[font-family:inherit]" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} disabled={saving} />
           </div>
         </div>
 
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="finance-date" className="text-xs text-slate-600">תאריך אפקטיבי</Label>
-            <Input id="finance-date" type="date" value={form.effectiveDate} onChange={(event) => setForm((current) => ({ ...current, effectiveDate: event.target.value }))} disabled={saving} />
+            <Input id="finance-date" type="date" className="[font-family:inherit]" value={form.effectiveDate} onChange={(event) => setForm((current) => ({ ...current, effectiveDate: event.target.value }))} disabled={saving} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="finance-notes" className="text-xs text-slate-600">הערות</Label>
-            <Input id="finance-notes" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
+            <Input id="finance-notes" className="[font-family:inherit]" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
           </div>
         </div>
 
         <div className="mt-3 flex gap-2">
-          <Button onClick={handleSaveAdjustment} disabled={saving || form.amount === ''}>
+          <Button className="[font-family:inherit]" onClick={handleSaveAdjustment} disabled={saving || form.amount === ''}>
             {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
             הוסף תיקון
           </Button>
@@ -290,7 +290,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
                   <div className="text-sm font-semibold text-slate-900">{entry.correction_type} • {formatCurrency(entry.amount)}</div>
                   <div className="mt-1 text-xs text-slate-500">{entry.effective_date} • {entry.notes || 'ללא הערות'}</div>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => handleDeleteAdjustment(entry.id)} disabled={saving}>
+                <Button size="sm" variant="outline" className="[font-family:inherit]" onClick={() => handleDeleteAdjustment(entry.id)} disabled={saving}>
                   הסר
                 </Button>
               </div>

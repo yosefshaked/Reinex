@@ -731,6 +731,7 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
   const commitmentMap = await loadCommitmentsMap(tenantClient, commitmentIds);
   const syncedAt = new Date().toISOString();
   let updatedParticipants = 0;
+  const attentionRequired = [];
 
   for (const participant of participants || []) {
     const commitment = await resolveParticipantCommitmentForSync(tenantClient, {
@@ -800,12 +801,27 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
     }
 
     updatedParticipants += 1;
+
+    // Collect participants that need attention (e.g. no commitment / invalid commitment)
+    // but are in a resolved status that should normally be billed.
+    if (decision.requiresAttention) {
+      const pStatus = normalizeString(participant.participant_status).toLowerCase();
+      if (RESOLVED_PARTICIPANT_STATUSES.has(pStatus)) {
+        attentionRequired.push({
+          participant_id: participant.id,
+          student_id: participant.student_id,
+          billing_status: decision.billingStatus,
+          billing_reason: decision.billingReason,
+        });
+      }
+    }
   }
 
   return {
     lesson_instance_id: lessonInstanceId,
     billing_synced: true,
     updated_participants: updatedParticipants,
+    attention_required: attentionRequired,
   };
 }
 
