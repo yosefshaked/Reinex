@@ -1,11 +1,7 @@
 /* eslint-env node */
-import process from 'node:process';
 import { randomUUID } from 'node:crypto';
 import { json, resolveBearerAuthorization } from '../_shared/http.js';
-
-function readEnv(context) {
-  return context?.env ?? process.env ?? {};
-}
+import { readEnv } from '../_shared/org-bff.js';
 
 async function parseJsonResponse(response) {
   const contentType = response.headers?.get?.('content-type') ?? response.headers?.get?.('Content-Type') ?? '';

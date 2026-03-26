@@ -2,8 +2,9 @@
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 import { createClient } from '@supabase/supabase-js';
-import { json, resolveBearerAuthorization } from '../_shared/http.js';
+import { resolveBearerAuthorization } from '../_shared/http.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { readEnv, respond as _respond, isAdminRole } from '../_shared/org-bff.js';
 
 const ADMIN_CLIENT_OPTIONS = {
   auth: {
@@ -27,13 +28,6 @@ const STATUS_FAILED = 'failed';
 
 let cachedAdminClient = null;
 let cachedAdminConfig = null;
-
-function readEnv(context) {
-  if (context?.env && typeof context.env === 'object') {
-    return context.env;
-  }
-  return process.env ?? {};
-}
 
 function selectStringCandidate(source, key) {
   if (!source) {
@@ -90,9 +84,7 @@ function getAdminClient(context) {
 }
 
 function respond(context, status, body, extraHeaders = {}) {
-  const response = json(status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
-  context.res = response;
-  return response;
+  return _respond(context, status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
 }
 
 function parseRestSegments(context) {
@@ -215,14 +207,6 @@ function normalizeExpirationInput(value) {
     return { value: null, valid: false };
   }
   return { value: null, valid: false };
-}
-
-function isAdminRole(role) {
-  if (typeof role !== 'string') {
-    return false;
-  }
-  const normalized = role.trim().toLowerCase();
-  return normalized === 'admin' || normalized === 'owner';
 }
 
 function isExpiredTimestamp(timestamp) {

@@ -1,18 +1,15 @@
 /* eslint-env node */
 import process from 'node:process';
 import { createClient } from '@supabase/supabase-js';
-import { json, resolveBearerAuthorization } from '../_shared/http.js';
+import { resolveBearerAuthorization } from '../_shared/http.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { readEnv, respond as _respond, isAdminRole } from '../_shared/org-bff.js';
 
 const ADMIN_CLIENT_OPTIONS = {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   global: { headers: { Accept: 'application/json' } },
 };
 
-
-function readEnv(context) {
-  return (context?.env && typeof context.env === 'object') ? context.env : (process.env ?? {});
-}
 function take(env, key) {
   const v = env?.[key];
   return typeof v === 'string' && v.trim() ? v.trim() : '';
@@ -27,13 +24,11 @@ function resolveAdminConfig(context) {
 function getAdminClient(context) {
   const cfg = resolveAdminConfig(context);
   if (!cfg.url || !cfg.key) return { client: null, error: new Error('missing_admin_credentials') };
-  // Create a fresh admin client per request
   const client = createClient(cfg.url, cfg.key, ADMIN_CLIENT_OPTIONS);
   return { client, error: null };
 }
 function respond(context, status, body, extraHeaders = {}) {
-  const response = json(status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
-  context.res = response; return response;
+  return _respond(context, status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
 }
 function parseSegments(context) {
   const raw = context?.bindingData?.restOfPath; if (!raw || typeof raw !== 'string') return [];
@@ -73,8 +68,6 @@ async function getAuthUser(context, req, supabase){
   if (res.error || !res.data?.user?.id) { respond(context,401,{message:'invalid or expired token'}); return null; }
   const u=res.data.user; return { id: u.id, email: typeof u.email==='string'?u.email.toLowerCase():null };
 }
-function isAdminRole(role){ if (typeof role !== 'string') return false; const t=role.trim().toLowerCase(); return t==='admin'||t==='owner'; }
-
 async function requireActorRole(context, supabase, orgId, userId){
   const result = await supabase.from('org_memberships').select('id, role').eq('org_id', orgId).eq('user_id', userId).maybeSingle();
   if (result.error){ respond(context,500,{message:'failed to verify membership'}); return null; }

@@ -1,23 +1,13 @@
 /* eslint-env node */
-import process from 'node:process';
-import { json, resolveBearerAuthorization } from '../_shared/http.js';
+import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
-
-function readEnv(context) {
-  return context?.env ?? process.env ?? {};
-}
+import { readEnv, respond } from '../_shared/org-bff.js';
 
 function normalizeMetadata(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
   }
   return value;
-}
-
-function respond(context, status, body, extraHeaders) {
-  const response = json(status, body, extraHeaders);
-  context.res = response;
-  return response;
 }
 
 export default async function (context, req) {

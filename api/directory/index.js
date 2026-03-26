@@ -1,7 +1,8 @@
 /* eslint-env node */
 import process from 'node:process';
 import { createClient } from '@supabase/supabase-js';
-import { json, resolveBearerAuthorization } from '../_shared/http.js';
+import { resolveBearerAuthorization } from '../_shared/http.js';
+import { readEnv, respond as _respond } from '../_shared/org-bff.js';
 
 const ADMIN_CLIENT_OPTIONS = {
   auth: {
@@ -15,14 +16,6 @@ const ADMIN_CLIENT_OPTIONS = {
     },
   },
 };
-
-
-function readEnv(context) {
-  if (context?.env && typeof context.env === 'object') {
-    return context.env;
-  }
-  return process.env ?? {};
-}
 
 function selectStringCandidate(source, key) {
   if (!source) {
@@ -56,15 +49,12 @@ function getAdminClient(context) {
   if (!config.url || !config.key) {
     return { client: null, error: new Error('missing_admin_credentials') };
   }
-  // Create a fresh admin client per request to avoid lingering connections
   const client = createAdminClient(config.url, config.key);
   return { client, error: null };
 }
 
 function respond(context, status, body, extraHeaders = {}) {
-  const response = json(status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
-  context.res = response;
-  return response;
+  return _respond(context, status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
 }
 
 function normalizeUuid(value) {

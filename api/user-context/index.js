@@ -1,16 +1,10 @@
 /* eslint-env node */
-import process from 'node:process';
-import { json, resolveBearerAuthorization } from '../_shared/http.js';
+import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
-
-function readEnv(context) {
-  return (context?.env && typeof context.env === 'object') ? context.env : (process.env ?? {});
-}
+import { readEnv, respond as _respond } from '../_shared/org-bff.js';
 
 function respond(context, status, body, extraHeaders = {}) {
-  const response = json(status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
-  context.res = response;
-  return response;
+  return _respond(context, status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
 }
 
 function mapOrganizationRecord(record, membership, connection) {

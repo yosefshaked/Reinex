@@ -1,114 +1,19 @@
 /* eslint-env node */
-import process from 'node:process';
 import { Buffer } from 'node:buffer';
-import { randomBytes, createCipheriv, createHash } from 'node:crypto';
-import { json, resolveBearerAuthorization } from '../_shared/http.js';
+import { randomBytes, createCipheriv } from 'node:crypto';
+import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import {
+  readEnv,
+  respond,
+  normalizeString,
+  parseRequestBody,
+  resolveEncryptionSecret,
+  deriveEncryptionKey,
+  isValidOrgId,
+  isAdminRole,
+} from '../_shared/org-bff.js';
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function readEnv(context) {
-  if (context?.env && typeof context.env === 'object') {
-    return context.env;
-  }
-  return process.env ?? {};
-}
-
-function respond(context, status, body, extraHeaders) {
-  const response = json(status, body, extraHeaders);
-  context.res = response;
-  return response;
-}
-
-function normalizeString(value) {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  return value.trim();
-}
-
-function parseRequestBody(req) {
-  if (req?.body && typeof req.body === 'object') {
-    return req.body;
-  }
-
-  const rawBody = typeof req?.body === 'string'
-    ? req.body
-    : typeof req?.rawBody === 'string'
-      ? req.rawBody
-      : null;
-
-  if (!rawBody) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(rawBody);
-  } catch {
-    return {};
-  }
-}
-
-function resolveEncryptionSecret(env) {
-  const candidates = [
-    env.APP_ORG_CREDENTIALS_ENCRYPTION_KEY,
-    env.ORG_CREDENTIALS_ENCRYPTION_KEY,
-    env.APP_SECRET_ENCRYPTION_KEY,
-    env.APP_ENCRYPTION_KEY,
-  ];
-
-  for (const candidate of candidates) {
-    const normalized = normalizeString(candidate);
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return '';
-}
-
-function decodeKeyMaterial(secret) {
-  const attempts = [
-    () => Buffer.from(secret, 'base64'),
-    () => Buffer.from(secret, 'hex'),
-  ];
-
-  for (const attempt of attempts) {
-    try {
-      const buffer = attempt();
-      if (buffer.length) {
-        return buffer;
-      }
-    } catch {
-      // ignore and try next format
-    }
-  }
-
-  return Buffer.from(secret, 'utf8');
-}
-
-function deriveEncryptionKey(secret) {
-  const normalized = normalizeString(secret);
-  if (!normalized) {
-    return null;
-  }
-
-  let keyBuffer = decodeKeyMaterial(normalized);
-
-  if (keyBuffer.length < 32) {
-    keyBuffer = createHash('sha256').update(keyBuffer).digest();
-  }
-
-  if (keyBuffer.length > 32) {
-    keyBuffer = keyBuffer.subarray(0, 32);
-  }
-
-  if (keyBuffer.length < 32) {
-    return null;
-  }
-
-  return keyBuffer;
-}
 
 function encryptDedicatedKey(plainText, keyBuffer) {
   const iv = randomBytes(12);
@@ -116,18 +21,6 @@ function encryptDedicatedKey(plainText, keyBuffer) {
   const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()]);
   const authTag = cipher.getAuthTag();
   return `v1:gcm:${iv.toString('base64')}:${authTag.toString('base64')}:${encrypted.toString('base64')}`;
-}
-
-function isValidOrgId(value) {
-  return UUID_PATTERN.test(value);
-}
-
-function isAdminRole(role) {
-  if (!role) {
-    return false;
-  }
-  const normalized = String(role).trim().toLowerCase();
-  return normalized === 'admin' || normalized === 'owner';
 }
 
 export default async function (context, req) {
