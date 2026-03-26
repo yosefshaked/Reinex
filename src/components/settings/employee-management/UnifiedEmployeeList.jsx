@@ -558,7 +558,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   }
 
   return (
-    <div className="font-sans antialiased text-foreground">
+    <div className="antialiased text-foreground">
       <div className="grid gap-3 lg:grid-cols-[minmax(260px,300px)_minmax(0,1fr)]">
         <aside className="rounded-2xl border border-slate-200 bg-blue-50/30 shadow-sm lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-hidden lg:flex lg:flex-col">
           <div className="shrink-0 space-y-2 border-b border-slate-200/80 p-3">
