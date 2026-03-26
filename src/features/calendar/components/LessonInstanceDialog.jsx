@@ -108,11 +108,28 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     return '972' + digits;
   }
 
+  function formatReminderDayDate(dateTimeValue) {
+    if (!dateTimeValue) return '';
+    const date = new Date(dateTimeValue);
+    if (Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat('he-IL', {
+      weekday: 'long',
+      day: '2-digit',
+      month: '2-digit',
+    }).format(date);
+  }
+
   function buildReminderMessage(lessonInstance, studentName) {
-    const date = formatDateDisplay(lessonInstance.datetime_start);
+    const dayDate = formatReminderDayDate(lessonInstance.datetime_start);
     const time = formatTimeDisplay(lessonInstance.datetime_start);
     const service = lessonInstance.service?.service_name || 'שיעור';
-    return `שלום ${studentName} 😊\nרצינו להזכיר לך שיש לך ${service} ב-${date} בשעה ${time}.\nנשמח לאישור הגעתך 🙏`;
+    return [
+      `שלום ${studentName},`,
+      `רצינו להזכיר שיש לך מפגש ${service}.`,
+      `ניפגש ב${dayDate} בשעה ${time}.`,
+      'נשמח לאישור הגעתך.',
+      'תודה רבה!',
+    ].join('\n');
   }
 
   function resolveReminderContact(participant) {
@@ -138,14 +155,16 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   function buildEmailReminderHref(lessonInstance, contact) {
     if (!contact?.email) return null;
-    const date = formatDateDisplay(lessonInstance.datetime_start);
-    const time = formatTimeDisplay(lessonInstance.datetime_start);
+    const dayDate = formatReminderDayDate(lessonInstance.datetime_start);
     const service = lessonInstance.service?.service_name || 'שיעור';
     const studentName = contact.name || 'תלמיד';
-    const subject = encodeURIComponent(`תזכורת: ${service} – ${date}`);
-    const body = encodeURIComponent(
-      `שלום ${studentName},\n\nרצינו להזכיר לך שיש לך ${service} ב-${date} בשעה ${time}.\nנשמח לאישור הגעתך.\n\nתודה!`
-    );
+    const subject = encodeURIComponent(`תזכורת: ${service} – ${dayDate}`);
+    const reminderText = buildReminderMessage(lessonInstance, studentName);
+    const rtlBody = reminderText
+      .split('\n')
+      .map((line) => `\u202B${line}\u202C`)
+      .join('\n');
+    const body = encodeURIComponent(rtlBody);
     return `mailto:${contact.email}?subject=${subject}&body=${body}`;
   }
 
