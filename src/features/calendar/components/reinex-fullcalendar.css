@@ -183,6 +183,14 @@
   line-height: 1.1;
 }
 
+.reinex-calendar-event__badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .reinex-calendar-event__badge {
   display: inline-flex;
   align-items: center;

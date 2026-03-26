@@ -112,6 +112,13 @@ function EventContent({ arg }) {
   const isInlineSummary = !isStudentOnlySummary && (durationMinutes <= 30 || isNarrow);
   const studentLabel = `${firstStudentName}${additionalCount > 0 ? ` +${additionalCount}` : ''}`;
   const serviceLabel = instance.service?.service_name || 'שיעור';
+  const participants = Array.isArray(instance.participants) ? instance.participants : [];
+  const remindersTotal = participants.length;
+  const remindersSent = participants.filter((participant) => participant?.reminder_sent).length;
+  const remindersAccepted = participants.filter((participant) => participant?.reminder_seen).length;
+  const remindersDeclined = participants.filter((participant) => participant?.participant_status === 'cancelled_student').length;
+  const reminderBadgeLabel = `🔔 ${remindersSent}/${remindersTotal} • ✅${remindersAccepted} • ❌${remindersDeclined}`;
+  const reminderBadgeTitle = `תזכורות: נשלח ${remindersSent}/${remindersTotal}, אישרו ${remindersAccepted}, לא מגיעים ${remindersDeclined}`;
 
   return (
     <div
@@ -155,9 +162,14 @@ function EventContent({ arg }) {
 
       <div className="reinex-calendar-event__meta">
         <span className="reinex-calendar-event__time">{arg.timeText || formatTimeDisplay(instance.datetime_start)}</span>
-        {instance.documentation_status === 'undocumented' && instance.status === 'completed' ? (
-          <span className="reinex-calendar-event__badge">לא תועד</span>
-        ) : null}
+        <span className="reinex-calendar-event__badges">
+          {remindersTotal > 0 ? (
+            <span className="reinex-calendar-event__badge" title={reminderBadgeTitle}>{reminderBadgeLabel}</span>
+          ) : null}
+          {instance.documentation_status === 'undocumented' && instance.status === 'completed' ? (
+            <span className="reinex-calendar-event__badge">לא תועד</span>
+          ) : null}
+        </span>
       </div>
         </>
       )}
