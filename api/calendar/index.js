@@ -257,6 +257,61 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
     });
   }
 
+  const studentIds = Array.from(new Set(
+    (instances || []).flatMap((instance) => (
+      Array.isArray(instance.participants)
+        ? instance.participants.map((participant) => participant?.student_id).filter(Boolean)
+        : []
+    )),
+  ));
+
+  const primaryGuardianLinkByStudent = new Map();
+  if (studentIds.length > 0) {
+    const { data: studentGuardianLinks, error: linksError } = await tenantClient
+      .from('student_guardians')
+      .select('student_id, guardian_id, relationship, is_primary, created_at')
+      .in('student_id', studentIds)
+      .order('student_id', { ascending: true })
+      .order('is_primary', { ascending: false })
+      .order('created_at', { ascending: true });
+
+    if (linksError) {
+      context.log?.warn?.('calendar/instances failed to fetch student_guardians links', {
+        message: linksError.message,
+      });
+    } else {
+      for (const link of studentGuardianLinks || []) {
+        if (!link?.student_id || !link?.guardian_id) continue;
+        if (!primaryGuardianLinkByStudent.has(link.student_id)) {
+          primaryGuardianLinkByStudent.set(link.student_id, link);
+        }
+      }
+    }
+  }
+
+  const guardianIds = Array.from(new Set(
+    Array.from(primaryGuardianLinkByStudent.values()).map((link) => link.guardian_id).filter(Boolean),
+  ));
+  const guardiansById = new Map();
+
+  if (guardianIds.length > 0) {
+    const { data: guardians, error: guardiansError } = await tenantClient
+      .from('guardians')
+      .select('id, first_name, middle_name, last_name, phone, email')
+      .in('id', guardianIds);
+
+    if (guardiansError) {
+      context.log?.warn?.('calendar/instances failed to fetch guardians', {
+        message: guardiansError.message,
+      });
+    } else {
+      for (const guardian of guardians || []) {
+        if (!guardian?.id) continue;
+        guardiansById.set(guardian.id, guardian);
+      }
+    }
+  }
+
   // Transform data for frontend consumption
   const transformedInstances = (instances || []).map(instance => {
     const participants = Array.isArray(instance.participants) 
@@ -283,6 +338,22 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
             phone: p.student.phone ?? null,
             email: p.student.email ?? null,
             default_notification_method: p.student.default_notification_method ?? 'whatsapp',
+            primary_guardian: (() => {
+              const link = primaryGuardianLinkByStudent.get(p.student_id);
+              if (!link) return null;
+              const guardian = guardiansById.get(link.guardian_id);
+              if (!guardian) return null;
+              return {
+                id: guardian.id,
+                first_name: guardian.first_name,
+                middle_name: guardian.middle_name,
+                last_name: guardian.last_name,
+                phone: guardian.phone ?? null,
+                email: guardian.email ?? null,
+                relationship: link.relationship ?? null,
+                is_primary: link.is_primary ?? true,
+              };
+            })(),
           } : null,
         }))
       : [];

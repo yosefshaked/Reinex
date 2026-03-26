@@ -115,19 +115,38 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     return `שלום ${studentName} 😊\nרצינו להזכיר לך שיש לך ${service} ב-${date} בשעה ${time}.\nנשמח לאישור הגעתך 🙏`;
   }
 
-  function buildEmailReminderHref(lessonInstance, student) {
-    if (!student?.email) return null;
+  function resolveReminderContact(participant) {
+    const student = participant?.student || null;
+    const guardian = student?.primary_guardian || null;
+
+    if (guardian) {
+      return {
+        source: 'guardian',
+        name: [guardian.first_name, guardian.middle_name, guardian.last_name].filter(Boolean).join(' ') || 'הורה/אפוטרופוס',
+        phone: guardian.phone || null,
+        email: guardian.email || null,
+      };
+    }
+
+    return {
+      source: 'student',
+      name: student?.full_name || [student?.first_name, student?.last_name].filter(Boolean).join(' ') || 'תלמיד',
+      phone: student?.phone || null,
+      email: student?.email || null,
+    };
+  }
+
+  function buildEmailReminderHref(lessonInstance, contact) {
+    if (!contact?.email) return null;
     const date = formatDateDisplay(lessonInstance.datetime_start);
     const time = formatTimeDisplay(lessonInstance.datetime_start);
     const service = lessonInstance.service?.service_name || 'שיעור';
-    const studentName = student.full_name
-      || [student.first_name, student.last_name].filter(Boolean).join(' ')
-      || 'תלמיד';
+    const studentName = contact.name || 'תלמיד';
     const subject = encodeURIComponent(`תזכורת: ${service} – ${date}`);
     const body = encodeURIComponent(
       `שלום ${studentName},\n\nרצינו להזכיר לך שיש לך ${service} ב-${date} בשעה ${time}.\nנשמח לאישור הגעתך.\n\nתודה!`
     );
-    return `mailto:${student.email}?subject=${subject}&body=${body}`;
+    return `mailto:${contact.email}?subject=${subject}&body=${body}`;
   }
 
   const statusInfo = getInstanceStatusIcon(instance.status, instance.documentation_status);
@@ -291,18 +310,18 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   }
 
   async function handleSendWaReminder(participant) {
-    const waPhone = formatPhoneForWhatsApp(participant.student?.phone);
+    const contact = resolveReminderContact(participant);
+    const waPhone = formatPhoneForWhatsApp(contact.phone);
     if (!waPhone || !org?.id) return;
-    const studentName = participant.student?.full_name
-      || [participant.student?.first_name, participant.student?.last_name].filter(Boolean).join(' ')
-      || 'תלמיד';
+    const studentName = contact.name || 'תלמיד';
     const message = buildReminderMessage(instance, studentName);
     window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
     await markReminderSent(participant.id);
   }
 
   function handleSendEmailReminder(participant) {
-    const href = buildEmailReminderHref(instance, participant.student);
+    const contact = resolveReminderContact(participant);
+    const href = buildEmailReminderHref(instance, contact);
     if (!href) return;
     window.open(href, '_blank', 'noopener,noreferrer');
     markReminderSent(participant.id);
@@ -600,7 +619,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   const rs = localReminderState[participant.id] || {};
                   const hasSent = rs.reminder_sent ?? participant.reminder_sent ?? false;
                   const hasConfirmed = rs.reminder_seen ?? participant.reminder_seen ?? false;
-                  const waPhone = formatPhoneForWhatsApp(participant.student?.phone);
+                  const reminderContact = resolveReminderContact(participant);
+                  const waPhone = formatPhoneForWhatsApp(reminderContact.phone);
+                  const emailAddress = reminderContact.email;
                   const isScheduled = participant.participant_status === 'scheduled';
                   return (
                     <div key={participant.id} className="p-3 bg-gray-50 rounded-lg space-y-2">
@@ -645,6 +666,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                       {/* Reminder row — admins only, scheduled participants only */}
                       {isScheduled && canManageAll && (
                         <div className="flex items-center gap-2 pt-1.5 border-t border-gray-200 flex-wrap">
+                          <span className="text-[11px] text-gray-500">
+                            {reminderContact.source === 'guardian' ? 'איש קשר: הורה' : 'איש קשר: תלמיד'}
+                          </span>
                           {waPhone && (
                             <Button
                               size="sm"
@@ -658,7 +682,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               {hasSent ? 'שלח שוב WA' : 'תזכורת WA'}
                             </Button>
                           )}
-                          {participant.student?.email && (
+                          {emailAddress && (
                             <Button
                               size="sm"
                               variant={hasSent ? 'outline' : 'secondary'}
@@ -703,7 +727,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               ✓ אישר הגעה
                             </Badge>
                           )}
-                          {!waPhone && !participant.student?.email && (
+                          {!waPhone && !emailAddress && (
                             <span className="text-xs text-gray-400">אין פרטי קשר</span>
                           )}
                         </div>
