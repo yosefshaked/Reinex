@@ -280,6 +280,9 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
             full_name: [p.student.first_name, p.student.middle_name, p.student.last_name]
               .filter(Boolean)
               .join(' '),
+            phone: p.student.phone ?? null,
+            email: p.student.email ?? null,
+            default_notification_method: p.student.default_notification_method ?? 'whatsapp',
           } : null,
         }))
       : [];
