@@ -245,7 +245,7 @@
   padding: 0.25rem 0.4375rem;
 }
 
-.reinex-calendar-event--compact .reinex-calendar-event__badge {
+.reinex-calendar-event--compact .reinex-calendar-event__badge:not(.reinex-calendar-event__reminder-badge) {
   display: none;
 }
 
@@ -254,7 +254,7 @@
   border-radius: 0.75rem;
 }
 
-.reinex-calendar-event--xs .reinex-calendar-event__badge {
+.reinex-calendar-event--xs .reinex-calendar-event__badge:not(.reinex-calendar-event__reminder-badge) {
   display: none;
 }
 
@@ -335,7 +335,7 @@
 .reinex-calendar-event--student-only .reinex-calendar-event__service,
 .reinex-calendar-event--student-only .reinex-calendar-event__separator,
 .reinex-calendar-event--student-only .reinex-calendar-event__time,
-.reinex-calendar-event--student-only .reinex-calendar-event__badge {
+.reinex-calendar-event--student-only .reinex-calendar-event__badge:not(.reinex-calendar-event__reminder-badge) {
   display: none;
 }
 

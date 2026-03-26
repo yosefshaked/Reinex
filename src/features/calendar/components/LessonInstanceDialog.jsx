@@ -122,10 +122,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   function buildReminderMessage(lessonInstance, studentName) {
     const dayDate = formatReminderDayDate(lessonInstance.datetime_start);
     const time = formatTimeDisplay(lessonInstance.datetime_start);
-    const service = lessonInstance.service?.service_name || 'שיעור';
+    const service = lessonInstance.service?.service_name || 'אצלנו';
     return [
-      `שלום ${studentName},`,
-      `רצינו להזכיר שיש לך מפגש ${service}.`,
+      `שלום,`,
+      `רצינו להזכיר שיש ל${studentName} מפגש ${service}.`,
       `ניפגש ב${dayDate} בשעה ${time}.`,
       'נשמח לאישור הגעתך.',
       'תודה רבה!',
