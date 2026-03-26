@@ -13,6 +13,8 @@ import {
   resolveOrgId,
   resolveTenantClient,
 } from '../_shared/org-bff.js';
+import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
+import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons } from '../_shared/employee-finance.js';
 
 function isIsoDate(value) {
   if (typeof value !== 'string') return false;
@@ -339,6 +341,21 @@ export default async function lessonInstances(context, req) {
     if (updateError) {
       context.log?.error?.('lesson-instances failed to update instance', { message: updateError.message });
       return respond(context, 500, { message: 'failed_to_update_lesson_instance' });
+    }
+
+    // Sync financial artifacts and instructor attendance when status changes
+    if (nextStatus) {
+      try {
+        await syncLessonBillingArtifacts(tenantClient, lessonInstanceId, userId);
+        await syncLessonInstructorEarnings(tenantClient, lessonInstanceId, userId);
+        await syncInstructorAttendanceFromLessons(tenantClient, lessonInstanceId, userId);
+      } catch (syncError) {
+        context.log?.error?.('lesson-instances failed to sync financial artifacts', {
+          message: syncError?.message,
+          lessonInstanceId,
+        });
+        // Non-fatal: status update succeeded, log but continue
+      }
     }
 
     const { data, error } = await tenantClient

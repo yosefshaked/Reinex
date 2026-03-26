@@ -1034,3 +1034,114 @@ export async function syncLessonFinancialArtifacts(tenantClient, lessonInstanceI
     policies,
   });
 }
+
+/**
+ * Auto-sync instructor attendance when lessons are completed.
+ * Upserts an employee_attendance_records row with source_type='system',
+ * summing worked_minutes from all completed lessons for that instructor on that date.
+ * Respects existing manual attendance: does not overwrite manual/import entries.
+ */
+export async function syncInstructorAttendanceFromLessons(
+  tenantClient,
+  lessonInstanceId,
+  actorUserId = null,
+) {
+  if (!lessonInstanceId) {
+    return null;
+  }
+
+  const { data: instance, error: instanceError } = await tenantClient
+    .from('lesson_instances')
+    .select('id, instructor_employee_id, datetime_start, duration_minutes, status')
+    .eq('id', lessonInstanceId)
+    .maybeSingle();
+
+  if (instanceError) {
+    throw instanceError;
+  }
+  if (!instance || !instance.instructor_employee_id) {
+    return null;
+  }
+
+  const lessonDate = toDateKey(instance.datetime_start);
+  if (!lessonDate) {
+    return null;
+  }
+
+  // Check if a manual/import attendance record already exists for this employee+date.
+  // If so, do not overwrite — manual entries take precedence.
+  const { data: existingRecord, error: existingError } = await tenantClient
+    .from('employee_attendance_records')
+    .select('id, source_type')
+    .eq('employee_id', instance.instructor_employee_id)
+    .eq('attendance_date', lessonDate)
+    .maybeSingle();
+
+  if (existingError && existingError.code !== '42P01') {
+    throw existingError;
+  }
+
+  if (existingRecord && existingRecord.source_type !== 'system') {
+    // Manual or import entry exists — do not overwrite
+    return { employee_id: instance.instructor_employee_id, attendance_date: lessonDate, skipped: true };
+  }
+
+  // Sum worked minutes from all completed lessons for this instructor on this date
+  const dayStart = `${lessonDate}T00:00:00`;
+  const dayEnd = `${lessonDate}T23:59:59`;
+  const { data: dayLessons, error: dayLessonsError } = await tenantClient
+    .from('lesson_instances')
+    .select('id, duration_minutes, status')
+    .eq('instructor_employee_id', instance.instructor_employee_id)
+    .gte('datetime_start', dayStart)
+    .lte('datetime_start', dayEnd);
+
+  if (dayLessonsError) {
+    throw dayLessonsError;
+  }
+
+  const completedLessons = (dayLessons || []).filter((l) => l.status === 'completed');
+
+  if (completedLessons.length === 0) {
+    // No completed lessons — remove system attendance record if it exists
+    if (existingRecord && existingRecord.source_type === 'system') {
+      await tenantClient
+        .from('employee_attendance_records')
+        .delete()
+        .eq('id', existingRecord.id);
+    }
+    return { employee_id: instance.instructor_employee_id, attendance_date: lessonDate, removed: true };
+  }
+
+  const totalWorkedMinutes = completedLessons.reduce(
+    (sum, l) => sum + (Number(l.duration_minutes) || 0), 0
+  );
+
+  const { error: upsertError } = await tenantClient
+    .from('employee_attendance_records')
+    .upsert({
+      employee_id: instance.instructor_employee_id,
+      attendance_date: lessonDate,
+      status: 'present',
+      worked_minutes: totalWorkedMinutes,
+      source_type: 'system',
+      notes: `${completedLessons.length} שיעורים הושלמו`,
+      updated_by: actorUserId || null,
+      updated_at: new Date().toISOString(),
+      metadata: {
+        lesson_count: completedLessons.length,
+        lesson_ids: completedLessons.map((l) => l.id),
+      },
+    }, { onConflict: 'employee_id,attendance_date' });
+
+  if (upsertError) {
+    throw upsertError;
+  }
+
+  return {
+    employee_id: instance.instructor_employee_id,
+    attendance_date: lessonDate,
+    worked_minutes: totalWorkedMinutes,
+    lesson_count: completedLessons.length,
+  };
+}
