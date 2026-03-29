@@ -2440,7 +2440,8 @@ inserted_providers AS (
   INSERT INTO public.hmo_providers (id, name, is_active, metadata)
   SELECT provider_id, provider_name, true, jsonb_build_object('legacy_source', 'commitments.metadata.hmo')
   FROM provider_rows
-  ON CONFLICT DO NOTHING
+  ON CONFLICT ON CONSTRAINT hmo_providers_name_uidx DO UPDATE
+    SET metadata = EXCLUDED.metadata
   RETURNING id
 ),
 track_rows AS (
@@ -2602,111 +2603,19 @@ WITH legacy_hmo_commitments AS (
 )
 UPDATE public.commitments c
 SET
-  hmo_provider_id = provider_rows.provider_id,
-  hmo_provider_track_id = track_rows.track_id,
-  hmo_authorization_id = legacy_hmo_commitments.authorization_id
-FROM legacy_hmo_commitments
-JOIN (
-  SELECT DISTINCT
-    provider_name,
-    (
-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
-    )::uuid AS provider_id
-  FROM legacy_hmo_commitments
-) AS provider_rows ON provider_rows.provider_name = legacy_hmo_commitments.provider_name
-JOIN (
-  SELECT DISTINCT
-    provider_name,
-    service_id,
-    payment_mode,
-    customer_charge_amount,
-    insurer_claim_amount,
-    workflow_notes,
-    (
-      substr(md5(
-        (
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
-        ) || '|' ||
-        COALESCE(service_id::text, '') || '|' ||
-        payment_mode || '|' ||
-        COALESCE(customer_charge_amount, 0)::text || '|' ||
-        COALESCE(insurer_claim_amount, 0)::text || '|' ||
-        COALESCE(workflow_notes, '')
-      ), 1, 8) || '-' ||
-      substr(md5(
-        (
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
-        ) || '|' ||
-        COALESCE(service_id::text, '') || '|' ||
-        payment_mode || '|' ||
-        COALESCE(customer_charge_amount, 0)::text || '|' ||
-        COALESCE(insurer_claim_amount, 0)::text || '|' ||
-        COALESCE(workflow_notes, '')
-      ), 9, 4) || '-' ||
-      substr(md5(
-        (
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
-        ) || '|' ||
-        COALESCE(service_id::text, '') || '|' ||
-        payment_mode || '|' ||
-        COALESCE(customer_charge_amount, 0)::text || '|' ||
-        COALESCE(insurer_claim_amount, 0)::text || '|' ||
-        COALESCE(workflow_notes, '')
-      ), 13, 4) || '-' ||
-      substr(md5(
-        (
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
-        ) || '|' ||
-        COALESCE(service_id::text, '') || '|' ||
-        payment_mode || '|' ||
-        COALESCE(customer_charge_amount, 0)::text || '|' ||
-        COALESCE(insurer_claim_amount, 0)::text || '|' ||
-        COALESCE(workflow_notes, '')
-      ), 17, 4) || '-' ||
-      substr(md5(
-        (
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
-          substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
-        ) || '|' ||
-        COALESCE(service_id::text, '') || '|' ||
-        payment_mode || '|' ||
-        COALESCE(customer_charge_amount, 0)::text || '|' ||
-        COALESCE(insurer_claim_amount, 0)::text || '|' ||
-        COALESCE(workflow_notes, '')
-      ), 21, 12)
-    )::uuid AS track_id
-  FROM legacy_hmo_commitments
-) AS track_rows
-  ON track_rows.provider_name = legacy_hmo_commitments.provider_name
- AND track_rows.service_id IS NOT DISTINCT FROM legacy_hmo_commitments.service_id
- AND track_rows.payment_mode = legacy_hmo_commitments.payment_mode
- AND track_rows.customer_charge_amount = legacy_hmo_commitments.customer_charge_amount
- AND track_rows.insurer_claim_amount = legacy_hmo_commitments.insurer_claim_amount
- AND COALESCE(track_rows.workflow_notes, '') = COALESCE(legacy_hmo_commitments.workflow_notes, '')
-WHERE c.id = legacy_hmo_commitments.commitment_id;
+  hmo_provider_id = hp.id,
+  hmo_provider_track_id = hpt.id,
+  hmo_authorization_id = lhc.authorization_id
+FROM legacy_hmo_commitments lhc
+JOIN public.hmo_providers hp ON lower(hp.name) = lower(lhc.provider_name)
+JOIN public.hmo_provider_tracks hpt
+  ON hpt.provider_id = hp.id
+  AND hpt.service_id IS NOT DISTINCT FROM lhc.service_id
+  AND hpt.payment_mode = lhc.payment_mode
+  AND hpt.default_customer_charge_amount = COALESCE(lhc.customer_charge_amount, 0)
+  AND hpt.default_insurer_claim_amount = COALESCE(lhc.insurer_claim_amount, 0)
+  AND COALESCE(hpt.default_workflow_notes, '') = COALESCE(lhc.workflow_notes, '')
+WHERE c.id = lhc.commitment_id;
 
 -- -----------------------------------------------------------------
 -- public."Documents" (polymorphic file metadata)
