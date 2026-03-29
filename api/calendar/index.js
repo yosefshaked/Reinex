@@ -183,6 +183,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
         reminder_seen,
         attendance_confirmed_at,
         documented_at,
+        metadata,
         student:students(
           id,
           first_name,

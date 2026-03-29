@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Loader2, BookOpen, CalendarDays } from 'lucide-react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
+import { Loader2, BookOpen, CalendarDays, History, ChevronDown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -69,8 +70,48 @@ function getTemplateInstructorName(template) {
   return [instructor.first_name, instructor.middle_name, instructor.last_name].filter(Boolean).join(' ') || instructor.name || '—';
 }
 
+const HISTORY_WINDOW_DAYS = 90;
+
+function getParticipantForStudent(instance, studentId) {
+  return (instance?.participants || []).find((p) => p.student_id === studentId) || null;
+}
+
+function getInstanceStatusConfig(status) {
+  switch (status) {
+    case 'completed': return { label: 'הושלם', className: 'bg-green-100 text-green-800 border-green-200' };
+    case 'cancelled_student': return { label: 'בוטל ע"י תלמיד', className: 'bg-orange-100 text-orange-800 border-orange-200' };
+    case 'cancelled_clinic': return { label: 'בוטל ע"י המכון', className: 'bg-red-100 text-red-800 border-red-200' };
+    case 'no_show': return { label: 'אי הגעה', className: 'bg-red-100 text-red-800 border-red-200' };
+    case 'scheduled': return { label: 'מתוכנן', className: 'bg-blue-100 text-blue-800 border-blue-200' };
+    default: return { label: status || '—', className: 'bg-gray-100 text-gray-700 border-gray-200' };
+  }
+}
+
+function getParticipantStatusConfig(status) {
+  switch (status) {
+    case 'attended': return { label: '✓ נכח', className: 'bg-green-100 text-green-800 border-green-200' };
+    case 'no_show': return { label: '✗ לא הגיע', className: 'bg-red-100 text-red-800 border-red-200' };
+    case 'cancelled_student': return { label: 'בוטל ע"י תלמיד', className: 'bg-orange-100 text-orange-800 border-orange-200' };
+    case 'cancelled_clinic': return { label: 'בוטל ע"י המכון', className: 'bg-red-100 text-red-800 border-red-200' };
+    case 'scheduled': return { label: 'מתוכנן', className: 'bg-blue-100 text-blue-800 border-blue-200' };
+    default: return { label: status || '—', className: 'bg-gray-100 text-gray-700 border-gray-200' };
+  }
+}
+
+function getClosedReasonLabel(reason) {
+  const map = {
+    student_request: 'בקשת תלמיד',
+    clinic_closure: 'סגירת מרפאה',
+    instructor_unavailable: 'מדריך לא זמין',
+    doctor_note: 'אישור רופא',
+    no_show: 'אי הגעה',
+    other: 'אחר',
+  };
+  return map[reason] || reason || null;
+}
+
 /**
- * Schedule tab: fetches its own lesson templates and upcoming lesson instances.
+ * Schedule tab: lesson templates, upcoming instances, and lesson history.
  *
  * @param {Object} props
  * @param {string} props.studentId
@@ -86,12 +127,17 @@ export default function StudentScheduleTab({ studentId }) {
   const [templateError, setTemplateError] = useState(null);
   const [instanceError, setInstanceError] = useState(null);
 
+  const [historyItems, setHistoryItems] = useState([]);
+  const [historyWindowCount, setHistoryWindowCount] = useState(1);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+
   const activeOrgId = activeOrg?.id;
 
-  // Fetch lesson templates for this student
   useEffect(() => {
     if (!studentId || !activeOrgId) return;
-
     const fetchTemplates = async () => {
       setIsLoadingTemplates(true);
       setTemplateError(null);
@@ -108,44 +154,30 @@ export default function StudentScheduleTab({ studentId }) {
         setIsLoadingTemplates(false);
       }
     };
-
     void fetchTemplates();
   }, [studentId, activeOrgId, session]);
 
-  // Fetch lesson instances for next 14 days.
   useEffect(() => {
     if (!studentId || !activeOrgId) return;
-
     const fetchInstances = async () => {
       setIsLoadingInstances(true);
       setInstanceError(null);
       try {
         const today = new Date();
         const allInstances = [];
-
         for (let d = 0; d < 14; d++) {
           const date = new Date(today);
           date.setDate(today.getDate() + d);
           const dateStr = date.toISOString().split('T')[0];
-
           const dayData = await authenticatedFetch('lesson-instances', {
             session,
             params: { date: dateStr, student_id: studentId, org_id: activeOrgId },
           });
-
-          if (Array.isArray(dayData)) {
-            allInstances.push(...dayData);
-          }
+          if (Array.isArray(dayData)) allInstances.push(...dayData);
         }
-
-        // Sort by datetime_start ascending
-        const sortedInstances = allInstances.sort((a, b) => {
-          const aTime = new Date(a.datetime_start || 0).getTime();
-          const bTime = new Date(b.datetime_start || 0).getTime();
-          return aTime - bTime;
-        });
-
-        // Keep a stable, deduplicated list in case backend returns the same instance more than once.
+        const sortedInstances = allInstances.sort((a, b) =>
+          new Date(a.datetime_start || 0).getTime() - new Date(b.datetime_start || 0).getTime()
+        );
         const deduped = Array.from(
           new Map(sortedInstances.map((item) => [item.id, item])).values()
         );
@@ -157,9 +189,55 @@ export default function StudentScheduleTab({ studentId }) {
         setIsLoadingInstances(false);
       }
     };
-
     void fetchInstances();
   }, [studentId, activeOrgId, session]);
+
+  const fetchHistoryWindow = useCallback(async (windowIndex, append) => {
+    if (!studentId || !activeOrgId) return;
+    const today = new Date();
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() - windowIndex * HISTORY_WINDOW_DAYS - 1);
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - (HISTORY_WINDOW_DAYS - 1));
+    const startStr = startDate.toISOString().split('T')[0];
+    const endStr = endDate.toISOString().split('T')[0];
+    try {
+      const data = await authenticatedFetch('calendar/instances', {
+        session,
+        params: { org_id: activeOrgId, student_id: studentId, start_date: startStr, end_date: endStr },
+      });
+      const results = Array.isArray(data) ? data : [];
+      results.sort((a, b) => new Date(b.datetime_start).getTime() - new Date(a.datetime_start).getTime());
+      if (append) {
+        setHistoryItems((prev) => [...prev, ...results]);
+      } else {
+        setHistoryItems(results);
+      }
+      setHistoryHasMore(results.length >= 1);
+    } catch (err) {
+      console.error('Failed to load lesson history', err);
+      setHistoryError(err?.message || 'טעינת היסטוריה נכשלה');
+    }
+  }, [studentId, activeOrgId, session]);
+
+  useEffect(() => {
+    if (!studentId || !activeOrgId) return;
+    setHistoryItems([]);
+    setHistoryWindowCount(1);
+    setHistoryError(null);
+    setHistoryHasMore(false);
+    setIsLoadingHistory(true);
+    fetchHistoryWindow(0, false).finally(() => setIsLoadingHistory(false));
+  }, [studentId, activeOrgId, fetchHistoryWindow]);
+
+  async function handleLoadMoreHistory() {
+    if (isLoadingMoreHistory) return;
+    setIsLoadingMoreHistory(true);
+    const nextWindow = historyWindowCount;
+    await fetchHistoryWindow(nextWindow, true);
+    setHistoryWindowCount((c) => c + 1);
+    setIsLoadingMoreHistory(false);
+  }
 
   return (
     <div className="space-y-6">
@@ -169,9 +247,9 @@ export default function StudentScheduleTab({ studentId }) {
         <div className="p-5">
           <div className="flex items-center gap-2 mb-4">
             <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center text-lg">📚</div>
-            <h3 className="font-semibold text-zinc-800">מפגשים קבועים</h3>
+            <h3 className="font-semibold text-zinc-800">תבניות קבועות</h3>
             <span className="me-auto text-sm text-muted-foreground">
-              {isLoadingTemplates ? 'טוען...' : `${templates.length} מפגשים קבועים פעילים`}
+              {isLoadingTemplates ? 'טוען...' : `${templates.length} תבניות קבועות פעילות`}
             </span>
           </div>
           {isLoadingTemplates ? (
@@ -196,9 +274,7 @@ export default function StudentScheduleTab({ studentId }) {
                     </p>
                     <div className="flex flex-wrap gap-2 items-center text-xs text-neutral-600">
                       {getTemplateInstructorName(template) !== '—' && (
-                        <span>
-                          מדריך: {getTemplateInstructorName(template)}
-                        </span>
+                        <span>מדריך: {getTemplateInstructorName(template)}</span>
                       )}
                       {template.day_of_week != null && (
                         <>
@@ -221,13 +297,13 @@ export default function StudentScheduleTab({ studentId }) {
           ) : (
             <div className="flex flex-col items-center justify-center py-8 text-neutral-500">
               <BookOpen className="h-10 w-10 mb-2 text-neutral-300" />
-              <p className="text-sm">אין מפגשים קבועים פעילים</p>
+              <p className="text-sm">אין תבניות קבועות פעילות</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Upcoming Lesson Instances Table */}
+      {/* Upcoming Lesson Instances */}
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
         <div className="h-1.5 bg-green-500" />
         <div className="p-5">
@@ -284,6 +360,114 @@ export default function StudentScheduleTab({ studentId }) {
             <div className="flex flex-col items-center justify-center py-8 text-neutral-500">
               <CalendarDays className="h-10 w-10 mb-2 text-neutral-300" />
               <p className="text-sm">אין שיעורים מתוכננים</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Lesson History */}
+      <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="h-1.5 bg-violet-500" />
+        <div className="p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-9 h-9 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center">
+              <History className="h-5 w-5" />
+            </div>
+            <h3 className="font-semibold text-zinc-800">היסטוריית שיעורים</h3>
+            {!isLoadingHistory && !historyError && (
+              <span className="me-auto text-sm text-muted-foreground">
+                {historyItems.length === 0
+                  ? 'אין היסטוריה'
+                  : `${historyItems.length} שיעורים (${historyWindowCount * HISTORY_WINDOW_DAYS} ימים אחרונים)`}
+              </span>
+            )}
+          </div>
+          {isLoadingHistory ? (
+            <div className="space-y-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : historyError ? (
+            <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+              {historyError}
+            </div>
+          ) : historyItems.length > 0 ? (
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-28">תאריך</TableHead>
+                      <TableHead className="w-16">שעה</TableHead>
+                      <TableHead>שירות</TableHead>
+                      <TableHead>מדריך</TableHead>
+                      <TableHead>סטטוס שיעור</TableHead>
+                      <TableHead>נוכחות</TableHead>
+                      <TableHead>סיבה / הערה</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {historyItems.map((inst) => {
+                      const participant = getParticipantForStudent(inst, studentId);
+                      const instStatusCfg = getInstanceStatusConfig(inst.status);
+                      const partStatusCfg = participant
+                        ? getParticipantStatusConfig(participant.participant_status)
+                        : null;
+                      const closedReason = getClosedReasonLabel(inst.closed_reason);
+                      const participantNote = participant?.metadata?.notes || null;
+                      const reasonOrNote = participantNote || closedReason;
+                      return (
+                        <TableRow key={inst.id}>
+                          <TableCell className="font-medium text-sm">{formatDate(inst.datetime_start)}</TableCell>
+                          <TableCell className="text-sm">{formatTime(inst.datetime_start)}</TableCell>
+                          <TableCell className="text-sm">{getServiceName(inst)}</TableCell>
+                          <TableCell className="text-sm">{getInstructorName(inst)}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-xs font-normal ${instStatusCfg.className}`}>
+                              {instStatusCfg.label}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {partStatusCfg ? (
+                              <Badge variant="outline" className={`text-xs font-normal ${partStatusCfg.className}`}>
+                                {partStatusCfg.label}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate" title={reasonOrNote || ''}>
+                            {reasonOrNote || '—'}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+              {historyHasMore && (
+                <div className="mt-4 flex justify-center">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLoadMoreHistory}
+                    disabled={isLoadingMoreHistory}
+                  >
+                    {isLoadingMoreHistory ? (
+                      <Loader2 className="h-4 w-4 animate-spin me-2" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 me-2" />
+                    )}
+                    הצג 90 ימים נוספים
+                  </Button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8 text-neutral-500">
+              <History className="h-10 w-10 mb-2 text-neutral-300" />
+              <p className="text-sm">אין היסטוריית שיעורים ב-{HISTORY_WINDOW_DAYS} הימים האחרונים</p>
             </div>
           )}
         </div>
