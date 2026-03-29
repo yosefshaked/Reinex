@@ -2446,7 +2446,7 @@ inserted_providers AS (
 track_rows AS (
   SELECT DISTINCT
     lhc.provider_name,
-    pr.provider_id,
+    COALESCE(hp.id, pr.provider_id) AS provider_id,
     lhc.service_id,
     lhc.payment_mode,
     lhc.customer_charge_amount,
@@ -2454,7 +2454,7 @@ track_rows AS (
     lhc.workflow_notes,
     (
       substr(md5(
-        pr.provider_id::text || '|' ||
+        COALESCE(hp.id, pr.provider_id)::text || '|' ||
         COALESCE(lhc.service_id::text, '') || '|' ||
         lhc.payment_mode || '|' ||
         COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
@@ -2462,7 +2462,7 @@ track_rows AS (
         COALESCE(lhc.workflow_notes, '')
       ), 1, 8) || '-' ||
       substr(md5(
-        pr.provider_id::text || '|' ||
+        COALESCE(hp.id, pr.provider_id)::text || '|' ||
         COALESCE(lhc.service_id::text, '') || '|' ||
         lhc.payment_mode || '|' ||
         COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
@@ -2470,7 +2470,7 @@ track_rows AS (
         COALESCE(lhc.workflow_notes, '')
       ), 9, 4) || '-' ||
       substr(md5(
-        pr.provider_id::text || '|' ||
+        COALESCE(hp.id, pr.provider_id)::text || '|' ||
         COALESCE(lhc.service_id::text, '') || '|' ||
         lhc.payment_mode || '|' ||
         COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
@@ -2478,7 +2478,7 @@ track_rows AS (
         COALESCE(lhc.workflow_notes, '')
       ), 13, 4) || '-' ||
       substr(md5(
-        pr.provider_id::text || '|' ||
+        COALESCE(hp.id, pr.provider_id)::text || '|' ||
         COALESCE(lhc.service_id::text, '') || '|' ||
         lhc.payment_mode || '|' ||
         COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
@@ -2486,7 +2486,7 @@ track_rows AS (
         COALESCE(lhc.workflow_notes, '')
       ), 17, 4) || '-' ||
       substr(md5(
-        pr.provider_id::text || '|' ||
+        COALESCE(hp.id, pr.provider_id)::text || '|' ||
         COALESCE(lhc.service_id::text, '') || '|' ||
         lhc.payment_mode || '|' ||
         COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
@@ -2496,6 +2496,7 @@ track_rows AS (
     )::uuid AS track_id
   FROM legacy_hmo_commitments lhc
   JOIN provider_rows pr ON pr.provider_name = lhc.provider_name
+  LEFT JOIN public.hmo_providers hp ON lower(hp.name) = lower(lhc.provider_name)
 ),
 inserted_tracks AS (
   INSERT INTO public.hmo_provider_tracks (
@@ -2535,7 +2536,7 @@ inserted_tracks AS (
 authorization_source AS (
   SELECT
     lhc.*,
-    pr.provider_id,
+    tr.provider_id,
     tr.track_id,
     CASE
       WHEN row_number() OVER (
@@ -2547,8 +2548,7 @@ authorization_source AS (
       ELSE 'completed'
     END AS authorization_status
   FROM legacy_hmo_commitments lhc
-  JOIN provider_rows pr ON pr.provider_name = lhc.provider_name
-  JOIN track_rows tr ON tr.provider_id = pr.provider_id
+  JOIN track_rows tr ON lower(tr.provider_name) = lower(lhc.provider_name)
     AND tr.service_id IS NOT DISTINCT FROM lhc.service_id
     AND tr.payment_mode = lhc.payment_mode
     AND tr.customer_charge_amount = lhc.customer_charge_amount
