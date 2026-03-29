@@ -2440,7 +2440,7 @@ inserted_providers AS (
   INSERT INTO public.hmo_providers (id, name, is_active, metadata)
   SELECT provider_id, provider_name, true, jsonb_build_object('legacy_source', 'commitments.metadata.hmo')
   FROM provider_rows
-  ON CONFLICT ON CONSTRAINT hmo_providers_name_uidx DO UPDATE
+  ON CONFLICT (lower(name)) DO UPDATE
     SET metadata = EXCLUDED.metadata
   RETURNING id
 ),
