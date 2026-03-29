@@ -2297,14 +2297,24 @@ END $$;
 -- Cleanup: drop consumption_entries and all related objects
 -- =================================================================
 
-DROP TRIGGER IF EXISTS consumption_entries_validate_commitment_ownership_trg ON public.consumption_entries;
+DO $$
+BEGIN
+  IF to_regclass('public.consumption_entries') IS NOT NULL THEN
+    DROP TRIGGER IF EXISTS consumption_entries_validate_commitment_ownership_trg ON public.consumption_entries;
+  END IF;
+END $$;
 DROP FUNCTION IF EXISTS public.validate_consumption_commitment_ownership();
 
 DROP VIEW IF EXISTS public.commitment_balances;
 
 -- Cleanup for deprecated precomputed balance model
 DROP TRIGGER IF EXISTS commitments_recalculate_student_balance_trg ON public.commitments;
-DROP TRIGGER IF EXISTS consumption_entries_recalculate_student_balance_trg ON public.consumption_entries;
+DO $$
+BEGIN
+  IF to_regclass('public.consumption_entries') IS NOT NULL THEN
+    DROP TRIGGER IF EXISTS consumption_entries_recalculate_student_balance_trg ON public.consumption_entries;
+  END IF;
+END $$;
 DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_commitments();
 DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_consumption_entries();
 DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_transfers();
