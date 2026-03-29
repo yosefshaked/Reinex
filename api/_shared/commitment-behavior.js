@@ -163,14 +163,28 @@ export function normalizeCommitmentBehavior(commitment) {
   };
 }
 
+const LESSON_USAGE_TYPES = new Set(['standard', 'double', 'cross_service']);
+
 function groupLessonUsage(entries = []) {
   const usageByService = new Map();
-  let consumedAmount = 0;
+  let totalCredits = 0;
+  let totalDebits = 0;
   let consumedLessons = 0;
 
   for (const entry of entries) {
-    consumedAmount += coerceNumber(entry?.amount_charged, 0);
-    if (normalizeString(entry?.source_type).toLowerCase() !== 'lesson') {
+    const txType = normalizeString(entry?.transaction_type).toUpperCase();
+    const amount = coerceNumber(entry?.amount, coerceNumber(entry?.amount_charged, 0));
+
+    if (txType === 'CREDIT') {
+      totalCredits += amount;
+    } else {
+      totalDebits += amount;
+    }
+
+    const usageType = normalizeString(entry?.usage_type).toLowerCase();
+    const sourceType = normalizeString(entry?.source_type).toLowerCase();
+    const isLesson = LESSON_USAGE_TYPES.has(usageType) || sourceType === 'lesson';
+    if (!isLesson) {
       continue;
     }
     consumedLessons += 1;
@@ -187,7 +201,9 @@ function groupLessonUsage(entries = []) {
   }
 
   return {
-    consumed_amount: roundCurrency(consumedAmount),
+    total_credits: roundCurrency(totalCredits),
+    total_debits: roundCurrency(totalDebits),
+    consumed_amount: roundCurrency(totalDebits),
     consumed_lessons: consumedLessons,
     usage_by_service: usageByService,
   };
@@ -196,7 +212,7 @@ function groupLessonUsage(entries = []) {
 export function buildCommitmentRuntime(commitment, entries = []) {
   const behavior = normalizeCommitmentBehavior(commitment);
   const usage = groupLessonUsage(entries);
-  const totalAmount = roundCurrency(coerceNumber(commitment?.total_amount, 0));
+  const ledgerBalance = roundCurrency(usage.total_credits - usage.total_debits);
   const defaultChargeAmount = Number.isFinite(Number(commitment?.default_charge_amount))
     ? roundCurrency(Number(commitment.default_charge_amount))
     : null;
@@ -225,7 +241,7 @@ export function buildCommitmentRuntime(commitment, entries = []) {
       consumed_lessons: usage.consumed_lessons,
       total_authorized_lessons: packageItems.reduce((sum, item) => sum + item.lessons_count, 0),
       consumed_amount: usage.consumed_amount,
-      remaining_amount: roundCurrency(totalAmount - usage.consumed_amount),
+      remaining_amount: ledgerBalance,
       reminder: null,
     };
   }
@@ -248,7 +264,7 @@ export function buildCommitmentRuntime(commitment, entries = []) {
       consumed_lessons: consumedLessons,
       total_authorized_lessons: totalLessons,
       consumed_amount: usage.consumed_amount,
-      remaining_amount: roundCurrency(totalAmount - usage.consumed_amount),
+      remaining_amount: ledgerBalance,
       reminder: null,
     };
   }
@@ -274,7 +290,7 @@ export function buildCommitmentRuntime(commitment, entries = []) {
       consumed_lessons: consumedLessons,
       total_authorized_lessons: totalLessons,
       consumed_amount: usage.consumed_amount,
-      remaining_amount: roundCurrency(totalAmount - usage.consumed_amount),
+      remaining_amount: ledgerBalance,
       reminder: {
         type: 'hmo_follow_up',
         provider_name: behavior.hmo?.provider_name || 'גורם מממן',
@@ -294,7 +310,7 @@ export function buildCommitmentRuntime(commitment, entries = []) {
     consumed_lessons: usage.consumed_lessons,
     total_authorized_lessons: null,
     consumed_amount: usage.consumed_amount,
-    remaining_amount: roundCurrency(totalAmount - usage.consumed_amount),
+    remaining_amount: ledgerBalance,
     reminder: null,
   };
 }
