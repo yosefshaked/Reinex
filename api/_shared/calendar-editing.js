@@ -55,7 +55,7 @@ export async function fetchLessonMutationState(tenantClient, options) {
   if (instanceId) {
     const { data: instance, error } = await tenantClient
       .from('lesson_instances')
-      .select('id, instructor_employee_id, service_id, status, version, locked_at, locked_by, metadata')
+      .select('id, instructor_employee_id, service_id, status, version, metadata')
       .eq('id', instanceId)
       .maybeSingle();
 
@@ -139,7 +139,6 @@ export function isLockedState(state) {
   return Boolean(
     state?.instanceLocks?.length
       || state?.participantLocks?.length
-      || state?.instance?.locked_at
       || state?.participant?.locked_at,
   );
 }

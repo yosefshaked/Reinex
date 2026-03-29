@@ -227,7 +227,7 @@ export default async function debugUatTools(context, req) {
 
   const { data: instance, error: instanceError } = await tenantClient
     .from('lesson_instances')
-    .select('id, start_at, end_at, status')
+    .select('id')
     .eq('id', lessonInstanceId)
     .maybeSingle();
 
