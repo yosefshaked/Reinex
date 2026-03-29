@@ -140,6 +140,28 @@ export default async function (context, req) {
         return respond(context, 500, { message: 'failed_to_create_commitment' });
       }
 
+      if (data && totalAmount > 0) {
+        const creditPayload = {
+          student_id: data.student_id,
+          commitment_id: data.id,
+          transaction_type: 'CREDIT',
+          usage_type: data.commitment_type === 'hmo' ? 'hmo_authorization_added' : 'commitment_creation',
+          amount: totalAmount,
+          source_ref: null,
+          notes: null,
+          created_at: data.created_at,
+          updated_at: data.created_at,
+          metadata: { commitment_type: data.commitment_type },
+        };
+        const { error: creditError } = await tenantClient
+          .from('ledger_transactions')
+          .insert(creditPayload);
+
+        if (creditError) {
+          context.log?.error?.('commitments failed to create initial CREDIT ledger entry', { message: creditError.message });
+        }
+      }
+
       return respond(context, 201, data);
     }
 
@@ -147,6 +169,12 @@ export default async function (context, req) {
     if (!id) {
       return respond(context, 400, { message: 'missing_commitment_id' });
     }
+
+    const { data: existingCommitment } = await tenantClient
+      .from('commitments')
+      .select('total_amount')
+      .eq('id', id)
+      .maybeSingle();
 
     const { data, error } = await tenantClient
       .from('commitments')
@@ -161,6 +189,32 @@ export default async function (context, req) {
     }
     if (!data) {
       return respond(context, 404, { message: 'commitment_not_found' });
+    }
+
+    if (existingCommitment && Number.isFinite(totalAmount)) {
+      const oldTotal = Number(existingCommitment.total_amount || 0);
+      const delta = totalAmount - oldTotal;
+      if (delta !== 0) {
+        const deltaPayload = {
+          student_id: data.student_id,
+          commitment_id: data.id,
+          transaction_type: delta > 0 ? 'CREDIT' : 'DEBIT',
+          usage_type: delta > 0 ? 'manual_topup' : 'manual_adjustment',
+          amount: Math.abs(delta),
+          source_ref: null,
+          notes: 'Commitment total_amount updated',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          metadata: { commitment_update: true, old_total: oldTotal, new_total: totalAmount },
+        };
+        const { error: deltaError } = await tenantClient
+          .from('ledger_transactions')
+          .insert(deltaPayload);
+
+        if (deltaError) {
+          context.log?.error?.('commitments failed to record total_amount delta in ledger', { message: deltaError.message });
+        }
+      }
     }
 
     return respond(context, 200, data);
@@ -190,9 +244,10 @@ export default async function (context, req) {
     }
 
     const { data: usageRows, error: usageError } = await tenantClient
-      .from('consumption_entries')
+      .from('ledger_transactions')
       .select('id')
       .eq('commitment_id', id)
+      .eq('transaction_type', 'DEBIT')
       .limit(1);
 
     if (usageError && usageError.code !== '42P01') {
@@ -201,25 +256,7 @@ export default async function (context, req) {
     }
 
     if ((usageRows || []).length > 0) {
-      return respond(context, 409, { message: 'commitment_has_consumption_entries' });
-    }
-
-    if (commitment.transfer_ref) {
-      const { data: transferRows, error: transferError } = await tenantClient
-        .from('consumption_entries')
-        .select('id')
-        .eq('source_type', 'transfer')
-        .eq('transfer_ref', commitment.transfer_ref)
-        .limit(1);
-
-      if (transferError && transferError.code !== '42P01') {
-        context.log?.error?.('commitments failed to verify transfer linkage', { message: transferError.message });
-        return respond(context, 500, { message: 'failed_to_verify_commitment_usage' });
-      }
-
-      if ((transferRows || []).length > 0) {
-        return respond(context, 409, { message: 'commitment_has_transfer_entries' });
-      }
+      return respond(context, 409, { message: 'commitment_has_ledger_transactions' });
     }
 
     const { data, error } = await tenantClient

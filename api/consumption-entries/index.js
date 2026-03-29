@@ -12,7 +12,7 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { BILLING_SOURCE_TYPES, isYmdDate } from '../_shared/employee-finance.js';
+import { isYmdDate } from '../_shared/employee-finance.js';
 import {
   assignLessonParticipantCommitment,
   clearLessonParticipantCommitment,
@@ -20,9 +20,25 @@ import {
 
 const MAX_BODY_BYTES = 64 * 1024;
 
-function normalizeSourceType(value) {
-  const normalized = normalizeString(value).toLowerCase();
-  return BILLING_SOURCE_TYPES.has(normalized) ? normalized : '';
+const VALID_CREDIT_TYPES = new Set(['manual_topup', 'commitment_creation', 'transfer_received', 'hmo_authorization_added']);
+const VALID_DEBIT_TYPES = new Set(['standard', 'double', 'cross_service', 'manual_adjustment']);
+const MANUAL_ENTRY_TYPES = new Set(['manual_topup', 'manual_adjustment']);
+
+function resolveTransactionFields(body) {
+  const direction = normalizeString(body?.direction).toLowerCase();
+  const usageType = normalizeString(body?.usage_type).toLowerCase();
+
+  if (direction === 'credit' || VALID_CREDIT_TYPES.has(usageType)) {
+    return {
+      transaction_type: 'CREDIT',
+      usage_type: VALID_CREDIT_TYPES.has(usageType) ? usageType : 'manual_topup',
+    };
+  }
+
+  return {
+    transaction_type: 'DEBIT',
+    usage_type: VALID_DEBIT_TYPES.has(usageType) ? usageType : 'manual_adjustment',
+  };
 }
 
 export default async function (context, req) {
@@ -75,14 +91,14 @@ export default async function (context, req) {
 
   if (method === 'GET') {
     let query = tenantClient
-      .from('consumption_entries')
-      .select('id, lesson_participant_id, student_id, source_type, commitment_id, transfer_ref, amount_charged, effective_date, notes, created_at, metadata')
-      .order('effective_date', { ascending: false, nullsFirst: false })
+      .from('ledger_transactions')
+      .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata')
       .order('created_at', { ascending: false });
 
     const studentId = normalizeString(req?.query?.student_id);
     const commitmentId = normalizeString(req?.query?.commitment_id);
-    const sourceType = normalizeSourceType(req?.query?.source_type);
+    const transactionType = normalizeString(req?.query?.transaction_type).toUpperCase();
+    const usageType = normalizeString(req?.query?.usage_type).toLowerCase();
 
     if (studentId) {
       query = query.eq('student_id', studentId);
@@ -90,14 +106,17 @@ export default async function (context, req) {
     if (commitmentId) {
       query = query.eq('commitment_id', commitmentId);
     }
-    if (sourceType) {
-      query = query.eq('source_type', sourceType);
+    if (transactionType === 'CREDIT' || transactionType === 'DEBIT') {
+      query = query.eq('transaction_type', transactionType);
+    }
+    if (usageType) {
+      query = query.eq('usage_type', usageType);
     }
 
     const { data, error } = await query;
     if (error) {
-      context.log?.error?.('consumption-entries failed to load records', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_load_consumption_entries' });
+      context.log?.error?.('ledger-transactions failed to load records', { message: error.message });
+      return respond(context, 500, { message: 'failed_to_load_ledger_transactions' });
     }
 
     return respond(context, 200, { entries: data || [] });
@@ -154,46 +173,55 @@ export default async function (context, req) {
   }
 
   if (method === 'POST' || method === 'PUT') {
-    const sourceType = normalizeSourceType(body?.source_type);
-    const amountCharged = Number(body?.amount_charged);
+    const txFields = resolveTransactionFields(body);
+    const amount = Math.abs(Number(body?.amount ?? body?.amount_charged ?? 0));
     const effectiveDate = normalizeString(body?.effective_date);
     const notes = normalizeString(body?.notes);
-    if (!sourceType || sourceType === 'lesson') {
-      return respond(context, 400, { message: 'invalid_source_type' });
+    const commitmentId = normalizeString(body?.commitment_id);
+
+    if (!MANUAL_ENTRY_TYPES.has(txFields.usage_type)) {
+      return respond(context, 400, { message: 'invalid_usage_type_for_manual_entry' });
     }
-    if (!Number.isFinite(amountCharged)) {
-      return respond(context, 400, { message: 'invalid_amount_charged' });
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return respond(context, 400, { message: 'invalid_amount' });
     }
     if (effectiveDate && !isYmdDate(effectiveDate)) {
       return respond(context, 400, { message: 'invalid_effective_date' });
     }
-    if (sourceType === 'adjustment' && !notes) {
+    if (txFields.usage_type === 'manual_adjustment' && txFields.transaction_type === 'DEBIT' && !notes) {
       return respond(context, 400, { message: 'notes_required_for_adjustment' });
+    }
+    if (!commitmentId) {
+      return respond(context, 400, { message: 'commitment_id_required' });
     }
 
     const payload = {
-      lesson_participant_id: null,
       student_id: normalizeString(body?.student_id) || null,
-      source_type: sourceType,
-      commitment_id: normalizeString(body?.commitment_id) || null,
-      transfer_ref: normalizeString(body?.transfer_ref) || null,
-      amount_charged: amountCharged,
-      effective_date: effectiveDate || null,
+      commitment_id: commitmentId,
+      transaction_type: txFields.transaction_type,
+      usage_type: txFields.usage_type,
+      amount,
+      source_ref: null,
       notes: notes || null,
-      metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+      updated_at: new Date().toISOString(),
+      metadata: {
+        ...(body?.metadata && typeof body.metadata === 'object' ? body.metadata : {}),
+        effective_date: effectiveDate || null,
+        transfer_ref: normalizeString(body?.transfer_ref) || null,
+      },
     };
 
     if (method === 'POST') {
       payload.created_at = new Date().toISOString();
       const { data, error } = await tenantClient
-        .from('consumption_entries')
+        .from('ledger_transactions')
         .insert(payload)
-        .select('id, lesson_participant_id, student_id, source_type, commitment_id, transfer_ref, amount_charged, effective_date, notes, created_at, metadata')
+        .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata')
         .single();
 
       if (error) {
-        context.log?.error?.('consumption-entries failed to create record', { message: error.message });
-        return respond(context, 500, { message: 'failed_to_create_consumption_entry' });
+        context.log?.error?.('ledger-transactions failed to create record', { message: error.message });
+        return respond(context, 500, { message: 'failed_to_create_ledger_transaction' });
       }
 
       return respond(context, 201, data);
@@ -201,22 +229,22 @@ export default async function (context, req) {
 
     const id = normalizeString(body?.id);
     if (!id) {
-      return respond(context, 400, { message: 'missing_consumption_entry_id' });
+      return respond(context, 400, { message: 'missing_ledger_transaction_id' });
     }
 
     const { data, error } = await tenantClient
-      .from('consumption_entries')
+      .from('ledger_transactions')
       .update(payload)
       .eq('id', id)
-      .select('id, lesson_participant_id, student_id, source_type, commitment_id, transfer_ref, amount_charged, effective_date, notes, created_at, metadata')
+      .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata')
       .maybeSingle();
 
     if (error) {
-      context.log?.error?.('consumption-entries failed to update record', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_update_consumption_entry' });
+      context.log?.error?.('ledger-transactions failed to update record', { message: error.message });
+      return respond(context, 500, { message: 'failed_to_update_ledger_transaction' });
     }
     if (!data) {
-      return respond(context, 404, { message: 'consumption_entry_not_found' });
+      return respond(context, 404, { message: 'ledger_transaction_not_found' });
     }
 
     return respond(context, 200, data);
@@ -225,22 +253,22 @@ export default async function (context, req) {
   if (method === 'DELETE') {
     const id = normalizeString(body?.id);
     if (!id) {
-      return respond(context, 400, { message: 'missing_consumption_entry_id' });
+      return respond(context, 400, { message: 'missing_ledger_transaction_id' });
     }
 
     const { data, error } = await tenantClient
-      .from('consumption_entries')
+      .from('ledger_transactions')
       .delete()
       .eq('id', id)
       .select('id')
       .maybeSingle();
 
     if (error) {
-      context.log?.error?.('consumption-entries failed to delete record', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_delete_consumption_entry' });
+      context.log?.error?.('ledger-transactions failed to delete record', { message: error.message });
+      return respond(context, 500, { message: 'failed_to_delete_ledger_transaction' });
     }
     if (!data) {
-      return respond(context, 404, { message: 'consumption_entry_not_found' });
+      return respond(context, 404, { message: 'ledger_transaction_not_found' });
     }
 
     return respond(context, 200, { id, deleted: true });
