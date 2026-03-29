@@ -1856,7 +1856,7 @@ BEGIN
       jsonb_build_object('migration', 'commitment_to_credit', 'original_commitment_id', c.id)
     FROM public.commitments c
     WHERE c.total_amount > 0
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT DO NOTHING;
   END IF;
 END $$;
 
@@ -1893,7 +1893,7 @@ BEGIN
     LEFT JOIN public.commitments c ON c.id = e.commitment_id
     WHERE e.commitment_id IS NOT NULL
       AND COALESCE(e.student_id, lp.student_id, c.student_id) IS NOT NULL
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT DO NOTHING;
   END IF;
 END $$;
 
@@ -2361,7 +2361,7 @@ SELECT
   true,
   jsonb_build_object('legacy_source', 'settings.medical_providers', 'legacy_provider_seed', provider_seed)
 FROM normalized_legacy_providers
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 WITH legacy_provider_entries AS (
   SELECT
@@ -2440,7 +2440,7 @@ inserted_providers AS (
   INSERT INTO public.hmo_providers (id, name, is_active, metadata)
   SELECT provider_id, provider_name, true, jsonb_build_object('legacy_source', 'commitments.metadata.hmo')
   FROM provider_rows
-  ON CONFLICT (id) DO NOTHING
+  ON CONFLICT DO NOTHING
   RETURNING id
 ),
 track_rows AS (
@@ -2529,7 +2529,7 @@ inserted_tracks AS (
     true,
     jsonb_build_object('generated_from', 'legacy_hmo_commitment')
   FROM track_rows
-  ON CONFLICT (id) DO NOTHING
+  ON CONFLICT DO NOTHING
   RETURNING id
 ),
 authorization_source AS (
@@ -2585,7 +2585,7 @@ SELECT
   notes,
   jsonb_build_object('generated_from', 'legacy_hmo_commitment', 'legacy_commitment_id', commitment_id)
 FROM authorization_source
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 WITH legacy_hmo_commitments AS (
   SELECT
