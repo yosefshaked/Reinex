@@ -791,9 +791,11 @@ export default function StudentBillingWorkspace({
             <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4">
               <div className="text-xs text-cyan-700">השתתפות גורם מממן</div>
               <div className="mt-1 text-xl font-bold text-cyan-950">{formatCurrency(summary?.insurer_claim_amount)}</div>
-              <div className="mt-2 text-xs text-cyan-900">
-                פתוח לתביעה: {formatCurrency(summary?.pending_insurer_claim_amount)}
-              </div>
+              {summary?.pending_insurer_claim_amount != null && summary.pending_insurer_claim_amount !== summary.insurer_claim_amount ? (
+                <div className="mt-2 text-xs text-cyan-900">
+                  פתוח לתביעה: {formatCurrency(summary.pending_insurer_claim_amount)}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -952,7 +954,7 @@ export default function StudentBillingWorkspace({
                     <HelpTooltip text={creationActionOptions.find((option) => option.value === commitmentForm.commitmentType)?.description || ''} />
                   </div>
                   <div className="rounded-xl border border-dashed border-border bg-slate-50 px-3 py-2 text-sm text-zinc-700">
-                    {creationActionOptions.find((option) => option.value === commitmentForm.commitmentType)?.label}
+                    {creationActionOptions.find((option) => option.value === commitmentForm.commitmentType)?.description}
                   </div>
                 </div>
               </div>
@@ -1293,7 +1295,7 @@ export default function StudentBillingWorkspace({
                               ))}
                             </SelectContent>
                           </Select>
-                          <Button onClick={() => handleApplyAssignment(row)} disabled={saving}>
+                          <Button onClick={() => handleApplyAssignment(row)} disabled={saving || (selectedValue === '__none__' && !row.commitment_id)}>
                             {selectedValue === '__none__' ? 'נקה שיוך' : (row.commitment_id ? 'עדכן שיוך' : 'שייך')}
                           </Button>
                         </div>
@@ -1527,7 +1529,7 @@ export default function StudentBillingWorkspace({
                             ))}
                           </SelectContent>
                         </Select>
-                        <Button onClick={() => handleApplyAssignment(row)} disabled={saving}>
+                        <Button onClick={() => handleApplyAssignment(row)} disabled={saving || (selectedValue === '__none__' && !row.commitment_id)}>
                           {selectedValue === '__none__' ? 'נקה שיוך' : (row.commitment_id ? 'עדכן שיוך' : 'שייך')}
                         </Button>
                       </div>

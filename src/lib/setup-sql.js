@@ -1850,13 +1850,20 @@ BEGIN
       'commitment_creation',
       COALESCE(c.total_amount, 0),
       NULL,
-      'Migrated from commitment total_amount',
+      'יצירת התחייבות (מיגרציה)',
       c.created_at,
       COALESCE(c.updated_at, c.created_at),
       jsonb_build_object('migration', 'commitment_to_credit', 'original_commitment_id', c.id)
     FROM public.commitments c
     WHERE c.total_amount > 0
     ON CONFLICT DO NOTHING;
+
+    -- Fix note text for records already migrated with English text
+    UPDATE public.ledger_transactions
+    SET notes = 'יצירת התחייבות (מיגרציה)'
+    WHERE notes = 'Migrated from commitment total_amount'
+      AND usage_type = 'commitment_creation'
+      AND (metadata->>'migration') = 'commitment_to_credit';
   END IF;
 END $$;
 
