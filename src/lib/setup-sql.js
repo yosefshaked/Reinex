@@ -1856,14 +1856,9 @@ BEGIN
       jsonb_build_object('migration', 'commitment_to_credit', 'original_commitment_id', c.id)
     FROM public.commitments c
     WHERE c.total_amount > 0
-    ON CONFLICT DO NOTHING;
-
-    -- Fix note text for records already migrated with English text
-    UPDATE public.ledger_transactions
-    SET notes = 'יצירת התחייבות (מיגרציה)'
-    WHERE notes = 'Migrated from commitment total_amount'
-      AND usage_type = 'commitment_creation'
-      AND (metadata->>'migration') = 'commitment_to_credit';
+    ON CONFLICT (id) DO UPDATE
+      SET notes = EXCLUDED.notes
+      WHERE ledger_transactions.notes = 'Migrated from commitment total_amount';
   END IF;
 END $$;
 
