@@ -1,0 +1,1665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Control DB SSOT</title>
+  <style>
+    :root { color-scheme: light; --bg:#f3efe6; --ink:#1d1b18; --muted:#6a6258; --panel:#fffdf8; --line:#d8cdbd; --accent:#0f766e; --accent-2:#134e4a; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: Georgia, "Times New Roman", serif; color:var(--ink); background:linear-gradient(180deg,#ede4d3 0%,#f7f3ea 45%,#f3efe6 100%); }
+    .wrap { max-width:1100px; margin:0 auto; padding:32px 20px 48px; }
+    .hero { background:rgba(255,253,248,.88); border:1px solid var(--line); border-radius:24px; padding:24px; box-shadow:0 14px 40px rgba(57,44,26,.08); }
+    h1 { margin:0 0 8px; font-size:40px; line-height:1; }
+    p { margin:0; color:var(--muted); }
+    .meta { display:flex; gap:12px; flex-wrap:wrap; margin-top:16px; }
+    .chip { border:1px solid var(--line); background:#f6f0e5; border-radius:999px; padding:8px 12px; font-size:14px; }
+    .toolbar { display:flex; gap:12px; flex-wrap:wrap; margin:20px 0; }
+    button { border:0; border-radius:999px; padding:12px 18px; font-size:15px; cursor:pointer; }
+    .primary { background:var(--accent); color:#fff; }
+    .secondary { background:#efe6d8; color:var(--ink); border:1px solid var(--line); }
+    .status { font-size:14px; color:var(--accent-2); align-self:center; }
+    textarea { width:100%; min-height:72vh; resize:vertical; border:1px solid var(--line); border-radius:20px; padding:20px; background:var(--panel); color:#111827; font:13px/1.45 Consolas, "Courier New", monospace; box-shadow:inset 0 1px 0 rgba(255,255,255,.7); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>Control DB SSOT</h1>
+      <p>Single idempotent SQL script for the shared control database. Paste it into the Supabase SQL Editor.</p>
+      <div class="meta">
+        <div class="chip">Source: docs/ssot/control-db-setup.sql</div>
+        <div class="chip">Mode: idempotent</div>
+        <div class="chip">Includes functions, triggers, RLS, grants, and seed permissions</div>
+      </div>
+    </section>
+    <div class="toolbar">
+      <button class="primary" id="copyBtn" type="button">Copy SQL</button>
+      <button class="secondary" id="selectBtn" type="button">Select All</button>
+      <div class="status" id="status"></div>
+    </div>
+    <textarea id="sql" spellcheck="false" readonly aria-label="Control DB SSOT SQL">-- =================================================================
+-- Control DB Base Core (SSOT segment)
+-- =================================================================
+
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE SCHEMA IF NOT EXISTS graphql;
+CREATE SCHEMA IF NOT EXISTS vault;
+
+CREATE EXTENSION IF NOT EXISTS &quot;pg_graphql&quot; WITH SCHEMA graphql;
+CREATE EXTENSION IF NOT EXISTS &quot;pg_stat_statements&quot; WITH SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS &quot;pgcrypto&quot; WITH SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS &quot;supabase_vault&quot; WITH SCHEMA vault;
+CREATE EXTENSION IF NOT EXISTS &quot;uuid-ossp&quot; WITH SCHEMA extensions;
+
+CREATE TABLE IF NOT EXISTS public.organizations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  slug text,
+  created_by uuid NOT NULL DEFAULT auth.uid(),
+  supabase_url text,
+  supabase_anon_key text,
+  policy_links jsonb NOT NULL DEFAULT &#39;{}&#39;::jsonb,
+  legal_settings jsonb NOT NULL DEFAULT &#39;{}&#39;::jsonb,
+  setup_completed boolean NOT NULL DEFAULT false,
+  verified_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  dedicated_key_encrypted text,
+  dedicated_key_saved_at timestamptz
+);
+
+ALTER TABLE public.organizations
+  ADD COLUMN IF NOT EXISTS name text,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS slug text,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS supabase_url text,
+  ADD COLUMN IF NOT EXISTS supabase_anon_key text,
+  ADD COLUMN IF NOT EXISTS policy_links jsonb,
+  ADD COLUMN IF NOT EXISTS legal_settings jsonb,
+  ADD COLUMN IF NOT EXISTS setup_completed boolean,
+  ADD COLUMN IF NOT EXISTS verified_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS dedicated_key_encrypted text,
+  ADD COLUMN IF NOT EXISTS dedicated_key_saved_at timestamptz;
+
+ALTER TABLE public.organizations
+  ALTER COLUMN created_at SET DEFAULT now(),
+  ALTER COLUMN created_by SET DEFAULT auth.uid(),
+  ALTER COLUMN policy_links SET DEFAULT &#39;{}&#39;::jsonb,
+  ALTER COLUMN legal_settings SET DEFAULT &#39;{}&#39;::jsonb,
+  ALTER COLUMN setup_completed SET DEFAULT false,
+  ALTER COLUMN updated_at SET DEFAULT now();
+
+DO $$ BEGIN ALTER TABLE public.organizations ALTER COLUMN name SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.organizations ALTER COLUMN created_at SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.organizations ALTER COLUMN created_by SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.organizations ALTER COLUMN policy_links SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.organizations ALTER COLUMN legal_settings SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.organizations ALTER COLUMN setup_completed SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.organizations ALTER COLUMN updated_at SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = &#39;organizations_slug_key&#39;
+      AND conrelid = &#39;public.organizations&#39;::regclass
+  ) THEN
+    ALTER TABLE public.organizations ADD CONSTRAINT organizations_slug_key UNIQUE (slug);
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS public.org_memberships (
+  org_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  role text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  id uuid DEFAULT gen_random_uuid(),
+  PRIMARY KEY (org_id, user_id),
+  CONSTRAINT org_memberships_role_check CHECK (role IN (&#39;owner&#39;, &#39;admin&#39;, &#39;member&#39;))
+);
+
+ALTER TABLE public.org_memberships
+  ADD COLUMN IF NOT EXISTS org_id uuid,
+  ADD COLUMN IF NOT EXISTS user_id uuid,
+  ADD COLUMN IF NOT EXISTS role text,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS id uuid;
+
+ALTER TABLE public.org_memberships
+  ALTER COLUMN created_at SET DEFAULT now(),
+  ALTER COLUMN id SET DEFAULT gen_random_uuid();
+
+DO $$ BEGIN ALTER TABLE public.org_memberships ALTER COLUMN org_id SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.org_memberships ALTER COLUMN user_id SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.org_memberships ALTER COLUMN role SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.org_memberships ALTER COLUMN created_at SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS public.org_settings (
+  org_id uuid PRIMARY KEY,
+  supabase_url text NOT NULL,
+  anon_key text NOT NULL,
+  metadata jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.org_settings
+  ADD COLUMN IF NOT EXISTS org_id uuid,
+  ADD COLUMN IF NOT EXISTS supabase_url text,
+  ADD COLUMN IF NOT EXISTS anon_key text,
+  ADD COLUMN IF NOT EXISTS metadata jsonb,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+
+ALTER TABLE public.org_settings ALTER COLUMN updated_at SET DEFAULT now();
+DO $$ BEGIN ALTER TABLE public.org_settings ALTER COLUMN org_id SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.org_settings ALTER COLUMN supabase_url SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.org_settings ALTER COLUMN anon_key SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.org_settings ALTER COLUMN updated_at SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS public.org_invitations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL,
+  email text NOT NULL,
+  status text NOT NULL DEFAULT &#39;pending&#39;,
+  invited_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz,
+  token uuid NOT NULL DEFAULT gen_random_uuid(),
+  CONSTRAINT org_invitations_status_check CHECK (status IN (&#39;pending&#39;, &#39;sent&#39;, &#39;accepted&#39;, &#39;expired&#39;, &#39;revoked&#39;))
+);
+
+ALTER TABLE public.org_invitations
+  ADD COLUMN IF NOT EXISTS org_id uuid,
+  ADD COLUMN IF NOT EXISTS email text,
+  ADD COLUMN IF NOT EXISTS status text,
+  ADD COLUMN IF NOT EXISTS invited_by uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
+  ADD COLUMN IF NOT EXISTS token uuid;
+
+ALTER TABLE public.org_invitations
+  ALTER COLUMN status SET DEFAULT &#39;pending&#39;,
+  ALTER COLUMN created_at SET DEFAULT now(),
+  ALTER COLUMN token SET DEFAULT gen_random_uuid();
+
+DO $$ BEGIN ALTER TABLE public.org_invitations ALTER COLUMN org_id SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.org_invitations ALTER COLUMN email SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.org_invitations ALTER COLUMN status SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.org_invitations ALTER COLUMN created_at SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.org_invitations ALTER COLUMN token SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id uuid PRIMARY KEY,
+  email text,
+  full_name text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz
+);
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS email text,
+  ADD COLUMN IF NOT EXISTS full_name text,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+
+ALTER TABLE public.profiles ALTER COLUMN created_at SET DEFAULT now();
+COMMENT ON TABLE public.profiles IS &#39;Public-facing user profiles, mirroring data from auth.users.&#39;;
+
+CREATE TABLE IF NOT EXISTS public.schema_migration_audit (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  ssot_version_hash text NOT NULL,
+  db_snapshot_hash_before text,
+  db_snapshot_hash_after text,
+  summary_counts jsonb,
+  patch_plan_json jsonb,
+  db_snapshot_before jsonb,
+  db_snapshot_after jsonb,
+  preflight_results jsonb,
+  executed_sql_safe text,
+  executed_sql_manual text,
+  executed_result_json jsonb,
+  approved_by_user_id uuid,
+  approval_method text,
+  approval_phrase text,
+  status text NOT NULL
+);
+
+ALTER TABLE public.schema_migration_audit
+  ADD COLUMN IF NOT EXISTS tenant_id uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS ssot_version_hash text,
+  ADD COLUMN IF NOT EXISTS db_snapshot_hash_before text,
+  ADD COLUMN IF NOT EXISTS db_snapshot_hash_after text,
+  ADD COLUMN IF NOT EXISTS summary_counts jsonb,
+  ADD COLUMN IF NOT EXISTS patch_plan_json jsonb,
+  ADD COLUMN IF NOT EXISTS db_snapshot_before jsonb,
+  ADD COLUMN IF NOT EXISTS db_snapshot_after jsonb,
+  ADD COLUMN IF NOT EXISTS preflight_results jsonb,
+  ADD COLUMN IF NOT EXISTS executed_sql_safe text,
+  ADD COLUMN IF NOT EXISTS executed_sql_manual text,
+  ADD COLUMN IF NOT EXISTS executed_result_json jsonb,
+  ADD COLUMN IF NOT EXISTS approved_by_user_id uuid,
+  ADD COLUMN IF NOT EXISTS approval_method text,
+  ADD COLUMN IF NOT EXISTS approval_phrase text,
+  ADD COLUMN IF NOT EXISTS status text;
+
+ALTER TABLE public.schema_migration_audit ALTER COLUMN created_at SET DEFAULT now();
+DO $$ BEGIN ALTER TABLE public.schema_migration_audit ALTER COLUMN tenant_id SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.schema_migration_audit ALTER COLUMN created_at SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.schema_migration_audit ALTER COLUMN ssot_version_hash SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE public.schema_migration_audit ALTER COLUMN status SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = &#39;organizations_created_by_fkey&#39; AND conrelid = &#39;public.organizations&#39;::regclass) THEN
+    ALTER TABLE public.organizations ADD CONSTRAINT organizations_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = &#39;org_memberships_org_id_fkey&#39; AND conrelid = &#39;public.org_memberships&#39;::regclass) THEN
+    ALTER TABLE public.org_memberships ADD CONSTRAINT org_memberships_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = &#39;org_memberships_user_id_fkey&#39; AND conrelid = &#39;public.org_memberships&#39;::regclass) THEN
+    ALTER TABLE public.org_memberships ADD CONSTRAINT org_memberships_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = &#39;org_settings_org_id_fkey&#39; AND conrelid = &#39;public.org_settings&#39;::regclass) THEN
+    ALTER TABLE public.org_settings ADD CONSTRAINT org_settings_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = &#39;org_invitations_org_id_fkey&#39; AND conrelid = &#39;public.org_invitations&#39;::regclass) THEN
+    ALTER TABLE public.org_invitations ADD CONSTRAINT org_invitations_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = &#39;org_invitations_invited_by_fkey&#39; AND conrelid = &#39;public.org_invitations&#39;::regclass) THEN
+    ALTER TABLE public.org_invitations ADD CONSTRAINT org_invitations_invited_by_fkey FOREIGN KEY (invited_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = &#39;profiles_id_fkey&#39; AND conrelid = &#39;public.profiles&#39;::regclass) THEN
+    ALTER TABLE public.profiles ADD CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = &#39;schema_migration_audit_tenant_id_fkey&#39; AND conrelid = &#39;public.schema_migration_audit&#39;::regclass) THEN
+    ALTER TABLE public.schema_migration_audit ADD CONSTRAINT schema_migration_audit_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = &#39;schema_migration_audit_approved_by_user_id_fkey&#39; AND conrelid = &#39;public.schema_migration_audit&#39;::regclass) THEN
+    ALTER TABLE public.schema_migration_audit ADD CONSTRAINT schema_migration_audit_approved_by_user_id_fkey FOREIGN KEY (approved_by_user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE INDEX IF NOT EXISTS idx_org_memberships_org ON public.org_memberships (org_id);
+CREATE INDEX IF NOT EXISTS idx_org_memberships_user ON public.org_memberships (user_id);
+CREATE INDEX IF NOT EXISTS idx_org_invites_email ON public.org_invitations (email);
+CREATE INDEX IF NOT EXISTS idx_org_invites_org ON public.org_invitations (org_id);
+CREATE INDEX IF NOT EXISTS schema_migration_audit_tenant_created_idx ON public.schema_migration_audit (tenant_id, created_at DESC);
+
+CREATE OR REPLACE FUNCTION public._add_owner_membership()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.created_by IS NOT NULL THEN
+    INSERT INTO public.org_memberships (org_id, user_id, role)
+    VALUES (NEW.id, NEW.created_by, &#39;owner&#39;)
+    ON CONFLICT DO NOTHING;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public._set_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.add_membership(p_org_id uuid, p_user_id uuid, p_role text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.org_memberships m
+    WHERE m.org_id = p_org_id
+      AND m.user_id = auth.uid()
+      AND m.role IN (&#39;owner&#39;, &#39;admin&#39;)
+  ) THEN
+    RAISE EXCEPTION &#39;not_authorized&#39;;
+  END IF;
+
+  INSERT INTO public.org_memberships (org_id, user_id, role)
+  VALUES (p_org_id, p_user_id, p_role)
+  ON CONFLICT (org_id, user_id) DO UPDATE
+    SET role = EXCLUDED.role;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.add_owner_membership()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  INSERT INTO public.org_memberships (org_id, user_id, role)
+  VALUES (NEW.id, auth.uid(), &#39;owner&#39;)
+  ON CONFLICT (org_id, user_id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_organization(p_name text)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_org_id uuid;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION &#39;unauthenticated&#39;;
+  END IF;
+
+  INSERT INTO public.organizations (name, created_by)
+  VALUES (p_name, auth.uid())
+  RETURNING id INTO v_org_id;
+
+  INSERT INTO public.org_memberships (org_id, user_id, role)
+  VALUES (v_org_id, auth.uid(), &#39;owner&#39;)
+  ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+
+  RETURN v_org_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.current_user_is_org_admin(target_org uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.org_memberships m
+    WHERE m.org_id = target_org
+      AND m.user_id = auth.uid()
+      AND m.role IN (&#39;owner&#39;, &#39;admin&#39;)
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.current_user_is_org_member(target_org uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.org_memberships m
+    WHERE m.org_id = target_org
+      AND m.user_id = auth.uid()
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_org_public_keys(p_org_id uuid)
+RETURNS TABLE (supabase_url text, anon_key text)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT s.supabase_url, s.anon_key
+  FROM public.org_settings s
+  WHERE s.org_id = p_org_id;
+$$;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name)
+  VALUES (NEW.id, NEW.email, NEW.raw_user_meta_data-&gt;&gt;&#39;name&#39;)
+  ON CONFLICT (id) DO UPDATE
+    SET email = EXCLUDED.email,
+        full_name = COALESCE(EXCLUDED.full_name, public.profiles.full_name);
+  RETURN NEW;
+END;
+$$;
+
+COMMENT ON FUNCTION public.handle_new_user() IS &#39;Creates a profile for new users, pulling data from auth.users.&#39;;
+
+CREATE OR REPLACE FUNCTION public.handle_org_owner()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  INSERT INTO public.org_memberships (org_id, user_id, role)
+  VALUES (NEW.id, auth.uid(), &#39;owner&#39;)
+  ON CONFLICT DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.organizations_timestamps()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  IF NEW.created_by IS NULL THEN
+    NEW.created_by := auth.uid();
+  END IF;
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.user_exists(user_email text)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM auth.users WHERE lower(email) = lower(user_email)
+  );
+END;
+$$;
+
+ALTER TABLE public.org_invitations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.org_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.org_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.schema_migration_audit ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS &quot;Allow members to read org settings&quot; ON public.org_settings;
+CREATE POLICY &quot;Allow members to read org settings&quot; ON public.org_settings FOR SELECT TO authenticated USING (public.current_user_is_org_member(org_id));
+
+DROP POLICY IF EXISTS &quot;Org settings admin&quot; ON public.org_settings;
+CREATE POLICY &quot;Org settings admin&quot; ON public.org_settings FOR ALL TO authenticated USING (public.current_user_is_org_admin(org_id)) WITH CHECK (public.current_user_is_org_admin(org_id));
+
+DROP POLICY IF EXISTS &quot;Org invitations admin&quot; ON public.org_invitations;
+CREATE POLICY &quot;Org invitations admin&quot; ON public.org_invitations FOR ALL TO authenticated USING (public.current_user_is_org_admin(org_id)) WITH CHECK (public.current_user_is_org_admin(org_id));
+
+DROP POLICY IF EXISTS &quot;Org invitations self&quot; ON public.org_invitations;
+CREATE POLICY &quot;Org invitations self&quot; ON public.org_invitations FOR SELECT TO authenticated USING (lower(email) = lower(COALESCE(auth.jwt() -&gt;&gt; &#39;email&#39;, &#39;&#39;)));
+
+DROP POLICY IF EXISTS &quot;Org invitations self update&quot; ON public.org_invitations;
+CREATE POLICY &quot;Org invitations self update&quot; ON public.org_invitations FOR UPDATE TO authenticated USING (lower(email) = lower(COALESCE(auth.jwt() -&gt;&gt; &#39;email&#39;, &#39;&#39;))) WITH CHECK (lower(email) = lower(COALESCE(auth.jwt() -&gt;&gt; &#39;email&#39;, &#39;&#39;)));
+
+DROP POLICY IF EXISTS &quot;inv_select&quot; ON public.org_invitations;
+CREATE POLICY &quot;inv_select&quot; ON public.org_invitations FOR SELECT TO authenticated USING (invited_by = auth.uid() OR lower(email) = lower(COALESCE(auth.jwt() -&gt;&gt; &#39;email&#39;, &#39;&#39;)));
+
+DROP POLICY IF EXISTS &quot;invites_select_basic&quot; ON public.org_invitations;
+CREATE POLICY &quot;invites_select_basic&quot; ON public.org_invitations FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM public.org_memberships m WHERE m.org_id = org_invitations.org_id AND m.user_id = auth.uid()) OR lower(email) = lower(COALESCE(auth.jwt() -&gt;&gt; &#39;email&#39;, &#39;&#39;)));
+
+DROP POLICY IF EXISTS &quot;members or creator can read orgs&quot; ON public.organizations;
+CREATE POLICY &quot;members or creator can read orgs&quot; ON public.organizations FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM public.org_memberships m WHERE m.org_id = organizations.id AND m.user_id = auth.uid()) OR created_by = auth.uid());
+
+DROP POLICY IF EXISTS &quot;orgs_insert_authenticated&quot; ON public.organizations;
+CREATE POLICY &quot;orgs_insert_authenticated&quot; ON public.organizations FOR INSERT TO authenticated WITH CHECK (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS &quot;orgs_update_by_admins&quot; ON public.organizations;
+CREATE POLICY &quot;orgs_update_by_admins&quot; ON public.organizations FOR UPDATE TO authenticated USING (EXISTS (SELECT 1 FROM public.org_memberships m WHERE m.org_id = organizations.id AND m.user_id = auth.uid() AND m.role IN (&#39;owner&#39;, &#39;admin&#39;)));
+
+DROP POLICY IF EXISTS &quot;orgs_delete_by_owners&quot; ON public.organizations;
+CREATE POLICY &quot;orgs_delete_by_owners&quot; ON public.organizations FOR DELETE TO authenticated USING (EXISTS (SELECT 1 FROM public.org_memberships m WHERE m.org_id = organizations.id AND m.user_id = auth.uid() AND m.role = &#39;owner&#39;));
+
+DROP POLICY IF EXISTS &quot;Organizations admin manage&quot; ON public.organizations;
+CREATE POLICY &quot;Organizations admin manage&quot; ON public.organizations FOR UPDATE TO authenticated USING (public.current_user_is_org_admin(id)) WITH CHECK (public.current_user_is_org_admin(id));
+
+DROP POLICY IF EXISTS &quot;Organizations admin delete&quot; ON public.organizations;
+CREATE POLICY &quot;Organizations admin delete&quot; ON public.organizations FOR DELETE TO authenticated USING (public.current_user_is_org_admin(id));
+
+DROP POLICY IF EXISTS &quot;read own membership&quot; ON public.org_memberships;
+CREATE POLICY &quot;read own membership&quot; ON public.org_memberships FOR SELECT TO authenticated USING (user_id = auth.uid());
+
+DROP POLICY IF EXISTS &quot;update own membership&quot; ON public.org_memberships;
+CREATE POLICY &quot;update own membership&quot; ON public.org_memberships FOR UPDATE TO authenticated USING (user_id = auth.uid());
+
+DROP POLICY IF EXISTS &quot;delete own membership&quot; ON public.org_memberships;
+CREATE POLICY &quot;delete own membership&quot; ON public.org_memberships FOR DELETE TO authenticated USING (user_id = auth.uid());
+
+DROP POLICY IF EXISTS &quot;Users can view their own profile.&quot; ON public.profiles;
+CREATE POLICY &quot;Users can view their own profile.&quot; ON public.profiles FOR SELECT TO authenticated USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS &quot;Users can update their own profile.&quot; ON public.profiles;
+CREATE POLICY &quot;Users can update their own profile.&quot; ON public.profiles FOR UPDATE TO authenticated USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS &quot;Allow service role access on schema_migration_audit&quot; ON public.schema_migration_audit;
+CREATE POLICY &quot;Allow service role access on schema_migration_audit&quot; ON public.schema_migration_audit FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.org_invitations TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.org_memberships TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.org_settings TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.organizations TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.profiles TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.schema_migration_audit TO anon, authenticated, service_role;
+
+GRANT EXECUTE ON FUNCTION public._add_owner_membership() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public._set_updated_at() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.add_membership(uuid, uuid, text) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.add_owner_membership() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.create_organization(text) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.current_user_is_org_admin(uuid) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.current_user_is_org_member(uuid) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_org_public_keys(uuid) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.handle_new_user() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.handle_org_owner() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.organizations_timestamps() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.user_exists(text) TO anon, authenticated, service_role;
+
+CREATE OR REPLACE TRIGGER trg_add_owner_membership AFTER INSERT ON public.organizations FOR EACH ROW EXECUTE FUNCTION public.add_owner_membership();
+CREATE OR REPLACE TRIGGER trg_org_owner AFTER INSERT ON public.organizations FOR EACH ROW EXECUTE FUNCTION public.handle_org_owner();
+CREATE OR REPLACE TRIGGER trg_org_owner_after_insert AFTER INSERT ON public.organizations FOR EACH ROW EXECUTE FUNCTION public._add_owner_membership();
+CREATE OR REPLACE TRIGGER trg_org_settings_updated_at BEFORE UPDATE ON public.org_settings FOR EACH ROW EXECUTE FUNCTION public._set_updated_at();
+CREATE OR REPLACE TRIGGER trg_org_updated_at BEFORE UPDATE ON public.organizations FOR EACH ROW EXECUTE FUNCTION public._set_updated_at();
+CREATE OR REPLACE TRIGGER trg_orgs_timestamps BEFORE INSERT OR UPDATE ON public.organizations FOR EACH ROW EXECUTE FUNCTION public.organizations_timestamps();
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = &#39;auth&#39; AND c.relname = &#39;users&#39;
+  ) THEN
+    EXECUTE &#39;DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users&#39;;
+    EXECUTE &#39;CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION public.handle_new_user()&#39;;
+  END IF;
+EXCEPTION WHEN others THEN NULL; END $$;
+
+
+
+-- Control DB: Global Permissions Registry
+-- This table defines all available permissions across the system with their default values
+-- Use this as the source of truth for initializing org_settings.permissions
+
+CREATE TABLE IF NOT EXISTS public.permission_registry (
+  permission_key TEXT PRIMARY KEY,
+  display_name_en TEXT NOT NULL,
+  display_name_he TEXT NOT NULL,
+  description_en TEXT,
+  description_he TEXT,
+  -- Store defaults as JSONB to allow boolean, number, or string defaults
+  default_value JSONB NOT NULL DEFAULT &#39;false&#39;::jsonb,
+  category TEXT NOT NULL, -- &#39;backup&#39;, &#39;branding&#39;, &#39;features&#39;, etc.
+  requires_approval BOOLEAN NOT NULL DEFAULT true, -- Whether enabling requires admin approval
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Idempotent migration: convert legacy BOOLEAN default_value to JSONB if needed
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = &#39;public&#39; AND table_name = &#39;permission_registry&#39; AND column_name = &#39;default_value&#39; AND data_type &lt;&gt; &#39;jsonb&#39;
+  ) THEN
+    -- First, drop the default constraint if it exists
+    ALTER TABLE public.permission_registry ALTER COLUMN default_value DROP DEFAULT;
+    -- Convert existing boolean values to jsonb
+    ALTER TABLE public.permission_registry ALTER COLUMN default_value TYPE jsonb USING to_jsonb(default_value);
+    -- Re-add the default
+    ALTER TABLE public.permission_registry ALTER COLUMN default_value SET DEFAULT &#39;false&#39;::jsonb;
+  END IF;
+END;
+$$;
+
+-- Create index on category for filtering
+CREATE INDEX IF NOT EXISTS idx_permission_registry_category ON public.permission_registry(category);
+
+-- Enable Row Level Security
+ALTER TABLE public.permission_registry ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policy: Allow authenticated users to read permission registry
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = &#39;public&#39; 
+    AND tablename = &#39;permission_registry&#39; 
+    AND policyname = &#39;Allow authenticated users to read permission registry&#39;
+  ) THEN
+    CREATE POLICY &quot;Allow authenticated users to read permission registry&quot;
+      ON public.permission_registry
+      FOR SELECT
+      TO public
+      USING (auth.role() = &#39;authenticated&#39;);
+  END IF;
+END;
+$$;
+
+-- RLS Policy: Only service role can modify permission registry
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = &#39;public&#39; 
+    AND tablename = &#39;permission_registry&#39; 
+    AND policyname = &#39;Only service role can modify permission registry&#39;
+  ) THEN
+    CREATE POLICY &quot;Only service role can modify permission registry&quot;
+      ON public.permission_registry
+      FOR ALL
+      TO service_role
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+END;
+$$;
+
+-- Insert default permissions
+INSERT INTO public.permission_registry (
+  permission_key,
+  display_name_en,
+  display_name_he,
+  description_en,
+  description_he,
+  default_value,
+  category,
+  requires_approval
+) VALUES
+  (
+    &#39;backup_local_enabled&#39;,
+    &#39;Local Backup&#39;,
+    &#39;גיבוי מקומי&#39;,
+    &#39;Allow organization to create encrypted local backups&#39;,
+    &#39;אפשר לארגון ליצור גיבויים מוצפנים מקומיים&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;backup&#39;,
+    true
+  ),
+  (
+    &#39;backup_cooldown_override&#39;,
+    &#39;Backup Cooldown Override&#39;,
+    &#39;עקיפת המתנה לגיבוי&#39;,
+    &#39;One-time override of the 7-day backup cooldown (automatically resets after use)&#39;,
+    &#39;עקיפה חד-פעמית של תקופת ההמתנה של 7 ימים (מתאפסת אוטומטית לאחר שימוש)&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;backup&#39;,
+    true
+  ),
+  (
+    &#39;backup_oauth_enabled&#39;,
+    &#39;Cloud Backup (OAuth)&#39;,
+    &#39;גיבוי ענן (Google Drive, OneDrive)&#39;,
+    &#39;Allow organization to backup to cloud storage providers&#39;,
+    &#39;אפשר לארגון לגבות לספקי אחסון ענן&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;backup&#39;,
+    true
+  ),
+  (
+    &#39;logo_enabled&#39;,
+    &#39;Custom Logo&#39;,
+    &#39;לוגו מותאם אישית&#39;,
+    &#39;Allow organization to upload and use a custom logo&#39;,
+    &#39;אפשר לארגון להעלות ולהשתמש בלוגו מותאם אישית&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;branding&#39;,
+    true
+  ),
+  -- Preconfigured answers feature toggle (enabled/disabled)
+  (
+    &#39;session_form_preanswers_enabled&#39;,
+    &#39;Session Form: Preconfigured Answers&#39;,
+    &#39;טופס מפגש: תשובות מוכנות מראש&#39;,
+    &#39;Allow organizations to configure predefined answer lists for text/textarea questions&#39;,
+    &#39;אפשר לארגון להגדיר רשימות תשובות מוכנות לשאלות טקסט/טקסט חופשי&#39;,
+    &#39;true&#39;::jsonb,
+    &#39;features&#39;,
+    false
+  ),
+  -- Preconfigured answers cap per question (numeric)
+  (
+    &#39;session_form_preanswers_cap&#39;,
+    &#39;Session Form: Preanswers Cap&#39;,
+    &#39;טופס מפגש: תקרת תשובות מוכנות&#39;,
+    &#39;Maximum number of preconfigured answers allowed per question (text/textarea)&#39;,
+    &#39;מספר מרבי של תשובות מוכנות לשאלה (טקסט/טקסט חופשי)&#39;,
+    &#39;50&#39;::jsonb,
+    &#39;features&#39;,
+    false
+  ),
+  -- Invitation expiry seconds configuration (global, control-level)
+  (
+    &#39;invitation_expiry_seconds&#39;,
+    &#39;Invitation Expiry Seconds&#39;,
+    &#39;שניות תוקף הזמנה&#39;,
+    &#39;Number of seconds until invitation links expire (global). Overrides Supabase auth config if set.&#39;,
+    &#39;מספר שניות עד פקיעת קישורי הזמנה (גלובלי). דורס את הגדרת Supabase אם מוגדר.&#39;,
+    &#39;null&#39;::jsonb,
+    &#39;features&#39;,
+    false
+  ),
+  -- PDF Export feature (premium)
+  (
+    &#39;can_export_pdf_reports&#39;,
+    &#39;Export PDF Reports&#39;,
+    &#39;ייצוא דוחות PDF&#39;,
+    &#39;Allow organization to export student session records to professional PDF documents&#39;,
+    &#39;אפשר לארגון לייצא רישומי מפגשים של תלמידים למסמכי PDF מקצועיים&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;features&#39;,
+    true
+  ),
+  -- Custom logo on PDF exports (premium)
+  (
+    &#39;can_use_custom_logo_on_exports&#39;,
+    &#39;Custom Logo on Exports&#39;,
+    &#39;לוגו מותאם אישית בייצוא&#39;,
+    &#39;Allow organization to display their custom logo alongside TutTiud logo on PDF exports&#39;,
+    &#39;אפשר לארגון להציג את הלוגו המותאם שלהם לצד לוגו TutTiud בייצוא PDF&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;branding&#39;,
+    true
+  ),
+  (
+    &#39;can_reupload_legacy_reports&#39;,
+    &#39;Re-upload Legacy Session Reports&#39;,
+    &#39;העלאה חוזרת של דוחות עבר&#39;,
+    &#39;Allow organization admins/owners to upload legacy session records for a student more than once (subsequent uploads replace previous legacy data).&#39;,
+    &#39;מאפשר למנהלי ובעלי הארגון להעלות מחדש נתוני מפגשי עבר לתלמיד יותר מפעם אחת (העלאה חדשה מחליפה נתונים קודמים).&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;features&#39;,
+    true
+  ),
+  -- Storage grace period before deletion (in days)
+  (
+    &#39;storage_grace_period_days&#39;,
+    &#39;Storage Grace Period (Days)&#39;,
+    &#39;תקופת חסד לאחסון (ימים)&#39;,
+    &#39;Number of days users have to download files after storage is disconnected before permanent deletion&#39;,
+    &#39;מספר הימים שיש למשתמשים להוריד קבצים לאחר ניתוק האחסון לפני מחיקה סופית&#39;,
+    &#39;30&#39;::jsonb,
+    &#39;storage&#39;,
+    false
+  )
+ON CONFLICT (permission_key) DO UPDATE SET
+  display_name_en = EXCLUDED.display_name_en,
+  display_name_he = EXCLUDED.display_name_he,
+  description_en = EXCLUDED.description_en,
+  description_he = EXCLUDED.description_he,
+  default_value = EXCLUDED.default_value,
+  category = EXCLUDED.category,
+  requires_approval = EXCLUDED.requires_approval,
+  updated_at = NOW();
+
+-- Helper function to get default permissions as JSON
+CREATE OR REPLACE FUNCTION public.get_default_permissions()
+RETURNS JSONB
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+  result JSONB;
+BEGIN
+  SELECT jsonb_object_agg(permission_key, default_value)
+  INTO result
+  FROM public.permission_registry;
+  
+  RETURN COALESCE(result, &#39;{}&#39;::jsonb);
+END;
+$$;
+
+-- Helper function to initialize org permissions if null/empty and merge missing ones
+CREATE OR REPLACE FUNCTION public.initialize_org_permissions(p_org_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  current_permissions JSONB;
+  default_permissions JSONB;
+  merged_permissions JSONB;
+  permission_key TEXT;
+  default_value JSONB;
+BEGIN
+  -- Get current permissions
+  SELECT permissions
+  INTO current_permissions
+  FROM public.org_settings
+  WHERE org_id = p_org_id;
+  
+  -- Get default permissions from registry
+  default_permissions := public.get_default_permissions();
+  
+  -- If permissions is null or empty, use defaults
+  IF current_permissions IS NULL OR 
+     current_permissions = &#39;{}&#39;::jsonb OR 
+     jsonb_typeof(current_permissions) = &#39;null&#39; OR
+     (SELECT COUNT(*) FROM jsonb_object_keys(current_permissions)) = 0 THEN
+    
+    -- Update org_settings with defaults
+    UPDATE public.org_settings
+    SET 
+      permissions = default_permissions,
+      updated_at = NOW()
+    WHERE org_id = p_org_id;
+    
+    RETURN default_permissions;
+  END IF;
+  
+  -- Otherwise, merge: start with current permissions, add missing ones from defaults
+  merged_permissions := current_permissions;
+  
+  -- Loop through each permission in the registry
+  FOR permission_key, default_value IN 
+    SELECT key, value 
+    FROM jsonb_each(default_permissions)
+  LOOP
+    -- If this permission key doesn&#39;t exist in current permissions, add it
+    IF NOT (merged_permissions ? permission_key) THEN
+      merged_permissions := jsonb_set(
+        merged_permissions,
+        ARRAY[permission_key],
+        default_value,
+        true
+      );
+    END IF;
+  END LOOP;
+  
+  -- Update org_settings with merged permissions
+  UPDATE public.org_settings
+  SET 
+    permissions = merged_permissions,
+    updated_at = NOW()
+  WHERE org_id = p_org_id;
+  
+  RETURN merged_permissions;
+END;
+$$;
+
+-- Example usage:
+-- Get all default permissions:
+-- SELECT public.get_default_permissions();
+
+-- Initialize permissions for an org:
+-- SELECT public.initialize_org_permissions(&#39;your-org-uuid-here&#39;);
+
+-- Query permissions by category:
+-- SELECT * FROM public.permission_registry WHERE category = &#39;backup&#39;;
+
+-- Grant necessary permissions (adjust as needed for your setup)
+-- These grants are idempotent - they won&#39;t error if already granted
+DO $$
+BEGIN
+  GRANT SELECT ON public.permission_registry TO authenticated;
+  GRANT EXECUTE ON FUNCTION public.get_default_permissions() TO authenticated;
+  GRANT EXECUTE ON FUNCTION public.initialize_org_permissions(UUID) TO authenticated;
+EXCEPTION
+  WHEN OTHERS THEN
+    -- Ignore errors if already granted
+    NULL;
+END;
+$$;
+
+
+
+-- Control DB: Storage Access Permission
+-- Defines the storage_access_level permission in the permissions_registry
+-- This permission controls access to storage configuration features
+
+-- Insert storage permission definition into permissions_registry
+INSERT INTO public.permission_registry (
+  permission_key,
+  display_name_en,
+  display_name_he,
+  description_en,
+  description_he,
+  default_value,
+  category,
+  requires_approval
+) VALUES (
+  &#39;storage_access_level&#39;,
+  &#39;Storage Configuration Access&#39;,
+  &#39;גישה להגדרות אחסון&#39;,
+  &#39;Determines if the organization can configure storage and which modes are available. Options: false (locked), &quot;byos_only&quot; (BYOS only), &quot;managed_only&quot; (Managed only), &quot;all&quot; (both modes).&#39;,
+  &#39;קובע האם הארגון יכול להגדיר אחסון ואילו מצבים זמינים. אפשרויות: false (נעול), &quot;byos_only&quot; (BYOS בלבד), &quot;managed_only&quot; (מנוהל בלבד), &quot;all&quot; (שני המצבים).&#39;,
+  &#39;false&#39;::jsonb,
+  &#39;storage&#39;,
+  true
+) ON CONFLICT (permission_key) DO UPDATE SET
+  display_name_en = EXCLUDED.display_name_en,
+  display_name_he = EXCLUDED.display_name_he,
+  description_en = EXCLUDED.description_en,
+  description_he = EXCLUDED.description_he,
+  default_value = EXCLUDED.default_value,
+  category = EXCLUDED.category,
+  requires_approval = EXCLUDED.requires_approval,
+  updated_at = NOW();
+
+-- Add helpful comment
+COMMENT ON COLUMN public.permission_registry.permission_key IS 
+  &#39;Unique identifier for the permission. For storage_access_level, valid values in org_settings.permissions are: false, &quot;byos_only&quot;, &quot;managed_only&quot;, &quot;all&quot;&#39;;
+
+
+
+-- Control Plane Database Schema Updates for Backup/Restore Feature
+-- Version: 2.0
+-- Date: 2025-01
+-- Description: Adds permissions and backup_history columns to org_settings
+
+-- ============================================================================
+-- 1. Add permissions column to org_settings
+-- ============================================================================
+-- This column stores JSON configuration for feature permissions like:
+-- { &quot;backup_local_enabled&quot;: true, &quot;backup_oauth_enabled&quot;: false, &quot;logo_enabled&quot;: true }
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = &#39;public&#39;
+      AND table_name = &#39;org_settings&#39;
+      AND column_name = &#39;permissions&#39;
+  ) THEN
+    ALTER TABLE public.org_settings
+      ADD COLUMN permissions jsonb DEFAULT &#39;{}&#39;::jsonb;
+    
+    RAISE NOTICE &#39;Added permissions column to org_settings&#39;;
+  ELSE
+    RAISE NOTICE &#39;Column permissions already exists on org_settings&#39;;
+  END IF;
+END $$;
+
+-- ============================================================================
+-- 2. Add backup_history column to org_settings
+-- ============================================================================
+-- Stores array of backup/restore operations with structure:
+-- [
+--   {
+--     &quot;type&quot;: &quot;backup|restore&quot;,
+--     &quot;status&quot;: &quot;completed|failed&quot;,
+--     &quot;timestamp&quot;: &quot;2025-01-15T10:30:00Z&quot;,
+--     &quot;initiated_by&quot;: &quot;user-uuid&quot;,
+--     &quot;size_bytes&quot;: 1024000,
+--     &quot;error_message&quot;: &quot;optional error text&quot;
+--   }
+-- ]
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = &#39;public&#39;
+      AND table_name = &#39;org_settings&#39;
+      AND column_name = &#39;backup_history&#39;
+  ) THEN
+    ALTER TABLE public.org_settings
+      ADD COLUMN backup_history jsonb DEFAULT &#39;[]&#39;::jsonb;
+    
+    RAISE NOTICE &#39;Added backup_history column to org_settings&#39;;
+  ELSE
+    RAISE NOTICE &#39;Column backup_history already exists on org_settings&#39;;
+  END IF;
+END $$;
+
+-- ============================================================================
+-- Comments for documentation
+-- ============================================================================
+COMMENT ON COLUMN public.org_settings.permissions IS &#39;Feature permission flags (backup_local_enabled, logo_enabled, etc.)&#39;;
+COMMENT ON COLUMN public.org_settings.backup_history IS &#39;Array of backup/restore operations with timestamps and status&#39;;
+
+
+
+-- Control Plane Database Schema Updates for Custom Logo Feature
+-- Version: 1.0
+-- Date: 2025-10
+-- Description: Adds logo_url column to org_settings for custom branding
+
+-- ============================================================================
+-- 1. Add logo_url column to org_settings
+-- ============================================================================
+-- This column stores the URL to the organization&#39;s custom logo
+-- Format: Public image URL (https://example.com/logo.png)
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = &#39;public&#39;
+      AND table_name = &#39;org_settings&#39;
+      AND column_name = &#39;logo_url&#39;
+  ) THEN
+    ALTER TABLE public.org_settings
+      ADD COLUMN logo_url text DEFAULT NULL;
+    
+    RAISE NOTICE &#39;Added logo_url column to org_settings&#39;;
+  ELSE
+    RAISE NOTICE &#39;Column logo_url already exists on org_settings&#39;;
+  END IF;
+END $$;
+
+-- ============================================================================
+-- Comments for documentation
+-- ============================================================================
+COMMENT ON COLUMN public.org_settings.logo_url IS &#39;Organization custom logo URL (public image URL)&#39;;
+
+
+
+-- Control Plane Database Schema Updates for Storage Profile Feature
+-- Version: 1.0
+-- Date: 2025-11
+-- Description: Adds storage_profile column to org_settings for cross-system storage configuration
+
+-- ============================================================================
+-- 1. Add storage_profile column to org_settings
+-- ============================================================================
+-- This column stores the organization&#39;s storage configuration:
+-- {
+--   &quot;mode&quot;: &quot;byos&quot; | &quot;managed&quot;,
+--   &quot;byos&quot;: {
+--     &quot;provider&quot;: &quot;s3&quot; | &quot;azure&quot; | &quot;gcs&quot;,
+--     &quot;endpoint&quot;: &quot;https://...&quot;,
+--     &quot;region&quot;: &quot;us-east-1&quot;,
+--     &quot;bucket&quot;: &quot;bucket-name&quot;,
+--     &quot;access_key_id&quot;: &quot;encrypted-key&quot;,
+--     &quot;secret_access_key&quot;: &quot;encrypted-secret&quot;,
+--     &quot;public_url&quot;: &quot;https://files.example.com&quot; (optional, for public CDN/custom domain),
+--     &quot;validated_at&quot;: &quot;2025-11-22T10:30:00Z&quot;
+--   },
+--   &quot;managed&quot;: {
+--     &quot;namespace&quot;: &quot;org-abc-123&quot;,
+--     &quot;active&quot;: true,
+--     &quot;created_at&quot;: &quot;2025-11-22T10:30:00Z&quot;
+--   },
+--   &quot;updated_at&quot;: &quot;2025-11-22T10:30:00Z&quot;,
+--   &quot;updated_by&quot;: &quot;user-uuid&quot;
+-- }
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = &#39;public&#39;
+      AND table_name = &#39;org_settings&#39;
+      AND column_name = &#39;storage_profile&#39;
+  ) THEN
+    ALTER TABLE public.org_settings
+      ADD COLUMN storage_profile jsonb DEFAULT NULL;
+    
+    RAISE NOTICE &#39;Added storage_profile column to org_settings&#39;;
+  ELSE
+    RAISE NOTICE &#39;Column storage_profile already exists on org_settings&#39;;
+  END IF;
+END $$;
+
+-- ============================================================================
+-- Comments for documentation
+-- ============================================================================
+COMMENT ON COLUMN public.org_settings.storage_profile IS 
+  &#39;Cross-system storage configuration (BYOS or Managed Storage). Used by TutTiud and future systems for file storage operations. Structure: { mode: &quot;byos&quot;|&quot;managed&quot;, byos?: {...}, managed?: {...} }&#39;;
+
+
+
+-- Control DB: Storage Grace Period Tracking
+-- Adds column to track when storage files should be deleted
+
+-- Add storage_grace_ends_at column to org_settings
+ALTER TABLE public.org_settings
+ADD COLUMN IF NOT EXISTS storage_grace_ends_at TIMESTAMPTZ;
+
+-- Add index for finding orgs with expired grace periods
+CREATE INDEX IF NOT EXISTS idx_org_settings_storage_grace_ends_at 
+ON public.org_settings(storage_grace_ends_at) 
+WHERE storage_grace_ends_at IS NOT NULL;
+
+-- Comment for documentation
+COMMENT ON COLUMN public.org_settings.storage_grace_ends_at IS 
+&#39;Timestamp when storage grace period ends and files should be permanently deleted. 
+Set when storage_access_level changes to read_only_grace. 
+Null when storage is active or fully disconnected.&#39;;
+
+
+
+-- Control DB: Audit Log for System and Org Admin Actions
+-- Tracks critical actions for legal compliance and dispute resolution
+
+CREATE TABLE IF NOT EXISTS public.audit_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id UUID NOT NULL,
+  user_id UUID NOT NULL,
+  user_email TEXT,
+  user_role TEXT NOT NULL, -- &#39;system_admin&#39;, &#39;owner&#39;, &#39;admin&#39;, &#39;member&#39;
+  action_type TEXT NOT NULL, -- &#39;storage.grace_period_started&#39;, &#39;storage.files_deleted&#39;, &#39;storage.migrated_to_byos&#39;, etc.
+  action_category TEXT NOT NULL, -- &#39;storage&#39;, &#39;backup&#39;, &#39;permissions&#39;, &#39;membership&#39;, etc.
+  resource_type TEXT, -- &#39;storage_profile&#39;, &#39;files&#39;, &#39;permissions&#39;, &#39;org_settings&#39;, etc.
+  resource_id TEXT, -- ID of affected resource if applicable
+  details JSONB, -- Structured details about the action
+  metadata JSONB, -- Additional context (IP address, user agent, etc.)
+  performed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ -- Optional expiration for log retention policies
+);
+
+-- Indexes for efficient querying
+CREATE INDEX IF NOT EXISTS idx_audit_log_org_id ON public.audit_log(org_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON public.audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_action_type ON public.audit_log(action_type);
+CREATE INDEX IF NOT EXISTS idx_audit_log_action_category ON public.audit_log(action_category);
+CREATE INDEX IF NOT EXISTS idx_audit_log_performed_at ON public.audit_log(performed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_expires_at ON public.audit_log(expires_at) WHERE expires_at IS NOT NULL;
+
+-- Composite index for common queries (org + time range)
+CREATE INDEX IF NOT EXISTS idx_audit_log_org_time ON public.audit_log(org_id, performed_at DESC);
+
+-- Enable Row Level Security
+ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policy: Users can only read audit logs for their own organizations
+-- (Must verify membership via org_members join)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = &#39;public&#39; 
+    AND tablename = &#39;audit_log&#39; 
+    AND policyname = &#39;Users can read audit logs for their orgs&#39;
+  ) THEN
+    CREATE POLICY &quot;Users can read audit logs for their orgs&quot;
+      ON public.audit_log
+      FOR SELECT
+      TO authenticated
+      USING (
+        org_id IN (
+          SELECT org_id FROM public.org_memberships 
+          WHERE user_id = auth.uid()
+        )
+      );
+  END IF;
+END;
+$$;
+
+-- RLS Policy: Only service role can insert/modify audit logs
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = &#39;public&#39; 
+    AND tablename = &#39;audit_log&#39; 
+    AND policyname = &#39;Only service role can modify audit logs&#39;
+  ) THEN
+    CREATE POLICY &quot;Only service role can modify audit logs&quot;
+      ON public.audit_log
+      FOR ALL
+      TO service_role
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+END;
+$$;
+
+-- Helper function to create audit log entries
+CREATE OR REPLACE FUNCTION public.log_audit_event(
+  p_org_id UUID,
+  p_user_id UUID,
+  p_user_email TEXT,
+  p_user_role TEXT,
+  p_action_type TEXT,
+  p_action_category TEXT,
+  p_resource_type TEXT DEFAULT NULL,
+  p_resource_id TEXT DEFAULT NULL,
+  p_details JSONB DEFAULT NULL,
+  p_metadata JSONB DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  log_id UUID;
+BEGIN
+  INSERT INTO public.audit_log (
+    org_id,
+    user_id,
+    user_email,
+    user_role,
+    action_type,
+    action_category,
+    resource_type,
+    resource_id,
+    details,
+    metadata,
+    performed_at
+  ) VALUES (
+    p_org_id,
+    p_user_id,
+    p_user_email,
+    p_user_role,
+    p_action_type,
+    p_action_category,
+    p_resource_type,
+    p_resource_id,
+    p_details,
+    p_metadata,
+    NOW()
+  )
+  RETURNING id INTO log_id;
+  
+  RETURN log_id;
+END;
+$$;
+
+-- Comment for documentation
+COMMENT ON TABLE public.audit_log IS 
+&#39;Audit log for tracking critical system and organization admin actions.
+Required for legal compliance and dispute resolution.
+Retention: 7 years for compliance (can be configured via expires_at).&#39;;
+
+COMMENT ON FUNCTION public.log_audit_event IS 
+&#39;Helper function to create audit log entries.
+Use this from API endpoints to log admin actions.
+Example: SELECT public.log_audit_event(org_id, user_id, email, role, &#39;&#39;storage.grace_period_started&#39;&#39;, &#39;&#39;storage&#39;&#39;, &#39;&#39;storage_profile&#39;&#39;, org_id::text, jsonb_build_object(&#39;&#39;grace_days&#39;&#39;, 30));&#39;;
+
+-- Example audit action types (for reference):
+-- Storage actions:
+--   - storage.configured (initial setup)
+--   - storage.updated (changed mode or credentials)
+--   - storage.disconnected (manually disconnected)
+--   - storage.grace_period_started (payment lapsed)
+--   - storage.files_deleted (grace period expired)
+--   - storage.migrated_to_byos (migrated from managed to BYOS)
+--   - storage.bulk_download (downloaded all files)
+--
+-- Permission actions:
+--   - permission.enabled (feature enabled)
+--   - permission.disabled (feature disabled)
+--
+-- Membership actions:
+--   - member.invited
+--   - member.removed
+--   - member.role_changed
+--
+-- Backup actions:
+--   - backup.created
+--   - backup.restored
+
+
+
+-- Control DB auth utilities
+-- Provides user verification state lookup for invitations and onboarding flows.
+-- Run this script against the control database.
+
+create or replace function public.user_verification_state(user_email text)
+returns table(
+  user_exists boolean,
+  email_confirmed boolean,
+  last_sign_in_at timestamptz
+)
+language sql
+security definer
+set search_path = public, auth, extensions
+as $$
+  with u as (
+    select email, email_confirmed_at, last_sign_in_at
+    from auth.users
+    where lower(email) = lower($1)
+    limit 1
+  )
+  select true as user_exists,
+         (u.email_confirmed_at is not null) as email_confirmed,
+         u.last_sign_in_at
+  from u
+  union all
+  select false as user_exists,
+         false as email_confirmed,
+         null::timestamptz as last_sign_in_at
+  where not exists (select 1 from u)
+  limit 1;
+$$;
+
+comment on function public.user_verification_state(text) is
+  &#39;Returns a single row indicating whether a user exists in auth.users and whether their email is confirmed.&#39;;
+
+
+
+-- Control DB: Invitation Expiry Configuration
+-- Provides a function to read Supabase auth config for OTP expiry settings
+-- and calculate invitation expiration timestamps with smart precedence
+
+-- Function to get MAILER_OTP_EXP from Supabase auth config
+-- Returns expiry in seconds (Supabase stores as seconds)
+CREATE OR REPLACE FUNCTION public.get_auth_otp_expiry_seconds()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+  expiry_seconds INTEGER;
+BEGIN
+  -- Read MAILER_OTP_EXP from auth.config
+  -- Default is 86400 seconds (24 hours) if not configured
+  SELECT COALESCE(
+    (config-&gt;&#39;MAILER_OTP_EXP&#39;)::text::integer,
+    86400
+  ) INTO expiry_seconds
+  FROM auth.config
+  WHERE id = 1  -- Supabase auth config typically uses id=1
+  LIMIT 1;
+  
+  -- If no config row exists, return 24h default
+  IF expiry_seconds IS NULL THEN
+    expiry_seconds := 86400;
+  END IF;
+  
+  RETURN expiry_seconds;
+END;
+$$;
+
+-- Function to calculate invitation expiry timestamp with smart precedence
+-- Precedence order:
+-- 1. permission_registry.invitation_expiry_seconds (if set and &gt; 0)
+-- 2. auth.config MAILER_OTP_EXP (read via get_auth_otp_expiry_seconds)
+-- 3. Hardcoded 24 hours fallback (86400 seconds)
+CREATE OR REPLACE FUNCTION public.calculate_invitation_expiry(org_id UUID)
+RETURNS TIMESTAMPTZ
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  custom_seconds INTEGER;
+  auth_seconds INTEGER;
+  expiry_seconds INTEGER;
+BEGIN
+  -- Check for global override in permission_registry (seconds)
+  SELECT CASE
+           WHEN jsonb_typeof(default_value) = &#39;number&#39; THEN (default_value)::text::integer
+           ELSE NULL
+         END
+  INTO custom_seconds
+  FROM public.permission_registry
+  WHERE permission_key = &#39;invitation_expiry_seconds&#39;
+  LIMIT 1;
+
+  -- Use custom seconds if set and valid
+  IF custom_seconds IS NOT NULL AND custom_seconds &gt; 0 THEN
+    expiry_seconds := custom_seconds;
+  ELSE
+    -- Fall back to Supabase auth config (seconds)
+    auth_seconds := public.get_auth_otp_expiry_seconds();
+    expiry_seconds := COALESCE(auth_seconds, 86400);
+  END IF;
+
+  -- Return current timestamp + calculated seconds
+  RETURN NOW() + (expiry_seconds || &#39; seconds&#39;)::INTERVAL;
+END;
+$$;
+
+-- Grant execute to authenticated users (BFF endpoints will call this)
+GRANT EXECUTE ON FUNCTION public.get_auth_otp_expiry_seconds() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.calculate_invitation_expiry(UUID) TO authenticated;
+
+-- Example usage:
+-- SELECT public.calculate_invitation_expiry(&#39;your-org-uuid-here&#39;);
+-- SELECT public.get_auth_otp_expiry_seconds(); -- returns seconds from auth.config
+
+
+
+-- Control DB: Global Active Routing Table
+-- Supports /submit and future easy-access workflows across tenants.
+
+CREATE TABLE IF NOT EXISTS public.active_routing (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid,
+  category text NOT NULL,
+  routing_info jsonb NOT NULL DEFAULT &#39;{}&#39;::jsonb,
+  expires_at timestamptz,
+  created_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb
+);
+
+-- Fast JSON lookups (identity, otp, submission id, etc.)
+CREATE INDEX IF NOT EXISTS active_routing_routing_info_gin_idx
+  ON public.active_routing
+  USING GIN (routing_info);
+
+-- Optional supporting indexes for common access patterns
+CREATE INDEX IF NOT EXISTS active_routing_category_idx
+  ON public.active_routing (category);
+
+CREATE INDEX IF NOT EXISTS active_routing_expires_at_idx
+  ON public.active_routing (expires_at)
+  WHERE expires_at IS NOT NULL;
+
+-- Ensure org-scoped routing rows reference a valid organization.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = &#39;active_routing_org_id_fkey&#39;
+      AND conrelid = &#39;public.active_routing&#39;::regclass
+  ) THEN
+    ALTER TABLE public.active_routing
+      ADD CONSTRAINT active_routing_org_id_fkey
+      FOREIGN KEY (org_id)
+      REFERENCES public.organizations(id);
+  END IF;
+END;
+$$;
+
+-- Canonical permission registry sync
+-- Source aligned with: C:/Users/Admin/Downloads/permission_registry_rows (1).sql
+INSERT INTO public.permission_registry (
+  permission_key,
+  display_name_en,
+  display_name_he,
+  description_en,
+  description_he,
+  default_value,
+  category,
+  requires_approval
+) VALUES
+  (
+    &#39;backup_cooldown_override&#39;,
+    &#39;Backup Cooldown Override&#39;,
+    &#39;עקיפת המתנה לגיבוי&#39;,
+    &#39;One-time override of the 7-day backup cooldown (automatically resets after use)&#39;,
+    &#39;עקיפה חד-פעמית של תקופת ההמתנה של 7 ימים (מתאפסת אוטומטית לאחר שימוש)&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;backup&#39;,
+    true
+  ),
+  (
+    &#39;backup_local_enabled&#39;,
+    &#39;Local Backup&#39;,
+    &#39;גיבוי מקומי&#39;,
+    &#39;Allow organization to create encrypted local backups&#39;,
+    &#39;אפשר לארגון ליצור גיבויים מוצפנים מקומיים&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;backup&#39;,
+    true
+  ),
+  (
+    &#39;backup_oauth_enabled&#39;,
+    &#39;Cloud Backup (OAuth)&#39;,
+    &#39;גיבוי ענן (Google Drive, OneDrive)&#39;,
+    &#39;Allow organization to backup to cloud storage providers&#39;,
+    &#39;אפשר לארגון לגבות לספקי אחסון ענן&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;backup&#39;,
+    true
+  ),
+  (
+    &#39;can_export_pdf_reports&#39;,
+    &#39;Export PDF Reports&#39;,
+    &#39;ייצוא דוחות PDF&#39;,
+    &#39;Allow organization to export student session records to professional PDF documents&#39;,
+    &#39;אפשר לארגון לייצא רישומי מפגשים של תלמידים למסמכי PDF מקצועיים&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;features&#39;,
+    true
+  ),
+  (
+    &#39;can_reupload_legacy_reports&#39;,
+    &#39;Re-upload Legacy Session Reports&#39;,
+    &#39;העלאה חוזרת של דוחות עבר&#39;,
+    &#39;Allow organization admins/owners to upload legacy session records for a student more than once (subsequent uploads replace previous legacy data).&#39;,
+    &#39;מאפשר למנהלי ובעלי הארגון להעלות מחדש נתוני מפגשי עבר לתלמיד יותר מפעם אחת (העלאה חדשה מחליפה נתונים קודמים).&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;features&#39;,
+    true
+  ),
+  (
+    &#39;can_use_custom_logo_on_exports&#39;,
+    &#39;Custom Logo on Exports&#39;,
+    &#39;לוגו מותאם ביצוא&#39;,
+    &#39;Allow organization to display their custom logo alongside TutTiud logo on PDF exports&#39;,
+    &#39;אפשר לארגון להציג את הלוגו המותאם שלו לצד לוגו TutTiud ביצוא PDF&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;branding&#39;,
+    true
+  ),
+  (
+    &#39;invitation_expiry_seconds&#39;,
+    &#39;Invitation Expiry Seconds&#39;,
+    &#39;שניות תוקף הזמנה&#39;,
+    &#39;Number of seconds until invitation links expire (global). Overrides Supabase auth config if set.&#39;,
+    &#39;מספר שניות עד פקיעת קישורי הזמנה (גלובלי). דורס את הגדרת Supabase אם מוגדר.&#39;,
+    &#39;3639&#39;::jsonb,
+    &#39;features&#39;,
+    false
+  ),
+  (
+    &#39;logo_enabled&#39;,
+    &#39;Custom Logo&#39;,
+    &#39;לוגו מותאם אישית&#39;,
+    &#39;Allow organization to upload and use a custom logo&#39;,
+    &#39;אפשר לארגון להעלות ולהשתמש בלוגו מותאם אישית&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;branding&#39;,
+    true
+  ),
+  (
+    &#39;session_form_preanswers_cap&#39;,
+    &#39;Session Form: Preanswers Cap&#39;,
+    &#39;טופס מפגש: תקרת תשובות מוכנות&#39;,
+    &#39;Maximum number of preconfigured answers allowed per question (text/textarea)&#39;,
+    &#39;מספר מרבי של תשובות מוכנות לשאלה (טקסט/טקסט חופשי)&#39;,
+    &#39;5&#39;::jsonb,
+    &#39;features&#39;,
+    false
+  ),
+  (
+    &#39;session_form_preanswers_enabled&#39;,
+    &#39;Session Form: Preconfigured Answers&#39;,
+    &#39;טופס מפגש: תשובות מוכנות מראש&#39;,
+    &#39;Allow organizations to configure predefined answer lists for text/textarea questions&#39;,
+    &#39;אפשר לארגון להגדיר רשימות תשובות מוכנות לשאלות טקסט/טקסט חופשי&#39;,
+    &#39;true&#39;::jsonb,
+    &#39;features&#39;,
+    false
+  ),
+  (
+    &#39;storage_access_level&#39;,
+    &#39;Storage Configuration Access&#39;,
+    &#39;גישה להגדרות אחסון&#39;,
+    &#39;Determines if the organization can configure storage and which modes are available. Options: false (locked), &quot;byos_only&quot; (BYOS only), &quot;managed_only&quot; (Managed only), &quot;all&quot; (both modes).&#39;,
+    &#39;קובע האם הארגון יכול להגדיר אחסון ואילו מצבים זמינים. אפשרויות: false (נעול), &quot;byos_only&quot; (BYOS בלבד), &quot;managed_only&quot; (מנוהל בלבד), &quot;all&quot; (שני המצבים).&#39;,
+    &#39;false&#39;::jsonb,
+    &#39;storage&#39;,
+    true
+  ),
+  (
+    &#39;storage_grace_period_days&#39;,
+    &#39;Storage Grace Period (Days)&#39;,
+    &#39;תקופת חסד לאחסון (ימים)&#39;,
+    &#39;Number of days users have to download files after storage is disconnected before permanent deletion&#39;,
+    &#39;מספר הימים שיש למשתמשים להוריד קבצים לאחר ניתוק האחסון לפני מחיקה סופית&#39;,
+    &#39;3&#39;::jsonb,
+    &#39;storage&#39;,
+    false
+  )
+ON CONFLICT (permission_key) DO UPDATE SET
+  display_name_en = EXCLUDED.display_name_en,
+  display_name_he = EXCLUDED.display_name_he,
+  description_en = EXCLUDED.description_en,
+  description_he = EXCLUDED.description_he,
+  default_value = EXCLUDED.default_value,
+  category = EXCLUDED.category,
+  requires_approval = EXCLUDED.requires_approval,
+  updated_at = NOW();
+
+-- Security hardening: this table stores sensitive routing and OTP context.
+-- Access is intended only through backend code running with service_role.
+ALTER TABLE public.active_routing ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.active_routing FORCE ROW LEVEL SECURITY;
+
+-- Restrict direct table grants for client roles.
+REVOKE ALL ON TABLE public.active_routing FROM PUBLIC;
+REVOKE ALL ON TABLE public.active_routing FROM anon;
+REVOKE ALL ON TABLE public.active_routing FROM authenticated;
+
+-- Ensure service_role can manage routing rows through PostgREST/REST APIs.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.active_routing TO service_role;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = &#39;public&#39;
+      AND tablename = &#39;active_routing&#39;
+      AND policyname = &#39;Only service role can access active routing&#39;
+  ) THEN
+    CREATE POLICY &quot;Only service role can access active routing&quot;
+      ON public.active_routing
+      FOR ALL
+      TO service_role
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+END;
+$$;
+</textarea>
+  </div>
+  <script>
+    const sql = document.getElementById('sql');
+    const status = document.getElementById('status');
+    document.getElementById('selectBtn').addEventListener('click', () => { sql.focus(); sql.select(); status.textContent = 'Selected'; });
+    document.getElementById('copyBtn').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(sql.value);
+        status.textContent = 'Copied';
+      } catch {
+        sql.focus(); sql.select(); document.execCommand('copy'); status.textContent = 'Copied';
+      }
+    });
+  </script>
+</body>
+</html>
