@@ -423,6 +423,7 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
   worked_minutes integer NULL,
   notes text NULL,
   source_type text NOT NULL DEFAULT 'manual',
+  version int NOT NULL DEFAULT 1,
   created_by uuid NULL,
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -437,6 +438,7 @@ ALTER TABLE public.employee_attendance_records
   ADD COLUMN IF NOT EXISTS worked_minutes integer,
   ADD COLUMN IF NOT EXISTS notes text,
   ADD COLUMN IF NOT EXISTS source_type text,
+  ADD COLUMN IF NOT EXISTS version int,
   ADD COLUMN IF NOT EXISTS created_by uuid,
   ADD COLUMN IF NOT EXISTS updated_by uuid,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
@@ -467,17 +469,24 @@ DO $$
 BEGIN
   ALTER TABLE public.employee_attendance_records
     ADD CONSTRAINT employee_attendance_records_source_type_check
-    CHECK (source_type IN ('manual', 'import', 'system'));
+    CHECK (source_type IN ('manual', 'import', 'system', 'correction'));
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
 END $$;
 
-CREATE UNIQUE INDEX IF NOT EXISTS employee_attendance_records_employee_date_uidx
-  ON public.employee_attendance_records (employee_id, attendance_date);
+DROP INDEX IF EXISTS public.employee_attendance_records_employee_date_uidx;
+
+CREATE UNIQUE INDEX IF NOT EXISTS employee_attendance_records_primary_date_uidx
+  ON public.employee_attendance_records (employee_id, attendance_date)
+  WHERE source_type IN ('manual', 'import', 'system');
 
 CREATE INDEX IF NOT EXISTS employee_attendance_records_date_idx
   ON public.employee_attendance_records (attendance_date);
+
+CREATE INDEX IF NOT EXISTS employee_attendance_records_correction_idx
+  ON public.employee_attendance_records (employee_id, attendance_date, source_type)
+  WHERE source_type = 'correction';
 
 -- -----------------------------------------------------------------
 -- public.employee_leave_entries
@@ -734,6 +743,7 @@ CREATE TABLE IF NOT EXISTS public.finance_corrections (
   amount numeric NOT NULL,
   effective_date date NOT NULL,
   notes text NULL,
+  version int NOT NULL DEFAULT 1,
   created_by uuid NULL,
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -747,6 +757,7 @@ ALTER TABLE public.finance_corrections
   ADD COLUMN IF NOT EXISTS amount numeric,
   ADD COLUMN IF NOT EXISTS effective_date date,
   ADD COLUMN IF NOT EXISTS notes text,
+  ADD COLUMN IF NOT EXISTS version int,
   ADD COLUMN IF NOT EXISTS created_by uuid,
   ADD COLUMN IF NOT EXISTS updated_by uuid,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
@@ -1114,6 +1125,9 @@ CREATE TABLE IF NOT EXISTS public.lesson_instances (
   closed_by uuid NULL,
   closed_at timestamptz NULL,
   created_source text NOT NULL,
+  version int NOT NULL DEFAULT 1,
+  created_by uuid NULL,
+  updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL
@@ -1133,6 +1147,9 @@ ALTER TABLE public.lesson_instances
   ADD COLUMN IF NOT EXISTS closed_by uuid,
   ADD COLUMN IF NOT EXISTS closed_at timestamptz,
   ADD COLUMN IF NOT EXISTS created_source text,
+  ADD COLUMN IF NOT EXISTS version int,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS updated_by uuid,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS updated_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
@@ -1231,6 +1248,8 @@ CREATE TABLE IF NOT EXISTS public.lesson_participants (
   documented_at timestamptz NULL,
   documented_by uuid NULL,
   locked_at timestamptz NULL,
+  version int NOT NULL DEFAULT 1,
+  updated_by uuid NULL,
   metadata jsonb NULL
 );
 
@@ -1249,6 +1268,8 @@ ALTER TABLE public.lesson_participants
   ADD COLUMN IF NOT EXISTS documented_at timestamptz,
   ADD COLUMN IF NOT EXISTS documented_by uuid,
   ADD COLUMN IF NOT EXISTS locked_at timestamptz,
+  ADD COLUMN IF NOT EXISTS version int,
+  ADD COLUMN IF NOT EXISTS updated_by uuid,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
 DO $$
@@ -1289,6 +1310,379 @@ CREATE INDEX IF NOT EXISTS lesson_participants_student_id_idx
 
 CREATE INDEX IF NOT EXISTS lesson_participants_locked_at_idx
   ON public.lesson_participants (locked_at) WHERE locked_at IS NOT NULL;
+
+-- -----------------------------------------------------------------
+-- public.payroll_runs
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.payroll_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  period_start date NOT NULL,
+  period_end date NOT NULL,
+  status text NOT NULL DEFAULT 'draft',
+  finalized_at timestamptz NULL,
+  finalized_by uuid NULL,
+  version int NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.payroll_runs
+  ADD COLUMN IF NOT EXISTS period_start date,
+  ADD COLUMN IF NOT EXISTS period_end date,
+  ADD COLUMN IF NOT EXISTS status text,
+  ADD COLUMN IF NOT EXISTS finalized_at timestamptz,
+  ADD COLUMN IF NOT EXISTS finalized_by uuid,
+  ADD COLUMN IF NOT EXISTS version int,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.payroll_runs
+    ADD CONSTRAINT payroll_runs_status_check
+    CHECK (status IN ('draft', 'finalized', 'cancelled'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS payroll_runs_period_idx
+  ON public.payroll_runs (period_start, period_end, status);
+
+-- -----------------------------------------------------------------
+-- public.claim_batches
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.claim_batches (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_type text NOT NULL DEFAULT 'hmo',
+  period_start date NOT NULL,
+  period_end date NOT NULL,
+  status text NOT NULL DEFAULT 'draft',
+  submitted_at timestamptz NULL,
+  submitted_by uuid NULL,
+  paid_at timestamptz NULL,
+  paid_by uuid NULL,
+  version int NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.claim_batches
+  ADD COLUMN IF NOT EXISTS batch_type text,
+  ADD COLUMN IF NOT EXISTS period_start date,
+  ADD COLUMN IF NOT EXISTS period_end date,
+  ADD COLUMN IF NOT EXISTS status text,
+  ADD COLUMN IF NOT EXISTS submitted_at timestamptz,
+  ADD COLUMN IF NOT EXISTS submitted_by uuid,
+  ADD COLUMN IF NOT EXISTS paid_at timestamptz,
+  ADD COLUMN IF NOT EXISTS paid_by uuid,
+  ADD COLUMN IF NOT EXISTS version int,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.claim_batches
+    ADD CONSTRAINT claim_batches_batch_type_check
+    CHECK (batch_type IN ('hmo', 'manual'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.claim_batches
+    ADD CONSTRAINT claim_batches_status_check
+    CHECK (status IN ('draft', 'submitted', 'rejected', 'paid', 'cancelled'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS claim_batches_period_idx
+  ON public.claim_batches (period_start, period_end, status);
+
+-- -----------------------------------------------------------------
+-- public.instance_locks
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.instance_locks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lesson_instance_id uuid NOT NULL,
+  lock_source_type text NOT NULL,
+  lock_source_id uuid NOT NULL,
+  lock_reason text NOT NULL,
+  created_by uuid NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.instance_locks
+  ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
+  ADD COLUMN IF NOT EXISTS lock_source_type text,
+  ADD COLUMN IF NOT EXISTS lock_source_id uuid,
+  ADD COLUMN IF NOT EXISTS lock_reason text,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.instance_locks
+    ADD CONSTRAINT instance_locks_lesson_instance_id_fkey
+    FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id) ON DELETE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.instance_locks
+    ADD CONSTRAINT instance_locks_source_type_check
+    CHECK (lock_source_type IN ('payroll_run', 'claim_batch', 'manual_compliance_lock'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS instance_locks_instance_source_uidx
+  ON public.instance_locks (lesson_instance_id, lock_source_type, lock_source_id);
+
+CREATE INDEX IF NOT EXISTS instance_locks_instance_idx
+  ON public.instance_locks (lesson_instance_id, created_at DESC);
+
+-- -----------------------------------------------------------------
+-- public.participant_locks
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.participant_locks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lesson_participant_id uuid NOT NULL,
+  lock_source_type text NOT NULL,
+  lock_source_id uuid NOT NULL,
+  lock_reason text NOT NULL,
+  created_by uuid NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.participant_locks
+  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
+  ADD COLUMN IF NOT EXISTS lock_source_type text,
+  ADD COLUMN IF NOT EXISTS lock_source_id uuid,
+  ADD COLUMN IF NOT EXISTS lock_reason text,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.participant_locks
+    ADD CONSTRAINT participant_locks_lesson_participant_id_fkey
+    FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id) ON DELETE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.participant_locks
+    ADD CONSTRAINT participant_locks_source_type_check
+    CHECK (lock_source_type IN ('payroll_run', 'claim_batch', 'manual_compliance_lock'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS participant_locks_participant_source_uidx
+  ON public.participant_locks (lesson_participant_id, lock_source_type, lock_source_id);
+
+CREATE INDEX IF NOT EXISTS participant_locks_participant_idx
+  ON public.participant_locks (lesson_participant_id, created_at DESC);
+
+-- -----------------------------------------------------------------
+-- public.calendar_instance_corrections
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.calendar_instance_corrections (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  original_instance_id uuid NOT NULL,
+  correction_mode text NOT NULL DEFAULT 'value_only',
+  reason_code text NOT NULL,
+  reason_text text NOT NULL,
+  status text NOT NULL DEFAULT 'applied',
+  instance_patch jsonb NOT NULL DEFAULT '{}'::jsonb,
+  participant_patches jsonb NOT NULL DEFAULT '[]'::jsonb,
+  effective_state jsonb NOT NULL DEFAULT '{}'::jsonb,
+  impact_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+  blocked_by_paid_claim boolean NOT NULL DEFAULT false,
+  version int NOT NULL DEFAULT 1,
+  created_by uuid NULL,
+  updated_by uuid NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.calendar_instance_corrections
+  ADD COLUMN IF NOT EXISTS original_instance_id uuid,
+  ADD COLUMN IF NOT EXISTS correction_mode text,
+  ADD COLUMN IF NOT EXISTS reason_code text,
+  ADD COLUMN IF NOT EXISTS reason_text text,
+  ADD COLUMN IF NOT EXISTS status text,
+  ADD COLUMN IF NOT EXISTS instance_patch jsonb,
+  ADD COLUMN IF NOT EXISTS participant_patches jsonb,
+  ADD COLUMN IF NOT EXISTS effective_state jsonb,
+  ADD COLUMN IF NOT EXISTS impact_snapshot jsonb,
+  ADD COLUMN IF NOT EXISTS blocked_by_paid_claim boolean,
+  ADD COLUMN IF NOT EXISTS version int,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS updated_by uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.calendar_instance_corrections
+    ADD CONSTRAINT calendar_instance_corrections_instance_fkey
+    FOREIGN KEY (original_instance_id) REFERENCES public.lesson_instances(id) ON DELETE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.calendar_instance_corrections
+    ADD CONSTRAINT calendar_instance_corrections_mode_check
+    CHECK (correction_mode IN ('value_only', 'replacement_instance', 'participant_adjustment'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.calendar_instance_corrections
+    ADD CONSTRAINT calendar_instance_corrections_status_check
+    CHECK (status IN ('previewed', 'applied', 'blocked'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS calendar_instance_corrections_instance_idx
+  ON public.calendar_instance_corrections (original_instance_id, created_at DESC);
+
+-- -----------------------------------------------------------------
+-- public.tenant_audit_log
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.tenant_audit_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  correlation_id uuid NULL,
+  actor_user_id uuid NULL,
+  event_type text NOT NULL,
+  retention_category text NOT NULL DEFAULT 'standard',
+  resource_type text NOT NULL,
+  resource_id text NOT NULL,
+  before_state jsonb NULL,
+  after_state jsonb NULL,
+  details jsonb NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NULL
+);
+
+ALTER TABLE public.tenant_audit_log
+  ADD COLUMN IF NOT EXISTS correlation_id uuid,
+  ADD COLUMN IF NOT EXISTS actor_user_id uuid,
+  ADD COLUMN IF NOT EXISTS event_type text,
+  ADD COLUMN IF NOT EXISTS retention_category text,
+  ADD COLUMN IF NOT EXISTS resource_type text,
+  ADD COLUMN IF NOT EXISTS resource_id text,
+  ADD COLUMN IF NOT EXISTS before_state jsonb,
+  ADD COLUMN IF NOT EXISTS after_state jsonb,
+  ADD COLUMN IF NOT EXISTS details jsonb,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS expires_at timestamptz;
+
+DO $$
+BEGIN
+  ALTER TABLE public.tenant_audit_log
+    ADD CONSTRAINT tenant_audit_log_retention_category_check
+    CHECK (retention_category IN ('critical', 'standard', 'diagnostic'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS tenant_audit_log_resource_idx
+  ON public.tenant_audit_log (resource_type, resource_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS tenant_audit_log_expiry_idx
+  ON public.tenant_audit_log (expires_at) WHERE expires_at IS NOT NULL;
+
+-- -----------------------------------------------------------------
+-- public.dashboard_tasks
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.dashboard_tasks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_type text NOT NULL,
+  title text NOT NULL,
+  description text NOT NULL,
+  priority text NOT NULL DEFAULT 'medium',
+  status text NOT NULL DEFAULT 'open',
+  resource_type text NULL,
+  resource_id text NULL,
+  action_path text NULL,
+  version int NOT NULL DEFAULT 1,
+  created_by uuid NULL,
+  resolved_by uuid NULL,
+  resolved_at timestamptz NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NULL,
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.dashboard_tasks
+  ADD COLUMN IF NOT EXISTS task_type text,
+  ADD COLUMN IF NOT EXISTS title text,
+  ADD COLUMN IF NOT EXISTS description text,
+  ADD COLUMN IF NOT EXISTS priority text,
+  ADD COLUMN IF NOT EXISTS status text,
+  ADD COLUMN IF NOT EXISTS resource_type text,
+  ADD COLUMN IF NOT EXISTS resource_id text,
+  ADD COLUMN IF NOT EXISTS action_path text,
+  ADD COLUMN IF NOT EXISTS version int,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS resolved_by uuid,
+  ADD COLUMN IF NOT EXISTS resolved_at timestamptz,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.dashboard_tasks
+    ADD CONSTRAINT dashboard_tasks_priority_check
+    CHECK (priority IN ('low', 'medium', 'high', 'critical'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.dashboard_tasks
+    ADD CONSTRAINT dashboard_tasks_status_check
+    CHECK (status IN ('open', 'resolved', 'dismissed'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS dashboard_tasks_open_idx
+  ON public.dashboard_tasks (status, priority, created_at DESC)
+  WHERE status = 'open';
 
 -- -----------------------------------------------------------------
 -- public.hmo_providers
@@ -2672,6 +3066,248 @@ CREATE INDEX IF NOT EXISTS "Documents_uploaded_at_idx" ON public."Documents" ("u
 CREATE INDEX IF NOT EXISTS "Documents_expiration_idx" ON public."Documents" ("expiration_date") WHERE "expiration_date" IS NOT NULL;
 CREATE INDEX IF NOT EXISTS "Documents_hash_idx" ON public."Documents" ("hash") WHERE "hash" IS NOT NULL;
 
+CREATE OR REPLACE FUNCTION public.set_entity_updated_at_and_version()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = TG_TABLE_SCHEMA
+        AND table_name = TG_TABLE_NAME
+        AND column_name = 'updated_at'
+    ) THEN
+      NEW.updated_at := now();
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = TG_TABLE_SCHEMA
+        AND table_name = TG_TABLE_NAME
+        AND column_name = 'version'
+    ) THEN
+      NEW.version := COALESCE(OLD.version, 0) + 1;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.set_tenant_audit_log_expiry()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  base_timestamp timestamptz;
+BEGIN
+  base_timestamp := COALESCE(NEW.created_at, now());
+  NEW.created_at := base_timestamp;
+
+  IF NEW.expires_at IS NULL THEN
+    NEW.expires_at := CASE COALESCE(NEW.retention_category, 'standard')
+      WHEN 'critical' THEN base_timestamp + interval '7 years'
+      WHEN 'diagnostic' THEN base_timestamp + interval '90 days'
+      ELSE base_timestamp + interval '1 year'
+    END;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.guard_lesson_instance_locked()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  target_instance_id uuid;
+BEGIN
+  target_instance_id := COALESCE(NEW.id, OLD.id, NEW.lesson_instance_id, OLD.lesson_instance_id);
+
+  IF target_instance_id IS NULL THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.instance_locks locked
+    WHERE locked.lesson_instance_id = target_instance_id
+  ) THEN
+    RAISE EXCEPTION 'lesson_instance_locked'
+      USING ERRCODE = 'P0001',
+            DETAIL = target_instance_id::text,
+            HINT = 'Use the correction workflow for locked lesson instances.';
+  END IF;
+
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.guard_lesson_participant_locked()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  target_participant_id uuid;
+  target_instance_id uuid;
+BEGIN
+  target_participant_id := COALESCE(NEW.id, OLD.id);
+  target_instance_id := COALESCE(NEW.lesson_instance_id, OLD.lesson_instance_id);
+
+  IF target_participant_id IS NOT NULL AND EXISTS (
+    SELECT 1
+    FROM public.participant_locks locked
+    WHERE locked.lesson_participant_id = target_participant_id
+  ) THEN
+    RAISE EXCEPTION 'lesson_participant_locked'
+      USING ERRCODE = 'P0001',
+            DETAIL = target_participant_id::text,
+            HINT = 'Use the correction workflow for locked lesson participants.';
+  END IF;
+
+  IF target_instance_id IS NOT NULL AND EXISTS (
+    SELECT 1
+    FROM public.instance_locks locked
+    WHERE locked.lesson_instance_id = target_instance_id
+  ) THEN
+    RAISE EXCEPTION 'lesson_instance_locked'
+      USING ERRCODE = 'P0001',
+            DETAIL = target_instance_id::text,
+            HINT = 'Use the correction workflow for locked lesson participants.';
+  END IF;
+
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_employee_attendance_records_set_updated_at_version'
+      AND tgrelid = 'public.employee_attendance_records'::regclass
+  ) THEN
+    CREATE TRIGGER trg_employee_attendance_records_set_updated_at_version
+      BEFORE UPDATE ON public.employee_attendance_records
+      FOR EACH ROW
+      EXECUTE FUNCTION public.set_entity_updated_at_and_version();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_finance_corrections_set_updated_at_version'
+      AND tgrelid = 'public.finance_corrections'::regclass
+  ) THEN
+    CREATE TRIGGER trg_finance_corrections_set_updated_at_version
+      BEFORE UPDATE ON public.finance_corrections
+      FOR EACH ROW
+      EXECUTE FUNCTION public.set_entity_updated_at_and_version();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_lesson_instances_guard_locked'
+      AND tgrelid = 'public.lesson_instances'::regclass
+  ) THEN
+    CREATE TRIGGER trg_lesson_instances_guard_locked
+      BEFORE UPDATE OR DELETE ON public.lesson_instances
+      FOR EACH ROW
+      EXECUTE FUNCTION public.guard_lesson_instance_locked();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_lesson_instances_set_updated_at_version'
+      AND tgrelid = 'public.lesson_instances'::regclass
+  ) THEN
+    CREATE TRIGGER trg_lesson_instances_set_updated_at_version
+      BEFORE UPDATE ON public.lesson_instances
+      FOR EACH ROW
+      EXECUTE FUNCTION public.set_entity_updated_at_and_version();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_lesson_participants_guard_locked'
+      AND tgrelid = 'public.lesson_participants'::regclass
+  ) THEN
+    CREATE TRIGGER trg_lesson_participants_guard_locked
+      BEFORE UPDATE OR DELETE ON public.lesson_participants
+      FOR EACH ROW
+      EXECUTE FUNCTION public.guard_lesson_participant_locked();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_lesson_participants_set_updated_at_version'
+      AND tgrelid = 'public.lesson_participants'::regclass
+  ) THEN
+    CREATE TRIGGER trg_lesson_participants_set_updated_at_version
+      BEFORE UPDATE ON public.lesson_participants
+      FOR EACH ROW
+      EXECUTE FUNCTION public.set_entity_updated_at_and_version();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_payroll_runs_set_updated_at_version'
+      AND tgrelid = 'public.payroll_runs'::regclass
+  ) THEN
+    CREATE TRIGGER trg_payroll_runs_set_updated_at_version
+      BEFORE UPDATE ON public.payroll_runs
+      FOR EACH ROW
+      EXECUTE FUNCTION public.set_entity_updated_at_and_version();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_claim_batches_set_updated_at_version'
+      AND tgrelid = 'public.claim_batches'::regclass
+  ) THEN
+    CREATE TRIGGER trg_claim_batches_set_updated_at_version
+      BEFORE UPDATE ON public.claim_batches
+      FOR EACH ROW
+      EXECUTE FUNCTION public.set_entity_updated_at_and_version();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_calendar_instance_corrections_set_updated_at_version'
+      AND tgrelid = 'public.calendar_instance_corrections'::regclass
+  ) THEN
+    CREATE TRIGGER trg_calendar_instance_corrections_set_updated_at_version
+      BEFORE UPDATE ON public.calendar_instance_corrections
+      FOR EACH ROW
+      EXECUTE FUNCTION public.set_entity_updated_at_and_version();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_dashboard_tasks_set_updated_at_version'
+      AND tgrelid = 'public.dashboard_tasks'::regclass
+  ) THEN
+    CREATE TRIGGER trg_dashboard_tasks_set_updated_at_version
+      BEFORE UPDATE ON public.dashboard_tasks
+      FOR EACH ROW
+      EXECUTE FUNCTION public.set_entity_updated_at_and_version();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_tenant_audit_log_set_expiry'
+      AND tgrelid = 'public.tenant_audit_log'::regclass
+  ) THEN
+    CREATE TRIGGER trg_tenant_audit_log_set_expiry
+      BEFORE INSERT ON public.tenant_audit_log
+      FOR EACH ROW
+      EXECUTE FUNCTION public.set_tenant_audit_log_expiry();
+  END IF;
+END $$;
+
 -- =================================================================
 -- Tenant Public Domain Tables — RLS + Diagnostics
 -- =================================================================
@@ -2684,6 +3320,9 @@ CREATE INDEX IF NOT EXISTS hmo_authorizations_status_idx ON public.hmo_authoriza
 CREATE INDEX IF NOT EXISTS employee_leave_entries_status_idx ON public.employee_leave_entries (status);
 CREATE INDEX IF NOT EXISTS employee_leave_days_date_idx ON public.employee_leave_days (leave_date);
 CREATE INDEX IF NOT EXISTS finance_corrections_type_idx ON public.finance_corrections (correction_type);
+CREATE INDEX IF NOT EXISTS payroll_runs_status_idx ON public.payroll_runs (status, finalized_at);
+CREATE INDEX IF NOT EXISTS claim_batches_status_idx ON public.claim_batches (status, paid_at);
+CREATE INDEX IF NOT EXISTS dashboard_tasks_resource_idx ON public.dashboard_tasks (resource_type, resource_id, status);
 
 -- Enable RLS on all tables (both domain and payroll)
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
@@ -2700,6 +3339,13 @@ ALTER TABLE public.employee_leave_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.employee_leave_days ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.employee_leave_balance_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.finance_corrections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payroll_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.claim_batches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.instance_locks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.participant_locks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.calendar_instance_corrections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tenant_audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.dashboard_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instructor_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instructor_service_capabilities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_templates ENABLE ROW LEVEL SECURITY;
@@ -2736,6 +3382,13 @@ BEGIN
     'employee_leave_days',
     'employee_leave_balance_events',
     'finance_corrections',
+    'payroll_runs',
+    'claim_batches',
+    'instance_locks',
+    'participant_locks',
+    'calendar_instance_corrections',
+    'tenant_audit_log',
+    'dashboard_tasks',
     'instructor_profiles',
     'instructor_service_capabilities',
     'lesson_templates',
@@ -2796,6 +3449,13 @@ GRANT ALL ON TABLE public.employee_leave_entries TO app_user;
 GRANT ALL ON TABLE public.employee_leave_days TO app_user;
 GRANT ALL ON TABLE public.employee_leave_balance_events TO app_user;
 GRANT ALL ON TABLE public.finance_corrections TO app_user;
+GRANT ALL ON TABLE public.payroll_runs TO app_user;
+GRANT ALL ON TABLE public.claim_batches TO app_user;
+GRANT ALL ON TABLE public.instance_locks TO app_user;
+GRANT ALL ON TABLE public.participant_locks TO app_user;
+GRANT ALL ON TABLE public.calendar_instance_corrections TO app_user;
+GRANT ALL ON TABLE public.tenant_audit_log TO app_user;
+GRANT ALL ON TABLE public.dashboard_tasks TO app_user;
 GRANT ALL ON TABLE public.instructor_profiles TO app_user;
 GRANT ALL ON TABLE public.instructor_service_capabilities TO app_user;
 GRANT ALL ON TABLE public.lesson_templates TO app_user;

@@ -2,6 +2,14 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
+  fetchLessonMutationState,
+  isLockedState,
+  parseExpectedVersion,
+  resolveActorInstructorId,
+  respondWithLockedMutation,
+  respondWithVersionConflict,
+} from '../_shared/calendar-editing.js';
+import {
   ensureMembership,
   isAdminRole,
   readEnv,
@@ -12,6 +20,7 @@ import {
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
+import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -89,12 +98,52 @@ export default async function (context, req) {
   return await handleMarkAttendance(context, body, tenantClient, userId, isAdmin);
 }
 
-async function handleUpdateReminder(context, body, tenantClient) {
+async function handleUpdateReminder(context, body, tenantClient, userId) {
   if (!body.instance_id) {
     return respond(context, 400, { message: 'missing instance_id' });
   }
   if (!body.participant_id) {
     return respond(context, 400, { message: 'missing participant_id' });
+  }
+
+  const expectedParticipantVersion = parseExpectedVersion(
+    body.participant_version,
+    body.participantVersion,
+    body.version,
+    body.expected_version,
+    body.expectedVersion,
+  );
+
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(tenantClient, {
+    instanceId: body.instance_id,
+    participantId: body.participant_id,
+  });
+
+  if (mutationStateError) {
+    context.log?.error?.('calendar/attendance failed to load reminder mutation state', { message: mutationStateError.message });
+    return respond(context, 500, { message: 'failed_to_load_attendance_state' });
+  }
+
+  if (!mutationState.instance || !mutationState.participant) {
+    return respond(context, 404, { message: 'attendance_target_not_found' });
+  }
+
+  if (isLockedState(mutationState)) {
+    return respondWithLockedMutation(context, {
+      instanceId: body.instance_id,
+      participantId: body.participant_id,
+      instanceLocks: mutationState.instanceLocks,
+      participantLocks: mutationState.participantLocks,
+    });
+  }
+
+  if (expectedParticipantVersion !== null && mutationState.participant.version !== expectedParticipantVersion) {
+    return respondWithVersionConflict(context, {
+      resourceType: 'lesson_participant',
+      resourceId: body.participant_id,
+      expectedVersion: expectedParticipantVersion,
+      currentVersion: mutationState.participant.version,
+    });
   }
 
   const update = {};
@@ -109,15 +158,60 @@ async function handleUpdateReminder(context, body, tenantClient) {
     return respond(context, 400, { message: 'no reminder fields to update' });
   }
 
-  const { error } = await tenantClient
+  let updateQuery = tenantClient
     .from('lesson_participants')
     .update(update)
     .eq('id', body.participant_id)
     .eq('lesson_instance_id', body.instance_id);
 
+  if (expectedParticipantVersion !== null) {
+    updateQuery = updateQuery.eq('version', expectedParticipantVersion);
+  }
+
+  const { data: updatedRow, error } = await updateQuery.select('id, version').maybeSingle();
+
   if (error) {
     context.log?.error?.('calendar/attendance update-reminder failed', { message: error.message });
     return respond(context, 500, { message: 'failed_to_update_reminder' });
+  }
+
+  if (!updatedRow) {
+    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+      participantId: body.participant_id,
+      instanceId: body.instance_id,
+    });
+    if (refreshedError) {
+      context.log?.error?.('calendar/attendance failed to refresh reminder state after conflict', { message: refreshedError.message });
+      return respond(context, 500, { message: 'failed_to_update_reminder' });
+    }
+    return respondWithVersionConflict(context, {
+      resourceType: 'lesson_participant',
+      resourceId: body.participant_id,
+      expectedVersion: expectedParticipantVersion,
+      currentVersion: refreshedState.participant?.version ?? null,
+    });
+  }
+
+  try {
+    await logTenantAuditEvent(tenantClient, {
+      actorUserId: userId,
+      eventType: 'calendar.lesson_participant.reminder_updated',
+      retentionCategory: TENANT_AUDIT_RETENTION.DIAGNOSTIC,
+      resourceType: 'lesson_participant',
+      resourceId: body.participant_id,
+      beforeState: mutationState.participant,
+      afterState: {
+        ...mutationState.participant,
+        ...update,
+        version: updatedRow.version,
+      },
+      details: {
+        origin: 'api/calendar-attendance',
+        lesson_instance_id: body.instance_id,
+      },
+    });
+  } catch (auditError) {
+    context.log?.warn?.('calendar/attendance failed to write tenant audit (reminder)', { message: auditError?.message, participantId: body.participant_id });
   }
 
   return respond(context, 200, { message: 'reminder updated' });
@@ -125,7 +219,7 @@ async function handleUpdateReminder(context, body, tenantClient) {
 
 async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin) {
   if (body.action === 'update-reminder') {
-    return handleUpdateReminder(context, body, tenantClient);
+    return handleUpdateReminder(context, body, tenantClient, userId);
   }
 
   // Validate required fields
@@ -141,6 +235,19 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     ? body.participant_status.trim().toLowerCase()
     : '';
   const hasParticipantStatus = Boolean(requestedParticipantStatus);
+  const expectedInstanceVersion = parseExpectedVersion(
+    body.instance_version,
+    body.instanceVersion,
+    body.lesson_instance_version,
+    body.lessonInstanceVersion,
+  );
+  const expectedParticipantVersion = parseExpectedVersion(
+    body.participant_version,
+    body.participantVersion,
+    body.version,
+    body.expected_version,
+    body.expectedVersion,
+  );
 
   if (!hasAttendedFlag && !hasParticipantStatus) {
     return respond(context, 400, {
@@ -149,25 +256,59 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
   }
 
   // Fetch instance to verify permissions
-  const { data: instance, error: instanceError } = await tenantClient
-    .from('lesson_instances')
-    .select('id, instructor_employee_id, service_id, status')
-    .eq('id', body.instance_id)
-    .single();
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(tenantClient, {
+    instanceId: body.instance_id,
+    participantId: body.participant_id,
+  });
 
-  if (instanceError || !instance) {
+  if (mutationStateError) {
+    context.log?.error?.('calendar/attendance failed to load mutation state', { message: mutationStateError.message });
+    return respond(context, 500, { message: 'failed_to_load_attendance_state' });
+  }
+
+  const instance = mutationState.instance;
+  const participant = mutationState.participant;
+
+  if (!instance || !participant) {
     return respond(context, 404, { message: 'instance not found' });
+  }
+
+  if (isLockedState(mutationState)) {
+    return respondWithLockedMutation(context, {
+      instanceId: body.instance_id,
+      participantId: body.participant_id,
+      instanceLocks: mutationState.instanceLocks,
+      participantLocks: mutationState.participantLocks,
+    });
+  }
+
+  if (expectedInstanceVersion !== null && instance.version !== expectedInstanceVersion) {
+    return respondWithVersionConflict(context, {
+      resourceType: 'lesson_instance',
+      resourceId: body.instance_id,
+      expectedVersion: expectedInstanceVersion,
+      currentVersion: instance.version,
+    });
+  }
+
+  if (expectedParticipantVersion !== null && participant.version !== expectedParticipantVersion) {
+    return respondWithVersionConflict(context, {
+      resourceType: 'lesson_participant',
+      resourceId: body.participant_id,
+      expectedVersion: expectedParticipantVersion,
+      currentVersion: participant.version,
+    });
   }
 
   // Non-admin users can only mark attendance for their own lessons
   if (!isAdmin) {
-    const { data: instructors } = await tenantClient
-      .from('Employees')
-      .select('id')
-      .eq('user_id', userId)
-      .limit(1);
-    
-    if (!instructors || instructors.length === 0 || instructors[0].id !== instance.instructor_employee_id) {
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(tenantClient, userId);
+    if (instructorError) {
+      context.log?.error?.('calendar/attendance failed to resolve actor instructor', { message: instructorError.message, userId });
+      return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
+    }
+
+    if (!instructorId || instructorId !== instance.instructor_employee_id) {
       return respond(context, 403, { message: 'forbidden: can only mark attendance for your own lessons' });
     }
   }
@@ -205,6 +346,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     participantUpdate.participant_status = participantStatus;
     participantUpdate.attendance_confirmed_at = new Date().toISOString();
     participantUpdate.attendance_confirmed_by = userId;
+    participantUpdate.updated_by = userId;
 
     // Persist optional notes into metadata.notes
     const notes = typeof body.notes === 'string' ? body.notes.trim() : null;
@@ -222,17 +364,64 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     }
   }
 
-  const { error: updateError } = await tenantClient
+  let participantUpdateQuery = tenantClient
     .from('lesson_participants')
     .update(participantUpdate)
     .eq('id', body.participant_id)
     .eq('lesson_instance_id', body.instance_id);
+
+  if (expectedParticipantVersion !== null) {
+    participantUpdateQuery = participantUpdateQuery.eq('version', expectedParticipantVersion);
+  }
+
+  const { data: updatedParticipant, error: updateError } = await participantUpdateQuery
+    .select('id, version')
+    .maybeSingle();
 
   if (updateError) {
     context.log?.error?.('calendar/attendance failed to update participant', { 
       message: updateError.message,
     });
     return respond(context, 500, { message: 'failed_to_update_attendance' });
+  }
+
+  if (!updatedParticipant) {
+    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+      instanceId: body.instance_id,
+      participantId: body.participant_id,
+    });
+    if (refreshedError) {
+      context.log?.error?.('calendar/attendance failed to refresh participant after conflict', { message: refreshedError.message });
+      return respond(context, 500, { message: 'failed_to_update_attendance' });
+    }
+    return respondWithVersionConflict(context, {
+      resourceType: 'lesson_participant',
+      resourceId: body.participant_id,
+      expectedVersion: expectedParticipantVersion,
+      currentVersion: refreshedState.participant?.version ?? null,
+    });
+  }
+
+  try {
+    await logTenantAuditEvent(tenantClient, {
+      actorUserId: userId,
+      eventType: 'calendar.lesson_participant.attendance_updated',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'lesson_participant',
+      resourceId: body.participant_id,
+      beforeState: participant,
+      afterState: {
+        ...participant,
+        ...participantUpdate,
+        version: updatedParticipant.version,
+      },
+      details: {
+        origin: 'api/calendar-attendance',
+        lesson_instance_id: body.instance_id,
+      },
+    });
+  } catch (auditError) {
+    context.log?.warn?.('calendar/attendance failed to write tenant audit (attendance)', { message: auditError?.message, participantId: body.participant_id });
   }
 
   if (Object.prototype.hasOwnProperty.call(participantUpdate, 'participant_status')) {
@@ -253,13 +442,20 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       ));
 
       if (allMarked) {
-        await tenantClient
+        let instanceUpdateQuery = tenantClient
           .from('lesson_instances')
           .update({
             status: 'completed',
             updated_at: new Date().toISOString(),
+            updated_by: userId,
           })
           .eq('id', body.instance_id);
+
+        if (expectedInstanceVersion !== null) {
+          instanceUpdateQuery = instanceUpdateQuery.eq('version', expectedInstanceVersion);
+        }
+
+        await instanceUpdateQuery;
       }
     }
   }

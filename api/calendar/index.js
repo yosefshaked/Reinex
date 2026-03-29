@@ -3,6 +3,14 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import {
+  fetchLessonMutationState,
+  isLockedState,
+  parseExpectedVersion,
+  resolveActorInstructorId,
+  respondWithLockedMutation,
+  respondWithVersionConflict,
+} from '../_shared/calendar-editing.js';
+import {
   ensureMembership,
   isAdminOrOffice,
   normalizeString,
@@ -14,6 +22,7 @@ import {
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { assertNoLeaveForLesson, syncInstructorAttendanceFromLessons, syncLessonInstructorEarnings, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
+import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 const INSTANCE_STATUSES = new Set(['scheduled', 'completed', 'cancelled_student', 'cancelled_clinic', 'no_show']);
@@ -167,6 +176,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
       status,
       documentation_status,
       closed_reason,
+      version,
       created_source,
       metadata,
       created_at,
@@ -175,6 +185,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
         id,
         student_id,
         participant_status,
+        version,
         price_charged,
         pricing_breakdown,
         commitment_id,
@@ -223,24 +234,19 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
 
   // Non-admin/office users: filter by their instructor record
   if (!canManageAll) {
-    // Find instructor record for this user
-    const { data: instructors, error: instructorError } = await tenantClient
-      .from('Employees')
-      .select('id')
-      .eq('user_id', userId)
-      .limit(1);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(tenantClient, userId);
 
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to find instructor', { message: instructorError.message });
       return respond(context, 500, { message: 'failed_to_load_instructor' });
     }
 
-    if (!instructors || instructors.length === 0) {
+    if (!instructorId) {
       // User is not an instructor, return empty array
       return respond(context, 200, []);
     }
 
-    instancesQuery = instancesQuery.eq('instructor_employee_id', instructors[0].id);
+    instancesQuery = instancesQuery.eq('instructor_employee_id', instructorId);
   }
 
   const { data: instances, error } = await instancesQuery;
@@ -320,6 +326,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
           id: p.id,
           student_id: p.student_id,
           participant_status: p.participant_status,
+          version: p.version ?? 1,
           price_charged: p.price_charged,
           pricing_breakdown: p.pricing_breakdown,
           commitment_id: p.commitment_id,
@@ -369,6 +376,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
       status: instance.status,
       documentation_status: instance.documentation_status,
       closed_reason: instance.closed_reason || null,
+      version: instance.version ?? 1,
       created_source: instance.created_source,
       metadata: instance.metadata,
       created_at: instance.created_at,
@@ -422,13 +430,13 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
 
   // Non-admin users can only create lessons for themselves
   if (!isAdmin) {
-    const { data: instructors } = await tenantClient
-      .from('Employees')
-      .select('id')
-      .eq('user_id', userId)
-      .limit(1);
-    
-    if (!instructors || instructors.length === 0 || instructors[0].id !== body.instructor_employee_id) {
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(tenantClient, userId);
+    if (instructorError) {
+      context.log?.error?.('calendar/instances failed to resolve actor instructor', { message: instructorError.message, userId });
+      return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
+    }
+
+    if (!instructorId || instructorId !== body.instructor_employee_id) {
       return respond(context, 403, { message: 'forbidden: can only create lessons for yourself' });
     }
   }
@@ -477,6 +485,8 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     documentation_status: body.documentation_status || 'undocumented',
     created_source: body.created_source || 'manual',
     metadata: body.metadata || {},
+    created_by: userId,
+    updated_by: userId,
   };
 
   const { data: instance, error: instanceError } = await tenantClient
@@ -559,6 +569,26 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
   }
 
   try {
+    await logTenantAuditEvent(tenantClient, {
+      actorUserId: userId,
+      eventType: 'calendar.instance.created',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'lesson_instance',
+      resourceId: instance.id,
+      afterState: instance,
+      details: {
+        origin: 'api/calendar',
+        student_ids: body.student_ids,
+      },
+    });
+  } catch (auditError) {
+    context.log?.warn?.('calendar/instances failed to write tenant audit event (create)', {
+      message: auditError?.message,
+      instanceId: instance?.id,
+    });
+  }
+
+  try {
     await syncLessonBillingArtifacts(tenantClient, instance.id, userId);
     await syncLessonInstructorEarnings(tenantClient, instance.id, userId);
   } catch (syncError) {
@@ -577,26 +607,48 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
     return respond(context, 400, { message: 'missing instance id' });
   }
 
-  // Fetch existing instance
-  const { data: existingInstance, error: fetchError } = await tenantClient
-    .from('lesson_instances')
-    .select('id, instructor_employee_id, service_id, datetime_start, status, closed_reason')
-    .eq('id', body.id)
-    .single();
+  const expectedVersion = parseExpectedVersion(body.version, body.expected_version, body.expectedVersion);
 
-  if (fetchError || !existingInstance) {
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(tenantClient, {
+    instanceId: body.id,
+  });
+
+  if (mutationStateError) {
+    context.log?.error?.('calendar/instances failed to load mutation state', { message: mutationStateError.message, instanceId: body.id });
+    return respond(context, 500, { message: 'failed_to_load_instance' });
+  }
+
+  const existingInstance = mutationState.instance;
+
+  if (!existingInstance) {
     return respond(context, 404, { message: 'instance not found' });
+  }
+
+  if (isLockedState(mutationState)) {
+    return respondWithLockedMutation(context, {
+      instanceId: body.id,
+      instanceLocks: mutationState.instanceLocks,
+    });
+  }
+
+  if (expectedVersion !== null && existingInstance.version !== expectedVersion) {
+    return respondWithVersionConflict(context, {
+      resourceType: 'lesson_instance',
+      resourceId: body.id,
+      expectedVersion,
+      currentVersion: existingInstance.version,
+    });
   }
 
   // Instructors (non-admin/office) can only update their own lessons
   if (!canManageAll) {
-    const { data: instructors } = await tenantClient
-      .from('Employees')
-      .select('id')
-      .eq('user_id', userId)
-      .limit(1);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(tenantClient, userId);
+    if (instructorError) {
+      context.log?.error?.('calendar/instances failed to resolve actor instructor', { message: instructorError.message, userId });
+      return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
+    }
 
-    if (!instructors || instructors.length === 0 || instructors[0].id !== existingInstance.instructor_employee_id) {
+    if (!instructorId || instructorId !== existingInstance.instructor_employee_id) {
       return respond(context, 403, { message: 'forbidden: can only update your own lessons' });
     }
 
@@ -678,6 +730,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   if (body.closed_reason !== undefined) updateData.closed_reason = body.closed_reason;
   if (body.documentation_status !== undefined) updateData.documentation_status = body.documentation_status;
   if (body.metadata !== undefined) updateData.metadata = body.metadata;
+  updateData.updated_by = userId;
   
   updateData.updated_at = new Date().toISOString();
 
@@ -695,10 +748,18 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   // financial decision trail yet. That should be modeled in the future billing layer.
 
   // Update instance
-  const { error: updateError } = await tenantClient
+  let updateQuery = tenantClient
     .from('lesson_instances')
     .update(updateData)
     .eq('id', body.id);
+
+  if (expectedVersion !== null) {
+    updateQuery = updateQuery.eq('version', expectedVersion);
+  }
+
+  const { data: updatedRow, error: updateError } = await updateQuery
+    .select('id, version')
+    .maybeSingle();
 
   if (updateError) {
     context.log?.error?.('calendar/instances failed to update instance', { 
@@ -706,6 +767,22 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
       code: updateError.code,
     });
     return respond(context, 500, { message: 'failed_to_update_instance' });
+  }
+
+  if (!updatedRow) {
+    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+      instanceId: body.id,
+    });
+    if (refreshedError) {
+      context.log?.error?.('calendar/instances failed to refresh instance after conflict', { message: refreshedError.message, instanceId: body.id });
+      return respond(context, 500, { message: 'failed_to_update_instance' });
+    }
+    return respondWithVersionConflict(context, {
+      resourceType: 'lesson_instance',
+      resourceId: body.id,
+      expectedVersion,
+      currentVersion: refreshedState.instance?.version ?? null,
+    });
   }
 
   const normalizedStatus = typeof updateData.status === 'string' ? updateData.status.trim().toLowerCase() : '';
@@ -716,7 +793,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   if (normalizedStatus === 'completed') {
     const { error: promoteError } = await tenantClient
       .from('lesson_participants')
-      .update({ participant_status: 'attended' })
+      .update({ participant_status: 'attended', updated_by: userId })
       .eq('lesson_instance_id', body.id)
       .eq('participant_status', 'scheduled');
 
@@ -755,6 +832,31 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
     });
   } catch (auditError) {
     context.log?.error?.('calendar/instances failed to write audit event (update)', {
+      message: auditError?.message,
+      instanceId: body?.id,
+    });
+  }
+
+  try {
+    await logTenantAuditEvent(tenantClient, {
+      actorUserId: userId,
+      eventType: 'calendar.instance.updated',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'lesson_instance',
+      resourceId: body.id,
+      beforeState: existingInstance,
+      afterState: {
+        ...existingInstance,
+        ...updateData,
+        version: updatedRow?.version ?? existingInstance.version,
+      },
+      details: {
+        origin: 'api/calendar',
+        updated_fields: Object.keys(updateData),
+      },
+    });
+  } catch (auditError) {
+    context.log?.warn?.('calendar/instances failed to write tenant audit event (update)', {
       message: auditError?.message,
       instanceId: body?.id,
     });

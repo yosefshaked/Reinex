@@ -2,8 +2,17 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import {
-  UUID_PATTERN,
+  fetchLessonMutationState,
+  isLockedState,
+  normalizeUuid,
+  parseExpectedVersion,
+  resolveActorInstructorId,
+  respondWithLockedMutation,
+  respondWithVersionConflict,
+} from '../_shared/calendar-editing.js';
+import {
   ensureMembership,
   isAdminRole,
   normalizeString,
@@ -34,14 +43,6 @@ function buildUtcRange(dateString) {
   };
 }
 
-function normalizeUuid(value) {
-  const normalized = normalizeString(value);
-  if (!normalized) {
-    return '';
-  }
-  return UUID_PATTERN.test(normalized) ? normalized : '';
-}
-
 function getLessonInstanceId(context, req, body) {
   const candidate =
     normalizeString(context?.bindingData?.lessonInstanceId) ||
@@ -49,11 +50,7 @@ function getLessonInstanceId(context, req, body) {
     normalizeString(body?.lessonInstanceId) ||
     normalizeString(body?.id);
 
-  if (candidate && UUID_PATTERN.test(candidate)) {
-    return candidate;
-  }
-
-  return '';
+  return normalizeUuid(candidate);
 }
 
 function buildInstanceSelect(options = {}) {
@@ -76,6 +73,9 @@ function buildInstanceSelect(options = {}) {
     'created_source',
     'created_at',
     'updated_at',
+    'version',
+    'created_by',
+    'updated_by',
     'metadata',
     'instructor:Employees(id, first_name, middle_name, last_name, name)',
     'service:Services(id, name, color, duration_minutes)',
@@ -140,10 +140,20 @@ export default async function lessonInstances(context, req) {
   }
 
   const isAdmin = isAdminRole(role);
+  let actorInstructorId = '';
 
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
   if (tenantError) {
     return respond(context, tenantError.status, tenantError.body);
+  }
+
+  if (!isAdmin) {
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(tenantClient, userId);
+    if (instructorError) {
+      context.log?.error?.('lesson-instances failed to resolve actor instructor', { message: instructorError.message, userId });
+      return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
+    }
+    actorInstructorId = instructorId;
   }
 
   if (method === 'GET') {
@@ -172,7 +182,10 @@ export default async function lessonInstances(context, req) {
       .order('datetime_start', { ascending: true });
 
     if (!isAdmin) {
-      builder = builder.eq('instructor_employee_id', userId);
+      if (!actorInstructorId) {
+        return respond(context, 200, []);
+      }
+      builder = builder.eq('instructor_employee_id', actorInstructorId);
     } else if (requestedInstructorId) {
       builder = builder.eq('instructor_employee_id', requestedInstructorId);
     }
@@ -240,6 +253,8 @@ export default async function lessonInstances(context, req) {
         status: 'scheduled',
         documentation_status: 'undocumented',
         created_source: 'one_time',
+        created_by: userId,
+        updated_by: userId,
         updated_at: new Date().toISOString(),
       })
       .select('id')
@@ -276,6 +291,23 @@ export default async function lessonInstances(context, req) {
       return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
     }
 
+    try {
+      await logTenantAuditEvent(tenantClient, {
+        actorUserId: userId,
+        eventType: 'calendar.lesson_instance.created',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'lesson_instance',
+        resourceId: instanceRow.id,
+        afterState: data,
+        details: {
+          origin: 'api/lesson-instances',
+          action: 'create',
+        },
+      });
+    } catch (auditError) {
+      context.log?.warn?.('lesson-instances failed to write tenant audit (create)', { message: auditError?.message, lessonInstanceId: instanceRow.id });
+    }
+
     return respond(context, 200, data);
   }
 
@@ -287,6 +319,7 @@ export default async function lessonInstances(context, req) {
 
     const nextStatus = normalizeString(body?.status);
     const nextDocumentationStatus = normalizeString(body?.documentation_status || body?.documentationStatus);
+    const expectedVersion = parseExpectedVersion(body?.version, body?.expected_version, body?.expectedVersion);
 
     if (!nextStatus && !nextDocumentationStatus) {
       return respond(context, 400, { message: 'no_updates_provided' });
@@ -295,7 +328,36 @@ export default async function lessonInstances(context, req) {
     const allowedStatus = new Set(['scheduled', 'completed', 'cancelled_student', 'cancelled_clinic', 'no_show']);
     const allowedDocumentation = new Set(['undocumented', 'documented']);
 
-    const updates = { updated_at: new Date().toISOString() };
+    const { error: stateError, result: mutationState } = await fetchLessonMutationState(tenantClient, {
+      instanceId: lessonInstanceId,
+    });
+
+    if (stateError) {
+      context.log?.error?.('lesson-instances failed to load mutation state', { message: stateError.message, lessonInstanceId });
+      return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
+    }
+
+    if (!mutationState.instance) {
+      return respond(context, 404, { message: 'lesson_instance_not_found' });
+    }
+
+    if (isLockedState(mutationState)) {
+      return respondWithLockedMutation(context, {
+        instanceId: lessonInstanceId,
+        instanceLocks: mutationState.instanceLocks,
+      });
+    }
+
+    if (expectedVersion !== null && mutationState.instance.version !== expectedVersion) {
+      return respondWithVersionConflict(context, {
+        resourceType: 'lesson_instance',
+        resourceId: lessonInstanceId,
+        expectedVersion,
+        currentVersion: mutationState.instance.version,
+      });
+    }
+
+    const updates = { updated_at: new Date().toISOString(), updated_by: userId };
 
     if (nextStatus) {
       if (!allowedStatus.has(nextStatus)) {
@@ -313,22 +375,7 @@ export default async function lessonInstances(context, req) {
 
     // Non-admin users can only update their own lesson instances
     if (!isAdmin) {
-      const { data: existing, error: existingError } = await tenantClient
-        .from('lesson_instances')
-        .select('id, instructor_employee_id')
-        .eq('id', lessonInstanceId)
-        .maybeSingle();
-
-      if (existingError) {
-        context.log?.error?.('lesson-instances failed to load instance for permission check', { message: existingError.message });
-        return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
-      }
-
-      if (!existing) {
-        return respond(context, 404, { message: 'lesson_instance_not_found' });
-      }
-
-      if (existing.instructor_employee_id !== userId) {
+      if (!actorInstructorId || mutationState.instance.instructor_employee_id !== actorInstructorId) {
         return respond(context, 403, { message: 'forbidden' });
       }
     }
@@ -357,14 +404,38 @@ export default async function lessonInstances(context, req) {
       }
     }
 
-    const { error: updateError } = await tenantClient
+    let updateBuilder = tenantClient
       .from('lesson_instances')
       .update(updates)
       .eq('id', lessonInstanceId);
 
+    if (expectedVersion !== null) {
+      updateBuilder = updateBuilder.eq('version', expectedVersion);
+    }
+
+    const { data: updatedRows, error: updateError } = await updateBuilder
+      .select('id, version')
+      .maybeSingle();
+
     if (updateError) {
       context.log?.error?.('lesson-instances failed to update instance', { message: updateError.message });
       return respond(context, 500, { message: 'failed_to_update_lesson_instance' });
+    }
+
+    if (!updatedRows) {
+      const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+        instanceId: lessonInstanceId,
+      });
+      if (refreshedError) {
+        context.log?.error?.('lesson-instances failed to refresh instance after conflict', { message: refreshedError.message, lessonInstanceId });
+        return respond(context, 500, { message: 'failed_to_update_lesson_instance' });
+      }
+      return respondWithVersionConflict(context, {
+        resourceType: 'lesson_instance',
+        resourceId: lessonInstanceId,
+        expectedVersion,
+        currentVersion: refreshedState.instance?.version ?? null,
+      });
     }
 
     // Sync financial artifacts and instructor attendance when status changes
@@ -391,6 +462,24 @@ export default async function lessonInstances(context, req) {
     if (error) {
       context.log?.error?.('lesson-instances failed to load updated instance', { message: error.message });
       return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
+    }
+
+    try {
+      await logTenantAuditEvent(tenantClient, {
+        actorUserId: userId,
+        eventType: 'calendar.lesson_instance.updated',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'lesson_instance',
+        resourceId: lessonInstanceId,
+        beforeState: mutationState.instance,
+        afterState: data,
+        details: {
+          origin: 'api/lesson-instances',
+          updated_fields: Object.keys(updates),
+        },
+      });
+    } catch (auditError) {
+      context.log?.warn?.('lesson-instances failed to write tenant audit (update)', { message: auditError?.message, lessonInstanceId });
     }
 
     return respond(context, 200, data);
