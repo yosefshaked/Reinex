@@ -119,17 +119,17 @@ async function loadCommitmentsMap(tenantClient, commitmentIds = []) {
     throw error;
   }
 
-  const { data: entries, error: entriesError } = await tenantClient
-    .from('consumption_entries')
-    .select('id, commitment_id, amount_charged, source_type, metadata')
+  const { data: ledgerRows, error: ledgerError } = await tenantClient
+    .from('ledger_transactions')
+    .select('id, commitment_id, transaction_type, usage_type, amount, source_ref, metadata')
     .in('commitment_id', ids);
 
-  if (entriesError && entriesError.code !== '42P01') {
-    throw entriesError;
+  if (ledgerError && ledgerError.code !== '42P01') {
+    throw ledgerError;
   }
 
   const entriesByCommitment = new Map();
-  for (const entry of entries || []) {
+  for (const entry of ledgerRows || []) {
     if (!entriesByCommitment.has(entry.commitment_id)) {
       entriesByCommitment.set(entry.commitment_id, []);
     }
@@ -283,6 +283,15 @@ function buildBillingDecision({ participant, instance, commitment, policies, syn
     chargeAmount = coverage.student_charge_amount;
   }
 
+  let usageType = 'standard';
+  if (coverage?.metadata?.coverage_type === 'package_item') {
+    const coveredServiceId = normalizeString(coverage?.covered_service_id);
+    const lessonServiceId = normalizeString(instance?.service_id);
+    if (coveredServiceId && lessonServiceId && coveredServiceId !== lessonServiceId) {
+      usageType = 'cross_service';
+    }
+  }
+
   return {
     shouldCharge: chargeAmount != null,
     chargeAmount,
@@ -290,6 +299,7 @@ function buildBillingDecision({ participant, instance, commitment, policies, syn
     billingStatus,
     billingReason,
     requiresAttention,
+    usageType,
     pricingBreakdown: {
       version: BILLING_BREAKDOWN_VERSION,
       synced_at: syncedAt,
@@ -310,6 +320,7 @@ function buildBillingDecision({ participant, instance, commitment, policies, syn
       billing_reason: billingReason,
       policy_allowed: policyAllowsCharge,
       requires_attention: requiresAttention,
+      usage_type: usageType,
     },
   };
 }
@@ -453,9 +464,8 @@ async function fetchLessonBillingHistory(tenantClient, {
 
 async function fetchBillingEntries(tenantClient, { studentId = '', commitmentBalanceMap = new Map() } = {}) {
   let query = tenantClient
-    .from('consumption_entries')
-    .select('id, lesson_participant_id, student_id, source_type, commitment_id, transfer_ref, amount_charged, effective_date, notes, created_at, metadata')
-    .order('effective_date', { ascending: false, nullsFirst: false })
+    .from('ledger_transactions')
+    .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata')
     .order('created_at', { ascending: false });
 
   if (studentId) {
@@ -511,6 +521,10 @@ async function fetchBillingEntries(tenantClient, { studentId = '', commitmentBal
 
     return {
       ...entry,
+      effective_date: entry.metadata?.effective_date || null,
+      transfer_ref: entry.metadata?.transfer_ref || null,
+      source_type: entry.metadata?.original_source_type || (entry.transaction_type === 'CREDIT' ? 'credit' : entry.usage_type),
+      amount_charged: entry.transaction_type === 'CREDIT' ? -entry.amount : entry.amount,
       student: studentMap.get(entry.student_id) || null,
       commitment,
     };
@@ -521,16 +535,17 @@ function buildTransferGroups({ commitments = [], entries = [], studentId = '' } 
   const groups = new Map();
 
   for (const entry of entries) {
-    if (entry?.source_type !== 'transfer' || !entry.transfer_ref) {
+    const transferRef = entry?.transfer_ref || entry?.metadata?.transfer_ref;
+    if (!transferRef) {
       continue;
     }
 
-    groups.set(entry.transfer_ref, {
-      transfer_ref: entry.transfer_ref,
+    groups.set(transferRef, {
+      transfer_ref: transferRef,
       source_entry: entry,
       target_commitments: [],
-      created_at: entry.effective_date || entry.created_at || null,
-      amount: roundCurrency(coerceNumber(entry.amount_charged, 0)),
+      created_at: entry.effective_date || entry.metadata?.effective_date || entry.created_at || null,
+      amount: roundCurrency(coerceNumber(entry.amount_charged ?? entry.amount, 0)),
     });
   }
 
@@ -573,7 +588,7 @@ function buildSnapshotSummary({ commitments = [], billingQueue = [], lessonHisto
   const activeCommitments = commitments.filter((row) => row.is_active !== false);
   const lowBalanceCount = commitments.filter((row) => row.attention?.low_balance).length;
   const expiringSoonCount = commitments.filter((row) => row.attention?.expiring_soon).length;
-  const manualEntryCount = entries.filter((row) => row.source_type === 'adjustment').length;
+  const manualEntryCount = entries.filter((row) => row.usage_type === 'manual_adjustment' || row.usage_type === 'manual_topup' || row.source_type === 'adjustment').length;
   const studentChargedAmount = roundCurrency(lessonHistory.reduce(
     (sum, row) => sum + coerceNumber(row?.pricing_breakdown?.student_charge_amount ?? row?.resolved_charge_amount ?? row?.price_charged, 0),
     0,
@@ -625,10 +640,10 @@ async function loadParticipantWithInstance(tenantClient, lessonParticipantId) {
   };
 }
 
-async function upsertLessonConsumptionEntry(tenantClient, payload) {
+async function upsertLessonLedgerEntry(tenantClient, payload) {
   const { data, error } = await tenantClient
-    .from('consumption_entries')
-    .upsert(payload, { onConflict: 'lesson_participant_id,source_type' })
+    .from('ledger_transactions')
+    .upsert(payload, { onConflict: 'source_ref,usage_type' })
     .select('id')
     .maybeSingle();
 
@@ -639,12 +654,12 @@ async function upsertLessonConsumptionEntry(tenantClient, payload) {
   return data?.id || null;
 }
 
-async function deleteLessonConsumptionEntry(tenantClient, lessonParticipantId) {
+async function deleteLessonLedgerEntry(tenantClient, lessonParticipantId) {
   const { error } = await tenantClient
-    .from('consumption_entries')
+    .from('ledger_transactions')
     .delete()
-    .eq('lesson_participant_id', lessonParticipantId)
-    .eq('source_type', 'lesson');
+    .eq('source_ref', lessonParticipantId)
+    .in('usage_type', ['standard', 'double', 'cross_service']);
 
   if (error && error.code !== '42P01') {
     throw error;
@@ -750,18 +765,19 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
 
     let lessonEntryId = null;
     if (decision.shouldCharge) {
-      lessonEntryId = await upsertLessonConsumptionEntry(tenantClient, {
-        lesson_participant_id: participant.id,
+      lessonEntryId = await upsertLessonLedgerEntry(tenantClient, {
         student_id: participant.student_id,
-        source_type: 'lesson',
         commitment_id: commitment?.id || null,
-        amount_charged: decision.chargeAmount,
-        effective_date: toDateKey(instance.datetime_start),
+        transaction_type: 'DEBIT',
+        usage_type: decision.usageType || 'standard',
+        amount: decision.chargeAmount,
+        source_ref: participant.id,
         notes: null,
         metadata: {
           participant_status: normalizeString(participant.participant_status).toLowerCase(),
           lesson_instance_id: lessonInstanceId,
           lesson_service_id: instance.service_id,
+          effective_date: toDateKey(instance.datetime_start),
           billing_status: decision.billingStatus,
           billing_reason: decision.billingReason,
           covered_service_id: decision.coverage?.covered_service_id || null,
@@ -771,7 +787,7 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
         },
       });
     } else {
-      await deleteLessonConsumptionEntry(tenantClient, participant.id);
+      await deleteLessonLedgerEntry(tenantClient, participant.id);
     }
 
     const pricingBreakdown = {
@@ -987,17 +1003,19 @@ export async function createCommitmentTransfer(tenantClient, {
     throw targetCommitmentError;
   }
 
-  const transferEntryPayload = {
-    lesson_participant_id: null,
+  const sourceDebitPayload = {
     student_id: sourceCommitment.student_id,
-    source_type: 'transfer',
     commitment_id: sourceCommitment.id,
-    transfer_ref: transferRef,
-    amount_charged: transferAmount,
-    effective_date: toDateKey(new Date()),
+    transaction_type: 'DEBIT',
+    usage_type: 'manual_adjustment',
+    amount: transferAmount,
+    source_ref: null,
     notes: trimmedNotes,
     created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     metadata: {
+      transfer_ref: transferRef,
+      effective_date: toDateKey(new Date()),
       target_commitment_id: targetCommitment.id,
       target_student_id: targetCommitment.student_id,
       created_by: actorUserId || null,
@@ -1005,9 +1023,9 @@ export async function createCommitmentTransfer(tenantClient, {
   };
 
   const { data: sourceEntry, error: sourceEntryError } = await tenantClient
-    .from('consumption_entries')
-    .insert(transferEntryPayload)
-    .select('id, lesson_participant_id, student_id, source_type, commitment_id, transfer_ref, amount_charged, effective_date, notes, created_at, metadata')
+    .from('ledger_transactions')
+    .insert(sourceDebitPayload)
+    .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, metadata')
     .single();
 
   if (sourceEntryError) {
@@ -1018,9 +1036,41 @@ export async function createCommitmentTransfer(tenantClient, {
     throw sourceEntryError;
   }
 
+  const targetCreditPayload = {
+    student_id: targetCommitment.student_id,
+    commitment_id: targetCommitment.id,
+    transaction_type: 'CREDIT',
+    usage_type: 'transfer_received',
+    amount: transferAmount,
+    source_ref: null,
+    notes: trimmedNotes,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    metadata: {
+      transfer_ref: transferRef,
+      effective_date: toDateKey(new Date()),
+      source_commitment_id: sourceCommitment.id,
+      source_student_id: sourceCommitment.student_id,
+      created_by: actorUserId || null,
+    },
+  };
+
+  const { error: targetCreditError } = await tenantClient
+    .from('ledger_transactions')
+    .insert(targetCreditPayload);
+
+  if (targetCreditError) {
+    throw targetCreditError;
+  }
+
   return {
     transfer_ref: transferRef,
-    source_entry: sourceEntry,
+    source_entry: {
+      ...sourceEntry,
+      transfer_ref: transferRef,
+      amount_charged: transferAmount,
+      effective_date: toDateKey(new Date()),
+    },
     target_commitment: targetCommitment,
   };
 }
@@ -1096,8 +1146,10 @@ export async function fetchBillingSnapshot(tenantClient, {
       : Promise.resolve([]),
   ]);
 
+  const LESSON_DEBIT_TYPES = new Set(['standard', 'double', 'cross_service']);
+
   const filteredEntries = allEntries.filter((entry) => {
-    const dateKey = toDateKey(entry.effective_date || entry.created_at);
+    const dateKey = toDateKey(entry.effective_date || entry.metadata?.effective_date || entry.created_at);
     if (normalizedStartDate && dateKey < normalizedStartDate) {
       return false;
     }
@@ -1108,7 +1160,7 @@ export async function fetchBillingSnapshot(tenantClient, {
   });
 
   const billingQueue = lessonHistory.filter((row) => ACTIONABLE_BILLING_STATUSES.has(row.billing_status));
-  const manualEntries = filteredEntries.filter((row) => row.source_type !== 'lesson');
+  const manualEntries = filteredEntries.filter((row) => !LESSON_DEBIT_TYPES.has(row.usage_type));
   const transfers = buildTransferGroups({
     commitments,
     entries: manualEntries,

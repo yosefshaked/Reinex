@@ -123,8 +123,25 @@ function getBillingReasonLabel(reason) {
   }
 }
 
-function getEntryTypeLabel(sourceType) {
-  switch (sourceType) {
+function getEntryTypeLabel(entry) {
+  const usageType = entry?.usage_type || entry?.source_type || '';
+  switch (usageType) {
+    case 'manual_topup':
+      return 'הוספת יתרה';
+    case 'commitment_creation':
+      return 'יצירת התחייבות';
+    case 'transfer_received':
+      return 'העברה נכנסת';
+    case 'hmo_authorization_added':
+      return 'אישור גורם מממן';
+    case 'standard':
+      return 'חיוב שיעור';
+    case 'double':
+      return 'חיוב כפול';
+    case 'cross_service':
+      return 'חיוב שירות חוצה';
+    case 'manual_adjustment':
+      return 'התאמה ידנית';
     case 'adjustment':
       return 'התאמה';
     case 'transfer':
@@ -132,8 +149,18 @@ function getEntryTypeLabel(sourceType) {
     case 'lesson':
       return 'שיעור';
     default:
-      return sourceType || 'תנועה';
+      return usageType || 'תנועה';
   }
+}
+
+function getTransactionTypeBadge(entry) {
+  if (entry?.transaction_type === 'CREDIT') {
+    return { label: 'זיכוי', className: 'border-emerald-200 bg-emerald-50 text-emerald-900' };
+  }
+  if (entry?.transaction_type === 'DEBIT') {
+    return { label: 'חיוב', className: 'border-red-200 bg-red-50 text-red-900' };
+  }
+  return { label: '—', className: '' };
 }
 
 function getParticipantStatusLabel(status) {
@@ -184,10 +211,10 @@ function exportBillingCsv({ student, commitments, lessonHistory, entries, transf
     ...entries.map((entry) => ([
       'entry',
       entry.student?.full_name || student?.full_name || '',
-      entry.effective_date || entry.created_at || '',
+      entry.effective_date || entry.metadata?.effective_date || entry.created_at || '',
       entry.commitment?.service?.service_name || '',
-      getEntryTypeLabel(entry.source_type),
-      entry.amount_charged ?? '',
+      `${entry.transaction_type || ''} ${getEntryTypeLabel(entry)}`,
+      entry.transaction_type === 'CREDIT' ? entry.amount ?? '' : -(entry.amount ?? entry.amount_charged ?? 0),
       entry.commitment?.remaining_amount ?? '',
       entry.notes || '',
     ])),
@@ -550,16 +577,17 @@ export default function StudentBillingWorkspace({
   }
 
   function startEditingEntry(entry) {
-    if (entry.source_type !== 'adjustment') return;
+    const isManual = entry.usage_type === 'manual_adjustment' || entry.usage_type === 'manual_topup' || entry.source_type === 'adjustment';
+    if (!isManual) return;
     resetCommitmentForm();
     setSelectedHmoAuthorizationId('');
     setEntryForm({
       id: entry.id,
-      sourceType: entry.source_type || 'adjustment',
+      sourceType: 'adjustment',
       commitmentId: entry.commitment_id || '',
-      direction: Number(entry.amount_charged || 0) < 0 ? 'debit' : 'credit',
-      amountCharged: Math.abs(Number(entry.amount_charged || 0)) || '',
-      effectiveDate: entry.effective_date || '',
+      direction: entry.transaction_type === 'CREDIT' ? 'credit' : 'debit',
+      amountCharged: Number(entry.amount || Math.abs(entry.amount_charged) || 0) || '',
+      effectiveDate: entry.effective_date || entry.metadata?.effective_date || '',
       notes: entry.notes || '',
     });
   }
@@ -579,9 +607,10 @@ export default function StudentBillingWorkspace({
           id: entryForm.id || undefined,
           org_id: activeOrgId,
           student_id: studentId,
-          source_type: entryForm.sourceType,
+          direction: entryForm.direction,
+          usage_type: entryForm.direction === 'credit' ? 'manual_topup' : 'manual_adjustment',
           commitment_id: entryForm.commitmentId || null,
-          amount_charged: (entryForm.direction === 'debit' ? -1 : 1) * Math.abs(Number(entryForm.amountCharged)),
+          amount: Math.abs(Number(entryForm.amountCharged)),
           effective_date: entryForm.effectiveDate || null,
           notes: entryForm.notes || null,
         },
@@ -1392,35 +1421,42 @@ export default function StudentBillingWorkspace({
           <div className="h-1.5 bg-purple-500" />
           <div className="p-5 space-y-4">
             <div>
-              <h3 className="text-lg font-semibold text-zinc-800">היסטוריית תנועות</h3>
-              <p className="text-sm text-muted-foreground">התאמות ידניות והעברות שכבר נרשמו.</p>
+              <h3 className="text-lg font-semibold text-zinc-800">יומן פנקס כספי</h3>
+              <p className="text-sm text-muted-foreground">כל התנועות הכספיות: זיכויים (ירוק), חיובים (אדום), התאמות והעברות.</p>
             </div>
 
             <div className="space-y-3">
               {entries.map((entry) => {
-                const linkedTransfer = entry.transfer_ref ? transferMap.get(entry.transfer_ref) || null : null;
+                const transferRef = entry.transfer_ref || entry.metadata?.transfer_ref;
+                const linkedTransfer = transferRef ? transferMap.get(transferRef) || null : null;
+                const txBadge = getTransactionTypeBadge(entry);
+                const isManualEntry = entry.usage_type === 'manual_adjustment' || entry.usage_type === 'manual_topup';
+                const displayAmount = entry.transaction_type === 'CREDIT'
+                  ? `+${formatCurrency(entry.amount ?? Math.abs(entry.amount_charged))}`
+                  : `-${formatCurrency(entry.amount ?? Math.abs(entry.amount_charged))}`;
                 return (
                   <div key={entry.id} className="rounded-xl border border-border bg-slate-50/70 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <div className="text-sm font-semibold text-zinc-900">
-                          {getEntryTypeLabel(entry.source_type)} • {formatCurrency(entry.amount_charged)}
+                          {getEntryTypeLabel(entry)} • <span className={entry.transaction_type === 'CREDIT' ? 'text-emerald-700' : 'text-red-700'}>{displayAmount}</span>
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
-                          {formatDate(entry.effective_date || entry.created_at)}
+                          {formatDate(entry.effective_date || entry.metadata?.effective_date || entry.created_at)}
                           {entry.commitment ? ` • ${getCommitmentLabel(entry.commitment, services)}` : ''}
                           {linkedTransfer?.target_commitments?.length ? ` • יעד: ${linkedTransfer.target_commitments.map((commitment) => getServiceName(services, commitment.service_id)).join(', ')}` : ''}
                           {entry.notes ? ` • ${entry.notes}` : ''}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
+                        <Badge variant="outline" className={txBadge.className}>{txBadge.label}</Badge>
                         <Badge variant="outline">{entry.commitment_id ? 'משויך להתחייבות' : 'ללא התחייבות'}</Badge>
-                        {entry.source_type === 'adjustment' && canMutateBilling ? (
+                        {isManualEntry && canMutateBilling ? (
                           <Button type="button" size="sm" variant="outline" onClick={() => startEditingEntry(entry)} disabled={saving}>
                             ערוך
                           </Button>
                         ) : null}
-                        {entry.source_type === 'adjustment' && canMutateBilling ? (
+                        {isManualEntry && canMutateBilling ? (
                           <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteEntry(entry.id)} disabled={saving}>
                             מחק
                           </Button>

@@ -748,39 +748,49 @@ export async function fetchCommitmentsWithBalances(tenantClient, filters = {}) {
     return [];
   }
 
-  const { data: entries, error: entriesError } = await tenantClient
-    .from('consumption_entries')
-    .select('id, commitment_id, amount_charged, source_type, metadata')
+  const { data: ledgerRows, error: ledgerError } = await tenantClient
+    .from('ledger_transactions')
+    .select('id, commitment_id, transaction_type, usage_type, amount, source_ref, metadata')
     .in('commitment_id', commitmentIds);
 
-  if (entriesError && entriesError.code !== '42P01') {
-    throw entriesError;
+  if (ledgerError && ledgerError.code !== '42P01') {
+    throw ledgerError;
   }
 
-  const sums = new Map();
+  const creditSums = new Map();
+  const debitSums = new Map();
   const entriesByCommitment = new Map();
-  for (const entry of entries || []) {
-    sums.set(entry.commitment_id, (sums.get(entry.commitment_id) || 0) + coerceNumber(entry.amount_charged, 0));
-    if (!entriesByCommitment.has(entry.commitment_id)) {
-      entriesByCommitment.set(entry.commitment_id, []);
+  for (const row of ledgerRows || []) {
+    if (!entriesByCommitment.has(row.commitment_id)) {
+      entriesByCommitment.set(row.commitment_id, []);
     }
-    entriesByCommitment.get(entry.commitment_id).push(entry);
+    entriesByCommitment.get(row.commitment_id).push(row);
+    const amt = coerceNumber(row.amount, 0);
+    if (row.transaction_type === 'CREDIT') {
+      creditSums.set(row.commitment_id, (creditSums.get(row.commitment_id) || 0) + amt);
+    } else {
+      debitSums.set(row.commitment_id, (debitSums.get(row.commitment_id) || 0) + amt);
+    }
   }
 
   const enrichedCommitments = await attachHmoContextToCommitments(tenantClient, commitments || []);
 
-  return enrichedCommitments.map((commitment) => ({
-    ...commitment,
-    consumed_amount: roundCurrency(sums.get(commitment.id) || 0),
-    remaining_amount: roundCurrency(Number(commitment.total_amount || 0) - (sums.get(commitment.id) || 0)),
-    runtime: (() => {
-      const runtime = buildCommitmentRuntime(commitment, entriesByCommitment.get(commitment.id) || []);
-      return {
+  return enrichedCommitments.map((commitment) => {
+    const credits = roundCurrency(creditSums.get(commitment.id) || 0);
+    const debits = roundCurrency(debitSums.get(commitment.id) || 0);
+    const consumedAmount = debits;
+    const remainingAmount = roundCurrency(credits - debits);
+    const runtime = buildCommitmentRuntime(commitment, entriesByCommitment.get(commitment.id) || []);
+    return {
+      ...commitment,
+      consumed_amount: consumedAmount,
+      remaining_amount: remainingAmount,
+      runtime: {
         ...runtime,
         attention: computeCommitmentAttention(commitment, runtime),
-      };
-    })(),
-  }));
+      },
+    };
+  });
 }
 
 export async function fetchLessonPendingBillingQueue(tenantClient, { startDate = '', endDate = '', studentId = '' } = {}) {
@@ -995,32 +1005,33 @@ export async function syncLessonFinancialArtifacts(tenantClient, lessonInstanceI
 
     if (shouldCharge) {
       const payload = {
-        lesson_participant_id: participant.id,
         student_id: participant.student_id,
-        source_type: 'lesson',
         commitment_id: commitment.id,
-        amount_charged: derivedCharge,
-        effective_date: toDateKey(instance.datetime_start),
+        transaction_type: 'DEBIT',
+        usage_type: 'standard',
+        amount: derivedCharge,
+        source_ref: participant.id,
         notes: null,
         metadata: {
           participant_status: statusKey,
           lesson_instance_id: lessonInstanceId,
+          effective_date: toDateKey(instance.datetime_start),
         },
       };
 
       const { error: upsertError } = await tenantClient
-        .from('consumption_entries')
-        .upsert(payload, { onConflict: 'lesson_participant_id,source_type' });
+        .from('ledger_transactions')
+        .upsert(payload, { onConflict: 'source_ref,usage_type' });
 
       if (upsertError) {
         throw upsertError;
       }
     } else {
       const { error: deleteError } = await tenantClient
-        .from('consumption_entries')
+        .from('ledger_transactions')
         .delete()
-        .eq('lesson_participant_id', participant.id)
-        .eq('source_type', 'lesson');
+        .eq('source_ref', participant.id)
+        .in('usage_type', ['standard', 'double', 'cross_service']);
 
       if (deleteError && deleteError.code !== '42P01') {
         throw deleteError;

@@ -1683,63 +1683,41 @@ EXCEPTION
 END $$;
 
 -- -----------------------------------------------------------------
--- public.consumption_entries
+-- public.ledger_transactions (replaces consumption_entries)
+-- Double-entry-like ledger: balance = SUM(CREDIT) - SUM(DEBIT)
 -- -----------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS public.consumption_entries (
+CREATE TABLE IF NOT EXISTS public.ledger_transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  lesson_participant_id uuid NULL,
-  student_id uuid NULL,
-  source_type text NOT NULL DEFAULT 'lesson',
-  commitment_id uuid NULL,
-  transfer_ref uuid NULL,
-  amount_charged numeric NOT NULL,
-  effective_date date NULL,
+  student_id uuid NOT NULL,
+  commitment_id uuid NOT NULL,
+  transaction_type text NOT NULL,
+  usage_type text NOT NULL,
+  amount numeric NOT NULL,
+  source_ref uuid NULL,
   notes text NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL
 );
 
-ALTER TABLE public.consumption_entries
-  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
+ALTER TABLE public.ledger_transactions
   ADD COLUMN IF NOT EXISTS student_id uuid,
-  ADD COLUMN IF NOT EXISTS source_type text,
   ADD COLUMN IF NOT EXISTS commitment_id uuid,
-  ADD COLUMN IF NOT EXISTS transfer_ref uuid,
-  ADD COLUMN IF NOT EXISTS amount_charged numeric,
-  ADD COLUMN IF NOT EXISTS effective_date date,
+  ADD COLUMN IF NOT EXISTS transaction_type text,
+  ADD COLUMN IF NOT EXISTS usage_type text,
+  ADD COLUMN IF NOT EXISTS amount numeric,
+  ADD COLUMN IF NOT EXISTS source_ref uuid,
   ADD COLUMN IF NOT EXISTS notes text,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
-ALTER TABLE public.consumption_entries
-  ALTER COLUMN lesson_participant_id DROP NOT NULL;
-
--- Backfill student_id for legacy rows when possible.
-UPDATE public.consumption_entries e
-SET student_id = lp.student_id
-FROM public.lesson_participants lp
-WHERE e.lesson_participant_id = lp.id
-  AND e.student_id IS NULL;
-
-UPDATE public.consumption_entries e
-SET student_id = c.student_id
-FROM public.commitments c
-WHERE e.commitment_id = c.id
-  AND e.student_id IS NULL;
-
-UPDATE public.consumption_entries
-SET source_type = COALESCE(source_type, 'lesson')
-WHERE source_type IS NULL;
-
-ALTER TABLE public.consumption_entries
-  ALTER COLUMN source_type SET DEFAULT 'lesson';
-
 DO $$
 BEGIN
-  ALTER TABLE public.consumption_entries
-    ADD CONSTRAINT consumption_entries_lesson_participant_id_fkey
-    FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id);
+  ALTER TABLE public.ledger_transactions
+    ADD CONSTRAINT ledger_transactions_student_id_fkey
+    FOREIGN KEY (student_id) REFERENCES public.students(id) ON DELETE CASCADE;
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -1747,9 +1725,9 @@ END $$;
 
 DO $$
 BEGIN
-  ALTER TABLE public.consumption_entries
-    ADD CONSTRAINT consumption_entries_student_id_fkey
-    FOREIGN KEY (student_id) REFERENCES public.students(id);
+  ALTER TABLE public.ledger_transactions
+    ADD CONSTRAINT ledger_transactions_commitment_id_fkey
+    FOREIGN KEY (commitment_id) REFERENCES public.commitments(id) ON DELETE CASCADE;
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -1757,9 +1735,9 @@ END $$;
 
 DO $$
 BEGIN
-  ALTER TABLE public.consumption_entries
-    ADD CONSTRAINT consumption_entries_commitment_id_fkey
-    FOREIGN KEY (commitment_id) REFERENCES public.commitments(id);
+  ALTER TABLE public.ledger_transactions
+    ADD CONSTRAINT ledger_transactions_transaction_type_check
+    CHECK (transaction_type IN ('CREDIT', 'DEBIT'));
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -1767,143 +1745,164 @@ END $$;
 
 DO $$
 BEGIN
-  ALTER TABLE public.consumption_entries
-    ADD CONSTRAINT consumption_entries_source_type_check
-    CHECK (source_type IN ('lesson','transfer','adjustment'));
+  ALTER TABLE public.ledger_transactions
+    ADD CONSTRAINT ledger_transactions_usage_type_check
+    CHECK (
+      (transaction_type = 'CREDIT' AND usage_type IN ('manual_topup', 'commitment_creation', 'transfer_received', 'hmo_authorization_added'))
+      OR (transaction_type = 'DEBIT' AND usage_type IN ('standard', 'double', 'cross_service', 'manual_adjustment'))
+    );
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
 END $$;
 
+DO $$
+BEGIN
+  ALTER TABLE public.ledger_transactions
+    ADD CONSTRAINT ledger_transactions_amount_non_negative_check
+    CHECK (amount >= 0);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+-- Unique constraint for lesson-based debits: one debit per (source_ref, usage_type).
+-- NULL source_ref rows (manual adjustments, credits) are excluded by PostgreSQL semantics.
 DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1
     FROM pg_constraint
-    WHERE conname = 'consumption_entries_lesson_source_unique'
-      AND conrelid = 'public.consumption_entries'::regclass
+    WHERE conname = 'ledger_transactions_source_usage_unique'
+      AND conrelid = 'public.ledger_transactions'::regclass
   ) AND NOT EXISTS (
     SELECT 1
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE c.relname = 'consumption_entries_lesson_source_unique'
+    WHERE c.relname = 'ledger_transactions_source_usage_unique'
       AND n.nspname = 'public'
   ) THEN
-    ALTER TABLE public.consumption_entries
-      ADD CONSTRAINT consumption_entries_lesson_source_unique
-      UNIQUE (lesson_participant_id, source_type);
+    ALTER TABLE public.ledger_transactions
+      ADD CONSTRAINT ledger_transactions_source_usage_unique
+      UNIQUE (source_ref, usage_type);
   END IF;
 END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.consumption_entries
-    ADD CONSTRAINT consumption_entries_lesson_participant_required_for_lesson_check
-    CHECK (
-      (source_type = 'lesson' AND lesson_participant_id IS NOT NULL)
-      OR (source_type <> 'lesson')
-    ) NOT VALID;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
+CREATE INDEX IF NOT EXISTS ledger_transactions_commitment_id_idx
+  ON public.ledger_transactions (commitment_id);
+CREATE INDEX IF NOT EXISTS ledger_transactions_student_id_idx
+  ON public.ledger_transactions (student_id);
+CREATE INDEX IF NOT EXISTS ledger_transactions_transaction_type_idx
+  ON public.ledger_transactions (transaction_type);
+CREATE INDEX IF NOT EXISTS ledger_transactions_usage_type_idx
+  ON public.ledger_transactions (usage_type);
+CREATE INDEX IF NOT EXISTS ledger_transactions_created_at_idx
+  ON public.ledger_transactions (created_at);
 
-DO $$
-BEGIN
-  ALTER TABLE public.consumption_entries
-    ADD CONSTRAINT consumption_entries_commitment_required_for_transfer_check
-    CHECK (
-      (source_type = 'transfer' AND commitment_id IS NOT NULL AND transfer_ref IS NOT NULL)
-      OR (source_type <> 'transfer')
-    ) NOT VALID;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.consumption_entries
-    ADD CONSTRAINT consumption_entries_transfer_requires_student_check
-    CHECK (
-      (source_type = 'transfer' AND student_id IS NOT NULL)
-      OR (source_type <> 'transfer')
-    ) NOT VALID;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.consumption_entries
-    ADD CONSTRAINT consumption_entries_transfer_has_no_lesson_participant_check
-    CHECK (
-      (source_type = 'transfer' AND lesson_participant_id IS NULL)
-      OR (source_type <> 'transfer')
-    ) NOT VALID;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-CREATE INDEX IF NOT EXISTS consumption_entries_commitment_id_idx
-  ON public.consumption_entries (commitment_id);
-CREATE INDEX IF NOT EXISTS consumption_entries_student_id_idx
-  ON public.consumption_entries (student_id);
-CREATE INDEX IF NOT EXISTS consumption_entries_source_type_idx
-  ON public.consumption_entries (source_type);
-CREATE INDEX IF NOT EXISTS consumption_entries_transfer_ref_idx
-  ON public.consumption_entries (transfer_ref) WHERE transfer_ref IS NOT NULL;
-
-CREATE OR REPLACE FUNCTION public.validate_consumption_commitment_ownership()
+-- Trigger: validate that ledger transaction commitment belongs to the same student
+CREATE OR REPLACE FUNCTION public.validate_ledger_commitment_ownership()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE
   v_commitment_student_id uuid;
-  v_entry_student_id uuid;
 BEGIN
-  IF NEW.commitment_id IS NULL THEN
-    RETURN NEW;
-  END IF;
-
   SELECT c.student_id
     INTO v_commitment_student_id
   FROM public.commitments c
   WHERE c.id = NEW.commitment_id;
 
   IF v_commitment_student_id IS NULL THEN
-    RAISE EXCEPTION 'Invalid commitment_id for consumption entry';
+    RAISE EXCEPTION 'Invalid commitment_id for ledger transaction';
   END IF;
 
-  v_entry_student_id := NEW.student_id;
-
-  IF v_entry_student_id IS NULL AND NEW.lesson_participant_id IS NOT NULL THEN
-    SELECT lp.student_id
-      INTO v_entry_student_id
-    FROM public.lesson_participants lp
-    WHERE lp.id = NEW.lesson_participant_id;
-  END IF;
-
-  IF v_entry_student_id IS NULL THEN
-    RAISE EXCEPTION 'student_id (or lesson_participant_id) is required when commitment_id is set';
-  END IF;
-
-  IF v_commitment_student_id <> v_entry_student_id THEN
-    RAISE EXCEPTION 'consumption_entries.commitment_id must belong to the same student being debited';
+  IF v_commitment_student_id <> NEW.student_id THEN
+    RAISE EXCEPTION 'ledger_transactions.commitment_id must belong to the same student';
   END IF;
 
   RETURN NEW;
 END;
 $$;
 
-DROP TRIGGER IF EXISTS consumption_entries_validate_commitment_ownership_trg ON public.consumption_entries;
-CREATE TRIGGER consumption_entries_validate_commitment_ownership_trg
-BEFORE INSERT OR UPDATE OF commitment_id, student_id, lesson_participant_id
-ON public.consumption_entries
+DROP TRIGGER IF EXISTS ledger_transactions_validate_commitment_ownership_trg ON public.ledger_transactions;
+CREATE TRIGGER ledger_transactions_validate_commitment_ownership_trg
+BEFORE INSERT OR UPDATE OF commitment_id, student_id
+ON public.ledger_transactions
 FOR EACH ROW
-EXECUTE FUNCTION public.validate_consumption_commitment_ownership();
+EXECUTE FUNCTION public.validate_ledger_commitment_ownership();
+
+-- =================================================================
+-- Inline Data Migration: consumption_entries -> ledger_transactions
+-- Runs BEFORE dropping consumption_entries. Fully idempotent.
+-- =================================================================
+
+-- 1) Migrate existing commitments as CREDIT (commitment_creation).
+--    Deterministic UUID derived from commitment id to ensure idempotency.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'commitments') THEN
+    INSERT INTO public.ledger_transactions (id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata)
+    SELECT
+      md5('commitment-credit:' || c.id::text)::uuid,
+      c.student_id,
+      c.id,
+      'CREDIT',
+      'commitment_creation',
+      COALESCE(c.total_amount, 0),
+      NULL,
+      'Migrated from commitment total_amount',
+      c.created_at,
+      COALESCE(c.updated_at, c.created_at),
+      jsonb_build_object('migration', 'commitment_to_credit', 'original_commitment_id', c.id)
+    FROM public.commitments c
+    WHERE c.total_amount > 0
+    ON CONFLICT (id) DO NOTHING;
+  END IF;
+END $$;
+
+-- 2) Migrate existing consumption_entries as DEBIT or CREDIT rows.
+--    Only rows with a non-null commitment_id can be migrated (strict FK).
+--    Uses the original consumption_entries.id as the new ledger id.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'consumption_entries') THEN
+    INSERT INTO public.ledger_transactions (id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata)
+    SELECT
+      e.id,
+      COALESCE(e.student_id, lp.student_id, c.student_id),
+      e.commitment_id,
+      CASE WHEN e.amount_charged < 0 THEN 'CREDIT' ELSE 'DEBIT' END,
+      CASE
+        WHEN e.amount_charged < 0 THEN 'manual_topup'
+        WHEN e.source_type = 'lesson' THEN 'standard'
+        WHEN e.source_type = 'transfer' THEN 'manual_adjustment'
+        WHEN e.source_type = 'adjustment' THEN 'manual_adjustment'
+        ELSE 'manual_adjustment'
+      END,
+      ABS(e.amount_charged),
+      e.lesson_participant_id,
+      e.notes,
+      e.created_at,
+      e.created_at,
+      COALESCE(e.metadata, '{}'::jsonb)
+        || jsonb_build_object('migration', 'consumption_to_ledger', 'original_source_type', e.source_type)
+        || CASE WHEN e.transfer_ref IS NOT NULL THEN jsonb_build_object('transfer_ref', e.transfer_ref) ELSE '{}'::jsonb END
+        || CASE WHEN e.effective_date IS NOT NULL THEN jsonb_build_object('effective_date', e.effective_date::text) ELSE '{}'::jsonb END
+    FROM public.consumption_entries e
+    LEFT JOIN public.lesson_participants lp ON lp.id = e.lesson_participant_id
+    LEFT JOIN public.commitments c ON c.id = e.commitment_id
+    WHERE e.commitment_id IS NOT NULL
+      AND COALESCE(e.student_id, lp.student_id, c.student_id) IS NOT NULL
+    ON CONFLICT (id) DO NOTHING;
+  END IF;
+END $$;
+
+-- =================================================================
+-- Cleanup: drop consumption_entries and all related objects
+-- =================================================================
+
+DROP TRIGGER IF EXISTS consumption_entries_validate_commitment_ownership_trg ON public.consumption_entries;
+DROP FUNCTION IF EXISTS public.validate_consumption_commitment_ownership();
 
 DROP VIEW IF EXISTS public.commitment_balances;
 
@@ -1928,8 +1927,11 @@ ALTER TABLE public.commitments
   DROP COLUMN IF EXISTS balance_entry_type,
   DROP COLUMN IF EXISTS transfer_peer_student_id;
 
+-- Drop consumption_entries table (data already migrated to ledger_transactions)
+DROP TABLE IF EXISTS public.consumption_entries CASCADE;
+
 -- -----------------------------------------------------------------
--- Query-time balance computation helpers
+-- Query-time balance computation helpers (ledger-based)
 -- -----------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.get_student_remaining_balance(p_student_id uuid)
@@ -1937,26 +1939,26 @@ RETURNS numeric
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  v_commitment_total numeric := 0;
-  v_debited numeric := 0;
+  v_credits numeric := 0;
+  v_debits numeric := 0;
 BEGIN
   IF p_student_id IS NULL THEN
     RETURN 0;
   END IF;
 
-  SELECT COALESCE(SUM(c.total_amount), 0)
-    INTO v_commitment_total
-  FROM public.commitments c
-  WHERE c.student_id = p_student_id;
+  SELECT COALESCE(SUM(lt.amount), 0)
+    INTO v_credits
+  FROM public.ledger_transactions lt
+  WHERE lt.student_id = p_student_id
+    AND lt.transaction_type = 'CREDIT';
 
-  SELECT COALESCE(SUM(e.amount_charged), 0)
-    INTO v_debited
-  FROM public.consumption_entries e
-  LEFT JOIN public.lesson_participants lp ON lp.id = e.lesson_participant_id
-  LEFT JOIN public.commitments c ON c.id = e.commitment_id
-  WHERE COALESCE(e.student_id, lp.student_id, c.student_id) = p_student_id;
+  SELECT COALESCE(SUM(lt.amount), 0)
+    INTO v_debits
+  FROM public.ledger_transactions lt
+  WHERE lt.student_id = p_student_id
+    AND lt.transaction_type = 'DEBIT';
 
-  RETURN v_commitment_total - v_debited;
+  RETURN v_credits - v_debits;
 END;
 $$;
 
@@ -2794,7 +2796,7 @@ ALTER TABLE public.lesson_template_overrides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.commitments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.consumption_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ledger_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_earnings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.form_submissions ENABLE ROW LEVEL SECURITY;
@@ -2830,7 +2832,7 @@ BEGIN
     'lesson_instances',
     'lesson_participants',
     'commitments',
-    'consumption_entries',
+    'ledger_transactions',
     'lesson_earnings',
     'forms',
     'form_submissions',
@@ -2890,7 +2892,7 @@ GRANT ALL ON TABLE public.lesson_template_overrides TO app_user;
 GRANT ALL ON TABLE public.lesson_instances TO app_user;
 GRANT ALL ON TABLE public.lesson_participants TO app_user;
 GRANT ALL ON TABLE public.commitments TO app_user;
-GRANT ALL ON TABLE public.consumption_entries TO app_user;
+GRANT ALL ON TABLE public.ledger_transactions TO app_user;
 GRANT ALL ON TABLE public.lesson_earnings TO app_user;
 GRANT ALL ON TABLE public.forms TO app_user;
 GRANT ALL ON TABLE public.form_submissions TO app_user;
@@ -2925,7 +2927,7 @@ DECLARE
     'lesson_instances',
     'lesson_participants',
     'commitments',
-    'consumption_entries',
+    'ledger_transactions',
     'lesson_earnings',
     'forms',
     'form_submissions',
