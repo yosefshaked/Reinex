@@ -13,6 +13,7 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, MessageCircle, Mail, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Textarea } from '../../../components/ui/textarea';
+import { LockedCorrectionPanel } from './LockedCorrectionPanel';
 
 function toLocalDateString(dateObj) {
   if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
@@ -49,6 +50,34 @@ function getCancellationStatusLabel(status) {
   return 'ביטול';
 }
 
+function getDisplayInstance(instance) {
+  return instance?.latest_correction?.effective_state?.instance
+    ? { ...instance, ...instance.latest_correction.effective_state.instance }
+    : instance;
+}
+
+function getDisplayParticipants(instance) {
+  const baseParticipants = Array.isArray(instance?.participants) ? instance.participants : [];
+  const effectiveParticipants = Array.isArray(instance?.latest_correction?.effective_state?.participants)
+    ? instance.latest_correction.effective_state.participants
+    : [];
+  const effectiveById = new Map(effectiveParticipants.map((participant) => [participant.id, participant]));
+  return baseParticipants.map((participant) => ({
+    ...participant,
+    ...(effectiveById.get(participant.id) || {}),
+  }));
+}
+
+function resolveMutationError(error) {
+  if (error?.status === 423) {
+    return 'השיעור נעול לשינוי ישיר. יש להשתמש בזרימת התיקון.';
+  }
+  if (error?.status === 409) {
+    return 'השיעור עודכן על ידי משתמש אחר. רעננו את התצוגה ונסו שוב.';
+  }
+  return error?.message || 'הפעולה נכשלה.';
+}
+
 /**
  * LessonInstanceDialog component - displays and edits lesson instance details
  */
@@ -59,6 +88,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const org = currentOrg ?? activeOrg;
   const role = typeof org?.membership?.role === 'string' ? org.membership.role.trim().toLowerCase() : 'member';
   const canManageAll = role === 'admin' || role === 'owner' || role === 'office';
+  const displayInstance = getDisplayInstance(instance);
+  const displayParticipants = getDisplayParticipants(instance);
   
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -82,25 +113,25 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   // Initialize form data when instance changes
   useEffect(() => {
-    if (instance) {
-      const dateTime = new Date(instance.datetime_start);
+    if (displayInstance) {
+      const dateTime = new Date(displayInstance.datetime_start);
       setFormData({
-        instructor_employee_id: instance.instructor_employee_id || '',
-        service_id: instance.service_id || '',
+        instructor_employee_id: displayInstance.instructor_employee_id || '',
+        service_id: displayInstance.service_id || '',
         date: toLocalDateString(dateTime),
         time: dateTime.toTimeString().slice(0, 5),
-        duration_minutes: instance.duration_minutes || 60,
-        status: instance.status || 'scheduled',
-        closed_reason: instance.closed_reason || '',
+        duration_minutes: displayInstance.duration_minutes || 60,
+        status: displayInstance.status || 'scheduled',
+        closed_reason: displayInstance.closed_reason || '',
       });
     }
-  }, [instance]);
+  }, [displayInstance]);
 
   // Reset local reminder optimistic state when a different instance is opened
   useEffect(() => {
     setLocalReminderState({});
     setBillingWarnings([]);
-  }, [instance?.id]);
+  }, [instance?.id, instance?.latest_correction?.id]);
 
   if (!instance) return null;
 
@@ -173,11 +204,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     return `mailto:${contact.email}?subject=${subject}&body=${body}`;
   }
 
-  const statusInfo = getInstanceStatusIcon(instance.status, instance.documentation_status);
-  const startTime = formatTimeDisplay(instance.datetime_start);
-  const endDate = new Date(new Date(instance.datetime_start).getTime() + instance.duration_minutes * 60000);
+  const statusInfo = getInstanceStatusIcon(displayInstance.status, displayInstance.documentation_status);
+  const startTime = formatTimeDisplay(displayInstance.datetime_start);
+  const endDate = new Date(new Date(displayInstance.datetime_start).getTime() + displayInstance.duration_minutes * 60000);
   const endTime = formatTimeDisplay(endDate.toISOString());
-  const dateDisplay = formatDateDisplay(instance.datetime_start);
+  const dateDisplay = formatDateDisplay(displayInstance.datetime_start);
 
   async function handleSave() {
     if (!org?.id) {
@@ -209,6 +240,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         instructor_employee_id: formData.instructor_employee_id,
         service_id: formData.service_id,
         status: formData.status,
+        expected_version: instance.version,
       };
 
       if (isCancellationStatus(formData.status) || formData.status === 'no_show') {
@@ -224,7 +256,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       onUpdate?.();
     } catch (err) {
       console.error('Error updating lesson:', err);
-      setError(err.message);
+      setError(resolveMutationError(err));
     } finally {
       setIsSaving(false);
     }
@@ -244,6 +276,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         instance_id: instance.id,
         participant_id: participantId,
         participant_status: status,
+        instance_version: instance.version,
+        participant_version: displayParticipants.find((participant) => participant.id === participantId)?.version,
       };
       if (typeof notes === 'string') {
         body.notes = notes.trim();
@@ -259,7 +293,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       onUpdate?.();
     } catch (err) {
       console.error('Error marking attendance:', err);
-      setError(err.message);
+      setError(resolveMutationError(err));
     } finally {
       setIsMarkingAttendance(false);
     }
@@ -295,6 +329,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           org_id: org.id,
           status,
           closed_reason: closedReason || null,
+          expected_version: instance.version,
         },
       });
 
@@ -302,7 +337,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       onClose();
     } catch (err) {
       console.error('Error cancelling lesson:', err);
-      setError(err.message);
+      setError(resolveMutationError(err));
     } finally {
       setIsSaving(false);
     }
@@ -324,6 +359,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           id: instance.id,
           org_id: org.id,
           status,
+          expected_version: instance.version,
         },
       });
 
@@ -336,7 +372,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       }
     } catch (err) {
       console.error('Error reporting lesson status:', err);
-      setError(err.message);
+      setError(resolveMutationError(err));
     } finally {
       setIsSaving(false);
     }
@@ -373,14 +409,14 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     const waPhone = formatPhoneForWhatsApp(contact.phone);
     if (!waPhone || !org?.id) return;
     const studentName = contact.name || 'תלמיד';
-    const message = buildReminderMessage(instance, studentName);
+    const message = buildReminderMessage(displayInstance, studentName);
     window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
     await markReminderSent(participant.id);
   }
 
   function handleSendEmailReminder(participant) {
     const contact = resolveReminderContact(participant);
-    const href = buildEmailReminderHref(instance, contact);
+    const href = buildEmailReminderHref(displayInstance, contact);
     if (!href) return;
     window.open(href, '_blank', 'noopener,noreferrer');
     markReminderSent(participant.id);
@@ -427,18 +463,18 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   }
 
   const activeServices = services?.filter(s => s.is_active) || [];
-  const isReportable = instance.status === 'scheduled';
-  const canEdit = canManageAll && isReportable;
-  const canMarkAttendance = isReportable;
-  const canQuickReport = isReportable;
+  const isReportable = displayInstance.status === 'scheduled';
+  const canEdit = canManageAll && isReportable && !instance.is_locked;
+  const canMarkAttendance = isReportable && !instance.is_locked;
+  const canQuickReport = isReportable && !instance.is_locked;
 
-  const scheduledParticipantsCount = (instance.participants || []).filter(
+  const scheduledParticipantsCount = displayParticipants.filter(
     (p) => p.participant_status === 'scheduled'
   ).length;
   // Block completing an instance when at least one participant still has no resolved attendance status.
   // An instance with zero participants is exempt (e.g. template-generated shells before enrolment).
   const hasUnsetParticipants =
-    (instance.participants?.length ?? 0) > 0 && scheduledParticipantsCount > 0;
+    displayParticipants.length > 0 && scheduledParticipantsCount > 0;
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -465,7 +501,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
         {billingWarnings.length > 0 && (() => {
           const participantMap = new Map(
-            (instance.participants || []).map((p) => [p.student_id, p.student?.full_name || p.student?.first_name || 'תלמיד'])
+            displayParticipants.map((p) => [p.student_id, p.student?.full_name || p.student?.first_name || 'תלמיד'])
           );
           const names = billingWarnings
             .map((w) => participantMap.get(w.student_id) || 'תלמיד')
@@ -482,6 +518,15 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             </Alert>
           );
         })()}
+
+        {(instance.is_locked || instance.latest_correction) && canManageAll && (
+          <LockedCorrectionPanel
+            instance={instance}
+            orgId={org?.id}
+            forceOpen={Boolean(error && instance.is_locked)}
+            onApplied={() => onUpdate?.()}
+          />
+        )}
 
         {isEditMode ? (
           // Edit Mode
@@ -635,9 +680,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           <div className="space-y-6">{/* Status Badge */}
             <div className="flex items-center gap-2">
               <span className={`text-2xl ${statusInfo.color}`}>{statusInfo.icon}</span>
-              <Badge variant={instance.status === 'completed' ? 'default' : 'secondary'}>
+              <Badge variant={displayInstance.status === 'completed' ? 'default' : 'secondary'}>
                 {statusInfo.label}
               </Badge>
+              {instance.latest_correction && (
+                <Badge className="bg-sky-100 text-sky-800 border-sky-200">מציג ערך מתוקן</Badge>
+              )}
               {canQuickReport && (
                 <div className="flex items-center gap-2">
                   <Button
@@ -671,13 +719,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             <div>
               <label className="text-sm font-medium text-gray-700">שירות</label>
               <div className="mt-1 flex items-center gap-2">
-                {instance.service?.color && (
+                {displayInstance.service?.color && (
                   <div
                     className="w-4 h-4 rounded"
-                    style={{ backgroundColor: instance.service.color }}
+                    style={{ backgroundColor: displayInstance.service.color }}
                   />
                 )}
-                <span className="text-lg">{instance.service?.service_name || 'לא ידוע'}</span>
+                <span className="text-lg">{displayInstance.service?.service_name || 'לא ידוע'}</span>
               </div>
             </div>
 
@@ -690,7 +738,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               <div>
                 <label className="text-sm font-medium text-gray-700">שעה</label>
                 <p className="mt-1 text-lg">
-                  {startTime} - {endTime} ({instance.duration_minutes} דקות)
+                  {startTime} - {endTime} ({displayInstance.duration_minutes} דקות)
                 </p>
               </div>
             </div>
@@ -698,13 +746,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             {/* Instructor */}
             <div>
               <label className="text-sm font-medium text-gray-700">מדריך</label>
-              <p className="mt-1 text-lg">{instance.instructor?.full_name || 'לא ידוע'}</p>
+              <p className="mt-1 text-lg">{displayInstance.instructor?.full_name || 'לא ידוע'}</p>
             </div>
 
             {/* Participants with Attendance */}
             <div>
               <label className="text-sm font-medium text-gray-700">
-                משתתפים ({instance.participants?.length || 0})
+                משתתפים ({displayParticipants.length || 0})
               </label>
               {canQuickReport && hasUnsetParticipants && (
                 <Alert className="mt-2 border-amber-400 bg-amber-50">
@@ -716,7 +764,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                 </Alert>
               )}
               <div className="mt-2 space-y-2">
-                {(instance.participants || []).map((participant) => {
+                {displayParticipants.map((participant) => {
                   const rs = localReminderState[participant.id] || {};
                   const hasSent = rs.reminder_sent ?? participant.reminder_sent ?? false;
                   const hasConfirmed = rs.reminder_seen ?? participant.reminder_seen ?? false;
@@ -898,38 +946,38 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             </div>
 
             {/* Documentation Status */}
-            {instance.documentation_status && (
+            {displayInstance.documentation_status && (
               <div>
                 <label className="text-sm font-medium text-gray-700">סטטוס תיעוד</label>
                 <p className="mt-1">
                   <Badge
-                    variant={instance.documentation_status === 'documented' ? 'default' : 'secondary'}
+                    variant={displayInstance.documentation_status === 'documented' ? 'default' : 'secondary'}
                   >
-                    {instance.documentation_status === 'documented' ? 'תועד' : 'ממתין לתיעוד'}
+                    {displayInstance.documentation_status === 'documented' ? 'תועד' : 'ממתין לתיעוד'}
                   </Badge>
                 </p>
               </div>
             )}
 
             {/* Cancellation Reason */}
-            {instance.closed_reason && (
+            {displayInstance.closed_reason && (
               <div>
                 <label className="text-sm font-medium text-gray-700">
-                  {getCancellationStatusLabel(instance.status)}
+                  {getCancellationStatusLabel(displayInstance.status)}
                 </label>
-                <p className="mt-1 text-gray-900">{instance.closed_reason}</p>
+                <p className="mt-1 text-gray-900">{displayInstance.closed_reason}</p>
               </div>
             )}
 
             {/* Created Source */}
-            {instance.created_source && (
+            {displayInstance.created_source && (
               <div className="text-sm text-gray-600">
-                מקור: {instance.created_source}
+                מקור: {displayInstance.created_source}
               </div>
             )}
 
             {/* Cancel Button */}
-            {canEdit && !isCancellationStatus(instance.status) && instance.status !== 'no_show' && (
+            {canEdit && !isCancellationStatus(displayInstance.status) && displayInstance.status !== 'no_show' && (
               <div className="pt-4 border-t">
                 <Button
                   variant="destructive"

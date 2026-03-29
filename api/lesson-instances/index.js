@@ -3,6 +3,7 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { enrichInstancesWithCorrectionState } from '../_shared/calendar-corrections.js';
 import {
   fetchLessonMutationState,
   isLockedState,
@@ -201,7 +202,8 @@ export default async function lessonInstances(context, req) {
       return respond(context, 500, { message: 'failed_to_load_lesson_instances' });
     }
 
-    return respond(context, 200, Array.isArray(data) ? data : []);
+    const enrichedData = await enrichInstancesWithCorrectionState(tenantClient, Array.isArray(data) ? data : []);
+    return respond(context, 200, enrichedData);
   }
 
   if (method === 'POST') {
@@ -308,7 +310,8 @@ export default async function lessonInstances(context, req) {
       context.log?.warn?.('lesson-instances failed to write tenant audit (create)', { message: auditError?.message, lessonInstanceId: instanceRow.id });
     }
 
-    return respond(context, 200, data);
+    const [enriched] = await enrichInstancesWithCorrectionState(tenantClient, data ? [data] : []);
+    return respond(context, 200, enriched || data);
   }
 
   if (method === 'PUT') {
@@ -482,7 +485,8 @@ export default async function lessonInstances(context, req) {
       context.log?.warn?.('lesson-instances failed to write tenant audit (update)', { message: auditError?.message, lessonInstanceId });
     }
 
-    return respond(context, 200, data);
+    const [enriched] = await enrichInstancesWithCorrectionState(tenantClient, data ? [data] : []);
+    return respond(context, 200, enriched || data);
   }
 
   // PATCH: Bulk operations (admin only)

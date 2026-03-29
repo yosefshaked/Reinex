@@ -76,6 +76,24 @@ function getParticipantForStudent(instance, studentId) {
   return (instance?.participants || []).find((p) => p.student_id === studentId) || null;
 }
 
+function getDisplayInstance(instance) {
+  return instance?.latest_correction?.effective_state?.instance
+    ? { ...instance, ...instance.latest_correction.effective_state.instance }
+    : instance;
+}
+
+function getDisplayParticipantForStudent(instance, studentId) {
+  const baseParticipant = getParticipantForStudent(instance, studentId);
+  const effectiveParticipants = Array.isArray(instance?.latest_correction?.effective_state?.participants)
+    ? instance.latest_correction.effective_state.participants
+    : [];
+  const effectiveParticipant = effectiveParticipants.find((participant) => participant.student_id === studentId);
+  if (baseParticipant && effectiveParticipant) {
+    return { ...baseParticipant, ...effectiveParticipant };
+  }
+  return effectiveParticipant || baseParticipant;
+}
+
 function getInstanceStatusConfig(status) {
   switch (status) {
     case 'completed': return { label: 'הושלם', className: 'bg-green-100 text-green-800 border-green-200' };
@@ -337,22 +355,29 @@ export default function StudentScheduleTab({ studentId }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {instances.map((inst) => (
+                  {instances.map((inst) => {
+                    const displayInstance = getDisplayInstance(inst);
+                    return (
                     <TableRow key={inst.id}>
-                      <TableCell className="font-medium">{formatDate(inst.datetime_start)}</TableCell>
-                      <TableCell>{formatTime(inst.datetime_start)}</TableCell>
-                      <TableCell>{getServiceName(inst)}</TableCell>
-                      <TableCell>{getInstructorName(inst)}</TableCell>
+                      <TableCell className="font-medium">{formatDate(displayInstance.datetime_start)}</TableCell>
+                      <TableCell>{formatTime(displayInstance.datetime_start)}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span>{getServiceName(displayInstance)}</span>
+                          {inst.latest_correction && <Badge className="bg-sky-100 text-sky-800 border-sky-200">מתוקן</Badge>}
+                        </div>
+                      </TableCell>
+                      <TableCell>{getInstructorName(displayInstance)}</TableCell>
                       <TableCell>
                         <Badge
-                          variant={inst.status === 'completed' ? 'secondary' : 'default'}
+                          variant={displayInstance.status === 'completed' ? 'secondary' : 'default'}
                           className="text-xs"
                         >
-                          {inst.status === 'completed' ? 'הושלם' : inst.status === 'cancelled' ? 'בוטל' : 'מתוכנן'}
+                          {displayInstance.status === 'completed' ? 'הושלם' : displayInstance.status === 'cancelled' ? 'בוטל' : 'מתוכנן'}
                         </Badge>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  )})}
                 </TableBody>
               </Table>
             </div>
@@ -409,20 +434,26 @@ export default function StudentScheduleTab({ studentId }) {
                   </TableHeader>
                   <TableBody>
                     {historyItems.map((inst) => {
-                      const participant = getParticipantForStudent(inst, studentId);
-                      const instStatusCfg = getInstanceStatusConfig(inst.status);
+                      const displayInstance = getDisplayInstance(inst);
+                      const participant = getDisplayParticipantForStudent(inst, studentId);
+                      const instStatusCfg = getInstanceStatusConfig(displayInstance.status);
                       const partStatusCfg = participant
                         ? getParticipantStatusConfig(participant.participant_status)
                         : null;
-                      const closedReason = getClosedReasonLabel(inst.closed_reason);
+                      const closedReason = getClosedReasonLabel(displayInstance.closed_reason);
                       const participantNote = participant?.metadata?.notes || null;
                       const reasonOrNote = participantNote || closedReason;
                       return (
                         <TableRow key={inst.id}>
-                          <TableCell className="font-medium text-sm">{formatDate(inst.datetime_start)}</TableCell>
-                          <TableCell className="text-sm">{formatTime(inst.datetime_start)}</TableCell>
-                          <TableCell className="text-sm">{getServiceName(inst)}</TableCell>
-                          <TableCell className="text-sm">{getInstructorName(inst)}</TableCell>
+                          <TableCell className="font-medium text-sm">{formatDate(displayInstance.datetime_start)}</TableCell>
+                          <TableCell className="text-sm">{formatTime(displayInstance.datetime_start)}</TableCell>
+                          <TableCell className="text-sm">
+                            <div className="flex items-center gap-2">
+                              <span>{getServiceName(displayInstance)}</span>
+                              {inst.latest_correction && <Badge className="bg-sky-100 text-sky-800 border-sky-200">מתוקן</Badge>}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-sm">{getInstructorName(displayInstance)}</TableCell>
                           <TableCell>
                             <Badge variant="outline" className={`text-xs font-normal ${instStatusCfg.className}`}>
                               {instStatusCfg.label}

@@ -10,6 +10,7 @@ import {
   respondWithLockedMutation,
   respondWithVersionConflict,
 } from '../_shared/calendar-editing.js';
+import { enrichInstancesWithCorrectionState } from '../_shared/calendar-corrections.js';
 import {
   ensureMembership,
   isAdminOrOffice,
@@ -401,7 +402,8 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
     };
   });
 
-  return respond(context, 200, transformedInstances);
+  const enrichedInstances = await enrichInstancesWithCorrectionState(tenantClient, transformedInstances);
+  return respond(context, 200, enrichedInstances);
 }
 
 async function handleCreateInstance(context, body, tenantClient, supabase, authContext) {

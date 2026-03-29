@@ -1,11 +1,16 @@
 import React, { useEffect, useState } from "react"
+import { useNavigate } from 'react-router-dom'
+import { AlertTriangle, ArrowLeft, CheckCheck, Loader2 } from 'lucide-react'
 
 import Card from "@/components/ui/CustomCard.jsx"
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { useAuth } from "@/auth/AuthContext.jsx"
 import { useOrg } from "@/org/OrgContext.jsx"
 import { useSupabase } from "@/context/SupabaseContext.jsx"
 import { useInstructors } from "@/hooks/useOrgData.js"
 import { ComplianceHeatmap } from "@/features/dashboard/components/ComplianceHeatmap.jsx"
+import { authenticatedFetch } from '@/lib/api-client.js'
 
 /**
  * Build greeting with proper fallback chain:
@@ -49,10 +54,20 @@ function buildGreeting(instructorName, profileName, authName, email) {
 
 export default function DashboardPage() {
   const { user, session } = useAuth()
-  const { activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg()
+  const { activeOrgId, activeOrgHasConnection, tenantClientReady, activeOrg } = useOrg()
   const { authClient } = useSupabase()
+  const navigate = useNavigate()
   const [instructorName, setInstructorName] = useState(null)
   const [profileName, setProfileName] = useState(null)
+  const [dashboardTasks, setDashboardTasks] = useState([])
+  const [isLoadingTasks, setIsLoadingTasks] = useState(false)
+  const [tasksError, setTasksError] = useState(null)
+  const [resolvingTaskId, setResolvingTaskId] = useState(null)
+
+  const membershipRole = typeof activeOrg?.membership?.role === 'string'
+    ? activeOrg.membership.role.trim().toLowerCase()
+    : 'member'
+  const canManageAll = membershipRole === 'admin' || membershipRole === 'owner' || membershipRole === 'office'
 
   const { instructors } = useInstructors({
     enabled: Boolean(user?.id && activeOrgId && tenantClientReady && activeOrgHasConnection && session),
@@ -109,6 +124,132 @@ export default function DashboardPage() {
     }
   }, [user?.id, authClient])
 
+  useEffect(() => {
+    if (!canManageAll || !activeOrgId || !tenantClientReady || !activeOrgHasConnection) {
+      setDashboardTasks([])
+      return
+    }
+
+    let isMounted = true
+
+    async function fetchDashboardTasks() {
+      setIsLoadingTasks(true)
+      setTasksError(null)
+      try {
+        const payload = await authenticatedFetch('dashboard-tasks', {
+          params: {
+            org_id: activeOrgId,
+            status: 'open',
+          },
+          session,
+        })
+        if (!isMounted) return
+        setDashboardTasks(Array.isArray(payload?.entries) ? payload.entries : [])
+      } catch (error) {
+        if (!isMounted) return
+        setTasksError(error?.message || 'טעינת משימות הדשבורד נכשלה.')
+      } finally {
+        if (isMounted) {
+          setIsLoadingTasks(false)
+        }
+      }
+    }
+
+    fetchDashboardTasks()
+
+    return () => {
+      isMounted = false
+    }
+  }, [activeOrgHasConnection, activeOrgId, canManageAll, session, tenantClientReady])
+
+  async function handleResolveTask(taskId) {
+    if (!taskId || !activeOrgId) return
+    setResolvingTaskId(taskId)
+    try {
+      await authenticatedFetch('dashboard-tasks', {
+        method: 'PUT',
+        body: {
+          id: taskId,
+          org_id: activeOrgId,
+        },
+        session,
+      })
+      setDashboardTasks((prev) => prev.filter((task) => task.id !== taskId))
+    } catch (error) {
+      setTasksError(error?.message || 'פתרון המשימה נכשל.')
+    } finally {
+      setResolvingTaskId(null)
+    }
+  }
+
+  function renderDashboardTasks() {
+    if (!canManageAll) {
+      return null
+    }
+
+    if (!tenantClientReady || !activeOrgHasConnection) {
+      return null
+    }
+
+    return (
+      <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-neutral-900">משימות פעולה</h2>
+            <p className="text-sm text-neutral-600">פעולות שנפתחו אוטומטית ודורשות טיפול אנושי.</p>
+          </div>
+          <Badge variant="outline">{dashboardTasks.length} פתוחות</Badge>
+        </div>
+
+        {tasksError && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {tasksError}
+          </div>
+        )}
+
+        {isLoadingTasks ? (
+          <div className="mt-4 flex items-center gap-2 text-sm text-neutral-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            טוען משימות...
+          </div>
+        ) : dashboardTasks.length === 0 ? (
+          <div className="mt-4 rounded-xl border border-dashed border-neutral-200 p-4 text-sm text-neutral-500">
+            אין כרגע משימות פתוחות.
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {dashboardTasks.map((task) => (
+              <div key={task.id} className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-amber-950">
+                      <AlertTriangle className="h-4 w-4" />
+                      <span className="font-medium">{task.title}</span>
+                      <Badge className="bg-white text-amber-900 border-amber-200">{task.priority}</Badge>
+                    </div>
+                    <p className="text-sm text-amber-900/80">{task.description}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {task.action_path && (
+                      <Button variant="outline" size="sm" onClick={() => navigate(task.action_path)}>
+                        <ArrowLeft className="ms-1 h-4 w-4" />
+                        פתח
+                      </Button>
+                    )}
+                    <Button size="sm" onClick={() => handleResolveTask(task.id)} disabled={resolvingTaskId === task.id}>
+                      {resolvingTaskId === task.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="ms-1 h-4 w-4" />}
+                      סמן כטופל
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    )
+  }
+
   const greeting = buildGreeting(instructorName, profileName, user?.name, user?.email)
 
   return (
@@ -129,6 +270,8 @@ export default function DashboardPage() {
               <p className="max-w-2xl text-sm text-neutral-600 sm:text-body-md">מה תרצו לעשות כעת?</p>
             </div>
           </header>
+
+          {renderDashboardTasks()}
 
           {/* Weekly compliance - mobile */}
           {tenantClientReady && activeOrgHasConnection ? (
@@ -154,6 +297,8 @@ export default function DashboardPage() {
               <p className="max-w-2xl text-sm text-neutral-600 sm:text-body-md">מה תרצו לעשות כעת?</p>
             </div>
           </header>
+
+          {renderDashboardTasks()}
 
           {tenantClientReady && activeOrgHasConnection ? (
           <ComplianceHeatmap />
