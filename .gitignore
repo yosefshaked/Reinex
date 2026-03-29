@@ -27,3 +27,4 @@ release
 settings.json
 .env
 
+/supabase/.temp
