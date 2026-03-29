@@ -79,7 +79,7 @@ function buildInstanceSelect(options = {}) {
     'metadata',
     'instructor:Employees(id, first_name, middle_name, last_name, name)',
     'service:Services(id, name, color, duration_minutes)',
-    `participants:${participantsJoin}(id, student_id, participant_status, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, student:students(id, first_name, middle_name, last_name))`,
+    `participants:${participantsJoin}(id, student_id, participant_status, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, metadata, student:students(id, first_name, middle_name, last_name))`,
   ].join(',');
 }
 
@@ -330,6 +330,30 @@ export default async function lessonInstances(context, req) {
 
       if (existing.instructor_employee_id !== userId) {
         return respond(context, 403, { message: 'forbidden' });
+      }
+    }
+
+    // Guard: cannot mark an instance as completed unless all participants have a resolved status
+    if (nextStatus === 'completed') {
+      const { data: participants, error: participantsErr } = await tenantClient
+        .from('lesson_participants')
+        .select('id, participant_status')
+        .eq('lesson_instance_id', lessonInstanceId);
+
+      if (participantsErr) {
+        context.log?.error?.('lesson-instances failed to check participant statuses before completing', {
+          message: participantsErr.message,
+          lessonInstanceId,
+        });
+        return respond(context, 500, { message: 'failed_to_check_participant_statuses' });
+      }
+
+      const unsetCount = (participants || []).filter((p) => p.participant_status === 'scheduled').length;
+      if (unsetCount > 0) {
+        return respond(context, 422, {
+          message: 'participants_missing_status',
+          unset_count: unsetCount,
+        });
       }
     }
 

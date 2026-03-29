@@ -12,6 +12,7 @@ import { useCalendarInstructors } from '../hooks/useCalendar';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, MessageCircle, Mail, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
+import { Textarea } from '../../../components/ui/textarea';
 
 function toLocalDateString(dateObj) {
   if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
@@ -66,6 +67,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [localReminderState, setLocalReminderState] = useState({});
   const [error, setError] = useState(null);
   const [billingWarnings, setBillingWarnings] = useState([]);
+  // absenceForm: { participantId, status, notes } | null
+  const [absenceForm, setAbsenceForm] = useState(null);
   
   const [formData, setFormData] = useState({
     instructor_employee_id: '',
@@ -181,6 +184,14 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       setError('Organization not found');
       return;
     }
+
+    if (formData.status === 'completed' && hasUnsetParticipants) {
+      setError(
+        `יש לסמן נוכחות לכל התלמידים לפני השלמת השיעור (${scheduledParticipantsCount} ${scheduledParticipantsCount === 1 ? 'תלמיד ממתין' : 'תלמידים ממתינים'})`
+      );
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
 
@@ -219,7 +230,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
-  async function handleMarkAttendance(participantId, status) {
+  async function handleMarkAttendance(participantId, status, notes) {
     if (!org?.id) {
       setError('Organization not found');
       return;
@@ -228,14 +239,18 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setError(null);
 
     try {
+      const body = {
+        org_id: org.id,
+        instance_id: instance.id,
+        participant_id: participantId,
+        participant_status: status,
+      };
+      if (typeof notes === 'string') {
+        body.notes = notes.trim();
+      }
       const result = await authenticatedFetch('calendar/attendance', {
         method: 'POST',
-        body: {
-          org_id: org.id,
-          instance_id: instance.id,
-          participant_id: participantId,
-          participant_status: status,
-        },
+        body,
       });
 
       if (result?.billing_warnings?.length > 0) {
@@ -248,6 +263,20 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     } finally {
       setIsMarkingAttendance(false);
     }
+  }
+
+  function openAbsenceForm(participantId) {
+    setAbsenceForm({ participantId, status: 'no_show', notes: '' });
+  }
+
+  function closeAbsenceForm() {
+    setAbsenceForm(null);
+  }
+
+  async function confirmAbsenceForm() {
+    if (!absenceForm) return;
+    await handleMarkAttendance(absenceForm.participantId, absenceForm.status, absenceForm.notes);
+    setAbsenceForm(null);
   }
 
   async function handleCancel(status, closedReason) {
@@ -402,6 +431,14 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const canEdit = canManageAll && isReportable;
   const canMarkAttendance = isReportable;
   const canQuickReport = isReportable;
+
+  const scheduledParticipantsCount = (instance.participants || []).filter(
+    (p) => p.participant_status === 'scheduled'
+  ).length;
+  // Block completing an instance when at least one participant still has no resolved attendance status.
+  // An instance with zero participants is exempt (e.g. template-generated shells before enrolment).
+  const hasUnsetParticipants =
+    (instance.participants?.length ?? 0) > 0 && scheduledParticipantsCount > 0;
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -607,7 +644,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                     size="sm"
                     variant="outline"
                     onClick={() => handleReportStatus('completed')}
-                    disabled={isSaving}
+                    disabled={isSaving || hasUnsetParticipants}
+                    title={
+                      hasUnsetParticipants
+                        ? `יש לסמן נוכחות ל-${scheduledParticipantsCount} תלמיד/ים לפני השלמת השיעור`
+                        : undefined
+                    }
                   >
                     <Check className="h-4 w-4 ms-1" />
                     הושלם
@@ -664,6 +706,15 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               <label className="text-sm font-medium text-gray-700">
                 משתתפים ({instance.participants?.length || 0})
               </label>
+              {canQuickReport && hasUnsetParticipants && (
+                <Alert className="mt-2 border-amber-400 bg-amber-50">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  <AlertDescription className="text-amber-900 text-sm">
+                    {'יש לסמן נוכחות לכל התלמידים לפני השלמת השיעור'}
+                    {` (${scheduledParticipantsCount} ${scheduledParticipantsCount === 1 ? 'תלמיד ממתין' : 'תלמידים ממתינים'})`}
+                  </AlertDescription>
+                </Alert>
+              )}
               <div className="mt-2 space-y-2">
                 {(instance.participants || []).map((participant) => {
                   const rs = localReminderState[participant.id] || {};
@@ -673,6 +724,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   const waPhone = formatPhoneForWhatsApp(reminderContact.phone);
                   const emailAddress = reminderContact.email;
                   const isScheduled = participant.participant_status === 'scheduled';
+                  const isAbsenceFormOpen = absenceForm?.participantId === participant.id;
+                  const participantNotes = participant.metadata?.notes || null;
                   return (
                     <div key={participant.id} className="p-3 bg-gray-50 rounded-lg space-y-2">
                       {/* Main info + attendance buttons */}
@@ -686,11 +739,14 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                             {participant.participant_status === 'cancelled_student' && 'בוטל ע"י תלמיד'}
                             {participant.participant_status === 'cancelled_clinic' && 'בוטל ע"י המכון'}
                           </div>
+                          {participantNotes && (
+                            <p className="text-xs text-gray-500 mt-0.5 italic">{participantNotes}</p>
+                          )}
                         </div>
                         {participant.price_charged && (
                           <Badge variant="outline" className="ms-2">₪{participant.price_charged}</Badge>
                         )}
-                        {canMarkAttendance && isScheduled && (
+                        {canMarkAttendance && isScheduled && !isAbsenceFormOpen && (
                           <div className="flex gap-1 ms-2">
                             <Button
                               size="sm"
@@ -704,15 +760,68 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => handleMarkAttendance(participant.id, 'no_show')}
+                              onClick={() => openAbsenceForm(participant.id)}
                               disabled={isMarkingAttendance}
-                              title="לא הגיע"
+                              title="לא הגיע / ביטול"
                             >
                               <XCircle className="h-4 w-4 text-red-600" />
                             </Button>
                           </div>
                         )}
                       </div>
+                      {/* Inline absence form */}
+                      {isAbsenceFormOpen && (
+                        <div className="pt-2 border-t border-red-200 space-y-2">
+                          <div>
+                            <Label className="text-xs text-gray-600">סוג אי-הגעה</Label>
+                            <Select
+                              value={absenceForm.status}
+                              onValueChange={(value) => setAbsenceForm((prev) => ({ ...prev, status: value }))}
+                            >
+                              <SelectTrigger className="h-8 text-sm mt-1">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="no_show">לא הגיע</SelectItem>
+                                <SelectItem value="cancelled_student">ביטול ע"י תלמיד</SelectItem>
+                                <SelectItem value="cancelled_clinic">ביטול ע"י המכון</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-xs text-gray-600">הערה (אופציונלי)</Label>
+                            <Textarea
+                              className="mt-1 text-sm resize-none"
+                              rows={2}
+                              placeholder="הוסף הערה..."
+                              value={absenceForm.notes}
+                              onChange={(e) => setAbsenceForm((prev) => ({ ...prev, notes: e.target.value }))}
+                            />
+                          </div>
+                          <div className="flex gap-2 justify-end">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={closeAbsenceForm}
+                              disabled={isMarkingAttendance}
+                            >
+                              ביטול
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={confirmAbsenceForm}
+                              disabled={isMarkingAttendance}
+                            >
+                              {isMarkingAttendance ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                'אישור'
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                       {/* Reminder row — admins only, scheduled participants only */}
                       {isScheduled && canManageAll && (
                         <div className="flex items-center gap-2 pt-1.5 border-t border-gray-200 flex-wrap">

@@ -205,6 +205,21 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     participantUpdate.participant_status = participantStatus;
     participantUpdate.attendance_confirmed_at = new Date().toISOString();
     participantUpdate.attendance_confirmed_by = userId;
+
+    // Persist optional notes into metadata.notes
+    const notes = typeof body.notes === 'string' ? body.notes.trim() : null;
+    if (notes !== null) {
+      // Fetch existing metadata to merge (avoids clobbering unrelated keys)
+      const { data: existing } = await tenantClient
+        .from('lesson_participants')
+        .select('metadata')
+        .eq('id', body.participant_id)
+        .eq('lesson_instance_id', body.instance_id)
+        .maybeSingle();
+
+      const existingMeta = (existing?.metadata && typeof existing.metadata === 'object') ? existing.metadata : {};
+      participantUpdate.metadata = { ...existingMeta, notes: notes || null };
+    }
   }
 
   const { error: updateError } = await tenantClient
