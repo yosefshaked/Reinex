@@ -1,7 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { NavLink, useLocation, matchPath } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { authenticatedFetch } from '@/lib/api-client.js';
+import HiddenUatAdminToolsDialog from '@/features/admin/components/HiddenUatAdminToolsDialog.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
 import {
   LayoutDashboard,
   Calendar,
@@ -15,6 +21,8 @@ import {
   Pin,
   PinOff,
   PanelRightClose,
+  Loader2,
+  Shield,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -34,12 +42,133 @@ function isStudentsRoute(pathname) {
 }
 
 export default function Sidebar({ hidden = false, onToggleHidden }) {
+  const SEQUENCE_WINDOW_MS = 5000;
+
   const [hovered, setHovered] = useState(false);
   const [pinned, setPinned] = useState(false);
+  const [sequenceState, setSequenceState] = useState({ step: 0, startedAt: 0 });
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const [adminToolsOpen, setAdminToolsOpen] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [authPasswordInput, setAuthPasswordInput] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authError, setAuthError] = useState('');
   const expanded = pinned || hovered;
   const location = useLocation();
+  const { activeOrgId } = useOrg();
 
   const items = useMemo(() => NAV_ITEMS, []);
+
+  function resetSequence() {
+    setSequenceState({ step: 0, startedAt: 0 });
+  }
+
+  async function attemptHiddenAdminTrigger() {
+    if (!activeOrgId) {
+      return;
+    }
+
+    try {
+      const payload = await authenticatedFetch('debug/uat-tools', {
+        method: 'GET',
+        params: {
+          org_id: activeOrgId,
+        },
+      });
+
+      if (payload?.enabled !== true) {
+        return;
+      }
+
+      setAuthPasswordInput('');
+      setAuthError('');
+      setAuthDialogOpen(true);
+    } catch {
+      // Intentionally silent (fail-closed).
+    }
+  }
+
+  function trackSidebarSequence(action) {
+    const now = Date.now();
+    const step = sequenceState.step;
+    const startedAt = sequenceState.startedAt;
+    const expired = startedAt > 0 && now - startedAt > SEQUENCE_WINDOW_MS;
+
+    if (expired) {
+      if (action === 'pin') {
+        setSequenceState({ step: 1, startedAt: now });
+      } else {
+        resetSequence();
+      }
+      return;
+    }
+
+    if (action === 'pin') {
+      if (step >= 0 && step < 4) {
+        setSequenceState({
+          step: step + 1,
+          startedAt: step === 0 ? now : startedAt,
+        });
+        return;
+      }
+
+      setSequenceState({ step: 1, startedAt: now });
+      return;
+    }
+
+    if (action === 'settings') {
+      if (step === 4) {
+        resetSequence();
+        void attemptHiddenAdminTrigger();
+        return;
+      }
+      resetSequence();
+      return;
+    }
+
+    resetSequence();
+  }
+
+  async function handleAuthenticateAdminTool() {
+    if (!activeOrgId) {
+      setAuthError('אין ארגון פעיל.');
+      return;
+    }
+
+    if (!authPasswordInput.trim()) {
+      setAuthError('יש להזין סיסמה.');
+      return;
+    }
+
+    setIsAuthenticating(true);
+    setAuthError('');
+
+    try {
+      await authenticatedFetch('debug/uat-tools', {
+        method: 'POST',
+        body: {
+          action: 'authenticate',
+          org_id: activeOrgId,
+          password: authPasswordInput,
+        },
+      });
+
+      setAdminPassword(authPasswordInput);
+      setAuthPasswordInput('');
+      setAuthDialogOpen(false);
+      setAdminToolsOpen(true);
+    } catch (error) {
+      setAuthError(error?.data?.message || error?.message || 'אימות נכשל.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }
+
+  function handleCancelAuthDialog() {
+    setAuthDialogOpen(false);
+    setAuthPasswordInput('');
+    setAuthError('');
+  }
 
   if (hidden) {
     return null;
@@ -65,6 +194,7 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
               to={item.to}
               end={item.end}
               aria-label={item.label}
+              onClick={() => trackSidebarSequence(item.key === 'settings' ? 'settings' : 'other')}
               className={({ isActive }) => {
                 const active =
                   isActive || (item.key === 'students' && isStudentsRoute(location.pathname));
@@ -89,7 +219,10 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
           type="button"
           variant="ghost"
           className={cn('w-full justify-center', expanded ? 'gap-sm' : '')}
-          onClick={() => setPinned((prev) => !prev)}
+          onClick={() => {
+            setPinned((prev) => !prev);
+            trackSidebarSequence('pin');
+          }}
           aria-label={pinned ? 'ביטול נעילת סרגל צד' : 'נעילת סרגל צד'}
         >
           {pinned ? <PinOff className="h-4 w-4" aria-hidden="true" /> : <Pin className="h-4 w-4" aria-hidden="true" />}
@@ -100,13 +233,83 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
           type="button"
           variant="ghost"
           className={cn('mt-xs w-full justify-center', expanded ? 'gap-sm' : '')}
-          onClick={() => onToggleHidden?.()}
+          onClick={() => {
+            trackSidebarSequence('other');
+            onToggleHidden?.();
+          }}
           aria-label="הסתר סרגל צד"
         >
           <PanelRightClose className="h-4 w-4" aria-hidden="true" />
           {expanded ? <span className="whitespace-nowrap">הסתר</span> : null}
         </Button>
       </div>
+
+      <Dialog
+        open={authDialogOpen}
+        onOpenChange={(nextOpen) => {
+          if (nextOpen) {
+            setAuthDialogOpen(true);
+          }
+        }}
+      >
+        <DialogContent
+          hideDefaultClose
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onPointerDownOutside={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="h-4 w-4" />
+              Admin Authentication
+            </DialogTitle>
+            <DialogDescription>
+              יש להזין סיסמת מנהל כדי לפתוח את כלי ה-UAT המוסתר.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <Label htmlFor="hidden-admin-tool-password">סיסמה</Label>
+            <Input
+              id="hidden-admin-tool-password"
+              type="password"
+              autoComplete="off"
+              value={authPasswordInput}
+              onChange={(event) => setAuthPasswordInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void handleAuthenticateAdminTool();
+                }
+              }}
+            />
+            {authError ? (
+              <p className="text-sm text-red-600">{authError}</p>
+            ) : null}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={handleCancelAuthDialog} disabled={isAuthenticating}>
+              ביטול
+            </Button>
+            <Button type="button" onClick={handleAuthenticateAdminTool} disabled={isAuthenticating}>
+              {isAuthenticating ? <Loader2 className="h-4 w-4 animate-spin" /> : 'אימות'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <HiddenUatAdminToolsDialog
+        open={adminToolsOpen}
+        onOpenChange={(nextOpen) => {
+          setAdminToolsOpen(nextOpen);
+          if (!nextOpen) {
+            setAdminPassword('');
+          }
+        }}
+        orgId={activeOrgId}
+        password={adminPassword}
+      />
     </aside>
   );
 }
