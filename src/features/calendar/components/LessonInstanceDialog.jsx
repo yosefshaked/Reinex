@@ -10,6 +10,7 @@ import { useOrg } from '@/org/OrgContext';
 import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { toast } from 'sonner';
 import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, MessageCircle, Mail, ThumbsUp, ThumbsDown, UserPlus, RotateCcw } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Textarea } from '../../../components/ui/textarea';
@@ -503,6 +504,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         }));
       }
       onUpdate?.();
+      toast.success(
+        status === 'scheduled'
+          ? 'סטטוס התלמיד שוחזר למתוכנן.'
+          : `סטטוס התלמיד עודכן ל-${getParticipantStatusLabel(status)}.`
+      );
       return true;
     } catch (err) {
       console.error('Error marking attendance:', err);

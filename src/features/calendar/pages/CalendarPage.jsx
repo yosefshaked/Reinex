@@ -80,6 +80,17 @@ export default function CalendarPage() {
   const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(dateForQuery, viewMode);
   const isCalendarLoading = instructorsLoading || instancesLoading;
 
+  useEffect(() => {
+    if (!selectedInstance?.id || !Array.isArray(instances)) {
+      return;
+    }
+
+    const refreshedSelectedInstance = instances.find((instance) => instance.id === selectedInstance.id);
+    if (refreshedSelectedInstance) {
+      setSelectedInstance(refreshedSelectedInstance);
+    }
+  }, [instances, selectedInstance?.id]);
+
   const handleInstanceClick = (instance) => {
     setSelectedInstance(instance);
   };
@@ -95,7 +106,6 @@ export default function CalendarPage() {
 
   const handleUpdateSuccess = () => {
     refetchInstances();
-    setSelectedInstance(null);
   };
 
   const handleRescheduleSuccess = () => {
