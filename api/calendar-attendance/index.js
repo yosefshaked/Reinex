@@ -254,7 +254,7 @@ async function buildRestorePreview(tenantClient, body) {
   const [{ data: instanceDetail, error: instanceDetailError }, { data: allParticipants, error: participantsError }, { data: lessonEarningRows, error: earningError }, { data: participantLedgerRows, error: ledgerError }, dashboardTasks] = await Promise.all([
     tenantClient
       .from('lesson_instances')
-      .select('id, instructor_employee_id, status, datetime_start')
+      .select('id, instructor_employee_id, service_id, duration_minutes, status, datetime_start')
       .eq('id', body.instance_id)
       .maybeSingle(),
     tenantClient
@@ -302,7 +302,8 @@ async function buildRestorePreview(tenantClient, body) {
 
   const lessonDate = new Date(instanceDetail.datetime_start || Date.now());
   const lessonDateKey = String(instanceDetail.datetime_start || '').slice(0, 10);
-  const [{ data: dayLessons, error: dayLessonsError }, { data: systemAttendanceRecord, error: attendanceError }, { data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }] = await Promise.all([
+  const policiesPromise = loadFinancePolicies(tenantClient);
+  const [{ data: dayLessons, error: dayLessonsError }, { data: systemAttendanceRecord, error: attendanceError }, { data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }, { data: capabilityRow, error: capabilityError }, policies] = await Promise.all([
     tenantClient
       .from('lesson_instances')
       .select('id, status, duration_minutes')
@@ -325,23 +326,47 @@ async function buildRestorePreview(tenantClient, body) {
       .select('id, first_name, middle_name, last_name')
       .eq('id', participant.student_id)
       .maybeSingle(),
+    tenantClient
+      .from('instructor_service_capabilities')
+      .select('base_rate')
+      .eq('employee_id', instanceDetail.instructor_employee_id)
+      .eq('service_id', instanceDetail.service_id)
+      .maybeSingle(),
+    policiesPromise,
   ]);
 
   if (dayLessonsError) throw dayLessonsError;
   if (attendanceError && attendanceError.code !== 'PGRST116' && attendanceError.code !== '42P01') throw attendanceError;
   if (employeeError && employeeError.code !== 'PGRST116') throw employeeError;
   if (studentError && studentError.code !== 'PGRST116') throw studentError;
+  if (capabilityError && capabilityError.code !== 'PGRST116' && capabilityError.code !== '42P01') throw capabilityError;
 
+  const currentParticipants = allParticipants || [];
+  const isParticipantEarningEligible = (row) => (
+    Boolean(policies?.instructorEarningsPolicy?.[String(row?.participant_status || '').toLowerCase()])
+  );
+
+  const currentShouldInstructorEarn = instance.status === 'completed'
+    && currentParticipants.some(isParticipantEarningEligible);
+  const projectedShouldInstructorEarn = projectedInstanceStatus === 'completed'
+    && projectedParticipants.some(isParticipantEarningEligible);
+
+  const currentCompletedLessons = (dayLessons || []).filter((row) => row.status === 'completed');
   const projectedCompletedLessons = (dayLessons || []).filter((row) => {
     if (row.id === body.instance_id) {
       return projectedInstanceStatus === 'completed';
     }
     return row.status === 'completed';
   });
+  const currentWorkedMinutes = currentCompletedLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
   const projectedWorkedMinutes = projectedCompletedLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
 
   const openHmoTask = (dashboardTasks || []).find((task) => task.task_type === 'hmo_claim_submission' && task.status === 'open') || null;
-  const lessonEarningAmount = roundCurrency((lessonEarningRows || []).reduce((sum, row) => sum + Number(row?.payout_amount || 0), 0));
+  const storedLessonEarningAmount = roundCurrency((lessonEarningRows || []).reduce((sum, row) => sum + Number(row?.payout_amount || 0), 0));
+  const inferredLessonEarningAmount = roundCurrency(
+    Number(capabilityRow?.base_rate || 0) * (Number(instanceDetail.duration_minutes || 0) / 60)
+  );
+  const lessonEarningAmount = storedLessonEarningAmount || (currentShouldInstructorEarn ? inferredLessonEarningAmount : 0);
   const ledgerAmount = roundCurrency((participantLedgerRows || []).reduce((sum, row) => {
     if (row.transaction_type === 'DEBIT') return sum + Number(row.amount || 0);
     if (row.transaction_type === 'CREDIT') return sum - Number(row.amount || 0);
@@ -366,7 +391,7 @@ async function buildRestorePreview(tenantClient, body) {
       message: `₪${ledgerAmount} יוחזרו ליתרה של ${studentName}.`,
     });
   }
-  if (lessonEarningAmount !== 0 && projectedInstanceStatus !== 'completed') {
+  if (currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0) {
     impacts.push({
       type: 'instructor_earning_reversal',
       amount: lessonEarningAmount,
@@ -374,12 +399,12 @@ async function buildRestorePreview(tenantClient, body) {
     });
   }
   if (systemAttendanceRecord?.source_type === 'system') {
-    if (projectedCompletedLessons.length === 0) {
+    if (currentCompletedLessons.length > 0 && projectedCompletedLessons.length === 0) {
       impacts.push({
         type: 'instructor_attendance_remove',
         message: `נוכחות המדריך של ${instructorName} בתאריך ${lessonDateKey} תוסר.`,
       });
-    } else if (Number(systemAttendanceRecord.worked_minutes || 0) !== projectedWorkedMinutes) {
+    } else if (currentWorkedMinutes !== projectedWorkedMinutes) {
       impacts.push({
         type: 'instructor_attendance_update',
         message: `נוכחות המדריך של ${instructorName} בתאריך ${lessonDateKey} תשתנה ל-${projectedWorkedMinutes} דקות.`,
@@ -404,7 +429,7 @@ async function buildRestorePreview(tenantClient, body) {
     impacts,
     projected: {
       billing_amount_reversed: ledgerAmount,
-      instructor_earning_removed: lessonEarningAmount !== 0 && projectedInstanceStatus !== 'completed'
+      instructor_earning_removed: currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0
         ? lessonEarningAmount
         : 0,
       instructor_attendance_worked_minutes: projectedCompletedLessons.length > 0 ? projectedWorkedMinutes : null,
