@@ -212,6 +212,7 @@ function buildBillingDecision({ participant, instance, commitment, policies, syn
 
   const shouldPreserveStoredCharge = Boolean(
     commitment?.id
+    && policyAllowsCharge
     && storedPricingBreakdown?.billing_status === 'charged'
     && normalizeString(storedPricingBreakdown?.selected_commitment_id) === commitment.id
     && Number.isFinite(Number(participant?.price_charged)),

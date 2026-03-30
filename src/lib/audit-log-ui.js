@@ -14,6 +14,7 @@ const ACTION_LABELS_HE = {
   'student.created': 'נוצר תלמיד חדש',
   'student.updated': 'פרטי תלמיד עודכנו',
   'student.deleted': 'תלמיד נמחק',
+  'student.lesson_attendance_restored': 'שוחזרה נוכחות תלמיד',
   'students.bulk_update': 'בוצע עדכון מרובה לתלמידים',
   'status.changed': 'שינוי סטטוס תלמיד',
 
@@ -118,6 +119,8 @@ const DETAIL_LABELS_HE = {
   storage_mode: 'מצב אחסון',
   role: 'תפקיד',
   status: 'סטטוס',
+  participant_status: 'סטטוס השתתפות',
+  lesson_status: 'סטטוס שיעור',
   previous: 'לפני',
   next: 'אחרי',
   requested: 'התבקש',
@@ -134,6 +137,14 @@ const DETAIL_LABELS_HE = {
   cancelled_count: 'כמות שבוטלה',
   instance_count: 'כמות מופעים',
   from_date: 'מתאריך',
+  billing_amount_reversed: 'סכום שהוחזר לתלמיד',
+  instructor_earning_removed: 'סכום שהוסר משכר מדריך',
+  instructor_attendance_worked_minutes: 'דקות נוכחות מדריך לאחר השחזור',
+  hmo_task_resolved: 'משימת תביעה טופלה',
+  previous_status: 'סטטוס קודם',
+  next_status: 'סטטוס חדש',
+  impacts: 'השפעות',
+  projected: 'חיזוי',
 };
 
 const VALUE_LABELS_BY_KEY = {

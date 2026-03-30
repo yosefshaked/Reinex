@@ -21,6 +21,7 @@ import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { loadFinancePolicies, syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
 import { listDashboardTasks, resolveDashboardTask } from '../_shared/dashboard-tasks.js';
 
@@ -101,7 +102,12 @@ export default async function (context, req) {
     return respond(context, tenantError.status, tenantError.body);
   }
 
-  return await handleMarkAttendance(context, body, tenantClient, userId, isAdmin);
+  return await handleMarkAttendance(context, body, tenantClient, userId, isAdmin, {
+    supabase,
+    orgId,
+    userEmail: authResult.data.user.email || null,
+    role,
+  });
 }
 
 async function handleUpdateReminder(context, body, tenantClient, userId) {
@@ -407,7 +413,67 @@ async function buildRestorePreview(tenantClient, body) {
   };
 }
 
-async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin) {
+async function buildRestoreAuditChanges(preview) {
+  if (!preview) {
+    return [];
+  }
+
+  const changes = [
+    {
+      field: 'participant_status',
+      before: preview.participant_status_before,
+      after: preview.participant_status_after,
+    },
+  ];
+
+  if (preview.lesson_status_before !== preview.lesson_status_after) {
+    changes.push({
+      field: 'lesson_status',
+      before: preview.lesson_status_before,
+      after: preview.lesson_status_after,
+    });
+  }
+
+  if (Number(preview.projected?.billing_amount_reversed || 0) > 0) {
+    changes.push({
+      field: 'billing_amount_reversed',
+      before: 0,
+      after: roundCurrency(preview.projected.billing_amount_reversed),
+    });
+  }
+
+  if (Number(preview.projected?.instructor_earning_removed || 0) > 0) {
+    changes.push({
+      field: 'instructor_earning_removed',
+      before: 0,
+      after: roundCurrency(preview.projected.instructor_earning_removed),
+    });
+  }
+
+  const attendanceImpact = (preview.impacts || []).some((impact) => (
+    impact?.type === 'instructor_attendance_remove'
+      || impact?.type === 'instructor_attendance_update'
+  ));
+  if (attendanceImpact) {
+    changes.push({
+      field: 'instructor_attendance_worked_minutes',
+      before: null,
+      after: preview.projected?.instructor_attendance_worked_minutes,
+    });
+  }
+
+  if (preview.projected?.hmo_task_id_to_resolve) {
+    changes.push({
+      field: 'hmo_task_resolved',
+      before: false,
+      after: true,
+    });
+  }
+
+  return changes;
+}
+
+async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin, auditContext = {}) {
   if (body.action === 'update-reminder') {
     return handleUpdateReminder(context, body, tenantClient, userId);
   }
@@ -540,6 +606,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
   }
 
   const participantUpdate = {};
+  let restoreAuditPreview = null;
 
   if (hasAttendedFlag || hasParticipantStatus) {
     const allowedParticipantStatuses = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -555,6 +622,16 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     participantUpdate.updated_by = userId;
 
     if (participantStatus === 'scheduled') {
+      try {
+        restoreAuditPreview = await buildRestorePreview(tenantClient, body);
+      } catch (previewError) {
+        context.log?.warn?.('calendar/attendance failed to capture restore preview for audit', {
+          message: previewError?.message,
+          instanceId: body.instance_id,
+          participantId: body.participant_id,
+        });
+      }
+
       // Restoring a participant reopens the attendance/reminder workflow.
       participantUpdate.reminder_sent = false;
       participantUpdate.reminder_seen = false;
@@ -847,6 +924,64 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     } catch (taskResolveError) {
       context.log?.warn?.('calendar/attendance failed to resolve HMO task on restore', {
         message: taskResolveError?.message,
+        participantId: body.participant_id,
+      });
+    }
+  }
+
+  if (participantUpdate.participant_status === 'scheduled' && participant?.student_id) {
+    const auditDetails = {
+      action_label_he: 'שוחזרה נוכחות תלמיד לשיעור מתוכנן',
+      lesson_instance_id: body.instance_id,
+      participant_id: body.participant_id,
+      previous_status: participant.participant_status,
+      next_status: 'scheduled',
+      impacts: restoreAuditPreview?.impacts || [],
+      projected: restoreAuditPreview?.projected || null,
+      changes: await buildRestoreAuditChanges(restoreAuditPreview),
+    };
+
+    try {
+      if (auditContext?.supabase && auditContext?.orgId && auditContext?.userEmail && auditContext?.role) {
+        await logAuditEvent(auditContext.supabase, {
+          orgId: auditContext.orgId,
+          userId,
+          userEmail: auditContext.userEmail,
+          userRole: auditContext.role,
+          actionType: 'student.lesson_attendance_restored',
+          actionCategory: AUDIT_CATEGORIES.STUDENTS,
+          resourceType: 'student',
+          resourceId: participant.student_id,
+          details: auditDetails,
+        });
+      }
+    } catch (auditError) {
+      context.log?.warn?.('calendar/attendance failed to write control audit (restore)', {
+        message: auditError?.message,
+        participantId: body.participant_id,
+      });
+    }
+
+    try {
+      await logTenantAuditEvent(tenantClient, {
+        actorUserId: userId,
+        eventType: 'calendar.lesson_participant.restored_to_scheduled',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'lesson_participant',
+        resourceId: body.participant_id,
+        beforeState: participant,
+        afterState: {
+          ...participant,
+          ...participantUpdate,
+        },
+        details: {
+          origin: 'api/calendar-attendance',
+          ...auditDetails,
+        },
+      });
+    } catch (auditError) {
+      context.log?.warn?.('calendar/attendance failed to write tenant audit (restore)', {
+        message: auditError?.message,
         participantId: body.participant_id,
       });
     }
