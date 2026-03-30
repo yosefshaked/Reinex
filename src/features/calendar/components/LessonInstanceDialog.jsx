@@ -398,13 +398,15 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       return;
     }
     setIsSearchingStudents(true);
+    setError(null);
     try {
       const results = await authenticatedFetch('students-search', {
         params: { q: query, org_id: org.id },
       });
       setAddStudentResults(Array.isArray(results) ? results : []);
-    } catch {
+    } catch (err) {
       setAddStudentResults([]);
+      setError(resolveMutationError(err) || 'חיפוש תלמידים נכשל');
     } finally {
       setIsSearchingStudents(false);
     }

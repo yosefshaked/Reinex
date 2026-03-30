@@ -15,6 +15,11 @@ import {
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { normalizeDayToken, daySortValue } from '../_shared/day-of-week.js';
 import {
+  applyStudentSearchFilter,
+  filterStudentsBySearchTerms,
+  parseStudentSearchQuery,
+} from '../_shared/student-search.js';
+import {
   coerceBooleanFlag,
   coerceIdentityNumber,
   coerceOptionalText,
@@ -734,10 +739,6 @@ function parseSortOrder(query) {
   return 'schedule'; // default: day → time → name
 }
 
-function escapeILikeValue(value) {
-  return String(value || '').replace(/[%_,]/g, '');
-}
-
 function isPaginationRequested(query) {
   const parsed = coerceBooleanFlag(query?.pagination ?? query?.paginated, {
     defaultValue: false,
@@ -871,8 +872,9 @@ export default async function handler(context, req) {
     const dayFilter = parseDayFilter(req?.query);
     const sortOrder = parseSortOrder(req?.query);
     const searchTerm = normalizeString(req?.query?.search);
+    const studentSearch = parseStudentSearchQuery(searchTerm);
     const tagFilter = normalizeString(req?.query?.tag ?? req?.query?.tags);
-    const requiresDerivedSchedule = sortOrder === 'schedule' || dayFilter !== null;
+    const requiresDerivedSchedule = sortOrder === 'schedule' || dayFilter !== null || studentSearch.requiresRefinement;
 
     if (Number.isNaN(dayFilter)) {
       return respond(context, 400, { message: 'invalid_day_filter' });
@@ -971,18 +973,8 @@ export default async function handler(context, req) {
       builder = builder.eq('is_active', false);
     }
 
-    if (searchTerm) {
-      const sanitizedSearch = escapeILikeValue(searchTerm);
-      builder = builder.or(
-        [
-          `first_name.ilike.%${sanitizedSearch}%`,
-          `middle_name.ilike.%${sanitizedSearch}%`,
-          `last_name.ilike.%${sanitizedSearch}%`,
-          `identity_number.ilike.%${sanitizedSearch}%`,
-          `phone.ilike.%${sanitizedSearch}%`,
-          `email.ilike.%${sanitizedSearch}%`,
-        ].join(','),
-      );
+    if (studentSearch.hasQuery) {
+      builder = applyStudentSearchFilter(builder, studentSearch);
     }
 
     if (tagFilter) {
@@ -1008,6 +1000,10 @@ export default async function handler(context, req) {
     }
 
     let normalizedData = Array.isArray(data) ? data : [];
+
+    if (studentSearch.hasQuery) {
+      normalizedData = filterStudentsBySearchTerms(normalizedData, studentSearch);
+    }
 
     const studentIds = normalizedData.map((student) => student?.id).filter(Boolean);
     const { data: scheduleMap, error: scheduleError } = await fetchPrimarySchedulesByStudentIds(

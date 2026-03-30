@@ -2,6 +2,12 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
+  applyStudentSearchFilter,
+  filterStudentsBySearchTerms,
+  parseStudentSearchQuery,
+  STUDENT_SEARCH_SELECT,
+} from '../_shared/student-search.js';
+import {
   ensureMembership,
   isAdminRole,
   normalizeString,
@@ -86,11 +92,12 @@ export default async function (context, req) {
   if (!query || query.length < 2) {
     return respond(context, 200, []);
   }
+  const searchSpec = parseStudentSearchQuery(query);
 
   // Build query with role-based filtering
   let builder = tenantClient
     .from('students')
-    .select('id, first_name, last_name, identity_number, phone, email, is_active, assigned_instructor_id');
+    .select(STUDENT_SEARCH_SELECT);
 
   // Member instructors can only see their assigned students
   if (!isAdminRole(role)) {
@@ -98,15 +105,17 @@ export default async function (context, req) {
   }
   // Admins see all students (no filter needed)
 
-  const { data, error } = await builder
-    .or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%`)
+  const { data, error } = await applyStudentSearchFilter(builder, searchSpec)
     .order('first_name', { ascending: true })
-    .limit(8);
+    .limit(25);
 
   if (error) {
     context.log?.error?.('students-search failed to query roster', { message: error.message, orgId });
     return respond(context, 500, { message: 'failed_to_search_students' });
   }
 
-  return respond(context, 200, Array.isArray(data) ? data : []);
+  const results = Array.isArray(data) ? data : [];
+  const filteredResults = filterStudentsBySearchTerms(results, searchSpec);
+
+  return respond(context, 200, filteredResults.slice(0, 8));
 }
