@@ -270,7 +270,7 @@ export default async function calendarCorrections(context, req) {
   }
 
   const action = normalizeString(body?.action).toLowerCase();
-  if (!['preview', 'apply'].includes(action)) {
+  if (!['preview', 'apply', 'register_blocked_attempt'].includes(action)) {
     return respond(context, 400, { message: 'invalid_action' });
   }
 
@@ -286,7 +286,7 @@ export default async function calendarCorrections(context, req) {
   const instancePatch = normalizePatchObject(body?.instance_patch || body?.instancePatch);
   const participantPatches = normalizeParticipantPatches(body?.participant_patches || body?.participantPatches);
 
-  if (!reasonText) {
+  if (action === 'apply' && !reasonText) {
     return respond(context, 400, { message: 'missing_reason_text' });
   }
 
@@ -307,6 +307,73 @@ export default async function calendarCorrections(context, req) {
     return respond(context, 404, { message: 'lesson_instance_not_found' });
   }
 
+  if (action === 'preview') {
+    // Preview is intentionally read-only: no writes, no side effects, no optimistic-lock enforcement.
+    return respond(context, 200, preview);
+  }
+
+  if (action === 'register_blocked_attempt') {
+    if (!preview.blocked_by_paid_claim) {
+      return respond(context, 409, { message: 'correction_not_blocked_by_paid_claim', preview });
+    }
+
+    try {
+      const task = await createDashboardTask(tenantClient, {
+        taskType: 'calendar_correction_paid_claim_block',
+        title: 'נדרשת בדיקה ידנית לתיקון שיעור חסום',
+        description: 'ניסיון תיקון נחסם כי השיעור קשור לאצוות תביעה שסומנה כשולמה. נדרשת בדיקה ידנית.',
+        priority: 'high',
+        resourceType: 'lesson_instance',
+        resourceId: preview.original_instance_id,
+        actionPath: '/financials',
+        createdBy: userId,
+        metadata: {
+          paid_claim_batch_ids: preview.paid_claim_batch_ids,
+          source: 'blocked_attempt',
+        },
+      });
+
+      await logAuditEvent(supabase, {
+        orgId,
+        userId,
+        userEmail: authResult.data.user.email || '',
+        userRole: role,
+        actionType: 'locked_correction.blocked_attempt_task_created',
+        actionCategory: AUDIT_CATEGORIES.CALENDAR,
+        resourceType: 'lesson_instance',
+        resourceId: originalInstanceId,
+        details: {
+          dashboard_task_id: task?.id || null,
+          paid_claim_batch_ids: preview.paid_claim_batch_ids,
+        },
+      });
+
+      await logTenantAuditEvent(tenantClient, {
+        actorUserId: userId,
+        eventType: 'calendar.instance.blocked_attempt_task_created',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'lesson_instance',
+        resourceId: originalInstanceId,
+        details: {
+          dashboard_task_id: task?.id || null,
+          paid_claim_batch_ids: preview.paid_claim_batch_ids,
+        },
+      });
+
+      return respond(context, 201, {
+        message: 'blocked_attempt_task_created',
+        dashboard_task: task,
+        preview,
+      });
+    } catch (error) {
+      context.log?.error?.('calendar-corrections failed to register blocked attempt', {
+        message: error?.message,
+        originalInstanceId,
+      });
+      return respond(context, 500, { message: 'failed_to_register_blocked_attempt' });
+    }
+  }
+
   if (expectedVersion !== null && preview.instance_version !== expectedVersion) {
     return respondWithVersionConflict(context, {
       resourceType: 'lesson_instance',
@@ -314,26 +381,6 @@ export default async function calendarCorrections(context, req) {
       expectedVersion,
       currentVersion: preview.instance_version,
     });
-  }
-
-  if (action === 'preview') {
-    try {
-      await logTenantAuditEvent(tenantClient, {
-        actorUserId: userId,
-        eventType: 'calendar.instance.correction_previewed',
-        retentionCategory: TENANT_AUDIT_RETENTION.DIAGNOSTIC,
-        resourceType: 'lesson_instance',
-        resourceId: originalInstanceId,
-        details: {
-          correction_mode: correctionMode,
-          blocked_by_paid_claim: preview.blocked_by_paid_claim,
-        },
-      });
-    } catch (auditError) {
-      context.log?.warn?.('calendar-corrections failed to write tenant audit (preview)', { message: auditError?.message, originalInstanceId });
-    }
-
-    return respond(context, 200, preview);
   }
 
   if (body?.impact_warning_acknowledged !== true) {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
 import { Label } from '../../../components/ui/label';
@@ -98,6 +98,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [localReminderState, setLocalReminderState] = useState({});
   const [error, setError] = useState(null);
   const [billingWarnings, setBillingWarnings] = useState([]);
+  const [blockedAttemptTaskId, setBlockedAttemptTaskId] = useState('');
+  const [isRegisteringBlockedAttempt, setIsRegisteringBlockedAttempt] = useState(false);
   // absenceForm: { participantId, status, notes } | null
   const [absenceForm, setAbsenceForm] = useState(null);
   
@@ -131,9 +133,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   useEffect(() => {
     setLocalReminderState({});
     setBillingWarnings([]);
+    setBlockedAttemptTaskId('');
   }, [instance?.id, instance?.latest_correction?.id]);
 
-  if (!instance) return null;
 
   function formatPhoneForWhatsApp(phone) {
     if (!phone) return null;
@@ -204,11 +206,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     return `mailto:${contact.email}?subject=${subject}&body=${body}`;
   }
 
-  const statusInfo = getInstanceStatusIcon(displayInstance.status, displayInstance.documentation_status);
-  const startTime = formatTimeDisplay(displayInstance.datetime_start);
-  const endDate = new Date(new Date(displayInstance.datetime_start).getTime() + displayInstance.duration_minutes * 60000);
-  const endTime = formatTimeDisplay(endDate.toISOString());
-  const dateDisplay = formatDateDisplay(displayInstance.datetime_start);
+  const statusInfo = getInstanceStatusIcon(displayInstance?.status, displayInstance?.documentation_status);
+  const startTime = displayInstance?.datetime_start ? formatTimeDisplay(displayInstance.datetime_start) : '';
+  const endDate = displayInstance?.datetime_start
+    ? new Date(new Date(displayInstance.datetime_start).getTime() + Number(displayInstance.duration_minutes || 0) * 60000)
+    : null;
+  const endTime = endDate ? formatTimeDisplay(endDate.toISOString()) : '';
+  const dateDisplay = displayInstance?.datetime_start ? formatDateDisplay(displayInstance.datetime_start) : '';
 
   async function handleSave() {
     if (!org?.id) {
@@ -378,6 +382,36 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
+  const registerBlockedAttemptTask = useCallback(async () => {
+    if (!org?.id || !instance?.id) {
+      return;
+    }
+
+    setIsRegisteringBlockedAttempt(true);
+    setError(null);
+
+    try {
+      const payload = await authenticatedFetch('calendar/corrections', {
+        method: 'POST',
+        body: {
+          action: 'register_blocked_attempt',
+          org_id: org.id,
+          original_instance_id: instance.id,
+        },
+      });
+
+      const taskId = payload?.dashboard_task?.id || '';
+      if (taskId) {
+        setBlockedAttemptTaskId(taskId);
+      }
+      onUpdate?.();
+    } catch (err) {
+      setError(resolveMutationError(err));
+    } finally {
+      setIsRegisteringBlockedAttempt(false);
+    }
+  }, [instance?.id, onUpdate, org?.id]);
+
   async function markReminderSent(participantId) {
     if (!org?.id) return;
     setReminderUpdating(true);
@@ -463,10 +497,35 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   }
 
   const activeServices = services?.filter(s => s.is_active) || [];
-  const isReportable = displayInstance.status === 'scheduled';
-  const canEdit = canManageAll && isReportable && !instance.is_locked;
-  const canMarkAttendance = isReportable && !instance.is_locked;
-  const canQuickReport = isReportable && !instance.is_locked;
+  const isReportable = displayInstance?.status === 'scheduled';
+  const lockRows = [
+    ...(Array.isArray(instance?.locks?.instance) ? instance.locks.instance : []),
+    ...(Array.isArray(instance?.locks?.participants) ? instance.locks.participants : []),
+  ];
+  const paidClaimBatchIds = Array.isArray(instance?.paid_claim_batch_ids) ? instance.paid_claim_batch_ids : [];
+  const hardBlockedByPaidClaim = Boolean(
+    instance?.hard_blocked_by_paid_claim
+      || paidClaimBatchIds.length > 0
+      || lockRows.some((lock) => lock.lock_source_type === 'claim_batch' && lock.claim_batch_status === 'paid'),
+  );
+
+  const canEdit = canManageAll && isReportable && !instance?.is_locked;
+  const canMarkAttendance = isReportable && !instance?.is_locked;
+  const canQuickReport = isReportable && !instance?.is_locked;
+
+  useEffect(() => {
+    if (!open || !canManageAll || !hardBlockedByPaidClaim || blockedAttemptTaskId || isRegisteringBlockedAttempt) {
+      return;
+    }
+    void registerBlockedAttemptTask();
+  }, [
+    blockedAttemptTaskId,
+    canManageAll,
+    hardBlockedByPaidClaim,
+    isRegisteringBlockedAttempt,
+    open,
+    registerBlockedAttemptTask,
+  ]);
 
   const scheduledParticipantsCount = displayParticipants.filter(
     (p) => p.participant_status === 'scheduled'
@@ -475,6 +534,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   // An instance with zero participants is exempt (e.g. template-generated shells before enrolment).
   const hasUnsetParticipants =
     displayParticipants.length > 0 && scheduledParticipantsCount > 0;
+
+  if (!instance || !displayInstance) return null;
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -519,13 +580,39 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           );
         })()}
 
-        {(instance.is_locked || instance.latest_correction) && canManageAll && (
+        {(instance.is_locked || instance.latest_correction) && canManageAll && !hardBlockedByPaidClaim && (
           <LockedCorrectionPanel
             instance={instance}
             orgId={org?.id}
             forceOpen={Boolean(error && instance.is_locked)}
             onApplied={() => onUpdate?.()}
           />
+        )}
+
+        {hardBlockedByPaidClaim && canManageAll && (
+          <Alert className="border-red-300 bg-red-50 text-red-950">
+            <AlertTriangle className="h-4 w-4 text-red-700" />
+            <AlertDescription className="space-y-2">
+              <div className="font-medium">השיעור חסום לתיקון בגלל תביעה ששולמה.</div>
+              <div className="text-sm">לא ניתן לפתוח תיקון לשיעור זה. יש להעביר את האירוע לטיפול ידני.</div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={registerBlockedAttemptTask}
+                  disabled={isRegisteringBlockedAttempt}
+                >
+                  {isRegisteringBlockedAttempt ? <Loader2 className="h-4 w-4 animate-spin" /> : 'צור משימת פעולה'}
+                </Button>
+                {blockedAttemptTaskId ? (
+                  <Badge variant="outline" className="border-red-300 bg-white text-red-900">
+                    נוצרה משימה: {blockedAttemptTaskId}
+                  </Badge>
+                ) : null}
+              </div>
+            </AlertDescription>
+          </Alert>
         )}
 
         {isEditMode ? (

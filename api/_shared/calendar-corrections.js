@@ -16,6 +16,12 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function isMissingRelationError(error) {
+  const code = normalizeString(error?.code).toUpperCase();
+  const message = normalizeString(error?.message).toLowerCase();
+  return code === '42P01' || message.includes('does not exist');
+}
+
 function normalizeCorrectionMode(value) {
   const normalized = normalizeString(value).toLowerCase();
   if (['value_only', 'replacement_instance', 'participant_adjustment'].includes(normalized)) {
@@ -202,7 +208,7 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
       .contains('metadata', { source_type: 'calendar_instance_correction', original_instance_id: originalInstanceId }),
   ]);
 
-  if (earningsError && earningsError.code !== 'PGRST116') {
+  if (earningsError && earningsError.code !== 'PGRST116' && !isMissingRelationError(earningsError)) {
     throw earningsError;
   }
   if (commitmentsError) {
@@ -220,13 +226,13 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
   if (latestCorrectionError) {
     throw latestCorrectionError;
   }
-  if (financeAdjustmentError) {
+  if (financeAdjustmentError && !isMissingRelationError(financeAdjustmentError)) {
     throw financeAdjustmentError;
   }
-  if (attendanceCorrectionError) {
+  if (attendanceCorrectionError && !isMissingRelationError(attendanceCorrectionError)) {
     throw attendanceCorrectionError;
   }
-  if (correctionLedgerError) {
+  if (correctionLedgerError && !isMissingRelationError(correctionLedgerError)) {
     throw correctionLedgerError;
   }
 
@@ -466,6 +472,29 @@ export async function enrichInstancesWithCorrectionState(tenantClient, instances
     throw correctionsError;
   }
 
+  const claimBatchIds = Array.from(new Set([
+    ...asArray(instanceLocks)
+      .filter((lock) => lock.lock_source_type === 'claim_batch')
+      .map((lock) => lock.lock_source_id),
+    ...asArray(participantLocks)
+      .filter((lock) => lock.lock_source_type === 'claim_batch')
+      .map((lock) => lock.lock_source_id),
+  ].filter(Boolean)));
+
+  let claimBatchStatusById = new Map();
+  if (claimBatchIds.length > 0) {
+    const { data: claimBatches, error: claimBatchesError } = await tenantClient
+      .from('claim_batches')
+      .select('id, status, paid_at')
+      .in('id', claimBatchIds);
+
+    if (claimBatchesError) {
+      throw claimBatchesError;
+    }
+
+    claimBatchStatusById = new Map(asArray(claimBatches).map((row) => [row.id, row]));
+  }
+
   const instanceLocksById = new Map();
   for (const lock of asArray(instanceLocks)) {
     if (!instanceLocksById.has(lock.lesson_instance_id)) {
@@ -490,19 +519,51 @@ export async function enrichInstancesWithCorrectionState(tenantClient, instances
   }
 
   return rows.map((row) => {
-    const instanceLockRows = instanceLocksById.get(row.id) || [];
+    const instanceLockRows = (instanceLocksById.get(row.id) || []).map((lock) => {
+      const claimBatch = lock.lock_source_type === 'claim_batch'
+        ? claimBatchStatusById.get(lock.lock_source_id) || null
+        : null;
+      return {
+        ...lock,
+        claim_batch_status: claimBatch?.status || null,
+        claim_batch_paid_at: claimBatch?.paid_at || null,
+      };
+    });
+
     const participantRows = asArray(row.participants).map((participant) => ({
       ...participant,
-      locks: participantLocksById.get(participant.id) || [],
+      locks: (participantLocksById.get(participant.id) || []).map((lock) => {
+        const claimBatch = lock.lock_source_type === 'claim_batch'
+          ? claimBatchStatusById.get(lock.lock_source_id) || null
+          : null;
+        return {
+          ...lock,
+          claim_batch_status: claimBatch?.status || null,
+          claim_batch_paid_at: claimBatch?.paid_at || null,
+        };
+      }),
     }));
+
+    const participantLockRows = participantRows.flatMap((participant) => participant.locks);
+    const paidClaimBatchIds = Array.from(new Set([
+      ...instanceLockRows
+        .filter((lock) => lock.lock_source_type === 'claim_batch' && lock.claim_batch_status === 'paid')
+        .map((lock) => lock.lock_source_id),
+      ...participantLockRows
+        .filter((lock) => lock.lock_source_type === 'claim_batch' && lock.claim_batch_status === 'paid')
+        .map((lock) => lock.lock_source_id),
+    ].filter(Boolean)));
+
     const latestCorrection = latestCorrectionByInstanceId.get(row.id) || null;
     return {
       ...row,
       participants: participantRows,
       is_locked: instanceLockRows.length > 0 || participantRows.some((participant) => participant.locks.length > 0),
+      hard_blocked_by_paid_claim: paidClaimBatchIds.length > 0,
+      paid_claim_batch_ids: paidClaimBatchIds,
       locks: {
         instance: instanceLockRows,
-        participants: participantRows.flatMap((participant) => participant.locks),
+        participants: participantLockRows,
       },
       latest_correction: latestCorrection,
     };
