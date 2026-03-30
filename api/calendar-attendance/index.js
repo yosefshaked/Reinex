@@ -21,6 +21,7 @@ import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { createDashboardTask } from '../_shared/dashboard-tasks.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -472,6 +473,72 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       instanceId: body.instance_id,
     });
     return respond(context, 500, { message: 'failed_to_sync_financial_artifacts' });
+  }
+
+  // HMO claim workflow task: when a participant is marked attended on an HMO commitment,
+  // create a dashboard task prompting the clinic to submit the claim.
+  if (participantUpdate.participant_status === 'attended') {
+    try {
+      const [{ data: participantDetail }, { data: instanceDetail }] = await Promise.all([
+        tenantClient
+          .from('lesson_participants')
+          .select('student_id, commitment_id')
+          .eq('id', body.participant_id)
+          .maybeSingle(),
+        tenantClient
+          .from('lesson_instances')
+          .select('datetime_start')
+          .eq('id', body.instance_id)
+          .maybeSingle(),
+      ]);
+
+      if (participantDetail?.commitment_id) {
+        const { data: commitment } = await tenantClient
+          .from('commitments')
+          .select('commitment_type, hmo_provider_id, is_active')
+          .eq('id', participantDetail.commitment_id)
+          .maybeSingle();
+
+        const isHmo = commitment?.is_active !== false
+          && (commitment?.commitment_type === 'hmo' || Boolean(commitment?.hmo_provider_id));
+
+        if (isHmo) {
+          const { data: student } = await tenantClient
+            .from('students')
+            .select('first_name, last_name')
+            .eq('id', participantDetail.student_id)
+            .maybeSingle();
+
+          const studentName = [student?.first_name, student?.last_name].filter(Boolean).join(' ') || 'תלמיד';
+          const lessonDate = instanceDetail?.datetime_start
+            ? new Date(instanceDetail.datetime_start).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' })
+            : '';
+          const description = lessonDate
+            ? `שיעור של ${studentName} בתאריך ${lessonDate} דורש הגשת תביעה.`
+            : `שיעור של ${studentName} דורש הגשת תביעה.`;
+
+          await createDashboardTask(tenantClient, {
+            taskType: 'hmo_claim_submission',
+            title: 'הגשת תביעה לביטוח לאומי',
+            description,
+            priority: 'medium',
+            resourceType: 'lesson_participant',
+            resourceId: body.participant_id,
+            createdBy: userId,
+            metadata: {
+              lesson_instance_id: body.instance_id,
+              student_id: participantDetail.student_id,
+              commitment_id: participantDetail.commitment_id,
+            },
+          });
+        }
+      }
+    } catch (hmoTaskError) {
+      context.log?.warn?.('calendar/attendance failed to create HMO claim task', {
+        message: hmoTaskError?.message,
+        participantId: body.participant_id,
+      });
+    }
   }
 
   return respond(context, 200, {

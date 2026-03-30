@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
 import { Label } from '../../../components/ui/label';
@@ -98,8 +98,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [localReminderState, setLocalReminderState] = useState({});
   const [error, setError] = useState(null);
   const [billingWarnings, setBillingWarnings] = useState([]);
-  const [blockedAttemptTaskId, setBlockedAttemptTaskId] = useState('');
-  const [isRegisteringBlockedAttempt, setIsRegisteringBlockedAttempt] = useState(false);
   // absenceForm: { participantId, status, notes } | null
   const [absenceForm, setAbsenceForm] = useState(null);
   
@@ -133,7 +131,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   useEffect(() => {
     setLocalReminderState({});
     setBillingWarnings([]);
-    setBlockedAttemptTaskId('');
   }, [instance?.id, instance?.latest_correction?.id]);
 
 
@@ -382,36 +379,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
-  const registerBlockedAttemptTask = useCallback(async () => {
-    if (!org?.id || !instance?.id) {
-      return;
-    }
-
-    setIsRegisteringBlockedAttempt(true);
-    setError(null);
-
-    try {
-      const payload = await authenticatedFetch('calendar/corrections', {
-        method: 'POST',
-        body: {
-          action: 'register_blocked_attempt',
-          org_id: org.id,
-          original_instance_id: instance.id,
-        },
-      });
-
-      const taskId = payload?.dashboard_task?.id || '';
-      if (taskId) {
-        setBlockedAttemptTaskId(taskId);
-      }
-      onUpdate?.();
-    } catch (err) {
-      setError(resolveMutationError(err));
-    } finally {
-      setIsRegisteringBlockedAttempt(false);
-    }
-  }, [instance?.id, onUpdate, org?.id]);
-
   async function markReminderSent(participantId) {
     if (!org?.id) return;
     setReminderUpdating(true);
@@ -513,20 +480,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const canMarkAttendance = isReportable && !instance?.is_locked;
   const canQuickReport = isReportable && !instance?.is_locked;
 
-  useEffect(() => {
-    if (!open || !canManageAll || !hardBlockedByPaidClaim || blockedAttemptTaskId || isRegisteringBlockedAttempt) {
-      return;
-    }
-    void registerBlockedAttemptTask();
-  }, [
-    blockedAttemptTaskId,
-    canManageAll,
-    hardBlockedByPaidClaim,
-    isRegisteringBlockedAttempt,
-    open,
-    registerBlockedAttemptTask,
-  ]);
-
   const scheduledParticipantsCount = displayParticipants.filter(
     (p) => p.participant_status === 'scheduled'
   ).length;
@@ -592,25 +545,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         {hardBlockedByPaidClaim && canManageAll && (
           <Alert className="border-red-300 bg-red-50 text-red-950">
             <AlertTriangle className="h-4 w-4 text-red-700" />
-            <AlertDescription className="space-y-2">
+            <AlertDescription>
               <div className="font-medium">השיעור חסום לתיקון בגלל תביעה ששולמה.</div>
               <div className="text-sm">לא ניתן לפתוח תיקון לשיעור זה. יש להעביר את האירוע לטיפול ידני.</div>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={registerBlockedAttemptTask}
-                  disabled={isRegisteringBlockedAttempt}
-                >
-                  {isRegisteringBlockedAttempt ? <Loader2 className="h-4 w-4 animate-spin" /> : 'צור משימת פעולה'}
-                </Button>
-                {blockedAttemptTaskId ? (
-                  <Badge variant="outline" className="border-red-300 bg-white text-red-900">
-                    נוצרה משימה: {blockedAttemptTaskId}
-                  </Badge>
-                ) : null}
-              </div>
             </AlertDescription>
           </Alert>
         )}
