@@ -509,7 +509,18 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   }
 
   function openAbsenceForm(participantId) {
-    setAbsenceForm({ participantId, status: 'no_show', notes: '' });
+    const participant = displayParticipants.find((entry) => entry.id === participantId);
+    const existingStatus = participant?.participant_status;
+    const existingNotes = typeof participant?.metadata?.notes === 'string' ? participant.metadata.notes : '';
+    const nextStatus = ['no_show', 'cancelled_student', 'cancelled_clinic'].includes(existingStatus)
+      ? existingStatus
+      : 'no_show';
+
+    setAbsenceForm({
+      participantId,
+      status: nextStatus,
+      notes: existingNotes,
+    });
   }
 
   function closeAbsenceForm() {
