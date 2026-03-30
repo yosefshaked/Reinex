@@ -23,6 +23,7 @@ import {
   fetchApprovedLeaveDays,
   isYmdDate,
   loadFinancePolicies,
+  resolveActorEmployeeId,
   resolveEmployeeRecord,
   toDateKey,
   upsertLeaveBalanceUsage,
@@ -223,18 +224,28 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
+  const actorResult = await resolveActorEmployeeId(tenantClient, userId);
+  if (actorResult.error === 'employee_profile_required') {
+    return respond(context, 403, { message: 'employee_profile_required' });
+  }
+  if (actorResult.error) {
+    context.log?.error?.('employee-leave failed to resolve actor employee', { message: actorResult.error?.message });
+    return respond(context, 500, { message: 'failed_to_resolve_actor' });
+  }
+  const actorEmployeeId = actorResult.employeeId;
+
   if (method === 'POST' || method === 'PUT') {
     if (isBalanceEventRequest(body)) {
-      return handleBalanceEventUpsert(context, tenantClient, body, userId, method);
+      return handleBalanceEventUpsert(context, tenantClient, body, actorEmployeeId, method);
     }
-    return handleUpsert(context, tenantClient, body, userId, method);
+    return handleUpsert(context, tenantClient, body, actorEmployeeId, method);
   }
 
   if (method === 'DELETE') {
     if (isBalanceEventRequest(body)) {
       return handleBalanceEventDelete(context, tenantClient, body);
     }
-    return handleDelete(context, tenantClient, body, userId);
+    return handleDelete(context, tenantClient, body, actorEmployeeId);
   }
 
   return respond(context, 405, { message: 'method not allowed' });
@@ -301,7 +312,7 @@ async function handleGet(context, req, tenantClient, userId, canManageAll) {
   });
 }
 
-async function handleUpsert(context, tenantClient, body, userId, method) {
+async function handleUpsert(context, tenantClient, body, actorEmployeeId, method) {
   const leaveType = normalizeLeaveType(body?.leave_type);
   const employeeId = normalizeString(body?.employee_id);
   const startDate = normalizeString(body?.start_date);
@@ -378,8 +389,8 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
     reason,
     notes,
     source_type: normalizeString(body?.source_type).toLowerCase() || 'admin_manual',
-    approved_by: userId,
-    updated_by: userId,
+    approved_by: actorEmployeeId,
+    updated_by: actorEmployeeId,
     updated_at: new Date().toISOString(),
     metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
   };
@@ -387,7 +398,7 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
   let leaveEntryId = existingEntry?.id || '';
   try {
     if (!existingEntry) {
-      payload.created_by = userId;
+      payload.created_by = actorEmployeeId;
       payload.created_at = new Date().toISOString();
       const { data, error } = await tenantClient
         .from('employee_leave_entries')
@@ -437,7 +448,7 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
         employeeId,
         leaveType,
         notes,
-        createdBy: userId,
+        createdBy: actorEmployeeId,
       });
     }
   } catch (error) {
@@ -456,7 +467,7 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
   return respond(context, existingEntry ? 200 : 201, savedEntry);
 }
 
-async function handleDelete(context, tenantClient, body, userId) {
+async function handleDelete(context, tenantClient, body, actorEmployeeId) {
   const leaveEntryId = normalizeString(body?.id);
   if (!leaveEntryId) {
     return respond(context, 400, { message: 'missing_leave_entry_id' });
@@ -473,7 +484,7 @@ async function handleDelete(context, tenantClient, body, userId) {
       .from('employee_leave_entries')
       .update({
         status: 'cancelled',
-        updated_by: userId,
+        updated_by: actorEmployeeId,
         updated_at: new Date().toISOString(),
       })
       .eq('id', leaveEntryId)
@@ -492,7 +503,7 @@ async function handleDelete(context, tenantClient, body, userId) {
 }
 
 
-async function handleBalanceEventUpsert(context, tenantClient, body, userId, method) {
+async function handleBalanceEventUpsert(context, tenantClient, body, actorEmployeeId, method) {
   const employeeId = normalizeString(body?.employee_id);
   const eventType = normalizeBalanceEventType(body?.event_type);
   const effectiveDate = normalizeString(body?.effective_date);
@@ -548,7 +559,7 @@ async function handleBalanceEventUpsert(context, tenantClient, body, userId, met
 
   try {
     if (!existingEvent) {
-      payload.created_by = userId;
+      payload.created_by = actorEmployeeId;
       payload.created_at = new Date().toISOString();
       const { data, error } = await tenantClient
         .from('employee_leave_balance_events')

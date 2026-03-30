@@ -18,6 +18,7 @@ import {
   fetchAttendanceRecords,
   endOfMonthKey,
   isYmdDate,
+  resolveActorEmployeeId,
   resolveEmployeeRecord,
   startOfMonthKey,
   toDateKey,
@@ -104,6 +105,19 @@ export default async function (context, req) {
     return respond(context, tenantError.status, tenantError.body);
   }
 
+  let actorEmployeeId;
+  if (method !== 'GET') {
+    const actorResult = await resolveActorEmployeeId(tenantClient, userId);
+    if (actorResult.error === 'employee_profile_required') {
+      return respond(context, 403, { message: 'employee_profile_required' });
+    }
+    if (actorResult.error) {
+      context.log?.error?.('employee-attendance failed to resolve actor employee', { message: actorResult.error?.message });
+      return respond(context, 500, { message: 'failed_to_resolve_actor' });
+    }
+    actorEmployeeId = actorResult.employeeId;
+  }
+
   const canManageAll = canManageEmployeeOps(role);
 
   if (method === 'GET') {
@@ -184,12 +198,12 @@ export default async function (context, req) {
       worked_minutes: workedMinutesResult.value,
       notes,
       source_type: normalizeString(body?.source_type).toLowerCase() || 'manual',
-      updated_by: userId,
+      updated_by: actorEmployeeId,
       updated_at: new Date().toISOString(),
     };
 
     if (method === 'POST') {
-      payload.created_by = userId;
+      payload.created_by = actorEmployeeId;
       payload.created_at = new Date().toISOString();
       const { data, error } = await tenantClient
         .from('employee_attendance_records')

@@ -15,6 +15,7 @@ import {
   respond,
 } from '../_shared/org-bff.js';
 import { sendBrevoEmail } from '../_shared/brevo.js';
+import { resolveActorEmployeeId } from '../_shared/employee-finance.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 
 const OTP_DIGITS = 6;
@@ -953,6 +954,16 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
   if (tenantError) return respond(context, tenantError.status, tenantError.body);
 
+  const actorResult = await resolveActorEmployeeId(tenantClient, userId);
+  if (actorResult.error === 'employee_profile_required') {
+    return respond(context, 403, { message: 'employee_profile_required' });
+  }
+  if (actorResult.error) {
+    context.log?.error?.('form-submissions failed to resolve actor employee', { message: actorResult.error?.message });
+    return respond(context, 500, { message: 'failed_to_resolve_actor' });
+  }
+  const actorEmployeeId = actorResult.employeeId;
+
   const [{ data: form, error: formError }, { data: student, error: studentError }] = await Promise.all([
     tenantClient
       .from('forms')
@@ -1000,7 +1011,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     delivery_method: deliveryMethod,
     sent_via: [deliveryMethod],
     initiated_at: nowIso,
-    initiated_by: userId,
+    initiated_by: actorEmployeeId,
   };
 
   const { data: submission, error: submissionError } = await tenantClient
@@ -1155,6 +1166,16 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
 
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
   if (tenantError) return respond(context, tenantError.status, tenantError.body);
+
+  const actorResult = await resolveActorEmployeeId(tenantClient, userId);
+  if (actorResult.error === 'employee_profile_required') {
+    return respond(context, 403, { message: 'employee_profile_required' });
+  }
+  if (actorResult.error) {
+    context.log?.error?.('form-submissions failed to resolve actor employee for resend', { message: actorResult.error?.message });
+    return respond(context, 500, { message: 'failed_to_resolve_actor' });
+  }
+  const actorEmployeeId = actorResult.employeeId;
 
   const { data: submission, error: submissionError } = await tenantClient
     .from('form_submissions')
@@ -1339,7 +1360,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
         sent_via: existingSentVia,
         otp_expires_at: expiresAt,
         resent_at: nowIso,
-        resent_by: userId,
+        resent_by: actorEmployeeId,
         resend_count: nextResendCount,
       },
     })
