@@ -245,7 +245,7 @@ async function buildRestorePreview(tenantClient, body) {
     return null;
   }
 
-  const [{ data: instanceDetail, error: instanceDetailError }, { data: allParticipants, error: participantsError }, { data: lessonEarning, error: earningError }, { data: participantLedgerRows, error: ledgerError }, dashboardTasks] = await Promise.all([
+  const [{ data: instanceDetail, error: instanceDetailError }, { data: allParticipants, error: participantsError }, { data: lessonEarningRows, error: earningError }, { data: participantLedgerRows, error: ledgerError }, dashboardTasks] = await Promise.all([
     tenantClient
       .from('lesson_instances')
       .select('id, instructor_employee_id, status, datetime_start')
@@ -258,8 +258,7 @@ async function buildRestorePreview(tenantClient, body) {
     tenantClient
       .from('lesson_earnings')
       .select('id, employee_id, rate_used, payout_amount, metadata')
-      .eq('lesson_instance_id', body.instance_id)
-      .maybeSingle(),
+      .eq('lesson_instance_id', body.instance_id),
     tenantClient
       .from('ledger_transactions')
       .select('id, student_id, commitment_id, transaction_type, usage_type, amount, metadata')
@@ -336,6 +335,7 @@ async function buildRestorePreview(tenantClient, body) {
   const projectedWorkedMinutes = projectedCompletedLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
 
   const openHmoTask = (dashboardTasks || []).find((task) => task.task_type === 'hmo_claim_submission' && task.status === 'open') || null;
+  const lessonEarningAmount = roundCurrency((lessonEarningRows || []).reduce((sum, row) => sum + Number(row?.payout_amount || 0), 0));
   const ledgerAmount = roundCurrency((participantLedgerRows || []).reduce((sum, row) => {
     if (row.transaction_type === 'DEBIT') return sum + Number(row.amount || 0);
     if (row.transaction_type === 'CREDIT') return sum - Number(row.amount || 0);
@@ -360,11 +360,11 @@ async function buildRestorePreview(tenantClient, body) {
       message: `₪${ledgerAmount} יוחזרו ליתרה של ${studentName}.`,
     });
   }
-  if (lessonEarning?.id && Number(lessonEarning.payout_amount || 0) !== 0 && projectedInstanceStatus !== 'completed') {
+  if (lessonEarningAmount !== 0 && projectedInstanceStatus !== 'completed') {
     impacts.push({
       type: 'instructor_earning_reversal',
-      amount: roundCurrency(lessonEarning.payout_amount),
-      message: `₪${roundCurrency(lessonEarning.payout_amount)} יוסרו מהשכר של ${instructorName} עבור ${monthLabel}.`,
+      amount: lessonEarningAmount,
+      message: `₪${lessonEarningAmount} יוסרו מהשכר של ${instructorName} עבור ${monthLabel}.`,
     });
   }
   if (systemAttendanceRecord?.source_type === 'system') {
@@ -398,8 +398,8 @@ async function buildRestorePreview(tenantClient, body) {
     impacts,
     projected: {
       billing_amount_reversed: ledgerAmount,
-      instructor_earning_removed: lessonEarning?.id && projectedInstanceStatus !== 'completed'
-        ? roundCurrency(lessonEarning.payout_amount || 0)
+      instructor_earning_removed: lessonEarningAmount !== 0 && projectedInstanceStatus !== 'completed'
+        ? lessonEarningAmount
         : 0,
       instructor_attendance_worked_minutes: projectedCompletedLessons.length > 0 ? projectedWorkedMinutes : null,
       hmo_task_id_to_resolve: openHmoTask?.id || null,
