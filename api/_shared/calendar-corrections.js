@@ -1,5 +1,6 @@
 /* eslint-env node */
 import { loadFinancePolicies, toDateKey } from './employee-finance.js';
+import { normalizeEntityVersion } from './calendar-editing.js';
 import { normalizeString } from './org-bff.js';
 
 const LESSON_BILLING_USAGE_TYPES = ['standard', 'double', 'cross_service'];
@@ -145,6 +146,8 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
     return null;
   }
 
+  instance.version = normalizeEntityVersion(instance.version);
+
   const { data: participants, error: participantsError } = await tenantClient
     .from('lesson_participants')
     .select('id, lesson_instance_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id, reminder_sent, reminder_seen, attendance_confirmed_at, documented_at, version, metadata')
@@ -154,7 +157,10 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
     throw participantsError;
   }
 
-  const participantRows = asArray(participants);
+  const participantRows = asArray(participants).map((participant) => ({
+    ...participant,
+    version: normalizeEntityVersion(participant.version),
+  }));
   const participantIds = participantRows.map((participant) => participant.id);
   const commitmentIds = Array.from(new Set(participantRows.map((participant) => participant.commitment_id).filter(Boolean)));
 

@@ -756,7 +756,13 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
     .eq('id', body.id);
 
   if (expectedVersion !== null) {
-    updateQuery = updateQuery.eq('version', expectedVersion);
+    const shouldFilterByVersion = !(
+      existingInstance?.legacy_null_version
+      && expectedVersion === 1
+    );
+    if (shouldFilterByVersion) {
+      updateQuery = updateQuery.eq('version', expectedVersion);
+    }
   }
 
   const { data: updatedRow, error: updateError } = await updateQuery

@@ -166,7 +166,13 @@ async function handleUpdateReminder(context, body, tenantClient, userId) {
     .eq('lesson_instance_id', body.instance_id);
 
   if (expectedParticipantVersion !== null) {
-    updateQuery = updateQuery.eq('version', expectedParticipantVersion);
+    const shouldFilterByVersion = !(
+      mutationState.participant?.legacy_null_version
+      && expectedParticipantVersion === 1
+    );
+    if (shouldFilterByVersion) {
+      updateQuery = updateQuery.eq('version', expectedParticipantVersion);
+    }
   }
 
   const { data: updatedRow, error } = await updateQuery.select('id, version').maybeSingle();
@@ -372,7 +378,13 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     .eq('lesson_instance_id', body.instance_id);
 
   if (expectedParticipantVersion !== null) {
-    participantUpdateQuery = participantUpdateQuery.eq('version', expectedParticipantVersion);
+    const shouldFilterByVersion = !(
+      participant?.legacy_null_version
+      && expectedParticipantVersion === 1
+    );
+    if (shouldFilterByVersion) {
+      participantUpdateQuery = participantUpdateQuery.eq('version', expectedParticipantVersion);
+    }
   }
 
   const { data: updatedParticipant, error: updateError } = await participantUpdateQuery
@@ -453,7 +465,13 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
           .eq('id', body.instance_id);
 
         if (expectedInstanceVersion !== null) {
-          instanceUpdateQuery = instanceUpdateQuery.eq('version', expectedInstanceVersion);
+          const shouldFilterByVersion = !(
+            instance?.legacy_null_version
+            && expectedInstanceVersion === 1
+          );
+          if (shouldFilterByVersion) {
+            instanceUpdateQuery = instanceUpdateQuery.eq('version', expectedInstanceVersion);
+          }
         }
 
         await instanceUpdateQuery;

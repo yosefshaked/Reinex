@@ -7,6 +7,7 @@ import { enrichInstancesWithCorrectionState } from '../_shared/calendar-correcti
 import {
   fetchLessonMutationState,
   isLockedState,
+  normalizeEntityVersion,
   normalizeUuid,
   parseExpectedVersion,
   resolveActorInstructorId,
@@ -80,7 +81,7 @@ function buildInstanceSelect(options = {}) {
     'metadata',
     'instructor:Employees(id, first_name, middle_name, last_name, name)',
     'service:Services(id, name, color, duration_minutes)',
-    `participants:${participantsJoin}(id, student_id, participant_status, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, metadata, student:students(id, first_name, middle_name, last_name))`,
+    `participants:${participantsJoin}(id, student_id, participant_status, version, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, metadata, student:students(id, first_name, middle_name, last_name))`,
   ].join(',');
 }
 
@@ -158,7 +159,40 @@ export default async function lessonInstances(context, req) {
   }
 
   if (method === 'GET') {
+    const lessonInstanceId = getLessonInstanceId(context, req, body);
     const date = normalizeString(req?.query?.date || body?.date);
+    const requestedInstructorId = normalizeUuid(req?.query?.instructor_id || req?.query?.instructorId);
+    const requestedStudentId = normalizeUuid(req?.query?.student_id || req?.query?.studentId);
+
+    if (lessonInstanceId) {
+      let builder = tenantClient
+        .from('lesson_instances')
+        .select(buildInstanceSelect())
+        .eq('id', lessonInstanceId);
+
+      if (!isAdmin) {
+        if (!actorInstructorId) {
+          return respond(context, 404, { message: 'lesson_instance_not_found' });
+        }
+        builder = builder.eq('instructor_employee_id', actorInstructorId);
+      }
+
+      const { data, error } = await builder.maybeSingle();
+      if (error) {
+        context.log?.error?.('lesson-instances failed to fetch lesson instance', { message: error.message, lessonInstanceId });
+        return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
+      }
+      if (!data) {
+        return respond(context, 404, { message: 'lesson_instance_not_found' });
+      }
+
+      const [enriched] = await enrichInstancesWithCorrectionState(tenantClient, [data]);
+      if (enriched?.version !== undefined) {
+        enriched.version = normalizeEntityVersion(enriched.version);
+      }
+      return respond(context, 200, enriched || data);
+    }
+
     if (!date || !isIsoDate(date)) {
       return respond(context, 400, { message: 'invalid_date' });
     }
@@ -167,9 +201,6 @@ export default async function lessonInstances(context, req) {
     if (!range) {
       return respond(context, 400, { message: 'invalid_date' });
     }
-
-    const requestedInstructorId = normalizeUuid(req?.query?.instructor_id || req?.query?.instructorId);
-    const requestedStudentId = normalizeUuid(req?.query?.student_id || req?.query?.studentId);
 
     const selectClause = requestedStudentId
       ? buildInstanceSelect({ participantsJoin: 'lesson_participants!inner' })
@@ -191,7 +222,6 @@ export default async function lessonInstances(context, req) {
       builder = builder.eq('instructor_employee_id', requestedInstructorId);
     }
 
-    // Filter by student_id if provided. Use !inner join to enforce participant membership.
     if (requestedStudentId) {
       builder = builder.eq('participants.student_id', requestedStudentId);
     }
@@ -413,7 +443,13 @@ export default async function lessonInstances(context, req) {
       .eq('id', lessonInstanceId);
 
     if (expectedVersion !== null) {
-      updateBuilder = updateBuilder.eq('version', expectedVersion);
+      const shouldFilterByVersion = !(
+        mutationState.instance?.legacy_null_version
+        && expectedVersion === 1
+      );
+      if (shouldFilterByVersion) {
+        updateBuilder = updateBuilder.eq('version', expectedVersion);
+      }
     }
 
     const { data: updatedRows, error: updateError } = await updateBuilder
@@ -486,6 +522,9 @@ export default async function lessonInstances(context, req) {
     }
 
     const [enriched] = await enrichInstancesWithCorrectionState(tenantClient, data ? [data] : []);
+    if (enriched?.version !== undefined) {
+      enriched.version = normalizeEntityVersion(enriched.version);
+    }
     return respond(context, 200, enriched || data);
   }
 

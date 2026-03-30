@@ -3076,6 +3076,47 @@ CREATE INDEX IF NOT EXISTS "Documents_uploaded_at_idx" ON public."Documents" ("u
 CREATE INDEX IF NOT EXISTS "Documents_expiration_idx" ON public."Documents" ("expiration_date") WHERE "expiration_date" IS NOT NULL;
 CREATE INDEX IF NOT EXISTS "Documents_hash_idx" ON public."Documents" ("hash") WHERE "hash" IS NOT NULL;
 
+DO $$
+DECLARE
+  versioned_table text;
+  versioned_tables text[] := ARRAY[
+    'forms',
+    'employee_attendance_records',
+    'finance_corrections',
+    'lesson_templates',
+    'lesson_instances',
+    'lesson_participants',
+    'payroll_runs',
+    'claim_batches',
+    'calendar_instance_corrections',
+    'dashboard_tasks'
+  ];
+BEGIN
+  FOREACH versioned_table IN ARRAY versioned_tables
+  LOOP
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = versioned_table
+        AND column_name = 'version'
+    ) THEN
+      EXECUTE format(
+        'UPDATE public.%I SET version = 1 WHERE version IS NULL OR version < 1',
+        versioned_table
+      );
+      EXECUTE format(
+        'ALTER TABLE public.%I ALTER COLUMN version SET DEFAULT 1',
+        versioned_table
+      );
+      EXECUTE format(
+        'ALTER TABLE public.%I ALTER COLUMN version SET NOT NULL',
+        versioned_table
+      );
+    END IF;
+  END LOOP;
+END $$;
+
 CREATE OR REPLACE FUNCTION public.set_entity_updated_at_and_version()
 RETURNS trigger
 LANGUAGE plpgsql

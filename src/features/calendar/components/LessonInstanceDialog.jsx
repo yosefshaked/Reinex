@@ -14,6 +14,7 @@ import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, Message
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Textarea } from '../../../components/ui/textarea';
 import { LockedCorrectionPanel } from './LockedCorrectionPanel';
+import { useVersionConflictResolver } from './useVersionConflictResolver';
 
 function toLocalDateString(dateObj) {
   if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
@@ -76,6 +77,56 @@ function resolveMutationError(error) {
     return 'השיעור עודכן על ידי משתמש אחר. רעננו את התצוגה ונסו שוב.';
   }
   return error?.message || 'הפעולה נכשלה.';
+}
+
+function getParticipantStatusLabel(status) {
+  if (status === 'attended') return 'נכח';
+  if (status === 'no_show') return 'לא הגיע';
+  if (status === 'cancelled_student') return 'בוטל ע"י תלמיד';
+  if (status === 'cancelled_clinic') return 'בוטל ע"י המכון';
+  return 'מתוכנן';
+}
+
+function buildConflictLines(baseInstance, latestInstance, participantId) {
+  const lines = [];
+  if (!latestInstance) return lines;
+
+  const baseDisplayInstance = getDisplayInstance(baseInstance);
+  const latestDisplayInstance = getDisplayInstance(latestInstance);
+  const baseParticipants = getDisplayParticipants(baseInstance);
+  const latestParticipants = getDisplayParticipants(latestInstance);
+
+  if (baseDisplayInstance?.status !== latestDisplayInstance?.status) {
+    lines.push(`סטטוס השיעור כעת הוא "${getParticipantStatusLabel(latestDisplayInstance?.status)}" במקום "${getParticipantStatusLabel(baseDisplayInstance?.status)}".`);
+  }
+
+  if (baseDisplayInstance?.datetime_start !== latestDisplayInstance?.datetime_start) {
+    lines.push(`מועד השיעור השתנה ל-${formatDateDisplay(latestDisplayInstance?.datetime_start)} ${formatTimeDisplay(latestDisplayInstance?.datetime_start)}.`);
+  }
+
+  if (baseDisplayInstance?.duration_minutes !== latestDisplayInstance?.duration_minutes) {
+    lines.push(`משך השיעור עודכן ל-${latestDisplayInstance?.duration_minutes || 0} דקות.`);
+  }
+
+  if (participantId) {
+    const beforeParticipant = baseParticipants.find((participant) => participant.id === participantId);
+    const latestParticipant = latestParticipants.find((participant) => participant.id === participantId);
+    if (latestParticipant && beforeParticipant?.participant_status !== latestParticipant.participant_status) {
+      const participantName = latestParticipant.student?.full_name || beforeParticipant?.student?.full_name || 'התלמיד';
+      lines.push(`${participantName} מסומן כרגע כ-"${getParticipantStatusLabel(latestParticipant.participant_status)}".`);
+    }
+    const latestNotes = latestParticipant?.metadata?.notes || '';
+    const previousNotes = beforeParticipant?.metadata?.notes || '';
+    if (latestNotes !== previousNotes && latestNotes) {
+      lines.push(`הערת המשתתף עודכנה ל-"${latestNotes}".`);
+    }
+  }
+
+  if (lines.length === 0) {
+    lines.push('קיימת גרסה חדשה יותר של השיעור בשרת, גם אם לא זוהה שינוי גלוי בשדות המוצגים כאן.');
+  }
+
+  return lines;
 }
 
 /**
@@ -219,6 +270,139 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const endTime = endDate ? formatTimeDisplay(endDate.toISOString()) : '';
   const dateDisplay = displayInstance?.datetime_start ? formatDateDisplay(displayInstance.datetime_start) : '';
 
+  async function fetchLatestInstance() {
+    return authenticatedFetch(`lesson-instances/${instance.id}`, {
+      params: { org_id: org.id },
+    });
+  }
+  const {
+    conflictState,
+    isResolvingConflict,
+    handleVersionConflict,
+    applyConflictOverride,
+    clearConflict,
+  } = useVersionConflictResolver({
+    fetchLatestValue: fetchLatestInstance,
+    clearError: () => setError(null),
+  });
+
+  function createAttendanceConflictAdapter() {
+    return {
+      buildConflictState: ({ payload, latestValue }) => ({
+        title: 'השיעור השתנה מאז שפתחתם אותו.',
+        actionLabel: `סימון תלמיד כ-${getParticipantStatusLabel(payload.requestedStatus)}`,
+        diffLines: buildConflictLines(instance, latestValue, payload.participantId),
+        participantId: payload.participantId,
+      }),
+      retry: async ({ latestValue, payload }) => {
+        const latestParticipants = getDisplayParticipants(latestValue);
+        const latestParticipant = latestParticipants.find((participant) => participant.id === payload.participantId);
+        const body = {
+          org_id: org.id,
+          instance_id: latestValue.id,
+          participant_id: payload.participantId,
+          participant_status: payload.requestedStatus,
+          instance_version: latestValue.version,
+          participant_version: latestParticipant?.version,
+        };
+        if (typeof payload.notes === 'string') {
+          body.notes = payload.notes.trim();
+        }
+        const result = await authenticatedFetch('calendar/attendance', {
+          method: 'POST',
+          body,
+        });
+        if (result?.billing_warnings?.length > 0) {
+          setBillingWarnings(result.billing_warnings);
+        }
+        if (absenceForm?.participantId === payload.participantId) {
+          setAbsenceForm(null);
+        }
+        onUpdate?.();
+      },
+    };
+  }
+
+  function createSaveConflictAdapter() {
+    return {
+      buildConflictState: ({ payload, latestValue }) => ({
+        title: 'השיעור השתנה מאז שפתחתם אותו.',
+        actionLabel: 'שמירת שינויים בשיעור',
+        diffLines: buildConflictLines(instance, latestValue),
+      }),
+      retry: async ({ latestValue, payload }) => {
+        const datetime_start = toUtcIsoString(payload.formData.date, payload.formData.time);
+        const body = {
+          id: latestValue.id,
+          org_id: org.id,
+          datetime_start,
+          duration_minutes: payload.formData.duration_minutes,
+          instructor_employee_id: payload.formData.instructor_employee_id,
+          service_id: payload.formData.service_id,
+          status: payload.formData.status,
+          expected_version: latestValue.version,
+        };
+        if (isCancellationStatus(payload.formData.status) || payload.formData.status === 'no_show') {
+          body.closed_reason = payload.formData.closed_reason || null;
+        }
+        await authenticatedFetch('calendar/instances', { method: 'PUT', body });
+        setIsEditMode(false);
+        onUpdate?.();
+      },
+    };
+  }
+
+  function createCancelConflictAdapter() {
+    return {
+      buildConflictState: ({ payload, latestValue }) => ({
+        title: 'השיעור השתנה מאז שפתחתם אותו.',
+        actionLabel: 'עדכון סטטוס ביטול',
+        diffLines: buildConflictLines(instance, latestValue),
+      }),
+      retry: async ({ latestValue, payload }) => {
+        await authenticatedFetch('calendar/instances', {
+          method: 'PUT',
+          body: {
+            id: latestValue.id,
+            org_id: org.id,
+            status: payload.requestedStatus,
+            closed_reason: payload.closedReason || null,
+            expected_version: latestValue.version,
+          },
+        });
+        onUpdate?.();
+        onClose();
+      },
+    };
+  }
+
+  function createReportConflictAdapter() {
+    return {
+      buildConflictState: ({ payload, latestValue }) => ({
+        title: 'השיעור השתנה מאז שפתחתם אותו.',
+        actionLabel: `עדכון סטטוס שיעור ל-${getParticipantStatusLabel(payload.requestedStatus)}`,
+        diffLines: buildConflictLines(instance, latestValue),
+      }),
+      retry: async ({ latestValue, payload }) => {
+        const result = await authenticatedFetch('calendar/instances', {
+          method: 'PUT',
+          body: {
+            id: latestValue.id,
+            org_id: org.id,
+            status: payload.requestedStatus,
+            expected_version: latestValue.version,
+          },
+        });
+        onUpdate?.();
+        if (result?.billing_warnings?.length > 0) {
+          setBillingWarnings(result.billing_warnings);
+        } else {
+          onClose();
+        }
+      },
+    };
+  }
+
   async function handleSave() {
     if (!org?.id) {
       setError('Organization not found');
@@ -265,7 +449,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       onUpdate?.();
     } catch (err) {
       console.error('Error updating lesson:', err);
-      setError(resolveMutationError(err));
+      const handled = await handleVersionConflict(err, createSaveConflictAdapter(), {
+        formData: { ...formData },
+      });
+      if (!handled) {
+        setError(resolveMutationError(err));
+      }
     } finally {
       setIsSaving(false);
     }
@@ -274,7 +463,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   async function handleMarkAttendance(participantId, status, notes) {
     if (!org?.id) {
       setError('Organization not found');
-      return;
+      return false;
     }
     setIsMarkingAttendance(true);
     setError(null);
@@ -300,9 +489,20 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         setBillingWarnings(result.billing_warnings);
       }
       onUpdate?.();
+      return true;
     } catch (err) {
       console.error('Error marking attendance:', err);
-      setError(resolveMutationError(err));
+      const participant = displayParticipants.find((entry) => entry.id === participantId);
+      const handled = await handleVersionConflict(err, createAttendanceConflictAdapter(), {
+        participantId,
+        participantName: participant?.student?.full_name || 'תלמיד',
+        requestedStatus: status,
+        notes: typeof notes === 'string' ? notes : '',
+      });
+      if (!handled) {
+        setError(resolveMutationError(err));
+      }
+      return false;
     } finally {
       setIsMarkingAttendance(false);
     }
@@ -318,8 +518,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   async function confirmAbsenceForm() {
     if (!absenceForm) return;
-    await handleMarkAttendance(absenceForm.participantId, absenceForm.status, absenceForm.notes);
-    setAbsenceForm(null);
+    const didSucceed = await handleMarkAttendance(absenceForm.participantId, absenceForm.status, absenceForm.notes);
+    if (didSucceed) {
+      setAbsenceForm(null);
+    }
   }
 
   async function handleCancel(status, closedReason) {
@@ -346,7 +548,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       onClose();
     } catch (err) {
       console.error('Error cancelling lesson:', err);
-      setError(resolveMutationError(err));
+      const handled = await handleVersionConflict(err, createCancelConflictAdapter(), {
+        requestedStatus: status,
+        closedReason: closedReason || null,
+      });
+      if (!handled) {
+        setError(resolveMutationError(err));
+      }
     } finally {
       setIsSaving(false);
     }
@@ -386,7 +594,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       }
     } catch (err) {
       console.error('Error reporting lesson status:', err);
-      setError(resolveMutationError(err));
+      const handled = await handleVersionConflict(err, createReportConflictAdapter(), {
+        requestedStatus: status,
+      });
+      if (!handled) {
+        setError(resolveMutationError(err));
+      }
     } finally {
       setIsSaving(false);
     }
@@ -565,6 +778,53 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {conflictState && (
+          <Alert className="border-amber-400 bg-amber-50 text-amber-950">
+            <AlertTriangle className="h-4 w-4 text-amber-700" />
+            <AlertDescription className="space-y-3">
+              <div className="font-medium">{conflictState.title}</div>
+              <div className="text-sm">הפעולה שביקשתם: {conflictState.actionLabel}.</div>
+              <div className="text-sm">המצב הנוכחי בשרת:</div>
+              <ul className="list-disc pe-5 text-sm space-y-1">
+                {(conflictState.diffLines || []).map((line, index) => (
+                  <li key={`${line}-${index}`}>{line}</li>
+                ))}
+              </ul>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={clearConflict}
+                  disabled={isResolvingConflict}
+                >
+                  ביטול
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => applyConflictOverride({
+                    onUnhandledError: (err) => {
+                      console.error('Error overriding conflict:', err);
+                      setError(resolveMutationError(err));
+                    },
+                  })}
+                  disabled={isResolvingConflict}
+                >
+                  {isResolvingConflict ? (
+                    <>
+                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                      מחיל...
+                    </>
+                  ) : (
+                    'החל בכל זאת'
+                  )}
+                </Button>
+              </div>
+            </AlertDescription>
           </Alert>
         )}
 

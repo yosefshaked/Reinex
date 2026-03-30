@@ -22,6 +22,15 @@ export function parseExpectedVersion(...values) {
   return null;
 }
 
+export function normalizeEntityVersion(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export function usesLegacyNullVersion(value) {
+  return value === null || value === undefined || value === '';
+}
+
 export async function resolveActorInstructorId(tenantClient, userId) {
   const normalizedUserId = normalizeUuid(userId);
   if (!normalizedUserId) {
@@ -63,7 +72,13 @@ export async function fetchLessonMutationState(tenantClient, options) {
       return { error, result };
     }
 
-    result.instance = instance || null;
+    result.instance = instance
+      ? {
+          ...instance,
+          version: normalizeEntityVersion(instance.version),
+          legacy_null_version: usesLegacyNullVersion(instance.version),
+        }
+      : null;
 
     const { data: instanceLocks, error: instanceLocksError } = await tenantClient
       .from('instance_locks')
@@ -89,7 +104,13 @@ export async function fetchLessonMutationState(tenantClient, options) {
       return { error, result };
     }
 
-    result.participant = participant || null;
+    result.participant = participant
+      ? {
+          ...participant,
+          version: normalizeEntityVersion(participant.version),
+          legacy_null_version: usesLegacyNullVersion(participant.version),
+        }
+      : null;
 
     const { data: participantLocks, error: participantLocksError } = await tenantClient
       .from('participant_locks')
