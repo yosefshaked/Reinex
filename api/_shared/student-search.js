@@ -1,4 +1,4 @@
-export const STUDENT_SEARCH_SELECT = 'id, first_name, middle_name, last_name, identity_number, phone, email, is_active, assigned_instructor_id';
+export const STUDENT_SEARCH_SELECT = 'id, first_name, middle_name, last_name, identity_number, phone, email, is_active';
 
 function normalizeStudentSearchQuery(value) {
   return String(value || '').trim();

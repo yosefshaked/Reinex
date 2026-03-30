@@ -54,6 +54,10 @@ function compareInstructorNames(nameA, nameB) {
   return null; // Both empty
 }
 
+function resolveStudentInstructorId(student) {
+  return student?.instructor_employee_id || null;
+}
+
 /**
  * Compare function for sorting students by:
  * 1. Day of week (1-7, nulls last)
@@ -84,8 +88,8 @@ export function compareStudentsBySchedule(a, b, instructorMap = new Map()) {
   }
   
   // 3. Compare by instructor name (for admins)
-  const instructorA = instructorMap.get(a?.assigned_instructor_id);
-  const instructorB = instructorMap.get(b?.assigned_instructor_id);
+  const instructorA = instructorMap.get(resolveStudentInstructorId(a));
+  const instructorB = instructorMap.get(resolveStudentInstructorId(b));
   
   const instructorNameA = instructorA?.name || formatInstructorName(instructorA) || '';
   const instructorNameB = instructorB?.name || formatInstructorName(instructorB) || '';
@@ -142,8 +146,8 @@ export function getStudentComparator(sortBy, instructorMap = new Map()) {
         }
         
         // 2. Compare by instructor name
-        const instructorA = instructorMap.get(a?.assigned_instructor_id);
-        const instructorB = instructorMap.get(b?.assigned_instructor_id);
+        const instructorA = instructorMap.get(resolveStudentInstructorId(a));
+        const instructorB = instructorMap.get(resolveStudentInstructorId(b));
         
         const instructorNameA = instructorA?.name || formatInstructorName(instructorA) || '';
         const instructorNameB = instructorB?.name || formatInstructorName(instructorB) || '';

@@ -160,8 +160,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       const nextServiceId = student.service_id && serviceIds.has(String(student.service_id))
         ? String(student.service_id)
         : '';
-      const nextInstructorId = student.assigned_instructor_id && instructorIds.has(String(student.assigned_instructor_id))
-        ? String(student.assigned_instructor_id)
+      const nextInstructorId = student.instructor_employee_id && instructorIds.has(String(student.instructor_employee_id))
+        ? String(student.instructor_employee_id)
         : '';
 
       setFormData(prev => ({

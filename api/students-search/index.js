@@ -17,6 +17,7 @@ import {
   resolveOrgId,
   resolveTenantClient,
 } from '../_shared/org-bff.js';
+import { fetchStudentIdsByInstructor } from '../_shared/instructor-student-scope.js';
 
 export default async function (context, req) {
   const method = String(req.method || 'GET').toUpperCase();
@@ -99,11 +100,24 @@ export default async function (context, req) {
     .from('students')
     .select(STUDENT_SEARCH_SELECT);
 
-  // Member instructors can only see their assigned students
+  // Member instructors can only see students from their active templates.
   if (!isAdminRole(role)) {
-    builder = builder.eq('assigned_instructor_id', userId);
+    const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(tenantClient, userId);
+    if (lessonError) {
+      context.log?.error?.('students-search failed to fetch instructor lesson templates', {
+        message: lessonError.message,
+        orgId,
+        userId,
+      });
+      return respond(context, 500, { message: 'failed_to_search_students' });
+    }
+
+    if (!studentIds.length) {
+      return respond(context, 200, []);
+    }
+
+    builder = builder.in('id', studentIds);
   }
-  // Admins see all students (no filter needed)
 
   const { data, error } = await applyStudentSearchFilter(builder, searchSpec)
     .order('first_name', { ascending: true })

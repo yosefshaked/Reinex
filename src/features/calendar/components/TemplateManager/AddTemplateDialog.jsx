@@ -138,8 +138,8 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
           ? String(student.service_id)
           : prev.service_id,
       instructor_employee_id:
-        !prev.instructor_employee_id && student.assigned_instructor_id && instructorIds.has(String(student.assigned_instructor_id))
-          ? String(student.assigned_instructor_id)
+        !prev.instructor_employee_id && student.instructor_employee_id && instructorIds.has(String(student.instructor_employee_id))
+          ? String(student.instructor_employee_id)
           : prev.instructor_employee_id,
     }));
   }, [formData.student_id, students, services, instructors]);

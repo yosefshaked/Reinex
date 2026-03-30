@@ -19,6 +19,7 @@ import {
   filterStudentsBySearchTerms,
   parseStudentSearchQuery,
 } from '../_shared/student-search.js';
+import { fetchStudentIdsByInstructor } from '../_shared/instructor-student-scope.js';
 import {
   coerceBooleanFlag,
   coerceIdentityNumber,
@@ -62,28 +63,6 @@ async function findStudentByIdentityNumber(tenantClient, identityNumber, { exclu
 
   const { data, error } = await query.maybeSingle();
   return { data, error };
-}
-
-async function fetchStudentIdsByInstructor(tenantClient, instructorEmployeeId) {
-  if (!instructorEmployeeId) {
-    return { studentIds: [], error: null };
-  }
-
-  const { data, error } = await tenantClient
-    .from('lesson_templates')
-    .select('student_id')
-    .eq('instructor_employee_id', instructorEmployeeId)
-    .eq('is_active', true);
-
-  if (error) {
-    return { studentIds: [], error };
-  }
-
-  const studentIds = Array.from(
-    new Set((data || []).map((row) => row.student_id).filter(Boolean)),
-  );
-
-  return { studentIds, error: null };
 }
 
 /**
@@ -203,7 +182,7 @@ async function fetchPrimarySchedulesByStudentIds(tenantClient, studentIds) {
 
   const { data, error } = await tenantClient
     .from('lesson_templates')
-    .select('student_id, day_of_week, time_of_day')
+    .select('student_id, instructor_employee_id, service_id, day_of_week, time_of_day')
     .in('student_id', studentIds)
     .eq('is_active', true);
 
@@ -222,10 +201,14 @@ async function fetchPrimarySchedulesByStudentIds(tenantClient, studentIds) {
     const candidate = {
       default_day_of_week: normalizedDay,
       default_session_time: row?.time_of_day ?? null,
+      instructor_employee_id: normalizeString(row?.instructor_employee_id) || null,
+      service_id: normalizeString(row?.service_id) || null,
       active_template_count: 1,
       has_multiple_templates: false,
       templates: [
         {
+          instructor_employee_id: normalizeString(row?.instructor_employee_id) || null,
+          service_id: normalizeString(row?.service_id) || null,
           day_of_week: normalizedDay,
           time_of_day: row?.time_of_day ?? null,
         },
@@ -263,6 +246,8 @@ function mergeStudentSchedules(students, scheduleMap) {
       return {
         ...student,
         default_day_of_week: normalizeDayToken(student.default_day_of_week),
+        instructor_employee_id: normalizeString(student?.instructor_employee_id) || null,
+        service_id: normalizeString(student?.service_id) || null,
         active_template_count: 0,
         has_multiple_templates: false,
         additional_templates: [],
@@ -288,6 +273,8 @@ function mergeStudentSchedules(students, scheduleMap) {
       // lesson_templates is the source of truth for schedule in Reinex.
       default_day_of_week: derivedSchedule.default_day_of_week,
       default_session_time: derivedSchedule.default_session_time,
+      instructor_employee_id: derivedSchedule.instructor_employee_id || null,
+      service_id: derivedSchedule.service_id || null,
       active_template_count: derivedSchedule.active_template_count || 1,
       has_multiple_templates: Boolean(derivedSchedule.has_multiple_templates),
       additional_templates: additionalTemplates,
