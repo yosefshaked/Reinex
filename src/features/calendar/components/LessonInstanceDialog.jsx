@@ -547,7 +547,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             <AlertTriangle className="h-4 w-4 text-red-700" />
             <AlertDescription>
               <div className="font-medium">השיעור חסום לתיקון בגלל תביעה ששולמה.</div>
-              <div className="text-sm">לא ניתן לפתוח תיקון לשיעור זה. יש להעביר את האירוע לטיפול ידני.</div>
+              <div className="text-sm">לא ניתן לפתוח תיקון לשיעור זה. יש לטפל ידנית באיזור הפיננסי של התלמיד.</div>
             </AlertDescription>
           </Alert>
         )}
