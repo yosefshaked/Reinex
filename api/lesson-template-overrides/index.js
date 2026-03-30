@@ -13,7 +13,6 @@ import {
   resolveOrgId,
   resolveTenantClient,
 } from '../_shared/org-bff.js';
-import { resolveActorEmployeeId } from '../_shared/employee-finance.js';
 
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
@@ -177,19 +176,6 @@ export default async function lessonTemplateOverrides(context, req) {
     return respond(context, tenantError.status, tenantError.body);
   }
 
-  let actorEmployeeId;
-  if (method !== 'GET') {
-    const actorResult = await resolveActorEmployeeId(tenantClient, userId);
-    if (actorResult.error === 'employee_profile_required') {
-      return respond(context, 403, { message: 'employee_profile_required' });
-    }
-    if (actorResult.error) {
-      context.log?.error?.('lesson-template-overrides failed to resolve actor employee', { message: actorResult.error?.message });
-      return respond(context, 500, { message: 'failed_to_resolve_actor' });
-    }
-    actorEmployeeId = actorResult.employeeId;
-  }
-
   if (method === 'GET') {
     const templateId = normalizeUuid(req?.query?.template_id || req?.query?.templateId || body?.template_id || body?.templateId);
     if (!templateId) {
@@ -258,7 +244,7 @@ export default async function lessonTemplateOverrides(context, req) {
       new_time_of_day: newTimeOfDay,
       new_duration_minutes: newDurationMinutes,
       note,
-      created_by: actorEmployeeId,
+      created_by: userId,
     };
 
     if (overrideType === 'cancel') {

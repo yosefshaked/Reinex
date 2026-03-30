@@ -25,7 +25,7 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
-import { resolveActorEmployeeId, syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons } from '../_shared/employee-finance.js';
+import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons } from '../_shared/employee-finance.js';
 
 function isIsoDate(value) {
   if (typeof value !== 'string') return false;
@@ -158,19 +158,6 @@ export default async function lessonInstances(context, req) {
     actorInstructorId = instructorId;
   }
 
-  let actorEmployeeId;
-  if (method !== 'GET') {
-    const actorResult = await resolveActorEmployeeId(tenantClient, userId);
-    if (actorResult.error === 'employee_profile_required') {
-      return respond(context, 403, { message: 'employee_profile_required' });
-    }
-    if (actorResult.error) {
-      context.log?.error?.('lesson-instances failed to resolve actor employee', { message: actorResult.error?.message });
-      return respond(context, 500, { message: 'failed_to_resolve_actor' });
-    }
-    actorEmployeeId = actorResult.employeeId;
-  }
-
   if (method === 'GET') {
     const lessonInstanceId = getLessonInstanceId(context, req, body);
     const date = normalizeString(req?.query?.date || body?.date);
@@ -298,8 +285,8 @@ export default async function lessonInstances(context, req) {
         status: 'scheduled',
         documentation_status: 'undocumented',
         created_source: 'one_time',
-        created_by: actorEmployeeId,
-        updated_by: actorEmployeeId,
+        created_by: userId,
+        updated_by: userId,
         updated_at: new Date().toISOString(),
       })
       .select('id')
@@ -403,7 +390,7 @@ export default async function lessonInstances(context, req) {
       });
     }
 
-    const updates = { updated_at: new Date().toISOString(), updated_by: actorEmployeeId };
+    const updates = { updated_at: new Date().toISOString(), updated_by: userId };
 
     if (nextStatus) {
       if (!allowedStatus.has(nextStatus)) {

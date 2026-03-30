@@ -221,18 +221,6 @@ export async function resolveEmployeeRecord(tenantClient, { employeeId, userId, 
   return { employee };
 }
 
-export async function resolveActorEmployeeId(tenantClient, userId) {
-  const { data, error } = await tenantClient
-    .from('Employees')
-    .select('id')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (error) return { error };
-  if (!data) return { error: 'employee_profile_required' };
-  return { employeeId: data.id };
-}
-
 export async function loadInstructorProfilesMap(tenantClient, employeeIds = []) {
   const ids = Array.from(new Set((employeeIds || []).map((id) => normalizeString(id)).filter(Boolean)));
   if (ids.length === 0) {

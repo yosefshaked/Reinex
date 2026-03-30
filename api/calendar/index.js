@@ -21,7 +21,7 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { assertNoLeaveForLesson, resolveActorEmployeeId, syncInstructorAttendanceFromLessons, syncLessonInstructorEarnings, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
+import { assertNoLeaveForLesson, syncInstructorAttendanceFromLessons, syncLessonInstructorEarnings, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 
@@ -105,21 +105,10 @@ export default async function (context, req) {
     return await handleGetInstances(context, req, tenantClient, userId, canManageAll);
   }
 
-  const actorResult = await resolveActorEmployeeId(tenantClient, userId);
-  if (actorResult.error === 'employee_profile_required') {
-    return respond(context, 403, { message: 'employee_profile_required' });
-  }
-  if (actorResult.error) {
-    context.log?.error?.('calendar/instances failed to resolve actor employee', { message: actorResult.error?.message });
-    return respond(context, 500, { message: 'failed_to_resolve_actor' });
-  }
-  const actorEmployeeId = actorResult.employeeId;
-
   if (method === 'POST') {
     return await handleCreateInstance(context, body, tenantClient, supabase, {
       orgId,
       userId,
-      actorEmployeeId,
       userEmail: authResult.data.user.email || '',
       role,
       canManageAll,
@@ -130,7 +119,6 @@ export default async function (context, req) {
     return await handleUpdateInstance(context, body, tenantClient, supabase, {
       orgId,
       userId,
-      actorEmployeeId,
       userEmail: authResult.data.user.email || '',
       role,
       canManageAll,
@@ -419,7 +407,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
 }
 
 async function handleCreateInstance(context, body, tenantClient, supabase, authContext) {
-  const { orgId, userId, actorEmployeeId, userEmail, role, canManageAll: isAdmin } = authContext;
+  const { orgId, userId, userEmail, role, canManageAll: isAdmin } = authContext;
   // Validate required fields
   if (!body.datetime_start) {
     return respond(context, 400, { message: 'missing datetime_start' });
@@ -499,8 +487,8 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     documentation_status: body.documentation_status || 'undocumented',
     created_source: body.created_source || 'manual',
     metadata: body.metadata || {},
-    created_by: actorEmployeeId,
-    updated_by: actorEmployeeId,
+    created_by: userId,
+    updated_by: userId,
   };
 
   const { data: instance, error: instanceError } = await tenantClient
@@ -616,7 +604,7 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
 }
 
 async function handleUpdateInstance(context, body, tenantClient, supabase, authContext) {
-  const { orgId, userId, actorEmployeeId, userEmail, role, canManageAll } = authContext;
+  const { orgId, userId, userEmail, role, canManageAll } = authContext;
   if (!body.id) {
     return respond(context, 400, { message: 'missing instance id' });
   }
@@ -744,7 +732,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   if (body.closed_reason !== undefined) updateData.closed_reason = body.closed_reason;
   if (body.documentation_status !== undefined) updateData.documentation_status = body.documentation_status;
   if (body.metadata !== undefined) updateData.metadata = body.metadata;
-  updateData.updated_by = actorEmployeeId;
+  updateData.updated_by = userId;
   
   updateData.updated_at = new Date().toISOString();
 
@@ -813,7 +801,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   if (normalizedStatus === 'completed') {
     const { error: promoteError } = await tenantClient
       .from('lesson_participants')
-      .update({ participant_status: 'attended', updated_by: actorEmployeeId })
+      .update({ participant_status: 'attended', updated_by: userId })
       .eq('lesson_instance_id', body.id)
       .eq('participant_status', 'scheduled');
 

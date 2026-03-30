@@ -10,7 +10,6 @@
 
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { ensureMembership, resolveTenantClient, readEnv, respond } from '../_shared/org-bff.js';
-import { resolveActorEmployeeId } from '../_shared/employee-finance.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { decryptStorageProfile } from '../_shared/storage-encryption.js';
@@ -134,7 +133,7 @@ async function handleGet(req, supabase, tenantClient, orgId, userId, userRole, i
 /**
  * POST - Upload document
  */
-async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail, userRole, isAdmin, context, env, multipartParts = null, actorEmployeeId = null) {
+async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail, userRole, isAdmin, context, env, multipartParts = null) {
   const contentType = req.headers['content-type'] || '';
   const boundary = contentType.split('boundary=')[1];
 
@@ -330,7 +329,7 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
         path: 'temp', // Will update after we get the ID
         storage_provider: storageProfile.mode,
         uploaded_at: new Date().toISOString(),
-        uploaded_by: actorEmployeeId,
+        uploaded_by: userId,
         definition_id: definitionId || null,
         definition_name: definitionName,
         size: fileBuffer.length,
@@ -426,7 +425,7 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
         path: storagePath,
         storage_provider: storageProfile.mode,
         uploaded_at: tempDocRecord.uploaded_at,
-        uploaded_by: actorEmployeeId,
+        uploaded_by: userId,
         definition_id: definitionId,
         definition_name: definitionName,
         size: fileBuffer.length,
@@ -820,25 +819,12 @@ export default async function handler(context, req) {
     }
     const tenantClient = tenantResult.client;
 
-    let actorEmployeeId;
-    if (method !== 'GET') {
-      const actorResult = await resolveActorEmployeeId(tenantClient, userId);
-      if (actorResult.error === 'employee_profile_required') {
-        return respond(context, 403, { error: 'employee_profile_required' });
-      }
-      if (actorResult.error) {
-        context.log?.error?.('documents failed to resolve actor employee', { message: actorResult.error?.message });
-        return respond(context, 500, { error: 'failed_to_resolve_actor' });
-      }
-      actorEmployeeId = actorResult.employeeId;
-    }
-
     // Route to handler
     let result;
     if (method === 'GET') {
       result = await handleGet(req, supabase, tenantClient, orgId, userId, userRole, isAdmin);
     } else if (method === 'POST') {
-      result = await handlePost(req, supabase, tenantClient, orgId, userId, userEmail, userRole, isAdmin, context, env, multipartParts, actorEmployeeId);
+      result = await handlePost(req, supabase, tenantClient, orgId, userId, userEmail, userRole, isAdmin, context, env, multipartParts);
     } else if (method === 'PUT') {
       result = await handlePut(req, supabase, tenantClient, orgId, userId, userEmail, userRole, isAdmin);
     } else if (method === 'DELETE') {

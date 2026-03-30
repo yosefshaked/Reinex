@@ -18,7 +18,7 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { loadFinancePolicies, resolveActorEmployeeId, syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
+import { loadFinancePolicies, syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
@@ -102,22 +102,11 @@ export default async function (context, req) {
     return respond(context, tenantError.status, tenantError.body);
   }
 
-  const actorResult = await resolveActorEmployeeId(tenantClient, userId);
-  if (actorResult.error === 'employee_profile_required') {
-    return respond(context, 403, { message: 'employee_profile_required' });
-  }
-  if (actorResult.error) {
-    context.log?.error?.('calendar/attendance failed to resolve actor employee', { message: actorResult.error?.message });
-    return respond(context, 500, { message: 'failed_to_resolve_actor' });
-  }
-  const actorEmployeeId = actorResult.employeeId;
-
   return await handleMarkAttendance(context, body, tenantClient, userId, isAdmin, {
     supabase,
     orgId,
     userEmail: authResult.data.user.email || null,
     role,
-    actorEmployeeId,
   });
 }
 
@@ -485,7 +474,6 @@ async function buildRestoreAuditChanges(preview) {
 }
 
 async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin, auditContext = {}) {
-  const { actorEmployeeId } = auditContext;
   if (body.action === 'update-reminder') {
     return handleUpdateReminder(context, body, tenantClient, userId);
   }
@@ -631,7 +619,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     }
 
     participantUpdate.participant_status = participantStatus;
-    participantUpdate.updated_by = actorEmployeeId;
+    participantUpdate.updated_by = userId;
 
     if (participantStatus === 'scheduled') {
       try {
@@ -651,7 +639,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       participantUpdate.attendance_confirmed_by = null;
     } else {
       participantUpdate.attendance_confirmed_at = new Date().toISOString();
-      participantUpdate.attendance_confirmed_by = actorEmployeeId;
+      participantUpdate.attendance_confirmed_by = userId;
     }
 
     // Persist optional notes into metadata.notes
@@ -795,7 +783,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
           .update({
             status: 'completed',
             updated_at: new Date().toISOString(),
-            updated_by: actorEmployeeId,
+            updated_by: userId,
           })
           .eq('id', body.instance_id);
 
@@ -816,7 +804,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
           .update({
             status: 'scheduled',
             updated_at: new Date().toISOString(),
-            updated_by: actorEmployeeId,
+            updated_by: userId,
           })
           .eq('id', body.instance_id);
 
@@ -898,7 +886,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
             priority: 'medium',
             resourceType: 'lesson_participant',
             resourceId: body.participant_id,
-            createdBy: actorEmployeeId,
+            createdBy: userId,
             metadata: {
               lesson_instance_id: body.instance_id,
               student_id: participantDetail.student_id,
@@ -926,7 +914,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       if (hmoTask?.id) {
         await resolveDashboardTask(tenantClient, {
           taskId: hmoTask.id,
-          resolvedBy: actorEmployeeId,
+          resolvedBy: userId,
           metadata: {
             ...(hmoTask.metadata && typeof hmoTask.metadata === 'object' ? hmoTask.metadata : {}),
             resolved_by_restore_to_scheduled: true,

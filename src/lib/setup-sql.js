@@ -3904,55 +3904,6 @@ GRANT EXECUTE ON FUNCTION public.schema_introspection_v1() TO service_role;
 GRANT EXECUTE ON FUNCTION public.schema_run_selects_v1(text[]) TO service_role;
 GRANT EXECUTE ON FUNCTION public.schema_execute_statements_v1(text[], boolean, text) TO service_role;
 
--- -----------------------------------------------------------------
--- *_by foreign keys → Employees(id)
--- All audit/actor columns that record which employee performed an action.
--- Run the *_by data migration script before applying to an existing DB.
--- -----------------------------------------------------------------
-
-DO $$ BEGIN ALTER TABLE public.employee_attendance_records ADD CONSTRAINT employee_attendance_records_created_by_fkey FOREIGN KEY (created_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE public.employee_attendance_records ADD CONSTRAINT employee_attendance_records_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.employee_leave_entries ADD CONSTRAINT employee_leave_entries_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE public.employee_leave_entries ADD CONSTRAINT employee_leave_entries_created_by_fkey FOREIGN KEY (created_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE public.employee_leave_entries ADD CONSTRAINT employee_leave_entries_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.employee_leave_balance_events ADD CONSTRAINT employee_leave_balance_events_created_by_fkey FOREIGN KEY (created_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.finance_corrections ADD CONSTRAINT finance_corrections_created_by_fkey FOREIGN KEY (created_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE public.finance_corrections ADD CONSTRAINT finance_corrections_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.lesson_template_overrides ADD CONSTRAINT lesson_template_overrides_created_by_fkey FOREIGN KEY (created_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.lesson_instances ADD CONSTRAINT lesson_instances_created_by_fkey FOREIGN KEY (created_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE public.lesson_instances ADD CONSTRAINT lesson_instances_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE public.lesson_instances ADD CONSTRAINT lesson_instances_closed_by_fkey FOREIGN KEY (closed_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.lesson_participants ADD CONSTRAINT lesson_participants_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE public.lesson_participants ADD CONSTRAINT lesson_participants_attendance_confirmed_by_fkey FOREIGN KEY (attendance_confirmed_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE public.lesson_participants ADD CONSTRAINT lesson_participants_documented_by_fkey FOREIGN KEY (documented_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.payroll_runs ADD CONSTRAINT payroll_runs_finalized_by_fkey FOREIGN KEY (finalized_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.claim_batches ADD CONSTRAINT claim_batches_submitted_by_fkey FOREIGN KEY (submitted_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE public.claim_batches ADD CONSTRAINT claim_batches_paid_by_fkey FOREIGN KEY (paid_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.instance_locks ADD CONSTRAINT instance_locks_created_by_fkey FOREIGN KEY (created_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.participant_locks ADD CONSTRAINT participant_locks_created_by_fkey FOREIGN KEY (created_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.calendar_instance_corrections ADD CONSTRAINT calendar_instance_corrections_created_by_fkey FOREIGN KEY (created_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE public.calendar_instance_corrections ADD CONSTRAINT calendar_instance_corrections_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.dashboard_tasks ADD CONSTRAINT dashboard_tasks_created_by_fkey FOREIGN KEY (created_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE public.dashboard_tasks ADD CONSTRAINT dashboard_tasks_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.forms ADD CONSTRAINT forms_created_by_fkey FOREIGN KEY (created_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public.form_submissions ADD CONSTRAINT form_submissions_reviewed_by_fkey FOREIGN KEY (reviewed_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN ALTER TABLE public."Documents" ADD CONSTRAINT documents_uploaded_by_fkey FOREIGN KEY (uploaded_by) REFERENCES public."Employees"(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
 SELECT extensions.sign(
   json_build_object(
     'role', 'app_user',
