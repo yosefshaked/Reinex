@@ -21,6 +21,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -425,6 +435,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
   const [pendingFiles, setPendingFiles] = useState([]); // Changed to array for bulk upload
   const [pendingDefinitionId, setPendingDefinitionId] = useState(null)
   const [editingFile, setEditingFile] = useState(null); // File being edited post-upload
+  const [deleteDialogFile, setDeleteDialogFile] = useState(null);
 
   // Use documents from hook instead of instructor.files prop
   const instructorFiles = documents;
@@ -696,10 +707,6 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
   }, [instructor, orgId, onRefresh, fetchDocuments]);
 
   const handleDeleteFile = useCallback(async (fileId) => {
-    if (!confirm('האם למחוק את הקובץ? פעולה זו בלתי הפיכה.')) {
-      return;
-    }
-
     setDeleteState(REQUEST_STATE.loading);
     const toastId = toast.loading('מוחק קובץ...');
 
@@ -740,6 +747,17 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
       setDeleteState(REQUEST_STATE.idle);
     }
   }, [session, orgId, onRefresh, fetchDocuments]);
+
+  const requestDeleteFile = useCallback((file) => {
+    setDeleteDialogFile(file);
+  }, []);
+
+  const confirmDeleteFile = useCallback(async () => {
+    if (!deleteDialogFile?.id) return;
+    const fileId = deleteDialogFile.id;
+    setDeleteDialogFile(null);
+    await handleDeleteFile(fileId);
+  }, [deleteDialogFile, handleDeleteFile]);
 
   const handleDownloadFile = useCallback(async (file) => {
     const toastId = toast.loading('מכין קובץ להורדה...');
@@ -1060,6 +1078,23 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
         onConfirm={handleEditFile}
         onCancel={() => setEditingFile(null)}
       />
+      <AlertDialog open={Boolean(deleteDialogFile)} onOpenChange={(open) => !open && setDeleteDialogFile(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>מחיקת קובץ</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteDialogFile ? `האם למחוק את הקובץ "${deleteDialogFile.name}"? פעולה זו בלתי הפיכה.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteState === REQUEST_STATE.loading}>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteFile} disabled={deleteState === REQUEST_STATE.loading}>
+              {deleteState === REQUEST_STATE.loading ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+              מחק
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       
       <div className="space-y-4">
       {/* Upload progress indicator */}
@@ -1242,7 +1277,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => handleDeleteFile(file.id)}
+                              onClick={() => requestDeleteFile(file)}
                               disabled={deleteState === REQUEST_STATE.loading}
                               className="text-destructive hover:text-destructive"
                               title="מחיקה"
@@ -1413,7 +1448,7 @@ export default function InstructorDocumentsSection({ instructor, session, orgId,
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => handleDeleteFile(file.id)}
+                        onClick={() => requestDeleteFile(file)}
                         disabled={deleteState === REQUEST_STATE.loading}
                         className="text-destructive hover:text-destructive"
                         title="מחיקה"

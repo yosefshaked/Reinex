@@ -3,6 +3,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertTriangle, Check, Clock, MailPlus, Pencil, RefreshCw, Trash2, UserMinus, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -50,6 +60,8 @@ export default function OrgMembersCard() {
   const [editingMemberId, setEditingMemberId] = useState(null);
   const [editingName, setEditingName] = useState('');
   const [savingMemberId, setSavingMemberId] = useState(null);
+  const [pendingRoleChange, setPendingRoleChange] = useState(null);
+  const [pendingRemovalMember, setPendingRemovalMember] = useState(null);
   const activeOrgId = activeOrg?.id || null;
   const role = activeOrg?.membership?.role || '';
   const canManageOrgMembers = useMemo(() => {
@@ -281,6 +293,26 @@ export default function OrgMembersCard() {
     [editingName, updateMemberName],
   );
 
+  const confirmRoleChange = useCallback(async () => {
+    if (!pendingRoleChange?.memberId || !pendingRoleChange?.nextRole) return;
+    const { memberId, nextRole } = pendingRoleChange;
+    setPendingRoleChange(null);
+    try {
+      await updateMemberRole(memberId, nextRole);
+      toast.success('תפקיד עודכן');
+    } catch (error) {
+      console.error('Failed to update role', error);
+      toast.error(error?.message || 'עדכון התפקיד נכשל');
+    }
+  }, [pendingRoleChange, updateMemberRole]);
+
+  const confirmMemberRemoval = useCallback(async () => {
+    if (!pendingRemovalMember?.id) return;
+    const membershipId = pendingRemovalMember.id;
+    setPendingRemovalMember(null);
+    await handleRemoveMember(membershipId);
+  }, [handleRemoveMember, pendingRemovalMember]);
+
   if (!activeOrg) {
     return null;
   }
@@ -411,19 +443,14 @@ export default function OrgMembersCard() {
                       <Select
                         value={roleNorm || 'member'}
                         disabled={isOwner || isCurrentUser || isSaving}
-                        onValueChange={async (nextRole) => {
+                        onValueChange={(nextRole) => {
                           const nextLabel = nextRole === 'admin' ? 'מנהל' : 'מדריך';
-                          const confirmed = window.confirm(`האם לשנות את התפקיד של ${member.name || member.email || 'המשתמש'} ל"${nextLabel}"?`);
-                          if (!confirmed) {
-                            return;
-                          }
-                          try {
-                            await updateMemberRole(member.id, nextRole);
-                            toast.success('תפקיד עודכן');
-                          } catch (error) {
-                            console.error('Failed to update role', error);
-                            toast.error(error?.message || 'עדכון התפקיד נכשל');
-                          }
+                          setPendingRoleChange({
+                            memberId: member.id,
+                            memberName: member.name || member.email || 'המשתמש',
+                            nextRole,
+                            nextLabel,
+                          });
                         }}
                       >
                         <SelectTrigger className="h-auto rounded-md px-2 py-1 text-xs">
@@ -440,11 +467,7 @@ export default function OrgMembersCard() {
                           variant="ghost"
                           className="text-red-600 hover:bg-red-50 gap-2"
                           disabled={isOwner || isSaving}
-                          onClick={() => {
-                            const confirmed = window.confirm(`האם להסיר את ${member.name || member.email || 'המשתמש'} מהארגון?`);
-                            if (!confirmed) return;
-                            void handleRemoveMember(member.id);
-                          }}
+                          onClick={() => setPendingRemovalMember(member)}
                         >
                           <UserMinus className="w-4 h-4" />
                           הסר מהארגון
@@ -593,6 +616,34 @@ export default function OrgMembersCard() {
           </section>
         ) : null}
       </CardContent>
+      <AlertDialog open={Boolean(pendingRoleChange)} onOpenChange={(open) => !open && setPendingRoleChange(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>שינוי תפקיד</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRoleChange ? `האם לשנות את התפקיד של ${pendingRoleChange.memberName} ל"${pendingRoleChange.nextLabel}"?` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRoleChange}>אישור</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={Boolean(pendingRemovalMember)} onOpenChange={(open) => !open && setPendingRemovalMember(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>הסרת חבר מהארגון</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRemovalMember ? `האם להסיר את ${pendingRemovalMember.name || pendingRemovalMember.email || 'המשתמש'} מהארגון?` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmMemberRemoval}>הסר</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

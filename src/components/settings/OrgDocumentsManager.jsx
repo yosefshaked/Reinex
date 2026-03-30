@@ -35,6 +35,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -454,6 +464,8 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
   const [visibilityRestricted, setVisibilityRestricted] = useState(false);
   const [memberVisibility, setMemberVisibility] = useState(false);
   const [savingVisibility, setSavingVisibility] = useState(false);
+  const [duplicateDialogState, setDuplicateDialogState] = useState({ open: false, message: '', onConfirm: null, onCancel: null });
+  const [deleteDialogDocument, setDeleteDialogDocument] = useState(null);
 
   const canManage = membershipRole === 'admin' || membershipRole === 'owner';
   
@@ -606,8 +618,15 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
         .join(', ');
       
       const message = `נמצאו ${totalDuplicates} כפילויות קיימות (${duplicateFileNames}${totalDuplicates > 3 ? '...' : ''}). להמשיך בהעלאה?`;
-      
-      const confirmed = window.confirm(message);
+      const confirmed = await new Promise((resolve) => {
+        setDuplicateDialogState({
+          open: true,
+          message,
+          onConfirm: () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      });
+      setDuplicateDialogState({ open: false, message: '', onConfirm: null, onCancel: null });
       if (!confirmed) {
         event.target.value = '';
         return;
@@ -711,7 +730,6 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
   // Handle delete
   const handleDelete = useCallback(async (documentId, documentName) => {
     if (!session || !orgId) return;
-    if (!confirm(`האם למחוק את המסמך "${documentName}"? פעולה זו בלתי הפיכה.`)) return;
 
     setDeleteState(REQUEST_STATE.loading);
     const toastId = toast.loading('מוחק מסמך...');
@@ -731,6 +749,17 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
       setDeleteState(REQUEST_STATE.error);
     }
   }, [session, orgId, deleteDocument, fetchDocuments]);
+
+  const requestDelete = useCallback((documentId, documentName) => {
+    setDeleteDialogDocument({ id: documentId, name: documentName });
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteDialogDocument?.id) return;
+    const { id, name } = deleteDialogDocument;
+    setDeleteDialogDocument(null);
+    await handleDelete(id, name);
+  }, [deleteDialogDocument, handleDelete]);
 
   // Handle download
   const handleDownload = useCallback(async (doc) => {
@@ -977,7 +1006,7 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
                       canManage={canManage}
                       deleteState={deleteState}
                       onEdit={() => setEditingDocument(doc)}
-                      onDelete={() => handleDelete(doc.id, doc.name)}
+                      onDelete={() => requestDelete(doc.id, doc.name)}
                       onDownload={() => handleDownload(doc)}
                       onPreview={() => handlePreview(doc)}
                     />
@@ -1002,7 +1031,7 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
                       canManage={canManage}
                       deleteState={deleteState}
                       onEdit={() => setEditingDocument(doc)}
-                      onDelete={() => handleDelete(doc.id, doc.name)}
+                      onDelete={() => requestDelete(doc.id, doc.name)}
                       onDownload={() => handleDownload(doc)}
                       onPreview={() => handlePreview(doc)}
                     />
@@ -1031,6 +1060,57 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
           onCancel={() => setEditingDocument(null)}
         />
       )}
+      <AlertDialog
+        open={Boolean(duplicateDialogState.open)}
+        onOpenChange={(open) => {
+          if (!open && duplicateDialogState.open) {
+            duplicateDialogState.onCancel?.();
+            setDuplicateDialogState({ open: false, message: '', onConfirm: null, onCancel: null });
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>נמצאו כפילויות</AlertDialogTitle>
+            <AlertDialogDescription>{duplicateDialogState.message}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                duplicateDialogState.onCancel?.();
+                setDuplicateDialogState({ open: false, message: '', onConfirm: null, onCancel: null });
+              }}
+            >
+              ביטול
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                duplicateDialogState.onConfirm?.();
+                setDuplicateDialogState({ open: false, message: '', onConfirm: null, onCancel: null });
+              }}
+            >
+              המשך העלאה
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={Boolean(deleteDialogDocument)} onOpenChange={(open) => !open && setDeleteDialogDocument(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>מחיקת מסמך</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteDialogDocument ? `האם למחוק את המסמך "${deleteDialogDocument.name}"? פעולה זו בלתי הפיכה.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteState === REQUEST_STATE.loading}>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} disabled={deleteState === REQUEST_STATE.loading}>
+              {deleteState === REQUEST_STATE.loading ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+              מחק
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

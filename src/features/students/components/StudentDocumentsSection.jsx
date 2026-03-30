@@ -21,6 +21,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -413,6 +423,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
   const [pendingFiles, setPendingFiles] = useState([]); // Files awaiting metadata input
   const [pendingDefinitionId, setPendingDefinitionId] = useState(null); // Associated definition for pending files
   const [editingFile, setEditingFile] = useState(null); // File being edited post-upload
+  const [deleteDialogFile, setDeleteDialogFile] = useState(null);
 
   // Use documents from hook instead of student.files prop
   const studentFiles = documents;
@@ -587,7 +598,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         
         const confirmMessage = `הקובץ "${file.name}" כבר קיים במערכת:\n\n${duplicateList}\n\nהאם להעלות בכל זאת?`;
         
-        if (!confirm(confirmMessage)) {
+        if (!duplicateUploadApproved) {
           toast.info('העלאת הקובץ בוטלה');
           return;
         }
@@ -904,7 +915,6 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
   const handleFileDelete = useCallback(
     async (fileId) => {
       if (!session || !orgId) return;
-      if (!confirm('האם למחוק קובץ זה? פעולה זו אינה ניתנת לביטול.')) return;
 
       const token = session.access_token;
       if (!token) {
@@ -950,6 +960,17 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
     },
     [session, orgId, onRefresh, fetchDocuments]
   );
+
+  const requestFileDelete = useCallback((file) => {
+    setDeleteDialogFile(file);
+  }, []);
+
+  const confirmFileDelete = useCallback(async () => {
+    if (!deleteDialogFile?.id) return;
+    const fileId = deleteDialogFile.id;
+    setDeleteDialogFile(null);
+    await handleFileDelete(fileId);
+  }, [deleteDialogFile, handleFileDelete]);
 
   const handleToggleResolved = useCallback(
     async (fileId, currentResolved) => {
@@ -1349,6 +1370,23 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         onConfirm={handleEditFile}
         onCancel={() => setEditingFile(null)}
       />
+      <AlertDialog open={Boolean(deleteDialogFile)} onOpenChange={(open) => !open && setDeleteDialogFile(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>מחיקת קובץ</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteDialogFile ? `האם למחוק את הקובץ "${deleteDialogFile.name}"? פעולה זו אינה ניתנת לביטול.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteState === REQUEST_STATE.loading}>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmFileDelete} disabled={deleteState === REQUEST_STATE.loading}>
+              {deleteState === REQUEST_STATE.loading ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+              מחק
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <Card className="border-slate-200">
@@ -1547,7 +1585,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
                                         <Button
                                           size="sm"
                                           variant="ghost"
-                                          onClick={() => handleFileDelete(file.id)}
+                                          onClick={() => requestFileDelete(file)}
                                           disabled={deleteState === REQUEST_STATE.loading}
                                         >
                                           <Trash2 className="h-4 w-4 text-red-500" />
@@ -1750,7 +1788,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    onClick={() => handleFileDelete(file.id)}
+                                    onClick={() => requestFileDelete(file)}
                                     disabled={deleteState === REQUEST_STATE.loading}
                                   >
                                     <Trash2 className="h-4 w-4 text-red-500" />

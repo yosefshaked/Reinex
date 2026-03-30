@@ -496,8 +496,94 @@ export default async function lessonInstances(context, req) {
     }
 
     const action = normalizeString(body?.action);
-    if (action !== 'bulk-cancel') {
+    if (!['bulk-cancel', 'add-participant'].includes(action)) {
       return respond(context, 400, { message: 'invalid_action' });
+    }
+
+    // add-participant: Add a student to an existing scheduled instance
+    if (action === 'add-participant') {
+      const instanceId = normalizeUuid(body?.instance_id || body?.instanceId);
+      const studentId = normalizeUuid(body?.student_id || body?.studentId);
+
+      if (!instanceId) return respond(context, 400, { message: 'missing_instance_id' });
+      if (!studentId) return respond(context, 400, { message: 'missing_student_id' });
+
+      const { error: addStateError, result: addMutationState } = await fetchLessonMutationState(tenantClient, { instanceId });
+      if (addStateError) {
+        context.log?.error?.('lesson-instances add-participant failed to load state', { message: addStateError.message });
+        return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
+      }
+      if (!addMutationState.instance) return respond(context, 404, { message: 'lesson_instance_not_found' });
+      if (isLockedState(addMutationState)) {
+        return respondWithLockedMutation(context, { instanceId, instanceLocks: addMutationState.instanceLocks });
+      }
+      if (addMutationState.instance.status !== 'scheduled') {
+        return respond(context, 422, { message: 'instance_not_scheduled' });
+      }
+
+
+      // Capacity check: cancelled/absent participants do not count toward max_students
+      const [{ data: activeParticipants, error: countError }, { data: capability }] = await Promise.all([
+        tenantClient
+          .from('lesson_participants')
+          .select('id')
+          .eq('lesson_instance_id', instanceId)
+          .in('participant_status', ['scheduled', 'attended']),
+        tenantClient
+          .from('instructor_service_capabilities')
+          .select('max_students')
+          .eq('employee_id', addMutationState.instance.instructor_employee_id)
+          .eq('service_id', addMutationState.instance.service_id)
+          .maybeSingle(),
+      ]);
+
+      if (countError) {
+        context.log?.error?.('lesson-instances add-participant capacity check failed', { message: countError.message });
+        return respond(context, 500, { message: 'failed_to_check_capacity' });
+      }
+
+      if (capability?.max_students) {
+        const activeCount = (activeParticipants ?? []).length;
+        if (activeCount >= capability.max_students) {
+          return respond(context, 422, {
+            message: 'capacity_exceeded',
+            current_count: activeCount,
+            max_capacity: capability.max_students,
+          });
+        }
+      }
+
+      const { data: newParticipant, error: insertError } = await tenantClient
+        .from('lesson_participants')
+        .insert({ lesson_instance_id: instanceId, student_id: studentId, participant_status: 'scheduled' })
+        .select('id')
+        .single();
+
+      if (insertError) {
+        if (insertError.code === '23505') return respond(context, 409, { message: 'participant_already_exists' });
+        context.log?.error?.('lesson-instances add-participant failed', { message: insertError.message });
+        return respond(context, 500, { message: 'failed_to_add_participant' });
+      }
+
+      try {
+        await logTenantAuditEvent(tenantClient, {
+          actorUserId: userId,
+          eventType: 'calendar.lesson_participant.added',
+          retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+          resourceType: 'lesson_participant',
+          resourceId: newParticipant.id,
+          afterState: { lesson_instance_id: instanceId, student_id: studentId, participant_status: 'scheduled' },
+          details: { origin: 'api/lesson-instances', action: 'add-participant' },
+        });
+      } catch (auditError) {
+        context.log?.warn?.('lesson-instances failed to write audit (add-participant)', { message: auditError?.message });
+      }
+
+      const { data: addedRefreshed, error: addedRefreshError } = await tenantClient
+        .from('lesson_instances').select(buildInstanceSelect()).eq('id', instanceId).single();
+      if (addedRefreshError) return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
+      const [addedEnriched] = await enrichInstancesWithCorrectionState(tenantClient, addedRefreshed ? [addedRefreshed] : []);
+      return respond(context, 200, addedEnriched || addedRefreshed);
     }
 
     // bulk-cancel: Cancel all future lesson instances for a student from a given date

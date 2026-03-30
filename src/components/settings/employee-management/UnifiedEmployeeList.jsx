@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar.jsx';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -297,6 +298,9 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const [showProfileDialog, setShowProfileDialog] = useState(false);
   const [showCapabilitiesDialog, setShowCapabilitiesDialog] = useState(false);
   const [showLinkDialog, setShowLinkDialog] = useState(false);
+  const [inviteUserDialogOpen, setInviteUserDialogOpen] = useState(false);
+  const [inviteUserEmployee, setInviteUserEmployee] = useState(null);
+  const [inviteUserEmail, setInviteUserEmail] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
@@ -462,17 +466,25 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
 
   const currentEmployeeSetupIncomplete = Boolean(currentEmployee?.setup_incomplete);
 
-  const handleLinkUser = async (employee) => {
-    const email = window.prompt('הזן כתובת דוא"ל להזמנת משתמש:', employee.email || '');
-    if (!email?.trim()) return;
+  const handleLinkUser = useCallback((employee) => {
+    setInviteUserEmployee(employee);
+    setInviteUserEmail(employee?.email || '');
+    setInviteUserDialogOpen(true);
+  }, []);
+
+  const handleInviteUserSubmit = useCallback(async () => {
+    if (!inviteUserEmployee?.id || !inviteUserEmail.trim()) return;
     setActionState(REQUEST.loading);
     try {
       await authenticatedFetch('instructors-link-user', {
         session,
         method: 'POST',
-        body: { org_id: orgId, instructor_id: employee.id, email: email.trim() },
+        body: { org_id: orgId, instructor_id: inviteUserEmployee.id, email: inviteUserEmail.trim() },
       });
       toast.success('ההזמנה נשלחה בהצלחה.');
+      setInviteUserDialogOpen(false);
+      setInviteUserEmployee(null);
+      setInviteUserEmail('');
       await refetchInstructors();
     } catch (error) {
       console.error('Failed to link user', error);
@@ -480,7 +492,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     } finally {
       setActionState(REQUEST.idle);
     }
-  };
+  }, [inviteUserEmail, inviteUserEmployee, orgId, refetchInstructors, session]);
 
   const handleCreateEmployeeForMember = async (member) => {
     setActionState(REQUEST.loading);
@@ -1115,6 +1127,58 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
         session={session}
         onLinked={handleLinkDialogSuccess}
       />
+      <Dialog
+        open={inviteUserDialogOpen}
+        onOpenChange={(open) => {
+          setInviteUserDialogOpen(open);
+          if (!open) {
+            setInviteUserEmployee(null);
+            setInviteUserEmail('');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>הזמן משתמש</DialogTitle>
+            <DialogDescription>
+              שליחת הזמנה לקישור עובד לחשבון משתמש.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="invite-user-email">כתובת דוא"ל</Label>
+            <Input
+              id="invite-user-email"
+              type="email"
+              dir="ltr"
+              value={inviteUserEmail}
+              onChange={(event) => setInviteUserEmail(event.target.value)}
+              placeholder="user@example.com"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setInviteUserDialogOpen(false);
+                setInviteUserEmployee(null);
+                setInviteUserEmail('');
+              }}
+              disabled={actionState === REQUEST.loading}
+            >
+              ביטול
+            </Button>
+            <Button
+              type="button"
+              onClick={handleInviteUserSubmit}
+              disabled={actionState === REQUEST.loading || !inviteUserEmail.trim()}
+            >
+              {actionState === REQUEST.loading ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+              שלח הזמנה
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

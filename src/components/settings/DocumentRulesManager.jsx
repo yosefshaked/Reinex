@@ -17,6 +17,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -35,6 +45,7 @@ export default function DocumentRulesManager({ session, orgId }) {
   const [definitions, setDefinitions] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ name: '', is_mandatory: false, target_tags: [], target_instructor_types: [], isNew: false });
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
   
   const { tagOptions: rawTagOptions, loadingTags, loadTags } = useStudentTags();
   const { typeOptions: rawTypeOptions, loadingTypes, loadTypes } = useInstructorTypes();
@@ -178,9 +189,14 @@ export default function DocumentRulesManager({ session, orgId }) {
   }, [editingId, editForm.isNew]);
 
   const handleDelete = useCallback((id) => {
-    if (!confirm('האם למחוק מסמך זה? פעולה זו אינה ניתנת לביטול.')) return;
     setDefinitions((prev) => prev.filter((d) => d.id !== id));
   }, []);
+
+  const confirmDelete = useCallback(() => {
+    if (!pendingDeleteId) return;
+    handleDelete(pendingDeleteId);
+    setPendingDeleteId(null);
+  }, [handleDelete, pendingDeleteId]);
 
   const handleAddTag = useCallback((tagId) => {
     if (!tagId || editForm.target_tags.includes(tagId)) return;
@@ -482,7 +498,7 @@ export default function DocumentRulesManager({ session, orgId }) {
                       <Button size="sm" variant="ghost" onClick={() => handleEdit(def)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleDelete(def.id)}>
+                      <Button size="sm" variant="ghost" onClick={() => setPendingDeleteId(def.id)}>
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     </div>
@@ -516,6 +532,20 @@ export default function DocumentRulesManager({ session, orgId }) {
           </Button>
         </div>
       </CardContent>
+      <AlertDialog open={Boolean(pendingDeleteId)} onOpenChange={(open) => !open && setPendingDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>מחיקת מסמך</AlertDialogTitle>
+            <AlertDialogDescription>
+              האם למחוק מסמך זה? פעולה זו אינה ניתנת לביטול.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>מחק</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

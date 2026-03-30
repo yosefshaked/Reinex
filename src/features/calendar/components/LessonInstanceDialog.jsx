@@ -10,7 +10,7 @@ import { useOrg } from '@/org/OrgContext';
 import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, MessageCircle, Mail, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, MessageCircle, Mail, ThumbsUp, ThumbsDown, UserPlus, RotateCcw } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Textarea } from '../../../components/ui/textarea';
 import { LockedCorrectionPanel } from './LockedCorrectionPanel';
@@ -98,6 +98,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [localReminderState, setLocalReminderState] = useState({});
   const [error, setError] = useState(null);
   const [billingWarnings, setBillingWarnings] = useState([]);
+  const [isAddingParticipant, setIsAddingParticipant] = useState(false);
+  const [addStudentQuery, setAddStudentQuery] = useState('');
+  const [addStudentResults, setAddStudentResults] = useState([]);
+  const [isSearchingStudents, setIsSearchingStudents] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   // absenceForm: { participantId, status, notes } | null
   const [absenceForm, setAbsenceForm] = useState(null);
   
@@ -131,6 +136,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   useEffect(() => {
     setLocalReminderState({});
     setBillingWarnings([]);
+    setIsAddingParticipant(false);
+    setAddStudentQuery('');
+    setAddStudentResults([]);
   }, [instance?.id, instance?.latest_correction?.id]);
 
 
@@ -344,6 +352,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
+  async function handleCancelSelection(status, closedReason) {
+    setCancelDialogOpen(false);
+    await handleCancel(status, closedReason);
+  }
+
   async function handleReportStatus(status) {
     if (!org?.id) {
       setError('Organization not found');
@@ -376,6 +389,46 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       setError(resolveMutationError(err));
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function searchStudents(query) {
+    if (!org?.id || query.length < 2) {
+      setAddStudentResults([]);
+      return;
+    }
+    setIsSearchingStudents(true);
+    try {
+      const results = await authenticatedFetch('students-search', {
+        params: { q: query, org_id: org.id },
+      });
+      setAddStudentResults(Array.isArray(results) ? results : []);
+    } catch {
+      setAddStudentResults([]);
+    } finally {
+      setIsSearchingStudents(false);
+    }
+  }
+
+  async function handleAddParticipant(studentId) {
+    if (!org?.id || !instance?.id) return;
+    setError(null);
+    try {
+      await authenticatedFetch('lesson-instances', {
+        method: 'PATCH',
+        body: {
+          action: 'add-participant',
+          org_id: org.id,
+          instance_id: instance.id,
+          student_id: studentId,
+        },
+      });
+      setIsAddingParticipant(false);
+      setAddStudentQuery('');
+      setAddStudentResults([]);
+      onUpdate?.();
+    } catch (err) {
+      setError(resolveMutationError(err));
     }
   }
 
@@ -818,17 +871,19 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                         {participant.price_charged && (
                           <Badge variant="outline" className="ms-2">₪{participant.price_charged}</Badge>
                         )}
-                        {canMarkAttendance && isScheduled && !isAbsenceFormOpen && (
+                        {canMarkAttendance && !isAbsenceFormOpen && (
                           <div className="flex gap-1 ms-2">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleMarkAttendance(participant.id, 'attended')}
-                              disabled={isMarkingAttendance}
-                              title="נכח"
-                            >
-                              <Check className="h-4 w-4 text-green-600" />
-                            </Button>
+                            {isScheduled && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleMarkAttendance(participant.id, 'attended')}
+                                disabled={isMarkingAttendance}
+                                title="נכח"
+                              >
+                                <Check className="h-4 w-4 text-green-600" />
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="ghost"
@@ -838,6 +893,17 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                             >
                               <XCircle className="h-4 w-4 text-red-600" />
                             </Button>
+                            {!isScheduled && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleMarkAttendance(participant.id, 'scheduled')}
+                                disabled={isMarkingAttendance}
+                                title="שחזר לתוכנן"
+                              >
+                                <RotateCcw className="h-4 w-4 text-blue-600" />
+                              </Button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -967,6 +1033,85 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   );
                 })}
               </div>
+              {/* Add Student — admin only, scheduled unlocked instances */}
+              {canManageAll && isReportable && !instance?.is_locked && (
+                <div className="mt-3">
+                  {!isAddingParticipant ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIsAddingParticipant(true)}
+                    >
+                      <UserPlus className="h-4 w-4 ms-1" />
+                      הוסף תלמיד
+                    </Button>
+                  ) : (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="חפש תלמיד (2 תווים לפחות)..."
+                          value={addStudentQuery}
+                          onChange={(e) => {
+                            setAddStudentQuery(e.target.value);
+                            searchStudents(e.target.value);
+                          }}
+                          className="flex-1 h-8 text-sm"
+                          autoFocus
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 px-2"
+                          onClick={() => {
+                            setIsAddingParticipant(false);
+                            setAddStudentQuery('');
+                            setAddStudentResults([]);
+                          }}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      {isSearchingStudents && (
+                        <div className="flex items-center gap-1 text-sm text-gray-500">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          מחפש...
+                        </div>
+                      )}
+                      {!isSearchingStudents && addStudentResults.length > 0 && (() => {
+                        const enrolledIds = new Set(displayParticipants.map((p) => p.student_id));
+                        const filtered = addStudentResults.filter((s) => !enrolledIds.has(s.id));
+                        return filtered.length === 0 ? (
+                          <p className="text-xs text-gray-400">כל התלמידים שנמצאו כבר רשומים לשיעור</p>
+                        ) : (
+                          <div className="space-y-1 max-h-48 overflow-y-auto">
+                            {filtered.map((student) => (
+                              <button
+                                key={student.id}
+                                type="button"
+                                className="w-full text-start text-sm px-2 py-1.5 rounded hover:bg-blue-100 flex items-center justify-between"
+                                onClick={() => handleAddParticipant(student.id)}
+                              >
+                                <span className="font-medium">
+                                  {[student.first_name, student.last_name].filter(Boolean).join(' ')}
+                                </span>
+                                {student.phone && (
+                                  <span className="text-xs text-gray-500">{student.phone}</span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                      {!isSearchingStudents && addStudentQuery.length >= 2 && addStudentResults.length === 0 && (
+                        <p className="text-sm text-gray-500">לא נמצאו תלמידים</p>
+                      )}
+                      {addStudentQuery.length === 1 && (
+                        <p className="text-xs text-gray-400">הקלד לפחות 2 תווים לחיפוש</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Documentation Status */}
@@ -1005,17 +1150,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               <div className="pt-4 border-t">
                 <Button
                   variant="destructive"
-                  onClick={() => {
-                    const selection = prompt('בחר סטטוס:\n\n1. בוטל ע"י תלמיד\n2. בוטל ע"י המרפאה\n3. אי הגעה\n\nהכנס מספר (1-3):');
-                    const statusMap = {
-                      '1': { status: 'cancelled_student', closed_reason: 'student_request' },
-                      '2': { status: 'cancelled_clinic', closed_reason: 'clinic_closure' },
-                      '3': { status: 'no_show', closed_reason: 'no_show' },
-                    };
-                    if (selection && statusMap[selection]) {
-                      handleCancel(statusMap[selection].status, statusMap[selection].closed_reason);
-                    }
-                  }}
+                  onClick={() => setCancelDialogOpen(true)}
                   disabled={isSaving}
                 >
                   <X className="me-2 h-4 w-4" />
@@ -1026,6 +1161,32 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           </div>
         )}
       </DialogContent>
+      <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>ביטול שיעור</DialogTitle>
+            <DialogDescription>
+              בחר את הסטטוס שיירשם לשיעור.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Button type="button" variant="outline" className="justify-start" onClick={() => handleCancelSelection('cancelled_student', 'student_request')} disabled={isSaving}>
+              בוטל ע"י תלמיד
+            </Button>
+            <Button type="button" variant="outline" className="justify-start" onClick={() => handleCancelSelection('cancelled_clinic', 'clinic_closure')} disabled={isSaving}>
+              בוטל ע"י המרפאה
+            </Button>
+            <Button type="button" variant="outline" className="justify-start" onClick={() => handleCancelSelection('no_show', 'no_show')} disabled={isSaving}>
+              אי הגעה
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCancelDialogOpen(false)} disabled={isSaving}>
+              ביטול
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }
