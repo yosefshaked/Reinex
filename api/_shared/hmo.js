@@ -203,12 +203,27 @@ export async function loadHmoProviders(tenantClient, { activeOnly = false } = {}
     ? await selectHmoTracks(tenantClient, { providerIds, activeOnly })
     : [];
 
+  const inUseTrackIds = new Set();
+  if (tracks.length > 0) {
+    const trackIds = tracks.map((t) => t.id);
+    const [authResult, commitmentResult] = await Promise.all([
+      tenantClient.from('hmo_authorizations').select('provider_track_id').in('provider_track_id', trackIds),
+      tenantClient.from('commitments').select('hmo_provider_track_id').in('hmo_provider_track_id', trackIds),
+    ]);
+    for (const row of (authResult.data || [])) {
+      if (row.provider_track_id) inUseTrackIds.add(row.provider_track_id);
+    }
+    for (const row of (commitmentResult.data || [])) {
+      if (row.hmo_provider_track_id) inUseTrackIds.add(row.hmo_provider_track_id);
+    }
+  }
+
   const tracksByProvider = new Map();
   for (const track of tracks) {
     if (!tracksByProvider.has(track.provider_id)) {
       tracksByProvider.set(track.provider_id, []);
     }
-    tracksByProvider.get(track.provider_id).push(normalizeTrackRow(track));
+    tracksByProvider.get(track.provider_id).push({ ...track, in_use: inUseTrackIds.has(track.id) });
   }
 
   return (providers || []).map((provider) => ({

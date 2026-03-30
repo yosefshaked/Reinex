@@ -228,6 +228,31 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
     }
   }
 
+  async function handleDisableTrack(track) {
+    setSaving(true);
+    try {
+      await updateTrack({
+        id: track.id,
+        provider_id: track.provider_id,
+        service_id: track.service_id,
+        name: track.name,
+        payment_mode: track.payment_mode,
+        default_customer_charge_amount: track.default_customer_charge_amount,
+        default_insurer_claim_amount: track.default_insurer_claim_amount,
+        default_workflow_notes: track.default_workflow_notes,
+        is_active: false,
+        metadata: track.metadata,
+      });
+      await refreshAfterChange();
+      toast.success('המסלול הושבת.');
+    } catch (error) {
+      console.error('Failed to disable provider track', error);
+      toast.error(error?.message || 'השבתת המסלול נכשלה.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const activeProviders = useMemo(
     () => providers.filter((provider) => provider.is_active !== false),
     [providers],
@@ -310,9 +335,15 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                               <Button type="button" size="sm" variant="outline" onClick={() => startTrackEdit(provider, track)} disabled={saving}>
                                 ערוך
                               </Button>
-                              <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteTrack(track.id)} disabled={saving}>
-                                מחק
-                              </Button>
+                              {track.in_use ? (
+                                <Button type="button" size="sm" variant="outline" onClick={() => handleDisableTrack(track)} disabled={saving || track.is_active === false}>
+                                  השבת
+                                </Button>
+                              ) : (
+                                <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteTrack(track.id)} disabled={saving}>
+                                  מחק
+                                </Button>
+                              )}
                             </>
                           ) : null}
                         </div>
