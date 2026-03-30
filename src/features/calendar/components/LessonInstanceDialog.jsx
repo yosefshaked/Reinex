@@ -156,6 +156,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   // absenceForm: { participantId, status, notes } | null
   const [absenceForm, setAbsenceForm] = useState(null);
+  const [restorePreview, setRestorePreview] = useState(null);
+  const [restorePreviewLoading, setRestorePreviewLoading] = useState(false);
   
   const [formData, setFormData] = useState({
     instructor_employee_id: '',
@@ -190,6 +192,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setIsAddingParticipant(false);
     setAddStudentQuery('');
     setAddStudentResults([]);
+    setRestorePreview(null);
   }, [instance?.id, instance?.latest_correction?.id]);
 
 
@@ -488,6 +491,17 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       if (result?.billing_warnings?.length > 0) {
         setBillingWarnings(result.billing_warnings);
       }
+      if (status === 'scheduled') {
+        setRestorePreview(null);
+        setLocalReminderState((prev) => ({
+          ...prev,
+          [participantId]: {
+            ...(prev[participantId] || {}),
+            reminder_sent: false,
+            reminder_seen: false,
+          },
+        }));
+      }
       onUpdate?.();
       return true;
     } catch (err) {
@@ -633,6 +647,33 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       setError(resolveMutationError(err) || 'חיפוש תלמידים נכשל');
     } finally {
       setIsSearchingStudents(false);
+    }
+  }
+
+  async function openRestorePreview(participant) {
+    if (!org?.id || !instance?.id || !participant?.id) return;
+    setRestorePreviewLoading(true);
+    setError(null);
+    try {
+      const preview = await authenticatedFetch('calendar/attendance', {
+        method: 'POST',
+        body: {
+          action: 'preview-restore-to-scheduled',
+          org_id: org.id,
+          instance_id: instance.id,
+          participant_id: participant.id,
+        },
+      });
+      setRestorePreview({
+        participantId: participant.id,
+        participantName: participant.student?.full_name || 'תלמיד',
+        preview,
+      });
+    } catch (err) {
+      console.error('Error building restore preview:', err);
+      setError(resolveMutationError(err));
+    } finally {
+      setRestorePreviewLoading(false);
     }
   }
 
@@ -1123,6 +1164,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   const emailAddress = reminderContact.email;
                   const isScheduled = participant.participant_status === 'scheduled';
                   const isAbsenceFormOpen = absenceForm?.participantId === participant.id;
+                  const isRestorePreviewOpen = restorePreview?.participantId === participant.id;
                   const participantNotes = participant.metadata?.notes || null;
                   return (
                     <div key={participant.id} className="p-3 bg-gray-50 rounded-lg space-y-2">
@@ -1170,8 +1212,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => handleMarkAttendance(participant.id, 'scheduled')}
-                                disabled={isMarkingAttendance}
+                                onClick={() => openRestorePreview(participant)}
+                                disabled={isMarkingAttendance || restorePreviewLoading}
                                 title="שחזר לתוכנן"
                               >
                                 <RotateCcw className="h-4 w-4 text-blue-600" />
@@ -1228,6 +1270,41 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                                 <Loader2 className="h-3 w-3 animate-spin" />
                               ) : (
                                 'אישור'
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {isRestorePreviewOpen && (
+                        <div className="pt-2 border-t border-blue-200 space-y-2">
+                          <div className="text-sm font-medium text-slate-800">השפעות השחזור לתוכנן</div>
+                          <ul className="list-disc pe-5 text-sm text-slate-700 space-y-1">
+                            {(restorePreview.preview?.impacts || []).map((impact, index) => (
+                              <li key={`${impact.type || 'impact'}-${index}`}>{impact.message}</li>
+                            ))}
+                            {(!Array.isArray(restorePreview.preview?.impacts) || restorePreview.preview.impacts.length === 0) && (
+                              <li>לא זוהו השפעות נוספות מעבר להחזרת התלמיד לסטטוס "מתוכנן".</li>
+                            )}
+                          </ul>
+                          <div className="flex gap-2 justify-end">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setRestorePreview(null)}
+                              disabled={isMarkingAttendance}
+                            >
+                              ביטול
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleMarkAttendance(participant.id, 'scheduled')}
+                              disabled={isMarkingAttendance}
+                            >
+                              {isMarkingAttendance ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                'אשר שחזור'
                               )}
                             </Button>
                           </div>

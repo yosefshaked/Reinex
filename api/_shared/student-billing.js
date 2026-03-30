@@ -303,6 +303,10 @@ function buildBillingDecision({ participant, instance, commitment, policies, syn
     pricingBreakdown: {
       version: BILLING_BREAKDOWN_VERSION,
       synced_at: syncedAt,
+      policy_snapshot: {
+        billing_consumption_policy: policies?.billingConsumptionPolicy || null,
+        instructor_earnings_policy: policies?.instructorEarningsPolicy || null,
+      },
       lesson_status: lessonStatus || null,
       lesson_date: lessonDate || null,
       participant_status: participantStatus || null,

@@ -878,7 +878,7 @@ export async function syncLessonInstructorEarnings(
   }
 
   const resolvedPolicies = policies || await loadFinancePolicies(tenantClient);
-  const shouldInstructorEarn = resolvedInstance.status !== 'cancelled_clinic'
+  const shouldInstructorEarn = resolvedInstance.status === 'completed'
     && (resolvedParticipants || []).some((participant) => resolvedPolicies.instructorEarningsPolicy[normalizeString(participant.participant_status).toLowerCase()]);
 
   if (!shouldInstructorEarn || !resolvedInstance.instructor_employee_id) {
@@ -920,6 +920,9 @@ export async function syncLessonInstructorEarnings(
       metadata: {
         service_id: resolvedInstance.service_id,
         lesson_date: toDateKey(resolvedInstance.datetime_start),
+        policy_snapshot: {
+          instructor_earnings_policy: resolvedPolicies.instructorEarningsPolicy,
+        },
       },
     }, { onConflict: 'employee_id,lesson_instance_id' });
 

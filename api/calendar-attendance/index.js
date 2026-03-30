@@ -18,12 +18,17 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
+import { loadFinancePolicies, syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
+import { listDashboardTasks, resolveDashboardTask } from '../_shared/dashboard-tasks.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
+
+function roundCurrency(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
 
 /**
  * POST /api/calendar/attendance
@@ -224,10 +229,189 @@ async function handleUpdateReminder(context, body, tenantClient, userId) {
   return respond(context, 200, { message: 'reminder updated' });
 }
 
+async function buildRestorePreview(tenantClient, body) {
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(tenantClient, {
+    instanceId: body.instance_id,
+    participantId: body.participant_id,
+  });
+
+  if (mutationStateError) {
+    throw mutationStateError;
+  }
+
+  const instance = mutationState.instance;
+  const participant = mutationState.participant;
+  if (!instance || !participant) {
+    return null;
+  }
+
+  const [{ data: instanceDetail, error: instanceDetailError }, { data: allParticipants, error: participantsError }, { data: lessonEarning, error: earningError }, { data: participantLedgerRows, error: ledgerError }, dashboardTasks] = await Promise.all([
+    tenantClient
+      .from('lesson_instances')
+      .select('id, instructor_employee_id, status, datetime_start')
+      .eq('id', body.instance_id)
+      .maybeSingle(),
+    tenantClient
+      .from('lesson_participants')
+      .select('id, student_id, participant_status, lesson_instance_id')
+      .eq('lesson_instance_id', body.instance_id),
+    tenantClient
+      .from('lesson_earnings')
+      .select('id, employee_id, rate_used, payout_amount, metadata')
+      .eq('lesson_instance_id', body.instance_id)
+      .maybeSingle(),
+    tenantClient
+      .from('ledger_transactions')
+      .select('id, student_id, commitment_id, transaction_type, usage_type, amount, metadata')
+      .eq('source_ref', body.participant_id)
+      .in('usage_type', ['standard', 'double', 'cross_service']),
+    listDashboardTasks(tenantClient, {
+      status: 'open',
+      resourceType: 'lesson_participant',
+      resourceId: body.participant_id,
+    }),
+  ]);
+
+  if (instanceDetailError) throw instanceDetailError;
+  if (participantsError) throw participantsError;
+  if (earningError && earningError.code !== 'PGRST116' && earningError.code !== '42P01') throw earningError;
+  if (ledgerError && ledgerError.code !== '42P01') throw ledgerError;
+  if (!instanceDetail) return null;
+
+  const projectedParticipants = (allParticipants || []).map((row) => (
+    row.id === body.participant_id
+      ? { ...row, participant_status: 'scheduled' }
+      : row
+  ));
+  const anyScheduled = projectedParticipants.some((row) => row.participant_status === 'scheduled');
+  const allResolved = projectedParticipants.every((row) => (
+    row.participant_status === 'attended'
+      || row.participant_status === 'no_show'
+      || row.participant_status === 'cancelled_student'
+      || row.participant_status === 'cancelled_clinic'
+  ));
+
+  const projectedInstanceStatus = anyScheduled
+    ? 'scheduled'
+    : (allResolved ? 'completed' : instance.status);
+
+  const lessonDate = new Date(instanceDetail.datetime_start || Date.now());
+  const lessonDateKey = String(instanceDetail.datetime_start || '').slice(0, 10);
+  const [{ data: dayLessons, error: dayLessonsError }, { data: systemAttendanceRecord, error: attendanceError }, { data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }] = await Promise.all([
+    tenantClient
+      .from('lesson_instances')
+      .select('id, status, duration_minutes')
+      .eq('instructor_employee_id', instanceDetail.instructor_employee_id)
+      .gte('datetime_start', `${lessonDateKey}T00:00:00`)
+      .lte('datetime_start', `${lessonDateKey}T23:59:59`),
+    tenantClient
+      .from('employee_attendance_records')
+      .select('id, status, worked_minutes, source_type')
+      .eq('employee_id', instanceDetail.instructor_employee_id)
+      .eq('attendance_date', lessonDateKey)
+      .maybeSingle(),
+    tenantClient
+      .from('Employees')
+      .select('id, first_name, middle_name, last_name')
+      .eq('id', instanceDetail.instructor_employee_id)
+      .maybeSingle(),
+    tenantClient
+      .from('students')
+      .select('id, first_name, middle_name, last_name')
+      .eq('id', participant.student_id)
+      .maybeSingle(),
+  ]);
+
+  if (dayLessonsError) throw dayLessonsError;
+  if (attendanceError && attendanceError.code !== 'PGRST116' && attendanceError.code !== '42P01') throw attendanceError;
+  if (employeeError && employeeError.code !== 'PGRST116') throw employeeError;
+  if (studentError && studentError.code !== 'PGRST116') throw studentError;
+
+  const projectedCompletedLessons = (dayLessons || []).filter((row) => {
+    if (row.id === body.instance_id) {
+      return projectedInstanceStatus === 'completed';
+    }
+    return row.status === 'completed';
+  });
+  const projectedWorkedMinutes = projectedCompletedLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
+
+  const openHmoTask = (dashboardTasks || []).find((task) => task.task_type === 'hmo_claim_submission' && task.status === 'open') || null;
+  const ledgerAmount = roundCurrency((participantLedgerRows || []).reduce((sum, row) => {
+    if (row.transaction_type === 'DEBIT') return sum + Number(row.amount || 0);
+    if (row.transaction_type === 'CREDIT') return sum - Number(row.amount || 0);
+    return sum;
+  }, 0));
+
+  const instructorName = [employeeRow?.first_name, employeeRow?.middle_name, employeeRow?.last_name].filter(Boolean).join(' ').trim() || 'המדריך';
+  const studentName = [studentRow?.first_name, studentRow?.middle_name, studentRow?.last_name].filter(Boolean).join(' ').trim() || 'התלמיד';
+  const monthLabel = lessonDate.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
+
+  const impacts = [];
+  if (projectedInstanceStatus !== instance.status) {
+    impacts.push({
+      type: 'lesson_status',
+      message: `סטטוס השיעור ישתנה מ-${instance.status} ל-${projectedInstanceStatus}.`,
+    });
+  }
+  if (ledgerAmount > 0) {
+    impacts.push({
+      type: 'billing_reversal',
+      amount: ledgerAmount,
+      message: `₪${ledgerAmount} יוחזרו ליתרה של ${studentName}.`,
+    });
+  }
+  if (lessonEarning?.id && Number(lessonEarning.payout_amount || 0) !== 0 && projectedInstanceStatus !== 'completed') {
+    impacts.push({
+      type: 'instructor_earning_reversal',
+      amount: roundCurrency(lessonEarning.payout_amount),
+      message: `₪${roundCurrency(lessonEarning.payout_amount)} יוסרו מהשכר של ${instructorName} עבור ${monthLabel}.`,
+    });
+  }
+  if (systemAttendanceRecord?.source_type === 'system') {
+    if (projectedCompletedLessons.length === 0) {
+      impacts.push({
+        type: 'instructor_attendance_remove',
+        message: `נוכחות המדריך של ${instructorName} בתאריך ${lessonDateKey} תוסר.`,
+      });
+    } else if (Number(systemAttendanceRecord.worked_minutes || 0) !== projectedWorkedMinutes) {
+      impacts.push({
+        type: 'instructor_attendance_update',
+        message: `נוכחות המדריך של ${instructorName} בתאריך ${lessonDateKey} תשתנה ל-${projectedWorkedMinutes} דקות.`,
+      });
+    }
+  }
+  if (openHmoTask) {
+    impacts.push({
+      type: 'hmo_task_resolve',
+      message: `משימת הגשת התביעה עבור ${studentName} תסומן כטופלה.`,
+      task_id: openHmoTask.id,
+    });
+  }
+
+  return {
+    participant_id: participant.id,
+    participant_status_before: participant.participant_status,
+    participant_status_after: 'scheduled',
+    lesson_instance_id: instance.id,
+    lesson_status_before: instance.status,
+    lesson_status_after: projectedInstanceStatus,
+    impacts,
+    projected: {
+      billing_amount_reversed: ledgerAmount,
+      instructor_earning_removed: lessonEarning?.id && projectedInstanceStatus !== 'completed'
+        ? roundCurrency(lessonEarning.payout_amount || 0)
+        : 0,
+      instructor_attendance_worked_minutes: projectedCompletedLessons.length > 0 ? projectedWorkedMinutes : null,
+      hmo_task_id_to_resolve: openHmoTask?.id || null,
+    },
+  };
+}
+
 async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin) {
   if (body.action === 'update-reminder') {
     return handleUpdateReminder(context, body, tenantClient, userId);
   }
+  const isRestorePreviewAction = body.action === 'preview-restore-to-scheduled';
 
   // Validate required fields
   if (!body.instance_id) {
@@ -256,7 +440,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     body.expectedVersion,
   );
 
-  if (!hasAttendedFlag && !hasParticipantStatus) {
+  if (!isRestorePreviewAction && !hasAttendedFlag && !hasParticipantStatus) {
     return respond(context, 400, {
       message: 'missing update payload (expected attended or participant_status)',
     });
@@ -317,6 +501,23 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
 
     if (!instructorId || instructorId !== instance.instructor_employee_id) {
       return respond(context, 403, { message: 'forbidden: can only mark attendance for your own lessons' });
+    }
+  }
+
+  if (isRestorePreviewAction) {
+    try {
+      const preview = await buildRestorePreview(tenantClient, body);
+      if (!preview) {
+        return respond(context, 404, { message: 'instance not found' });
+      }
+      return respond(context, 200, preview);
+    } catch (error) {
+      context.log?.error?.('calendar/attendance failed to build restore preview', {
+        message: error?.message,
+        instanceId: body.instance_id,
+        participantId: body.participant_id,
+      });
+      return respond(context, 500, { message: 'failed_to_build_restore_preview' });
     }
   }
 
@@ -446,6 +647,42 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     context.log?.warn?.('calendar/attendance failed to write tenant audit (attendance)', { message: auditError?.message, participantId: body.participant_id });
   }
 
+  if (participantUpdate.participant_status && participantUpdate.participant_status !== 'scheduled') {
+    try {
+      const policies = await loadFinancePolicies(tenantClient);
+      const currentMetadata = mutationState.instance?.metadata && typeof mutationState.instance.metadata === 'object'
+        ? mutationState.instance.metadata
+        : {};
+      const existingSnapshots = currentMetadata.attendance_resolution_snapshots && typeof currentMetadata.attendance_resolution_snapshots === 'object'
+        ? currentMetadata.attendance_resolution_snapshots
+        : {};
+
+      await tenantClient
+        .from('lesson_instances')
+        .update({
+          metadata: {
+            ...currentMetadata,
+            attendance_resolution_snapshots: {
+              ...existingSnapshots,
+              [body.participant_id]: {
+                evaluated_at: new Date().toISOString(),
+                participant_status: participantUpdate.participant_status,
+                billing_consumption_policy: policies.billingConsumptionPolicy,
+                instructor_earnings_policy: policies.instructorEarningsPolicy,
+              },
+            },
+          },
+        })
+        .eq('id', body.instance_id);
+    } catch (snapshotError) {
+      context.log?.warn?.('calendar/attendance failed to persist attendance decision snapshot', {
+        message: snapshotError?.message,
+        instanceId: body.instance_id,
+        participantId: body.participant_id,
+      });
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(participantUpdate, 'participant_status')) {
     // Check if all participants have attendance statuses so instance can be marked completed.
     const { data: allParticipants, error: fetchError } = await tenantClient
@@ -468,6 +705,27 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
           .from('lesson_instances')
           .update({
             status: 'completed',
+            updated_at: new Date().toISOString(),
+            updated_by: userId,
+          })
+          .eq('id', body.instance_id);
+
+        if (expectedInstanceVersion !== null) {
+          const shouldFilterByVersion = !(
+            instance?.legacy_null_version
+            && expectedInstanceVersion === 1
+          );
+          if (shouldFilterByVersion) {
+            instanceUpdateQuery = instanceUpdateQuery.eq('version', expectedInstanceVersion);
+          }
+        }
+
+        await instanceUpdateQuery;
+      } else if (instance.status === 'completed') {
+        let instanceUpdateQuery = tenantClient
+          .from('lesson_instances')
+          .update({
+            status: 'scheduled',
             updated_at: new Date().toISOString(),
             updated_by: userId,
           })
@@ -563,6 +821,32 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     } catch (hmoTaskError) {
       context.log?.warn?.('calendar/attendance failed to create HMO claim task', {
         message: hmoTaskError?.message,
+        participantId: body.participant_id,
+      });
+    }
+  }
+
+  if (participantUpdate.participant_status === 'scheduled') {
+    try {
+      const openTasks = await listDashboardTasks(tenantClient, {
+        status: 'open',
+        resourceType: 'lesson_participant',
+        resourceId: body.participant_id,
+      });
+      const hmoTask = (openTasks || []).find((task) => task.task_type === 'hmo_claim_submission');
+      if (hmoTask?.id) {
+        await resolveDashboardTask(tenantClient, {
+          taskId: hmoTask.id,
+          resolvedBy: userId,
+          metadata: {
+            ...(hmoTask.metadata && typeof hmoTask.metadata === 'object' ? hmoTask.metadata : {}),
+            resolved_by_restore_to_scheduled: true,
+          },
+        });
+      }
+    } catch (taskResolveError) {
+      context.log?.warn?.('calendar/attendance failed to resolve HMO task on restore', {
+        message: taskResolveError?.message,
         participantId: body.participant_id,
       });
     }
