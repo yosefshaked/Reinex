@@ -351,9 +351,18 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     }
 
     participantUpdate.participant_status = participantStatus;
-    participantUpdate.attendance_confirmed_at = new Date().toISOString();
-    participantUpdate.attendance_confirmed_by = userId;
     participantUpdate.updated_by = userId;
+
+    if (participantStatus === 'scheduled') {
+      // Restoring a participant reopens the attendance/reminder workflow.
+      participantUpdate.reminder_sent = false;
+      participantUpdate.reminder_seen = false;
+      participantUpdate.attendance_confirmed_at = null;
+      participantUpdate.attendance_confirmed_by = null;
+    } else {
+      participantUpdate.attendance_confirmed_at = new Date().toISOString();
+      participantUpdate.attendance_confirmed_by = userId;
+    }
 
     // Persist optional notes into metadata.notes
     const notes = typeof body.notes === 'string' ? body.notes.trim() : null;
