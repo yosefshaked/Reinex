@@ -1089,6 +1089,7 @@ export async function syncInstructorAttendanceFromLessons(
     .select('id, source_type')
     .eq('employee_id', instance.instructor_employee_id)
     .eq('attendance_date', lessonDate)
+    .in('source_type', ['manual', 'import', 'system'])
     .maybeSingle();
 
   if (existingError && existingError.code !== '42P01') {
@@ -1131,25 +1132,84 @@ export async function syncInstructorAttendanceFromLessons(
     (sum, l) => sum + (Number(l.duration_minutes) || 0), 0
   );
 
-  const { error: upsertError } = await tenantClient
-    .from('employee_attendance_records')
-    .upsert({
-      employee_id: instance.instructor_employee_id,
-      attendance_date: lessonDate,
-      status: 'present',
-      worked_minutes: totalWorkedMinutes,
-      source_type: 'system',
-      notes: `${completedLessons.length} שיעורים הושלמו`,
-      updated_by: actorUserId || null,
-      updated_at: new Date().toISOString(),
-      metadata: {
-        lesson_count: completedLessons.length,
-        lesson_ids: completedLessons.map((l) => l.id),
-      },
-    }, { onConflict: 'employee_id,attendance_date' });
+  const completedLessonIds = completedLessons.map((lesson) => lesson.id).filter(Boolean);
+  const policies = await loadFinancePolicies(tenantClient);
+  const { data: dayParticipants, error: dayParticipantsError } = completedLessonIds.length > 0
+    ? await tenantClient
+      .from('lesson_participants')
+      .select('lesson_instance_id, participant_status')
+      .in('lesson_instance_id', completedLessonIds)
+    : { data: [], error: null };
 
-  if (upsertError) {
-    throw upsertError;
+  if (dayParticipantsError) {
+    throw dayParticipantsError;
+  }
+
+  const participantsByLesson = new Map();
+  for (const row of dayParticipants || []) {
+    if (!participantsByLesson.has(row.lesson_instance_id)) {
+      participantsByLesson.set(row.lesson_instance_id, []);
+    }
+    participantsByLesson.get(row.lesson_instance_id).push(row);
+  }
+
+  const policyPaidUnattendedLessons = completedLessons.filter((lesson) => {
+    const lessonParticipants = participantsByLesson.get(lesson.id) || [];
+    const hasAttendedParticipant = lessonParticipants.some((participant) => (
+      normalizeString(participant?.participant_status).toLowerCase() === 'attended'
+    ));
+
+    if (hasAttendedParticipant) {
+      return false;
+    }
+
+    return lessonParticipants.some((participant) => {
+      const status = normalizeString(participant?.participant_status).toLowerCase();
+      return status && status !== 'attended' && Boolean(policies.instructorEarningsPolicy[status]);
+    });
+  });
+
+  const systemNote = policyPaidUnattendedLessons.length > 0
+    ? `${completedLessons.length} שיעורים הושלמו, כולל ${policyPaidUnattendedLessons.length} ששויכו לנוכחות לפי הגדרות שכר ללא הגעה`
+    : `${completedLessons.length} שיעורים הושלמו`;
+
+  const systemPayload = {
+    employee_id: instance.instructor_employee_id,
+    attendance_date: lessonDate,
+    status: 'present',
+    worked_minutes: totalWorkedMinutes,
+    source_type: 'system',
+    notes: systemNote,
+    updated_by: actorUserId || null,
+    updated_at: new Date().toISOString(),
+    metadata: {
+      lesson_count: completedLessons.length,
+      lesson_ids: completedLessons.map((l) => l.id),
+      policy_paid_unattended_lesson_count: policyPaidUnattendedLessons.length,
+      policy_paid_unattended_lesson_ids: policyPaidUnattendedLessons.map((lesson) => lesson.id),
+    },
+  };
+
+  if (existingRecord?.source_type === 'system') {
+    const { error: updateError } = await tenantClient
+      .from('employee_attendance_records')
+      .update(systemPayload)
+      .eq('id', existingRecord.id);
+
+    if (updateError) {
+      throw updateError;
+    }
+  } else {
+    const { error: insertError } = await tenantClient
+      .from('employee_attendance_records')
+      .insert({
+        ...systemPayload,
+        created_by: actorUserId || null,
+      });
+
+    if (insertError) {
+      throw insertError;
+    }
   }
 
   return {
