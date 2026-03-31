@@ -101,7 +101,7 @@ async function loadServicesMap(tenantClient, serviceIds = []) {
   }]));
 }
 
-async function loadCommitmentsMap(tenantClient, commitmentIds = []) {
+export async function loadCommitmentsMap(tenantClient, commitmentIds = []) {
   const ids = Array.from(new Set((commitmentIds || []).map((id) => normalizeString(id)).filter(Boolean)));
   if (ids.length === 0) {
     return new Map();
@@ -195,7 +195,7 @@ async function loadLessonInstancesByIds(tenantClient, lessonInstanceIds = []) {
   return new Map((data || []).map((row) => [row.id, row]));
 }
 
-function buildBillingDecision({ participant, instance, commitment, policies, syncedAt = new Date().toISOString() }) {
+export function buildBillingDecision({ participant, instance, commitment, policies, syncedAt = new Date().toISOString() }) {
   const participantStatus = normalizeString(participant?.participant_status).toLowerCase();
   const lessonStatus = normalizeString(instance?.status).toLowerCase();
   const lessonDate = toDateKey(instance?.datetime_start);

@@ -21,12 +21,185 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { assertNoLeaveForLesson, syncInstructorAttendanceFromLessons, syncLessonInstructorEarnings, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
+import { assertNoLeaveForLesson, loadFinancePolicies, syncInstructorAttendanceFromLessons, syncLessonInstructorEarnings, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_shared/calendar-workflow.js';
+import { createDashboardTask } from '../_shared/dashboard-tasks.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 const INSTANCE_STATUSES = new Set(['scheduled', 'completed', 'cancelled_student', 'cancelled_clinic', 'no_show']);
+
+async function promoteScheduledParticipantsForCompletedLesson(tenantClient, {
+  instanceId,
+  userId,
+  instanceMetadata,
+  instanceDateTimeStart,
+}) {
+  const { data: scheduledParticipants, error: scheduledParticipantsError } = await tenantClient
+    .from('lesson_participants')
+    .select('id, student_id, commitment_id, metadata')
+    .eq('lesson_instance_id', instanceId)
+    .eq('participant_status', 'scheduled');
+
+  if (scheduledParticipantsError) {
+    throw scheduledParticipantsError;
+  }
+
+  const participantsToPromote = Array.isArray(scheduledParticipants) ? scheduledParticipants : [];
+  if (participantsToPromote.length === 0) {
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error: promoteError } = await tenantClient
+    .from('lesson_participants')
+    .update({
+      participant_status: 'attended',
+      attendance_confirmed_at: nowIso,
+      attendance_confirmed_by: userId,
+      updated_by: userId,
+    })
+    .eq('lesson_instance_id', instanceId)
+    .eq('participant_status', 'scheduled');
+
+  if (promoteError) {
+    throw promoteError;
+  }
+
+  const policies = await loadFinancePolicies(tenantClient);
+  const currentMetadata = instanceMetadata && typeof instanceMetadata === 'object' ? instanceMetadata : {};
+  const existingSnapshots = currentMetadata.attendance_resolution_snapshots && typeof currentMetadata.attendance_resolution_snapshots === 'object'
+    ? currentMetadata.attendance_resolution_snapshots
+    : {};
+  const nextSnapshots = { ...existingSnapshots };
+
+  for (const participant of participantsToPromote) {
+    const mergedWorkflowMetadata = mergeParticipantWorkflowMetadata(participant.metadata, {
+      student_billing: {
+        decision: 'pending',
+        decided_at: nowIso,
+        decided_by: userId,
+        reason: 'attended',
+      },
+      instructor_compensation: {
+        decision: 'compensated',
+        decided_at: nowIso,
+        decided_by: userId,
+        reason: 'attended',
+      },
+      hmo_claim: {
+        decision: 'pending',
+        decided_at: nowIso,
+        decided_by: userId,
+        reason: 'attended',
+      },
+    });
+
+    const { error: metadataUpdateError } = await tenantClient
+      .from('lesson_participants')
+      .update({ metadata: mergedWorkflowMetadata })
+      .eq('id', participant.id)
+      .eq('lesson_instance_id', instanceId);
+
+    if (metadataUpdateError) {
+      throw metadataUpdateError;
+    }
+
+    nextSnapshots[participant.id] = {
+      evaluated_at: nowIso,
+      participant_status: 'attended',
+      billing_consumption_policy: policies.billingConsumptionPolicy,
+      instructor_earnings_policy: policies.instructorEarningsPolicy,
+      instructor_compensation_decision: 'compensated',
+    };
+  }
+
+  const { error: snapshotUpdateError } = await tenantClient
+    .from('lesson_instances')
+    .update({
+      metadata: {
+        ...currentMetadata,
+        attendance_resolution_snapshots: nextSnapshots,
+      },
+    })
+    .eq('id', instanceId);
+
+  if (snapshotUpdateError) {
+    throw snapshotUpdateError;
+  }
+
+  const participantIdsWithCommitments = participantsToPromote
+    .filter((participant) => participant?.commitment_id)
+    .map((participant) => participant.id);
+
+  if (participantIdsWithCommitments.length === 0) {
+    return;
+  }
+
+  const commitmentIds = Array.from(new Set(
+    participantsToPromote.map((participant) => participant?.commitment_id).filter(Boolean),
+  ));
+  const studentIds = Array.from(new Set(
+    participantsToPromote.map((participant) => participant?.student_id).filter(Boolean),
+  ));
+
+  const [{ data: commitments, error: commitmentsError }, { data: students, error: studentsError }] = await Promise.all([
+    tenantClient
+      .from('commitments')
+      .select('id, commitment_type, hmo_provider_id, is_active')
+      .in('id', commitmentIds),
+    studentIds.length > 0
+      ? tenantClient
+        .from('students')
+        .select('id, first_name, last_name')
+        .in('id', studentIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (commitmentsError) {
+    throw commitmentsError;
+  }
+  if (studentsError) {
+    throw studentsError;
+  }
+
+  const commitmentById = new Map((commitments || []).map((row) => [row.id, row]));
+  const studentById = new Map((students || []).map((row) => [row.id, row]));
+  const lessonDate = instanceDateTimeStart
+    ? new Date(instanceDateTimeStart).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : '';
+
+  for (const participant of participantsToPromote) {
+    const commitment = participant?.commitment_id ? commitmentById.get(participant.commitment_id) || null : null;
+    const isHmo = commitment?.is_active !== false
+      && (commitment?.commitment_type === 'hmo' || Boolean(commitment?.hmo_provider_id));
+    if (!isHmo) {
+      continue;
+    }
+
+    const student = participant?.student_id ? studentById.get(participant.student_id) || null : null;
+    const studentName = [student?.first_name, student?.last_name].filter(Boolean).join(' ') || 'תלמיד';
+    const description = lessonDate
+      ? `שיעור של ${studentName} בתאריך ${lessonDate} דורש הגשת תביעה.`
+      : `שיעור של ${studentName} דורש הגשת תביעה.`;
+
+    await createDashboardTask(tenantClient, {
+      taskType: 'hmo_claim_submission',
+      title: 'הגשת תביעה לביטוח לאומי',
+      description,
+      priority: 'medium',
+      resourceType: 'lesson_participant',
+      resourceId: participant.id,
+      createdBy: userId,
+      metadata: {
+        lesson_instance_id: instanceId,
+        student_id: participant.student_id,
+        commitment_id: participant.commitment_id,
+      },
+    });
+  }
+}
 
 /**
  * GET /api/calendar/instances
@@ -593,6 +766,7 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
   try {
     await syncLessonBillingArtifacts(tenantClient, instance.id, userId);
     await syncLessonInstructorEarnings(tenantClient, instance.id, userId);
+    await syncLessonClosureState(tenantClient, instance.id, userId);
   } catch (syncError) {
     context.log?.error?.('calendar/instances failed to sync financial artifacts after create', {
       message: syncError?.message,
@@ -630,6 +804,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
     return respondWithLockedMutation(context, {
       instanceId: body.id,
       instanceLocks: mutationState.instanceLocks,
+      closed: mutationState.instance?.is_closed || false,
     });
   }
 
@@ -742,12 +917,8 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
     updateData.closed_reason = existingInstance.closed_reason;
   }
 
-  // Billing policy will hang off these statuses later:
-  // - cancelled_clinic: never charge
-  // - no_show: charge by default, with explicit override support
-  // - cancelled_student: charge only after grace-threshold logic + approval flow
-  // The current schema can represent the status and closed_reason, but not the eventual
-  // financial decision trail yet. That should be modeled in the future billing layer.
+  // Attendance status still drives the lesson instance itself, but downstream billing,
+  // instructor compensation, and closure are handled by the shared workflow syncs below.
 
   // Update instance
   let updateQuery = tenantClient
@@ -799,15 +970,16 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   // When the lesson is marked completed, promote any still-scheduled participants to
   // 'attended' so that the billing sync can process them (billing gates on participant status).
   if (normalizedStatus === 'completed') {
-    const { error: promoteError } = await tenantClient
-      .from('lesson_participants')
-      .update({ participant_status: 'attended', updated_by: userId })
-      .eq('lesson_instance_id', body.id)
-      .eq('participant_status', 'scheduled');
-
-    if (promoteError) {
+    try {
+      await promoteScheduledParticipantsForCompletedLesson(tenantClient, {
+        instanceId: body.id,
+        userId,
+        instanceMetadata: updateData.metadata !== undefined ? updateData.metadata : existingInstance.metadata,
+        instanceDateTimeStart: updateData.datetime_start || existingInstance.datetime_start,
+      });
+    } catch (promoteError) {
       context.log?.error?.('calendar/instances failed to promote scheduled participants to attended', {
-        message: promoteError.message,
+        message: promoteError?.message,
         instanceId: body.id,
       });
       // Non-fatal — continue; billing sync will just see pending_attendance for those participants
@@ -875,6 +1047,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
     const billingResult = await syncLessonBillingArtifacts(tenantClient, body.id, userId);
     await syncLessonInstructorEarnings(tenantClient, body.id, userId);
     await syncInstructorAttendanceFromLessons(tenantClient, body.id, userId);
+    await syncLessonClosureState(tenantClient, body.id, userId);
     billingWarnings = billingResult?.attention_required || [];
   } catch (syncError) {
     context.log?.error?.('calendar/instances failed to sync financial artifacts after update', {

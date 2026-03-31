@@ -14,6 +14,7 @@ import {
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { listDashboardTasks, resolveDashboardTask } from '../_shared/dashboard-tasks.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 
 const MAX_BODY_BYTES = 48 * 1024;
 
@@ -123,6 +124,32 @@ export default async function dashboardTasks(context, req) {
         resourceId: taskId,
         afterState: resolvedTask,
       });
+
+      try {
+        const resourceType = normalizeString(resolvedTask.resource_type);
+        if (resourceType === 'lesson_instance' && resolvedTask.resource_id) {
+          await syncLessonClosureState(tenantClient, resolvedTask.resource_id, userId);
+        } else if (resourceType === 'lesson_participant' && resolvedTask.resource_id) {
+          const { data: participantRow, error: participantError } = await tenantClient
+            .from('lesson_participants')
+            .select('lesson_instance_id')
+            .eq('id', resolvedTask.resource_id)
+            .maybeSingle();
+
+          if (participantError) {
+            throw participantError;
+          }
+
+          if (participantRow?.lesson_instance_id) {
+            await syncLessonClosureState(tenantClient, participantRow.lesson_instance_id, userId);
+          }
+        }
+      } catch (closureError) {
+        context.log?.warn?.('dashboard-tasks failed to sync lesson closure after resolve', {
+          message: closureError?.message,
+          taskId,
+        });
+      }
 
       return respond(context, 200, resolvedTask);
     } catch (error) {

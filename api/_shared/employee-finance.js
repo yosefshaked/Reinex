@@ -5,6 +5,7 @@ import {
   computeCommitmentAttention,
 } from './commitment-behavior.js';
 import { attachHmoContextToCommitments } from './hmo.js';
+import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
   carryover_enabled: false,
@@ -879,7 +880,7 @@ export async function syncLessonInstructorEarnings(
 
   const resolvedPolicies = policies || await loadFinancePolicies(tenantClient);
   const shouldInstructorEarn = resolvedInstance.status === 'completed'
-    && (resolvedParticipants || []).some((participant) => resolvedPolicies.instructorEarningsPolicy[normalizeString(participant.participant_status).toLowerCase()]);
+    && (resolvedParticipants || []).some((participant) => shouldParticipantTriggerInstructorCompensation(participant, resolvedPolicies));
 
   if (!shouldInstructorEarn || !resolvedInstance.instructor_employee_id) {
     const { error: deleteError } = await tenantClient
@@ -1137,7 +1138,7 @@ export async function syncInstructorAttendanceFromLessons(
   const { data: dayParticipants, error: dayParticipantsError } = completedLessonIds.length > 0
     ? await tenantClient
       .from('lesson_participants')
-      .select('lesson_instance_id, participant_status')
+      .select('lesson_instance_id, participant_status, metadata')
       .in('lesson_instance_id', completedLessonIds)
     : { data: [], error: null };
 
@@ -1153,7 +1154,26 @@ export async function syncInstructorAttendanceFromLessons(
     participantsByLesson.get(row.lesson_instance_id).push(row);
   }
 
-  const policyPaidUnattendedLessons = completedLessons.filter((lesson) => {
+  const eligibleCompletedLessons = completedLessons.filter((lesson) => {
+    const lessonParticipants = participantsByLesson.get(lesson.id) || [];
+    return lessonParticipants.some((participant) => shouldParticipantTriggerInstructorCompensation(participant, policies));
+  });
+
+  if (eligibleCompletedLessons.length === 0) {
+    if (existingRecord && existingRecord.source_type === 'system') {
+      await tenantClient
+        .from('employee_attendance_records')
+        .delete()
+        .eq('id', existingRecord.id);
+    }
+    return { employee_id: instance.instructor_employee_id, attendance_date: lessonDate, removed: true };
+  }
+
+  const totalWorkedMinutes = eligibleCompletedLessons.reduce(
+    (sum, lesson) => sum + (Number(lesson.duration_minutes) || 0), 0
+  );
+
+  const policyPaidUnattendedLessons = eligibleCompletedLessons.filter((lesson) => {
     const lessonParticipants = participantsByLesson.get(lesson.id) || [];
     const hasAttendedParticipant = lessonParticipants.some((participant) => (
       normalizeString(participant?.participant_status).toLowerCase() === 'attended'
@@ -1165,13 +1185,13 @@ export async function syncInstructorAttendanceFromLessons(
 
     return lessonParticipants.some((participant) => {
       const status = normalizeString(participant?.participant_status).toLowerCase();
-      return status && status !== 'attended' && Boolean(policies.instructorEarningsPolicy[status]);
+      return status && status !== 'attended' && shouldParticipantTriggerInstructorCompensation(participant, policies);
     });
   });
 
   const systemNote = policyPaidUnattendedLessons.length > 0
-    ? `${completedLessons.length} שיעורים הושלמו, כולל ${policyPaidUnattendedLessons.length} ששויכו לנוכחות לפי הגדרות שכר ללא הגעה`
-    : `${completedLessons.length} שיעורים הושלמו`;
+    ? `${eligibleCompletedLessons.length} שיעורים נספרו לנוכחות, כולל ${policyPaidUnattendedLessons.length} ששויכו לנוכחות לפי החלטת שכר ללא הגעה`
+    : `${eligibleCompletedLessons.length} שיעורים נספרו לנוכחות`;
 
   const systemPayload = {
     employee_id: instance.instructor_employee_id,
@@ -1183,8 +1203,10 @@ export async function syncInstructorAttendanceFromLessons(
     updated_by: actorUserId || null,
     updated_at: new Date().toISOString(),
     metadata: {
-      lesson_count: completedLessons.length,
-      lesson_ids: completedLessons.map((l) => l.id),
+      lesson_count: eligibleCompletedLessons.length,
+      lesson_ids: eligibleCompletedLessons.map((l) => l.id),
+      completed_lesson_count: completedLessons.length,
+      completed_lesson_ids: completedLessons.map((l) => l.id),
       policy_paid_unattended_lesson_count: policyPaidUnattendedLessons.length,
       policy_paid_unattended_lesson_ids: policyPaidUnattendedLessons.map((lesson) => lesson.id),
     },
@@ -1216,7 +1238,7 @@ export async function syncInstructorAttendanceFromLessons(
     employee_id: instance.instructor_employee_id,
     attendance_date: lessonDate,
     worked_minutes: totalWorkedMinutes,
-    lesson_count: completedLessons.length,
+    lesson_count: eligibleCompletedLessons.length,
   };
 }
 

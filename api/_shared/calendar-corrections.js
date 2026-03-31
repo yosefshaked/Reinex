@@ -2,6 +2,8 @@
 import { loadFinancePolicies, toDateKey } from './employee-finance.js';
 import { normalizeEntityVersion } from './calendar-editing.js';
 import { normalizeString } from './org-bff.js';
+import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
+import { buildBillingDecision, loadCommitmentsMap } from './student-billing.js';
 
 const LESSON_BILLING_USAGE_TYPES = ['standard', 'double', 'cross_service'];
 
@@ -80,19 +82,9 @@ function buildRateKey(employeeId, serviceId) {
   return `${employeeId || ''}:${serviceId || ''}`;
 }
 
-function isCommitmentExpired(commitment, lessonDate) {
-  const expiryDate = toDateKey(commitment?.expires_at);
-  if (!expiryDate || !lessonDate) {
-    return false;
-  }
-  return expiryDate < lessonDate;
-}
-
 function shouldInstructorEarn(instance, participants, policies) {
-  return normalizeString(instance?.status).toLowerCase() !== 'cancelled_clinic'
-    && asArray(participants).some((participant) => Boolean(
-      policies?.instructorEarningsPolicy?.[normalizeString(participant?.participant_status).toLowerCase()],
-    ));
+  return normalizeString(instance?.status).toLowerCase() === 'completed'
+    && asArray(participants).some((participant) => shouldParticipantTriggerInstructorCompensation(participant, policies));
 }
 
 function computeWorkedMinutes(instance) {
@@ -101,35 +93,20 @@ function computeWorkedMinutes(instance) {
     : 0;
 }
 
-function computeParticipantCharge(instance, participant, commitmentMap, policies, currentCharge = 0) {
-  const participantStatus = normalizeString(participant?.participant_status).toLowerCase();
-  const lessonStatus = normalizeString(instance?.status).toLowerCase();
+function computeParticipantCharge(instance, participant, commitmentMap, policies) {
   const commitment = participant?.commitment_id ? commitmentMap.get(participant.commitment_id) || null : null;
-  const lessonDate = toDateKey(instance?.datetime_start);
-  const policyAllowsCharge = lessonStatus !== 'cancelled_clinic'
-    && Boolean(policies?.billingConsumptionPolicy?.[participantStatus]);
+  const decision = buildBillingDecision({
+    participant,
+    instance,
+    commitment,
+    policies,
+  });
 
-  if (!policyAllowsCharge || !commitment) {
-    return 0;
+  if (decision.shouldCharge) {
+    return roundCurrency(decision.chargeAmount);
   }
 
-  if (commitment.is_active === false || isCommitmentExpired(commitment, lessonDate)) {
-    return 0;
-  }
-
-  if (commitment.service_id && instance?.service_id && commitment.service_id !== instance.service_id) {
-    return 0;
-  }
-
-  if (Number.isFinite(Number(participant?.price_charged))) {
-    return roundCurrency(Number(participant.price_charged));
-  }
-
-  if (Number.isFinite(Number(commitment?.default_charge_amount))) {
-    return roundCurrency(Number(commitment.default_charge_amount));
-  }
-
-  return roundCurrency(currentCharge);
+  return 0;
 }
 
 async function loadCorrectionContext(tenantClient, originalInstanceId) {
@@ -164,18 +141,13 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
   const participantIds = participantRows.map((participant) => participant.id);
   const commitmentIds = Array.from(new Set(participantRows.map((participant) => participant.commitment_id).filter(Boolean)));
 
-  const [{ data: earnings, error: earningsError }, { data: commitments, error: commitmentsError }, { data: ledgerRows, error: ledgerError }, { data: instanceLocks, error: instanceLocksError }, { data: participantLocks, error: participantLocksError }, { data: latestCorrectionRows, error: latestCorrectionError }, { data: financeAdjustmentRows, error: financeAdjustmentError }, { data: attendanceCorrectionRows, error: attendanceCorrectionError }, { data: correctionLedgerRows, error: correctionLedgerError }] = await Promise.all([
+  const [{ data: earnings, error: earningsError }, commitmentsMap, { data: ledgerRows, error: ledgerError }, { data: instanceLocks, error: instanceLocksError }, { data: participantLocks, error: participantLocksError }, { data: latestCorrectionRows, error: latestCorrectionError }, { data: financeAdjustmentRows, error: financeAdjustmentError }, { data: attendanceCorrectionRows, error: attendanceCorrectionError }, { data: correctionLedgerRows, error: correctionLedgerError }] = await Promise.all([
     tenantClient
       .from('lesson_earnings')
       .select('employee_id, lesson_instance_id, rate_used, payout_amount, metadata')
       .eq('lesson_instance_id', originalInstanceId)
       .maybeSingle(),
-    commitmentIds.length > 0
-      ? tenantClient
-        .from('commitments')
-        .select('id, student_id, service_id, default_charge_amount, is_active, expires_at, commitment_type, metadata')
-        .in('id', commitmentIds)
-      : Promise.resolve({ data: [], error: null }),
+    loadCommitmentsMap(tenantClient, commitmentIds),
     participantIds.length > 0
       ? tenantClient
         .from('ledger_transactions')
@@ -216,9 +188,6 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
 
   if (earningsError && earningsError.code !== 'PGRST116' && !isMissingRelationError(earningsError)) {
     throw earningsError;
-  }
-  if (commitmentsError) {
-    throw commitmentsError;
   }
   if (ledgerError) {
     throw ledgerError;
@@ -263,7 +232,7 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
     participants: participantRows,
     earning: earnings || null,
     latestCorrection: asArray(latestCorrectionRows)[0] || null,
-    commitments: new Map(asArray(commitments).map((commitment) => [commitment.id, commitment])),
+    commitments: commitmentsMap,
     ledgerRows: asArray(ledgerRows),
     financeAdjustmentRows: asArray(financeAdjustmentRows),
     attendanceCorrectionRows: asArray(attendanceCorrectionRows),
@@ -367,7 +336,7 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   const participantImpact = effectiveParticipants.map((participant) => {
     const originalParticipant = currentParticipants.find((row) => row.id === participant.id) || participant;
     const currentCharge = roundCurrency(currentChargeMap.get(participant.id) || 0);
-    const proposedCharge = computeParticipantCharge(effectiveInstance, participant, context.commitments, policies, currentCharge);
+    const proposedCharge = computeParticipantCharge(effectiveInstance, participant, context.commitments, policies);
     const delta = roundCurrency(proposedCharge - currentCharge);
     const participantClaimLocks = context.participantLocks.filter((lock) => lock.lesson_participant_id === participant.id && lock.lock_source_type === 'claim_batch');
     const paidClaimBatchIds = participantClaimLocks
@@ -564,7 +533,7 @@ export async function enrichInstancesWithCorrectionState(tenantClient, instances
     return {
       ...row,
       participants: participantRows,
-      is_locked: instanceLockRows.length > 0 || participantRows.some((participant) => participant.locks.length > 0),
+      is_locked: Boolean(row.is_closed) || instanceLockRows.length > 0 || participantRows.some((participant) => participant.locks.length > 0),
       hard_blocked_by_paid_claim: paidClaimBatchIds.length > 0,
       paid_claim_batch_ids: paidClaimBatchIds,
       locks: {

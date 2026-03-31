@@ -15,6 +15,7 @@ import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { parseExpectedVersion, respondWithVersionConflict } from '../_shared/calendar-editing.js';
 import { buildInstanceCorrectionPreview } from '../_shared/calendar-corrections.js';
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
+import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
@@ -441,6 +442,15 @@ export default async function calendarCorrections(context, req) {
       reasonCode,
       reasonText,
     });
+
+    try {
+      await syncLessonClosureState(tenantClient, originalInstanceId, userId);
+    } catch (closureError) {
+      context.log?.warn?.('calendar-corrections failed to sync lesson closure after correction', {
+        message: closureError?.message,
+        originalInstanceId,
+      });
+    }
 
     await logAuditEvent(supabase, {
       orgId,

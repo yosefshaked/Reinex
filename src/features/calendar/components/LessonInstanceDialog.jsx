@@ -17,6 +17,13 @@ import { Textarea } from '../../../components/ui/textarea';
 import { LockedCorrectionPanel } from './LockedCorrectionPanel';
 import { useVersionConflictResolver } from './useVersionConflictResolver';
 
+const DEFAULT_BILLING_POLICY = {
+  attended: true,
+  no_show: false,
+  cancelled_student: false,
+  cancelled_clinic: false,
+};
+
 function toLocalDateString(dateObj) {
   if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
   const year = dateObj.getFullYear();
@@ -77,6 +84,12 @@ function resolveMutationError(error) {
   if (error?.status === 409) {
     return 'השיעור עודכן על ידי משתמש אחר. רעננו את התצוגה ונסו שוב.';
   }
+  if (error?.data?.code === 'missing_instructor_compensation_decision') {
+    return 'יש לבחור אם המדריך אמור לקבל פיצוי לפני שמאשרים אי-הגעה מחויבת.';
+  }
+  if (error?.message === 'failed_to_build_status_change_preview') {
+    return 'לא ניתן היה לבנות תצוגה מקדימה לשינוי הסטטוס.';
+  }
   return error?.message || 'הפעולה נכשלה.';
 }
 
@@ -86,6 +99,108 @@ function getParticipantStatusLabel(status) {
   if (status === 'cancelled_student') return 'בוטל ע"י תלמיד';
   if (status === 'cancelled_clinic') return 'בוטל ע"י המכון';
   return 'מתוכנן';
+}
+
+function getCompensationDecisionLabel(decision) {
+  if (decision === 'compensated') return 'כן, לפצות את המדריך';
+  if (decision === 'not_compensated') return 'לא, אין לפצות את המדריך';
+  return 'יש לבחור';
+}
+
+function getWorkflowDecisionLabel(decision, kind = 'generic') {
+  if (kind === 'student_billing') {
+    if (decision === 'pending') return 'ממתין לחיוב';
+    if (decision === 'unknown') return 'טרם נקבע';
+    if (decision === 'resolved') return 'החיוב טופל';
+    if (decision === 'not_applicable') return 'לא רלוונטי';
+  }
+  if (kind === 'hmo_claim') {
+    if (decision === 'pending') return 'ממתין להגשת תביעה';
+    if (decision === 'required') return 'נדרשת תביעה';
+    if (decision === 'not_required') return 'לא נדרשת תביעה';
+    if (decision === 'unknown') return 'טרם נקבע';
+  }
+  if (kind === 'instructor_compensation') {
+    if (decision === 'compensated') return 'המדריך מתוגמל';
+    if (decision === 'not_compensated') return 'המדריך לא מתוגמל';
+    if (decision === 'pending') return 'ממתין להחלטת שכר';
+    if (decision === 'unknown') return 'טרם נקבע';
+    if (decision === 'not_applicable') return 'לא רלוונטי';
+  }
+  if (decision === 'resolved') return 'טופל';
+  if (decision === 'pending') return 'ממתין';
+  if (decision === 'unknown') return 'לא נקבע';
+  return decision || 'לא נקבע';
+}
+
+function deriveDisplayWorkflowDecisions(participant, billingPolicy) {
+  const workflow = participant?.metadata?.workflow && typeof participant.metadata.workflow === 'object'
+    ? participant.metadata.workflow
+    : {};
+  const status = String(participant?.participant_status || '').trim().toLowerCase();
+  const studentBillingDecision = workflow.student_billing?.decision || 'unknown';
+  const compensationDecision = workflow.instructor_compensation?.decision || 'unknown';
+  const hmoDecision = workflow.hmo_claim?.decision || 'unknown';
+  const hasResolvedStatus = ['attended', 'no_show', 'cancelled_student', 'cancelled_clinic'].includes(status);
+  const hasChargeArtifact = Number(participant?.price_charged || 0) > 0
+    || participant?.pricing_breakdown?.billing_status === 'charged';
+
+  return {
+    studentBillingDecision: studentBillingDecision !== 'unknown'
+      ? studentBillingDecision
+      : (!hasResolvedStatus
+        ? 'unknown'
+        : (hasChargeArtifact
+          ? 'resolved'
+          : (billingPolicy?.[status] ? 'pending' : 'not_applicable'))),
+    compensationDecision: compensationDecision !== 'unknown'
+      ? compensationDecision
+      : (status === 'attended'
+        ? 'compensated'
+        : 'unknown'),
+    hmoDecision: hmoDecision !== 'unknown'
+      ? hmoDecision
+      : (status === 'scheduled' ? 'not_required' : 'unknown'),
+  };
+}
+
+function getWorkflowReasonLabel(reason) {
+  if (reason === 'attendance_unresolved') return 'יש משתתפים שטרם קיבלו סטטוס סופי.';
+  if (reason === 'student_billing_unresolved') return 'יש חיוב תלמיד שעדיין לא הושלם.';
+  if (reason === 'instructor_compensation_unresolved') return 'שכר המדריך עדיין לא נסגר דרך הרצת שכר.';
+  if (reason === 'hmo_claim_unresolved') return 'יש תביעת גורם מממן שעדיין לא הושלמה.';
+  if (reason === 'missing_instance') return 'פרטי השיעור אינם זמינים.';
+  return reason || 'קיים שלב פתוח בתהליך הסגירה.';
+}
+
+function getImpactGroupMeta(type) {
+  if (['billing_reversal', 'billing_charge', 'billing_update'].includes(type)) {
+    return { key: 'billing', label: 'חיוב תלמיד', borderClass: 'border-amber-200', bgClass: 'bg-amber-50/70' };
+  }
+  if (['instructor_earning_reversal', 'instructor_earning_add'].includes(type)) {
+    return { key: 'payroll', label: 'שכר מדריך', borderClass: 'border-emerald-200', bgClass: 'bg-emerald-50/70' };
+  }
+  if (['instructor_attendance_remove', 'instructor_attendance_update', 'instructor_attendance_add'].includes(type)) {
+    return { key: 'attendance', label: 'נוכחות מדריך', borderClass: 'border-sky-200', bgClass: 'bg-sky-50/70' };
+  }
+  if (type === 'hmo_task_resolve') {
+    return { key: 'hmo', label: 'גורם מממן', borderClass: 'border-fuchsia-200', bgClass: 'bg-fuchsia-50/70' };
+  }
+  return { key: 'workflow', label: 'זרימת שיעור', borderClass: 'border-slate-200', bgClass: 'bg-slate-50/70' };
+}
+
+function groupPreviewImpacts(impacts) {
+  const groups = [];
+  for (const impact of Array.isArray(impacts) ? impacts : []) {
+    const meta = getImpactGroupMeta(impact?.type);
+    let group = groups.find((entry) => entry.key === meta.key);
+    if (!group) {
+      group = { ...meta, impacts: [] };
+      groups.push(group);
+    }
+    group.impacts.push(impact);
+  }
+  return groups;
 }
 
 function buildConflictLines(baseInstance, latestInstance, participantId) {
@@ -159,6 +274,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [absenceForm, setAbsenceForm] = useState(null);
   const [restorePreview, setRestorePreview] = useState(null);
   const [restorePreviewLoading, setRestorePreviewLoading] = useState(false);
+  const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
   
   const [formData, setFormData] = useState({
     instructor_employee_id: '',
@@ -195,6 +311,38 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setAddStudentResults([]);
     setRestorePreview(null);
   }, [instance?.id, instance?.latest_correction?.id]);
+
+  useEffect(() => {
+    if (!org?.id) {
+      setBillingPolicy(DEFAULT_BILLING_POLICY);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const loadBillingPolicy = async () => {
+      try {
+        const response = await authenticatedFetch('settings', {
+          params: { org_id: org.id, key: 'billing_consumption_policy' },
+        });
+        if (!cancelled) {
+          setBillingPolicy({
+            ...DEFAULT_BILLING_POLICY,
+            ...(response?.value && typeof response.value === 'object' ? response.value : {}),
+          });
+        }
+      } catch (loadError) {
+        console.error('Failed to load billing policy for attendance dialog:', loadError);
+        if (!cancelled) {
+          setBillingPolicy(DEFAULT_BILLING_POLICY);
+        }
+      }
+    };
+
+    void loadBillingPolicy();
+    return () => {
+      cancelled = true;
+    };
+  }, [org?.id]);
 
 
   function formatPhoneForWhatsApp(phone) {
@@ -311,6 +459,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         };
         if (typeof payload.notes === 'string') {
           body.notes = payload.notes.trim();
+        }
+        if (payload.instructorCompensationDecision) {
+          body.instructor_compensation_decision = payload.instructorCompensationDecision;
         }
         const result = await authenticatedFetch('calendar/attendance', {
           method: 'POST',
@@ -464,7 +615,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
-  async function handleMarkAttendance(participantId, status, notes) {
+  async function handleMarkAttendance(participantId, status, notes, options = {}) {
     if (!org?.id) {
       setError('Organization not found');
       return false;
@@ -483,6 +634,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       };
       if (typeof notes === 'string') {
         body.notes = notes.trim();
+      }
+      if (options.instructorCompensationDecision) {
+        body.instructor_compensation_decision = options.instructorCompensationDecision;
       }
       const result = await authenticatedFetch('calendar/attendance', {
         method: 'POST',
@@ -518,6 +672,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         participantName: participant?.student?.full_name || 'תלמיד',
         requestedStatus: status,
         notes: typeof notes === 'string' ? notes : '',
+        instructorCompensationDecision: options.instructorCompensationDecision || null,
       });
       if (!handled) {
         setError(resolveMutationError(err));
@@ -528,18 +683,26 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
-  function openAbsenceForm(participantId) {
+  function openAbsenceForm(participantId, options = {}) {
     const participant = displayParticipants.find((entry) => entry.id === participantId);
     const existingStatus = participant?.participant_status;
     const existingNotes = typeof participant?.metadata?.notes === 'string' ? participant.metadata.notes : '';
-    const nextStatus = ['no_show', 'cancelled_student', 'cancelled_clinic'].includes(existingStatus)
+    const existingCompensationDecision = participant?.metadata?.workflow?.instructor_compensation?.decision;
+    const requestedStatus = typeof options?.status === 'string' ? options.status : '';
+    const nextStatus = ['no_show', 'cancelled_student', 'cancelled_clinic'].includes(requestedStatus)
+      ? requestedStatus
+      : (['no_show', 'cancelled_student', 'cancelled_clinic'].includes(existingStatus)
       ? existingStatus
-      : 'no_show';
+      : 'no_show');
 
     setAbsenceForm({
       participantId,
       status: nextStatus,
       notes: existingNotes,
+      instructorCompensationDecision:
+        existingCompensationDecision === 'compensated' || existingCompensationDecision === 'not_compensated'
+          ? existingCompensationDecision
+          : '',
     });
   }
 
@@ -549,7 +712,32 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   async function confirmAbsenceForm() {
     if (!absenceForm) return;
-    const didSucceed = await handleMarkAttendance(absenceForm.participantId, absenceForm.status, absenceForm.notes);
+    const requiresCompensationDecision = Boolean(billingPolicy?.[absenceForm.status]);
+    if (requiresCompensationDecision && !absenceForm.instructorCompensationDecision) {
+      setError('יש לבחור אם המדריך אמור לקבל פיצוי עבור אי-ההגעה המחויבת.');
+      return;
+    }
+    const currentParticipant = displayParticipants.find((entry) => entry.id === absenceForm.participantId);
+    const currentStatus = currentParticipant?.participant_status || 'scheduled';
+    if (currentStatus !== 'scheduled' && currentStatus !== absenceForm.status) {
+      await openAttendancePreview(currentParticipant, absenceForm.status, {
+        notes: absenceForm.notes,
+        instructorCompensationDecision: requiresCompensationDecision
+          ? absenceForm.instructorCompensationDecision
+          : null,
+      });
+      return;
+    }
+    const didSucceed = await handleMarkAttendance(
+      absenceForm.participantId,
+      absenceForm.status,
+      absenceForm.notes,
+      {
+        instructorCompensationDecision: requiresCompensationDecision
+          ? absenceForm.instructorCompensationDecision
+          : null,
+      },
+    );
     if (didSucceed) {
       setAbsenceForm(null);
     }
@@ -656,31 +844,46 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
-  async function openRestorePreview(participant) {
+  async function openAttendancePreview(participant, targetStatus, options = {}) {
     if (!org?.id || !instance?.id || !participant?.id) return;
     setRestorePreviewLoading(true);
     setError(null);
     try {
+      const isRestore = targetStatus === 'scheduled';
       const preview = await authenticatedFetch('calendar/attendance', {
         method: 'POST',
         body: {
-          action: 'preview-restore-to-scheduled',
+          action: isRestore ? 'preview-restore-to-scheduled' : 'preview-participant-status-change',
           org_id: org.id,
           instance_id: instance.id,
           participant_id: participant.id,
+          ...(isRestore ? {} : { target_participant_status: targetStatus }),
+          ...(options.instructorCompensationDecision
+            ? { instructor_compensation_decision: options.instructorCompensationDecision }
+            : {}),
         },
       });
       setRestorePreview({
         participantId: participant.id,
         participantName: participant.student?.full_name || 'תלמיד',
+        targetStatus,
+        notes: options.notes || '',
+        instructorCompensationDecision: options.instructorCompensationDecision || null,
         preview,
       });
+      if (targetStatus !== 'scheduled') {
+        setAbsenceForm(null);
+      }
     } catch (err) {
-      console.error('Error building restore preview:', err);
+      console.error('Error building attendance preview:', err);
       setError(resolveMutationError(err));
     } finally {
       setRestorePreviewLoading(false);
     }
+  }
+
+  async function openRestorePreview(participant) {
+    await openAttendancePreview(participant, 'scheduled');
   }
 
   async function handleAddParticipant(studentId) {
@@ -770,15 +973,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           [participant.id]: { ...(prev[participant.id] || {}), reminder_seen: true },
         }));
       } else {
-        await authenticatedFetch('calendar/attendance', {
-          method: 'POST',
-          body: {
-            org_id: org.id,
-            instance_id: instance.id,
-            participant_id: participant.id,
-            participant_status: 'cancelled_student',
-          },
-        });
+        openAbsenceForm(participant.id, { status: 'cancelled_student' });
+        return;
       }
       onUpdate?.();
     } catch (err) {
@@ -791,6 +987,14 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   const activeServices = services?.filter(s => s.is_active) || [];
   const isReportable = displayInstance?.status === 'scheduled';
+  const isOperationallyOpen = !instance?.is_locked && !displayInstance?.is_closed;
+  const workflowState = displayInstance?.metadata?.workflow_state && typeof displayInstance.metadata.workflow_state === 'object'
+    ? displayInstance.metadata.workflow_state
+    : {};
+  const workflowSummary = workflowState.summary && typeof workflowState.summary === 'object'
+    ? workflowState.summary
+    : {};
+  const workflowReasonsOpen = Array.isArray(workflowState.reasons_open) ? workflowState.reasons_open : [];
   const lockRows = [
     ...(Array.isArray(instance?.locks?.instance) ? instance.locks.instance : []),
     ...(Array.isArray(instance?.locks?.participants) ? instance.locks.participants : []),
@@ -802,9 +1006,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       || lockRows.some((lock) => lock.lock_source_type === 'claim_batch' && lock.claim_batch_status === 'paid'),
   );
 
-  const canEdit = canManageAll && isReportable && !instance?.is_locked;
-  const canMarkAttendance = isReportable && !instance?.is_locked;
-  const canQuickReport = isReportable && !instance?.is_locked;
+  const canEdit = canManageAll && isOperationallyOpen;
+  const canMarkAttendance = isOperationallyOpen;
+  const canQuickReport = isReportable && isOperationallyOpen;
 
   const scheduledParticipantsCount = displayParticipants.filter(
     (p) => p.participant_status === 'scheduled'
@@ -1080,6 +1284,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               <Badge variant={displayInstance.status === 'completed' ? 'default' : 'secondary'}>
                 {statusInfo.label}
               </Badge>
+              <Badge variant={displayInstance.is_closed ? 'default' : 'outline'}>
+                {displayInstance.is_closed ? 'סגור תפעולית' : 'פתוח תפעולית'}
+              </Badge>
               {instance.latest_correction && (
                 <Badge className="bg-sky-100 text-sky-800 border-sky-200">מציג ערך מתוקן</Badge>
               )}
@@ -1146,6 +1353,38 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               <p className="mt-1 text-lg">{displayInstance.instructor?.full_name || 'לא ידוע'}</p>
             </div>
 
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-slate-800">מצב סגירה</div>
+                  <div className="text-xs text-slate-600">
+                    {displayInstance.is_closed
+                      ? 'כל החיובים, השכר וההתחייבויות התפעוליות סגורים.'
+                      : 'השיעור עדיין פתוח עד להשלמת כל ההתחייבויות.'}
+                  </div>
+                </div>
+                <Badge variant={displayInstance.is_closed ? 'default' : 'outline'}>
+                  {displayInstance.is_closed ? 'סגור' : 'פתוח'}
+                </Badge>
+              </div>
+              <div className="grid grid-cols-1 gap-1 text-xs text-slate-700 sm:grid-cols-2">
+                <div>נוכחות הוכרעה: {workflowSummary.all_attendance_resolved ? 'כן' : 'לא'}</div>
+                <div>חיובי תלמידים: {workflowSummary.all_student_billing_resolved ? 'סגורים' : 'עדיין פתוחים'}</div>
+                <div>שכר מדריך: {workflowSummary.instructor_compensation_resolved ? 'נסגר' : 'טרם נסגר'}</div>
+                <div>תביעות גורם מממן: {workflowSummary.all_hmo_resolved ? 'סגורות' : 'עדיין פתוחות'}</div>
+              </div>
+              {!displayInstance.is_closed && workflowReasonsOpen.length > 0 && (
+                <div className="pt-1">
+                  <div className="text-xs font-medium text-slate-700">מה עדיין מונע סגירה:</div>
+                  <ul className="mt-1 list-disc pe-5 text-xs text-slate-600 space-y-1">
+                    {workflowReasonsOpen.map((reason) => (
+                      <li key={reason}>{getWorkflowReasonLabel(reason)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
             {/* Participants with Attendance */}
             <div>
               <label className="text-sm font-medium text-gray-700">
@@ -1172,6 +1411,18 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   const isAbsenceFormOpen = absenceForm?.participantId === participant.id;
                   const isRestorePreviewOpen = restorePreview?.participantId === participant.id;
                   const participantNotes = participant.metadata?.notes || null;
+                  const participantWorkflow = participant.metadata?.workflow && typeof participant.metadata.workflow === 'object'
+                    ? participant.metadata.workflow
+                    : {};
+                  const {
+                    studentBillingDecision,
+                    compensationDecision,
+                    hmoDecision,
+                  } = deriveDisplayWorkflowDecisions(participant, billingPolicy);
+                  const absenceRequiresCompensationDecision = isAbsenceFormOpen && Boolean(billingPolicy?.[absenceForm.status]);
+                  const previewImpactGroups = isRestorePreviewOpen
+                    ? groupPreviewImpacts(restorePreview.preview?.impacts || [])
+                    : [];
                   return (
                     <div key={participant.id} className="p-3 bg-gray-50 rounded-lg space-y-2">
                       {/* Main info + attendance buttons */}
@@ -1188,6 +1439,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                           {participantNotes && (
                             <p className="text-xs text-gray-500 mt-0.5 italic">{participantNotes}</p>
                           )}
+                          <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                            <Badge variant="outline">{getWorkflowDecisionLabel(studentBillingDecision, 'student_billing')}</Badge>
+                            <Badge variant="outline">{getWorkflowDecisionLabel(compensationDecision, 'instructor_compensation')}</Badge>
+                            <Badge variant="outline">{getWorkflowDecisionLabel(hmoDecision, 'hmo_claim')}</Badge>
+                          </div>
                         </div>
                         {participant.price_charged && (
                           <Badge variant="outline" className="ms-2">₪{participant.price_charged}</Badge>
@@ -1257,6 +1513,29 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               onChange={(e) => setAbsenceForm((prev) => ({ ...prev, notes: e.target.value }))}
                             />
                           </div>
+                          {absenceRequiresCompensationDecision && (
+                            <div>
+                              <Label className="text-xs text-gray-600">פיצוי למדריך עבור אי-הגעה מחויבת</Label>
+                              <Select
+                                value={absenceForm.instructorCompensationDecision || ''}
+                                onValueChange={(value) => setAbsenceForm((prev) => ({
+                                  ...prev,
+                                  instructorCompensationDecision: value,
+                                }))}
+                              >
+                                <SelectTrigger className="h-8 text-sm mt-1">
+                                  <SelectValue placeholder="בחרו אם המדריך אמור לקבל פיצוי" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="compensated">{getCompensationDecisionLabel('compensated')}</SelectItem>
+                                  <SelectItem value="not_compensated">{getCompensationDecisionLabel('not_compensated')}</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <p className="mt-1 text-[11px] text-gray-500">
+                                הסטודנט מחויב לפי המדיניות עבור "{getCancellationStatusLabel(absenceForm.status)}", ולכן צריך להחליט בנפרד אם המדריך מקבל פיצוי.
+                              </p>
+                            </div>
+                          )}
                           <div className="flex gap-2 justify-end">
                             <Button
                               size="sm"
@@ -1270,7 +1549,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               size="sm"
                               variant="destructive"
                               onClick={confirmAbsenceForm}
-                              disabled={isMarkingAttendance}
+                              disabled={isMarkingAttendance || (absenceRequiresCompensationDecision && !absenceForm.instructorCompensationDecision)}
                             >
                               {isMarkingAttendance ? (
                                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -1283,15 +1562,29 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                       )}
                       {isRestorePreviewOpen && (
                         <div className="pt-2 border-t border-blue-200 space-y-2">
-                          <div className="text-sm font-medium text-slate-800">השפעות השחזור לתוכנן</div>
-                          <ul className="list-disc pe-5 text-sm text-slate-700 space-y-1">
-                            {(restorePreview.preview?.impacts || []).map((impact, index) => (
-                              <li key={`${impact.type || 'impact'}-${index}`}>{impact.message}</li>
-                            ))}
-                            {(!Array.isArray(restorePreview.preview?.impacts) || restorePreview.preview.impacts.length === 0) && (
+                          <div className="text-sm font-medium text-slate-800">
+                            {restorePreview?.targetStatus === 'scheduled'
+                              ? 'השפעות השחזור לתוכנן'
+                              : `השפעות שינוי הסטטוס ל-${getParticipantStatusLabel(restorePreview?.targetStatus)}`}
+                          </div>
+                          {previewImpactGroups.length > 0 ? (
+                            <div className="space-y-2">
+                              {previewImpactGroups.map((group) => (
+                                <div key={group.key} className={`rounded-md border p-2 ${group.borderClass} ${group.bgClass}`}>
+                                  <div className="text-xs font-medium text-slate-800">{group.label}</div>
+                                  <ul className="mt-1 list-disc pe-5 text-sm text-slate-700 space-y-1">
+                                    {group.impacts.map((impact, index) => (
+                                      <li key={`${impact.type || group.key}-${index}`}>{impact.message}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <ul className="list-disc pe-5 text-sm text-slate-700 space-y-1">
                               <li>לא זוהו השפעות נוספות מעבר להחזרת התלמיד לסטטוס "מתוכנן".</li>
-                            )}
-                          </ul>
+                            </ul>
+                          )}
                           <div className="flex gap-2 justify-end">
                             <Button
                               size="sm"
@@ -1304,13 +1597,20 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => handleMarkAttendance(participant.id, 'scheduled')}
+                              onClick={() => handleMarkAttendance(
+                                participant.id,
+                                restorePreview?.targetStatus || 'scheduled',
+                                restorePreview?.notes || '',
+                                {
+                                  instructorCompensationDecision: restorePreview?.instructorCompensationDecision || null,
+                                },
+                              )}
                               disabled={isMarkingAttendance}
                             >
                               {isMarkingAttendance ? (
                                 <Loader2 className="h-3 w-3 animate-spin" />
                               ) : (
-                                'אשר שחזור'
+                                restorePreview?.targetStatus === 'scheduled' ? 'אשר שחזור' : 'אשר שינוי'
                               )}
                             </Button>
                           </div>

@@ -19,11 +19,13 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { loadFinancePolicies, syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
-import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
+import { buildBillingDecision, loadCommitmentsMap, syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
 import { listDashboardTasks, resolveDashboardTask } from '../_shared/dashboard-tasks.js';
+import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_shared/calendar-workflow.js';
+import { normalizeWorkflowDecision, shouldParticipantTriggerInstructorCompensation } from '../_shared/calendar-workflow-decisions.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -146,6 +148,7 @@ async function handleUpdateReminder(context, body, tenantClient, userId) {
       participantId: body.participant_id,
       instanceLocks: mutationState.instanceLocks,
       participantLocks: mutationState.participantLocks,
+      closed: mutationState.instance?.is_closed || false,
     });
   }
 
@@ -226,6 +229,10 @@ async function handleUpdateReminder(context, body, tenantClient, userId) {
       details: {
         origin: 'api/calendar-attendance',
         lesson_instance_id: body.instance_id,
+        requested_instructor_compensation_decision:
+          requestedInstructorCompensationDecision === 'unknown'
+            ? null
+            : requestedInstructorCompensationDecision,
       },
     });
   } catch (auditError) {
@@ -236,6 +243,16 @@ async function handleUpdateReminder(context, body, tenantClient, userId) {
 }
 
 async function buildRestorePreview(tenantClient, body) {
+  return buildParticipantStatusPreview(tenantClient, body, {
+    targetStatus: 'scheduled',
+    requestedInstructorCompensationDecision: 'unknown',
+  });
+}
+
+async function buildParticipantStatusPreview(tenantClient, body, {
+  targetStatus,
+  requestedInstructorCompensationDecision = 'unknown',
+} = {}) {
   const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(tenantClient, {
     instanceId: body.instance_id,
     participantId: body.participant_id,
@@ -251,6 +268,11 @@ async function buildRestorePreview(tenantClient, body) {
     return null;
   }
 
+  const resolvedTargetStatus = String(targetStatus || '').trim().toLowerCase();
+  if (!resolvedTargetStatus) {
+    return null;
+  }
+
   const [{ data: instanceDetail, error: instanceDetailError }, { data: allParticipants, error: participantsError }, { data: lessonEarningRows, error: earningError }, { data: participantLedgerRows, error: ledgerError }, dashboardTasks] = await Promise.all([
     tenantClient
       .from('lesson_instances')
@@ -259,7 +281,7 @@ async function buildRestorePreview(tenantClient, body) {
       .maybeSingle(),
     tenantClient
       .from('lesson_participants')
-      .select('id, student_id, participant_status, lesson_instance_id')
+      .select('id, student_id, participant_status, lesson_instance_id, commitment_id, price_charged, pricing_breakdown, metadata')
       .eq('lesson_instance_id', body.instance_id),
     tenantClient
       .from('lesson_earnings')
@@ -283,11 +305,36 @@ async function buildRestorePreview(tenantClient, body) {
   if (ledgerError && ledgerError.code !== '42P01') throw ledgerError;
   if (!instanceDetail) return null;
 
-  const projectedParticipants = (allParticipants || []).map((row) => (
-    row.id === body.participant_id
-      ? { ...row, participant_status: 'scheduled' }
-      : row
-  ));
+  const currentParticipants = allParticipants || [];
+  const projectedParticipants = currentParticipants.map((row) => {
+    if (row.id !== body.participant_id) {
+      return row;
+    }
+
+    const nextMetadata = requestedInstructorCompensationDecision === 'compensated' || requestedInstructorCompensationDecision === 'not_compensated'
+      ? {
+          ...(row.metadata && typeof row.metadata === 'object' ? row.metadata : {}),
+          workflow: {
+            ...((row.metadata && typeof row.metadata === 'object' && row.metadata.workflow && typeof row.metadata.workflow === 'object')
+              ? row.metadata.workflow
+              : {}),
+            instructor_compensation: {
+              ...((row.metadata && typeof row.metadata === 'object' && row.metadata.workflow && typeof row.metadata.workflow === 'object' && row.metadata.workflow.instructor_compensation && typeof row.metadata.workflow.instructor_compensation === 'object')
+                ? row.metadata.workflow.instructor_compensation
+                : {}),
+              decision: requestedInstructorCompensationDecision,
+            },
+          },
+        }
+      : row.metadata;
+
+    return {
+      ...row,
+      participant_status: resolvedTargetStatus,
+      metadata: nextMetadata,
+    };
+  });
+
   const anyScheduled = projectedParticipants.some((row) => row.participant_status === 'scheduled');
   const allResolved = projectedParticipants.every((row) => (
     row.participant_status === 'attended'
@@ -295,10 +342,12 @@ async function buildRestorePreview(tenantClient, body) {
       || row.participant_status === 'cancelled_student'
       || row.participant_status === 'cancelled_clinic'
   ));
-
   const projectedInstanceStatus = anyScheduled
     ? 'scheduled'
     : (allResolved ? 'completed' : instance.status);
+
+  const targetParticipantBefore = currentParticipants.find((row) => row.id === body.participant_id) || participant;
+  const targetParticipantAfter = projectedParticipants.find((row) => row.id === body.participant_id) || targetParticipantBefore;
 
   const lessonDate = new Date(instanceDetail.datetime_start || Date.now());
   const lessonDateKey = String(instanceDetail.datetime_start || '').slice(0, 10);
@@ -312,7 +361,7 @@ async function buildRestorePreview(tenantClient, body) {
       .lte('datetime_start', `${lessonDateKey}T23:59:59`),
     tenantClient
       .from('employee_attendance_records')
-      .select('id, status, worked_minutes, source_type')
+      .select('id, status, worked_minutes, source_type, metadata')
       .eq('employee_id', instanceDetail.instructor_employee_id)
       .eq('attendance_date', lessonDateKey)
       .maybeSingle(),
@@ -340,26 +389,73 @@ async function buildRestorePreview(tenantClient, body) {
   if (employeeError && employeeError.code !== 'PGRST116') throw employeeError;
   if (studentError && studentError.code !== 'PGRST116') throw studentError;
   if (capabilityError && capabilityError.code !== 'PGRST116' && capabilityError.code !== '42P01') throw capabilityError;
-
-  const currentParticipants = allParticipants || [];
-  const isParticipantEarningEligible = (row) => (
-    Boolean(policies?.instructorEarningsPolicy?.[String(row?.participant_status || '').toLowerCase()])
+  const commitmentMap = await loadCommitmentsMap(
+    tenantClient,
+    targetParticipantBefore?.commitment_id ? [targetParticipantBefore.commitment_id] : [],
   );
+  const commitmentRow = targetParticipantBefore?.commitment_id
+    ? (commitmentMap.get(targetParticipantBefore.commitment_id) || null)
+    : null;
 
   const currentShouldInstructorEarn = instance.status === 'completed'
-    && currentParticipants.some(isParticipantEarningEligible);
+    && currentParticipants.some((row) => shouldParticipantTriggerInstructorCompensation(row, policies));
   const projectedShouldInstructorEarn = projectedInstanceStatus === 'completed'
-    && projectedParticipants.some(isParticipantEarningEligible);
+    && projectedParticipants.some((row) => shouldParticipantTriggerInstructorCompensation(row, policies));
 
-  const currentCompletedLessons = (dayLessons || []).filter((row) => row.status === 'completed');
-  const projectedCompletedLessons = (dayLessons || []).filter((row) => {
+  const allDayLessons = dayLessons || [];
+  const dayLessonIds = allDayLessons.map((row) => row.id).filter(Boolean);
+  const { data: dayParticipants, error: dayParticipantsError } = dayLessonIds.length > 0
+    ? await tenantClient
+      .from('lesson_participants')
+      .select('lesson_instance_id, participant_status, metadata')
+      .in('lesson_instance_id', dayLessonIds)
+    : { data: [], error: null };
+  if (dayParticipantsError && dayParticipantsError.code !== '42P01') throw dayParticipantsError;
+
+  const participantsByLesson = new Map();
+  for (const row of dayParticipants || []) {
+    if (!participantsByLesson.has(row.lesson_instance_id)) {
+      participantsByLesson.set(row.lesson_instance_id, []);
+    }
+    participantsByLesson.get(row.lesson_instance_id).push(row);
+  }
+
+  const currentCompletedLessons = allDayLessons.filter((row) => row.status === 'completed');
+  const projectedCompletedLessons = allDayLessons.filter((row) => {
     if (row.id === body.instance_id) {
       return projectedInstanceStatus === 'completed';
     }
     return row.status === 'completed';
   });
-  const currentWorkedMinutes = currentCompletedLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
-  const projectedWorkedMinutes = projectedCompletedLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
+
+  const currentAttendanceLessons = currentCompletedLessons.filter((lesson) => {
+    const lessonParticipants = participantsByLesson.get(lesson.id) || [];
+    return lessonParticipants.some((row) => shouldParticipantTriggerInstructorCompensation(row, policies));
+  });
+  const projectedAttendanceLessons = projectedCompletedLessons.filter((lesson) => {
+    const lessonParticipants = lesson.id === body.instance_id
+      ? projectedParticipants.map((row) => ({
+          lesson_instance_id: body.instance_id,
+          participant_status: row.participant_status,
+          metadata: row.metadata,
+        }))
+      : (participantsByLesson.get(lesson.id) || []);
+    return lessonParticipants.some((row) => shouldParticipantTriggerInstructorCompensation(row, policies));
+  });
+
+  const currentWorkedMinutes = currentAttendanceLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
+  const projectedWorkedMinutes = projectedAttendanceLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
+  const systemAttendanceMetadata = systemAttendanceRecord?.metadata && typeof systemAttendanceRecord.metadata === 'object'
+    ? systemAttendanceRecord.metadata
+    : {};
+  const attendanceLessonIds = Array.isArray(systemAttendanceMetadata.lesson_ids)
+    ? systemAttendanceMetadata.lesson_ids.map((value) => String(value || '')).filter(Boolean)
+    : [];
+  const attendanceIncludesTargetLesson = attendanceLessonIds.includes(String(body.instance_id || ''));
+  const currentAttendanceWorkedMinutes = Number(systemAttendanceRecord?.worked_minutes || 0);
+  const effectiveProjectedWorkedMinutes = currentAttendanceLessons.length > 0 || projectedAttendanceLessons.length > 0
+    ? projectedWorkedMinutes
+    : Math.max(0, currentAttendanceWorkedMinutes - Number(instanceDetail.duration_minutes || 0));
 
   const openHmoTask = (dashboardTasks || []).find((task) => task.task_type === 'hmo_claim_submission' && task.status === 'open') || null;
   const storedLessonEarningAmount = roundCurrency((lessonEarningRows || []).reduce((sum, row) => sum + Number(row?.payout_amount || 0), 0));
@@ -372,23 +468,61 @@ async function buildRestorePreview(tenantClient, body) {
     if (row.transaction_type === 'CREDIT') return sum - Number(row.amount || 0);
     return sum;
   }, 0));
+  const projectedBillingDecision = buildBillingDecision({
+    participant: targetParticipantAfter,
+    instance: {
+      ...instanceDetail,
+      status: projectedInstanceStatus,
+    },
+    commitment: commitmentRow || null,
+    policies,
+  });
+  const projectedChargeAmount = roundCurrency(Number(projectedBillingDecision?.chargeAmount || 0));
 
   const instructorName = [employeeRow?.first_name, employeeRow?.middle_name, employeeRow?.last_name].filter(Boolean).join(' ').trim() || 'המדריך';
   const studentName = [studentRow?.first_name, studentRow?.middle_name, studentRow?.last_name].filter(Boolean).join(' ').trim() || 'התלמיד';
   const monthLabel = lessonDate.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
 
   const impacts = [];
+  if (targetParticipantBefore.participant_status !== resolvedTargetStatus) {
+    impacts.push({
+      type: 'participant_status',
+      message: `סטטוס התלמיד ישתנה מ-${targetParticipantBefore.participant_status} ל-${resolvedTargetStatus}.`,
+    });
+  }
+  if (requestedInstructorCompensationDecision === 'compensated' || requestedInstructorCompensationDecision === 'not_compensated') {
+    impacts.push({
+      type: 'instructor_compensation_decision',
+      decision: requestedInstructorCompensationDecision,
+      message: requestedInstructorCompensationDecision === 'compensated'
+        ? `הפעולה תשמור שהמדריך יקבל פיצוי עבור ${studentName}.`
+        : `הפעולה תשמור שהמדריך לא יקבל פיצוי עבור ${studentName}.`,
+    });
+  }
   if (projectedInstanceStatus !== instance.status) {
     impacts.push({
       type: 'lesson_status',
       message: `סטטוס השיעור ישתנה מ-${instance.status} ל-${projectedInstanceStatus}.`,
     });
   }
-  if (ledgerAmount > 0) {
+  if (ledgerAmount > 0 && projectedChargeAmount <= 0) {
     impacts.push({
       type: 'billing_reversal',
       amount: ledgerAmount,
       message: `₪${ledgerAmount} יוחזרו ליתרה של ${studentName}.`,
+    });
+  } else if (ledgerAmount <= 0 && projectedChargeAmount > 0) {
+    impacts.push({
+      type: 'billing_charge',
+      amount: projectedChargeAmount,
+      message: `₪${projectedChargeAmount} יחויבו ליתרה של ${studentName}.`,
+    });
+  } else if (ledgerAmount > 0 && projectedChargeAmount > 0 && ledgerAmount !== projectedChargeAmount) {
+    impacts.push({
+      type: 'billing_update',
+      amount_before: ledgerAmount,
+      amount_after: projectedChargeAmount,
+      message: `חיוב היתרה של ${studentName} יעודכן מ-₪${ledgerAmount} ל-₪${projectedChargeAmount}.`,
     });
   }
   if (currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0) {
@@ -397,21 +531,35 @@ async function buildRestorePreview(tenantClient, body) {
       amount: lessonEarningAmount,
       message: `₪${lessonEarningAmount} יוסרו מהשכר של ${instructorName} עבור ${monthLabel}.`,
     });
+  } else if (!currentShouldInstructorEarn && projectedShouldInstructorEarn && inferredLessonEarningAmount !== 0) {
+    impacts.push({
+      type: 'instructor_earning_add',
+      amount: inferredLessonEarningAmount,
+      message: `₪${inferredLessonEarningAmount} יתווספו לשכר של ${instructorName} עבור ${monthLabel}.`,
+    });
   }
   if (systemAttendanceRecord?.source_type === 'system') {
-    if (currentCompletedLessons.length > 0 && projectedCompletedLessons.length === 0) {
+    if ((currentAttendanceLessons.length > 0 || attendanceIncludesTargetLesson) && effectiveProjectedWorkedMinutes === 0) {
       impacts.push({
         type: 'instructor_attendance_remove',
         message: `נוכחות המדריך של ${instructorName} בתאריך ${lessonDateKey} תוסר.`,
       });
-    } else if (currentWorkedMinutes !== projectedWorkedMinutes) {
+    } else if (
+      (currentAttendanceLessons.length > 0 || attendanceIncludesTargetLesson)
+      && currentAttendanceWorkedMinutes !== effectiveProjectedWorkedMinutes
+    ) {
       impacts.push({
         type: 'instructor_attendance_update',
-        message: `נוכחות המדריך של ${instructorName} בתאריך ${lessonDateKey} תשתנה ל-${projectedWorkedMinutes} דקות.`,
+        message: `נוכחות המדריך של ${instructorName} בתאריך ${lessonDateKey} תשתנה ל-${effectiveProjectedWorkedMinutes} דקות.`,
       });
     }
+  } else if (projectedWorkedMinutes > 0) {
+    impacts.push({
+      type: 'instructor_attendance_add',
+      message: `נוכחות מערכתית של ${instructorName} בתאריך ${lessonDateKey} תיווצר עם ${projectedWorkedMinutes} דקות.`,
+    });
   }
-  if (openHmoTask) {
+  if (openHmoTask && resolvedTargetStatus === 'scheduled') {
     impacts.push({
       type: 'hmo_task_resolve',
       message: `משימת הגשת התביעה עבור ${studentName} תסומן כטופלה.`,
@@ -422,23 +570,26 @@ async function buildRestorePreview(tenantClient, body) {
   return {
     participant_id: participant.id,
     participant_status_before: participant.participant_status,
-    participant_status_after: 'scheduled',
+    participant_status_after: resolvedTargetStatus,
     lesson_instance_id: instance.id,
     lesson_status_before: instance.status,
     lesson_status_after: projectedInstanceStatus,
     impacts,
     projected: {
-      billing_amount_reversed: ledgerAmount,
-      instructor_earning_removed: currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0
-        ? lessonEarningAmount
-        : 0,
-      instructor_attendance_worked_minutes: projectedCompletedLessons.length > 0 ? projectedWorkedMinutes : null,
-      hmo_task_id_to_resolve: openHmoTask?.id || null,
+      billing_amount_before: ledgerAmount,
+      billing_amount_after: projectedChargeAmount,
+      billing_amount_reversed: ledgerAmount > 0 && projectedChargeAmount <= 0 ? ledgerAmount : 0,
+      billing_amount_added: ledgerAmount <= 0 && projectedChargeAmount > 0 ? projectedChargeAmount : 0,
+      instructor_earning_removed: currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0 ? lessonEarningAmount : 0,
+      instructor_earning_added: !currentShouldInstructorEarn && projectedShouldInstructorEarn && inferredLessonEarningAmount !== 0 ? inferredLessonEarningAmount : 0,
+      instructor_attendance_worked_minutes: effectiveProjectedWorkedMinutes > 0 ? effectiveProjectedWorkedMinutes : null,
+      hmo_task_id_to_resolve: resolvedTargetStatus === 'scheduled' ? (openHmoTask?.id || null) : null,
+      instructor_compensation_decision: requestedInstructorCompensationDecision === 'unknown' ? null : requestedInstructorCompensationDecision,
     },
   };
 }
 
-async function buildRestoreAuditChanges(preview) {
+async function buildAttendanceTransitionAuditChanges(preview) {
   if (!preview) {
     return [];
   }
@@ -466,12 +617,26 @@ async function buildRestoreAuditChanges(preview) {
       after: roundCurrency(preview.projected.billing_amount_reversed),
     });
   }
+  if (Number(preview.projected?.billing_amount_added || 0) > 0) {
+    changes.push({
+      field: 'billing_amount_added',
+      before: 0,
+      after: roundCurrency(preview.projected.billing_amount_added),
+    });
+  }
 
   if (Number(preview.projected?.instructor_earning_removed || 0) > 0) {
     changes.push({
       field: 'instructor_earning_removed',
       before: 0,
       after: roundCurrency(preview.projected.instructor_earning_removed),
+    });
+  }
+  if (Number(preview.projected?.instructor_earning_added || 0) > 0) {
+    changes.push({
+      field: 'instructor_earning_added',
+      before: 0,
+      after: roundCurrency(preview.projected.instructor_earning_added),
     });
   }
 
@@ -503,6 +668,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     return handleUpdateReminder(context, body, tenantClient, userId);
   }
   const isRestorePreviewAction = body.action === 'preview-restore-to-scheduled';
+  const isStatusChangePreviewAction = body.action === 'preview-participant-status-change';
 
   // Validate required fields
   if (!body.instance_id) {
@@ -531,7 +697,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     body.expectedVersion,
   );
 
-  if (!isRestorePreviewAction && !hasAttendedFlag && !hasParticipantStatus) {
+  if (!isRestorePreviewAction && !isStatusChangePreviewAction && !hasAttendedFlag && !hasParticipantStatus) {
     return respond(context, 400, {
       message: 'missing update payload (expected attended or participant_status)',
     });
@@ -561,6 +727,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       participantId: body.participant_id,
       instanceLocks: mutationState.instanceLocks,
       participantLocks: mutationState.participantLocks,
+      closed: mutationState.instance?.is_closed || false,
     });
   }
 
@@ -612,6 +779,37 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     }
   }
 
+  if (isStatusChangePreviewAction) {
+    const previewTargetStatus = typeof body.target_participant_status === 'string'
+      ? body.target_participant_status.trim().toLowerCase()
+      : '';
+    const requestedDecision = normalizeWorkflowDecision(
+      body.instructor_compensation_decision ?? body.instructorCompensationDecision,
+      'unknown',
+    );
+    if (!previewTargetStatus) {
+      return respond(context, 400, { message: 'missing target_participant_status' });
+    }
+    try {
+      const preview = await buildParticipantStatusPreview(tenantClient, body, {
+        targetStatus: previewTargetStatus,
+        requestedInstructorCompensationDecision: requestedDecision,
+      });
+      if (!preview) {
+        return respond(context, 404, { message: 'instance not found' });
+      }
+      return respond(context, 200, preview);
+    } catch (error) {
+      context.log?.error?.('calendar/attendance failed to build participant status preview', {
+        message: error?.message,
+        instanceId: body.instance_id,
+        participantId: body.participant_id,
+        targetStatus: previewTargetStatus,
+      });
+      return respond(context, 500, { message: 'failed_to_build_status_change_preview' });
+    }
+  }
+
   // Instructor rate pre-flight: block attendance marking if the instructor has no base_rate
   // for this service. Skip the check when the lesson is already cancelled by the clinic
   // (in that case instructor earnings are not triggered regardless).
@@ -631,7 +829,8 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
   }
 
   const participantUpdate = {};
-  let restoreAuditPreview = null;
+  let transitionAuditPreview = null;
+  let requestedInstructorCompensationDecision = 'unknown';
 
   if (hasAttendedFlag || hasParticipantStatus) {
     const allowedParticipantStatuses = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -645,10 +844,29 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
 
     participantUpdate.participant_status = participantStatus;
     participantUpdate.updated_by = userId;
+    requestedInstructorCompensationDecision = normalizeWorkflowDecision(
+      body.instructor_compensation_decision ?? body.instructorCompensationDecision,
+      'unknown',
+    );
+
+    if (participantStatus !== 'scheduled' && participantStatus !== 'attended') {
+      const policies = await loadFinancePolicies(tenantClient);
+      const studentBillingApplies = Boolean(policies?.billingConsumptionPolicy?.[participantStatus]);
+      const isAmbiguousChargeableNonArrival = studentBillingApplies
+        && (participantStatus === 'no_show' || participantStatus === 'cancelled_student' || participantStatus === 'cancelled_clinic');
+
+      if (isAmbiguousChargeableNonArrival && !['compensated', 'not_compensated'].includes(requestedInstructorCompensationDecision)) {
+        return respond(context, 400, {
+          message: 'missing_instructor_compensation_decision',
+          code: 'missing_instructor_compensation_decision',
+          participant_status: participantStatus,
+        });
+      }
+    }
 
     if (participantStatus === 'scheduled') {
       try {
-        restoreAuditPreview = await buildRestorePreview(tenantClient, body);
+        transitionAuditPreview = await buildRestorePreview(tenantClient, body);
       } catch (previewError) {
         context.log?.warn?.('calendar/attendance failed to capture restore preview for audit', {
           message: previewError?.message,
@@ -665,6 +883,22 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     } else {
       participantUpdate.attendance_confirmed_at = new Date().toISOString();
       participantUpdate.attendance_confirmed_by = userId;
+    }
+
+    if (!transitionAuditPreview && participant.participant_status !== participantStatus) {
+      try {
+        transitionAuditPreview = await buildParticipantStatusPreview(tenantClient, body, {
+          targetStatus: participantStatus,
+          requestedInstructorCompensationDecision,
+        });
+      } catch (previewError) {
+        context.log?.warn?.('calendar/attendance failed to capture status transition preview for audit', {
+          message: previewError?.message,
+          instanceId: body.instance_id,
+          participantId: body.participant_id,
+          targetStatus: participantStatus,
+        });
+      }
     }
 
     // Persist optional notes into metadata.notes
@@ -749,7 +983,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     context.log?.warn?.('calendar/attendance failed to write tenant audit (attendance)', { message: auditError?.message, participantId: body.participant_id });
   }
 
-  if (participantUpdate.participant_status && participantUpdate.participant_status !== 'scheduled') {
+  if (participantUpdate.participant_status) {
     try {
       const policies = await loadFinancePolicies(tenantClient);
       const currentMetadata = mutationState.instance?.metadata && typeof mutationState.instance.metadata === 'object'
@@ -771,6 +1005,10 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
                 participant_status: participantUpdate.participant_status,
                 billing_consumption_policy: policies.billingConsumptionPolicy,
                 instructor_earnings_policy: policies.instructorEarningsPolicy,
+                instructor_compensation_decision:
+                  requestedInstructorCompensationDecision === 'unknown'
+                    ? null
+                    : requestedInstructorCompensationDecision,
               },
             },
           },
@@ -779,6 +1017,75 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     } catch (snapshotError) {
       context.log?.warn?.('calendar/attendance failed to persist attendance decision snapshot', {
         message: snapshotError?.message,
+        instanceId: body.instance_id,
+        participantId: body.participant_id,
+      });
+    }
+
+    try {
+      const workflowPatch = participantUpdate.participant_status === 'scheduled'
+        ? {
+            student_billing: {
+              decision: 'unknown',
+              decided_at: new Date().toISOString(),
+              decided_by: userId,
+              reason: 'restored_to_scheduled',
+            },
+            instructor_compensation: {
+              decision: 'unknown',
+              decided_at: new Date().toISOString(),
+              decided_by: userId,
+              reason: 'restored_to_scheduled',
+            },
+            hmo_claim: {
+              decision: 'unknown',
+              decided_at: new Date().toISOString(),
+              decided_by: userId,
+              reason: 'restored_to_scheduled',
+            },
+          }
+        : {
+            student_billing: {
+              decision: 'pending',
+              decided_at: new Date().toISOString(),
+              decided_by: userId,
+              reason: participantUpdate.participant_status,
+            },
+            instructor_compensation: {
+              decision: participantUpdate.participant_status === 'attended'
+                ? 'compensated'
+                : (requestedInstructorCompensationDecision === 'compensated' || requestedInstructorCompensationDecision === 'not_compensated'
+                  ? requestedInstructorCompensationDecision
+                  : 'pending'),
+              decided_at: new Date().toISOString(),
+              decided_by: userId,
+              reason: participantUpdate.participant_status,
+            },
+            hmo_claim: {
+              decision: participantUpdate.participant_status === 'attended' ? 'pending' : 'not_required',
+              decided_at: new Date().toISOString(),
+              decided_by: userId,
+              reason: participantUpdate.participant_status,
+            },
+          };
+
+      const mergedWorkflowMetadata = mergeParticipantWorkflowMetadata(participantUpdate.metadata ?? participant.metadata, workflowPatch);
+      const metadataPayload = participantUpdate.metadata && typeof participantUpdate.metadata === 'object'
+        ? { ...participantUpdate.metadata, workflow: mergedWorkflowMetadata.workflow }
+        : mergedWorkflowMetadata;
+
+      const { error: workflowUpdateError } = await tenantClient
+        .from('lesson_participants')
+        .update({ metadata: metadataPayload })
+        .eq('id', body.participant_id)
+        .eq('lesson_instance_id', body.instance_id);
+
+      if (workflowUpdateError) {
+        throw workflowUpdateError;
+      }
+    } catch (workflowError) {
+      context.log?.warn?.('calendar/attendance failed to persist participant workflow metadata', {
+        message: workflowError?.message,
         instanceId: body.instance_id,
         participantId: body.participant_id,
       });
@@ -961,9 +1268,13 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       participant_id: body.participant_id,
       previous_status: participant.participant_status,
       next_status: 'scheduled',
-      impacts: restoreAuditPreview?.impacts || [],
-      projected: restoreAuditPreview?.projected || null,
-      changes: await buildRestoreAuditChanges(restoreAuditPreview),
+      impacts: transitionAuditPreview?.impacts || [],
+      projected: transitionAuditPreview?.projected || null,
+      changes: await buildAttendanceTransitionAuditChanges(transitionAuditPreview),
+      requested_instructor_compensation_decision:
+        requestedInstructorCompensationDecision === 'unknown'
+          ? null
+          : requestedInstructorCompensationDecision,
     };
 
     try {
@@ -1010,6 +1321,82 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
         participantId: body.participant_id,
       });
     }
+  }
+
+  if (
+    participantUpdate.participant_status
+    && participantUpdate.participant_status !== 'scheduled'
+    && participant?.student_id
+    && participant.participant_status !== participantUpdate.participant_status
+  ) {
+    const auditDetails = {
+      action_label_he: 'עודכן סטטוס נוכחות תלמיד',
+      lesson_instance_id: body.instance_id,
+      participant_id: body.participant_id,
+      previous_status: participant.participant_status,
+      next_status: participantUpdate.participant_status,
+      impacts: transitionAuditPreview?.impacts || [],
+      projected: transitionAuditPreview?.projected || null,
+      changes: await buildAttendanceTransitionAuditChanges(transitionAuditPreview),
+      requested_instructor_compensation_decision:
+        requestedInstructorCompensationDecision === 'unknown'
+          ? null
+          : requestedInstructorCompensationDecision,
+    };
+
+    try {
+      if (auditContext?.supabase && auditContext?.orgId && auditContext?.userEmail && auditContext?.role) {
+        await logAuditEvent(auditContext.supabase, {
+          orgId: auditContext.orgId,
+          userId,
+          userEmail: auditContext.userEmail,
+          userRole: auditContext.role,
+          actionType: 'student.lesson_attendance_changed',
+          actionCategory: AUDIT_CATEGORIES.STUDENTS,
+          resourceType: 'student',
+          resourceId: participant.student_id,
+          details: auditDetails,
+        });
+      }
+    } catch (auditError) {
+      context.log?.warn?.('calendar/attendance failed to write control audit (status transition)', {
+        message: auditError?.message,
+        participantId: body.participant_id,
+      });
+    }
+
+    try {
+      await logTenantAuditEvent(tenantClient, {
+        actorUserId: userId,
+        eventType: 'calendar.lesson_participant.status_transition_applied',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'lesson_participant',
+        resourceId: body.participant_id,
+        beforeState: participant,
+        afterState: {
+          ...participant,
+          ...participantUpdate,
+        },
+        details: {
+          origin: 'api/calendar-attendance',
+          ...auditDetails,
+        },
+      });
+    } catch (auditError) {
+      context.log?.warn?.('calendar/attendance failed to write tenant audit (status transition)', {
+        message: auditError?.message,
+        participantId: body.participant_id,
+      });
+    }
+  }
+
+  try {
+    await syncLessonClosureState(tenantClient, body.instance_id, userId);
+  } catch (closureError) {
+    context.log?.warn?.('calendar/attendance failed to sync lesson closure state', {
+      message: closureError?.message,
+      instanceId: body.instance_id,
+    });
   }
 
   return respond(context, 200, {

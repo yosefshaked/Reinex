@@ -1109,6 +1109,10 @@ CREATE INDEX IF NOT EXISTS lesson_template_overrides_target_date_idx
 -- -----------------------------------------------------------------
 -- public.lesson_instances
 -- -----------------------------------------------------------------
+-- is_closed is the workflow closure flag for a lesson instance.
+-- It must reflect downstream settlement completion, not only attendance
+-- resolution. A lesson may be attendance-resolved and still remain open until
+-- billing, payroll, and required HMO claim workflow are resolved.
 
 CREATE TABLE IF NOT EXISTS public.lesson_instances (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1231,6 +1235,10 @@ CREATE INDEX IF NOT EXISTS lesson_instances_applied_override_id_idx ON public.le
 -- -----------------------------------------------------------------
 -- public.lesson_participants
 -- -----------------------------------------------------------------
+-- metadata.workflow may hold participant-level workflow decisions used by the
+-- calendar closeout flow, such as student billing, instructor compensation, and
+-- HMO claim decisions. These values are source-side workflow inputs only; they
+-- do not replace dedicated financial or task artifact tables.
 
 CREATE TABLE IF NOT EXISTS public.lesson_participants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

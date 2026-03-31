@@ -64,7 +64,7 @@ export async function fetchLessonMutationState(tenantClient, options) {
   if (instanceId) {
     const { data: instance, error } = await tenantClient
       .from('lesson_instances')
-      .select('id, instructor_employee_id, service_id, status, version, metadata')
+      .select('id, instructor_employee_id, service_id, status, is_closed, version, metadata')
       .eq('id', instanceId)
       .maybeSingle();
 
@@ -134,6 +134,17 @@ export function respondWithLockedMutation(context, options) {
     ...(Array.isArray(options?.participantLocks) ? options.participantLocks : []),
     ...(Array.isArray(options?.instanceLocks) ? options.instanceLocks : []),
   ];
+  if (locks.length === 0 && options?.closed) {
+    locks.push({
+      id: null,
+      lock_source_type: 'workflow_closed',
+      lock_source_id: null,
+      lock_reason: 'lesson_instance_closed',
+      metadata: {
+        workflow_closed: true,
+      },
+    });
+  }
 
   return respond(context, 423, {
     message: lockScope === 'participant' ? 'lesson_participant_locked' : 'lesson_instance_locked',
@@ -158,8 +169,9 @@ export function respondWithVersionConflict(context, options) {
 
 export function isLockedState(state) {
   return Boolean(
-    state?.instanceLocks?.length
+    state?.instance?.is_closed
+      || state?.instanceLocks?.length
       || state?.participantLocks?.length
-      || state?.participant?.locked_at,
+      || state?.participant?.locked_at
   );
 }

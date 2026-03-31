@@ -25,7 +25,8 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
-import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons } from '../_shared/employee-finance.js';
+import { loadFinancePolicies, syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons } from '../_shared/employee-finance.js';
+import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_shared/calendar-workflow.js';
 
 function isIsoDate(value) {
   if (typeof value !== 'string') return false;
@@ -378,6 +379,7 @@ export default async function lessonInstances(context, req) {
       return respondWithLockedMutation(context, {
         instanceId: lessonInstanceId,
         instanceLocks: mutationState.instanceLocks,
+        closed: mutationState.instance?.is_closed || false,
       });
     }
 
@@ -483,6 +485,7 @@ export default async function lessonInstances(context, req) {
         await syncLessonBillingArtifacts(tenantClient, lessonInstanceId, userId);
         await syncLessonInstructorEarnings(tenantClient, lessonInstanceId, userId);
         await syncInstructorAttendanceFromLessons(tenantClient, lessonInstanceId, userId);
+        await syncLessonClosureState(tenantClient, lessonInstanceId, userId);
       } catch (syncError) {
         context.log?.error?.('lesson-instances failed to sync financial artifacts', {
           message: syncError?.message,
@@ -554,7 +557,11 @@ export default async function lessonInstances(context, req) {
       }
       if (!addMutationState.instance) return respond(context, 404, { message: 'lesson_instance_not_found' });
       if (isLockedState(addMutationState)) {
-        return respondWithLockedMutation(context, { instanceId, instanceLocks: addMutationState.instanceLocks });
+        return respondWithLockedMutation(context, {
+          instanceId,
+          instanceLocks: addMutationState.instanceLocks,
+          closed: addMutationState.instance?.is_closed || false,
+        });
       }
       if (addMutationState.instance.status !== 'scheduled') {
         return respond(context, 422, { message: 'instance_not_scheduled' });
@@ -618,6 +625,15 @@ export default async function lessonInstances(context, req) {
         context.log?.warn?.('lesson-instances failed to write audit (add-participant)', { message: auditError?.message });
       }
 
+      try {
+        await syncLessonClosureState(tenantClient, instanceId, userId);
+      } catch (closureError) {
+        context.log?.warn?.('lesson-instances failed to sync lesson closure after add-participant', {
+          message: closureError?.message,
+          lessonInstanceId: instanceId,
+        });
+      }
+
       const { data: addedRefreshed, error: addedRefreshError } = await tenantClient
         .from('lesson_instances').select(buildInstanceSelect()).eq('id', instanceId).single();
       if (addedRefreshError) return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
@@ -662,11 +678,29 @@ export default async function lessonInstances(context, req) {
 
     const instanceIds = matchedParticipants.map((p) => p.lesson_instance_id);
     const participantIds = matchedParticipants.map((p) => p.id);
+    const nowIso = new Date().toISOString();
+
+    const { data: participantRows, error: participantRowsError } = await tenantClient
+      .from('lesson_participants')
+      .select('id, lesson_instance_id, metadata')
+      .in('id', participantIds);
+
+    if (participantRowsError) {
+      context.log?.error?.('lesson-instances bulk-cancel failed to load participant metadata', { message: participantRowsError.message });
+      return respond(context, 500, { message: 'failed_to_load_participants' });
+    }
+
+    const policies = await loadFinancePolicies(tenantClient);
+    const participantRowById = new Map((participantRows || []).map((row) => [row.id, row]));
 
     // Update participant status to cancelled
     const { error: participantUpdateErr } = await tenantClient
       .from('lesson_participants')
-      .update({ participant_status: 'cancelled_student' })
+      .update({
+        participant_status: 'cancelled_student',
+        attendance_confirmed_at: nowIso,
+        attendance_confirmed_by: userId,
+      })
       .in('id', participantIds);
 
     if (participantUpdateErr) {
@@ -674,9 +708,96 @@ export default async function lessonInstances(context, req) {
       return respond(context, 500, { message: 'failed_to_cancel_participants' });
     }
 
+    for (const participantId of participantIds) {
+      const participantRow = participantRowById.get(participantId) || null;
+      const mergedWorkflowMetadata = mergeParticipantWorkflowMetadata(participantRow?.metadata, {
+        student_billing: {
+          decision: 'pending',
+          decided_at: nowIso,
+          decided_by: userId,
+          reason: 'cancelled_student',
+        },
+        instructor_compensation: {
+          decision: 'not_compensated',
+          decided_at: nowIso,
+          decided_by: userId,
+          reason: 'student_suspension_bulk_cancel',
+        },
+        hmo_claim: {
+          decision: 'not_required',
+          decided_at: nowIso,
+          decided_by: userId,
+          reason: 'cancelled_student',
+        },
+      });
+
+      const { error: workflowUpdateError } = await tenantClient
+        .from('lesson_participants')
+        .update({ metadata: mergedWorkflowMetadata })
+        .eq('id', participantId);
+
+      if (workflowUpdateError) {
+        context.log?.error?.('lesson-instances bulk-cancel failed to persist workflow metadata', {
+          message: workflowUpdateError.message,
+          participantId,
+        });
+        return respond(context, 500, { message: 'failed_to_update_participant_workflow' });
+      }
+    }
+
     // For instances where this student was the only scheduled participant, cancel the instance too
     const uniqueInstanceIds = [...new Set(instanceIds)];
     for (const instId of uniqueInstanceIds) {
+      const affectedParticipantIds = matchedParticipants
+        .filter((participant) => participant.lesson_instance_id === instId)
+        .map((participant) => participant.id);
+      const { data: instanceRow, error: instanceRowError } = await tenantClient
+        .from('lesson_instances')
+        .select('metadata')
+        .eq('id', instId)
+        .maybeSingle();
+
+      if (instanceRowError) {
+        context.log?.error?.('lesson-instances bulk-cancel failed to load instance metadata', {
+          message: instanceRowError.message,
+          instanceId: instId,
+        });
+        return respond(context, 500, { message: 'failed_to_load_instance' });
+      }
+
+      const currentMetadata = instanceRow?.metadata && typeof instanceRow.metadata === 'object' ? instanceRow.metadata : {};
+      const existingSnapshots = currentMetadata.attendance_resolution_snapshots && typeof currentMetadata.attendance_resolution_snapshots === 'object'
+        ? currentMetadata.attendance_resolution_snapshots
+        : {};
+      const nextSnapshots = { ...existingSnapshots };
+      affectedParticipantIds.forEach((participantId) => {
+        nextSnapshots[participantId] = {
+          evaluated_at: nowIso,
+          participant_status: 'cancelled_student',
+          billing_consumption_policy: policies.billingConsumptionPolicy,
+          instructor_earnings_policy: policies.instructorEarningsPolicy,
+          instructor_compensation_decision: 'not_compensated',
+        };
+      });
+
+      const { error: snapshotUpdateError } = await tenantClient
+        .from('lesson_instances')
+        .update({
+          metadata: {
+            ...currentMetadata,
+            attendance_resolution_snapshots: nextSnapshots,
+          },
+        })
+        .eq('id', instId);
+
+      if (snapshotUpdateError) {
+        context.log?.error?.('lesson-instances bulk-cancel failed to persist instance snapshots', {
+          message: snapshotUpdateError.message,
+          instanceId: instId,
+        });
+        return respond(context, 500, { message: 'failed_to_update_instance_workflow' });
+      }
+
       const { data: remainingParticipants } = await tenantClient
         .from('lesson_participants')
         .select('id')
@@ -688,6 +809,19 @@ export default async function lessonInstances(context, req) {
           .from('lesson_instances')
           .update({ status: 'cancelled_student', updated_at: new Date().toISOString() })
           .eq('id', instId);
+      }
+
+      try {
+        await syncLessonBillingArtifacts(tenantClient, instId, userId);
+        await syncLessonInstructorEarnings(tenantClient, instId, userId);
+        await syncInstructorAttendanceFromLessons(tenantClient, instId, userId);
+        await syncLessonClosureState(tenantClient, instId, userId);
+      } catch (syncError) {
+        context.log?.error?.('lesson-instances bulk-cancel failed to sync lesson workflow', {
+          message: syncError?.message,
+          instanceId: instId,
+        });
+        return respond(context, 500, { message: 'failed_to_sync_financial_artifacts' });
       }
     }
 
