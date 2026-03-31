@@ -1,8 +1,12 @@
 /* eslint-env node */
-import { loadFinancePolicies, toDateKey } from './employee-finance.js';
+import {
+  computeLessonInstructorPayoutAmount,
+  lessonHasInstructorCompensation,
+  loadFinancePolicies,
+  toDateKey,
+} from './employee-finance.js';
 import { normalizeEntityVersion } from './calendar-editing.js';
 import { normalizeString } from './org-bff.js';
-import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import { buildBillingDecision, loadCommitmentsMap } from './student-billing.js';
 
 const LESSON_BILLING_USAGE_TYPES = ['standard', 'double', 'cross_service'];
@@ -83,12 +87,12 @@ function buildRateKey(employeeId, serviceId) {
 }
 
 function shouldInstructorEarn(instance, participants, policies) {
-  return normalizeString(instance?.status).toLowerCase() === 'completed'
-    && asArray(participants).some((participant) => shouldParticipantTriggerInstructorCompensation(participant, policies));
+  void instance;
+  return lessonHasInstructorCompensation(participants, policies);
 }
 
-function computeWorkedMinutes(instance) {
-  return normalizeString(instance?.status).toLowerCase() === 'completed'
+function computeWorkedMinutes(instance, participants, policies) {
+  return lessonHasInstructorCompensation(participants, policies)
     ? Number(instance?.duration_minutes || 0)
     : 0;
 }
@@ -318,19 +322,19 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   const currentRate = rateMap.get(buildRateKey(currentInstance.instructor_employee_id, currentInstance.service_id)) || 0;
   const proposedRate = rateMap.get(buildRateKey(effectiveInstance.instructor_employee_id, effectiveInstance.service_id)) || 0;
   const baseCurrentPayout = shouldInstructorEarn(context.instance, context.participants, policies)
-    ? roundCurrency(originalRate * (Number(context.instance.duration_minutes || 0) / 60))
+    ? computeLessonInstructorPayoutAmount(context.instance, originalRate)
     : 0;
   const correctionPayrollDelta = roundCurrency(
     context.financeAdjustmentRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
   );
   const currentPayout = roundCurrency(baseCurrentPayout + correctionPayrollDelta);
   const proposedPayout = shouldInstructorEarn(effectiveInstance, effectiveParticipants, policies)
-    ? roundCurrency(proposedRate * (Number(effectiveInstance.duration_minutes || 0) / 60))
+    ? computeLessonInstructorPayoutAmount(effectiveInstance, proposedRate)
     : 0;
 
-  const currentWorkedMinutes = computeWorkedMinutes(context.instance)
+  const currentWorkedMinutes = computeWorkedMinutes(context.instance, context.participants, policies)
     + context.attendanceCorrectionRows.reduce((sum, row) => sum + Number(row.worked_minutes || 0), 0);
-  const proposedWorkedMinutes = computeWorkedMinutes(effectiveInstance);
+  const proposedWorkedMinutes = computeWorkedMinutes(effectiveInstance, effectiveParticipants, policies);
   const currentChargeMap = buildChargeMap([...context.ledgerRows, ...context.correctionLedgerRows]);
 
   const participantImpact = effectiveParticipants.map((participant) => {

@@ -177,7 +177,7 @@ function getImpactGroupMeta(type) {
   if (['billing_reversal', 'billing_charge', 'billing_update'].includes(type)) {
     return { key: 'billing', label: 'חיוב תלמיד', borderClass: 'border-amber-200', bgClass: 'bg-amber-50/70' };
   }
-  if (['instructor_earning_reversal', 'instructor_earning_add'].includes(type)) {
+  if (['instructor_earning_reversal', 'instructor_earning_add', 'instructor_earning_update'].includes(type)) {
     return { key: 'payroll', label: 'שכר מדריך', borderClass: 'border-emerald-200', bgClass: 'bg-emerald-50/70' };
   }
   if (['instructor_attendance_remove', 'instructor_attendance_update', 'instructor_attendance_add'].includes(type)) {

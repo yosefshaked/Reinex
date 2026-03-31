@@ -230,6 +230,7 @@ const VALUE_LABELS_BY_KEY = {
     billing_update: 'עדכון חיוב תלמיד',
     instructor_earning_reversal: 'הסרת שכר מדריך',
     instructor_earning_add: 'הוספת שכר מדריך',
+    instructor_earning_update: 'עדכון שכר מדריך',
     instructor_attendance_remove: 'הסרת נוכחות מדריך',
     instructor_attendance_update: 'עדכון נוכחות מדריך',
     instructor_attendance_add: 'יצירת נוכחות מדריך',
