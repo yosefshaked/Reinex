@@ -272,7 +272,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   // absenceForm: { participantId, status, notes } | null
   const [absenceForm, setAbsenceForm] = useState(null);
+  const [absenceFormError, setAbsenceFormError] = useState('');
   const [restorePreview, setRestorePreview] = useState(null);
+  const [restorePreviewError, setRestorePreviewError] = useState('');
   const [restorePreviewLoading, setRestorePreviewLoading] = useState(false);
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
   
@@ -480,7 +482,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   function createSaveConflictAdapter() {
     return {
-      buildConflictState: ({ payload, latestValue }) => ({
+      buildConflictState: ({ latestValue }) => ({
         title: 'השיעור השתנה מאז שפתחתם אותו.',
         actionLabel: 'שמירת שינויים בשיעור',
         diffLines: buildConflictLines(instance, latestValue),
@@ -509,7 +511,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   function createCancelConflictAdapter() {
     return {
-      buildConflictState: ({ payload, latestValue }) => ({
+      buildConflictState: ({ latestValue }) => ({
         title: 'השיעור השתנה מאז שפתחתם אותו.',
         actionLabel: 'עדכון סטטוס ביטול',
         diffLines: buildConflictLines(instance, latestValue),
@@ -622,6 +624,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
     setIsMarkingAttendance(true);
     setError(null);
+    setAbsenceFormError('');
+    setRestorePreviewError('');
 
     try {
       const body = {
@@ -648,6 +652,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       }
       if (status === 'scheduled') {
         setRestorePreview(null);
+        setRestorePreviewError('');
         setLocalReminderState((prev) => ({
           ...prev,
           [participantId]: {
@@ -663,7 +668,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           ? 'סטטוס התלמיד שוחזר למתוכנן.'
           : `סטטוס התלמיד עודכן ל-${getParticipantStatusLabel(status)}.`
       );
-      return true;
+      return { ok: true, error: null };
     } catch (err) {
       console.error('Error marking attendance:', err);
       const participant = displayParticipants.find((entry) => entry.id === participantId);
@@ -675,9 +680,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         instructorCompensationDecision: options.instructorCompensationDecision || null,
       });
       if (!handled) {
-        setError(resolveMutationError(err));
+        const resolvedError = resolveMutationError(err) || 'עדכון הסטטוס נכשל.';
+        setError(resolvedError);
+        toast.error(resolvedError);
+        return { ok: false, error: resolvedError };
       }
-      return false;
+      return { ok: false, error: null };
     } finally {
       setIsMarkingAttendance(false);
     }
@@ -704,20 +712,33 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           ? existingCompensationDecision
           : '',
     });
+    setAbsenceFormError('');
   }
 
   function closeAbsenceForm() {
     setAbsenceForm(null);
+    setAbsenceFormError('');
   }
 
   async function confirmAbsenceForm() {
     if (!absenceForm) return;
+    setAbsenceFormError('');
     const requiresCompensationDecision = Boolean(billingPolicy?.[absenceForm.status]);
     if (requiresCompensationDecision && !absenceForm.instructorCompensationDecision) {
-      setError('יש לבחור אם המדריך אמור לקבל פיצוי עבור אי-ההגעה המחויבת.');
+      const validationMessage = 'יש לבחור אם המדריך אמור לקבל פיצוי עבור אי-ההגעה המחויבת.';
+      setAbsenceFormError(validationMessage);
+      setError(validationMessage);
+      toast.error(validationMessage);
       return;
     }
     const currentParticipant = displayParticipants.find((entry) => entry.id === absenceForm.participantId);
+    if (!currentParticipant) {
+      const missingParticipantMessage = 'לא ניתן למצוא את התלמיד לעדכון.';
+      setAbsenceFormError(missingParticipantMessage);
+      setError(missingParticipantMessage);
+      toast.error(missingParticipantMessage);
+      return;
+    }
     const currentStatus = currentParticipant?.participant_status || 'scheduled';
     if (currentStatus !== 'scheduled' && currentStatus !== absenceForm.status) {
       await openAttendancePreview(currentParticipant, absenceForm.status, {
@@ -728,7 +749,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       });
       return;
     }
-    const didSucceed = await handleMarkAttendance(
+    const attendanceResult = await handleMarkAttendance(
       absenceForm.participantId,
       absenceForm.status,
       absenceForm.notes,
@@ -738,8 +759,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           : null,
       },
     );
-    if (didSucceed) {
+    if (attendanceResult?.ok) {
       setAbsenceForm(null);
+      setAbsenceFormError('');
+    } else {
+      setAbsenceFormError(attendanceResult?.error || 'עדכון סטטוס אי-הגעה נכשל.');
     }
   }
 
@@ -848,6 +872,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     if (!org?.id || !instance?.id || !participant?.id) return;
     setRestorePreviewLoading(true);
     setError(null);
+    setRestorePreviewError('');
     try {
       const isRestore = targetStatus === 'scheduled';
       const preview = await authenticatedFetch('calendar/attendance', {
@@ -873,10 +898,14 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       });
       if (targetStatus !== 'scheduled') {
         setAbsenceForm(null);
+        setAbsenceFormError('');
       }
     } catch (err) {
       console.error('Error building attendance preview:', err);
-      setError(resolveMutationError(err));
+      const resolvedError = resolveMutationError(err) || 'טעינת תצוגת ההשפעה נכשלה.';
+      setRestorePreviewError(resolvedError);
+      setError(resolvedError);
+      toast.error(resolvedError);
     } finally {
       setRestorePreviewLoading(false);
     }
@@ -1411,9 +1440,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   const isAbsenceFormOpen = absenceForm?.participantId === participant.id;
                   const isRestorePreviewOpen = restorePreview?.participantId === participant.id;
                   const participantNotes = participant.metadata?.notes || null;
-                  const participantWorkflow = participant.metadata?.workflow && typeof participant.metadata.workflow === 'object'
-                    ? participant.metadata.workflow
-                    : {};
                   const {
                     studentBillingDecision,
                     compensationDecision,
@@ -1536,8 +1562,15 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               </p>
                             </div>
                           )}
+                          {absenceFormError && (
+                            <Alert className="border-red-300 bg-red-50 text-red-950">
+                              <AlertTriangle className="h-4 w-4 text-red-700" />
+                              <AlertDescription>{absenceFormError}</AlertDescription>
+                            </Alert>
+                          )}
                           <div className="flex gap-2 justify-end">
                             <Button
+                              type="button"
                               size="sm"
                               variant="ghost"
                               onClick={closeAbsenceForm}
@@ -1546,6 +1579,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               ביטול
                             </Button>
                             <Button
+                              type="button"
                               size="sm"
                               variant="destructive"
                               onClick={confirmAbsenceForm}
@@ -1585,26 +1619,42 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               <li>לא זוהו השפעות נוספות מעבר להחזרת התלמיד לסטטוס "מתוכנן".</li>
                             </ul>
                           )}
+                          {restorePreviewError && (
+                            <Alert className="border-red-300 bg-red-50 text-red-950">
+                              <AlertTriangle className="h-4 w-4 text-red-700" />
+                              <AlertDescription>{restorePreviewError}</AlertDescription>
+                            </Alert>
+                          )}
                           <div className="flex gap-2 justify-end">
                             <Button
+                              type="button"
                               size="sm"
                               variant="ghost"
-                              onClick={() => setRestorePreview(null)}
+                              onClick={() => {
+                                setRestorePreview(null);
+                                setRestorePreviewError('');
+                              }}
                               disabled={isMarkingAttendance}
                             >
                               ביטול
                             </Button>
                             <Button
+                              type="button"
                               size="sm"
                               variant="outline"
-                              onClick={() => handleMarkAttendance(
-                                participant.id,
-                                restorePreview?.targetStatus || 'scheduled',
-                                restorePreview?.notes || '',
-                                {
-                                  instructorCompensationDecision: restorePreview?.instructorCompensationDecision || null,
-                                },
-                              )}
+                              onClick={async () => {
+                                const attendanceResult = await handleMarkAttendance(
+                                  participant.id,
+                                  restorePreview?.targetStatus || 'scheduled',
+                                  restorePreview?.notes || '',
+                                  {
+                                    instructorCompensationDecision: restorePreview?.instructorCompensationDecision || null,
+                                  },
+                                );
+                                if (!attendanceResult?.ok) {
+                                  setRestorePreviewError(attendanceResult?.error || 'שחזור הסטטוס נכשל.');
+                                }
+                              }}
                               disabled={isMarkingAttendance}
                             >
                               {isMarkingAttendance ? (
