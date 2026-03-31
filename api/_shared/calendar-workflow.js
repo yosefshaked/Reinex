@@ -3,7 +3,7 @@ import { loadFinancePolicies } from './employee-finance.js';
 import { listDashboardTasks } from './dashboard-tasks.js';
 import { normalizeString } from './org-bff.js';
 import { loadCommitmentsMap } from './student-billing.js';
-import { isPlainObject, normalizeWorkflowDecision, readParticipantWorkflowMetadata, shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
+import { isPlainObject, readParticipantWorkflowMetadata, shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const LESSON_BILLING_USAGE_TYPES = ['standard', 'double', 'cross_service'];

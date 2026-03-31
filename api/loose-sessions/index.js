@@ -340,7 +340,7 @@ export default async function (context, req) {
   }
 
   const { data: instructorRow, error: instructorError } = await tenantClient
-    .from('Instructors')
+    .from('Employees')
     .select('id, is_active')
     .eq('id', assignedInstructorId)
     .maybeSingle();

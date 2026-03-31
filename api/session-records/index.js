@@ -12,6 +12,10 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 
+function buildEmployeeName(row) {
+  return [row?.first_name, row?.middle_name, row?.last_name].filter(Boolean).join(' ').trim();
+}
+
 function isMemberRole(role) {
   const normalized = normalizeString(role).toLowerCase();
   return normalized === 'member';
@@ -106,7 +110,7 @@ export default async function (context, req) {
 
   const { data, error } = await tenantClient
     .from('SessionRecords')
-    .select('*, Instructors:instructor_id(id, name, email)')
+    .select('*')
     .eq('student_id', studentId)
     .order('date', { ascending: false });
 
@@ -121,5 +125,29 @@ export default async function (context, req) {
     return respond(context, 404, { message: 'no_sessions' });
   }
 
-  return respond(context, 200, rows);
+  const instructorIds = Array.from(new Set(rows.map((row) => row?.instructor_id).filter(Boolean)));
+  let instructorMap = new Map();
+
+  if (instructorIds.length > 0) {
+    const { data: instructorRows, error: instructorError } = await tenantClient
+      .from('Employees')
+      .select('id, first_name, middle_name, last_name, email')
+      .in('id', instructorIds);
+
+    if (instructorError) {
+      context.log?.error?.('session-records failed to load instructors', { message: instructorError.message });
+      return respond(context, 500, { message: 'failed_to_load_instructors' });
+    }
+
+    instructorMap = new Map((instructorRows || []).map((row) => [row.id, {
+      id: row.id,
+      name: buildEmployeeName(row) || null,
+      email: row.email || null,
+    }]));
+  }
+
+  return respond(context, 200, rows.map((row) => ({
+    ...row,
+    Instructors: instructorMap.get(row.instructor_id) || null,
+  })));
 }

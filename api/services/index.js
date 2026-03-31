@@ -238,7 +238,7 @@ export default async function services(context, req) {
       if (!name) {
         return respond(context, 400, { message: 'missing_service_name' });
       }
-      updates.name = name;
+      updates['name'] = name;
     }
 
     if (Object.prototype.hasOwnProperty.call(body, 'duration_minutes') || Object.prototype.hasOwnProperty.call(body, 'durationMinutes')) {

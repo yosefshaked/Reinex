@@ -1129,10 +1129,6 @@ export async function syncInstructorAttendanceFromLessons(
     return { employee_id: instance.instructor_employee_id, attendance_date: lessonDate, removed: true };
   }
 
-  const totalWorkedMinutes = completedLessons.reduce(
-    (sum, l) => sum + (Number(l.duration_minutes) || 0), 0
-  );
-
   const completedLessonIds = completedLessons.map((lesson) => lesson.id).filter(Boolean);
   const policies = await loadFinancePolicies(tenantClient);
   const { data: dayParticipants, error: dayParticipantsError } = completedLessonIds.length > 0

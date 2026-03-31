@@ -25,12 +25,17 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
   ensureMembership,
+  normalizeString,
   readEnv,
   respond,
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import crypto from 'crypto';
 import multipart from 'parse-multipart-data';
+
+function buildEmployeeName(row) {
+  return [row?.first_name, row?.middle_name, row?.last_name].filter(Boolean).join(' ').trim();
+}
 
 /**
  * Validate entity type
@@ -94,10 +99,10 @@ async function getEntityNames(tenantClient, entityType, entityIds) {
   
   if (entityType === 'instructor') {
     const { data: instructors } = await tenantClient
-      .from('Instructors')
-      .select('id, name')
+      .from('Employees')
+      .select('id, first_name, middle_name, last_name')
       .in('id', entityIds);
-    return new Map((instructors || []).map(i => [i.id, i.name]));
+    return new Map((instructors || []).map((row) => [row.id, buildEmployeeName(row) || 'Unknown']));
   }
   
   // Organization - org_id is self-identifying, no lookup needed
@@ -107,7 +112,7 @@ async function getEntityNames(tenantClient, entityType, entityIds) {
 /**
  * Validate permissions for entity type and user
  */
-async function validateEntityPermissions(entityType, entityId, userId, isAdmin) {
+async function validateEntityPermissions(tenantClient, entityType, entityId, userId, isAdmin) {
   // Student documents: All org members can see duplicates across all students
   if (entityType === 'student') {
     return true; // All org members can check
@@ -118,8 +123,17 @@ async function validateEntityPermissions(entityType, entityId, userId, isAdmin) 
     if (isAdmin) {
       return true;
     }
-    // Non-admin can only check their own instructor record
-    return entityId === userId;
+    const { data: instructorRow, error } = await tenantClient
+      .from('Employees')
+      .select('id, user_id')
+      .eq('id', entityId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return normalizeString(instructorRow?.user_id) === normalizeString(userId);
   }
   
   // Organization documents: Admin/owner only
@@ -258,26 +272,6 @@ export default async function (context, req) {
 
   const isAdmin = role === 'admin' || role === 'owner';
 
-  // Validate permissions for this entity type
-  const hasPermission = await validateEntityPermissions(entityType, entityId, userId, isAdmin);
-  if (!hasPermission) {
-    context.log?.warn?.('documents-check: insufficient permissions', {
-      entityType,
-      entityId: entityId.substring(0, 8) + '...',
-      userId: userId.substring(0, 8) + '...',
-      isAdmin,
-    });
-    
-    let message = 'forbidden';
-    if (entityType === 'instructor') {
-      message = 'can_only_check_own_files';
-    } else if (entityType === 'organization') {
-      message = 'admin_only';
-    }
-    
-    return respond(context, 403, { message });
-  }
-
   // Get tenant client
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(
     context,
@@ -287,6 +281,36 @@ export default async function (context, req) {
   );
   if (tenantError) {
     return respond(context, tenantError.status, tenantError.body);
+  }
+
+  let hasPermission;
+  try {
+    hasPermission = await validateEntityPermissions(tenantClient, entityType, entityId, userId, isAdmin);
+  } catch (permissionError) {
+    context.log?.error?.('documents-check: failed to validate entity permissions', {
+      message: permissionError?.message,
+      entityType,
+      entityId,
+    });
+    return respond(context, 500, { message: 'failed_to_validate_permissions' });
+  }
+
+  if (!hasPermission) {
+    context.log?.warn?.('documents-check: insufficient permissions', {
+      entityType,
+      entityId: entityId.substring(0, 8) + '...',
+      userId: userId.substring(0, 8) + '...',
+      isAdmin,
+    });
+
+    let message = 'forbidden';
+    if (entityType === 'instructor') {
+      message = 'can_only_check_own_files';
+    } else if (entityType === 'organization') {
+      message = 'admin_only';
+    }
+
+    return respond(context, 403, { message });
   }
 
   // Calculate file hash
@@ -314,8 +338,7 @@ export default async function (context, req) {
   // Filter results based on permissions
   let filtersDocuments = allDocuments || [];
   if (entityType === 'instructor' && !isAdmin) {
-    // Non-admin instructors only see their own duplicates
-    filtersDocuments = filtersDocuments.filter(doc => doc.entity_id === userId);
+    filtersDocuments = filtersDocuments.filter(doc => doc.entity_id === entityId);
   }
   if (entityType === 'organization') {
     // Organization duplicates are scoped to this org already (by entity_id filter above)

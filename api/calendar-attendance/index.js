@@ -229,10 +229,6 @@ async function handleUpdateReminder(context, body, tenantClient, userId) {
       details: {
         origin: 'api/calendar-attendance',
         lesson_instance_id: body.instance_id,
-        requested_instructor_compensation_decision:
-          requestedInstructorCompensationDecision === 'unknown'
-            ? null
-            : requestedInstructorCompensationDecision,
       },
     });
   } catch (auditError) {
@@ -443,7 +439,6 @@ async function buildParticipantStatusPreview(tenantClient, body, {
     return lessonParticipants.some((row) => shouldParticipantTriggerInstructorCompensation(row, policies));
   });
 
-  const currentWorkedMinutes = currentAttendanceLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
   const projectedWorkedMinutes = projectedAttendanceLessons.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0);
   const systemAttendanceMetadata = systemAttendanceRecord?.metadata && typeof systemAttendanceRecord.metadata === 'object'
     ? systemAttendanceRecord.metadata

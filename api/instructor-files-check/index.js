@@ -20,6 +20,10 @@ import {
 import crypto from 'crypto';
 import multipart from 'parse-multipart-data';
 
+function buildEmployeeName(row) {
+  return [row?.first_name, row?.middle_name, row?.last_name].filter(Boolean).join(' ').trim();
+}
+
 /**
  * Calculate MD5 hash of file content for duplicate detection
  */
@@ -138,22 +142,36 @@ export default async function (context, req) {
   const isAdmin = isAdminRole(role);
 
   // Permission check: Non-admin users can only check their own files
-  if (!isAdmin && instructorId !== userId) {
-    return respond(context, 403, { 
-      message: 'forbidden',
-      details: 'You can only check files for your own instructor record'
-    });
+  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
+  if (tenantError) {
+    return respond(context, tenantError.status, tenantError.body);
+  }
+
+  if (!isAdmin) {
+    const { data: instructorRow, error: instructorError } = await tenantClient
+      .from('Employees')
+      .select('id, user_id')
+      .eq('id', instructorId)
+      .maybeSingle();
+
+    if (instructorError) {
+      context.log?.error?.('instructor-files-check failed to load instructor for permission check', {
+        message: instructorError.message,
+      });
+      return respond(context, 500, { message: 'failed_to_validate_permissions' });
+    }
+
+    if (instructorRow?.user_id !== userId) {
+      return respond(context, 403, {
+        message: 'forbidden',
+        details: 'You can only check files for your own instructor record',
+      });
+    }
   }
 
   // Calculate file hash
   const fileHash = calculateFileHash(filePart.data);
   context.log?.info?.('🔐 [INSTRUCTOR-CHECK] Hash calculated', { hash: fileHash });
-
-  // Get tenant client
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
 
   // Check for duplicate files in Documents table
   // Admins can see all instructor duplicates, non-admins only their own
@@ -186,11 +204,11 @@ export default async function (context, req) {
   if (allDocuments && allDocuments.length > 0) {
     const instructorIds = [...new Set(allDocuments.map(doc => doc.entity_id))];
     const { data: instructors } = await tenantClient
-      .from('Instructors')
-      .select('id, name')
+      .from('Employees')
+      .select('id, first_name, middle_name, last_name')
       .in('id', instructorIds);
 
-    const instructorMap = new Map((instructors || []).map(i => [i.id, i.name]));
+    const instructorMap = new Map((instructors || []).map((row) => [row.id, buildEmployeeName(row) || 'Unknown']));
 
     for (const doc of allDocuments) {
       duplicates.push({
