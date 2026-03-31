@@ -1506,7 +1506,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   const absenceRequiresCompensationDecision = isAbsenceFormOpen && Boolean(absenceRequirements?.requires_instructor_compensation_decision);
                   const absenceShowsCompensationDecision = isAbsenceFormOpen
                     && !absenceRequirementsLoading
-                    && Boolean(absenceRequirements)
+                    && Boolean(absenceRequirements?.requires_instructor_compensation_decision)
                     && ['no_show', 'cancelled_student', 'cancelled_clinic'].includes(absenceForm.status);
                   const previewImpactGroups = isRestorePreviewOpen
                     ? groupPreviewImpacts(restorePreview.preview?.impacts || [])
