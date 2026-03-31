@@ -40,6 +40,56 @@ function roundCurrency(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+function buildParticipantWorkflowPatch(participantStatus, requestedInstructorCompensationDecision, userId, decidedAt) {
+  if (participantStatus === 'scheduled') {
+    return {
+      student_billing: {
+        decision: 'unknown',
+        decided_at: decidedAt,
+        decided_by: userId,
+        reason: 'restored_to_scheduled',
+      },
+      instructor_compensation: {
+        decision: 'unknown',
+        decided_at: decidedAt,
+        decided_by: userId,
+        reason: 'restored_to_scheduled',
+      },
+      hmo_claim: {
+        decision: 'unknown',
+        decided_at: decidedAt,
+        decided_by: userId,
+        reason: 'restored_to_scheduled',
+      },
+    };
+  }
+
+  return {
+    student_billing: {
+      decision: 'pending',
+      decided_at: decidedAt,
+      decided_by: userId,
+      reason: participantStatus,
+    },
+    instructor_compensation: {
+      decision: participantStatus === 'attended'
+        ? 'compensated'
+        : (requestedInstructorCompensationDecision === 'compensated' || requestedInstructorCompensationDecision === 'not_compensated'
+          ? requestedInstructorCompensationDecision
+          : 'pending'),
+      decided_at: decidedAt,
+      decided_by: userId,
+      reason: participantStatus,
+    },
+    hmo_claim: {
+      decision: participantStatus === 'attended' ? 'pending' : 'not_required',
+      decided_at: decidedAt,
+      decided_by: userId,
+      reason: participantStatus,
+    },
+  };
+}
+
 async function getAttendanceStatusRequirements(tenantClient, participantStatus) {
   const normalizedStatus = typeof participantStatus === 'string'
     ? participantStatus.trim().toLowerCase()
@@ -953,19 +1003,27 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     }
 
     // Persist optional notes into metadata.notes
+    const currentParticipantMetadata = participant?.metadata && typeof participant.metadata === 'object'
+      ? participant.metadata
+      : {};
     const notes = typeof body.notes === 'string' ? body.notes.trim() : null;
     if (notes !== null) {
-      // Fetch existing metadata to merge (avoids clobbering unrelated keys)
-      const { data: existing } = await tenantClient
-        .from('lesson_participants')
-        .select('metadata')
-        .eq('id', body.participant_id)
-        .eq('lesson_instance_id', body.instance_id)
-        .maybeSingle();
-
-      const existingMeta = (existing?.metadata && typeof existing.metadata === 'object') ? existing.metadata : {};
-      participantUpdate.metadata = { ...existingMeta, notes: notes || null };
+      participantUpdate.metadata = {
+        ...currentParticipantMetadata,
+        notes: notes || null,
+      };
     }
+
+    const workflowPatch = buildParticipantWorkflowPatch(
+      participantStatus,
+      requestedInstructorCompensationDecision,
+      userId,
+      new Date().toISOString(),
+    );
+    const metadataBase = participantUpdate.metadata && typeof participantUpdate.metadata === 'object'
+      ? participantUpdate.metadata
+      : currentParticipantMetadata;
+    participantUpdate.metadata = mergeParticipantWorkflowMetadata(metadataBase, workflowPatch);
   }
 
   let participantUpdateQuery = tenantClient
@@ -1073,74 +1131,6 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       });
     }
 
-    try {
-      const workflowPatch = participantUpdate.participant_status === 'scheduled'
-        ? {
-            student_billing: {
-              decision: 'unknown',
-              decided_at: new Date().toISOString(),
-              decided_by: userId,
-              reason: 'restored_to_scheduled',
-            },
-            instructor_compensation: {
-              decision: 'unknown',
-              decided_at: new Date().toISOString(),
-              decided_by: userId,
-              reason: 'restored_to_scheduled',
-            },
-            hmo_claim: {
-              decision: 'unknown',
-              decided_at: new Date().toISOString(),
-              decided_by: userId,
-              reason: 'restored_to_scheduled',
-            },
-          }
-        : {
-            student_billing: {
-              decision: 'pending',
-              decided_at: new Date().toISOString(),
-              decided_by: userId,
-              reason: participantUpdate.participant_status,
-            },
-            instructor_compensation: {
-              decision: participantUpdate.participant_status === 'attended'
-                ? 'compensated'
-                : (requestedInstructorCompensationDecision === 'compensated' || requestedInstructorCompensationDecision === 'not_compensated'
-                  ? requestedInstructorCompensationDecision
-                  : 'pending'),
-              decided_at: new Date().toISOString(),
-              decided_by: userId,
-              reason: participantUpdate.participant_status,
-            },
-            hmo_claim: {
-              decision: participantUpdate.participant_status === 'attended' ? 'pending' : 'not_required',
-              decided_at: new Date().toISOString(),
-              decided_by: userId,
-              reason: participantUpdate.participant_status,
-            },
-          };
-
-      const mergedWorkflowMetadata = mergeParticipantWorkflowMetadata(participantUpdate.metadata ?? participant.metadata, workflowPatch);
-      const metadataPayload = participantUpdate.metadata && typeof participantUpdate.metadata === 'object'
-        ? { ...participantUpdate.metadata, workflow: mergedWorkflowMetadata.workflow }
-        : mergedWorkflowMetadata;
-
-      const { error: workflowUpdateError } = await tenantClient
-        .from('lesson_participants')
-        .update({ metadata: metadataPayload })
-        .eq('id', body.participant_id)
-        .eq('lesson_instance_id', body.instance_id);
-
-      if (workflowUpdateError) {
-        throw workflowUpdateError;
-      }
-    } catch (workflowError) {
-      context.log?.warn?.('calendar/attendance failed to persist participant workflow metadata', {
-        message: workflowError?.message,
-        instanceId: body.instance_id,
-        participantId: body.participant_id,
-      });
-    }
   }
 
   if (Object.prototype.hasOwnProperty.call(participantUpdate, 'participant_status')) {

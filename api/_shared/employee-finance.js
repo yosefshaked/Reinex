@@ -877,7 +877,7 @@ export async function syncLessonInstructorEarnings(
   if (!resolvedParticipants) {
     const { data: participantRows, error: participantsError } = await tenantClient
       .from('lesson_participants')
-      .select('id, student_id, participant_status, commitment_id, price_charged, attendance_confirmed_at')
+      .select('id, student_id, participant_status, commitment_id, price_charged, attendance_confirmed_at, metadata')
       .eq('lesson_instance_id', lessonInstanceId);
 
     if (participantsError) {
@@ -971,7 +971,7 @@ export async function syncLessonFinancialArtifacts(tenantClient, lessonInstanceI
 
   const { data: participants, error: participantsError } = await tenantClient
     .from('lesson_participants')
-    .select('id, student_id, participant_status, commitment_id, price_charged, attendance_confirmed_at')
+    .select('id, student_id, participant_status, commitment_id, price_charged, attendance_confirmed_at, metadata')
     .eq('lesson_instance_id', lessonInstanceId);
 
   if (participantsError) {
