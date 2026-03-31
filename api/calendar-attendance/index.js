@@ -33,6 +33,22 @@ function roundCurrency(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+async function getAttendanceStatusRequirements(tenantClient, participantStatus) {
+  const normalizedStatus = typeof participantStatus === 'string'
+    ? participantStatus.trim().toLowerCase()
+    : '';
+  const policies = await loadFinancePolicies(tenantClient);
+  const studentBillingApplies = Boolean(policies?.billingConsumptionPolicy?.[normalizedStatus]);
+  const requiresInstructorCompensationDecision = studentBillingApplies
+    && (normalizedStatus === 'no_show' || normalizedStatus === 'cancelled_student' || normalizedStatus === 'cancelled_clinic');
+
+  return {
+    participant_status: normalizedStatus,
+    student_billing_applies: studentBillingApplies,
+    requires_instructor_compensation_decision: requiresInstructorCompensationDecision,
+  };
+}
+
 /**
  * POST /api/calendar/attendance
  * Body:
@@ -662,6 +678,24 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
   if (body.action === 'update-reminder') {
     return handleUpdateReminder(context, body, tenantClient, userId);
   }
+  if (body.action === 'status-requirements') {
+    const requestedStatus = typeof body.participant_status === 'string'
+      ? body.participant_status.trim().toLowerCase()
+      : '';
+    if (!requestedStatus) {
+      return respond(context, 400, { message: 'missing participant_status' });
+    }
+    try {
+      const requirements = await getAttendanceStatusRequirements(tenantClient, requestedStatus);
+      return respond(context, 200, requirements);
+    } catch (error) {
+      context.log?.error?.('calendar/attendance failed to load status requirements', {
+        message: error?.message,
+        participantStatus: requestedStatus,
+      });
+      return respond(context, 500, { message: 'failed_to_load_status_requirements' });
+    }
+  }
   const isRestorePreviewAction = body.action === 'preview-restore-to-scheduled';
   const isStatusChangePreviewAction = body.action === 'preview-participant-status-change';
 
@@ -845,12 +879,9 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     );
 
     if (participantStatus !== 'scheduled' && participantStatus !== 'attended') {
-      const policies = await loadFinancePolicies(tenantClient);
-      const studentBillingApplies = Boolean(policies?.billingConsumptionPolicy?.[participantStatus]);
-      const isAmbiguousChargeableNonArrival = studentBillingApplies
-        && (participantStatus === 'no_show' || participantStatus === 'cancelled_student' || participantStatus === 'cancelled_clinic');
+      const statusRequirements = await getAttendanceStatusRequirements(tenantClient, participantStatus);
 
-      if (isAmbiguousChargeableNonArrival && !['compensated', 'not_compensated'].includes(requestedInstructorCompensationDecision)) {
+      if (statusRequirements.requires_instructor_compensation_decision && !['compensated', 'not_compensated'].includes(requestedInstructorCompensationDecision)) {
         return respond(context, 400, {
           message: 'missing_instructor_compensation_decision',
           code: 'missing_instructor_compensation_decision',

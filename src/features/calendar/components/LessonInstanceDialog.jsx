@@ -273,6 +273,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   // absenceForm: { participantId, status, notes } | null
   const [absenceForm, setAbsenceForm] = useState(null);
   const [absenceFormError, setAbsenceFormError] = useState('');
+  const [absenceRequirements, setAbsenceRequirements] = useState(null);
+  const [absenceRequirementsLoading, setAbsenceRequirementsLoading] = useState(false);
   const [restorePreview, setRestorePreview] = useState(null);
   const [restorePreviewError, setRestorePreviewError] = useState('');
   const [restorePreviewLoading, setRestorePreviewLoading] = useState(false);
@@ -345,6 +347,49 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       cancelled = true;
     };
   }, [org?.id]);
+
+  useEffect(() => {
+    if (!org?.id || !absenceForm?.status || !absenceForm?.participantId) {
+      setAbsenceRequirements(null);
+      setAbsenceRequirementsLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const loadAbsenceRequirements = async () => {
+      setAbsenceRequirementsLoading(true);
+      try {
+        const response = await authenticatedFetch('calendar/attendance', {
+          method: 'POST',
+          body: {
+            action: 'status-requirements',
+            org_id: org.id,
+            instance_id: instance.id,
+            participant_id: absenceForm.participantId,
+            participant_status: absenceForm.status,
+          },
+        });
+        if (!cancelled) {
+          setAbsenceRequirements(response && typeof response === 'object' ? response : null);
+        }
+      } catch (loadError) {
+        console.error('Failed to load absence requirements:', loadError);
+        if (!cancelled) {
+          setAbsenceRequirements(null);
+          setAbsenceFormError(resolveMutationError(loadError) || 'לא ניתן היה לטעון את דרישות אי-ההגעה.');
+        }
+      } finally {
+        if (!cancelled) {
+          setAbsenceRequirementsLoading(false);
+        }
+      }
+    };
+
+    void loadAbsenceRequirements();
+    return () => {
+      cancelled = true;
+    };
+  }, [org?.id, instance?.id, absenceForm?.participantId, absenceForm?.status]);
 
 
   function formatPhoneForWhatsApp(phone) {
@@ -713,17 +758,34 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           : '',
     });
     setAbsenceFormError('');
+    setAbsenceRequirements(null);
   }
 
   function closeAbsenceForm() {
     setAbsenceForm(null);
     setAbsenceFormError('');
+    setAbsenceRequirements(null);
+    setAbsenceRequirementsLoading(false);
   }
 
   async function confirmAbsenceForm() {
     if (!absenceForm) return;
     setAbsenceFormError('');
-    const requiresCompensationDecision = Boolean(billingPolicy?.[absenceForm.status]);
+    const requiresCompensationDecision = Boolean(absenceRequirements?.requires_instructor_compensation_decision);
+    const selectedCompensationDecision = absenceForm.instructorCompensationDecision || null;
+    if (absenceRequirementsLoading) {
+      const loadingMessage = 'טוען את דרישות הסטטוס, נסו שוב בעוד רגע.';
+      setAbsenceFormError(loadingMessage);
+      setError(loadingMessage);
+      return;
+    }
+    if (!absenceRequirements) {
+      const requirementsMessage = 'לא ניתן לאשר אי-הגעה לפני טעינת דרישות הסטטוס מהשרת.';
+      setAbsenceFormError(requirementsMessage);
+      setError(requirementsMessage);
+      toast.error(requirementsMessage);
+      return;
+    }
     if (requiresCompensationDecision && !absenceForm.instructorCompensationDecision) {
       const validationMessage = 'יש לבחור אם המדריך אמור לקבל פיצוי עבור אי-ההגעה המחויבת.';
       setAbsenceFormError(validationMessage);
@@ -743,9 +805,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     if (currentStatus !== 'scheduled' && currentStatus !== absenceForm.status) {
       await openAttendancePreview(currentParticipant, absenceForm.status, {
         notes: absenceForm.notes,
-        instructorCompensationDecision: requiresCompensationDecision
-          ? absenceForm.instructorCompensationDecision
-          : null,
+        instructorCompensationDecision: selectedCompensationDecision,
       });
       return;
     }
@@ -754,9 +814,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       absenceForm.status,
       absenceForm.notes,
       {
-        instructorCompensationDecision: requiresCompensationDecision
-          ? absenceForm.instructorCompensationDecision
-          : null,
+        instructorCompensationDecision: selectedCompensationDecision,
       },
     );
     if (attendanceResult?.ok) {
@@ -1445,7 +1503,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                     compensationDecision,
                     hmoDecision,
                   } = deriveDisplayWorkflowDecisions(participant, billingPolicy);
-                  const absenceRequiresCompensationDecision = isAbsenceFormOpen && Boolean(billingPolicy?.[absenceForm.status]);
+                  const absenceRequiresCompensationDecision = isAbsenceFormOpen && Boolean(absenceRequirements?.requires_instructor_compensation_decision);
+                  const absenceShowsCompensationDecision = isAbsenceFormOpen
+                    && !absenceRequirementsLoading
+                    && Boolean(absenceRequirements)
+                    && ['no_show', 'cancelled_student', 'cancelled_clinic'].includes(absenceForm.status);
                   const previewImpactGroups = isRestorePreviewOpen
                     ? groupPreviewImpacts(restorePreview.preview?.impacts || [])
                     : [];
@@ -1539,7 +1601,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               onChange={(e) => setAbsenceForm((prev) => ({ ...prev, notes: e.target.value }))}
                             />
                           </div>
-                          {absenceRequiresCompensationDecision && (
+                          {absenceRequirementsLoading && (
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              טוען את דרישות הסטטוס...
+                            </div>
+                          )}
+                          {absenceShowsCompensationDecision && (
                             <div>
                               <Label className="text-xs text-gray-600">פיצוי למדריך עבור אי-הגעה מחויבת</Label>
                               <Select
@@ -1558,7 +1626,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                                 </SelectContent>
                               </Select>
                               <p className="mt-1 text-[11px] text-gray-500">
-                                הסטודנט מחויב לפי המדיניות עבור "{getCancellationStatusLabel(absenceForm.status)}", ולכן צריך להחליט בנפרד אם המדריך מקבל פיצוי.
+                                {absenceRequiresCompensationDecision
+                                  ? `הסטודנט מחויב לפי המדיניות עבור "${getCancellationStatusLabel(absenceForm.status)}", ולכן צריך להחליט בנפרד אם המדריך מקבל פיצוי.`
+                                  : `אפשר לבחור מראש אם המדריך יקבל פיצוי עבור "${getCancellationStatusLabel(absenceForm.status)}". אם אין צורך, אפשר להשאיר ללא בחירה.`}
                               </p>
                             </div>
                           )}
@@ -1583,7 +1653,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               size="sm"
                               variant="destructive"
                               onClick={confirmAbsenceForm}
-                              disabled={isMarkingAttendance || (absenceRequiresCompensationDecision && !absenceForm.instructorCompensationDecision)}
+                              disabled={
+                                isMarkingAttendance
+                                || absenceRequirementsLoading
+                                || !absenceRequirements
+                                || (absenceRequiresCompensationDecision && !absenceForm.instructorCompensationDecision)
+                              }
                             >
                               {isMarkingAttendance ? (
                                 <Loader2 className="h-3 w-3 animate-spin" />
