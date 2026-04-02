@@ -306,8 +306,8 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
   
   // Parse date parameters
   const dateParam = normalizeString(queryParams.date);
-  const startDateParam = normalizeString(queryParams.start_date);
-  const endDateParam = normalizeString(queryParams.end_date);
+  const startDateParam = normalizeString(queryParams.start_date || queryParams.start);
+  const endDateParam = normalizeString(queryParams.end_date || queryParams.end);
   const instructorIdParam = normalizeString(queryParams.instructor_id);
   const studentIdParam = normalizeString(queryParams.student_id);
 

@@ -56,6 +56,7 @@ export default function Settings() {
   // Fetch backup permissions and initialize if empty using the proper RPC function
   useEffect(() => {
     if (!activeOrgId || !authClient) return;
+    let isCancelled = false;
     
     const fetchAndInitializePermissions = async () => {
       try {
@@ -64,6 +65,7 @@ export default function Settings() {
         const { data: permissions, error: initError } = await authClient
           .rpc('initialize_org_permissions', { p_org_id: activeOrgId });
         
+        if (isCancelled) return;
         if (initError) {
           console.error('Error initializing permissions:', initError);
           setBackupEnabled(false);
@@ -84,19 +86,23 @@ export default function Settings() {
           }
         }
         
+        if (isCancelled) return;
         setBackupEnabled(permissions?.backup_local_enabled === true);
         setLogoEnabled(permissions?.logo_enabled === true);
         // Storage is enabled if storage_access_level is not false (can be byos_only, managed_only, or all)
         setStorageEnabled(permissions?.storage_access_level && permissions.storage_access_level !== false);
       } catch (err) {
         console.error('Error in permissions initialization:', err);
-        setBackupEnabled(false);
-        setLogoEnabled(false);
-        setStorageEnabled(false);
+        if (!isCancelled) {
+          setBackupEnabled(false);
+          setLogoEnabled(false);
+          setStorageEnabled(false);
+        }
       }
     };
     
     fetchAndInitializePermissions();
+    return () => { isCancelled = true; };
   }, [activeOrgId, authClient, refreshOrganizations]);
 
   // Check if current user is an instructor (with caching)
@@ -112,6 +118,7 @@ export default function Settings() {
       return;
     }
 
+    let isCancelled = false;
     const checkInstructorStatus = async () => {
       const cacheKey = `instructor_status_${activeOrgId}_${user.id}`;
       
@@ -123,7 +130,7 @@ export default function Settings() {
           const age = Date.now() - timestamp;
           if (age < 5 * 60 * 1000) { // 5 minutes
             console.log('[Settings] Using cached instructor status:', cachedValue);
-            setIsInstructor(cachedValue);
+            if (!isCancelled) setIsInstructor(cachedValue);
             return;
           }
         }
@@ -142,6 +149,7 @@ export default function Settings() {
           },
         });
 
+        if (isCancelled) return;
         if (response.ok) {
           const instructors = await response.json();
           console.log('[Settings] Instructors response:', {
@@ -153,7 +161,7 @@ export default function Settings() {
           const isInstructorRecord = Array.isArray(instructors) && 
             instructors.some(instructor => instructor.id === user.id);
           console.log('[Settings] Is instructor:', isInstructorRecord);
-          setIsInstructor(isInstructorRecord);
+          if (!isCancelled) setIsInstructor(isInstructorRecord);
           
           // Cache the result
           try {
@@ -166,15 +174,16 @@ export default function Settings() {
           }
         } else {
           console.log('[Settings] Instructors API failed:', response.status, response.statusText);
-          setIsInstructor(false);
+          if (!isCancelled) setIsInstructor(false);
         }
       } catch (error) {
         console.error('[Settings] Error checking instructor status:', error);
-        setIsInstructor(false);
+        if (!isCancelled) setIsInstructor(false);
       }
     };
 
     checkInstructorStatus();
+    return () => { isCancelled = true; };
   }, [user?.id, session, tenantClientReady, activeOrgId]);
 
   // Fetch org documents visibility setting
@@ -187,6 +196,7 @@ export default function Settings() {
       return;
     }
 
+    let isCancelled = false;
     const loadVisibility = async () => {
       try {
         const response = await fetchSettingsValue({
@@ -194,14 +204,15 @@ export default function Settings() {
           orgId: activeOrgId,
           key: 'org_documents_member_visibility',
         });
-        setOrgDocsVisibility(response?.value === true || response?.value === 'true');
+        if (!isCancelled) setOrgDocsVisibility(response?.value === true || response?.value === 'true');
       } catch (error) {
         console.error('Failed to load org docs visibility:', error);
-        setOrgDocsVisibility(false);
+        if (!isCancelled) setOrgDocsVisibility(false);
       }
     };
 
     loadVisibility();
+    return () => { isCancelled = true; };
   }, [session, activeOrgId, activeOrgHasConnection, normalizedRole]);
 
   // Save org_id to Settings table for migration script

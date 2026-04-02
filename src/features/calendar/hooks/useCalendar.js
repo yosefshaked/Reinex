@@ -20,7 +20,11 @@ export function useCalendarInstances(date, viewMode = 'day', instructorId = null
 
   const getDateRange = (dateString, mode) => {
     if (mode === 'week') {
-      return getWeekRangeDateStrings(dateString);
+      const { start, end } = getWeekRangeDateStrings(dateString);
+      return {
+        start_date: start,
+        end_date: end,
+      };
     }
     return { date: dateString };
   };
