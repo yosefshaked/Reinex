@@ -42,7 +42,7 @@ function toLocalDateString(dateObj) {
 }
 
 function resolveCalendarView(viewMode) {
-  return viewMode === 'week' ? 'timeGridWeek' : 'resourceTimeGridDay';
+  return viewMode === 'week' ? 'resourceTimeGridWeek' : 'resourceTimeGridDay';
 }
 
 function resolveSchedulerLicenseKey(runtimeConfig) {
@@ -283,7 +283,7 @@ export default function ReinexFullCalendar({
   }, [currentDate, fullCalendarView]);
 
   const handleDatesSet = useCallback((info) => {
-    const nextViewMode = info.view.type === 'timeGridWeek' ? 'week' : 'day';
+    const nextViewMode = info.view.type === 'resourceTimeGridWeek' ? 'week' : 'day';
     if (nextViewMode !== viewMode) {
       onViewModeChange?.(nextViewMode);
     }
@@ -513,6 +513,7 @@ export default function ReinexFullCalendar({
           locale={heLocale}
           direction="rtl"
           firstDay={CALENDAR_WEEK_START}
+          datesAboveResources={viewMode === 'week'}
           headerToolbar={false}
           resources={mappedResources}
           resourceLabelContent={handleResourceLabelContent}
@@ -546,7 +547,7 @@ export default function ReinexFullCalendar({
               ],
               dayHeaderFormat: { weekday: 'long', day: 'numeric', month: 'numeric' },
             },
-            timeGridWeek: {
+            resourceTimeGridWeek: {
               slotDuration: '00:15:00',
               slotLabelInterval: '01:00:00',
               slotLabelFormat: [

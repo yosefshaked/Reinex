@@ -1,19 +1,13 @@
-function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
+import { getWeekStartDate, parseLocalDateString, toLocalDateString } from './localDate.js';
 
 function formatDateLabel(dateInput) {
-  const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  const date = typeof dateInput === 'string' ? parseLocalDateString(dateInput) : dateInput;
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
   return date.toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric', year: 'numeric' });
 }
 
 function formatWeekdayDateLabel(dateInput) {
-  const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  const date = typeof dateInput === 'string' ? parseLocalDateString(dateInput) : dateInput;
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
   return date.toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'numeric' });
 }
@@ -31,16 +25,11 @@ function addMinutes(dateInput, durationMinutes) {
   return new Date(date.getTime() + duration * 60 * 1000);
 }
 
-function getWeekStartDate(dateString) {
-  const date = new Date(dateString);
-  const day = date.getDay();
-  date.setDate(date.getDate() - day);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
-
 function getWeekEndDate(dateString) {
   const weekEnd = getWeekStartDate(dateString);
+  if (!(weekEnd instanceof Date) || Number.isNaN(weekEnd.getTime())) {
+    return null;
+  }
   weekEnd.setDate(weekEnd.getDate() + 6);
   weekEnd.setHours(23, 59, 59, 999);
   return weekEnd;
@@ -104,6 +93,9 @@ export function getInstructorDayLessons(instances, instructorId, dateString) {
 export function getInstructorWeekLessons(instances, instructorId, dateString) {
   const weekStart = getWeekStartDate(dateString);
   const weekEnd = getWeekEndDate(dateString);
+  if (!(weekStart instanceof Date) || Number.isNaN(weekStart.getTime()) || !(weekEnd instanceof Date) || Number.isNaN(weekEnd.getTime())) {
+    return [];
+  }
 
   return (Array.isArray(instances) ? instances : [])
     .filter((instance) => {
@@ -132,6 +124,9 @@ export function buildInstructorDayMessage({ instructorName, dateString, lessons 
 export function buildInstructorWeekMessage({ instructorName, dateString, lessons }) {
   const weekStart = getWeekStartDate(dateString);
   const weekEnd = getWeekEndDate(dateString);
+  if (!(weekStart instanceof Date) || Number.isNaN(weekStart.getTime()) || !(weekEnd instanceof Date) || Number.isNaN(weekEnd.getTime())) {
+    return '';
+  }
   const groupedByDay = new Map();
 
   lessons.forEach((lesson) => {
