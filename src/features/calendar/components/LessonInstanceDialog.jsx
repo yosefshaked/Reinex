@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
 import { Label } from '../../../components/ui/label';
@@ -144,10 +144,19 @@ function deriveDisplayWorkflowDecisions(participant, billingPolicy) {
   const hasResolvedStatus = ['attended', 'no_show', 'cancelled_student', 'cancelled_clinic'].includes(status);
   const hasChargeArtifact = Number(participant?.price_charged || 0) > 0
     || participant?.pricing_breakdown?.billing_status === 'charged';
+  const persistedBillingStatus = String(participant?.pricing_breakdown?.billing_status || '').trim().toLowerCase();
+  let resolvedStudentBillingDecision = studentBillingDecision;
+  if (persistedBillingStatus === 'charged') {
+    resolvedStudentBillingDecision = 'resolved';
+  } else if (persistedBillingStatus === 'not_chargeable') {
+    resolvedStudentBillingDecision = 'not_applicable';
+  } else if (studentBillingDecision === 'pending' && !billingPolicy?.[status]) {
+    resolvedStudentBillingDecision = 'not_applicable';
+  }
 
   return {
-    studentBillingDecision: studentBillingDecision !== 'unknown'
-      ? studentBillingDecision
+    studentBillingDecision: resolvedStudentBillingDecision !== 'unknown'
+      ? resolvedStudentBillingDecision
       : (!hasResolvedStatus
         ? 'unknown'
         : (hasChargeArtifact
@@ -257,6 +266,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const canManageAll = role === 'admin' || role === 'owner' || role === 'office';
   const displayInstance = getDisplayInstance(instance);
   const displayParticipants = getDisplayParticipants(instance);
+  const dialogScopeKey = `${instance?.id || ''}:${instance?.latest_correction?.id || ''}`;
   
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -279,6 +289,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [restorePreviewError, setRestorePreviewError] = useState('');
   const [restorePreviewLoading, setRestorePreviewLoading] = useState(false);
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
+  const latestPreviewRequestIdRef = useRef(0);
+  const latestStudentSearchRequestIdRef = useRef(0);
   
   const [formData, setFormData] = useState({
     instructor_employee_id: '',
@@ -313,7 +325,16 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setIsAddingParticipant(false);
     setAddStudentQuery('');
     setAddStudentResults([]);
+    setIsSearchingStudents(false);
+    setAbsenceForm(null);
+    setAbsenceFormError('');
+    setAbsenceRequirements(null);
+    setAbsenceRequirementsLoading(false);
     setRestorePreview(null);
+    setRestorePreviewError('');
+    setRestorePreviewLoading(false);
+    latestPreviewRequestIdRef.current += 1;
+    latestStudentSearchRequestIdRef.current += 1;
   }, [instance?.id, instance?.latest_correction?.id]);
 
   useEffect(() => {
@@ -483,6 +504,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   } = useVersionConflictResolver({
     fetchLatestValue: fetchLatestInstance,
     clearError: () => setError(null),
+    scopeKey: dialogScopeKey,
   });
 
   function createAttendanceConflictAdapter() {
@@ -761,6 +783,22 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setAbsenceRequirements(null);
   }
 
+  function handleAbsenceStatusChange(nextStatus) {
+    setAbsenceForm((prev) => {
+      if (!prev) return prev;
+      if (prev.status === nextStatus) {
+        return prev;
+      }
+      return {
+        ...prev,
+        status: nextStatus,
+        instructorCompensationDecision: '',
+      };
+    });
+    setAbsenceFormError('');
+    setAbsenceRequirements(null);
+  }
+
   function closeAbsenceForm() {
     setAbsenceForm(null);
     setAbsenceFormError('');
@@ -908,26 +946,40 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   async function searchStudents(query) {
     if (!org?.id || query.length < 2) {
+      latestStudentSearchRequestIdRef.current += 1;
       setAddStudentResults([]);
+      setIsSearchingStudents(false);
       return;
     }
+    const requestId = latestStudentSearchRequestIdRef.current + 1;
+    latestStudentSearchRequestIdRef.current = requestId;
     setIsSearchingStudents(true);
     setError(null);
     try {
       const results = await authenticatedFetch('students-search', {
         params: { q: query, org_id: org.id },
       });
+      if (requestId !== latestStudentSearchRequestIdRef.current) {
+        return;
+      }
       setAddStudentResults(Array.isArray(results) ? results : []);
     } catch (err) {
+      if (requestId !== latestStudentSearchRequestIdRef.current) {
+        return;
+      }
       setAddStudentResults([]);
       setError(resolveMutationError(err) || 'חיפוש תלמידים נכשל');
     } finally {
-      setIsSearchingStudents(false);
+      if (requestId === latestStudentSearchRequestIdRef.current) {
+        setIsSearchingStudents(false);
+      }
     }
   }
 
   async function openAttendancePreview(participant, targetStatus, options = {}) {
     if (!org?.id || !instance?.id || !participant?.id) return;
+    const requestId = latestPreviewRequestIdRef.current + 1;
+    latestPreviewRequestIdRef.current = requestId;
     setRestorePreviewLoading(true);
     setError(null);
     setRestorePreviewError('');
@@ -946,6 +998,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             : {}),
         },
       });
+      if (requestId !== latestPreviewRequestIdRef.current) {
+        return;
+      }
       setRestorePreview({
         participantId: participant.id,
         participantName: participant.student?.full_name || 'תלמיד',
@@ -959,13 +1014,18 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         setAbsenceFormError('');
       }
     } catch (err) {
+      if (requestId !== latestPreviewRequestIdRef.current) {
+        return;
+      }
       console.error('Error building attendance preview:', err);
       const resolvedError = resolveMutationError(err) || 'טעינת תצוגת ההשפעה נכשלה.';
       setRestorePreviewError(resolvedError);
       setError(resolvedError);
       toast.error(resolvedError);
     } finally {
-      setRestorePreviewLoading(false);
+      if (requestId === latestPreviewRequestIdRef.current) {
+        setRestorePreviewLoading(false);
+      }
     }
   }
 
@@ -1542,7 +1602,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => handleMarkAttendance(participant.id, 'attended')}
+                                onClick={() => openAttendancePreview(participant, 'attended')}
                                 disabled={isMarkingAttendance}
                                 title="נכח"
                               >
@@ -1579,7 +1639,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                             <Label className="text-xs text-gray-600">סוג אי-הגעה</Label>
                             <Select
                               value={absenceForm.status}
-                              onValueChange={(value) => setAbsenceForm((prev) => ({ ...prev, status: value }))}
+                              onValueChange={handleAbsenceStatusChange}
                             >
                               <SelectTrigger className="h-8 text-sm mt-1">
                                 <SelectValue />
@@ -1691,7 +1751,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                             </div>
                           ) : (
                             <ul className="list-disc pe-5 text-sm text-slate-700 space-y-1">
-                              <li>לא זוהו השפעות נוספות מעבר להחזרת התלמיד לסטטוס "מתוכנן".</li>
+                              <li>
+                                {restorePreview?.targetStatus === 'scheduled'
+                                  ? 'לא זוהו השפעות נוספות מעבר להחזרת התלמיד לסטטוס "מתוכנן".'
+                                  : 'לא זוהו השפעות נוספות מעבר לעדכון הסטטוס המבוקש.'}
+                              </li>
                             </ul>
                           )}
                           {restorePreviewError && (

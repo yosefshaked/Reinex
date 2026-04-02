@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { authenticatedFetch } from '@/lib/api-client.js';
 
@@ -26,6 +26,7 @@ export function useCalendarInstances(date, viewMode = 'day', instructorId = null
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
+  const latestRequestIdRef = useRef(0);
 
   const refetch = useCallback(() => {
     setRefetchTrigger(prev => prev + 1);
@@ -46,8 +47,15 @@ export function useCalendarInstances(date, viewMode = 'day', instructorId = null
 
   useEffect(() => {
     if (!activeOrgId || !date) {
+      setInstances([]);
+      setIsLoading(false);
+      setError(null);
       return;
     }
+
+    let cancelled = false;
+    const requestId = latestRequestIdRef.current + 1;
+    latestRequestIdRef.current = requestId;
 
     async function fetchInstances() {
       setIsLoading(true);
@@ -59,20 +67,34 @@ export function useCalendarInstances(date, viewMode = 'day', instructorId = null
           ...getDateRange(date, viewMode),
           ...(instructorId ? { instructor_id: instructorId } : {}),
         };
-        
+
         const data = await authenticatedFetch('calendar/instances', {
           params,
         });
+
+        if (cancelled || requestId !== latestRequestIdRef.current) {
+          return;
+        }
+
         setInstances(Array.isArray(data) ? data : []);
       } catch (err) {
+        if (cancelled || requestId !== latestRequestIdRef.current) {
+          return;
+        }
         console.error('Error fetching calendar instances:', err);
         setError(err?.message || 'Failed to load instances');
       } finally {
-        setIsLoading(false);
+        if (!cancelled && requestId === latestRequestIdRef.current) {
+          setIsLoading(false);
+        }
       }
     }
 
-    fetchInstances();
+    void fetchInstances();
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeOrgId, date, viewMode, instructorId, refetchTrigger]);
 
   return { instances, isLoading, error, refetch };
@@ -87,6 +109,7 @@ export function useCalendarInstructors(includeInactive = false) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
+  const latestRequestIdRef = useRef(0);
 
   const refetch = useCallback(() => {
     setRefetchTrigger(prev => prev + 1);
@@ -94,8 +117,15 @@ export function useCalendarInstructors(includeInactive = false) {
 
   useEffect(() => {
     if (!activeOrgId) {
+      setInstructors([]);
+      setIsLoading(false);
+      setError(null);
       return;
     }
+
+    let cancelled = false;
+    const requestId = latestRequestIdRef.current + 1;
+    latestRequestIdRef.current = requestId;
 
     async function fetchInstructors() {
       setIsLoading(true);
@@ -108,16 +138,30 @@ export function useCalendarInstructors(includeInactive = false) {
             include_inactive: includeInactive,
           },
         });
+
+        if (cancelled || requestId !== latestRequestIdRef.current) {
+          return;
+        }
+
         setInstructors(Array.isArray(data) ? data : []);
       } catch (err) {
+        if (cancelled || requestId !== latestRequestIdRef.current) {
+          return;
+        }
         console.error('Error fetching calendar instructors:', err);
         setError(err?.message || 'Failed to load instructors');
       } finally {
-        setIsLoading(false);
+        if (!cancelled && requestId === latestRequestIdRef.current) {
+          setIsLoading(false);
+        }
       }
     }
 
-    fetchInstructors();
+    void fetchInstructors();
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeOrgId, includeInactive, refetchTrigger]);
 
   return { instructors, isLoading, error, refetch };

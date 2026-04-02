@@ -40,35 +40,32 @@ function roundCurrency(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
-function buildParticipantWorkflowPatch(participantStatus, requestedInstructorCompensationDecision, userId, decidedAt) {
+function buildParticipantWorkflowDecisionState(
+  participantStatus,
+  requestedInstructorCompensationDecision,
+  { studentBillingApplies = null } = {},
+) {
   if (participantStatus === 'scheduled') {
     return {
       student_billing: {
-        decision: 'unknown',
-        decided_at: decidedAt,
-        decided_by: userId,
         reason: 'restored_to_scheduled',
       },
       instructor_compensation: {
-        decision: 'unknown',
-        decided_at: decidedAt,
-        decided_by: userId,
         reason: 'restored_to_scheduled',
       },
       hmo_claim: {
-        decision: 'unknown',
-        decided_at: decidedAt,
-        decided_by: userId,
         reason: 'restored_to_scheduled',
       },
     };
   }
 
+  const normalizedStudentBillingApplies = typeof studentBillingApplies === 'boolean'
+    ? studentBillingApplies
+    : null;
+
   return {
     student_billing: {
-      decision: 'pending',
-      decided_at: decidedAt,
-      decided_by: userId,
+      decision: normalizedStudentBillingApplies === false ? 'not_applicable' : 'pending',
       reason: participantStatus,
     },
     instructor_compensation: {
@@ -76,16 +73,46 @@ function buildParticipantWorkflowPatch(participantStatus, requestedInstructorCom
         ? 'compensated'
         : (requestedInstructorCompensationDecision === 'compensated' || requestedInstructorCompensationDecision === 'not_compensated'
           ? requestedInstructorCompensationDecision
-          : 'pending'),
-      decided_at: decidedAt,
-      decided_by: userId,
+          : 'unknown'),
       reason: participantStatus,
     },
     hmo_claim: {
       decision: participantStatus === 'attended' ? 'pending' : 'not_required',
+      reason: participantStatus,
+    },
+  };
+}
+
+function buildParticipantWorkflowPatch(
+  participantStatus,
+  requestedInstructorCompensationDecision,
+  userId,
+  decidedAt,
+  options = {},
+) {
+  const decisionState = buildParticipantWorkflowDecisionState(
+    participantStatus,
+    requestedInstructorCompensationDecision,
+    options,
+  );
+  return {
+    student_billing: {
+      ...decisionState.student_billing,
+      decision: normalizeWorkflowDecision(decisionState.student_billing?.decision, 'unknown'),
       decided_at: decidedAt,
       decided_by: userId,
-      reason: participantStatus,
+    },
+    instructor_compensation: {
+      ...decisionState.instructor_compensation,
+      decision: normalizeWorkflowDecision(decisionState.instructor_compensation?.decision, 'unknown'),
+      decided_at: decidedAt,
+      decided_by: userId,
+    },
+    hmo_claim: {
+      ...decisionState.hmo_claim,
+      decision: normalizeWorkflowDecision(decisionState.hmo_claim?.decision, 'unknown'),
+      decided_at: decidedAt,
+      decided_by: userId,
     },
   };
 }
@@ -104,6 +131,62 @@ async function getAttendanceStatusRequirements(tenantClient, participantStatus) 
     student_billing_applies: studentBillingApplies,
     requires_instructor_compensation_decision: requiresInstructorCompensationDecision,
   };
+}
+
+function projectParticipantsForStatusChange(
+  participants,
+  participantId,
+  targetStatus,
+  requestedInstructorCompensationDecision,
+  statusRequirements = null,
+) {
+  const resolvedParticipants = Array.isArray(participants) ? participants : [];
+  const resolvedTargetStatus = String(targetStatus || '').trim().toLowerCase();
+  return resolvedParticipants.map((row) => {
+    if (row.id !== participantId) {
+      return row;
+    }
+    const currentMetadata = row?.metadata && typeof row.metadata === 'object'
+      ? row.metadata
+      : {};
+    const workflowPatch = buildParticipantWorkflowPatch(
+      resolvedTargetStatus,
+      requestedInstructorCompensationDecision,
+      null,
+      null,
+      {
+        studentBillingApplies: statusRequirements?.student_billing_applies,
+      },
+    );
+    return {
+      ...row,
+      participant_status: resolvedTargetStatus,
+      metadata: mergeParticipantWorkflowMetadata(currentMetadata, workflowPatch),
+    };
+  });
+}
+
+async function validateProjectedInstructorRate(tenantClient, instance, participants, {
+  targetStatus,
+  participantId,
+  requestedInstructorCompensationDecision = 'unknown',
+  statusRequirements = null,
+} = {}) {
+  const projectedParticipants = projectParticipantsForStatusChange(
+    participants,
+    participantId,
+    targetStatus,
+    requestedInstructorCompensationDecision,
+    statusRequirements,
+  );
+  const policies = await loadFinancePolicies(tenantClient);
+  if (!lessonHasInstructorCompensation(projectedParticipants, policies)) {
+    return null;
+  }
+  return validateInstructorRateForLesson(tenantClient, {
+    instructorEmployeeId: instance?.instructor_employee_id,
+    serviceId: instance?.service_id,
+  });
 }
 
 /**
@@ -342,6 +425,10 @@ async function buildParticipantStatusPreview(tenantClient, body, {
     return null;
   }
 
+  const statusRequirements = resolvedTargetStatus === 'attended' || resolvedTargetStatus === 'scheduled'
+    ? null
+    : await getAttendanceStatusRequirements(tenantClient, resolvedTargetStatus);
+
   const [{ data: instanceDetail, error: instanceDetailError }, { data: allParticipants, error: participantsError }, { data: lessonEarningRows, error: earningError }, { data: participantLedgerRows, error: ledgerError }, dashboardTasks] = await Promise.all([
     tenantClient
       .from('lesson_instances')
@@ -375,34 +462,31 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   if (!instanceDetail) return null;
 
   const currentParticipants = allParticipants || [];
-  const projectedParticipants = currentParticipants.map((row) => {
-    if (row.id !== body.participant_id) {
-      return row;
-    }
+  const projectedParticipants = projectParticipantsForStatusChange(
+    currentParticipants,
+    body.participant_id,
+    resolvedTargetStatus,
+    requestedInstructorCompensationDecision,
+    statusRequirements,
+  );
 
-    const nextMetadata = requestedInstructorCompensationDecision === 'compensated' || requestedInstructorCompensationDecision === 'not_compensated'
-      ? {
-          ...(row.metadata && typeof row.metadata === 'object' ? row.metadata : {}),
-          workflow: {
-            ...((row.metadata && typeof row.metadata === 'object' && row.metadata.workflow && typeof row.metadata.workflow === 'object')
-              ? row.metadata.workflow
-              : {}),
-            instructor_compensation: {
-              ...((row.metadata && typeof row.metadata === 'object' && row.metadata.workflow && typeof row.metadata.workflow === 'object' && row.metadata.workflow.instructor_compensation && typeof row.metadata.workflow.instructor_compensation === 'object')
-                ? row.metadata.workflow.instructor_compensation
-                : {}),
-              decision: requestedInstructorCompensationDecision,
-            },
-          },
-        }
-      : row.metadata;
-
-    return {
-      ...row,
-      participant_status: resolvedTargetStatus,
-      metadata: nextMetadata,
-    };
+  const rateError = await validateProjectedInstructorRate(tenantClient, instanceDetail, currentParticipants, {
+    targetStatus: resolvedTargetStatus,
+    participantId: body.participant_id,
+    requestedInstructorCompensationDecision,
+    statusRequirements,
   });
+  if (rateError) {
+    const previewError = new Error('instructor_rate_not_configured');
+    previewError.status = 422;
+    previewError.payload = {
+      message: 'לא ניתן לעדכן נוכחות: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
+      code: rateError.code,
+      instructor_employee_id: rateError.instructor_employee_id,
+      service_id: rateError.service_id,
+    };
+    throw previewError;
+  }
 
   const anyScheduled = projectedParticipants.some((row) => row.participant_status === 'scheduled');
   const allResolved = projectedParticipants.every((row) => (
@@ -874,6 +958,9 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       }
       return respond(context, 200, preview);
     } catch (error) {
+      if (error?.status && error?.payload) {
+        return respond(context, error.status, error.payload);
+      }
       context.log?.error?.('calendar/attendance failed to build restore preview', {
         message: error?.message,
         instanceId: body.instance_id,
@@ -904,6 +991,9 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       }
       return respond(context, 200, preview);
     } catch (error) {
+      if (error?.status && error?.payload) {
+        return respond(context, error.status, error.payload);
+      }
       context.log?.error?.('calendar/attendance failed to build participant status preview', {
         message: error?.message,
         instanceId: body.instance_id,
@@ -914,27 +1004,10 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     }
   }
 
-  // Instructor rate pre-flight: block attendance marking if the instructor has no base_rate
-  // for this service. Skip the check when the lesson is already cancelled by the clinic
-  // (in that case instructor earnings are not triggered regardless).
-  if (instance.status !== 'cancelled_clinic') {
-    const rateError = await validateInstructorRateForLesson(tenantClient, {
-      instructorEmployeeId: instance.instructor_employee_id,
-      serviceId: instance.service_id,
-    });
-    if (rateError) {
-      return respond(context, 422, {
-        message: 'לא ניתן לעדכן נוכחות: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
-        code: rateError.code,
-        instructor_employee_id: rateError.instructor_employee_id,
-        service_id: rateError.service_id,
-      });
-    }
-  }
-
   const participantUpdate = {};
   let transitionAuditPreview = null;
   let requestedInstructorCompensationDecision = 'unknown';
+  let statusRequirements = null;
 
   if (hasAttendedFlag || hasParticipantStatus) {
     const allowedParticipantStatuses = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -954,7 +1027,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     );
 
     if (participantStatus !== 'scheduled' && participantStatus !== 'attended') {
-      const statusRequirements = await getAttendanceStatusRequirements(tenantClient, participantStatus);
+      statusRequirements = await getAttendanceStatusRequirements(tenantClient, participantStatus);
 
       if (statusRequirements.requires_instructor_compensation_decision && !['compensated', 'not_compensated'].includes(requestedInstructorCompensationDecision)) {
         return respond(context, 400, {
@@ -1019,11 +1092,42 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       requestedInstructorCompensationDecision,
       userId,
       new Date().toISOString(),
+      {
+        studentBillingApplies: statusRequirements?.student_billing_applies,
+      },
     );
     const metadataBase = participantUpdate.metadata && typeof participantUpdate.metadata === 'object'
       ? participantUpdate.metadata
       : currentParticipantMetadata;
     participantUpdate.metadata = mergeParticipantWorkflowMetadata(metadataBase, workflowPatch);
+
+    const { data: participantRowsForRate, error: participantRowsForRateError } = await tenantClient
+      .from('lesson_participants')
+      .select('id, participant_status, metadata')
+      .eq('lesson_instance_id', body.instance_id);
+
+    if (participantRowsForRateError) {
+      context.log?.error?.('calendar/attendance failed to load participants for rate validation', {
+        message: participantRowsForRateError.message,
+        instanceId: body.instance_id,
+      });
+      return respond(context, 500, { message: 'failed_to_load_attendance_state' });
+    }
+
+    const rateError = await validateProjectedInstructorRate(tenantClient, instance, participantRowsForRate || [], {
+      targetStatus: participantStatus,
+      participantId: body.participant_id,
+      requestedInstructorCompensationDecision,
+      statusRequirements,
+    });
+    if (rateError) {
+      return respond(context, 422, {
+        message: 'לא ניתן לעדכן נוכחות: תעריף המדריך לשירות זה לא הוגדר. יש להגדיר תעריף בכרטיס המדריך.',
+        code: rateError.code,
+        instructor_employee_id: rateError.instructor_employee_id,
+        service_id: rateError.service_id,
+      });
+    }
   }
 
   let participantUpdateQuery = tenantClient

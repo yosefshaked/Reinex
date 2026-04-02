@@ -1,23 +1,34 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 function isVersionConflict(error) {
   return error?.status === 409 && error?.data?.code === 'version_conflict';
 }
 
-export function useVersionConflictResolver({ fetchLatestValue, clearError }) {
+export function useVersionConflictResolver({ fetchLatestValue, clearError, scopeKey = '' }) {
   const [conflictState, setConflictState] = useState(null);
   const [isResolvingConflict, setIsResolvingConflict] = useState(false);
+  const scopeVersionRef = useRef(0);
 
   const clearConflict = useCallback(() => {
     setConflictState(null);
   }, []);
+
+  useEffect(() => {
+    scopeVersionRef.current += 1;
+    setConflictState(null);
+    setIsResolvingConflict(false);
+  }, [scopeKey]);
 
   const handleVersionConflict = useCallback(async (error, adapter, payload) => {
     if (!isVersionConflict(error) || !adapter || typeof fetchLatestValue !== 'function') {
       return false;
     }
 
+    const scopeVersion = scopeVersionRef.current;
     const latestValue = await fetchLatestValue();
+    if (scopeVersion !== scopeVersionRef.current) {
+      return false;
+    }
     const nextConflictState = adapter.buildConflictState({ payload, latestValue, error });
 
     setConflictState({
@@ -33,6 +44,7 @@ export function useVersionConflictResolver({ fetchLatestValue, clearError }) {
   const applyConflictOverride = useCallback(async ({ onUnhandledError } = {}) => {
     if (!conflictState?.adapter?.retry) return false;
 
+    const scopeVersion = scopeVersionRef.current;
     setIsResolvingConflict(true);
     clearError?.();
 
@@ -42,11 +54,20 @@ export function useVersionConflictResolver({ fetchLatestValue, clearError }) {
         payload: conflictState.payload,
         conflictState,
       });
+      if (scopeVersion !== scopeVersionRef.current) {
+        return false;
+      }
       setConflictState(null);
       return true;
     } catch (error) {
       if (isVersionConflict(error)) {
+        if (scopeVersion !== scopeVersionRef.current) {
+          return false;
+        }
         const latestValue = await fetchLatestValue();
+        if (scopeVersion !== scopeVersionRef.current) {
+          return false;
+        }
         const nextConflictState = conflictState.adapter.buildConflictState({
           payload: conflictState.payload,
           latestValue,
@@ -61,10 +82,15 @@ export function useVersionConflictResolver({ fetchLatestValue, clearError }) {
         return false;
       }
 
+      if (scopeVersion !== scopeVersionRef.current) {
+        return false;
+      }
       onUnhandledError?.(error);
       return false;
     } finally {
-      setIsResolvingConflict(false);
+      if (scopeVersion === scopeVersionRef.current) {
+        setIsResolvingConflict(false);
+      }
     }
   }, [clearError, conflictState, fetchLatestValue]);
 

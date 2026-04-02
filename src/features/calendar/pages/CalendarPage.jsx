@@ -81,15 +81,18 @@ export default function CalendarPage() {
   const isCalendarLoading = instructorsLoading || instancesLoading;
 
   useEffect(() => {
-    if (!selectedInstance?.id || !Array.isArray(instances)) {
+    if (!selectedInstance?.id || !Array.isArray(instances) || instancesLoading) {
       return;
     }
 
     const refreshedSelectedInstance = instances.find((instance) => instance.id === selectedInstance.id);
     if (refreshedSelectedInstance) {
       setSelectedInstance(refreshedSelectedInstance);
+      return;
     }
-  }, [instances, selectedInstance?.id]);
+
+    setSelectedInstance(null);
+  }, [instances, instancesLoading, selectedInstance?.id]);
 
   const handleInstanceClick = (instance) => {
     setSelectedInstance(instance);
