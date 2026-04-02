@@ -29,6 +29,7 @@ import {
   getInstructorDayLessons,
   getInstructorWeekLessons,
 } from '../utils/instructor-whatsapp.js';
+import { CALENDAR_WEEK_START } from '../utils/localDate.js';
 import InstructorWhatsAppDialog from './InstructorWhatsAppDialog.jsx';
 import './reinex-fullcalendar.css';
 
@@ -511,6 +512,7 @@ export default function ReinexFullCalendar({
           schedulerLicenseKey={schedulerLicenseKey || 'GPL-v3'}
           locale={heLocale}
           direction="rtl"
+          firstDay={CALENDAR_WEEK_START}
           headerToolbar={false}
           resources={mappedResources}
           resourceLabelContent={handleResourceLabelContent}

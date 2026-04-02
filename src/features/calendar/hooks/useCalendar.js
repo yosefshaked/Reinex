@@ -1,21 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { authenticatedFetch } from '@/lib/api-client.js';
-
-function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function getWeekStart(dateString) {
-  const date = new Date(dateString);
-  const day = date.getDay();
-  date.setDate(date.getDate() - day);
-  return date;
-}
+import { getWeekRangeDateStrings } from '../utils/localDate.js';
 
 /**
  * Hook for fetching calendar instances
@@ -34,13 +20,7 @@ export function useCalendarInstances(date, viewMode = 'day', instructorId = null
 
   const getDateRange = (dateString, mode) => {
     if (mode === 'week') {
-      const weekStart = getWeekStart(dateString);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6);
-      return {
-        start_date: toLocalDateString(weekStart),
-        end_date: toLocalDateString(weekEnd),
-      };
+      return getWeekRangeDateStrings(dateString);
     }
     return { date: dateString };
   };

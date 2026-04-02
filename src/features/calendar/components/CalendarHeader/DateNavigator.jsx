@@ -1,45 +1,34 @@
 import { ChevronRight, ChevronLeft, Calendar } from 'lucide-react';
 import { Button } from '../../../../components/ui/button';
-
-function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function getWeekStart(dateString) {
-  const date = new Date(dateString);
-  const day = date.getDay();
-  date.setDate(date.getDate() - day);
-  return date;
-}
+import { addLocalDays, getTodayLocalDateString, getWeekRangeDateStrings, parseLocalDateString } from '../../utils/localDate.js';
 
 /**
  * DateNavigator component - navigate between days/weeks and select date
  */
 export function DateNavigator({ currentDate, onDateChange, viewMode = 'day' }) {
   const handlePrev = () => {
-    const date = new Date(currentDate);
     const days = viewMode === 'week' ? 7 : 1;
-    date.setDate(date.getDate() - days);
-    onDateChange(toLocalDateString(date));
+    const date = addLocalDays(currentDate, -days);
+    if (date) {
+      onDateChange(date);
+    }
   };
 
   const handleNext = () => {
-    const date = new Date(currentDate);
     const days = viewMode === 'week' ? 7 : 1;
-    date.setDate(date.getDate() + days);
-    onDateChange(toLocalDateString(date));
+    const date = addLocalDays(currentDate, days);
+    if (date) {
+      onDateChange(date);
+    }
   };
 
   const handleToday = () => {
-    onDateChange(toLocalDateString(new Date()));
+    onDateChange(getTodayLocalDateString());
   };
 
   const formatDate = (dateString) => {
-    const date = new Date(dateString);
+    const date = parseLocalDateString(dateString);
+    if (!date) return dateString;
     return date.toLocaleDateString('he-IL', { 
       weekday: 'long', 
       year: 'numeric', 
@@ -49,11 +38,8 @@ export function DateNavigator({ currentDate, onDateChange, viewMode = 'day' }) {
   };
 
   const getWeekRange = (dateString) => {
-    const weekStart = getWeekStart(dateString);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    
-    return `${formatDate(toLocalDateString(weekStart))} - ${formatDate(toLocalDateString(weekEnd))}`;
+    const { start, end } = getWeekRangeDateStrings(dateString);
+    return `${formatDate(start)} - ${formatDate(end)}`;
   };
 
   const displayText = viewMode === 'week' 

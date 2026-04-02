@@ -7,19 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { useOrg } from '@/org/OrgContext';
 import { authenticatedFetch } from '@/lib/api-client.js';
-
-function getWeekRange(dateString) {
-  const date = new Date(dateString);
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-  const weekStart = new Date(date.setDate(diff));
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekEnd.getDate() + 6);
-  return {
-    start: weekStart.toISOString().split('T')[0],
-    end: weekEnd.toISOString().split('T')[0],
-  };
-}
+import { getTodayLocalDateString, getWeekRangeDateStrings } from '../utils/localDate.js';
 
 export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied }) {
   const { activeOrgId } = useOrg();
@@ -32,8 +20,8 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied }
 
   useEffect(() => {
     if (!open) return;
-    const referenceDate = defaultDate || new Date().toISOString().split('T')[0];
-    const week = getWeekRange(referenceDate);
+    const referenceDate = defaultDate || getTodayLocalDateString();
+    const week = getWeekRangeDateStrings(referenceDate);
     setStartDate(week.start);
     setEndDate(week.end);
     setResult(null);

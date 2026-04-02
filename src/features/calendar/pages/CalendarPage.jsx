@@ -9,33 +9,19 @@ import { AddLessonDialog } from '../components/AddLessonDialog';
 import { ManualGenerationDialog } from '../components/ManualGenerationDialog';
 import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
 import ReinexFullCalendar from '../components/ReinexFullCalendar';
+import { getTodayLocalDateString, getWeekStartDate, parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
 
 const CALENDAR_DATE_KEY = 'reinex_calendar_date';
 const CALENDAR_VIEW_KEY = 'reinex_calendar_view'; // 'day' or 'week'
 
-function toLocalDateString(dateObj) {
-  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function getWeekStartDate(dateString) {
-  const date = new Date(dateString);
-  const day = date.getDay();
-  date.setDate(date.getDate() - day);
-  return toLocalDateString(date);
-}
-
 export default function CalendarPage() {
   const [currentDate, setCurrentDateState] = useState(() => {
-    // Try to get saved date from sessionStorage, fall back to today
+    const fallbackDate = getTodayLocalDateString();
     if (typeof window !== 'undefined') {
       const saved = sessionStorage.getItem(CALENDAR_DATE_KEY);
-      return saved || toLocalDateString(new Date());
+      return parseLocalDateString(saved || '') ? saved : fallbackDate;
     }
-    return toLocalDateString(new Date());
+    return fallbackDate;
   });
 
   const [viewMode, setViewModeState] = useState(() => {
@@ -67,14 +53,21 @@ export default function CalendarPage() {
   }, [viewMode]);
 
   const setCurrentDate = (newDate) => {
-    setCurrentDateState(newDate);
+    const normalizedDate = typeof newDate === 'string'
+      ? newDate
+      : toLocalDateString(newDate);
+    if (parseLocalDateString(normalizedDate || '')) {
+      setCurrentDateState(normalizedDate);
+    }
   };
 
   const setViewMode = (mode) => {
     setViewModeState(mode);
   };
 
-  const dateForQuery = viewMode === 'week' ? getWeekStartDate(currentDate) : currentDate;
+  const dateForQuery = viewMode === 'week'
+    ? toLocalDateString(getWeekStartDate(currentDate))
+    : currentDate;
 
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
   const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(dateForQuery, viewMode);
