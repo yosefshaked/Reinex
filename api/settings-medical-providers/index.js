@@ -55,7 +55,13 @@ export default async function (context, req) {
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
-  const authResult = await supabase.auth.getUser(authorization.token);
+  let authResult;
+  try {
+    authResult = await supabase.auth.getUser(authorization.token);
+  } catch (authError) {
+    context.log?.error?.('settings-medical-providers failed to validate token', { message: authError?.message });
+    return respond(context, 401, { message: 'invalid or expired token' });
+  }
   if (authResult.error || !authResult.data?.user?.id) {
     return respond(context, 401, { message: 'invalid or expired token' });
   }

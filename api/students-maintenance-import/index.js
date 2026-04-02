@@ -108,7 +108,10 @@ export default async function handler(context, req) {
     return respond(context, 401, { message: 'missing bearer token' });
   }
 
-  const authResult = await supabase.auth.getUser(authorization.token);
+  const authResult = await supabase.auth.getUser(authorization.token).catch((authError) => {
+    context.log?.error?.('students-maintenance-import failed to validate token', { message: authError?.message });
+    return { error: authError, data: null };
+  });
   if (authResult.error || !authResult.data?.user?.id) {
     return respond(context, 401, { message: 'invalid or expired token' });
   }

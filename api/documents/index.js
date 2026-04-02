@@ -536,17 +536,6 @@ async function handlePut(req, supabase, tenantClient, orgId, userId, userEmail, 
   }
 
   // Audit log
-  console.log('[DEBUG] Preparing audit log for document update', {
-    hasOrgId: !!orgId,
-    hasUserId: !!userId,
-    hasUserEmail: !!userEmail,
-    hasUserRole: !!userRole,
-    orgId,
-    userId,
-    userEmail,
-    userRole
-  });
-  
   await logAuditEvent(supabase, {
     orgId,
     userId,
@@ -589,8 +578,6 @@ async function handleDelete(req, supabase, tenantClient, orgId, userId, userEmai
     });
     return { status: 400, body: { error: 'document_id_required' } };
   }
-
-  console.log('[DEBUG] handleDelete: Processing deletion');
 
   // Fetch existing document
   const { data: existingDoc, error: fetchError } = await tenantClient

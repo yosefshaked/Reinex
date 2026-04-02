@@ -33,7 +33,31 @@
 .reinex-fullcalendar .fc-theme-standard .fc-scrollgrid {
   border: 1px solid rgb(209 213 219);
   border-radius: 1rem;
-  overflow: hidden;
+  overflow: visible;
+}
+
+.reinex-fullcalendar .fc .fc-scroller,
+.reinex-fullcalendar .fc .fc-scroller-liquid-absolute {
+  scrollbar-width: thin;
+}
+
+.reinex-fullcalendar .fc .fc-scroller::-webkit-scrollbar,
+.reinex-fullcalendar .fc .fc-scroller-liquid-absolute::-webkit-scrollbar {
+  height: 0.7rem;
+  width: 0.7rem;
+}
+
+.reinex-fullcalendar .fc .fc-scroller::-webkit-scrollbar-thumb,
+.reinex-fullcalendar .fc .fc-scroller-liquid-absolute::-webkit-scrollbar-thumb {
+  background: rgb(148 163 184 / 0.7);
+  border-radius: 9999px;
+  border: 2px solid rgb(255 255 255 / 0.9);
+}
+
+.reinex-fullcalendar .fc .fc-scroller::-webkit-scrollbar-track,
+.reinex-fullcalendar .fc .fc-scroller-liquid-absolute::-webkit-scrollbar-track {
+  background: rgb(241 245 249);
+  border-radius: 9999px;
 }
 
 .reinex-fullcalendar .fc .fc-datagrid-header,

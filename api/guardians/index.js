@@ -294,8 +294,25 @@ async function handlePut(context, req, tenantClient, guardianId, userId) {
     return respond(context, 400, { error: 'no_updates' });
   }
 
-  // Add metadata
+  // Fetch existing metadata to preserve created_by/created_at
+  const { data: existing, error: fetchError } = await tenantClient
+    .from('guardians')
+    .select('metadata')
+    .eq('id', guardianId)
+    .maybeSingle();
+
+  if (fetchError) {
+    context.log.error('[guardians/PUT] Fetch existing error:', fetchError);
+    return respond(context, 500, { error: 'database_error', message: fetchError.message });
+  }
+  if (!existing) {
+    return respond(context, 404, { error: 'guardian_not_found' });
+  }
+
+  // Merge metadata to preserve original fields (e.g. created_by, created_at)
+  const existingMeta = existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {};
   updates.metadata = {
+    ...existingMeta,
     updated_by: userId,
     updated_at: new Date().toISOString(),
   };

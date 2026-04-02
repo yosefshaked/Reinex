@@ -1609,7 +1609,6 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   const submissionId = normalizeString(body?.submission_id || body?.submissionId);
   const otpCode = normalizeOtp(body?.otp);
   const answers = normalizeJsonObject(body?.answers, {});
-  const formSchema = normalizeJsonObject(body?.form_schema || body?.formSchema, {});
   const ipAddress = resolveClientIp(req);
 
   if (!UUID_PATTERN.test(submissionId) || otpCode.length !== OTP_DIGITS) {
@@ -1638,12 +1637,17 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
 
   const { data: submission, error: submissionError } = await tenantClient
     .from('form_submissions')
-    .select('id, student_id, metadata, otp_metadata')
+    .select('id, student_id, form_id, metadata, otp_metadata, submitted_at')
     .eq('id', submissionId)
     .maybeSingle();
 
   if (submissionError || !submission) {
     return respond(context, 404, { message: 'submission_not_found' });
+  }
+
+  // Idempotency guard: prevent re-finalization of already-submitted forms
+  if (submission.submitted_at) {
+    return respond(context, 409, { message: 'submission_already_finalized' });
   }
 
   let otpChallenge;
@@ -1665,6 +1669,19 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   const nowIso = getNowIso();
   const currentMetadata = normalizeJsonObject(submission.metadata, {});
 
+  // Fetch real form schema server-side for trusted snapshot (don't trust client input)
+  let serverFormSchema = {};
+  if (submission.form_id && UUID_PATTERN.test(String(submission.form_id))) {
+    const { data: formRecord } = await tenantClient
+      .from('forms')
+      .select('form_schema')
+      .eq('id', submission.form_id)
+      .maybeSingle();
+    if (formRecord?.form_schema) {
+      serverFormSchema = formRecord.form_schema;
+    }
+  }
+
   const { error: updateSubmissionError } = await tenantClient
     .from('form_submissions')
     .update({
@@ -1681,7 +1698,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
         ...currentMetadata,
         workflow_status: 'submitted',
         submitted_at: nowIso,
-        schema_snapshot: formSchema,
+        schema_snapshot: serverFormSchema,
         submit_ip: ipAddress || null,
         submit_ip_at: nowIso,
       },
