@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { authenticatedFetch } from '@/lib/api-client.js';
 
@@ -75,10 +75,23 @@ export function useTemplates({ showInactive = false, instructorId = null } = {})
 export function useTemplateMutations() {
   const { activeOrgId } = useOrg();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const pendingCountRef = useRef(0);
+
+  const beginSubmitting = useCallback(() => {
+    pendingCountRef.current += 1;
+    setIsSubmitting(true);
+  }, []);
+
+  const finishSubmitting = useCallback(() => {
+    pendingCountRef.current = Math.max(0, pendingCountRef.current - 1);
+    if (pendingCountRef.current === 0) {
+      setIsSubmitting(false);
+    }
+  }, []);
 
   const createTemplate = useCallback(
     async (templateData) => {
-      setIsSubmitting(true);
+      beginSubmitting();
       try {
         const data = await authenticatedFetch('lesson-templates', {
           method: 'POST',
@@ -91,15 +104,15 @@ export function useTemplateMutations() {
       } catch (err) {
         return { data: null, error: err?.message || 'Failed to create template' };
       } finally {
-        setIsSubmitting(false);
+        finishSubmitting();
       }
     },
-    [activeOrgId],
+    [activeOrgId, beginSubmitting, finishSubmitting],
   );
 
   const updateTemplate = useCallback(
     async (templateId, updates) => {
-      setIsSubmitting(true);
+      beginSubmitting();
       try {
         const data = await authenticatedFetch(`lesson-templates/${templateId}`, {
           method: 'PUT',
@@ -113,15 +126,15 @@ export function useTemplateMutations() {
       } catch (err) {
         return { data: null, error: err?.message || 'Failed to update template' };
       } finally {
-        setIsSubmitting(false);
+        finishSubmitting();
       }
     },
-    [activeOrgId],
+    [activeOrgId, beginSubmitting, finishSubmitting],
   );
 
   const deleteTemplate = useCallback(
     async (templateId) => {
-      setIsSubmitting(true);
+      beginSubmitting();
       try {
         const data = await authenticatedFetch(`lesson-templates/${templateId}`, {
           method: 'DELETE',
@@ -134,15 +147,15 @@ export function useTemplateMutations() {
       } catch (err) {
         return { data: null, error: err?.message || 'Failed to delete template' };
       } finally {
-        setIsSubmitting(false);
+        finishSubmitting();
       }
     },
-    [activeOrgId],
+    [activeOrgId, beginSubmitting, finishSubmitting],
   );
 
   const createTemplateOverride = useCallback(
     async (overrideData) => {
-      setIsSubmitting(true);
+      beginSubmitting();
       try {
         const data = await authenticatedFetch('lesson-template-overrides', {
           method: 'POST',
@@ -155,15 +168,15 @@ export function useTemplateMutations() {
       } catch (err) {
         return { data: null, error: err?.message || 'Failed to create template override' };
       } finally {
-        setIsSubmitting(false);
+        finishSubmitting();
       }
     },
-    [activeOrgId],
+    [activeOrgId, beginSubmitting, finishSubmitting],
   );
 
   const deleteTemplateOverride = useCallback(
     async (overrideId) => {
-      setIsSubmitting(true);
+      beginSubmitting();
       try {
         const data = await authenticatedFetch(`lesson-template-overrides/${overrideId}`, {
           method: 'DELETE',
@@ -176,10 +189,10 @@ export function useTemplateMutations() {
       } catch (err) {
         return { data: null, error: err?.message || 'Failed to delete template override' };
       } finally {
-        setIsSubmitting(false);
+        finishSubmitting();
       }
     },
-    [activeOrgId],
+    [activeOrgId, beginSubmitting, finishSubmitting],
   );
 
   return {

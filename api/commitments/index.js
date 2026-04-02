@@ -165,6 +165,19 @@ export default async function (context, req) {
 
         if (creditError) {
           context.log?.error?.('commitments failed to create initial CREDIT ledger entry', { message: creditError.message });
+          const { error: rollbackError } = await tenantClient
+            .from('commitments')
+            .delete()
+            .eq('id', data.id);
+
+          if (rollbackError) {
+            context.log?.error?.('commitments failed to rollback commitment after initial CREDIT ledger failure', {
+              message: rollbackError.message,
+              commitmentId: data.id,
+            });
+          }
+
+          return respond(context, 500, { message: 'failed_to_create_ledger_entry' });
         }
       }
 
@@ -176,11 +189,19 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'missing_commitment_id' });
     }
 
-    const { data: existingCommitment } = await tenantClient
+    const { data: existingCommitment, error: existingCommitmentError } = await tenantClient
       .from('commitments')
-      .select('total_amount')
+      .select('*')
       .eq('id', id)
       .maybeSingle();
+
+    if (existingCommitmentError) {
+      context.log?.error?.('commitments failed to load record before update', { message: existingCommitmentError.message });
+      return respond(context, 500, { message: 'failed_to_load_commitment' });
+    }
+    if (!existingCommitment) {
+      return respond(context, 404, { message: 'commitment_not_found' });
+    }
 
     const { data, error } = await tenantClient
       .from('commitments')
@@ -219,6 +240,33 @@ export default async function (context, req) {
 
         if (deltaError) {
           context.log?.error?.('commitments failed to record total_amount delta in ledger', { message: deltaError.message });
+          const rollbackPayload = {
+            student_id: existingCommitment.student_id,
+            service_id: existingCommitment.service_id,
+            commitment_type: existingCommitment.commitment_type,
+            total_amount: existingCommitment.total_amount,
+            default_charge_amount: existingCommitment.default_charge_amount,
+            transfer_ref: existingCommitment.transfer_ref,
+            notes: existingCommitment.notes,
+            is_active: existingCommitment.is_active,
+            updated_at: existingCommitment.updated_at,
+            expires_at: existingCommitment.expires_at,
+            metadata: existingCommitment.metadata ?? null,
+          };
+
+          const { error: rollbackError } = await tenantClient
+            .from('commitments')
+            .update(rollbackPayload)
+            .eq('id', id);
+
+          if (rollbackError) {
+            context.log?.error?.('commitments failed to rollback commitment after ledger delta failure', {
+              message: rollbackError.message,
+              commitmentId: id,
+            });
+          }
+
+          return respond(context, 500, { message: 'failed_to_record_ledger_delta' });
         }
       }
     }

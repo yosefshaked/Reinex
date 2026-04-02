@@ -90,7 +90,6 @@ function useOrgDataResource({
   const { activeOrgId } = useOrg();
 
   const { orgId, session } = resolveOrgAndSession({ orgId: orgIdOverride, session: sessionOverride }, activeOrgId, contextSession);
-  const sessionAccessToken = session?.access_token || null;
 
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -165,7 +164,7 @@ function useOrgDataResource({
     } finally {
       setLoading(false);
     }
-  }, [enabled, orgId, resetOnDisable, queryString, sessionAccessToken, stableMapResponse, path]);
+  }, [enabled, orgId, resetOnDisable, queryString, session, stableMapResponse, path]);
 
   // Auto-fetch when dependencies change
   useEffect(() => {
@@ -200,13 +199,6 @@ export function useInstructors(options = {}) {
   // API returns either an array (legacy) or an object { employees, unlinked_members }
   const instructors = Array.isArray(data) ? data : (data?.employees || []);
   const unlinkedMembers = Array.isArray(data?.unlinked_members) ? data.unlinked_members : [];
-
-  // Debug logging
-  if (includeUnlinked) {
-    console.log('[useInstructors] includeUnlinked=true, data:', data);
-    console.log('[useInstructors] instructors:', instructors);
-    console.log('[useInstructors] unlinkedMembers:', unlinkedMembers);
-  }
 
   return {
     instructors,

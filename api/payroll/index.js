@@ -96,7 +96,7 @@ function filterByDateRange(rows, startDate, endDate, field) {
 function collectWorkingDates(startDate, endDate, workingDays) {
   const dates = [];
   let cursor = startDate;
-  const workingDaySet = new Set(resolveEmployeeWorkingDays({ working_days: workingDays }));
+  const workingDaySet = new Set(Array.isArray(workingDays) ? workingDays : []);
   while (cursor <= endDate) {
     const dayOfWeek = new Date(`${cursor}T00:00:00Z`).getUTCDay();
     if (workingDaySet.has(dayOfWeek)) {
@@ -182,7 +182,9 @@ async function buildEmployeePayrollPreview(tenantClient, employee, profile, star
     system_paid_days: leaveDays.filter((row) => row.leave_type === 'system_paid').length,
     unpaid_days: leaveDays.filter((row) => row.leave_type === 'unpaid').length,
     half_days: leaveDays.filter((row) => row.leave_type === 'half_day').length,
-    paid_leave_total: payrollModel === 'monthly_salary' ? roundCurrency(leaveAmounts.filter((row) => row.leave_type === 'half_day' || row.leave_type === 'unpaid').reduce((sum, row) => sum + row.amount, 0)) : paidLeaveTotal,
+    paid_leave_total: payrollModel === 'monthly_salary'
+      ? roundCurrency(leaveAmounts.reduce((sum, row) => sum + row.amount, 0))
+      : paidLeaveTotal,
   };
 
   return {
