@@ -13,7 +13,7 @@ import {
 } from '../_shared/org-bff.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 
-const SELECT_FIELDS = 'id, name, description, form_schema, alert_rules, visibility_rules, is_active, version, created_by, created_at, updated_at, metadata';
+const SELECT_FIELDS = 'id, name, description, form_usage, form_schema, alert_rules, visibility_rules, is_active, version, created_by, created_at, updated_at, metadata';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return '';
@@ -30,6 +30,12 @@ function normalizeOptionalJson(value) {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'object' || Array.isArray(value)) return null;
   return value;
+}
+
+function normalizeFormUsage(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (!normalized) return '';
+  return normalized === 'waiting_list_intake' ? normalized : normalized === 'general' ? normalized : '';
 }
 
 export default async function forms(context, req) {
@@ -99,6 +105,7 @@ export default async function forms(context, req) {
   // ── GET: Fetch form templates ──
   if (method === 'GET') {
     const formId = context?.bindingData?.formId;
+    const usageFilter = normalizeFormUsage(req?.query?.usage ?? req?.query?.form_usage ?? body?.usage ?? body?.form_usage);
 
     if (formId) {
       if (!UUID_PATTERN.test(formId)) {
@@ -132,6 +139,9 @@ export default async function forms(context, req) {
     if (!isAdmin) {
       query.eq('is_active', true);
     }
+    if (usageFilter) {
+      query.eq('form_usage', usageFilter);
+    }
 
     const { data, error } = await query;
 
@@ -156,6 +166,7 @@ export default async function forms(context, req) {
     }
 
     const description = normalizeOptionalText(body?.description);
+    const formUsage = normalizeFormUsage(body?.form_usage ?? body?.formUsage) || 'general';
     const formSchema = normalizeOptionalJson(body?.form_schema ?? body?.formSchema);
 
     const { data, error } = await tenantClient
@@ -163,6 +174,7 @@ export default async function forms(context, req) {
       .insert({
         name,
         description,
+        form_usage: formUsage,
         form_schema: formSchema || {},
         created_by: userId,
       })
@@ -228,6 +240,14 @@ export default async function forms(context, req) {
 
     if (Object.prototype.hasOwnProperty.call(body, 'description')) {
       updates.description = normalizeOptionalText(body.description);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'form_usage') || Object.prototype.hasOwnProperty.call(body, 'formUsage')) {
+      const formUsage = normalizeFormUsage(body?.form_usage ?? body?.formUsage);
+      if (!formUsage) {
+        return respond(context, 400, { message: 'invalid_form_usage' });
+      }
+      updates.form_usage = formUsage;
     }
 
     if (Object.prototype.hasOwnProperty.call(body, 'form_schema') || Object.prototype.hasOwnProperty.call(body, 'formSchema')) {

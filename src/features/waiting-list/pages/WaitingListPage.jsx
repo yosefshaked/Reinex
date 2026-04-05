@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Pencil } from 'lucide-react';
+import { Plus, Pencil, Send, ExternalLink, Mail, MessageCircle } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ComboBoxField, SelectField, TextAreaField } from '@/components/ui/forms-ui';
+import { ComboBoxField, SelectField, TextAreaField, TextField } from '@/components/ui/forms-ui';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -28,23 +29,44 @@ const DAYS_OF_WEEK = [
 ];
 
 const STATUS_OPTIONS = [
+  { value: 'new', label: 'חדש' },
   { value: 'open', label: 'פתוח' },
   { value: 'matched', label: 'שובץ' },
   { value: 'closed', label: 'בוטל' },
 ];
 
 const STATUS_FILTER_OPTIONS = [
+  { value: 'active', label: 'חדשים ופתוחים' },
+  { value: 'new', label: 'חדשים בלבד' },
   { value: 'open', label: 'פתוחים בלבד' },
+  { value: 'matched', label: 'שובצו בלבד' },
+  { value: 'closed', label: 'בוטלו בלבד' },
   { value: 'all', label: 'כולל שובצו/בוטלו' },
 ];
 
 const STATUS_BADGE_VARIANTS = {
+  new: 'default',
   open: 'secondary',
   matched: 'default',
   closed: 'outline',
 };
 
 const EMPTY_RANGE = { start: '', end: '' };
+const FORM_USAGE_WAITING_LIST = 'waiting_list_intake';
+
+function buildInitialInviteForm() {
+  return {
+    formId: '',
+    contactName: '',
+    identityNumber: '',
+    phone: '',
+    email: '',
+    deliveryMethod: 'whatsapp',
+    serviceId: '',
+    allowAdditionalServices: false,
+    internalNote: '',
+  };
+}
 
 function buildStudentName(student) {
   if (!student) return '';
@@ -172,7 +194,8 @@ export default function WaitingListPage() {
   const [entries, setEntries] = useState([]);
   const [students, setStudents] = useState([]);
   const [services, setServices] = useState([]);
-  const [statusFilter, setStatusFilter] = useState('open');
+  const [waitingListForms, setWaitingListForms] = useState([]);
+  const [statusFilter, setStatusFilter] = useState('active');
   const [loading, setLoading] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(false);
   const [listError, setListError] = useState('');
@@ -183,6 +206,11 @@ export default function WaitingListPage() {
   const [touched, setTouched] = useState({});
   const [timeEditorDay, setTimeEditorDay] = useState(null);
   const [timeEditorOpen, setTimeEditorOpen] = useState(false);
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [inviteFormValues, setInviteFormValues] = useState(buildInitialInviteForm());
+  const [inviteError, setInviteError] = useState('');
+  const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [inviteResult, setInviteResult] = useState(null);
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -217,6 +245,10 @@ export default function WaitingListPage() {
     () => (services || []).map((service) => ({ value: service.id, label: service.name })),
     [services]
   );
+  const waitingListFormOptions = useMemo(
+    () => (waitingListForms || []).map((form) => ({ value: form.id, label: form.name })),
+    [waitingListForms]
+  );
 
   const loadReferenceData = useCallback(async () => {
     if (!canFetch) return;
@@ -225,7 +257,7 @@ export default function WaitingListPage() {
     setListError('');
 
     try {
-      const [studentsPayload, servicesPayload] = await Promise.all([
+      const [studentsPayload, servicesPayload, formsPayload] = await Promise.all([
         authenticatedFetch('students-list', {
           session,
           params: { org_id: activeOrgId, status: 'active' },
@@ -234,10 +266,15 @@ export default function WaitingListPage() {
           session,
           params: { org_id: activeOrgId },
         }),
+        authenticatedFetch('forms', {
+          session,
+          params: { org_id: activeOrgId, usage: FORM_USAGE_WAITING_LIST },
+        }),
       ]);
 
       setStudents(Array.isArray(studentsPayload) ? studentsPayload : []);
       setServices(Array.isArray(servicesPayload) ? servicesPayload : []);
+      setWaitingListForms(Array.isArray(formsPayload) ? formsPayload : []);
     } catch (err) {
       setListError(err?.message || 'טעינת הנתונים נכשלה.');
     } finally {
@@ -338,6 +375,86 @@ export default function WaitingListPage() {
     setCreateError('');
     setIsAddStudentOpen(true);
   };
+
+  const openInviteDialog = () => {
+    setInviteFormValues(buildInitialInviteForm());
+    setInviteError('');
+    setInviteResult(null);
+    setInviteDialogOpen(true);
+  };
+
+  const handleInviteSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!inviteFormValues.formId || !inviteFormValues.contactName.trim() || !inviteFormValues.serviceId) {
+      setInviteError('יש לבחור טופס, למלא שם איש קשר ולבחור שירות.');
+      return;
+    }
+
+    if (inviteFormValues.deliveryMethod === 'whatsapp' && !inviteFormValues.phone.trim()) {
+      setInviteError('יש להזין מספר טלפון לשליחת WhatsApp.');
+      return;
+    }
+
+    if (inviteFormValues.deliveryMethod === 'email' && !inviteFormValues.email.trim()) {
+      setInviteError('יש להזין כתובת אימייל לשליחה.');
+      return;
+    }
+
+    setInviteSubmitting(true);
+    setInviteError('');
+    setInviteResult(null);
+
+    try {
+      const payload = await authenticatedFetch('waiting-list-intake/send', {
+        method: 'POST',
+        session,
+        body: {
+          org_id: activeOrgId,
+          form_id: inviteFormValues.formId,
+          contact_name: inviteFormValues.contactName,
+          identity_number: inviteFormValues.identityNumber || null,
+          phone: inviteFormValues.phone || null,
+          email: inviteFormValues.email || null,
+          delivery_method: inviteFormValues.deliveryMethod,
+          desired_service_id: inviteFormValues.serviceId,
+          allow_additional_services: inviteFormValues.allowAdditionalServices,
+          internal_note: inviteFormValues.internalNote || null,
+        },
+      });
+
+      setInviteResult(payload);
+      if (payload?.delivery_status === 'email_failed') {
+        toast.warning('שליחת האימייל נכשלה. אפשר להשתמש בקישור הידני.');
+      } else if (inviteFormValues.deliveryMethod === 'email') {
+        toast.success('קישור הטופס נשלח באימייל.');
+      } else {
+        toast.success('קישור הטופס מוכן לשליחה בוואטסאפ.');
+      }
+      await loadEntries();
+    } catch (error) {
+      setInviteError(error?.message || 'שליחת טופס ההמתנה נכשלה.');
+    } finally {
+      setInviteSubmitting(false);
+    }
+  };
+
+  const inviteWhatsappLink = useMemo(() => {
+    if (!inviteResult?.invite_url || !inviteResult?.phone) return '';
+    const digits = String(inviteResult.phone).replace(/[^\d]/g, '');
+    const normalizedPhone = digits.startsWith('972')
+      ? digits
+      : digits.startsWith('0')
+        ? `972${digits.slice(1)}`
+        : digits;
+    const message = [
+      'שלום,',
+      '',
+      `קישור לטופס רשימת המתנה: ${inviteResult.invite_url}`,
+      inviteResult?.expires_at ? `תוקף הקישור עד: ${inviteResult.expires_at}` : '',
+    ].filter(Boolean).join('\n');
+    return `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`;
+  }, [inviteResult]);
 
   const handleAddStudentDialogOpenChange = (open) => {
     if (!open) {
@@ -517,10 +634,16 @@ export default function WaitingListPage() {
   const serviceError = touched.serviceId && !formValues.serviceId ? 'בחרו שירות.' : '';
 
   const pageActions = canManage ? (
-    <Button onClick={openCreateDialog} className="gap-2" size="sm">
-      <Plus className="h-4 w-4" />
-      רשומה חדשה
-    </Button>
+    <div className="flex items-center gap-2">
+      <Button onClick={openInviteDialog} className="gap-2" size="sm" variant="outline">
+        <Send className="h-4 w-4" />
+        שלח טופס המתנה
+      </Button>
+      <Button onClick={openCreateDialog} className="gap-2" size="sm">
+        <Plus className="h-4 w-4" />
+        רשומה חדשה
+      </Button>
+    </div>
   ) : null;
 
   if (!activeOrgId) {
@@ -597,12 +720,13 @@ export default function WaitingListPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>תלמיד</TableHead>
+                    <TableHead>יצירת קשר</TableHead>
                     <TableHead>שירות מבוקש</TableHead>
                     <TableHead>ימי זמינות</TableHead>
                     <TableHead>זמני העדפה</TableHead>
                     <TableHead>עדיפות</TableHead>
                     <TableHead>סטטוס</TableHead>
-                    <TableHead>הערות</TableHead>
+                    <TableHead>פרטי קליטה</TableHead>
                     <TableHead>פעולות</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -610,6 +734,22 @@ export default function WaitingListPage() {
                   {entries.map((entry) => {
                     const isPriority = Boolean(entry.priority_flag);
                     const statusLabel = STATUS_OPTIONS.find((option) => option.value === entry.status)?.label || '—';
+                    const intakeMeta = entry?.metadata && typeof entry.metadata === 'object' ? entry.metadata : {};
+                    const isProspect = entry?.student?.onboarding_status === 'pending_wl_form';
+                    const paymentPathLabel = intakeMeta.payment_path_intent === 'hmo'
+                      ? 'קופת חולים'
+                      : intakeMeta.payment_path_intent === 'private'
+                        ? 'פרטי'
+                        : intakeMeta.payment_path_intent === 'unsure'
+                          ? 'צריך עזרה'
+                          : '';
+                    const hmoApprovalLabel = intakeMeta.hmo_approval_status === 'has_approval'
+                      ? 'יש אישור'
+                      : intakeMeta.hmo_approval_status === 'send_separately'
+                        ? 'יישלח בנפרד'
+                        : intakeMeta.hmo_approval_status === 'no_approval_yet'
+                          ? 'ללא אישור'
+                          : '';
                     return (
                       <TableRow
                         key={entry.id}
@@ -618,7 +758,23 @@ export default function WaitingListPage() {
                         )}
                       >
                         <TableCell className="font-medium">
-                          {buildStudentName(entry.student)}
+                          <div className="flex flex-col gap-1">
+                            <Link to={`/students/${entry.student_id}`} className="font-medium text-primary hover:underline">
+                              {buildStudentName(entry.student)}
+                            </Link>
+                            {isProspect ? (
+                              <Badge variant="outline" className="w-fit">מתעניין / טופס המתנה</Badge>
+                            ) : null}
+                            {intakeMeta.source === 'waiting_list_intake' ? (
+                              <Badge variant="secondary" className="w-fit">נוצר מטופס</Badge>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-neutral-600">
+                          <div className="flex flex-col gap-1">
+                            <span>{entry?.student?.phone || '—'}</span>
+                            <span>{entry?.student?.email || '—'}</span>
+                          </div>
                         </TableCell>
                         <TableCell>{entry.service?.name || '—'}</TableCell>
                         <TableCell>{formatPreferredDays(entry.preferred_days)}</TableCell>
@@ -636,7 +792,12 @@ export default function WaitingListPage() {
                           <Badge variant={STATUS_BADGE_VARIANTS[entry.status] || 'outline'}>{statusLabel}</Badge>
                         </TableCell>
                         <TableCell className="text-sm text-neutral-600">
-                          {entry.notes || '—'}
+                          <div className="flex flex-col gap-1">
+                            {paymentPathLabel ? <span>מסלול תשלום: {paymentPathLabel}</span> : null}
+                            {hmoApprovalLabel ? <span>אישור גורם מממן: {hmoApprovalLabel}</span> : null}
+                            {entry.notes ? <span>הערות: {entry.notes}</span> : null}
+                            {!paymentPathLabel && !hmoApprovalLabel && !entry.notes ? <span>—</span> : null}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Button variant="ghost" size="icon" onClick={() => openEditDialog(entry)}>
@@ -652,6 +813,153 @@ export default function WaitingListPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>שליחת טופס הצטרפות לרשימת המתנה</DialogTitle>
+            <DialogDescription>
+              יוצרים או מקשרים מתעניין קיים, ושולחים לו קישור ציבורי למילוי פרטים.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleInviteSubmit}>
+            <div className="space-y-4 py-4">
+              <SelectField
+                id="waiting-list-intake-form"
+                label="טופס"
+                value={inviteFormValues.formId}
+                onChange={(value) => setInviteFormValues((prev) => ({ ...prev, formId: value }))}
+                options={waitingListFormOptions}
+                placeholder="בחרו טופס רשימת המתנה"
+                required
+              />
+
+              <TextField
+                id="waiting-list-contact-name"
+                name="contactName"
+                label="שם איש קשר"
+                value={inviteFormValues.contactName}
+                onChange={(event) => setInviteFormValues((prev) => ({ ...prev, contactName: event.target.value }))}
+                required
+              />
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <TextField
+                  id="waiting-list-identity"
+                  name="identityNumber"
+                  label="מספר זהות"
+                  value={inviteFormValues.identityNumber}
+                  onChange={(event) => setInviteFormValues((prev) => ({ ...prev, identityNumber: event.target.value.replace(/\D/g, '') }))}
+                />
+                <SelectField
+                  id="waiting-list-delivery-method"
+                  label="אופן שליחה"
+                  value={inviteFormValues.deliveryMethod}
+                  onChange={(value) => setInviteFormValues((prev) => ({ ...prev, deliveryMethod: value }))}
+                  options={[
+                    { value: 'whatsapp', label: 'וואטסאפ' },
+                    { value: 'email', label: 'אימייל' },
+                  ]}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <TextField
+                  id="waiting-list-phone"
+                  name="phone"
+                  label="טלפון"
+                  value={inviteFormValues.phone}
+                  onChange={(event) => setInviteFormValues((prev) => ({ ...prev, phone: event.target.value }))}
+                />
+                <TextField
+                  id="waiting-list-email"
+                  name="email"
+                  label="אימייל"
+                  value={inviteFormValues.email}
+                  onChange={(event) => setInviteFormValues((prev) => ({ ...prev, email: event.target.value }))}
+                />
+              </div>
+
+              <SelectField
+                id="waiting-list-primary-service"
+                label="שירות ראשי"
+                value={inviteFormValues.serviceId}
+                onChange={(value) => setInviteFormValues((prev) => ({ ...prev, serviceId: value }))}
+                options={serviceOptions}
+                placeholder="בחרו שירות"
+                required
+              />
+
+              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2">
+                <div>
+                  <Label className="block">לאפשר בקשה לשירותים נוספים</Label>
+                  <p className="text-xs text-neutral-500">המתעניין יוכל לבקש שירותים נוספים בטופס.</p>
+                </div>
+                <Switch
+                  checked={inviteFormValues.allowAdditionalServices}
+                  onCheckedChange={(checked) => setInviteFormValues((prev) => ({ ...prev, allowAdditionalServices: checked }))}
+                />
+              </div>
+
+              <TextAreaField
+                id="waiting-list-internal-note"
+                name="internalNote"
+                label="הערה פנימית"
+                value={inviteFormValues.internalNote}
+                onChange={(event) => setInviteFormValues((prev) => ({ ...prev, internalNote: event.target.value }))}
+                rows={3}
+              />
+
+              {inviteError ? (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+                  {inviteError}
+                </div>
+              ) : null}
+
+              {inviteResult ? (
+                <div className="space-y-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                  <div className="font-medium">הקישור נוצר בהצלחה</div>
+                  <a
+                    href={inviteResult.invite_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 text-primary underline"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    פתח קישור
+                  </a>
+                  {inviteWhatsappLink ? (
+                    <a
+                      href={inviteWhatsappLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 text-primary underline"
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                      שלח בוואטסאפ
+                    </a>
+                  ) : null}
+                  {inviteResult?.email ? (
+                    <div className="flex items-center gap-2 text-neutral-700">
+                      <Mail className="h-4 w-4" />
+                      <span>{inviteResult.email}</span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex flex-row-reverse gap-2 pt-4">
+              <Button type="submit" disabled={inviteSubmitting || waitingListFormOptions.length === 0}>
+                {inviteSubmitting ? 'שולח...' : 'שלח טופס'}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setInviteDialogOpen(false)} disabled={inviteSubmitting}>
+                ביטול
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-3xl">

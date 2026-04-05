@@ -677,6 +677,9 @@ function buildStudentUpdates(body) {
 
 function determineStatusFilter(query, canViewInactive = true) {
   const status = normalizeString(query?.status);
+  if (canViewInactive && status === 'prospects') {
+    return 'prospects';
+  }
   if (canViewInactive && status === 'inactive') {
     return 'inactive';
   }
@@ -956,6 +959,8 @@ export default async function handler(context, req) {
     const statusFilter = determineStatusFilter(req?.query, instructorsCanViewInactive);
     if (statusFilter === 'active') {
       builder = builder.eq('is_active', true);
+    } else if (statusFilter === 'prospects') {
+      builder = builder.eq('is_active', false).eq('onboarding_status', 'pending_wl_form');
     } else if (statusFilter === 'inactive') {
       builder = builder.eq('is_active', false);
     }

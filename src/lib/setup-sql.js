@@ -137,12 +137,28 @@ END $$;
 
 DO $$
 BEGIN
+  UPDATE public.students
+  SET onboarding_status = CASE
+    WHEN onboarding_status = 'in_progress' THEN 'pending_forms'
+    WHEN onboarding_status = 'completed' THEN 'approved'
+    ELSE onboarding_status
+  END
+  WHERE onboarding_status IN ('in_progress', 'completed');
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'students_onboarding_status_check'
+      AND conrelid = 'public.students'::regclass
+  ) THEN
+    ALTER TABLE public.students DROP CONSTRAINT students_onboarding_status_check;
+  END IF;
+
   ALTER TABLE public.students
     ADD CONSTRAINT students_onboarding_status_check
-    CHECK (onboarding_status IN ('not_started','pending_forms','approved'));
+    CHECK (onboarding_status IN ('not_started','pending_forms','pending_wl_form','approved'));
 EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
+  WHEN others THEN NULL;
 END $$;
 
 CREATE INDEX IF NOT EXISTS students_is_active_idx ON public.students (is_active);
@@ -2452,6 +2468,7 @@ CREATE TABLE IF NOT EXISTS public.forms (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   description text NULL,
+  form_usage text NOT NULL DEFAULT 'general',
   form_schema jsonb NOT NULL,
   alert_rules jsonb NULL,
   visibility_rules jsonb NULL,
@@ -2468,6 +2485,7 @@ CREATE TABLE IF NOT EXISTS public.forms (
 ALTER TABLE public.forms
   ADD COLUMN IF NOT EXISTS name text,
   ADD COLUMN IF NOT EXISTS description text,
+  ADD COLUMN IF NOT EXISTS form_usage text,
   ADD COLUMN IF NOT EXISTS form_schema jsonb,
   ADD COLUMN IF NOT EXISTS alert_rules jsonb,
   ADD COLUMN IF NOT EXISTS visibility_rules jsonb,
@@ -2480,7 +2498,40 @@ ALTER TABLE public.forms
   ADD COLUMN IF NOT EXISTS is_active boolean,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
+DO $$
+BEGIN
+  ALTER TABLE public.forms
+    ALTER COLUMN form_usage SET DEFAULT 'general';
+EXCEPTION
+  WHEN others THEN
+    NULL;
+END $$;
+
+UPDATE public.forms
+SET form_usage = COALESCE(NULLIF(form_usage, ''), 'general')
+WHERE form_usage IS NULL OR form_usage = '';
+
+DO $$
+BEGIN
+  ALTER TABLE public.forms
+    ALTER COLUMN form_usage SET NOT NULL;
+EXCEPTION
+  WHEN others THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.forms
+    ADD CONSTRAINT forms_form_usage_check
+    CHECK (form_usage IN ('general','waiting_list_intake'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
 CREATE INDEX IF NOT EXISTS forms_is_active_idx ON public.forms (is_active);
+CREATE INDEX IF NOT EXISTS forms_form_usage_idx ON public.forms (form_usage);
 
 -- -----------------------------------------------------------------
 -- public.form_submissions
@@ -2690,12 +2741,20 @@ END $$;
 
 DO $$
 BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'waiting_list_entries_status_check'
+      AND conrelid = 'public.waiting_list_entries'::regclass
+  ) THEN
+    ALTER TABLE public.waiting_list_entries DROP CONSTRAINT waiting_list_entries_status_check;
+  END IF;
+
   ALTER TABLE public.waiting_list_entries
     ADD CONSTRAINT waiting_list_entries_status_check
-    CHECK (status IN ('open','matched','closed'));
+    CHECK (status IN ('new','open','matched','closed'));
 EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
+  WHEN others THEN NULL;
 END $$;
 
 CREATE INDEX IF NOT EXISTS waiting_list_entries_student_id_idx

@@ -320,7 +320,7 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
                       <React.Fragment key={submission.id}>
                         <TableRow>
                           <TableCell className="font-medium">{submission.form_name || 'טופס ללא שם'}</TableCell>
-                          <TableCell>{formatDateTime(submission.submitted_at)}</TableCell>
+                          <TableCell>{formatDateTime(submission.submitted_at || submission?.metadata?.initiated_at)}</TableCell>
                           <TableCell>{formatDateTime(submission?.otp_metadata?.expires_at || submission?.metadata?.otp_expires_at)}</TableCell>
                           <TableCell>
                             <Badge variant={submission.workflow.variant}>{submission.workflow.label}</Badge>

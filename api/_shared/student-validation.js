@@ -369,9 +369,14 @@ export function coerceOnboardingStatus(raw) {
     return { value: 'not_started', valid: false };
   }
   const trimmed = raw.trim().toLowerCase();
-  const validStatuses = ['not_started', 'in_progress', 'completed'];
-  if (validStatuses.includes(trimmed)) {
-    return { value: trimmed, valid: true };
+  const legacyAliasMap = {
+    in_progress: 'pending_forms',
+    completed: 'approved',
+  };
+  const normalized = legacyAliasMap[trimmed] || trimmed;
+  const validStatuses = ['not_started', 'pending_forms', 'pending_wl_form', 'approved'];
+  if (validStatuses.includes(normalized)) {
+    return { value: normalized, valid: true };
   }
   return { value: 'not_started', valid: false };
 }

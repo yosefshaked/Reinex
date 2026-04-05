@@ -23,6 +23,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
@@ -44,6 +45,7 @@ export default function FormsListPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
+  const [newUsage, setNewUsage] = useState('general');
 
   const canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection);
 
@@ -89,12 +91,14 @@ export default function FormsListPage() {
           org_id: activeOrgId,
           name: trimmedName,
           description: newDescription.trim() || null,
+          form_usage: newUsage,
         },
       });
       toast.success('הטופס נוצר בהצלחה');
       setDialogOpen(false);
       setNewName('');
       setNewDescription('');
+      setNewUsage('general');
       void loadForms();
     } catch (err) {
       console.error('Failed to create form', err);
@@ -126,6 +130,10 @@ export default function FormsListPage() {
     } catch {
       return '—';
     }
+  }
+
+  function getUsageLabel(value) {
+    return value === 'waiting_list_intake' ? 'טופס רשימת המתנה' : 'טופס כללי';
   }
 
   if (loading && forms.length === 0) {
@@ -190,6 +198,7 @@ export default function FormsListPage() {
               <TableRow>
                 <TableHead>שם</TableHead>
                 <TableHead>תיאור</TableHead>
+                <TableHead className="text-center">שימוש</TableHead>
                 <TableHead className="text-center">גרסה</TableHead>
                 <TableHead className="text-center">סטטוס</TableHead>
                 <TableHead>נוצר</TableHead>
@@ -202,6 +211,11 @@ export default function FormsListPage() {
                   <TableCell className="font-medium">{form.name}</TableCell>
                   <TableCell className="text-neutral-500 max-w-xs truncate">
                     {form.description || '—'}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <Badge variant={form.form_usage === 'waiting_list_intake' ? 'default' : 'outline'}>
+                      {getUsageLabel(form.form_usage)}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-center">
                     <Badge variant="outline">v{form.version}</Badge>
@@ -276,6 +290,18 @@ export default function FormsListPage() {
                 placeholder="תיאור קצר של מטרת הטופס"
                 rows={3}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="form-usage">סוג הטופס</Label>
+              <Select value={newUsage} onValueChange={setNewUsage}>
+                <SelectTrigger id="form-usage">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="general">טופס כללי</SelectItem>
+                  <SelectItem value="waiting_list_intake">טופס רשימת המתנה</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>

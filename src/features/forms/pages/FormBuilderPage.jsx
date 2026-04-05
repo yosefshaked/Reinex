@@ -40,6 +40,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
@@ -357,6 +358,7 @@ export default function FormBuilderPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [formUsage, setFormUsage] = useState('general');
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -376,6 +378,7 @@ export default function FormBuilderPage() {
         params: { org_id: activeOrgId },
       });
       setFormData(data);
+      setFormUsage(data?.form_usage === 'waiting_list_intake' ? 'waiting_list_intake' : 'general');
       const schema = data?.form_schema && typeof data.form_schema === 'object' && data.form_schema.type
         ? data.form_schema
         : buildEmptySchema();
@@ -471,6 +474,7 @@ export default function FormBuilderPage() {
         method: 'PUT',
         body: {
           org_id: activeOrgId,
+          form_usage: formUsage,
           form_schema: formSchema,
         },
       });
@@ -483,7 +487,7 @@ export default function FormBuilderPage() {
     } finally {
       setSaving(false);
     }
-  }, [canFetch, formId, session, activeOrgId, formSchema]);
+  }, [canFetch, formId, session, activeOrgId, formSchema, formUsage]);
 
   // ── Build rjsf props ───────────────────────────────────────
   const uiSchema = useMemo(() => buildUiSchema(formSchema), [formSchema]);
@@ -533,20 +537,44 @@ export default function FormBuilderPage() {
           </Button>
           <div>
             <h1 className="text-base font-semibold leading-tight">{formData?.name || 'עורך טופס'}</h1>
-            {formData?.version && (
-              <Badge variant="outline" className="mt-0.5 text-xs">v{formData.version}</Badge>
-            )}
+            <div className="mt-0.5 flex items-center gap-2">
+              {formData?.version && (
+                <Badge variant="outline" className="text-xs">v{formData.version}</Badge>
+              )}
+              <Badge variant={formUsage === 'waiting_list_intake' ? 'default' : 'secondary'} className="text-xs">
+                {formUsage === 'waiting_list_intake' ? 'רשימת המתנה' : 'כללי'}
+              </Badge>
+            </div>
           </div>
         </div>
 
-        <Button
-          className="gap-2"
-          disabled={saving || !dirty}
-          onClick={handleSave}
-        >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          שמור שינויים
-        </Button>
+        <div className="flex items-center gap-3">
+          <div className="min-w-48">
+            <Select
+              value={formUsage}
+              onValueChange={(value) => {
+                setFormUsage(value);
+                setDirty(true);
+              }}
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="general">טופס כללי</SelectItem>
+                <SelectItem value="waiting_list_intake">טופס רשימת המתנה</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            className="gap-2"
+            disabled={saving || !dirty}
+            onClick={handleSave}
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            שמור שינויים
+          </Button>
+        </div>
       </div>
 
       {/* ── Two-pane layout ── */}

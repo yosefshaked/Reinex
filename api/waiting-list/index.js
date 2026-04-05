@@ -13,7 +13,7 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 
-const STATUS_OPTIONS = new Set(['open', 'matched', 'closed', 'all']);
+const STATUS_OPTIONS = new Set(['new', 'open', 'matched', 'closed', 'active', 'all']);
 
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
@@ -26,6 +26,9 @@ function normalizeStatus(value, { allowAll = false } = {}) {
   if (!normalized) return '';
   if (normalized === 'canceled' || normalized === 'cancelled' || normalized === 'cancel') {
     return 'closed';
+  }
+  if (normalized === 'active') {
+    return 'active';
   }
   if (allowAll && normalized === 'all') {
     return 'all';
@@ -114,7 +117,8 @@ function buildWaitingListSelect() {
     'notes',
     'status',
     'created_at',
-    'student:students(id, first_name, middle_name, last_name, identity_number)',
+    'metadata',
+    'student:students(id, first_name, middle_name, last_name, identity_number, phone, email, onboarding_status, is_active)',
     'service:Services(id, name)',
   ].join(',');
 }
@@ -186,8 +190,8 @@ export default async function waitingList(context, req) {
   }
 
   if (method === 'GET') {
-    const rawStatus = req?.query?.status ?? body?.status ?? 'open';
-    const statusFilter = normalizeStatus(rawStatus, { allowAll: true }) || 'open';
+    const rawStatus = req?.query?.status ?? body?.status ?? 'active';
+    const statusFilter = normalizeStatus(rawStatus, { allowAll: true }) || 'active';
 
     if (!statusFilter) {
       return respond(context, 400, { message: 'invalid_status_filter' });
@@ -199,7 +203,9 @@ export default async function waitingList(context, req) {
       .order('priority_flag', { ascending: false })
       .order('created_at', { ascending: false });
 
-    if (statusFilter !== 'all') {
+    if (statusFilter === 'active') {
+      builder = builder.in('status', ['new', 'open']);
+    } else if (statusFilter !== 'all') {
       builder = builder.eq('status', statusFilter);
     }
 
