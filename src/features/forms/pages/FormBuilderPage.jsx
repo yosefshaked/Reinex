@@ -41,6 +41,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
@@ -59,6 +60,23 @@ const FIELD_TYPES = [
     icon: List,
     schema: { type: 'string', enum: ['אפשרות 1', 'אפשרות 2'] },
   },
+];
+
+const WAITING_LIST_SYSTEM_FIELDS = [
+  { key: 'student_first_name', label: 'שם פרטי של התלמיד/ה', placeholder: 'שם פרטי', type: 'text' },
+  { key: 'student_last_name', label: 'שם משפחה של התלמיד/ה', placeholder: 'שם משפחה', type: 'text' },
+  { key: 'contact_name', label: 'שם איש קשר / אפוטרופוס', placeholder: 'שם איש קשר', type: 'text' },
+  { key: 'contact_relationship', label: 'קרבה לתלמיד/ה', type: 'select', options: ['התלמיד/ה עצמו/ה', 'אם', 'אב', 'מטפל/ת', 'אחר'] },
+  { key: 'identity_number', label: 'מספר זהות', placeholder: 'אופציונלי', type: 'text' },
+  { key: 'phone', label: 'טלפון', placeholder: '05X-XXXXXXX', type: 'text' },
+  { key: 'email', label: 'אימייל', placeholder: 'name@example.com', type: 'text' },
+  { key: 'additional_services', label: 'שירותים נוספים שמעניינים אותך', type: 'multi-select-note' },
+  { key: 'preferred_days', label: 'ימי זמינות מועדפים', type: 'day-selector' },
+  { key: 'preferred_times', label: 'טווחי שעות מועדפים', type: 'time-ranges' },
+  { key: 'payment_path_intent', label: 'סוג תשלום מבוקש', type: 'select', options: ['לא בטוח/ה, צריך עזרה', 'תשלום פרטי', 'דרך קופת חולים / גורם מממן'] },
+  { key: 'hmo_provider_name', label: 'שם קופת החולים / הגורם המממן', placeholder: 'למשל: כללית', type: 'text' },
+  { key: 'hmo_approval_status', label: 'סטטוס אישור קופת חולים', type: 'select', options: ['אין אישור עדיין', 'האישור יישלח בנפרד בוואטסאפ/אימייל'] },
+  { key: 'notes', label: 'הערות נוספות', placeholder: 'פרטים נוספים שחשוב שנדע', type: 'textarea' },
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -343,6 +361,125 @@ function CanvasObjectFieldTemplate(props) {
   );
 }
 
+function WaitingListIntakePreview() {
+  return (
+    <div className="mb-6 rounded-xl border border-dashed border-slate-300 bg-slate-100/70 p-4 opacity-70">
+      <div className="mb-4 space-y-1">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="border-slate-300 text-slate-600">מערכת</Badge>
+          <h3 className="text-sm font-semibold text-slate-700">שאלות קבועות לטופס רשימת המתנה</h3>
+        </div>
+        <p className="text-xs text-slate-500">
+          השדות האלה מוצגים תמיד בטופס הציבורי וממופים אוטומטית לפרופיל המתעניין ולרשומת ההמתנה. אי אפשר לערוך אותם דרך הבונה.
+        </p>
+      </div>
+
+      <div className="space-y-4">
+        <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
+          <p className="text-sm font-medium text-slate-700">שירות מבוקש</p>
+          <p className="mt-1 text-xs text-slate-500">מוצג מהשירות שנבחר בזמן שליחת הקישור, לא מהבונה.</p>
+        </div>
+
+        {WAITING_LIST_SYSTEM_FIELDS.map((field) => {
+          if (field.type === 'day-selector') {
+            return (
+              <div key={field.key} className="space-y-2">
+                <Label className="text-slate-700">{field.label}</Label>
+                <div className="flex flex-wrap gap-2">
+                  {['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'].map((day) => (
+                    <Button key={day} type="button" variant="outline" disabled className="border-slate-300 bg-white text-slate-500">
+                      {day}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+
+          if (field.type === 'time-ranges') {
+            return (
+              <div key={field.key} className="space-y-2">
+                <Label className="text-slate-700">{field.label}</Label>
+                <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
+                  <div className="mb-2 text-sm font-medium text-slate-600">יום לדוגמה</div>
+                  <div className="flex items-center gap-2">
+                    <Input type="time" disabled value="09:00" className="bg-slate-50 text-slate-500" />
+                    <span className="text-sm text-slate-400">עד</span>
+                    <Input type="time" disabled value="12:00" className="bg-slate-50 text-slate-500" />
+                    <Button type="button" variant="outline" disabled>הסר</Button>
+                  </div>
+                  <div className="mt-2">
+                    <Button type="button" variant="outline" disabled>הוסף טווח</Button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (field.type === 'select') {
+            return (
+              <div key={field.key} className="space-y-2">
+                <Label className="text-slate-700">{field.label}</Label>
+                <Select disabled value={field.options?.[0]}>
+                  <SelectTrigger className="bg-white/80 text-slate-500">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(field.options || []).map((option) => (
+                      <SelectItem key={option} value={option}>{option}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {field.key === 'contact_relationship' ? (
+                  <p className="text-xs text-slate-400">שם איש הקשר מוצג רק אם נבחרה אפשרות שאינה "התלמיד/ה עצמו/ה".</p>
+                ) : null}
+                {field.key === 'payment_path_intent' ? (
+                  <p className="text-xs text-slate-400">שם קופת החולים וסטטוס האישור מוצגים רק אם נבחר תשלום דרך קופת חולים / גורם מממן.</p>
+                ) : null}
+              </div>
+            );
+          }
+
+          if (field.type === 'textarea') {
+            return (
+              <div key={field.key} className="space-y-2">
+                <Label className="text-slate-700">{field.label}</Label>
+                <Textarea disabled rows={4} placeholder={field.placeholder} className="bg-white/80 text-slate-500 placeholder:text-slate-400" />
+              </div>
+            );
+          }
+
+          if (field.type === 'multi-select-note') {
+            return (
+              <div key={field.key} className="space-y-2">
+                <Label className="text-slate-700">{field.label}</Label>
+                <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
+                  <div className="space-y-2">
+                    {['שירות נוסף א׳', 'שירות נוסף ב׳'].map((label) => (
+                      <label key={label} className="flex items-center gap-3 text-sm text-slate-500">
+                        <Checkbox disabled />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-400">מופיע רק אם השולח מאפשר לבקש שירותים נוספים.</p>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div key={field.key} className="space-y-2">
+              <Label className="text-slate-700">{field.label}</Label>
+              <Input disabled placeholder={field.placeholder} className="bg-white/80 text-slate-500 placeholder:text-slate-400" />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page Component ─────────────────────────────────────────
 
 export default function FormBuilderPage() {
@@ -611,6 +748,7 @@ export default function FormBuilderPage() {
                 )}
               </CardHeader>
               <CardContent>
+                {formUsage === 'waiting_list_intake' && <WaitingListIntakePreview />}
                 {hasFields ? (
                   <Form
                     schema={formSchema}

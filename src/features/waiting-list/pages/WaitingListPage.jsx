@@ -57,7 +57,8 @@ const FORM_USAGE_WAITING_LIST = 'waiting_list_intake';
 function buildInitialInviteForm() {
   return {
     formId: '',
-    contactName: '',
+    studentFirstName: '',
+    studentLastName: '',
     identityNumber: '',
     phone: '',
     email: '',
@@ -386,8 +387,8 @@ export default function WaitingListPage() {
   const handleInviteSubmit = async (event) => {
     event.preventDefault();
 
-    if (!inviteFormValues.formId || !inviteFormValues.contactName.trim() || !inviteFormValues.serviceId) {
-      setInviteError('יש לבחור טופס, למלא שם איש קשר ולבחור שירות.');
+    if (!inviteFormValues.formId || !inviteFormValues.studentFirstName.trim() || !inviteFormValues.studentLastName.trim() || !inviteFormValues.serviceId) {
+      setInviteError('יש לבחור טופס, למלא שם פרטי ושם משפחה של התלמיד/ה ולבחור שירות.');
       return;
     }
 
@@ -412,7 +413,8 @@ export default function WaitingListPage() {
         body: {
           org_id: activeOrgId,
           form_id: inviteFormValues.formId,
-          contact_name: inviteFormValues.contactName,
+          student_first_name: inviteFormValues.studentFirstName,
+          student_last_name: inviteFormValues.studentLastName,
           identity_number: inviteFormValues.identityNumber || null,
           phone: inviteFormValues.phone || null,
           email: inviteFormValues.email || null,
@@ -743,11 +745,23 @@ export default function WaitingListPage() {
                         : intakeMeta.payment_path_intent === 'unsure'
                           ? 'צריך עזרה'
                           : '';
-                    const hmoApprovalLabel = intakeMeta.hmo_approval_status === 'has_approval'
-                      ? 'יש אישור'
-                      : intakeMeta.hmo_approval_status === 'send_separately'
-                        ? 'יישלח בנפרד'
-                        : intakeMeta.hmo_approval_status === 'no_approval_yet'
+                    const hmoProviderName = intakeMeta.payment_path_intent === 'hmo'
+                      ? String(intakeMeta.hmo_provider_name || '').trim()
+                      : '';
+                    const contactRelationshipLabel = intakeMeta.contact_relationship === 'mother'
+                      ? 'אם'
+                      : intakeMeta.contact_relationship === 'father'
+                        ? 'אב'
+                        : intakeMeta.contact_relationship === 'caretaker'
+                          ? 'מטפל/ת'
+                          : intakeMeta.contact_relationship === 'other'
+                            ? 'אחר'
+                            : intakeMeta.contact_relationship === 'self'
+                              ? 'התלמיד/ה עצמו/ה'
+                              : '';
+                    const hmoApprovalLabel = intakeMeta.payment_path_intent === 'hmo' && (intakeMeta.hmo_approval_status === 'send_separately' || intakeMeta.hmo_approval_status === 'has_approval')
+                      ? 'יישלח בנפרד'
+                        : intakeMeta.payment_path_intent === 'hmo' && intakeMeta.hmo_approval_status === 'no_approval_yet'
                           ? 'ללא אישור'
                           : '';
                     return (
@@ -793,10 +807,13 @@ export default function WaitingListPage() {
                         </TableCell>
                         <TableCell className="text-sm text-neutral-600">
                           <div className="flex flex-col gap-1">
+                            {intakeMeta.contact_relationship && intakeMeta.contact_relationship !== 'self' && intakeMeta.contact_name ? <span>איש קשר: {intakeMeta.contact_name}</span> : null}
+                            {intakeMeta.contact_relationship && intakeMeta.contact_relationship !== 'self' && contactRelationshipLabel ? <span>קשר לתלמיד/ה: {contactRelationshipLabel}</span> : null}
                             {paymentPathLabel ? <span>מסלול תשלום: {paymentPathLabel}</span> : null}
+                            {hmoProviderName ? <span>גורם מממן: {hmoProviderName}</span> : null}
                             {hmoApprovalLabel ? <span>אישור גורם מממן: {hmoApprovalLabel}</span> : null}
                             {entry.notes ? <span>הערות: {entry.notes}</span> : null}
-                            {!paymentPathLabel && !hmoApprovalLabel && !entry.notes ? <span>—</span> : null}
+                            {!intakeMeta.contact_name && !contactRelationshipLabel && !paymentPathLabel && !hmoProviderName && !hmoApprovalLabel && !entry.notes ? <span>—</span> : null}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -834,14 +851,24 @@ export default function WaitingListPage() {
                 required
               />
 
-              <TextField
-                id="waiting-list-contact-name"
-                name="contactName"
-                label="שם איש קשר"
-                value={inviteFormValues.contactName}
-                onChange={(event) => setInviteFormValues((prev) => ({ ...prev, contactName: event.target.value }))}
-                required
-              />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <TextField
+                  id="waiting-list-student-first-name"
+                  name="studentFirstName"
+                  label="שם פרטי של התלמיד/ה"
+                  value={inviteFormValues.studentFirstName}
+                  onChange={(event) => setInviteFormValues((prev) => ({ ...prev, studentFirstName: event.target.value }))}
+                  required
+                />
+                <TextField
+                  id="waiting-list-student-last-name"
+                  name="studentLastName"
+                  label="שם משפחה של התלמיד/ה"
+                  value={inviteFormValues.studentLastName}
+                  onChange={(event) => setInviteFormValues((prev) => ({ ...prev, studentLastName: event.target.value }))}
+                  required
+                />
+              </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <TextField

@@ -19,7 +19,8 @@ const DEFAULT_INVITE_TTL_MINUTES = 10080;
 const MAX_INVITE_TTL_MINUTES = 20160;
 const DELIVERY_METHODS = new Set(['whatsapp', 'email']);
 const PAYMENT_PATH_INTENTS = new Set(['private', 'hmo', 'unsure']);
-const HMO_APPROVAL_STATUSES = new Set(['has_approval', 'no_approval_yet', 'send_separately']);
+const HMO_APPROVAL_STATUSES = new Set(['no_approval_yet', 'send_separately']);
+const GUARDIAN_RELATIONSHIPS = new Set(['father', 'mother', 'self', 'caretaker', 'other']);
 const REVIEWABLE_WAITING_LIST_STATUSES = ['new', 'open'];
 
 function normalizeIdentityNumber(value) {
@@ -47,7 +48,13 @@ function normalizePaymentPathIntent(value) {
 
 function normalizeHmoApprovalStatus(value) {
   const normalized = normalizeString(value).toLowerCase();
+  if (normalized === 'has_approval') return 'send_separately';
   return HMO_APPROVAL_STATUSES.has(normalized) ? normalized : 'no_approval_yet';
+}
+
+function normalizeGuardianRelationship(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return GUARDIAN_RELATIONSHIPS.has(normalized) ? normalized : 'self';
 }
 
 function normalizeBoolean(value, defaultValue = false) {
@@ -386,11 +393,15 @@ async function createOrReuseProspectStudent(tenantClient, payload) {
     }
   }
 
-  const { firstName, lastName } = splitContactName(payload.contact_name);
+  const firstName = normalizeString(payload.student_first_name || payload.studentFirstName);
+  const lastName = normalizeString(payload.student_last_name || payload.studentLastName);
+  if (!firstName || !lastName) {
+    throw new Error('missing_student_name');
+  }
   const { data, error } = await tenantClient
     .from('students')
     .insert({
-      first_name: firstName || 'ללא שם',
+      first_name: firstName,
       last_name: lastName,
       identity_number: identityNumber || null,
       phone: normalizePhone(payload.phone) || null,
@@ -410,12 +421,87 @@ async function createOrReuseProspectStudent(tenantClient, payload) {
   return data.id;
 }
 
+async function createOrReuseGuardian(tenantClient, { contactName, phone, email }) {
+  const normalizedContactName = normalizeString(contactName);
+  if (!normalizedContactName) return null;
+
+  const { firstName, lastName } = splitContactName(normalizedContactName);
+  const normalizedPhone = normalizePhone(phone);
+  const normalizedEmail = normalizeEmail(email);
+
+  let existingGuardian = null;
+
+  if (normalizedPhone) {
+    const { data, error } = await tenantClient
+      .from('guardians')
+      .select('id, phone, email')
+      .eq('phone', normalizedPhone)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`failed_to_lookup_guardian:${error.message}`);
+    existingGuardian = data || null;
+  }
+
+  if (!existingGuardian && normalizedEmail) {
+    const { data, error } = await tenantClient
+      .from('guardians')
+      .select('id, phone, email')
+      .eq('email', normalizedEmail)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`failed_to_lookup_guardian:${error.message}`);
+    existingGuardian = data || null;
+  }
+
+  if (existingGuardian?.id) {
+    const updates = {};
+    if (!normalizePhone(existingGuardian.phone) && normalizedPhone) updates.phone = normalizedPhone;
+    if (!normalizeEmail(existingGuardian.email) && normalizedEmail) updates.email = normalizedEmail;
+    if (Object.keys(updates).length) {
+      const { error } = await tenantClient.from('guardians').update(updates).eq('id', existingGuardian.id);
+      if (error) throw new Error(`failed_to_update_guardian:${error.message}`);
+    }
+    return existingGuardian.id;
+  }
+
+  const { data, error } = await tenantClient
+    .from('guardians')
+    .insert({
+      first_name: firstName || normalizedContactName,
+      last_name: lastName || null,
+      phone: normalizedPhone || null,
+      email: normalizedEmail || null,
+    })
+    .select('id')
+    .single();
+
+  if (error || !data?.id) {
+    throw new Error(`failed_to_create_guardian:${error?.message || 'unknown_error'}`);
+  }
+
+  return data.id;
+}
+
+async function upsertGuardianLink(tenantClient, { studentId, guardianId, relationship }) {
+  if (!UUID_PATTERN.test(String(studentId || '')) || !UUID_PATTERN.test(String(guardianId || ''))) return;
+  const { error } = await tenantClient
+    .from('student_guardians')
+    .upsert({
+      student_id: studentId,
+      guardian_id: guardianId,
+      relationship,
+      is_primary: true,
+    }, { onConflict: 'student_id,guardian_id' });
+  if (error) throw new Error(`failed_to_link_guardian:${error.message}`);
+}
+
 async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
   const body = parseRequestBody(req);
   const formId = normalizeUuid(body?.form_id || body?.formId);
   const desiredServiceId = normalizeUuid(body?.desired_service_id || body?.desiredServiceId || body?.service_id || body?.serviceId);
   const deliveryMethod = normalizeDeliveryMethod(body?.delivery_method || body?.deliveryMethod);
-  const contactName = normalizeString(body?.contact_name || body?.contactName);
+  const studentFirstName = normalizeString(body?.student_first_name || body?.studentFirstName);
+  const studentLastName = normalizeString(body?.student_last_name || body?.studentLastName);
   const phone = normalizePhone(body?.phone);
   const email = normalizeEmail(body?.email);
   const allowAdditionalServices = normalizeBoolean(body?.allow_additional_services ?? body?.allowAdditionalServices, false);
@@ -426,7 +512,8 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
   if (!formId) return respond(context, 400, { message: 'invalid_form_id' });
   if (!desiredServiceId) return respond(context, 400, { message: 'invalid_service_id' });
   if (!deliveryMethod) return respond(context, 400, { message: 'invalid_delivery_method' });
-  if (!contactName) return respond(context, 400, { message: 'missing_contact_name' });
+  if (!studentFirstName) return respond(context, 400, { message: 'missing_student_first_name' });
+  if (!studentLastName) return respond(context, 400, { message: 'missing_student_last_name' });
   if (deliveryMethod === 'whatsapp' && !phone) return respond(context, 400, { message: 'missing_phone' });
   if (deliveryMethod === 'email' && !email) return respond(context, 400, { message: 'missing_email' });
 
@@ -459,7 +546,8 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
   let studentId = '';
   try {
     studentId = await createOrReuseProspectStudent(tenantClient, {
-      contact_name: contactName,
+      student_first_name: studentFirstName,
+      student_last_name: studentLastName,
       phone,
       email,
       identity_number: identityNumber,
@@ -562,6 +650,8 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
         delivery_method: deliveryMethod,
         initiated_at: nowIso,
         initiated_by: userId,
+        student_first_name: studentFirstName,
+        student_last_name: studentLastName,
         primary_service_id: desiredServiceId,
         allow_additional_services: allowAdditionalServices,
         internal_note: internalNote,
@@ -590,11 +680,13 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
       created_by: userId,
       routing_info: { submission_id: submission.id },
       metadata: {
-        student_id: studentId,
-        form_id: formId,
-        delivery_method: deliveryMethod,
-        primary_service_id: desiredServiceId,
-        allow_additional_services: allowAdditionalServices,
+      student_id: studentId,
+      form_id: formId,
+      delivery_method: deliveryMethod,
+      student_first_name: studentFirstName,
+      student_last_name: studentLastName,
+      primary_service_id: desiredServiceId,
+      allow_additional_services: allowAdditionalServices,
       },
     })
     .select('id')
@@ -718,7 +810,10 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
     form_schema: form.form_schema && typeof form.form_schema === 'object' ? form.form_schema : { type: 'object', properties: {}, required: [] },
     prospect: {
       student_id: student?.id || null,
-      contact_name: [student?.first_name, student?.last_name].filter(Boolean).join(' ').trim(),
+      student_first_name: student?.first_name || '',
+      student_last_name: student?.last_name || '',
+      contact_name: normalizeString(submissionMetadata.contact_name) || '',
+      contact_relationship: normalizeGuardianRelationship(submissionMetadata.contact_relationship),
       identity_number: student?.identity_number || '',
       phone: student?.phone || '',
       email: student?.email || '',
@@ -780,17 +875,23 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
   const intake = body?.intake && typeof body.intake === 'object' && !Array.isArray(body.intake) ? body.intake : {};
   const customAnswers = normalizeCustomAnswers(body?.custom_answers ?? body?.customAnswers);
 
+  const studentFirstName = normalizeString(intake?.student_first_name || intake?.studentFirstName);
+  const studentLastName = normalizeString(intake?.student_last_name || intake?.studentLastName);
   const contactName = normalizeString(intake?.contact_name || intake?.contactName);
+  const contactRelationship = normalizeGuardianRelationship(intake?.contact_relationship ?? intake?.contactRelationship);
   const phone = normalizePhone(intake?.phone);
   const email = normalizeEmail(intake?.email);
   const identityNumber = normalizeIdentityNumber(intake?.identity_number || intake?.identityNumber);
   const preferredDays = normalizePreferredDays(intake?.preferred_days ?? intake?.preferredDays);
   const preferredTimes = normalizePreferredTimes(intake?.preferred_times ?? intake?.preferredTimes);
   const paymentPathIntent = normalizePaymentPathIntent(intake?.payment_path_intent ?? intake?.paymentPathIntent);
-  const hmoApprovalStatus = normalizeHmoApprovalStatus(intake?.hmo_approval_status ?? intake?.hmoApprovalStatus);
+  const requestedHmoApprovalStatus = normalizeHmoApprovalStatus(intake?.hmo_approval_status ?? intake?.hmoApprovalStatus);
+  const requestedHmoProviderName = normalizeString(intake?.hmo_provider_name ?? intake?.hmoProviderName);
   const prospectNotes = normalizeString(intake?.notes);
 
-  if (!contactName) return respond(context, 400, { message: 'missing_contact_name' });
+  if (!studentFirstName) return respond(context, 400, { message: 'missing_student_first_name' });
+  if (!studentLastName) return respond(context, 400, { message: 'missing_student_last_name' });
+  if (contactRelationship !== 'self' && !contactName) return respond(context, 400, { message: 'missing_contact_name' });
 
   const serviceById = new Map(services.map((service) => [service.id, service]));
   const primaryServiceId = normalizeUuid(currentSubmissionMetadata.primary_service_id);
@@ -799,6 +900,12 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
   }
 
   const allowAdditionalServices = Boolean(currentSubmissionMetadata.allow_additional_services);
+  const effectiveContactName = contactRelationship === 'self' ? null : contactName;
+  const effectiveHmoApprovalStatus = paymentPathIntent === 'hmo' ? requestedHmoApprovalStatus : null;
+  const effectiveHmoProviderName = paymentPathIntent === 'hmo' ? requestedHmoProviderName : null;
+  if (paymentPathIntent === 'hmo' && !effectiveHmoProviderName) {
+    return respond(context, 400, { message: 'missing_hmo_provider_name' });
+  }
   const requestedAdditionalServices = Array.isArray(intake?.requested_additional_service_ids ?? intake?.requestedAdditionalServiceIds)
     ? (intake?.requested_additional_service_ids ?? intake?.requestedAdditionalServiceIds)
     : [];
@@ -829,10 +936,9 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     if (conflictStudent?.id) identityConflictStudentId = conflictStudent.id;
   }
 
-  const { firstName, lastName } = splitContactName(contactName);
   const studentUpdates = {
-    first_name: firstName || 'ללא שם',
-    last_name: lastName,
+    first_name: studentFirstName,
+    last_name: studentLastName,
     phone: phone || null,
     email: email || null,
     updated_at: nowIso,
@@ -854,19 +960,48 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     return respond(context, 500, { message: 'failed_to_update_student' });
   }
 
+  let guardianId = null;
+  if (contactRelationship !== 'self') {
+    try {
+      guardianId = await createOrReuseGuardian(tenantClient, {
+        contactName,
+        phone,
+        email,
+      });
+      if (guardianId) {
+        await upsertGuardianLink(tenantClient, {
+          studentId: submission.student_id,
+          guardianId,
+          relationship: contactRelationship,
+        });
+      }
+    } catch (error) {
+      const message = String(error?.message || '');
+      context.log?.error?.('waiting-list-intake failed to create or link guardian', {
+        message,
+        studentId: submission.student_id,
+      });
+      return respond(context, 500, { message: 'failed_to_link_guardian' });
+    }
+  }
+
   const { error: updateSubmissionError } = await tenantClient
     .from('form_submissions')
     .update({
       answers: {
         intake: {
-          contact_name: contactName,
+          student_first_name: studentFirstName,
+          student_last_name: studentLastName,
+          contact_name: effectiveContactName,
+          contact_relationship: contactRelationship,
           phone: phone || null,
           email: email || null,
           identity_number: identityNumber || null,
           preferred_days: preferredDays,
           preferred_times: preferredTimes,
           payment_path_intent: paymentPathIntent,
-          hmo_approval_status: hmoApprovalStatus,
+          hmo_approval_status: effectiveHmoApprovalStatus,
+          hmo_provider_name: effectiveHmoProviderName,
           notes: prospectNotes || null,
           primary_service_id: primaryServiceId,
           requested_additional_service_ids: additionalServiceIds,
@@ -880,6 +1015,10 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
         submitted_at: nowIso,
         workflow_kind: 'waiting_list_intake',
         identity_number_conflict_student_id: identityConflictStudentId || null,
+        contact_name: effectiveContactName,
+        contact_relationship: contactRelationship,
+        guardian_id: guardianId || null,
+        hmo_provider_name: effectiveHmoProviderName,
         schema_snapshot: form.form_schema && typeof form.form_schema === 'object' ? form.form_schema : {},
       },
       otp_metadata: {
@@ -903,7 +1042,11 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
       source: 'waiting_list_intake',
       form_submission_id: submissionId,
       payment_path_intent: paymentPathIntent,
-      hmo_approval_status: hmoApprovalStatus,
+      hmo_approval_status: effectiveHmoApprovalStatus,
+      hmo_provider_name: effectiveHmoProviderName,
+      contact_name: effectiveContactName,
+      contact_relationship: contactRelationship,
+      guardian_id: guardianId || null,
       allow_additional_services: allowAdditionalServices,
       identity_number_conflict_student_id: identityConflictStudentId || null,
       submitted_at: nowIso,

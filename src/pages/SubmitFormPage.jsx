@@ -88,7 +88,10 @@ export default function SubmitFormPage() {
     serviceOptions: [],
   });
   const [intakeValues, setIntakeValues] = useState({
+    studentFirstName: '',
+    studentLastName: '',
     contactName: '',
+    contactRelationship: 'self',
     identityNumber: '',
     phone: '',
     email: '',
@@ -97,6 +100,7 @@ export default function SubmitFormPage() {
     preferredTimesByDay: {},
     paymentPathIntent: 'unsure',
     hmoApprovalStatus: 'no_approval_yet',
+    hmoProviderName: '',
     notes: '',
   });
   const [loading, setLoading] = useState(false);
@@ -160,7 +164,10 @@ export default function SubmitFormPage() {
         });
         setIntakeValues((prev) => ({
           ...prev,
+          studentFirstName: String(payload?.prospect?.student_first_name || ''),
+          studentLastName: String(payload?.prospect?.student_last_name || ''),
           contactName: String(payload?.prospect?.contact_name || ''),
+          contactRelationship: String(payload?.prospect?.contact_relationship || 'self'),
           identityNumber: String(payload?.prospect?.identity_number || ''),
           phone: String(payload?.prospect?.phone || ''),
           email: String(payload?.prospect?.email || ''),
@@ -251,6 +258,18 @@ export default function SubmitFormPage() {
         setError('חסר מזהה קישור, נא לפתוח את הקישור מחדש.');
         return;
       }
+      if (!intakeValues.studentFirstName.trim() || !intakeValues.studentLastName.trim()) {
+        setError('יש למלא שם פרטי ושם משפחה של התלמיד/ה.');
+        return;
+      }
+      if (intakeValues.contactRelationship !== 'self' && !intakeValues.contactName.trim()) {
+        setError('יש למלא שם איש קשר כאשר הקרבה אינה התלמיד/ה עצמו/ה.');
+        return;
+      }
+      if (intakeValues.paymentPathIntent === 'hmo' && !intakeValues.hmoProviderName.trim()) {
+        setError('יש למלא את שם קופת החולים / הגורם המממן.');
+        return;
+      }
 
       setSubmitLoading(true);
       setError('');
@@ -262,7 +281,10 @@ export default function SubmitFormPage() {
           body: JSON.stringify({
             invite_token: inviteToken,
             intake: {
-              contact_name: intakeValues.contactName,
+              student_first_name: intakeValues.studentFirstName,
+              student_last_name: intakeValues.studentLastName,
+              contact_name: intakeValues.contactRelationship === 'self' ? '' : intakeValues.contactName,
+              contact_relationship: intakeValues.contactRelationship,
               identity_number: intakeValues.identityNumber,
               phone: intakeValues.phone,
               email: intakeValues.email,
@@ -270,7 +292,8 @@ export default function SubmitFormPage() {
               preferred_days: intakeValues.preferredDays,
               preferred_times: serializePreferredTimes(intakeValues.preferredTimesByDay),
               payment_path_intent: intakeValues.paymentPathIntent,
-              hmo_approval_status: intakeValues.hmoApprovalStatus,
+              hmo_approval_status: intakeValues.paymentPathIntent === 'hmo' ? intakeValues.hmoApprovalStatus : undefined,
+              hmo_provider_name: intakeValues.paymentPathIntent === 'hmo' ? intakeValues.hmoProviderName : undefined,
               notes: intakeValues.notes,
             },
             custom_answers: formData || {},
@@ -478,13 +501,56 @@ export default function SubmitFormPage() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="invite-contact-name">שם מלא</Label>
+                      <Label htmlFor="invite-student-first-name">שם פרטי של התלמיד/ה</Label>
                       <Input
-                        id="invite-contact-name"
-                        value={intakeValues.contactName}
-                        onChange={(e) => setIntakeValues((prev) => ({ ...prev, contactName: e.target.value }))}
-                        placeholder="שם מלא"
+                        id="invite-student-first-name"
+                        value={intakeValues.studentFirstName}
+                        onChange={(e) => setIntakeValues((prev) => ({ ...prev, studentFirstName: e.target.value }))}
+                        placeholder="שם פרטי"
                       />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="invite-student-last-name">שם משפחה של התלמיד/ה</Label>
+                      <Input
+                        id="invite-student-last-name"
+                        value={intakeValues.studentLastName}
+                        onChange={(e) => setIntakeValues((prev) => ({ ...prev, studentLastName: e.target.value }))}
+                        placeholder="שם משפחה"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="invite-contact-relationship">קרבה לתלמיד/ה</Label>
+                        <select
+                          id="invite-contact-relationship"
+                          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                          value={intakeValues.contactRelationship}
+                          onChange={(e) => setIntakeValues((prev) => ({
+                            ...prev,
+                            contactRelationship: e.target.value,
+                            contactName: e.target.value === 'self' ? '' : prev.contactName,
+                          }))}
+                        >
+                          <option value="self">התלמיד/ה עצמו/ה</option>
+                          <option value="mother">אם</option>
+                          <option value="father">אב</option>
+                          <option value="caretaker">מטפל/ת</option>
+                          <option value="other">אחר</option>
+                        </select>
+                      </div>
+                      {intakeValues.contactRelationship !== 'self' && (
+                        <div className="space-y-2">
+                          <Label htmlFor="invite-contact-name">שם איש קשר / אפוטרופוס</Label>
+                          <Input
+                            id="invite-contact-name"
+                            value={intakeValues.contactName}
+                            onChange={(e) => setIntakeValues((prev) => ({ ...prev, contactName: e.target.value }))}
+                            placeholder="שם איש קשר"
+                          />
+                        </div>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -607,26 +673,43 @@ export default function SubmitFormPage() {
                           id="payment-path-intent"
                           className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
                           value={intakeValues.paymentPathIntent}
-                          onChange={(e) => setIntakeValues((prev) => ({ ...prev, paymentPathIntent: e.target.value }))}
+                          onChange={(e) => setIntakeValues((prev) => ({
+                            ...prev,
+                            paymentPathIntent: e.target.value,
+                            hmoApprovalStatus: e.target.value === 'hmo' ? prev.hmoApprovalStatus : 'no_approval_yet',
+                            hmoProviderName: e.target.value === 'hmo' ? prev.hmoProviderName : '',
+                          }))}
                         >
                           <option value="unsure">לא בטוח/ה, צריך עזרה</option>
                           <option value="private">תשלום פרטי</option>
                           <option value="hmo">דרך קופת חולים / גורם מממן</option>
                         </select>
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="hmo-approval-status">סטטוס אישור קופת חולים</Label>
-                        <select
-                          id="hmo-approval-status"
-                          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-                          value={intakeValues.hmoApprovalStatus}
-                          onChange={(e) => setIntakeValues((prev) => ({ ...prev, hmoApprovalStatus: e.target.value }))}
-                        >
-                          <option value="no_approval_yet">אין אישור עדיין</option>
-                          <option value="has_approval">יש אישור קיים</option>
-                          <option value="send_separately">נשלח בנפרד בוואטסאפ/אימייל</option>
-                        </select>
-                      </div>
+                      {intakeValues.paymentPathIntent === 'hmo' && (
+                        <>
+                          <div className="space-y-2">
+                            <Label htmlFor="hmo-provider-name">שם קופת החולים / הגורם המממן</Label>
+                            <Input
+                              id="hmo-provider-name"
+                              value={intakeValues.hmoProviderName}
+                              onChange={(e) => setIntakeValues((prev) => ({ ...prev, hmoProviderName: e.target.value }))}
+                              placeholder="למשל: כללית"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="hmo-approval-status">סטטוס אישור קופת חולים</Label>
+                            <select
+                              id="hmo-approval-status"
+                              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                              value={intakeValues.hmoApprovalStatus}
+                              onChange={(e) => setIntakeValues((prev) => ({ ...prev, hmoApprovalStatus: e.target.value }))}
+                            >
+                              <option value="no_approval_yet">אין אישור עדיין</option>
+                              <option value="send_separately">האישור יישלח בנפרד בוואטסאפ/אימייל</option>
+                            </select>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <div className="space-y-2">
