@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
-import { Loader2, ShieldCheck, FileCheck2, Info } from 'lucide-react';
+import { Loader2, ShieldCheck, FileCheck2, Info, UserRound, PhoneCall, CalendarClock, WalletCards, ClipboardList, CheckCircle2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -69,6 +69,152 @@ function serializePreferredTimes(preferredTimesByDay) {
 }
 
 const LEGAL_NOTICE_DISMISSED_KEY = 'reinex_submit_legal_notice_dismissed';
+
+function RequiredLabel({ htmlFor, children, required = false }) {
+  return (
+    <Label htmlFor={htmlFor} className="text-sm font-medium text-slate-800">
+      {children}
+      {required ? <span className="ms-1 text-red-500">*</span> : null}
+    </Label>
+  );
+}
+
+function getPublicInputClass(hasError) {
+  return `h-11 rounded-xl border bg-white px-3 text-sm shadow-sm transition-colors ${
+    hasError ? 'border-red-300 focus-visible:ring-red-300' : 'border-slate-200 focus-visible:ring-primary/30'
+  }`;
+}
+
+function PublicTextWidget(props) {
+  const { id, value, onChange, placeholder, disabled, readonly, required, type = 'text', rawErrors } = props;
+  return (
+    <Input
+      id={id}
+      type={type}
+      value={value ?? ''}
+      required={required}
+      disabled={disabled || readonly}
+      placeholder={placeholder}
+      className={getPublicInputClass(Boolean(rawErrors?.length))}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+}
+
+function PublicNumberWidget(props) {
+  const { id, value, onChange, placeholder, disabled, readonly, required, rawErrors } = props;
+  return (
+    <Input
+      id={id}
+      type="number"
+      value={value ?? ''}
+      required={required}
+      disabled={disabled || readonly}
+      placeholder={placeholder}
+      className={getPublicInputClass(Boolean(rawErrors?.length))}
+      onChange={(event) => onChange(event.target.value === '' ? undefined : Number(event.target.value))}
+    />
+  );
+}
+
+function PublicTextareaWidget(props) {
+  const { id, value, onChange, placeholder, disabled, readonly, required, rawErrors } = props;
+  return (
+    <Textarea
+      id={id}
+      value={value ?? ''}
+      required={required}
+      disabled={disabled || readonly}
+      placeholder={placeholder}
+      rows={4}
+      className={`min-h-[120px] rounded-xl border bg-white px-3 py-2 text-sm shadow-sm ${rawErrors?.length ? 'border-red-300' : 'border-slate-200'}`}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+}
+
+function PublicSelectWidget(props) {
+  const { id, value, onChange, disabled, readonly, required, options, rawErrors, placeholder } = props;
+  return (
+    <select
+      id={id}
+      value={value ?? ''}
+      required={required}
+      disabled={disabled || readonly}
+      className={`h-11 w-full rounded-xl border bg-white px-3 text-sm shadow-sm ${rawErrors?.length ? 'border-red-300' : 'border-slate-200'}`}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <option value="">{placeholder || 'בחרו אפשרות'}</option>
+      {(options?.enumOptions || []).map((option) => (
+        <option key={String(option.value)} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function PublicCheckboxWidget(props) {
+  const { id, value, onChange, disabled, readonly, rawErrors } = props;
+  const isLocked = disabled || readonly;
+  const selectedValue = typeof value === 'boolean' ? value : null;
+  return (
+    <div className={`rounded-2xl border bg-white p-2 shadow-sm ${rawErrors?.length ? 'border-red-300' : 'border-slate-200'}`}>
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          variant={selectedValue === true ? 'default' : 'outline'}
+          className="h-11 rounded-xl"
+          disabled={isLocked}
+          onClick={() => onChange(true)}
+        >
+          כן
+        </Button>
+        <Button
+          type="button"
+          variant={selectedValue === false ? 'default' : 'outline'}
+          className="h-11 rounded-xl"
+          disabled={isLocked}
+          onClick={() => onChange(false)}
+        >
+          לא
+        </Button>
+      </div>
+      <input id={id} type="hidden" value={selectedValue === null ? '' : String(selectedValue)} readOnly />
+      {selectedValue === null ? (
+        <p className="mt-2 text-xs text-slate-500">בחרו כן או לא.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function PublicFieldTemplate(props) {
+  const { id, label, required, children, errors, help, hidden, displayLabel, description, rawErrors } = props;
+  if (hidden) return <div className="hidden">{children}</div>;
+  if (id === 'root') return children;
+  return (
+    <div className={`space-y-2 rounded-2xl border bg-slate-50/70 p-4 ${rawErrors?.length ? 'border-red-200' : 'border-slate-200'}`}>
+      {displayLabel && label ? <RequiredLabel htmlFor={id} required={required}>{label}</RequiredLabel> : null}
+      {description}
+      {children}
+      {errors}
+      {help}
+    </div>
+  );
+}
+
+function PublicObjectFieldTemplate(props) {
+  return <div className="space-y-4">{props.properties.map((property) => <div key={property.name}>{property.content}</div>)}</div>;
+}
+
+function PublicTitleFieldTemplate(props) {
+  return <h3 id={props.id} className="text-base font-semibold text-slate-900">{props.title}</h3>;
+}
+
+function PublicDescriptionFieldTemplate(props) {
+  if (!props.description) return null;
+  return <p id={props.id} className="text-sm text-slate-600">{props.description}</p>;
+}
 
 export default function SubmitFormPage() {
   const [searchParams] = useSearchParams();
@@ -260,6 +406,10 @@ export default function SubmitFormPage() {
       }
       if (!intakeValues.studentFirstName.trim() || !intakeValues.studentLastName.trim()) {
         setError('יש למלא שם פרטי ושם משפחה של התלמיד/ה.');
+        return;
+      }
+      if (!intakeValues.identityNumber.trim()) {
+        setError('יש למלא מספר זהות.');
         return;
       }
       if (intakeValues.contactRelationship !== 'self' && !intakeValues.contactName.trim()) {
@@ -457,9 +607,9 @@ export default function SubmitFormPage() {
             )}
 
             {step === 'login' && submissionMode !== 'invite' && (
-              <form className="space-y-4" onSubmit={handleVerify}>
+              <form className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-5" onSubmit={handleVerify}>
                 <div className="space-y-2">
-                  <Label htmlFor="identity-number">מזהה גישה</Label>
+                  <RequiredLabel htmlFor="identity-number" required>מזהה גישה</RequiredLabel>
                   <Input
                     id="identity-number"
                     dir="rtl"
@@ -471,7 +621,7 @@ export default function SubmitFormPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="otp">קוד אימות</Label>
+                  <RequiredLabel htmlFor="otp" required>קוד אימות</RequiredLabel>
                   <Input
                     id="otp"
                     dir="rtl"
@@ -492,108 +642,157 @@ export default function SubmitFormPage() {
             {step === 'form' && (
               <div className="space-y-5">
                 {submissionMode === 'invite' && (
-                  <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                    <div className="space-y-1">
-                      <h3 className="text-sm font-semibold text-slate-900">פרטי הצטרפות לרשימת המתנה</h3>
+                  <div className="space-y-5">
+                    <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-5 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <div className="rounded-2xl bg-primary/10 p-3 text-primary">
+                          <UserRound className="h-5 w-5" />
+                        </div>
+                        <div className="space-y-1">
+                          <h3 className="text-base font-semibold text-slate-900">פרטי הצטרפות לרשימת ההמתנה</h3>
+                          <p className="text-sm text-slate-600">נשמח להכיר את התלמיד/ה ולבדוק התאמה לשיבוץ.</p>
+                        </div>
+                      </div>
                       {primaryService ? (
-                        <p className="text-sm text-slate-600">שירות מבוקש: <strong>{primaryService.name}</strong></p>
+                        <div className="mt-4 rounded-2xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-slate-700">
+                          שירות מבוקש: <strong>{primaryService.name}</strong>
+                        </div>
                       ) : null}
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="invite-student-first-name">שם פרטי של התלמיד/ה</Label>
-                      <Input
-                        id="invite-student-first-name"
-                        value={intakeValues.studentFirstName}
-                        onChange={(e) => setIntakeValues((prev) => ({ ...prev, studentFirstName: e.target.value }))}
-                        placeholder="שם פרטי"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="invite-student-last-name">שם משפחה של התלמיד/ה</Label>
-                      <Input
-                        id="invite-student-last-name"
-                        value={intakeValues.studentLastName}
-                        onChange={(e) => setIntakeValues((prev) => ({ ...prev, studentLastName: e.target.value }))}
-                        placeholder="שם משפחה"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="invite-contact-relationship">קרבה לתלמיד/ה</Label>
-                        <select
-                          id="invite-contact-relationship"
-                          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-                          value={intakeValues.contactRelationship}
-                          onChange={(e) => setIntakeValues((prev) => ({
-                            ...prev,
-                            contactRelationship: e.target.value,
-                            contactName: e.target.value === 'self' ? '' : prev.contactName,
-                          }))}
-                        >
-                          <option value="self">התלמיד/ה עצמו/ה</option>
-                          <option value="mother">אם</option>
-                          <option value="father">אב</option>
-                          <option value="caretaker">מטפל/ת</option>
-                          <option value="other">אחר</option>
-                        </select>
+                    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
+                          <ClipboardList className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-semibold text-slate-900">פרטי תלמיד/ה</h4>
+                          <p className="text-xs text-slate-500">שדות החובה מסומנים בכוכבית.</p>
+                        </div>
                       </div>
-                      {intakeValues.contactRelationship !== 'self' && (
+
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                         <div className="space-y-2">
-                          <Label htmlFor="invite-contact-name">שם איש קשר / אפוטרופוס</Label>
+                          <RequiredLabel htmlFor="invite-student-first-name" required>שם פרטי של התלמיד/ה</RequiredLabel>
+                          <Input
+                            id="invite-student-first-name"
+                            value={intakeValues.studentFirstName}
+                            onChange={(e) => setIntakeValues((prev) => ({ ...prev, studentFirstName: e.target.value }))}
+                            placeholder="שם פרטי"
+                            className={getPublicInputClass(false)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <RequiredLabel htmlFor="invite-student-last-name" required>שם משפחה של התלמיד/ה</RequiredLabel>
+                          <Input
+                            id="invite-student-last-name"
+                            value={intakeValues.studentLastName}
+                            onChange={(e) => setIntakeValues((prev) => ({ ...prev, studentLastName: e.target.value }))}
+                            placeholder="שם משפחה"
+                            className={getPublicInputClass(false)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <RequiredLabel htmlFor="invite-identity-number" required>מספר זהות</RequiredLabel>
+                          <Input
+                            id="invite-identity-number"
+                            inputMode="numeric"
+                            value={intakeValues.identityNumber}
+                            onChange={(e) => setIntakeValues((prev) => ({ ...prev, identityNumber: e.target.value.replace(/\D/g, '') }))}
+                            placeholder="מספר זהות של התלמיד/ה"
+                            className={getPublicInputClass(false)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <RequiredLabel htmlFor="invite-contact-relationship">קרבה לתלמיד/ה</RequiredLabel>
+                          <select
+                            id="invite-contact-relationship"
+                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm"
+                            value={intakeValues.contactRelationship}
+                            onChange={(e) => setIntakeValues((prev) => ({
+                              ...prev,
+                              contactRelationship: e.target.value,
+                              contactName: e.target.value === 'self' ? '' : prev.contactName,
+                            }))}
+                          >
+                            <option value="self">התלמיד/ה עצמו/ה</option>
+                            <option value="mother">אם</option>
+                            <option value="father">אב</option>
+                            <option value="caretaker">מטפל/ת</option>
+                            <option value="other">אחר</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {intakeValues.contactRelationship !== 'self' && (
+                        <div className="mt-4 space-y-2">
+                          <RequiredLabel htmlFor="invite-contact-name" required>שם איש קשר / אפוטרופוס</RequiredLabel>
                           <Input
                             id="invite-contact-name"
                             value={intakeValues.contactName}
                             onChange={(e) => setIntakeValues((prev) => ({ ...prev, contactName: e.target.value }))}
                             placeholder="שם איש קשר"
+                            className={getPublicInputClass(false)}
                           />
                         </div>
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="invite-identity-number">מספר זהות</Label>
-                        <Input
-                          id="invite-identity-number"
-                          inputMode="numeric"
-                          value={intakeValues.identityNumber}
-                          onChange={(e) => setIntakeValues((prev) => ({ ...prev, identityNumber: e.target.value.replace(/\D/g, '') }))}
-                          placeholder="אופציונלי"
-                        />
+                    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
+                          <PhoneCall className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-semibold text-slate-900">פרטי התקשרות</h4>
+                          <p className="text-xs text-slate-500">כדי שנוכל לחזור אליכם ולעדכן על המשך התהליך.</p>
+                        </div>
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="invite-phone">טלפון</Label>
-                        <Input
-                          id="invite-phone"
-                          value={intakeValues.phone}
-                          onChange={(e) => setIntakeValues((prev) => ({ ...prev, phone: e.target.value }))}
-                          placeholder="05X-XXXXXXX"
-                        />
-                      </div>
-                    </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="invite-email">אימייל</Label>
-                      <Input
-                        id="invite-email"
-                        type="email"
-                        value={intakeValues.email}
-                        onChange={(e) => setIntakeValues((prev) => ({ ...prev, email: e.target.value }))}
-                        placeholder="name@example.com"
-                      />
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <RequiredLabel htmlFor="invite-phone">טלפון</RequiredLabel>
+                          <Input
+                            id="invite-phone"
+                            value={intakeValues.phone}
+                            onChange={(e) => setIntakeValues((prev) => ({ ...prev, phone: e.target.value }))}
+                            placeholder="05X-XXXXXXX"
+                            className={getPublicInputClass(false)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <RequiredLabel htmlFor="invite-email">אימייל</RequiredLabel>
+                          <Input
+                            id="invite-email"
+                            type="email"
+                            value={intakeValues.email}
+                            onChange={(e) => setIntakeValues((prev) => ({ ...prev, email: e.target.value }))}
+                            placeholder="name@example.com"
+                            className={getPublicInputClass(false)}
+                          />
+                        </div>
+                      </div>
                     </div>
 
                     {inviteConfig.allowAdditionalServices && inviteConfig.serviceOptions.length > 1 && (
-                      <div className="space-y-2">
-                        <Label>שירותים נוספים שמעניינים אותך</Label>
-                        <div className="space-y-2 rounded-md border border-slate-200 bg-white p-3">
+                      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div className="mb-4 flex items-center gap-3">
+                          <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
+                            <CheckCircle2 className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-semibold text-slate-900">שירותים נוספים</h4>
+                            <p className="text-xs text-slate-500">אפשר לסמן עוד שירותים שמעניינים אתכם, מעבר לשירות הראשי.</p>
+                          </div>
+                        </div>
+                        <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
                           {inviteConfig.serviceOptions
                             .filter((service) => service.id !== inviteConfig.primaryServiceId)
                             .map((service) => (
-                              <label key={service.id} className="flex items-center gap-3 text-sm text-slate-700">
+                              <label key={service.id} className="flex items-center gap-3 rounded-xl bg-white px-3 py-3 text-sm text-slate-700 shadow-sm">
                                 <Checkbox
                                   checked={intakeValues.additionalServiceIds.includes(service.id)}
                                   onCheckedChange={(checked) => toggleAdditionalService(service.id, checked === true)}
@@ -605,46 +804,60 @@ export default function SubmitFormPage() {
                       </div>
                     )}
 
-                    <div className="space-y-2">
-                      <Label>ימי זמינות מועדפים</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {DAYS_OF_WEEK.map((day) => {
-                          const selected = intakeValues.preferredDays.includes(day.value);
-                          return (
-                            <button
-                              key={day.value}
-                              type="button"
-                              onClick={() => togglePreferredDay(day.value)}
-                              className={`rounded-md border px-3 py-2 text-sm ${selected ? 'border-primary bg-primary text-white' : 'border-slate-300 bg-white text-slate-700'}`}
-                            >
-                              {day.label}
-                            </button>
-                          );
-                        })}
+                    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
+                          <CalendarClock className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-semibold text-slate-900">זמינות מועדפת</h4>
+                          <p className="text-xs text-slate-500">כך יהיה לנו קל יותר למצוא עבורכם התאמה מתאימה.</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <RequiredLabel>ימי זמינות מועדפים</RequiredLabel>
+                        <div className="flex flex-wrap gap-2">
+                          {DAYS_OF_WEEK.map((day) => {
+                            const selected = intakeValues.preferredDays.includes(day.value);
+                            return (
+                              <button
+                                key={day.value}
+                                type="button"
+                                onClick={() => togglePreferredDay(day.value)}
+                                className={`rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors ${selected ? 'border-primary bg-primary text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'}`}
+                              >
+                                {day.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
 
                     {intakeValues.preferredDays.length > 0 && (
                       <div className="space-y-3">
-                        <Label>טווחי שעות מועדפים</Label>
+                        <RequiredLabel>טווחי שעות מועדפים</RequiredLabel>
                         {intakeValues.preferredDays.map((day) => {
                           const dayInfo = DAYS_OF_WEEK.find((entry) => entry.value === day);
                           const ranges = intakeValues.preferredTimesByDay[day] || [{ start: '', end: '' }];
                           return (
-                            <div key={day} className="rounded-md border border-slate-200 bg-white p-3">
-                              <div className="mb-2 text-sm font-medium text-slate-700">{dayInfo?.label || day}</div>
+                            <div key={day} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                              <div className="mb-3 text-sm font-medium text-slate-700">{dayInfo?.label || day}</div>
                               <div className="space-y-2">
                                 {ranges.map((range, index) => (
-                                  <div key={`${day}-${index}`} className="flex items-center gap-2">
+                                  <div key={`${day}-${index}`} className="flex flex-col gap-2 sm:flex-row sm:items-center">
                                     <Input
                                       type="time"
                                       value={range.start}
+                                      className={getPublicInputClass(false)}
                                       onChange={(e) => updatePreferredRange(day, index, 'start', e.target.value)}
                                     />
                                     <span className="text-sm text-slate-500">עד</span>
                                     <Input
                                       type="time"
                                       value={range.end}
+                                      className={getPublicInputClass(false)}
                                       onChange={(e) => updatePreferredRange(day, index, 'end', e.target.value)}
                                     />
                                     {ranges.length > 1 && (
@@ -655,7 +868,7 @@ export default function SubmitFormPage() {
                                   </div>
                                 ))}
                               </div>
-                              <div className="mt-2">
+                              <div className="mt-3">
                                 <Button type="button" variant="outline" onClick={() => addPreferredRange(day)}>
                                   הוסף טווח
                                 </Button>
@@ -666,79 +879,120 @@ export default function SubmitFormPage() {
                       </div>
                     )}
 
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="payment-path-intent">סוג תשלום מבוקש</Label>
-                        <select
-                          id="payment-path-intent"
-                          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-                          value={intakeValues.paymentPathIntent}
-                          onChange={(e) => setIntakeValues((prev) => ({
-                            ...prev,
-                            paymentPathIntent: e.target.value,
-                            hmoApprovalStatus: e.target.value === 'hmo' ? prev.hmoApprovalStatus : 'no_approval_yet',
-                            hmoProviderName: e.target.value === 'hmo' ? prev.hmoProviderName : '',
-                          }))}
-                        >
-                          <option value="unsure">לא בטוח/ה, צריך עזרה</option>
-                          <option value="private">תשלום פרטי</option>
-                          <option value="hmo">דרך קופת חולים / גורם מממן</option>
-                        </select>
+                    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
+                          <WalletCards className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-semibold text-slate-900">פרטי מימון</h4>
+                          <p className="text-xs text-slate-500">המידע יעזור לנו להבין איך להמשיך את התהליך מולכם.</p>
+                        </div>
                       </div>
-                      {intakeValues.paymentPathIntent === 'hmo' && (
-                        <>
-                          <div className="space-y-2">
-                            <Label htmlFor="hmo-provider-name">שם קופת החולים / הגורם המממן</Label>
-                            <Input
-                              id="hmo-provider-name"
-                              value={intakeValues.hmoProviderName}
-                              onChange={(e) => setIntakeValues((prev) => ({ ...prev, hmoProviderName: e.target.value }))}
-                              placeholder="למשל: כללית"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="hmo-approval-status">סטטוס אישור קופת חולים</Label>
-                            <select
-                              id="hmo-approval-status"
-                              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-                              value={intakeValues.hmoApprovalStatus}
-                              onChange={(e) => setIntakeValues((prev) => ({ ...prev, hmoApprovalStatus: e.target.value }))}
-                            >
-                              <option value="no_approval_yet">אין אישור עדיין</option>
-                              <option value="send_separately">האישור יישלח בנפרד בוואטסאפ/אימייל</option>
-                            </select>
-                          </div>
-                        </>
-                      )}
-                    </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="invite-notes">הערות נוספות</Label>
-                      <Textarea
-                        id="invite-notes"
-                        value={intakeValues.notes}
-                        onChange={(e) => setIntakeValues((prev) => ({ ...prev, notes: e.target.value }))}
-                        rows={4}
-                        placeholder="פרטים נוספים שחשוב שנדע"
-                      />
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <RequiredLabel htmlFor="payment-path-intent">סוג תשלום מבוקש</RequiredLabel>
+                          <select
+                            id="payment-path-intent"
+                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm"
+                            value={intakeValues.paymentPathIntent}
+                            onChange={(e) => setIntakeValues((prev) => ({
+                              ...prev,
+                              paymentPathIntent: e.target.value,
+                              hmoApprovalStatus: e.target.value === 'hmo' ? prev.hmoApprovalStatus : 'no_approval_yet',
+                              hmoProviderName: e.target.value === 'hmo' ? prev.hmoProviderName : '',
+                            }))}
+                          >
+                            <option value="unsure">לא בטוח/ה, צריך עזרה</option>
+                            <option value="private">תשלום פרטי</option>
+                            <option value="hmo">דרך קופת חולים / גורם מממן</option>
+                          </select>
+                        </div>
+                        {intakeValues.paymentPathIntent === 'hmo' && (
+                          <>
+                            <div className="space-y-2">
+                              <RequiredLabel htmlFor="hmo-provider-name" required>שם קופת החולים / הגורם המממן</RequiredLabel>
+                              <Input
+                                id="hmo-provider-name"
+                                value={intakeValues.hmoProviderName}
+                                onChange={(e) => setIntakeValues((prev) => ({ ...prev, hmoProviderName: e.target.value }))}
+                                placeholder="למשל: כללית"
+                                className={getPublicInputClass(false)}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <RequiredLabel htmlFor="hmo-approval-status">סטטוס אישור קופת חולים</RequiredLabel>
+                              <select
+                                id="hmo-approval-status"
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm"
+                                value={intakeValues.hmoApprovalStatus}
+                                onChange={(e) => setIntakeValues((prev) => ({ ...prev, hmoApprovalStatus: e.target.value }))}
+                              >
+                                <option value="no_approval_yet">אין אישור עדיין</option>
+                                <option value="send_separately">האישור יישלח בנפרד בוואטסאפ/אימייל</option>
+                              </select>
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="mt-4 space-y-2">
+                        <RequiredLabel htmlFor="invite-notes">הערות נוספות</RequiredLabel>
+                        <Textarea
+                          id="invite-notes"
+                          value={intakeValues.notes}
+                          onChange={(e) => setIntakeValues((prev) => ({ ...prev, notes: e.target.value }))}
+                          rows={4}
+                          placeholder="פרטים נוספים שחשוב שנדע"
+                          className="min-h-[120px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
 
-                <Form
-                  schema={formSchema}
-                  validator={validator}
-                  formData={answers}
-                  onChange={(event) => setAnswers(event.formData || {})}
-                  onSubmit={handleSubmitForm}
-                >
-                  <div className="pt-2">
-                    <Button type="submit" className="w-full gap-2" disabled={submitLoading}>
-                      {submitLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      שלח טופס
-                    </Button>
+                <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-4 flex items-center gap-3">
+                    <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
+                      <FileCheck2 className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-900">שאלות נוספות</h4>
+                      <p className="text-xs text-slate-500">מלאו כל שאלה רלוונטית כדי שנוכל להמשיך את הטיפול מהר יותר.</p>
+                    </div>
                   </div>
-                </Form>
+
+                  <Form
+                    schema={formSchema}
+                    validator={validator}
+                    formData={answers}
+                    widgets={{
+                      TextWidget: PublicTextWidget,
+                      EmailWidget: PublicTextWidget,
+                      PasswordWidget: PublicTextWidget,
+                      NumberWidget: PublicNumberWidget,
+                      TextareaWidget: PublicTextareaWidget,
+                      SelectWidget: PublicSelectWidget,
+                      CheckboxWidget: PublicCheckboxWidget,
+                    }}
+                    templates={{
+                      FieldTemplate: PublicFieldTemplate,
+                      ObjectFieldTemplate: PublicObjectFieldTemplate,
+                      TitleFieldTemplate: PublicTitleFieldTemplate,
+                      DescriptionFieldTemplate: PublicDescriptionFieldTemplate,
+                    }}
+                    onChange={(event) => setAnswers(event.formData || {})}
+                    onSubmit={handleSubmitForm}
+                  >
+                    <div className="pt-4">
+                      <Button type="submit" className="h-11 w-full gap-2 rounded-xl" disabled={submitLoading}>
+                        {submitLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        שלח טופס
+                      </Button>
+                    </div>
+                  </Form>
+                </div>
               </div>
             )}
 

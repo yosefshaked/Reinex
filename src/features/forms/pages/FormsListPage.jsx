@@ -30,6 +30,20 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 
+function getDraftDefaultsByUsage(usage) {
+  if (usage === 'waiting_list_intake') {
+    return {
+      name: 'טופס הצטרפות לרשימת המתנה',
+      description: 'טופס ציבורי לאיסוף פרטי מתעניין/ת והעברה אוטומטית לרשימת ההמתנה.',
+    };
+  }
+
+  return {
+    name: 'טופס כללי חדש',
+    description: 'טופס כללי למילוי ושליחת מידע נוסף.',
+  };
+}
+
 export default function FormsListPage() {
   const navigate = useNavigate();
   const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
@@ -75,6 +89,27 @@ export default function FormsListPage() {
     }
   }, [canFetch, loadForms]);
 
+  useEffect(() => {
+    if (!dialogOpen) return;
+    const defaults = getDraftDefaultsByUsage(newUsage);
+    setNewName((prev) => {
+      const generalDefaults = getDraftDefaultsByUsage('general');
+      const waitingListDefaults = getDraftDefaultsByUsage('waiting_list_intake');
+      if (!prev.trim() || prev === generalDefaults.name || prev === waitingListDefaults.name) {
+        return defaults.name;
+      }
+      return prev;
+    });
+    setNewDescription((prev) => {
+      const generalDefaults = getDraftDefaultsByUsage('general');
+      const waitingListDefaults = getDraftDefaultsByUsage('waiting_list_intake');
+      if (!prev.trim() || prev === generalDefaults.description || prev === waitingListDefaults.description) {
+        return defaults.description;
+      }
+      return prev;
+    });
+  }, [dialogOpen, newUsage]);
+
   const handleCreate = async () => {
     const trimmedName = newName.trim();
     if (!trimmedName) {
@@ -96,8 +131,8 @@ export default function FormsListPage() {
       });
       toast.success('הטופס נוצר בהצלחה');
       setDialogOpen(false);
-      setNewName('');
-      setNewDescription('');
+      setNewName(getDraftDefaultsByUsage('general').name);
+      setNewDescription(getDraftDefaultsByUsage('general').description);
       setNewUsage('general');
       void loadForms();
     } catch (err) {
@@ -171,7 +206,16 @@ export default function FormsListPage() {
       description="ניהול טפסים ושאלונים עבור תלמידי הארגון"
       actions={
         isAdmin ? (
-          <Button className="gap-2" onClick={() => setDialogOpen(true)}>
+          <Button
+            className="gap-2"
+            onClick={() => {
+              const defaults = getDraftDefaultsByUsage('general');
+              setNewUsage('general');
+              setNewName(defaults.name);
+              setNewDescription(defaults.description);
+              setDialogOpen(true);
+            }}
+          >
             <Plus className="h-4 w-4" />
             צור טופס חדש
           </Button>
@@ -184,7 +228,18 @@ export default function FormsListPage() {
             <FileText className="h-12 w-12 text-neutral-300" />
             <p className="text-neutral-500">לא נמצאו טפסים</p>
             {isAdmin && (
-              <Button variant="outline" size="sm" className="gap-2" onClick={() => setDialogOpen(true)}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => {
+                  const defaults = getDraftDefaultsByUsage('general');
+                  setNewUsage('general');
+                  setNewName(defaults.name);
+                  setNewDescription(defaults.description);
+                  setDialogOpen(true);
+                }}
+              >
                 <Plus className="h-4 w-4" />
                 צור טופס ראשון
               </Button>

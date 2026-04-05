@@ -63,18 +63,18 @@ const FIELD_TYPES = [
 ];
 
 const WAITING_LIST_SYSTEM_FIELDS = [
-  { key: 'student_first_name', label: 'שם פרטי של התלמיד/ה', placeholder: 'שם פרטי', type: 'text' },
-  { key: 'student_last_name', label: 'שם משפחה של התלמיד/ה', placeholder: 'שם משפחה', type: 'text' },
-  { key: 'contact_name', label: 'שם איש קשר / אפוטרופוס', placeholder: 'שם איש קשר', type: 'text' },
+  { key: 'student_first_name', label: 'שם פרטי של התלמיד/ה', placeholder: 'שם פרטי', type: 'text', required: true },
+  { key: 'student_last_name', label: 'שם משפחה של התלמיד/ה', placeholder: 'שם משפחה', type: 'text', required: true },
+  { key: 'contact_name', label: 'שם איש קשר / אפוטרופוס', placeholder: 'שם איש קשר', type: 'text', conditionalRequired: true },
   { key: 'contact_relationship', label: 'קרבה לתלמיד/ה', type: 'select', options: ['התלמיד/ה עצמו/ה', 'אם', 'אב', 'מטפל/ת', 'אחר'] },
-  { key: 'identity_number', label: 'מספר זהות', placeholder: 'אופציונלי', type: 'text' },
+  { key: 'identity_number', label: 'מספר זהות', placeholder: 'מספר זהות של התלמיד/ה', type: 'text', required: true },
   { key: 'phone', label: 'טלפון', placeholder: '05X-XXXXXXX', type: 'text' },
   { key: 'email', label: 'אימייל', placeholder: 'name@example.com', type: 'text' },
   { key: 'additional_services', label: 'שירותים נוספים שמעניינים אותך', type: 'multi-select-note' },
   { key: 'preferred_days', label: 'ימי זמינות מועדפים', type: 'day-selector' },
   { key: 'preferred_times', label: 'טווחי שעות מועדפים', type: 'time-ranges' },
   { key: 'payment_path_intent', label: 'סוג תשלום מבוקש', type: 'select', options: ['לא בטוח/ה, צריך עזרה', 'תשלום פרטי', 'דרך קופת חולים / גורם מממן'] },
-  { key: 'hmo_provider_name', label: 'שם קופת החולים / הגורם המממן', placeholder: 'למשל: כללית', type: 'text' },
+  { key: 'hmo_provider_name', label: 'שם קופת החולים / הגורם המממן', placeholder: 'למשל: כללית', type: 'text', conditionalRequired: true },
   { key: 'hmo_approval_status', label: 'סטטוס אישור קופת חולים', type: 'select', options: ['אין אישור עדיין', 'האישור יישלח בנפרד בוואטסאפ/אימייל'] },
   { key: 'notes', label: 'הערות נוספות', placeholder: 'פרטים נוספים שחשוב שנדע', type: 'textarea' },
 ];
@@ -362,6 +362,14 @@ function CanvasObjectFieldTemplate(props) {
 }
 
 function WaitingListIntakePreview() {
+  const renderFieldLabel = (field) => (
+    <>
+      {field.label}
+      {field.required ? <span className="ms-1 text-red-500">*</span> : null}
+      {field.conditionalRequired ? <span className="ms-1 text-amber-500">*</span> : null}
+    </>
+  );
+
   return (
     <div className="mb-6 rounded-xl border border-dashed border-slate-300 bg-slate-100/70 p-4 opacity-70">
       <div className="mb-4 space-y-1">
@@ -371,6 +379,9 @@ function WaitingListIntakePreview() {
         </div>
         <p className="text-xs text-slate-500">
           השדות האלה מוצגים תמיד בטופס הציבורי וממופים אוטומטית לפרופיל המתעניין ולרשומת ההמתנה. אי אפשר לערוך אותם דרך הבונה.
+        </p>
+        <p className="text-xs text-slate-400">
+          <span className="text-red-500">*</span> שדה חובה קבוע, <span className="text-amber-500">*</span> שדה חובה מותנה בהתאם לבחירה בטופס.
         </p>
       </div>
 
@@ -384,7 +395,7 @@ function WaitingListIntakePreview() {
           if (field.type === 'day-selector') {
             return (
               <div key={field.key} className="space-y-2">
-                <Label className="text-slate-700">{field.label}</Label>
+                <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
                 <div className="flex flex-wrap gap-2">
                   {['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'].map((day) => (
                     <Button key={day} type="button" variant="outline" disabled className="border-slate-300 bg-white text-slate-500">
@@ -399,7 +410,7 @@ function WaitingListIntakePreview() {
           if (field.type === 'time-ranges') {
             return (
               <div key={field.key} className="space-y-2">
-                <Label className="text-slate-700">{field.label}</Label>
+                <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
                 <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
                   <div className="mb-2 text-sm font-medium text-slate-600">יום לדוגמה</div>
                   <div className="flex items-center gap-2">
@@ -419,7 +430,7 @@ function WaitingListIntakePreview() {
           if (field.type === 'select') {
             return (
               <div key={field.key} className="space-y-2">
-                <Label className="text-slate-700">{field.label}</Label>
+                <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
                 <Select disabled value={field.options?.[0]}>
                   <SelectTrigger className="bg-white/80 text-slate-500">
                     <SelectValue />
@@ -443,7 +454,7 @@ function WaitingListIntakePreview() {
           if (field.type === 'textarea') {
             return (
               <div key={field.key} className="space-y-2">
-                <Label className="text-slate-700">{field.label}</Label>
+                <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
                 <Textarea disabled rows={4} placeholder={field.placeholder} className="bg-white/80 text-slate-500 placeholder:text-slate-400" />
               </div>
             );
@@ -452,7 +463,7 @@ function WaitingListIntakePreview() {
           if (field.type === 'multi-select-note') {
             return (
               <div key={field.key} className="space-y-2">
-                <Label className="text-slate-700">{field.label}</Label>
+                <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
                 <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
                   <div className="space-y-2">
                     {['שירות נוסף א׳', 'שירות נוסף ב׳'].map((label) => (
@@ -470,7 +481,7 @@ function WaitingListIntakePreview() {
 
           return (
             <div key={field.key} className="space-y-2">
-              <Label className="text-slate-700">{field.label}</Label>
+              <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
               <Input disabled placeholder={field.placeholder} className="bg-white/80 text-slate-500 placeholder:text-slate-400" />
             </div>
           );
@@ -665,9 +676,9 @@ export default function FormBuilderPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full flex-col bg-neutral-50">
       {/* ── Header bar ── */}
-      <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-3">
+      <div className="flex items-center justify-between border-b border-border bg-white px-4 py-3 shadow-sm">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate('/forms')}>
             <ArrowRight className="h-4 w-4" />
@@ -718,7 +729,7 @@ export default function FormBuilderPage() {
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar (Inspector / Toolbox) — appears on start side (right in RTL) */}
-        <aside className="w-72 shrink-0 border-s border-border bg-surface overflow-y-auto p-4">
+        <aside className="w-72 shrink-0 overflow-y-auto border-s border-border bg-white p-4">
           {selectedField && selectedDef ? (
             <FieldInspector
               fieldKey={selectedField}
@@ -740,14 +751,14 @@ export default function FormBuilderPage() {
           onClick={() => setSelectedField(null)}
         >
           <div className="mx-auto max-w-2xl">
-            <Card>
-              <CardHeader>
+            <Card className="overflow-hidden border-slate-200 shadow-sm">
+              <CardHeader className="border-b border-slate-100 bg-white">
                 <CardTitle className="text-lg">{formData?.name || 'טופס חדש'}</CardTitle>
                 {formData?.description && (
                   <p className="text-sm text-neutral-500">{formData.description}</p>
                 )}
               </CardHeader>
-              <CardContent>
+              <CardContent className="bg-slate-50/50 pt-6">
                 {formUsage === 'waiting_list_intake' && <WaitingListIntakePreview />}
                 {hasFields ? (
                   <Form

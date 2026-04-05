@@ -239,6 +239,22 @@ function getFutureIso(minutes) {
   return new Date(Date.now() + (minutes * 60 * 1000)).toISOString();
 }
 
+function formatInviteDeadline(value) {
+  if (!value) return '';
+  try {
+    return new Intl.DateTimeFormat('he-IL', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Asia/Jerusalem',
+    }).format(new Date(value));
+  } catch {
+    return String(value);
+  }
+}
+
 function parseInviteTtlMinutes(raw) {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_INVITE_TTL_MINUTES;
@@ -298,21 +314,33 @@ async function listActiveServices(tenantClient) {
 }
 
 function buildEmailText({ formName, inviteUrl, expiresAt }) {
+  const formattedDeadline = formatInviteDeadline(expiresAt);
   return [
     'שלום,',
     '',
-    `נשלח אליך קישור למילוי ${formName || 'טופס רשימת המתנה'}.`,
+    `שמחים שיצרתם איתנו קשר.`,
     '',
+    `כדי שנוכל לקדם את ההצטרפות, נשמח שתמלאו את ${formName || 'טופס רשימת המתנה'} בקישור הבא:`,
     inviteUrl,
     '',
-    `תוקף הקישור עד: ${expiresAt}`,
+    formattedDeadline ? `הקישור זמין עד ${formattedDeadline}.` : '',
     '',
-    'ניתן לפתוח את הקישור ולמלא את הפרטים ישירות.',
+    'אם יש שאלות, אפשר להשיב להודעה הזו ונשמח לעזור.',
   ].join('\n');
 }
 
 function buildEmailHtml({ formName, inviteUrl, expiresAt }) {
-  return `<p>שלום,</p><p>נשלח אליך קישור למילוי <strong>${formName || 'טופס רשימת המתנה'}</strong>.</p><p><a href="${inviteUrl}">${inviteUrl}</a></p><p>תוקף הקישור עד: <strong>${expiresAt}</strong></p>`;
+  const formattedDeadline = formatInviteDeadline(expiresAt);
+  return [
+    '<div dir="rtl" style="font-family:Arial,sans-serif;line-height:1.7;color:#0f172a">',
+    '<p>שלום,</p>',
+    '<p>שמחים שיצרתם איתנו קשר.</p>',
+    `<p>כדי שנוכל לקדם את ההצטרפות, נשמח שתמלאו את <strong>${formName || 'טופס רשימת המתנה'}</strong> בקישור הבא:</p>`,
+    `<p><a href="${inviteUrl}" style="color:#2563eb">${inviteUrl}</a></p>`,
+    formattedDeadline ? `<p>הקישור זמין עד <strong>${formattedDeadline}</strong>.</p>` : '',
+    '<p>אם יש שאלות, אפשר להשיב להודעה הזו ונשמח לעזור.</p>',
+    '</div>',
+  ].filter(Boolean).join('');
 }
 
 async function loadInviteRouting(controlClient, inviteToken) {
@@ -514,6 +542,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
   if (!deliveryMethod) return respond(context, 400, { message: 'invalid_delivery_method' });
   if (!studentFirstName) return respond(context, 400, { message: 'missing_student_first_name' });
   if (!studentLastName) return respond(context, 400, { message: 'missing_student_last_name' });
+  if (!identityNumber) return respond(context, 400, { message: 'missing_identity_number' });
   if (deliveryMethod === 'whatsapp' && !phone) return respond(context, 400, { message: 'missing_phone' });
   if (deliveryMethod === 'email' && !email) return respond(context, 400, { message: 'missing_email' });
 
@@ -588,6 +617,8 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
           expires_at: existingRouting.expires_at || null,
           student_id: studentId,
           submission_id: existingSubmission.id,
+          student_first_name: studentFirstName,
+          student_last_name: studentLastName,
           form_name: form.name,
           desired_service: { id: service.id, name: service.name },
           delivery_method: deliveryMethod,
@@ -721,6 +752,8 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
     expires_at: expiresAt,
     student_id: studentId,
     submission_id: submissionId,
+    student_first_name: studentFirstName,
+    student_last_name: studentLastName,
     form_name: form.name,
     desired_service: { id: service.id, name: service.name },
     delivery_method: deliveryMethod,
@@ -891,6 +924,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
 
   if (!studentFirstName) return respond(context, 400, { message: 'missing_student_first_name' });
   if (!studentLastName) return respond(context, 400, { message: 'missing_student_last_name' });
+  if (!identityNumber) return respond(context, 400, { message: 'missing_identity_number' });
   if (contactRelationship !== 'self' && !contactName) return respond(context, 400, { message: 'missing_contact_name' });
 
   const serviceById = new Map(services.map((service) => [service.id, service]));
