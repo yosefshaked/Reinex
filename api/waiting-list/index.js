@@ -1,6 +1,8 @@
 /* eslint-env node */
+import { randomUUID } from 'node:crypto';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import {
   UUID_PATTERN,
   ensureMembership,
@@ -121,6 +123,19 @@ function buildWaitingListSelect() {
     'student:students(id, first_name, middle_name, last_name, identity_number, phone, email, onboarding_status, is_active)',
     'service:Services(id, name)',
   ].join(',');
+}
+
+async function writeTenantAudit(context, tenantClient, params) {
+  try {
+    await logTenantAuditEvent(tenantClient, params);
+  } catch (auditError) {
+    context.log?.warn?.('waiting-list failed to write tenant audit event', {
+      message: auditError?.message,
+      eventType: params?.eventType,
+      resourceType: params?.resourceType,
+      resourceId: params?.resourceId,
+    });
+  }
 }
 
 export default async function waitingList(context, req) {
@@ -261,6 +276,19 @@ export default async function waitingList(context, req) {
       return respond(context, 500, { message: 'failed_to_create_waiting_list' });
     }
 
+    await writeTenantAudit(context, tenantClient, {
+      correlationId: randomUUID(),
+      actorUserId: userId,
+      eventType: 'waiting_list.entry.created',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'waiting_list_entry',
+      resourceId: data.id,
+      afterState: data,
+      details: {
+        origin: 'api/waiting-list',
+      },
+    });
+
     return respond(context, 200, data);
   }
 
@@ -317,6 +345,21 @@ export default async function waitingList(context, req) {
     return respond(context, 400, { message: 'missing_updates' });
   }
 
+  const { data: existingEntry, error: existingEntryError } = await tenantClient
+    .from('waiting_list_entries')
+    .select(buildWaitingListSelect())
+    .eq('id', entryId)
+    .maybeSingle();
+
+  if (existingEntryError) {
+    context.log?.error?.('waiting-list failed to load entry before update', { message: existingEntryError.message });
+    return respond(context, 500, { message: 'failed_to_load_waiting_list' });
+  }
+
+  if (!existingEntry) {
+    return respond(context, 404, { message: 'waiting_list_entry_not_found' });
+  }
+
   const { data, error } = await tenantClient
     .from('waiting_list_entries')
     .update(updates)
@@ -328,6 +371,21 @@ export default async function waitingList(context, req) {
     context.log?.error?.('waiting-list failed to update entry', { message: error.message });
     return respond(context, 500, { message: 'failed_to_update_waiting_list' });
   }
+
+  await writeTenantAudit(context, tenantClient, {
+    correlationId: randomUUID(),
+    actorUserId: userId,
+    eventType: 'waiting_list.entry.updated',
+    retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+    resourceType: 'waiting_list_entry',
+    resourceId: entryId,
+    beforeState: existingEntry,
+    afterState: data,
+    details: {
+      origin: 'api/waiting-list',
+      updated_fields: Object.keys(updates),
+    },
+  });
 
   return respond(context, 200, data);
 }

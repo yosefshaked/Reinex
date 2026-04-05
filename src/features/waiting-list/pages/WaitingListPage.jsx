@@ -101,6 +101,30 @@ function buildInviteWhatsappMessage({ inviteUrl, expiresAt, serviceName, student
   ].filter(Boolean).join('\n');
 }
 
+function mapWaitingListInviteErrorMessage(code) {
+  switch (String(code || '').trim()) {
+    case 'missing_form_id':
+    case 'missing_student_first_name':
+    case 'missing_student_last_name':
+    case 'missing_identity_number':
+    case 'missing_delivery_destination':
+    case 'missing_desired_service_id':
+      return 'יש להשלים את כל שדות החובה לפני שליחת הטופס.';
+    case 'form_not_found':
+      return 'טופס ההמתנה שנבחר אינו זמין כרגע. אפשר לרענן את הרשימה ולנסות שוב.';
+    case 'form_usage_not_waiting_list':
+      return 'הטופס שנבחר אינו מוגדר כטופס רשימת המתנה.';
+    case 'failed_to_create_student':
+    case 'failed_to_update_student':
+    case 'failed_to_prepare_submission':
+    case 'failed_to_create_routing':
+    case 'failed_to_send_email':
+      return 'לא הצלחנו להכין את קישור ההצטרפות כרגע. אפשר לנסות שוב בעוד כמה דקות.';
+    default:
+      return 'שליחת טופס ההמתנה נכשלה. אפשר לנסות שוב בעוד כמה דקות.';
+  }
+}
+
 function buildStudentName(student) {
   if (!student) return '';
   const name = [student.first_name, student.middle_name, student.last_name]
@@ -503,7 +527,8 @@ export default function WaitingListPage() {
       }
       await loadEntries();
     } catch (error) {
-      setInviteError(error?.message || 'שליחת טופס ההמתנה נכשלה.');
+      const errorCode = error?.data?.message || error?.message;
+      setInviteError(mapWaitingListInviteErrorMessage(errorCode));
     } finally {
       setInviteSubmitting(false);
     }
@@ -924,7 +949,7 @@ export default function WaitingListPage() {
                 <div className="space-y-4">
                   <SelectField
                     id="waiting-list-intake-form"
-                    label="טופס *"
+                    label="טופס"
                     value={inviteFormValues.formId}
                     onChange={(value) => setInviteFormValues((prev) => ({ ...prev, formId: value }))}
                     options={waitingListFormOptions}
@@ -940,7 +965,7 @@ export default function WaitingListPage() {
                     <TextField
                       id="waiting-list-student-first-name"
                       name="studentFirstName"
-                      label="שם פרטי של התלמיד/ה *"
+                      label="שם פרטי של התלמיד/ה"
                       value={inviteFormValues.studentFirstName}
                       onChange={(event) => setInviteFormValues((prev) => ({ ...prev, studentFirstName: event.target.value }))}
                       required
@@ -948,7 +973,7 @@ export default function WaitingListPage() {
                     <TextField
                       id="waiting-list-student-last-name"
                       name="studentLastName"
-                      label="שם משפחה של התלמיד/ה *"
+                      label="שם משפחה של התלמיד/ה"
                       value={inviteFormValues.studentLastName}
                       onChange={(event) => setInviteFormValues((prev) => ({ ...prev, studentLastName: event.target.value }))}
                       required
@@ -959,14 +984,14 @@ export default function WaitingListPage() {
                     <TextField
                       id="waiting-list-identity"
                       name="identityNumber"
-                      label="מספר זהות *"
+                      label="מספר זהות"
                       value={inviteFormValues.identityNumber}
                       onChange={(event) => setInviteFormValues((prev) => ({ ...prev, identityNumber: event.target.value.replace(/\D/g, '') }))}
                       required
                     />
                     <SelectField
                       id="waiting-list-primary-service"
-                      label="שירות ראשי *"
+                      label="שירות ראשי"
                       value={inviteFormValues.serviceId}
                       onChange={(value) => setInviteFormValues((prev) => ({ ...prev, serviceId: value }))}
                       options={serviceOptions}

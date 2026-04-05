@@ -139,6 +139,7 @@ export const AUDIT_ACTIONS = {
   FORM_SUBMISSION_INITIATED: 'form_submission.initiated',
   FORM_SUBMISSION_RESENT: 'form_submission.resent',
   FORM_SUBMISSION_COMPLETED: 'form_submission.completed',
+  WAITING_LIST_INTAKE_INVITE_SENT: 'waiting_list_intake.invite_sent',
 
   // Settings
   SETTINGS_UPDATED: 'settings.updated',

@@ -21,6 +21,27 @@ const DAYS_OF_WEEK = [
   { value: 6, label: 'שבת', short: 'ש' },
 ];
 
+const CONTACT_RELATIONSHIP_OPTIONS = [
+  { value: '', label: 'בחרו קרבה לתלמיד/ה' },
+  { value: 'self', label: 'התלמיד/ה עצמו/ה' },
+  { value: 'mother', label: 'אם' },
+  { value: 'father', label: 'אב' },
+  { value: 'caretaker', label: 'מטפל/ת' },
+  { value: 'other', label: 'אחר' },
+];
+
+const PAYMENT_PATH_OPTIONS = [
+  { value: 'unsure', label: 'לא בטוח/ה, צריך עזרה' },
+  { value: 'private', label: 'תשלום פרטי' },
+  { value: 'hmo', label: 'דרך קופת חולים / גורם מממן' },
+];
+
+const HMO_APPROVAL_OPTIONS = [
+  { value: '', label: 'בחרו סטטוס אישור' },
+  { value: 'no_approval_yet', label: 'אין אישור עדיין' },
+  { value: 'send_separately', label: 'האישור יישלח בנפרד בוואטסאפ/אימייל' },
+];
+
 function normalizeSchema(schema) {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
     return { type: 'object', properties: {}, required: [] };
@@ -66,6 +87,109 @@ function serializePreferredTimes(preferredTimesByDay) {
       return normalizedRanges.length ? { day, ranges: normalizedRanges } : null;
     })
     .filter(Boolean);
+}
+
+function selectedDaysCoveredByRanges(preferredDays, preferredTimesByDay) {
+  if (!Array.isArray(preferredDays) || preferredDays.length === 0) return false;
+  const serializedRanges = serializePreferredTimes(preferredTimesByDay);
+  if (serializedRanges.length === 0) return false;
+  const coveredDays = new Set(serializedRanges.map((entry) => entry.day));
+  return preferredDays.every((day) => coveredDays.has(day));
+}
+
+function validateInviteIntake(values) {
+  const errors = {};
+  if (!String(values.studentFirstName || '').trim()) errors.studentFirstName = 'יש למלא שם פרטי.';
+  if (!String(values.studentLastName || '').trim()) errors.studentLastName = 'יש למלא שם משפחה.';
+  if (!String(values.identityNumber || '').trim()) errors.identityNumber = 'יש למלא מספר זהות.';
+  if (!String(values.contactRelationship || '').trim()) errors.contactRelationship = 'יש לבחור מי איש הקשר.';
+  if (values.contactRelationship && values.contactRelationship !== 'self' && !String(values.contactName || '').trim()) {
+    errors.contactName = 'יש למלא את שם איש הקשר / האפוטרופוס.';
+  }
+  if (!Array.isArray(values.preferredDays) || values.preferredDays.length === 0) {
+    errors.preferredDays = 'יש לבחור לפחות יום זמינות אחד.';
+  }
+  if (!selectedDaysCoveredByRanges(values.preferredDays, values.preferredTimesByDay)) {
+    errors.preferredTimes = 'יש למלא לפחות טווח שעות אחד לכל יום שנבחר, או להסיר את היום.';
+  }
+  if (values.paymentPathIntent === 'hmo' && !String(values.hmoProviderName || '').trim()) {
+    errors.hmoProviderName = 'יש למלא את שם קופת החולים / הגורם המממן.';
+  }
+  if (values.paymentPathIntent === 'hmo' && !String(values.hmoApprovalStatus || '').trim()) {
+    errors.hmoApprovalStatus = 'יש לבחור את סטטוס האישור.';
+  }
+  return errors;
+}
+
+function mapInviteLoadErrorMessage(code) {
+  switch (String(code || '').trim()) {
+    case 'invalid_invite_token':
+    case 'invite_not_found':
+      return 'הקישור הזה אינו תקין או שכבר אינו זמין. אפשר לבקש קישור חדש מהארגון.';
+    case 'invite_already_completed':
+      return 'הטופס כבר נשלח דרך הקישור הזה. אם צריך לעדכן פרטים, אפשר לבקש קישור חדש מהארגון.';
+    case 'form_not_found':
+      return 'לא הצלחנו לטעון את הטופס כרגע. אפשר לנסות שוב בעוד כמה דקות.';
+    case 'failed_to_load_invite':
+      return 'לא הצלחנו לטעון את הקישור כרגע. אפשר לנסות שוב בעוד כמה דקות.';
+    default:
+      return 'לא הצלחנו לפתוח את הקישור כרגע. אפשר לנסות שוב או לבקש קישור חדש מהארגון.';
+  }
+}
+
+function mapInviteSubmitErrorMessage(code) {
+  switch (String(code || '').trim()) {
+    case 'invalid_invite_token':
+    case 'invite_not_found':
+      return 'הקישור הזה אינו תקין או שכבר פג תוקפו. אפשר לבקש קישור חדש מהארגון.';
+    case 'invite_already_completed':
+      return 'הטופס כבר נשלח דרך הקישור הזה.';
+    case 'missing_student_first_name':
+    case 'missing_student_last_name':
+    case 'missing_identity_number':
+    case 'missing_contact_relationship':
+    case 'missing_contact_name':
+    case 'missing_preferred_days':
+    case 'missing_preferred_times':
+    case 'missing_hmo_provider_name':
+    case 'missing_hmo_approval_status':
+      return 'יש להשלים את כל שדות החובה לפני שליחת הטופס.';
+    case 'failed_to_submit_intake':
+    case 'failed_to_update_student':
+    case 'failed_to_link_guardian':
+    case 'failed_to_create_waiting_list':
+      return 'לא הצלחנו לשמור את הפרטים כרגע. אפשר לנסות שוב בעוד כמה דקות.';
+    default:
+      return 'שליחת הטופס נכשלה. אפשר לנסות שוב בעוד כמה דקות.';
+  }
+}
+
+function mapPublicFormSubmitErrorMessage(code) {
+  switch (String(code || '').trim()) {
+    case 'submission_not_found':
+      return 'לא מצאנו את הטופס הזה. אפשר לפתוח שוב את הקישור או לבקש קישור חדש מהארגון.';
+    case 'invalid_or_expired_otp':
+    case 'invalid_or_expired_token':
+      return 'פרטי הגישה אינם תקינים או שפג תוקפם. אפשר לחזור למסך האימות ולנסות שוב.';
+    case 'failed_to_submit':
+    case 'failed_to_save_answers':
+      return 'לא הצלחנו לשמור את המענה כרגע. אפשר לנסות שוב בעוד כמה דקות.';
+    default:
+      return 'שליחת הטופס נכשלה. אפשר לנסות שוב בעוד כמה דקות.';
+  }
+}
+
+function mapOtpErrorMessage(code) {
+  switch (String(code || '').trim()) {
+    case 'invalid or expired token':
+    case 'invalid_or_expired_token':
+    case 'invalid_or_expired_otp':
+    case 'קוד האימות שגוי או שפג תוקפו':
+    case 'מזהה או קוד אימות שגויים':
+      return 'פרטי הגישה אינם תקינים. בדקו את מזהה הגישה וקוד האימות ונסו שוב.';
+    default:
+      return 'לא הצלחנו לאמת את הפרטים. אפשר לנסות שוב או ליצור קשר עם הארגון.';
+  }
 }
 
 const LEGAL_NOTICE_DISMISSED_KEY = 'reinex_submit_legal_notice_dismissed';
@@ -159,30 +283,39 @@ function PublicCheckboxWidget(props) {
   const isLocked = disabled || readonly;
   const selectedValue = typeof value === 'boolean' ? value : null;
   return (
-    <div className={`rounded-2xl border bg-white p-2 shadow-sm ${rawErrors?.length ? 'border-red-300' : 'border-slate-200'}`}>
-      <div className="grid grid-cols-2 gap-2">
-        <Button
-          type="button"
-          variant={selectedValue === true ? 'default' : 'outline'}
-          className="h-11 rounded-xl"
-          disabled={isLocked}
-          onClick={() => onChange(true)}
-        >
-          כן
-        </Button>
-        <Button
-          type="button"
-          variant={selectedValue === false ? 'default' : 'outline'}
-          className="h-11 rounded-xl"
-          disabled={isLocked}
-          onClick={() => onChange(false)}
-        >
-          לא
-        </Button>
+    <div className={`rounded-2xl border bg-white p-3 shadow-sm ${rawErrors?.length ? 'border-red-300' : 'border-slate-200'}`}>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {[
+          { value: true, label: 'כן' },
+          { value: false, label: 'לא' },
+        ].map((option) => {
+          const checked = selectedValue === option.value;
+          return (
+            <label
+              key={String(option.value)}
+              className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm transition-colors ${
+                checked
+                  ? 'border-primary bg-primary/8 text-primary'
+                  : 'border-slate-200 bg-slate-50 text-slate-700'
+              } ${isLocked ? 'cursor-not-allowed opacity-70' : 'hover:border-slate-300 hover:bg-white'}`}
+            >
+              <span className="font-medium">{option.label}</span>
+              <input
+                id={checked ? id : undefined}
+                type="radio"
+                name={id}
+                checked={checked}
+                disabled={isLocked}
+                className="h-4 w-4 accent-primary"
+                onChange={() => onChange(option.value)}
+              />
+            </label>
+          );
+        })}
       </div>
       <input id={id} type="hidden" value={selectedValue === null ? '' : String(selectedValue)} readOnly />
       {selectedValue === null ? (
-        <p className="mt-2 text-xs text-slate-500">בחרו כן או לא.</p>
+        <p className="mt-2 text-xs text-slate-500">בחרו תשובה אחת כדי להמשיך.</p>
       ) : null}
     </div>
   );
@@ -237,7 +370,7 @@ export default function SubmitFormPage() {
     studentFirstName: '',
     studentLastName: '',
     contactName: '',
-    contactRelationship: 'self',
+    contactRelationship: '',
     identityNumber: '',
     phone: '',
     email: '',
@@ -245,10 +378,11 @@ export default function SubmitFormPage() {
     preferredDays: [],
     preferredTimesByDay: {},
     paymentPathIntent: 'unsure',
-    hmoApprovalStatus: 'no_approval_yet',
+    hmoApprovalStatus: '',
     hmoProviderName: '',
     notes: '',
   });
+  const [showInviteValidation, setShowInviteValidation] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [error, setError] = useState('');
@@ -268,6 +402,11 @@ export default function SubmitFormPage() {
     if (step === 'form') return submissionMode === 'invite' ? (formDescription || 'נא למלא את פרטי ההמתנה ולשלוח.') : 'נא למלא את כל הפרטים הנדרשים ולשלוח.';
     return 'הזן מזהה גישה וקוד אימות כדי להמשיך.';
   }, [formDescription, step, submissionMode]);
+
+  const inviteValidationErrors = useMemo(
+    () => (submissionMode === 'invite' ? validateInviteIntake(intakeValues) : {}),
+    [intakeValues, submissionMode],
+  );
 
   useEffect(() => {
     try {
@@ -289,12 +428,13 @@ export default function SubmitFormPage() {
     const loadInvite = async () => {
       setLoading(true);
       setError('');
+      setShowInviteValidation(false);
       setSubmissionMode('invite');
       try {
         const response = await fetch(`/api/waiting-list-intake/load?invite=${encodeURIComponent(invite)}`);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(payload?.message || 'טעינת הקישור נכשלה');
+          throw new Error(mapInviteLoadErrorMessage(payload?.message));
         }
         if (cancelled) return;
 
@@ -313,15 +453,22 @@ export default function SubmitFormPage() {
           studentFirstName: String(payload?.prospect?.student_first_name || ''),
           studentLastName: String(payload?.prospect?.student_last_name || ''),
           contactName: String(payload?.prospect?.contact_name || ''),
-          contactRelationship: String(payload?.prospect?.contact_relationship || 'self'),
+          contactRelationship: String(payload?.prospect?.contact_relationship || ''),
           identityNumber: String(payload?.prospect?.identity_number || ''),
           phone: String(payload?.prospect?.phone || ''),
           email: String(payload?.prospect?.email || ''),
+          paymentPathIntent: 'unsure',
+          hmoApprovalStatus: '',
+          hmoProviderName: '',
+          preferredDays: [],
+          preferredTimesByDay: {},
+          additionalServiceIds: [],
+          notes: '',
         }));
         setStep('form');
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError?.message || 'טעינת הקישור נכשלה');
+          setError(loadError?.message || mapInviteLoadErrorMessage('failed_to_load_invite'));
         }
       } finally {
         if (!cancelled) {
@@ -384,7 +531,7 @@ export default function SubmitFormPage() {
 
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload?.message || 'אימות נכשל');
+        throw new Error(mapOtpErrorMessage(payload?.message));
       }
 
       setSubmissionId(String(payload?.submission_id || submissionId || ''));
@@ -392,7 +539,7 @@ export default function SubmitFormPage() {
       setStep('form');
     } catch (verifyError) {
       console.error('Verify failed', verifyError);
-      setError(verifyError?.message || 'אימות נכשל, נסה שוב');
+      setError(verifyError?.message || mapOtpErrorMessage());
     } finally {
       setLoading(false);
     }
@@ -404,20 +551,10 @@ export default function SubmitFormPage() {
         setError('חסר מזהה קישור, נא לפתוח את הקישור מחדש.');
         return;
       }
-      if (!intakeValues.studentFirstName.trim() || !intakeValues.studentLastName.trim()) {
-        setError('יש למלא שם פרטי ושם משפחה של התלמיד/ה.');
-        return;
-      }
-      if (!intakeValues.identityNumber.trim()) {
-        setError('יש למלא מספר זהות.');
-        return;
-      }
-      if (intakeValues.contactRelationship !== 'self' && !intakeValues.contactName.trim()) {
-        setError('יש למלא שם איש קשר כאשר הקרבה אינה התלמיד/ה עצמו/ה.');
-        return;
-      }
-      if (intakeValues.paymentPathIntent === 'hmo' && !intakeValues.hmoProviderName.trim()) {
-        setError('יש למלא את שם קופת החולים / הגורם המממן.');
+      setShowInviteValidation(true);
+
+      if (Object.keys(inviteValidationErrors).length > 0) {
+        setError('יש להשלים את כל שדות החובה המסומנים לפני שליחת הטופס.');
         return;
       }
 
@@ -452,7 +589,7 @@ export default function SubmitFormPage() {
 
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(payload?.message || 'שליחת הטופס נכשלה');
+          throw new Error(mapInviteSubmitErrorMessage(payload?.message));
         }
 
         setSuccessMessage('הטופס נקלט בהצלחה. נציג יחזור אליך בהקדם.');
@@ -460,7 +597,7 @@ export default function SubmitFormPage() {
         return;
       } catch (submitError) {
         console.error('Waiting-list intake submit failed', submitError);
-        setError(submitError?.message || 'שליחת הטופס נכשלה');
+        setError(submitError?.message || mapInviteSubmitErrorMessage());
       } finally {
         setSubmitLoading(false);
       }
@@ -489,14 +626,14 @@ export default function SubmitFormPage() {
 
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload?.message || 'שליחת הטופס נכשלה');
+        throw new Error(mapPublicFormSubmitErrorMessage(payload?.message));
       }
 
       setSuccessMessage('הטופס נקלט בהצלחה. אפשר לסגור את החלון.');
       setStep('done');
     } catch (submitError) {
       console.error('Submit failed', submitError);
-      setError(submitError?.message || 'שליחת הטופס נכשלה');
+      setError(submitError?.message || mapPublicFormSubmitErrorMessage());
     } finally {
       setSubmitLoading(false);
     }
@@ -583,7 +720,7 @@ export default function SubmitFormPage() {
           </CardHeader>
 
           <CardContent className="space-y-4">
-            {error && (
+            {error && !(step === 'login' && submissionMode === 'invite') && (
               <Alert>
                 <AlertDescription className="text-red-700">{error}</AlertDescription>
               </Alert>
@@ -679,8 +816,11 @@ export default function SubmitFormPage() {
                             value={intakeValues.studentFirstName}
                             onChange={(e) => setIntakeValues((prev) => ({ ...prev, studentFirstName: e.target.value }))}
                             placeholder="שם פרטי"
-                            className={getPublicInputClass(false)}
+                            className={getPublicInputClass(Boolean(showInviteValidation && inviteValidationErrors.studentFirstName))}
                           />
+                          {showInviteValidation && inviteValidationErrors.studentFirstName ? (
+                            <p className="text-xs text-red-600">{inviteValidationErrors.studentFirstName}</p>
+                          ) : null}
                         </div>
                         <div className="space-y-2">
                           <RequiredLabel htmlFor="invite-student-last-name" required>שם משפחה של התלמיד/ה</RequiredLabel>
@@ -689,8 +829,11 @@ export default function SubmitFormPage() {
                             value={intakeValues.studentLastName}
                             onChange={(e) => setIntakeValues((prev) => ({ ...prev, studentLastName: e.target.value }))}
                             placeholder="שם משפחה"
-                            className={getPublicInputClass(false)}
+                            className={getPublicInputClass(Boolean(showInviteValidation && inviteValidationErrors.studentLastName))}
                           />
+                          {showInviteValidation && inviteValidationErrors.studentLastName ? (
+                            <p className="text-xs text-red-600">{inviteValidationErrors.studentLastName}</p>
+                          ) : null}
                         </div>
                       </div>
 
@@ -703,14 +846,17 @@ export default function SubmitFormPage() {
                             value={intakeValues.identityNumber}
                             onChange={(e) => setIntakeValues((prev) => ({ ...prev, identityNumber: e.target.value.replace(/\D/g, '') }))}
                             placeholder="מספר זהות של התלמיד/ה"
-                            className={getPublicInputClass(false)}
+                            className={getPublicInputClass(Boolean(showInviteValidation && inviteValidationErrors.identityNumber))}
                           />
+                          {showInviteValidation && inviteValidationErrors.identityNumber ? (
+                            <p className="text-xs text-red-600">{inviteValidationErrors.identityNumber}</p>
+                          ) : null}
                         </div>
                         <div className="space-y-2">
-                          <RequiredLabel htmlFor="invite-contact-relationship">קרבה לתלמיד/ה</RequiredLabel>
+                          <RequiredLabel htmlFor="invite-contact-relationship" required>קרבה לתלמיד/ה</RequiredLabel>
                           <select
                             id="invite-contact-relationship"
-                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm"
+                            className={`h-11 w-full rounded-xl border bg-white px-3 text-sm shadow-sm ${showInviteValidation && inviteValidationErrors.contactRelationship ? 'border-red-300' : 'border-slate-200'}`}
                             value={intakeValues.contactRelationship}
                             onChange={(e) => setIntakeValues((prev) => ({
                               ...prev,
@@ -718,16 +864,17 @@ export default function SubmitFormPage() {
                               contactName: e.target.value === 'self' ? '' : prev.contactName,
                             }))}
                           >
-                            <option value="self">התלמיד/ה עצמו/ה</option>
-                            <option value="mother">אם</option>
-                            <option value="father">אב</option>
-                            <option value="caretaker">מטפל/ת</option>
-                            <option value="other">אחר</option>
+                            {CONTACT_RELATIONSHIP_OPTIONS.map((option) => (
+                              <option key={option.value || 'empty'} value={option.value}>{option.label}</option>
+                            ))}
                           </select>
+                          {showInviteValidation && inviteValidationErrors.contactRelationship ? (
+                            <p className="text-xs text-red-600">{inviteValidationErrors.contactRelationship}</p>
+                          ) : null}
                         </div>
                       </div>
 
-                      {intakeValues.contactRelationship !== 'self' && (
+                      {intakeValues.contactRelationship && intakeValues.contactRelationship !== 'self' && (
                         <div className="mt-4 space-y-2">
                           <RequiredLabel htmlFor="invite-contact-name" required>שם איש קשר / אפוטרופוס</RequiredLabel>
                           <Input
@@ -735,8 +882,11 @@ export default function SubmitFormPage() {
                             value={intakeValues.contactName}
                             onChange={(e) => setIntakeValues((prev) => ({ ...prev, contactName: e.target.value }))}
                             placeholder="שם איש קשר"
-                            className={getPublicInputClass(false)}
+                            className={getPublicInputClass(Boolean(showInviteValidation && inviteValidationErrors.contactName))}
                           />
+                          {showInviteValidation && inviteValidationErrors.contactName ? (
+                            <p className="text-xs text-red-600">{inviteValidationErrors.contactName}</p>
+                          ) : null}
                         </div>
                       )}
                     </div>
@@ -816,7 +966,7 @@ export default function SubmitFormPage() {
                       </div>
 
                       <div className="space-y-2">
-                        <RequiredLabel>ימי זמינות מועדפים</RequiredLabel>
+                        <RequiredLabel required>ימי זמינות מועדפים</RequiredLabel>
                         <div className="flex flex-wrap gap-2">
                           {DAYS_OF_WEEK.map((day) => {
                             const selected = intakeValues.preferredDays.includes(day.value);
@@ -825,19 +975,29 @@ export default function SubmitFormPage() {
                                 key={day.value}
                                 type="button"
                                 onClick={() => togglePreferredDay(day.value)}
-                                className={`rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors ${selected ? 'border-primary bg-primary text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'}`}
+                                className={`rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors ${
+                                  selected
+                                    ? 'border-primary bg-primary text-white'
+                                    : showInviteValidation && inviteValidationErrors.preferredDays
+                                      ? 'border-red-300 bg-white text-slate-700 hover:border-red-300'
+                                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                                }`}
                               >
                                 {day.label}
                               </button>
                             );
                           })}
                         </div>
+                        <p className="text-xs text-slate-500">יש לבחור לפחות יום אחד ולהגדיר עבורו טווח שעות מתאים.</p>
+                        {showInviteValidation && inviteValidationErrors.preferredDays ? (
+                          <p className="text-xs text-red-600">{inviteValidationErrors.preferredDays}</p>
+                        ) : null}
                       </div>
                     </div>
 
                     {intakeValues.preferredDays.length > 0 && (
                       <div className="space-y-3">
-                        <RequiredLabel>טווחי שעות מועדפים</RequiredLabel>
+                        <RequiredLabel required>טווחי שעות מועדפים</RequiredLabel>
                         {intakeValues.preferredDays.map((day) => {
                           const dayInfo = DAYS_OF_WEEK.find((entry) => entry.value === day);
                           const ranges = intakeValues.preferredTimesByDay[day] || [{ start: '', end: '' }];
@@ -876,6 +1036,10 @@ export default function SubmitFormPage() {
                             </div>
                           );
                         })}
+                        <p className="text-xs text-slate-500">לכל יום שנבחר צריך להיות לפחות טווח שעות מלא אחד.</p>
+                        {showInviteValidation && inviteValidationErrors.preferredTimes ? (
+                          <p className="text-xs text-red-600">{inviteValidationErrors.preferredTimes}</p>
+                        ) : null}
                       </div>
                     )}
 
@@ -900,13 +1064,13 @@ export default function SubmitFormPage() {
                             onChange={(e) => setIntakeValues((prev) => ({
                               ...prev,
                               paymentPathIntent: e.target.value,
-                              hmoApprovalStatus: e.target.value === 'hmo' ? prev.hmoApprovalStatus : 'no_approval_yet',
+                              hmoApprovalStatus: e.target.value === 'hmo' ? prev.hmoApprovalStatus : '',
                               hmoProviderName: e.target.value === 'hmo' ? prev.hmoProviderName : '',
                             }))}
                           >
-                            <option value="unsure">לא בטוח/ה, צריך עזרה</option>
-                            <option value="private">תשלום פרטי</option>
-                            <option value="hmo">דרך קופת חולים / גורם מממן</option>
+                            {PAYMENT_PATH_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
                           </select>
                         </div>
                         {intakeValues.paymentPathIntent === 'hmo' && (
@@ -918,20 +1082,27 @@ export default function SubmitFormPage() {
                                 value={intakeValues.hmoProviderName}
                                 onChange={(e) => setIntakeValues((prev) => ({ ...prev, hmoProviderName: e.target.value }))}
                                 placeholder="למשל: כללית"
-                                className={getPublicInputClass(false)}
+                                className={getPublicInputClass(Boolean(showInviteValidation && inviteValidationErrors.hmoProviderName))}
                               />
+                              {showInviteValidation && inviteValidationErrors.hmoProviderName ? (
+                                <p className="text-xs text-red-600">{inviteValidationErrors.hmoProviderName}</p>
+                              ) : null}
                             </div>
                             <div className="space-y-2">
-                              <RequiredLabel htmlFor="hmo-approval-status">סטטוס אישור קופת חולים</RequiredLabel>
+                              <RequiredLabel htmlFor="hmo-approval-status" required>סטטוס אישור קופת חולים</RequiredLabel>
                               <select
                                 id="hmo-approval-status"
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm"
+                                className={`h-11 w-full rounded-xl border bg-white px-3 text-sm shadow-sm ${showInviteValidation && inviteValidationErrors.hmoApprovalStatus ? 'border-red-300' : 'border-slate-200'}`}
                                 value={intakeValues.hmoApprovalStatus}
                                 onChange={(e) => setIntakeValues((prev) => ({ ...prev, hmoApprovalStatus: e.target.value }))}
                               >
-                                <option value="no_approval_yet">אין אישור עדיין</option>
-                                <option value="send_separately">האישור יישלח בנפרד בוואטסאפ/אימייל</option>
+                                {HMO_APPROVAL_OPTIONS.map((option) => (
+                                  <option key={option.value || 'empty'} value={option.value}>{option.label}</option>
+                                ))}
                               </select>
+                              {showInviteValidation && inviteValidationErrors.hmoApprovalStatus ? (
+                                <p className="text-xs text-red-600">{inviteValidationErrors.hmoApprovalStatus}</p>
+                              ) : null}
                             </div>
                           </>
                         )}

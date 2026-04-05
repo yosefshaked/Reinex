@@ -66,16 +66,16 @@ const WAITING_LIST_SYSTEM_FIELDS = [
   { key: 'student_first_name', label: 'שם פרטי של התלמיד/ה', placeholder: 'שם פרטי', type: 'text', required: true },
   { key: 'student_last_name', label: 'שם משפחה של התלמיד/ה', placeholder: 'שם משפחה', type: 'text', required: true },
   { key: 'contact_name', label: 'שם איש קשר / אפוטרופוס', placeholder: 'שם איש קשר', type: 'text', conditionalRequired: true },
-  { key: 'contact_relationship', label: 'קרבה לתלמיד/ה', type: 'select', options: ['התלמיד/ה עצמו/ה', 'אם', 'אב', 'מטפל/ת', 'אחר'] },
+  { key: 'contact_relationship', label: 'קרבה לתלמיד/ה', type: 'select', required: true, options: ['בחרו קרבה לתלמיד/ה', 'התלמיד/ה עצמו/ה', 'אם', 'אב', 'מטפל/ת', 'אחר'] },
   { key: 'identity_number', label: 'מספר זהות', placeholder: 'מספר זהות של התלמיד/ה', type: 'text', required: true },
   { key: 'phone', label: 'טלפון', placeholder: '05X-XXXXXXX', type: 'text' },
   { key: 'email', label: 'אימייל', placeholder: 'name@example.com', type: 'text' },
   { key: 'additional_services', label: 'שירותים נוספים שמעניינים אותך', type: 'multi-select-note' },
-  { key: 'preferred_days', label: 'ימי זמינות מועדפים', type: 'day-selector' },
-  { key: 'preferred_times', label: 'טווחי שעות מועדפים', type: 'time-ranges' },
+  { key: 'preferred_days', label: 'ימי זמינות מועדפים', type: 'day-selector', required: true },
+  { key: 'preferred_times', label: 'טווחי שעות מועדפים', type: 'time-ranges', required: true },
   { key: 'payment_path_intent', label: 'סוג תשלום מבוקש', type: 'select', options: ['לא בטוח/ה, צריך עזרה', 'תשלום פרטי', 'דרך קופת חולים / גורם מממן'] },
   { key: 'hmo_provider_name', label: 'שם קופת החולים / הגורם המממן', placeholder: 'למשל: כללית', type: 'text', conditionalRequired: true },
-  { key: 'hmo_approval_status', label: 'סטטוס אישור קופת חולים', type: 'select', options: ['אין אישור עדיין', 'האישור יישלח בנפרד בוואטסאפ/אימייל'] },
+  { key: 'hmo_approval_status', label: 'סטטוס אישור קופת חולים', type: 'select', conditionalRequired: true, options: ['בחרו סטטוס אישור', 'אין אישור עדיין', 'האישור יישלח בנפרד בוואטסאפ/אימייל'] },
   { key: 'notes', label: 'הערות נוספות', placeholder: 'פרטים נוספים שחשוב שנדע', type: 'textarea' },
 ];
 
@@ -370,6 +370,53 @@ function WaitingListIntakePreview() {
     </>
   );
 
+  const findField = (key) => WAITING_LIST_SYSTEM_FIELDS.find((field) => field.key === key);
+  const studentFields = ['student_first_name', 'student_last_name', 'identity_number', 'contact_relationship', 'contact_name'].map(findField).filter(Boolean);
+  const contactFields = ['phone', 'email'].map(findField).filter(Boolean);
+  const fundingFields = ['payment_path_intent', 'hmo_provider_name', 'hmo_approval_status', 'notes'].map(findField).filter(Boolean);
+  const additionalServicesField = findField('additional_services');
+  const preferredDaysField = findField('preferred_days');
+  const preferredTimesField = findField('preferred_times');
+
+  const renderBasicField = (field, options = {}) => {
+    if (!field) return null;
+
+    if (field.type === 'select') {
+      return (
+        <div key={field.key} className="space-y-2">
+          <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
+          <Select disabled value="">
+            <SelectTrigger className="bg-white/80 text-slate-400">
+              <SelectValue placeholder={field.options?.[0] || 'בחרו אפשרות'} />
+            </SelectTrigger>
+            <SelectContent>
+              {(field.options || []).slice(1).map((option) => (
+                <SelectItem key={option} value={option}>{option}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {options.helpText ? <p className="text-xs text-slate-400">{options.helpText}</p> : null}
+        </div>
+      );
+    }
+
+    if (field.type === 'textarea') {
+      return (
+        <div key={field.key} className="space-y-2">
+          <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
+          <Textarea disabled rows={4} placeholder={field.placeholder} className="bg-white/80 text-slate-500 placeholder:text-slate-400" />
+        </div>
+      );
+    }
+
+    return (
+      <div key={field.key} className="space-y-2">
+        <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
+        <Input disabled placeholder={field.placeholder} className="bg-white/80 text-slate-500 placeholder:text-slate-400" />
+      </div>
+    );
+  };
+
   return (
     <div className="mb-6 rounded-xl border border-dashed border-slate-300 bg-slate-100/70 p-4 opacity-70">
       <div className="mb-4 space-y-1">
@@ -385,107 +432,112 @@ function WaitingListIntakePreview() {
         </p>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-5">
         <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
           <p className="text-sm font-medium text-slate-700">שירות מבוקש</p>
           <p className="mt-1 text-xs text-slate-500">מוצג מהשירות שנבחר בזמן שליחת הקישור, לא מהבונה.</p>
         </div>
 
-        {WAITING_LIST_SYSTEM_FIELDS.map((field) => {
-          if (field.type === 'day-selector') {
-            return (
-              <div key={field.key} className="space-y-2">
-                <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
-                <div className="flex flex-wrap gap-2">
-                  {['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'].map((day) => (
-                    <Button key={day} type="button" variant="outline" disabled className="border-slate-300 bg-white text-slate-500">
-                      {day}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            );
-          }
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 space-y-1">
+            <h4 className="text-sm font-semibold text-slate-900">פרטי תלמיד/ה</h4>
+            <p className="text-xs text-slate-500">אותו מבנה שיופיע ללקוח/ה בטופס הציבורי.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {studentFields
+              .filter((field) => field.key !== 'contact_name')
+              .map((field) => renderBasicField(field, field.key === 'contact_relationship'
+                ? { helpText: 'שם איש הקשר מוצג רק אחרי בחירת קרבה שאינה "התלמיד/ה עצמו/ה".' }
+                : {}))}
+          </div>
+          <div className="mt-4 opacity-75">
+            {renderBasicField(findField('contact_name'))}
+          </div>
+        </div>
 
-          if (field.type === 'time-ranges') {
-            return (
-              <div key={field.key} className="space-y-2">
-                <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
-                <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
-                  <div className="mb-2 text-sm font-medium text-slate-600">יום לדוגמה</div>
-                  <div className="flex items-center gap-2">
-                    <Input type="time" disabled value="09:00" className="bg-slate-50 text-slate-500" />
-                    <span className="text-sm text-slate-400">עד</span>
-                    <Input type="time" disabled value="12:00" className="bg-slate-50 text-slate-500" />
-                    <Button type="button" variant="outline" disabled>הסר</Button>
-                  </div>
-                  <div className="mt-2">
-                    <Button type="button" variant="outline" disabled>הוסף טווח</Button>
-                  </div>
-                </div>
-              </div>
-            );
-          }
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 space-y-1">
+            <h4 className="text-sm font-semibold text-slate-900">פרטי התקשרות</h4>
+            <p className="text-xs text-slate-500">פרטים ליצירת קשר לאחר שליחת הטופס.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {contactFields.map((field) => renderBasicField(field))}
+          </div>
+        </div>
 
-          if (field.type === 'select') {
-            return (
-              <div key={field.key} className="space-y-2">
-                <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
-                <Select disabled value={field.options?.[0]}>
-                  <SelectTrigger className="bg-white/80 text-slate-500">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(field.options || []).map((option) => (
-                      <SelectItem key={option} value={option}>{option}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {field.key === 'contact_relationship' ? (
-                  <p className="text-xs text-slate-400">שם איש הקשר מוצג רק אם נבחרה אפשרות שאינה "התלמיד/ה עצמו/ה".</p>
-                ) : null}
-                {field.key === 'payment_path_intent' ? (
-                  <p className="text-xs text-slate-400">שם קופת החולים וסטטוס האישור מוצגים רק אם נבחר תשלום דרך קופת חולים / גורם מממן.</p>
-                ) : null}
-              </div>
-            );
-          }
-
-          if (field.type === 'textarea') {
-            return (
-              <div key={field.key} className="space-y-2">
-                <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
-                <Textarea disabled rows={4} placeholder={field.placeholder} className="bg-white/80 text-slate-500 placeholder:text-slate-400" />
-              </div>
-            );
-          }
-
-          if (field.type === 'multi-select-note') {
-            return (
-              <div key={field.key} className="space-y-2">
-                <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
-                <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
-                  <div className="space-y-2">
-                    {['שירות נוסף א׳', 'שירות נוסף ב׳'].map((label) => (
-                      <label key={label} className="flex items-center gap-3 text-sm text-slate-500">
-                        <Checkbox disabled />
-                        <span>{label}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <p className="mt-2 text-xs text-slate-400">מופיע רק אם השולח מאפשר לבקש שירותים נוספים.</p>
-                </div>
-              </div>
-            );
-          }
-
-          return (
-            <div key={field.key} className="space-y-2">
-              <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
-              <Input disabled placeholder={field.placeholder} className="bg-white/80 text-slate-500 placeholder:text-slate-400" />
+        {additionalServicesField ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 space-y-1">
+              <h4 className="text-sm font-semibold text-slate-900">שירותים נוספים</h4>
+              <p className="text-xs text-slate-500">החלק הזה מופיע רק אם השולח מאפשר לבקש שירותים נוספים.</p>
             </div>
-          );
-        })}
+            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              {['שירות נוסף א׳', 'שירות נוסף ב׳'].map((label) => (
+                <label key={label} className="flex items-center gap-3 rounded-xl bg-white px-3 py-3 text-sm text-slate-500 shadow-sm">
+                  <Checkbox disabled />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 space-y-1">
+            <h4 className="text-sm font-semibold text-slate-900">זמינות מועדפת</h4>
+            <p className="text-xs text-slate-500">נדרש לבחור לפחות יום אחד ולהגדיר עבורו טווח שעות מלא.</p>
+          </div>
+          {preferredDaysField ? (
+            <div className="space-y-2">
+              <Label className="text-slate-700">{renderFieldLabel(preferredDaysField)}</Label>
+              <div className="flex flex-wrap gap-2">
+                {['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'].map((day) => (
+                  <Button key={day} type="button" variant="outline" disabled className="border-slate-300 bg-white text-slate-500">
+                    {day}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {preferredTimesField ? (
+            <div className="mt-4 space-y-2">
+              <Label className="text-slate-700">{renderFieldLabel(preferredTimesField)}</Label>
+              <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
+                <div className="mb-2 text-sm font-medium text-slate-600">יום לדוגמה</div>
+                <div className="flex items-center gap-2">
+                  <Input type="time" disabled value="09:00" className="bg-slate-50 text-slate-500" />
+                  <span className="text-sm text-slate-400">עד</span>
+                  <Input type="time" disabled value="12:00" className="bg-slate-50 text-slate-500" />
+                  <Button type="button" variant="outline" disabled>הסר</Button>
+                </div>
+                <div className="mt-2">
+                  <Button type="button" variant="outline" disabled>הוסף טווח</Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 space-y-1">
+            <h4 className="text-sm font-semibold text-slate-900">פרטי מימון</h4>
+            <p className="text-xs text-slate-500">שדות ה-HMO מופיעים רק אם נבחר מסלול תשלום דרך קופת חולים / גורם מממן.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {fundingFields
+              .filter((field) => !['hmo_provider_name', 'hmo_approval_status', 'notes'].includes(field.key))
+              .map((field) => renderBasicField(field, field.key === 'payment_path_intent'
+                ? { helpText: 'בחירת HMO תציג גם את שם הקופה וגם את סטטוס האישור.' }
+                : {}))}
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 opacity-75">
+            {renderBasicField(findField('hmo_provider_name'))}
+            {renderBasicField(findField('hmo_approval_status'))}
+          </div>
+          <div className="mt-4">
+            {renderBasicField(findField('notes'))}
+          </div>
+        </div>
       </div>
     </div>
   );

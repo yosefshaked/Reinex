@@ -1,6 +1,9 @@
 /* eslint-env node */
+import { randomUUID } from 'node:crypto';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import {
   UUID_PATTERN,
   ensureMembership,
@@ -46,14 +49,16 @@ function normalizePaymentPathIntent(value) {
   return PAYMENT_PATH_INTENTS.has(normalized) ? normalized : 'unsure';
 }
 
-function normalizeHmoApprovalStatus(value) {
+function normalizeHmoApprovalStatus(value, { allowEmpty = false } = {}) {
   const normalized = normalizeString(value).toLowerCase();
+  if (!normalized) return allowEmpty ? '' : 'no_approval_yet';
   if (normalized === 'has_approval') return 'send_separately';
   return HMO_APPROVAL_STATUSES.has(normalized) ? normalized : 'no_approval_yet';
 }
 
-function normalizeGuardianRelationship(value) {
+function normalizeGuardianRelationship(value, { allowEmpty = false } = {}) {
   const normalized = normalizeString(value).toLowerCase();
+  if (!normalized) return allowEmpty ? '' : 'self';
   return GUARDIAN_RELATIONSHIPS.has(normalized) ? normalized : 'self';
 }
 
@@ -110,6 +115,17 @@ function normalizePreferredTimes(value) {
   }
 
   return normalized.length ? normalized : [];
+}
+
+function selectedDaysCoveredByRanges(preferredDays, preferredTimes) {
+  if (!Array.isArray(preferredDays) || preferredDays.length === 0) return false;
+  if (!Array.isArray(preferredTimes) || preferredTimes.length === 0) return false;
+  const coveredDays = new Set(
+    preferredTimes
+      .map((entry) => Number(entry?.day))
+      .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6),
+  );
+  return preferredDays.every((day) => coveredDays.has(day));
 }
 
 function readHeader(req, key) {
@@ -415,9 +431,28 @@ async function createOrReuseProspectStudent(tenantClient, payload) {
       if (!normalizeString(existingStudent.phone) && phone) safeUpdates.phone = phone;
       if (!normalizeString(existingStudent.email) && email) safeUpdates.email = email;
       if (Object.keys(safeUpdates).length) {
-        await tenantClient.from('students').update({ ...safeUpdates, updated_at: getNowIso() }).eq('id', existingStudent.id);
+        const { data: updatedStudent, error: updateError } = await tenantClient
+          .from('students')
+          .update({ ...safeUpdates, updated_at: getNowIso() })
+          .eq('id', existingStudent.id)
+          .select('id, first_name, last_name, identity_number, phone, email, onboarding_status, is_active')
+          .single();
+        if (updateError || !updatedStudent?.id) {
+          throw new Error(`failed_to_update_student:${updateError?.message || 'unknown_error'}`);
+        }
+        return {
+          studentId: updatedStudent.id,
+          action: 'updated_existing',
+          beforeState: existingStudent,
+          afterState: updatedStudent,
+        };
       }
-      return existingStudent.id;
+      return {
+        studentId: existingStudent.id,
+        action: 'reused_existing',
+        beforeState: existingStudent,
+        afterState: existingStudent,
+      };
     }
   }
 
@@ -439,14 +474,19 @@ async function createOrReuseProspectStudent(tenantClient, payload) {
       onboarding_status: 'pending_wl_form',
       is_active: false,
     })
-    .select('id')
+    .select('id, first_name, last_name, identity_number, phone, email, onboarding_status, is_active')
     .single();
 
   if (error || !data?.id) {
     throw new Error(`failed_to_create_student:${error?.message || 'unknown_error'}`);
   }
 
-  return data.id;
+  return {
+    studentId: data.id,
+    action: 'created',
+    beforeState: null,
+    afterState: data,
+  };
 }
 
 async function createOrReuseGuardian(tenantClient, { contactName, phone, email }) {
@@ -486,10 +526,26 @@ async function createOrReuseGuardian(tenantClient, { contactName, phone, email }
     if (!normalizePhone(existingGuardian.phone) && normalizedPhone) updates.phone = normalizedPhone;
     if (!normalizeEmail(existingGuardian.email) && normalizedEmail) updates.email = normalizedEmail;
     if (Object.keys(updates).length) {
-      const { error } = await tenantClient.from('guardians').update(updates).eq('id', existingGuardian.id);
-      if (error) throw new Error(`failed_to_update_guardian:${error.message}`);
+      const { data: updatedGuardian, error } = await tenantClient
+        .from('guardians')
+        .update(updates)
+        .eq('id', existingGuardian.id)
+        .select('id, first_name, last_name, phone, email')
+        .single();
+      if (error || !updatedGuardian?.id) throw new Error(`failed_to_update_guardian:${error?.message || 'unknown_error'}`);
+      return {
+        guardianId: updatedGuardian.id,
+        action: 'updated_existing',
+        beforeState: existingGuardian,
+        afterState: updatedGuardian,
+      };
     }
-    return existingGuardian.id;
+    return {
+      guardianId: existingGuardian.id,
+      action: 'reused_existing',
+      beforeState: existingGuardian,
+      afterState: existingGuardian,
+    };
   }
 
   const { data, error } = await tenantClient
@@ -500,14 +556,19 @@ async function createOrReuseGuardian(tenantClient, { contactName, phone, email }
       phone: normalizedPhone || null,
       email: normalizedEmail || null,
     })
-    .select('id')
+    .select('id, first_name, last_name, phone, email')
     .single();
 
   if (error || !data?.id) {
     throw new Error(`failed_to_create_guardian:${error?.message || 'unknown_error'}`);
   }
 
-  return data.id;
+  return {
+    guardianId: data.id,
+    action: 'created',
+    beforeState: null,
+    afterState: data,
+  };
 }
 
 async function upsertGuardianLink(tenantClient, { studentId, guardianId, relationship }) {
@@ -523,7 +584,33 @@ async function upsertGuardianLink(tenantClient, { studentId, guardianId, relatio
   if (error) throw new Error(`failed_to_link_guardian:${error.message}`);
 }
 
-async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
+async function writeTenantAudit(context, tenantClient, params) {
+  try {
+    await logTenantAuditEvent(tenantClient, params);
+  } catch (auditError) {
+    context.log?.warn?.('waiting-list-intake failed to write tenant audit event', {
+      message: auditError?.message,
+      eventType: params?.eventType,
+      resourceType: params?.resourceType,
+      resourceId: params?.resourceId,
+    });
+  }
+}
+
+async function writeControlAudit(context, controlClient, params) {
+  try {
+    await logAuditEvent(controlClient, params);
+  } catch (auditError) {
+    context.log?.warn?.('waiting-list-intake failed to write control audit event', {
+      message: auditError?.message,
+      actionType: params?.actionType,
+      resourceType: params?.resourceType,
+      resourceId: params?.resourceId,
+    });
+  }
+}
+
+async function sendInvite(context, req, { controlClient, env, orgId, userId, userEmail, role }) {
   const body = parseRequestBody(req);
   const formId = normalizeUuid(body?.form_id || body?.formId);
   const desiredServiceId = normalizeUuid(body?.desired_service_id || body?.desiredServiceId || body?.service_id || body?.serviceId);
@@ -573,8 +660,9 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
   if (!service) return respond(context, 404, { message: 'service_not_found' });
 
   let studentId = '';
+  let studentResult = null;
   try {
-    studentId = await createOrReuseProspectStudent(tenantClient, {
+    studentResult = await createOrReuseProspectStudent(tenantClient, {
       student_first_name: studentFirstName,
       student_last_name: studentLastName,
       phone,
@@ -583,11 +671,16 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
       delivery_method: deliveryMethod,
       internal_note: internalNote,
     });
+    studentId = studentResult?.studentId || '';
   } catch (error) {
     const message = String(error?.message || '');
     if (message.startsWith('failed_to_lookup_student:')) {
       context.log?.error?.('waiting-list-intake failed to lookup student', { message: message.slice('failed_to_lookup_student:'.length), orgId });
       return respond(context, 500, { message: 'failed_to_lookup_student' });
+    }
+    if (message.startsWith('failed_to_update_student:')) {
+      context.log?.error?.('waiting-list-intake failed to update student', { message: message.slice('failed_to_update_student:'.length), orgId });
+      return respond(context, 500, { message: 'failed_to_update_student' });
     }
     if (message.startsWith('failed_to_create_student:')) {
       context.log?.error?.('waiting-list-intake failed to create student', { message: message.slice('failed_to_create_student:'.length), orgId });
@@ -597,7 +690,27 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
   }
 
   const nowIso = getNowIso();
+  const correlationId = randomUUID();
   let submissionId = '';
+
+  if (studentResult?.action === 'created' || studentResult?.action === 'updated_existing') {
+    await writeTenantAudit(context, tenantClient, {
+      correlationId,
+      actorUserId: userId,
+      eventType: studentResult.action === 'created'
+        ? 'student.waiting_list_prospect.created'
+        : 'student.waiting_list_prospect.updated',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'student',
+      resourceId: studentId,
+      beforeState: studentResult.beforeState,
+      afterState: studentResult.afterState,
+      details: {
+        origin: 'api/waiting-list-intake',
+        onboarding_status: 'pending_wl_form',
+      },
+    });
+  }
 
   try {
     const existingSubmission = await findPendingIntakeSubmission(tenantClient, {
@@ -647,6 +760,25 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
             responseBody.message = 'email_send_failed_manual_fallback';
           }
         }
+
+        await writeControlAudit(context, controlClient, {
+          orgId,
+          userId,
+          userEmail,
+          userRole: role,
+          actionType: AUDIT_ACTIONS.WAITING_LIST_INTAKE_INVITE_SENT,
+          actionCategory: AUDIT_CATEGORIES.FORMS,
+          resourceType: 'waiting_list_intake_invite',
+          resourceId: existingRouting.id,
+          details: {
+            submission_id: existingSubmission.id,
+            student_id: studentId,
+            form_id: formId,
+            desired_service_id: desiredServiceId,
+            delivery_method: deliveryMethod,
+            reused_existing_invite: true,
+          },
+        });
 
         return respond(context, 200, responseBody);
       }
@@ -700,6 +832,28 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
     return respond(context, 500, { message: 'failed_to_create_submission' });
   }
   submissionId = submission.id;
+
+  await writeTenantAudit(context, tenantClient, {
+    correlationId,
+    actorUserId: userId,
+    eventType: 'form_submission.waiting_list_intake.prepared',
+    retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+    resourceType: 'form_submission',
+    resourceId: submissionId,
+    afterState: {
+      id: submissionId,
+      student_id: studentId,
+      form_id: formId,
+      workflow_status: 'pending',
+      workflow_kind: 'waiting_list_intake',
+    },
+    details: {
+      origin: 'api/waiting-list-intake',
+      desired_service_id: desiredServiceId,
+      delivery_method: deliveryMethod,
+      allow_additional_services: allowAdditionalServices,
+    },
+  });
 
   const expiresAt = getFutureIso(ttlMinutes);
   const { data: routingRow, error: routingError } = await controlClient
@@ -782,6 +936,25 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId }) {
     }
   }
 
+  await writeControlAudit(context, controlClient, {
+    orgId,
+    userId,
+    userEmail,
+    userRole: role,
+    actionType: AUDIT_ACTIONS.WAITING_LIST_INTAKE_INVITE_SENT,
+    actionCategory: AUDIT_CATEGORIES.FORMS,
+    resourceType: 'waiting_list_intake_invite',
+    resourceId: routingRow.id,
+    details: {
+      submission_id: submissionId,
+      student_id: studentId,
+      form_id: formId,
+      desired_service_id: desiredServiceId,
+      delivery_method: deliveryMethod,
+      reused_existing_invite: false,
+    },
+  });
+
   return respond(context, 200, responseBody);
 }
 
@@ -846,7 +1019,7 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
       student_first_name: student?.first_name || '',
       student_last_name: student?.last_name || '',
       contact_name: normalizeString(submissionMetadata.contact_name) || '',
-      contact_relationship: normalizeGuardianRelationship(submissionMetadata.contact_relationship),
+      contact_relationship: normalizeGuardianRelationship(submissionMetadata.contact_relationship, { allowEmpty: true }),
       identity_number: student?.identity_number || '',
       phone: student?.phone || '',
       email: student?.email || '',
@@ -911,21 +1084,24 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
   const studentFirstName = normalizeString(intake?.student_first_name || intake?.studentFirstName);
   const studentLastName = normalizeString(intake?.student_last_name || intake?.studentLastName);
   const contactName = normalizeString(intake?.contact_name || intake?.contactName);
-  const contactRelationship = normalizeGuardianRelationship(intake?.contact_relationship ?? intake?.contactRelationship);
+  const contactRelationship = normalizeGuardianRelationship(intake?.contact_relationship ?? intake?.contactRelationship, { allowEmpty: true });
   const phone = normalizePhone(intake?.phone);
   const email = normalizeEmail(intake?.email);
   const identityNumber = normalizeIdentityNumber(intake?.identity_number || intake?.identityNumber);
   const preferredDays = normalizePreferredDays(intake?.preferred_days ?? intake?.preferredDays);
   const preferredTimes = normalizePreferredTimes(intake?.preferred_times ?? intake?.preferredTimes);
   const paymentPathIntent = normalizePaymentPathIntent(intake?.payment_path_intent ?? intake?.paymentPathIntent);
-  const requestedHmoApprovalStatus = normalizeHmoApprovalStatus(intake?.hmo_approval_status ?? intake?.hmoApprovalStatus);
+  const requestedHmoApprovalStatus = normalizeHmoApprovalStatus(intake?.hmo_approval_status ?? intake?.hmoApprovalStatus, { allowEmpty: true });
   const requestedHmoProviderName = normalizeString(intake?.hmo_provider_name ?? intake?.hmoProviderName);
   const prospectNotes = normalizeString(intake?.notes);
 
   if (!studentFirstName) return respond(context, 400, { message: 'missing_student_first_name' });
   if (!studentLastName) return respond(context, 400, { message: 'missing_student_last_name' });
   if (!identityNumber) return respond(context, 400, { message: 'missing_identity_number' });
+  if (!contactRelationship) return respond(context, 400, { message: 'missing_contact_relationship' });
   if (contactRelationship !== 'self' && !contactName) return respond(context, 400, { message: 'missing_contact_name' });
+  if (!Array.isArray(preferredDays) || preferredDays.length === 0) return respond(context, 400, { message: 'missing_preferred_days' });
+  if (!selectedDaysCoveredByRanges(preferredDays, preferredTimes)) return respond(context, 400, { message: 'missing_preferred_times' });
 
   const serviceById = new Map(services.map((service) => [service.id, service]));
   const primaryServiceId = normalizeUuid(currentSubmissionMetadata.primary_service_id);
@@ -939,6 +1115,9 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
   const effectiveHmoProviderName = paymentPathIntent === 'hmo' ? requestedHmoProviderName : null;
   if (paymentPathIntent === 'hmo' && !effectiveHmoProviderName) {
     return respond(context, 400, { message: 'missing_hmo_provider_name' });
+  }
+  if (paymentPathIntent === 'hmo' && !effectiveHmoApprovalStatus) {
+    return respond(context, 400, { message: 'missing_hmo_approval_status' });
   }
   const requestedAdditionalServices = Array.isArray(intake?.requested_additional_service_ids ?? intake?.requestedAdditionalServiceIds)
     ? (intake?.requested_additional_service_ids ?? intake?.requestedAdditionalServiceIds)
@@ -954,6 +1133,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
 
   const requestedServiceIds = [primaryServiceId, ...additionalServiceIds];
   const nowIso = getNowIso();
+  const correlationId = randomUUID();
 
   let identityConflictStudentId = '';
   if (identityNumber) {
@@ -994,14 +1174,30 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     return respond(context, 500, { message: 'failed_to_update_student' });
   }
 
+  await writeTenantAudit(context, tenantClient, {
+    correlationId,
+    actorUserId: null,
+    eventType: 'student.waiting_list_intake_profile_updated',
+    retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+    resourceType: 'student',
+    resourceId: submission.student_id,
+    afterState: studentUpdates,
+    details: {
+      origin: 'public_waiting_list_intake',
+      identity_number_conflict_student_id: identityConflictStudentId || null,
+    },
+  });
+
   let guardianId = null;
+  let guardianResult = null;
   if (contactRelationship !== 'self') {
     try {
-      guardianId = await createOrReuseGuardian(tenantClient, {
+      guardianResult = await createOrReuseGuardian(tenantClient, {
         contactName,
         phone,
         email,
       });
+      guardianId = guardianResult?.guardianId || null;
       if (guardianId) {
         await upsertGuardianLink(tenantClient, {
           studentId: submission.student_id,
@@ -1017,6 +1213,45 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
       });
       return respond(context, 500, { message: 'failed_to_link_guardian' });
     }
+  }
+
+  if (guardianResult?.action === 'created' || guardianResult?.action === 'updated_existing') {
+    await writeTenantAudit(context, tenantClient, {
+      correlationId,
+      actorUserId: null,
+      eventType: guardianResult.action === 'created'
+        ? 'guardian.created_from_waiting_list_intake'
+        : 'guardian.updated_from_waiting_list_intake',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'guardian',
+      resourceId: guardianId,
+      beforeState: guardianResult.beforeState,
+      afterState: guardianResult.afterState,
+      details: {
+        origin: 'public_waiting_list_intake',
+        student_id: submission.student_id,
+      },
+    });
+  }
+
+  if (guardianId) {
+    await writeTenantAudit(context, tenantClient, {
+      correlationId,
+      actorUserId: null,
+      eventType: 'student.guardian_linked_from_waiting_list_intake',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'student_guardian',
+      resourceId: `${submission.student_id}:${guardianId}`,
+      afterState: {
+        student_id: submission.student_id,
+        guardian_id: guardianId,
+        relationship: contactRelationship,
+        is_primary: true,
+      },
+      details: {
+        origin: 'public_waiting_list_intake',
+      },
+    });
   }
 
   const { error: updateSubmissionError } = await tenantClient
@@ -1070,6 +1305,26 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     });
     return respond(context, 500, { message: 'failed_to_submit_intake' });
   }
+
+  await writeTenantAudit(context, tenantClient, {
+    correlationId,
+    actorUserId: null,
+    eventType: 'form_submission.waiting_list_intake.completed',
+    retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+    resourceType: 'form_submission',
+    resourceId: submissionId,
+    beforeState: {
+      workflow_status: currentSubmissionMetadata.workflow_status || 'pending',
+    },
+    afterState: {
+      workflow_status: 'submitted',
+      submitted_at: nowIso,
+    },
+    details: {
+      origin: 'public_waiting_list_intake',
+      requested_service_ids: requestedServiceIds,
+    },
+  });
 
   for (const serviceId of requestedServiceIds) {
     const intakeMetadata = {
@@ -1127,8 +1382,30 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
         });
         return respond(context, 500, { message: 'failed_to_create_waiting_list' });
       }
+
+      await writeTenantAudit(context, tenantClient, {
+        correlationId,
+        actorUserId: null,
+        eventType: 'waiting_list.entry.updated_from_intake',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'waiting_list_entry',
+        resourceId: existingEntry.id,
+        beforeState: existingEntry,
+        afterState: {
+          id: existingEntry.id,
+          preferred_days: preferredDays,
+          preferred_times: preferredTimes,
+          notes: prospectNotes || null,
+          status: 'new',
+          metadata: mergedMetadata,
+        },
+        details: {
+          origin: 'public_waiting_list_intake',
+          desired_service_id: serviceId,
+        },
+      });
     } else {
-      const { error: insertEntryError } = await tenantClient
+      const { data: insertedEntry, error: insertEntryError } = await tenantClient
         .from('waiting_list_entries')
         .insert({
           student_id: submission.student_id,
@@ -1138,16 +1415,31 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
           notes: prospectNotes || null,
           status: 'new',
           metadata: intakeMetadata,
-        });
+        })
+        .select('id, student_id, desired_service_id, preferred_days, preferred_times, notes, status, metadata')
+        .single();
 
-      if (insertEntryError) {
+      if (insertEntryError || !insertedEntry?.id) {
         context.log?.error?.('waiting-list-intake failed to insert waiting-list entry', {
-          message: insertEntryError.message,
+          message: insertEntryError?.message,
           studentId: submission.student_id,
           serviceId,
         });
         return respond(context, 500, { message: 'failed_to_create_waiting_list' });
       }
+
+      await writeTenantAudit(context, tenantClient, {
+        correlationId,
+        actorUserId: null,
+        eventType: 'waiting_list.entry.created_from_intake',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'waiting_list_entry',
+        resourceId: insertedEntry.id,
+        afterState: insertedEntry,
+        details: {
+          origin: 'public_waiting_list_intake',
+        },
+      });
     }
   }
 
@@ -1220,6 +1512,7 @@ export default async function waitingListIntake(context, req) {
   if (!orgId) return respond(context, 400, { message: 'invalid_org_id' });
 
   const userId = authResult.data.user.id;
+  const userEmail = authResult.data.user.email || '';
 
   let role;
   try {
@@ -1237,5 +1530,5 @@ export default async function waitingListIntake(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  return sendInvite(context, req, { controlClient, env, orgId, userId });
+  return sendInvite(context, req, { controlClient, env, orgId, userId, userEmail, role });
 }

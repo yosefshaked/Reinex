@@ -16,6 +16,7 @@ import {
 } from '../_shared/org-bff.js';
 import { sendBrevoEmail } from '../_shared/brevo.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 
 const OTP_DIGITS = 6;
 const OTP_TTL_MINUTES = 15;
@@ -819,40 +820,6 @@ async function fetchStudentIdsByInstructor(tenantClient, instructorEmployeeId) {
 
   const studentIds = Array.from(new Set((data || []).map((row) => row.student_id).filter(Boolean)));
   return { studentIds, error: null };
-}
-
-async function resolveAuditActorContext(controlClient, orgId, userId) {
-  if (!UUID_PATTERN.test(String(userId || ''))) {
-    return null;
-  }
-
-  let userEmail = 'unknown@reinex.local';
-  let userRole = 'member';
-
-  try {
-    const authResult = await controlClient.auth.admin.getUserById(userId);
-    if (!authResult.error && authResult.data?.user?.email) {
-      userEmail = authResult.data.user.email;
-    }
-  } catch {
-    // non-blocking
-  }
-
-  try {
-    const { data: membership } = await controlClient
-      .from('org_memberships')
-      .select('role')
-      .eq('org_id', orgId)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (membership?.role) {
-      userRole = String(membership.role);
-    }
-  } catch {
-    // non-blocking
-  }
-
-  return { userId, userEmail, userRole };
 }
 
 async function listStudentSubmissions(context, req, { controlClient, env, orgId, userId, role }) {
@@ -1749,22 +1716,31 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     return respond(context, 500, { message: 'failed_to_cleanup_routing' });
   }
 
-  const actorContext = await resolveAuditActorContext(controlClient, orgId, routingRow.created_by);
-  if (actorContext) {
-    await logAuditEvent(controlClient, {
-      orgId,
-      userId: actorContext.userId,
-      userEmail: actorContext.userEmail,
-      userRole: actorContext.userRole,
-      actionType: AUDIT_ACTIONS.FORM_SUBMISSION_COMPLETED,
-      actionCategory: AUDIT_CATEGORIES.FORMS,
+  try {
+    await logTenantAuditEvent(tenantClient, {
+      actorUserId: null,
+      eventType: 'form_submission.completed',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
       resourceType: 'form_submission',
       resourceId: submissionId,
+      beforeState: {
+        workflow_status: currentMetadata.workflow_status || null,
+      },
+      afterState: {
+        workflow_status: 'submitted',
+        submitted_at: nowIso,
+      },
       details: {
-        student_id: submission.student_id,
+        origin: 'public_form_submission',
         form_id: routingRow?.metadata?.form_id || null,
+        student_id: submission.student_id,
         delivery_method: routingRow?.metadata?.delivery_method || null,
       },
+    });
+  } catch (auditError) {
+    context.log?.warn?.('form-submissions failed to write tenant audit event (complete)', {
+      message: auditError?.message,
+      submissionId,
     });
   }
 
