@@ -15,7 +15,12 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { DAY_OPTIONS, normalizeDayToken } from '@/lib/day-of-week.js';
 import { toast } from 'sonner';
-import { hasConfiguredAvailability, isWithinAvailabilityWindows } from '@/lib/instructor-availability.js';
+import {
+  buildAvailabilityTimeSlots,
+  getAvailabilityDayTokens,
+  hasConfiguredAvailability,
+  isWithinAvailabilityWindows,
+} from '@/lib/instructor-availability.js';
 
 function formatTemplateTime(timeString) {
   if (!timeString) return '—';
@@ -96,6 +101,12 @@ export function AddTemplateDialog({
   const selectedStudent = students.find((student) => student.id === formData.student_id) || null;
   const selectedInstructor = (instructors || []).find((instructor) => instructor.id === formData.instructor_employee_id) || null;
   const selectedCapability = (selectedInstructor?.service_capabilities || []).find((capability) => capability.service_id === formData.service_id) || null;
+  const availableDayTokens = getAvailabilityDayTokens(selectedCapability?.availability_windows || []);
+  const availableTimeSlots = buildAvailabilityTimeSlots({
+    availabilityWindows: selectedCapability?.availability_windows || [],
+    day: formData.day_of_week,
+    durationMinutes: Number(formData.duration_minutes) || 0,
+  });
   const shouldActivateStudentFromWaitingList = Boolean(
     waitingListEntryId
     && selectedStudent
@@ -116,6 +127,36 @@ export function AddTemplateDialog({
       durationMinutes: Number(formData.duration_minutes),
     }),
   );
+
+  useEffect(() => {
+    if (!selectedCapability || availableDayTokens.length === 0) {
+      return;
+    }
+
+    if (!availableDayTokens.includes(formData.day_of_week)) {
+      setFormData((prev) => ({
+        ...prev,
+        day_of_week: availableDayTokens[0],
+      }));
+    }
+  }, [availableDayTokens, formData.day_of_week, selectedCapability]);
+
+  useEffect(() => {
+    if (!selectedCapability || !formData.day_of_week) {
+      return;
+    }
+
+    if (availableTimeSlots.length === 0) {
+      if (formData.time_of_day) {
+        setFormData((prev) => ({ ...prev, time_of_day: '' }));
+      }
+      return;
+    }
+
+    if (!availableTimeSlots.includes(formData.time_of_day)) {
+      setFormData((prev) => ({ ...prev, time_of_day: availableTimeSlots[0] }));
+    }
+  }, [availableTimeSlots, formData.day_of_week, formData.time_of_day, selectedCapability]);
 
   // Reset form when dialog opens with defaults
   useEffect(() => {
@@ -547,25 +588,44 @@ export function AddTemplateDialog({
               </SelectTrigger>
               <SelectContent>
                 {DAY_OPTIONS.map((day) => (
-                  <SelectItem key={day.value} value={day.value}>
+                  <SelectItem
+                    key={day.value}
+                    value={day.value}
+                    disabled={selectedCapability ? !availableDayTokens.includes(day.value) : false}
+                  >
                     {day.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {selectedCapability && availableDayTokens.length === 0 ? (
+              <p className="mt-1 text-sm text-amber-700">לשירות הזה עדיין לא הוגדרו ימים זמינים.</p>
+            ) : null}
           </div>
 
           {/* Time */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="template-time">שעה *</Label>
-              <Input
-                id="template-time"
-                type="time"
-                value={formData.time_of_day}
-                onChange={(e) => setFormData((prev) => ({ ...prev, time_of_day: e.target.value }))}
-                required
-              />
+              <Select
+                value={formData.time_of_day || undefined}
+                onValueChange={(value) => setFormData((prev) => ({ ...prev, time_of_day: value }))}
+                disabled={!selectedCapability || !formData.day_of_week || availableTimeSlots.length === 0}
+              >
+                <SelectTrigger id="template-time">
+                  <SelectValue placeholder="בחר שעה זמינה" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableTimeSlots.map((time) => (
+                    <SelectItem key={time} value={time}>
+                      {formatTemplateTime(time)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedCapability && formData.day_of_week && availableTimeSlots.length === 0 ? (
+                <p className="mt-1 text-sm text-amber-700">אין שעות זמינות עבור היום והמשך שנבחרו.</p>
+              ) : null}
             </div>
             <div>
               <Label htmlFor="template-duration">משך (דקות) *</Label>
@@ -617,7 +677,10 @@ export function AddTemplateDialog({
             <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               ביטול
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button
+              type="submit"
+              disabled={isSubmitting || !formData.day_of_week || !formData.time_of_day || availableTimeSlots.length === 0}
+            >
               {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
               צור תבנית
             </Button>

@@ -109,6 +109,11 @@
   min-height: 5rem;
 }
 
+.reinex-fullcalendar .fc .reinex-calendar-availability {
+  background: linear-gradient(180deg, rgb(37 99 235 / 0.08), rgb(56 189 248 / 0.12));
+  border-radius: 0.75rem;
+}
+
 .reinex-fullcalendar .fc .fc-event,
 .reinex-fullcalendar .fc .fc-timeline-event {
   border: none;

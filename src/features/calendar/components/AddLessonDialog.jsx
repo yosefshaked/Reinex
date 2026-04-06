@@ -2,8 +2,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { useStudents } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
@@ -12,6 +13,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ComboBoxField } from '@/components/ui/forms-ui';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
+import { dayTokenForJsDay } from '@/lib/day-of-week.js';
+import {
+  buildAvailabilityTimeSlots,
+  getAvailabilityWindowsForDay,
+  hasConfiguredAvailability,
+} from '@/lib/instructor-availability.js';
+import { parseLocalDateString } from '../utils/localDate.js';
 
 function toLocalDateString(dateObj) {
   if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
@@ -42,6 +50,19 @@ function toUtcIsoString(dateString, timeString) {
   }
 
   return localDate.toISOString();
+}
+
+function getDayTokenForLocalDate(dateString) {
+  const parsed = parseLocalDateString(dateString);
+  if (!parsed) {
+    return null;
+  }
+  return dayTokenForJsDay(parsed.getDay());
+}
+
+function formatTimeLabel(timeString) {
+  const [hours = '00', minutes = '00'] = String(timeString || '').split(':');
+  return `${hours}:${minutes}`;
 }
 
 function buildInitialFormData(defaultDate, defaultSelection) {
@@ -92,6 +113,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [studentDetails, setStudentDetails] = useState(null); // Cache first student details
+  const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
 
   useEffect(() => {
     if (!open) {
@@ -103,6 +126,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     setError(null);
     setStudentDetails(null);
     setIsGroupSession(false);
+    setUseSchedulingOverride(false);
+    setOverrideReason('');
   }, [open, defaultDate, defaultSelection]);
 
   useEffect(() => {
@@ -139,6 +164,100 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       console.error('Error fetching students:', studentsError);
     }
   }, [studentsError]);
+
+  const activeServices = useMemo(
+    () => (services || []).filter((service) => service?.is_active === true),
+    [services],
+  );
+  const selectedDayToken = useMemo(() => getDayTokenForLocalDate(formData.date), [formData.date]);
+  const selectedInstructor = useMemo(
+    () => (instructors || []).find((instructor) => String(instructor.id) === String(formData.instructor_employee_id || '')) || null,
+    [formData.instructor_employee_id, instructors],
+  );
+  const selectedCapability = useMemo(
+    () => (selectedInstructor?.service_capabilities || []).find((capability) => String(capability.service_id) === String(formData.service_id || '')) || null,
+    [selectedInstructor, formData.service_id],
+  );
+
+  const serviceQualifiedInstructors = useMemo(() => {
+    if (!formData.service_id) {
+      return instructors || [];
+    }
+    return (instructors || []).filter((instructor) =>
+      (instructor.service_capabilities || []).some((capability) => String(capability.service_id) === String(formData.service_id)),
+    );
+  }, [formData.service_id, instructors]);
+
+  const dateAvailableInstructors = useMemo(() => {
+    if (!formData.service_id || !selectedDayToken) {
+      return serviceQualifiedInstructors;
+    }
+
+    return serviceQualifiedInstructors.filter((instructor) => {
+      const capability = (instructor.service_capabilities || []).find((item) => String(item.service_id) === String(formData.service_id));
+      return capability && getAvailabilityWindowsForDay(capability.availability_windows, selectedDayToken).length > 0;
+    });
+  }, [formData.service_id, selectedDayToken, serviceQualifiedInstructors]);
+
+  const instructorOptions = useMemo(
+    () => (useSchedulingOverride ? serviceQualifiedInstructors : dateAvailableInstructors),
+    [dateAvailableInstructors, serviceQualifiedInstructors, useSchedulingOverride],
+  );
+
+  const availableTimeSlots = useMemo(() => {
+    if (useSchedulingOverride || !selectedCapability || !selectedDayToken) {
+      return [];
+    }
+    return buildAvailabilityTimeSlots({
+      availabilityWindows: selectedCapability.availability_windows,
+      day: selectedDayToken,
+      durationMinutes: Number(formData.duration_minutes) || 0,
+    });
+  }, [formData.duration_minutes, selectedCapability, selectedDayToken, useSchedulingOverride]);
+
+  const missingCapability = Boolean(formData.instructor_employee_id && formData.service_id && !selectedCapability);
+  const missingAvailability = Boolean(selectedCapability && !hasConfiguredAvailability(selectedCapability.availability_windows));
+  const hasAvailableSlots = availableTimeSlots.length > 0;
+
+  useEffect(() => {
+    if (useSchedulingOverride) {
+      return;
+    }
+
+    if (formData.instructor_employee_id && !instructorOptions.some((instructor) => String(instructor.id) === String(formData.instructor_employee_id))) {
+      setFormData((prev) => ({ ...prev, instructor_employee_id: '' }));
+    }
+  }, [formData.instructor_employee_id, instructorOptions, useSchedulingOverride]);
+
+  useEffect(() => {
+    if (useSchedulingOverride) {
+      return;
+    }
+
+    if (!formData.service_id || !selectedDayToken || missingCapability || missingAvailability) {
+      return;
+    }
+
+    if (hasAvailableSlots) {
+      if (!availableTimeSlots.includes(formData.time)) {
+        setFormData((prev) => ({ ...prev, time: availableTimeSlots[0] }));
+      }
+      return;
+    }
+
+    if (formData.time) {
+      setFormData((prev) => ({ ...prev, time: '' }));
+    }
+  }, [
+    availableTimeSlots,
+    formData.service_id,
+    formData.time,
+    hasAvailableSlots,
+    missingAvailability,
+    missingCapability,
+    selectedDayToken,
+    useSchedulingOverride,
+  ]);
 
   // When first student is selected, auto-populate service and instructor (only if valid)
   useEffect(() => {
@@ -244,6 +363,26 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         setError('יש לבחור שירות מהרשימה.');
         return;
       }
+      if (!formData.instructor_employee_id) {
+        setError('יש לבחור מדריך/ה.');
+        return;
+      }
+      if (!useSchedulingOverride && missingCapability) {
+        setError('למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.');
+        return;
+      }
+      if (!useSchedulingOverride && missingAvailability) {
+        setError('לשירות הזה אין זמינות מוגדרת אצל המדריך/ה שנבחר/ה.');
+        return;
+      }
+      if (!useSchedulingOverride && !hasAvailableSlots) {
+        setError('לא נמצאה שעה זמינה ביום שנבחר עבור השירות והמדריך/ה.');
+        return;
+      }
+      if (useSchedulingOverride && !overrideReason.trim()) {
+        setError('יש למלא סיבת חריגה לפני יצירת שיעור חד-פעמי מחוץ לזמינות.');
+        return;
+      }
       const datetime_start = toUtcIsoString(formData.date, formData.time);
       if (!datetime_start) {
         setError('תאריך או שעה אינם תקינים.');
@@ -261,6 +400,15 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
           service_id: formData.service_id,
           student_ids: formData.student_ids,
           created_source: 'one_time',
+          metadata: useSchedulingOverride
+            ? {
+                scheduling_override: {
+                  type: 'one_time_exception',
+                  reason: overrideReason.trim(),
+                  created_by_ui: true,
+                },
+              }
+            : {},
         },
       });
 
@@ -268,7 +416,18 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       onClose();
     } catch (err) {
       console.error('Error creating lesson:', err);
-      setError(err?.message || 'Failed to create lesson');
+      const apiError = err?.message || '';
+      setError(
+        apiError === 'missing_instructor_service_capability'
+          ? 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.'
+          : apiError === 'missing_instructor_service_availability'
+            ? 'לשירות הזה אין זמינות מוגדרת אצל המדריך/ה שנבחר/ה.'
+            : apiError === 'outside_instructor_service_availability'
+              ? 'השעה שנבחרה נמצאת מחוץ לחלונות הזמינות שהוגדרו. כדי לשבץ חריג יש להפעיל שיבוץ חד-פעמי חריג ולציין סיבה.'
+              : apiError === 'failed_to_validate_instructor_availability'
+                ? 'לא הצלחנו לבדוק את זמינות המדריך/ה כרגע. אפשר לנסות שוב.'
+                : err?.message || 'יצירת השיעור נכשלה.',
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -279,8 +438,6 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     label: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() || 'ללא שם',
     searchText: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''} ${s.identity_number || ''}`.toLowerCase(),
   }));
-
-  const activeServices = services?.filter((s) => s?.is_active === true) || [];
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -429,7 +586,14 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             )}
             <Select
               value={formData.service_id}
-              onValueChange={(value) => setFormData({ ...formData, service_id: String(value) })}
+              onValueChange={(value) => {
+                const selectedService = activeServices.find((service) => String(service.id) === String(value));
+                setFormData((prev) => ({
+                  ...prev,
+                  service_id: String(value),
+                  duration_minutes: selectedService?.duration_minutes || prev.duration_minutes,
+                }));
+              }}
               disabled={servicesLoading || !formData.student_ids.length}
             >
               <SelectTrigger id="service">
@@ -445,22 +609,52 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             </Select>
           </div>
 
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">שיבוץ לפי זמינות</p>
+                <p className="text-xs text-slate-600">
+                  ברירת המחדל מציגה רק מדריכים ושעות זמינים לשירות ולתאריך שנבחרו.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant={useSchedulingOverride ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setUseSchedulingOverride((prev) => !prev);
+                  setError(null);
+                }}
+              >
+                {useSchedulingOverride ? 'בטל שיבוץ חריג' : 'שיבוץ חד-פעמי חריג'}
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              שיבוץ חריג מיועד לחגים, שירות מיוחד או חלון זמני פנוי, ואינו משנה את הזמינות הקבועה של המדריך/ה.
+            </p>
+          </div>
+
           {/* Instructor - AUTO-POPULATED */}
           <div>
             <Label htmlFor="instructor">מדריך *</Label>
             {instructorsError && (
               <div className="text-sm text-red-600 mb-2">{instructorsError}</div>
             )}
+            {!useSchedulingOverride && formData.service_id && selectedDayToken && instructorOptions.length === 0 ? (
+              <div className="mb-2 text-sm text-amber-700">
+                אין כרגע מדריכים זמינים עבור השירות והתאריך שנבחרו. אפשר לעבור לשיבוץ חד-פעמי חריג במקרה חריג.
+              </div>
+            ) : null}
             <Select
               value={formData.instructor_employee_id}
               onValueChange={(value) => setFormData({ ...formData, instructor_employee_id: String(value) })}
-              disabled={instructorsLoading}
+              disabled={instructorsLoading || instructorOptions.length === 0}
             >
               <SelectTrigger id="instructor">
-                <SelectValue placeholder="בחר מדריך" />
+                <SelectValue placeholder={useSchedulingOverride ? 'בחר מדריך/ה בעל/ת יכולת שירות' : 'בחר מדריך/ה זמין/ה'} />
               </SelectTrigger>
               <SelectContent>
-                {instructors.map((instructor) => (
+                {instructorOptions.map((instructor) => (
                   <SelectItem key={instructor.id} value={String(instructor.id)}>
                     {instructor.full_name}
                   </SelectItem>
@@ -481,18 +675,6 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             />
           </div>
 
-          {/* Time */}
-          <div>
-            <Label htmlFor="time">שעה *</Label>
-            <Input
-              id="time"
-              type="time"
-              value={formData.time}
-              onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-              required
-            />
-          </div>
-
           {/* Duration */}
           <div>
             <Label htmlFor="duration">משך (דקות) *</Label>
@@ -502,10 +684,74 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
               min="15"
               step="15"
               value={formData.duration_minutes}
-              onChange={(e) => setFormData({ ...formData, duration_minutes: parseInt(e.target.value) })}
+              onChange={(e) => setFormData({ ...formData, duration_minutes: parseInt(e.target.value, 10) || 60 })}
               required
             />
           </div>
+
+          {formData.instructor_employee_id && formData.service_id && !useSchedulingOverride && missingCapability ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {formData.instructor_employee_id && formData.service_id && !useSchedulingOverride && missingAvailability ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>לשירות הזה עדיין לא הוגדרה זמינות אצל המדריך/ה שנבחר/ה.</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {!useSchedulingOverride ? (
+            <div>
+              <Label htmlFor="time">שעה *</Label>
+              {!formData.instructor_employee_id || !formData.service_id || !selectedDayToken ? (
+                <div className="mt-1 text-sm text-slate-500">בחרו מדריך/ה, שירות ותאריך כדי לראות את השעות הזמינות.</div>
+              ) : !hasAvailableSlots ? (
+                <div className="mt-1 text-sm text-amber-700">אין שעות פנויות התואמות את חלונות הזמינות עבור היום הזה.</div>
+              ) : (
+                <Select
+                  value={formData.time || undefined}
+                  onValueChange={(value) => setFormData((prev) => ({ ...prev, time: value }))}
+                >
+                  <SelectTrigger id="time">
+                    <SelectValue placeholder="בחר שעה זמינה" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableTimeSlots.map((time) => (
+                      <SelectItem key={time} value={time}>
+                        {formatTimeLabel(time)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50/70 p-4">
+              <div>
+                <Label htmlFor="time">שעה חריגה *</Label>
+                <Input
+                  id="time"
+                  type="time"
+                  value={formData.time}
+                  onChange={(e) => setFormData({ ...formData, time: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="override-reason">סיבת החריגה *</Label>
+                <Textarea
+                  id="override-reason"
+                  rows={3}
+                  value={overrideReason}
+                  onChange={(event) => setOverrideReason(event.target.value)}
+                  placeholder="למשל: חופשה, תגבור חד-פעמי, חלון זמני פנוי, שירות מיוחד"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Conflicts Warning */}
           {isCheckingConflicts && (
@@ -542,7 +788,18 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               ביטול
             </Button>
-            <Button type="submit" disabled={isSubmitting || !formData.service_id || !formData.instructor_employee_id || formData.student_ids.length === 0}>
+            <Button
+              type="submit"
+              disabled={
+                isSubmitting
+                || !formData.service_id
+                || !formData.instructor_employee_id
+                || !formData.date
+                || !formData.time
+                || formData.student_ids.length === 0
+                || (useSchedulingOverride ? !overrideReason.trim() : (!hasAvailableSlots && !formData.time))
+              }
+            >
               {isSubmitting ? (
                 <>
                   <Loader2 className="me-2 h-4 w-4 animate-spin" />

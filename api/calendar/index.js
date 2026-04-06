@@ -26,6 +26,11 @@ import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
+import {
+  extractScheduleSlotFromIso,
+  hasConfiguredAvailability,
+  isWithinAvailabilityWindows,
+} from '../_shared/instructor-availability.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 const INSTANCE_STATUSES = new Set(['scheduled', 'completed', 'cancelled_student', 'cancelled_clinic', 'no_show']);
@@ -199,6 +204,90 @@ async function promoteScheduledParticipantsForCompletedLesson(tenantClient, {
       },
     });
   }
+}
+
+function normalizeSchedulingOverrideMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return { metadata: {}, override: null };
+  }
+
+  const nextMetadata = { ...metadata };
+  const rawOverride = metadata.scheduling_override;
+  if (!rawOverride || typeof rawOverride !== 'object' || Array.isArray(rawOverride)) {
+    return { metadata: nextMetadata, override: null };
+  }
+
+  const reason = normalizeString(rawOverride.reason);
+  if (!reason) {
+    delete nextMetadata.scheduling_override;
+    return { metadata: nextMetadata, override: null };
+  }
+
+  const normalizedOverride = {
+    type: 'one_time_exception',
+    reason,
+    created_by_ui: rawOverride.created_by_ui === true,
+    created_at: normalizeString(rawOverride.created_at) || new Date().toISOString(),
+  };
+
+  nextMetadata.scheduling_override = normalizedOverride;
+  return { metadata: nextMetadata, override: normalizedOverride };
+}
+
+function buildSchedulingOverrideAuditDetails(metadata) {
+  const reason = normalizeString(metadata?.scheduling_override?.reason);
+  return {
+    scheduling_override_used: Boolean(reason),
+    ...(reason ? { scheduling_override_reason: reason } : {}),
+  };
+}
+
+async function validateLessonInstanceAvailability(tenantClient, {
+  instructorEmployeeId,
+  serviceId,
+  datetimeStart,
+  durationMinutes,
+  metadata,
+}) {
+  const { data, error } = await tenantClient
+    .from('instructor_service_capabilities')
+    .select('employee_id, service_id, availability_windows')
+    .eq('employee_id', instructorEmployeeId)
+    .eq('service_id', serviceId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return { ok: false, code: 'missing_instructor_service_capability' };
+  }
+
+  const { override } = normalizeSchedulingOverrideMetadata(metadata);
+  if (override) {
+    return { ok: true, code: null, override };
+  }
+
+  if (!hasConfiguredAvailability(data.availability_windows)) {
+    return { ok: false, code: 'missing_instructor_service_availability' };
+  }
+
+  const slot = extractScheduleSlotFromIso(datetimeStart);
+  if (!slot) {
+    return { ok: false, code: 'invalid_datetime_start' };
+  }
+
+  if (!isWithinAvailabilityWindows({
+    availabilityWindows: data.availability_windows,
+    day: slot.day,
+    startTime: slot.startTime,
+    durationMinutes,
+  })) {
+    return { ok: false, code: 'outside_instructor_service_availability' };
+  }
+
+  return { ok: true, code: null, override: null };
 }
 
 /**
@@ -599,6 +688,7 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
   }
 
   const requestedStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : 'scheduled';
+  const normalizedSchedulingMetadata = normalizeSchedulingOverrideMetadata(body.metadata);
   if (!INSTANCE_STATUSES.has(requestedStatus)) {
     return respond(context, 400, { message: 'invalid status' });
   }
@@ -649,6 +739,27 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     return respond(context, 409, leaveConflict);
   }
 
+  try {
+    const availabilityValidation = await validateLessonInstanceAvailability(tenantClient, {
+      instructorEmployeeId: body.instructor_employee_id,
+      serviceId: body.service_id,
+      datetimeStart: body.datetime_start,
+      durationMinutes: body.duration_minutes,
+      metadata: normalizedSchedulingMetadata.metadata,
+    });
+
+    if (!availabilityValidation.ok) {
+      return respond(context, 409, { message: availabilityValidation.code });
+    }
+  } catch (availabilityError) {
+    context.log?.error?.('calendar/instances failed to validate instructor availability on create', {
+      message: availabilityError?.message,
+      instructorEmployeeId: body.instructor_employee_id,
+      serviceId: body.service_id,
+    });
+    return respond(context, 500, { message: 'failed_to_validate_instructor_availability' });
+  }
+
   // Create lesson instance
   const instanceData = {
     template_id: body.template_id || null,
@@ -659,7 +770,7 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     status: requestedStatus,
     documentation_status: body.documentation_status || 'undocumented',
     created_source: body.created_source || 'manual',
-    metadata: body.metadata || {},
+    metadata: normalizedSchedulingMetadata.metadata,
     created_by: userId,
     updated_by: userId,
   };
@@ -734,6 +845,7 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
         service_id: instance.service_id,
         student_ids: body.student_ids,
         created_source: instance.created_source,
+        ...buildSchedulingOverrideAuditDetails(normalizedSchedulingMetadata.metadata),
       },
     });
   } catch (auditError) {
@@ -754,6 +866,7 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
       details: {
         origin: 'api/calendar',
         student_ids: body.student_ids,
+        ...buildSchedulingOverrideAuditDetails(normalizedSchedulingMetadata.metadata),
       },
     });
   } catch (auditError) {
@@ -866,6 +979,19 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
 
   const targetInstructorId = body.instructor_employee_id || existingInstance.instructor_employee_id;
   const targetDate = toDateKey(body.datetime_start || existingInstance.datetime_start);
+  const targetServiceId = body.service_id || existingInstance.service_id;
+  const targetDurationMinutes = body.duration_minutes || existingInstance.duration_minutes;
+  const targetMetadata = body.metadata !== undefined
+    ? normalizeSchedulingOverrideMetadata(body.metadata).metadata
+    : (existingInstance.metadata || {});
+  const scheduleChanged = [
+    'datetime_start',
+    'duration_minutes',
+    'instructor_employee_id',
+    'service_id',
+    'metadata',
+  ].some((field) => Object.prototype.hasOwnProperty.call(body, field));
+
   if (targetInstructorId && targetDate) {
     const leaveConflict = await assertNoLeaveForLesson(tenantClient, {
       employeeId: targetInstructorId,
@@ -874,6 +1000,30 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
 
     if (leaveConflict) {
       return respond(context, 409, leaveConflict);
+    }
+  }
+
+  if (scheduleChanged) {
+    try {
+      const availabilityValidation = await validateLessonInstanceAvailability(tenantClient, {
+        instructorEmployeeId: targetInstructorId,
+        serviceId: targetServiceId,
+        datetimeStart: body.datetime_start || existingInstance.datetime_start,
+        durationMinutes: targetDurationMinutes,
+        metadata: targetMetadata,
+      });
+
+      if (!availabilityValidation.ok) {
+        return respond(context, 409, { message: availabilityValidation.code });
+      }
+    } catch (availabilityError) {
+      context.log?.error?.('calendar/instances failed to validate instructor availability on update', {
+        message: availabilityError?.message,
+        instanceId: body.id,
+        instructorEmployeeId: targetInstructorId,
+        serviceId: targetServiceId,
+      });
+      return respond(context, 500, { message: 'failed_to_validate_instructor_availability' });
     }
   }
 
@@ -906,7 +1056,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   if (body.status !== undefined) updateData.status = body.status;
   if (body.closed_reason !== undefined) updateData.closed_reason = body.closed_reason;
   if (body.documentation_status !== undefined) updateData.documentation_status = body.documentation_status;
-  if (body.metadata !== undefined) updateData.metadata = body.metadata;
+  if (body.metadata !== undefined) updateData.metadata = targetMetadata;
   updateData.updated_by = userId;
   
   updateData.updated_at = new Date().toISOString();
@@ -1008,6 +1158,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
         service_id: updateData.service_id || null,
         status: updateData.status || null,
         closed_reason: updateData.closed_reason || null,
+        ...buildSchedulingOverrideAuditDetails(targetMetadata),
       },
     });
   } catch (auditError) {
@@ -1033,6 +1184,7 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
       details: {
         origin: 'api/calendar',
         updated_fields: Object.keys(updateData),
+        ...buildSchedulingOverrideAuditDetails(targetMetadata),
       },
     });
   } catch (auditError) {

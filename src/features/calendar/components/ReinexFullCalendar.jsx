@@ -8,9 +8,17 @@ import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { Button } from '@/components/ui/button.jsx';
+import { Label } from '@/components/ui/label.jsx';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useRuntimeConfig } from '@/runtime/RuntimeConfigContext.jsx';
+import { dayTokenForJsDay } from '@/lib/day-of-week.js';
+import {
+  getAvailabilityWindowsForDay,
+  hasConfiguredAvailability,
+  isWithinAvailabilityWindows,
+  timeToMinutes,
+} from '@/lib/instructor-availability.js';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,6 +29,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog.jsx';
+import { Textarea } from '@/components/ui/textarea.jsx';
 import { formatTimeDisplay, getInstanceStatusIcon } from '../utils/timeGrid';
 import { mapInstancesToEvents, mapInstructorsToResources } from '../utils/fullcalendar-adapter.js';
 import {
@@ -29,7 +38,7 @@ import {
   getInstructorDayLessons,
   getInstructorWeekLessons,
 } from '../utils/instructor-whatsapp.js';
-import { CALENDAR_WEEK_START } from '../utils/localDate.js';
+import { addLocalDays, CALENDAR_WEEK_START, getWeekStartDate, parseLocalDateString, toLocalDateString as toCalendarLocalDateString } from '../utils/localDate.js';
 import InstructorWhatsAppDialog from './InstructorWhatsAppDialog.jsx';
 import './reinex-fullcalendar.css';
 
@@ -39,6 +48,204 @@ function toLocalDateString(dateObj) {
   const month = String(dateObj.getMonth() + 1).padStart(2, '0');
   const day = String(dateObj.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function resolveViewDates(currentDate, viewMode) {
+  const baseDate = parseLocalDateString(currentDate || '');
+  if (!baseDate) {
+    return [];
+  }
+
+  if (viewMode === 'week') {
+    const weekStart = getWeekStartDate(baseDate, CALENDAR_WEEK_START);
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = addLocalDays(weekStart, index);
+      const dateString = toCalendarLocalDateString(date);
+      return {
+        dateString,
+        dayToken: dayTokenForJsDay(date?.getDay?.()),
+      };
+    }).filter((entry) => entry.dateString && entry.dayToken);
+  }
+
+  return [{
+    dateString: currentDate,
+    dayToken: dayTokenForJsDay(baseDate.getDay()),
+  }].filter((entry) => entry.dateString && entry.dayToken);
+}
+
+function formatCalendarTime(minutes) {
+  const clamped = Math.max(0, Math.min(24 * 60, Number(minutes) || 0));
+  const hours = Math.floor(clamped / 60);
+  const mins = clamped % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:00`;
+}
+
+function getDateTimeLocalMinutes(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return (date.getHours() * 60) + date.getMinutes();
+}
+
+function getLocalStartTime(date) {
+  const minutes = getDateTimeLocalMinutes(date);
+  if (minutes == null) return '';
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+function buildSchedulingOverrideMetadata(baseMetadata, { enabled, reason }) {
+  const nextMetadata = baseMetadata && typeof baseMetadata === 'object' && !Array.isArray(baseMetadata)
+    ? { ...baseMetadata }
+    : {};
+
+  if (!enabled) {
+    delete nextMetadata.scheduling_override;
+    return nextMetadata;
+  }
+
+  const trimmedReason = String(reason || '').trim();
+  const existingOverride = nextMetadata.scheduling_override && typeof nextMetadata.scheduling_override === 'object'
+    ? nextMetadata.scheduling_override
+    : {};
+
+  nextMetadata.scheduling_override = {
+    type: 'one_time_exception',
+    reason: trimmedReason,
+    created_by_ui: true,
+    created_at: existingOverride.created_at || new Date().toISOString(),
+  };
+
+  return nextMetadata;
+}
+
+function resolveCalendarAvailabilityState({ instructorMap, instructorId, serviceId, startDate, durationMinutes }) {
+  const targetInstructor = instructorMap.get(String(instructorId || ''));
+  const targetCapability = (targetInstructor?.service_capabilities || []).find(
+    (capability) => String(capability.service_id) === String(serviceId || ''),
+  );
+
+  if (!targetCapability) {
+    return {
+      status: 'missing_capability',
+      message: 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השיעור הזה.',
+    };
+  }
+
+  if (!hasConfiguredAvailability(targetCapability.availability_windows)) {
+    return {
+      status: 'missing_availability',
+      message: 'לשירות הזה אין זמינות מוגדרת אצל המדריך/ה שנבחר/ה.',
+    };
+  }
+
+  const targetDay = dayTokenForJsDay(startDate?.getDay?.());
+  const targetStartTime = getLocalStartTime(startDate);
+  if (!targetDay || !targetStartTime || !isWithinAvailabilityWindows({
+    availabilityWindows: targetCapability.availability_windows,
+    day: targetDay,
+    startTime: targetStartTime,
+    durationMinutes,
+  })) {
+    return {
+      status: 'outside_availability',
+      message: 'המועד שנבחר נמצא מחוץ לחלונות הזמינות של השירות אצל המדריך/ה.',
+    };
+  }
+
+  return {
+    status: 'within_availability',
+    message: '',
+  };
+}
+
+function buildAvailabilityPresentationContext({ currentDate, viewMode, instructors, instances }) {
+  const viewDates = resolveViewDates(currentDate, viewMode);
+  const dayTokens = viewDates.map((entry) => entry.dayToken).filter(Boolean);
+  const dayDateMap = new Map(viewDates.map((entry) => [entry.dayToken, entry.dateString]));
+  const instructorsArray = Array.isArray(instructors) ? instructors : [];
+  const instancesArray = Array.isArray(instances) ? instances : [];
+  const eventInstructorIds = new Set(instancesArray.map((instance) => String(instance?.instructor_employee_id || '')).filter(Boolean));
+  const visibleInstructors = [];
+  const backgroundEvents = [];
+  const boundMinutes = [];
+
+  for (const instructor of instructorsArray) {
+    if (!instructor?.id) continue;
+
+    const capabilities = Array.isArray(instructor.service_capabilities) ? instructor.service_capabilities : [];
+    const relevantWindows = capabilities.flatMap((capability) => {
+      if (!hasConfiguredAvailability(capability?.availability_windows)) {
+        return [];
+      }
+
+      return dayTokens.flatMap((dayToken) => getAvailabilityWindowsForDay(capability.availability_windows, dayToken));
+    });
+
+    const hasAvailabilityInView = relevantWindows.length > 0;
+    const hasEventsInView = eventInstructorIds.has(String(instructor.id));
+    if (!hasAvailabilityInView && !hasEventsInView) {
+      continue;
+    }
+
+    visibleInstructors.push(instructor);
+
+    for (const window of relevantWindows) {
+      const startMinutes = timeToMinutes(window.start);
+      const endMinutes = timeToMinutes(window.end);
+      const dateString = dayDateMap.get(window.day);
+      if (startMinutes == null || endMinutes == null || !dateString) continue;
+
+      boundMinutes.push(startMinutes, endMinutes);
+      backgroundEvents.push({
+        id: `availability_${instructor.id}_${window.day}_${window.start}_${window.end}`,
+        resourceId: String(instructor.id),
+        start: `${dateString}T${window.start}:00`,
+        end: `${dateString}T${window.end}:00`,
+        display: 'background',
+        classNames: ['reinex-calendar-availability'],
+      });
+    }
+  }
+
+  for (const instance of instancesArray) {
+    const start = new Date(instance?.datetime_start);
+    if (Number.isNaN(start.getTime())) continue;
+    const startMinutes = getDateTimeLocalMinutes(start);
+    const endMinutes = startMinutes == null ? null : startMinutes + (Number(instance?.duration_minutes) || 0);
+    if (startMinutes != null) boundMinutes.push(startMinutes);
+    if (endMinutes != null) boundMinutes.push(endMinutes);
+  }
+
+  if (visibleInstructors.length === 0) {
+    return {
+      visibleInstructors: [],
+      backgroundEvents: [],
+      slotMinTime: '08:00:00',
+      slotMaxTime: '18:00:00',
+    };
+  }
+
+  if (boundMinutes.length === 0) {
+    return {
+      visibleInstructors,
+      backgroundEvents,
+      slotMinTime: '08:00:00',
+      slotMaxTime: '18:00:00',
+    };
+  }
+
+  const minMinutes = Math.max(0, Math.floor(Math.min(...boundMinutes) / 15) * 15 - 30);
+  const maxMinutes = Math.min(24 * 60, Math.ceil(Math.max(...boundMinutes) / 15) * 15 + 30);
+
+  return {
+    visibleInstructors,
+    backgroundEvents,
+    slotMinTime: formatCalendarTime(minMinutes),
+    slotMaxTime: formatCalendarTime(Math.max(minMinutes + 60, maxMinutes)),
+  };
 }
 
 function resolveCalendarView(viewMode) {
@@ -247,10 +454,34 @@ export default function ReinexFullCalendar({
   const [pendingDropInfo, setPendingDropInfo] = useState(null);
   const [whatsAppCompose, setWhatsAppCompose] = useState(null);
 
-  const mappedEvents = useMemo(() => mapInstancesToEvents(instances), [instances]);
-  const mappedResources = useMemo(() => mapInstructorsToResources(instructors), [instructors]);
+  const availabilityPresentation = useMemo(
+    () => buildAvailabilityPresentationContext({ currentDate, viewMode, instructors, instances }),
+    [currentDate, instructors, instances, viewMode],
+  );
+  const instructorMap = useMemo(
+    () => new Map((instructors || []).map((instructor) => [String(instructor.id), instructor])),
+    [instructors],
+  );
+  const mappedEvents = useMemo(
+    () => [...availabilityPresentation.backgroundEvents, ...mapInstancesToEvents(instances)],
+    [availabilityPresentation.backgroundEvents, instances],
+  );
+  const mappedResources = useMemo(
+    () => mapInstructorsToResources(availabilityPresentation.visibleInstructors),
+    [availabilityPresentation.visibleInstructors],
+  );
   const schedulerLicenseKey = useMemo(() => resolveSchedulerLicenseKey(runtimeConfig), [runtimeConfig]);
   const fullCalendarView = resolveCalendarView(viewMode);
+  const pendingDropConfirmDisabled = useMemo(() => {
+    if (!pendingDropInfo) return false;
+    if (pendingDropInfo.availabilityState?.status === 'outside_availability' && !pendingDropInfo.useSchedulingOverride) {
+      return true;
+    }
+    if (pendingDropInfo.useSchedulingOverride && !String(pendingDropInfo.overrideReason || '').trim()) {
+      return true;
+    }
+    return false;
+  }, [pendingDropInfo]);
 
   useEffect(() => {
     if (!schedulerLicenseKey) {
@@ -319,6 +550,32 @@ export default function ReinexFullCalendar({
     selectInfo.view.calendar.unselect();
   }, [onSlotSelect]);
 
+  const handleSelectAllow = useCallback((selectInfo) => {
+    const instructor = instructorMap.get(String(selectInfo.resource?.id || ''));
+    const startDate = selectInfo.start instanceof Date ? selectInfo.start : null;
+    const endDate = selectInfo.end instanceof Date ? selectInfo.end : null;
+    if (!instructor || !startDate || !endDate) {
+      return false;
+    }
+
+    const dayToken = dayTokenForJsDay(startDate.getDay());
+    const startTime = getLocalStartTime(startDate);
+    const durationMinutes = Math.max(15, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
+    if (!dayToken || !startTime || durationMinutes <= 0) {
+      return false;
+    }
+
+    return (instructor.service_capabilities || []).some((capability) =>
+      hasConfiguredAvailability(capability?.availability_windows)
+      && isWithinAvailabilityWindows({
+        availabilityWindows: capability.availability_windows,
+        day: dayToken,
+        startTime,
+        durationMinutes,
+      }),
+    );
+  }, [instructorMap]);
+
   const handleEventDrop = useCallback((info) => {
     const instance = info.event.extendedProps?.instance;
     const nextStart = info.event.start;
@@ -332,8 +589,28 @@ export default function ReinexFullCalendar({
       return;
     }
 
-    setPendingDropInfo(info);
-  }, [activeOrgId]);
+    const availabilityState = resolveCalendarAvailabilityState({
+      instructorMap,
+      instructorId: nextResourceId,
+      serviceId: instance.service_id,
+      startDate: nextStart,
+      durationMinutes: Number(instance.duration_minutes) || 0,
+    });
+
+    if (availabilityState.status === 'missing_capability' || availabilityState.status === 'missing_availability') {
+      info.revert();
+      toast.error(availabilityState.message);
+      return;
+    }
+
+    const existingOverrideReason = String(instance?.metadata?.scheduling_override?.reason || '').trim();
+    setPendingDropInfo({
+      rawInfo: info,
+      availabilityState,
+      useSchedulingOverride: availabilityState.status === 'outside_availability',
+      overrideReason: existingOverrideReason,
+    });
+  }, [activeOrgId, instructorMap]);
 
   const clearPendingDrop = useCallback(() => {
     setPendingDropInfo(null);
@@ -344,16 +621,27 @@ export default function ReinexFullCalendar({
       return;
     }
 
-    const instance = pendingDropInfo.event.extendedProps?.instance;
-    const nextStart = pendingDropInfo.event.start;
-    const nextResourceId = pendingDropInfo.newResource?.id
-      || pendingDropInfo.event.getResources?.()?.[0]?.id
+    const dropInfo = pendingDropInfo.rawInfo;
+    const instance = dropInfo?.event.extendedProps?.instance;
+    const nextStart = dropInfo?.event.start;
+    const nextResourceId = dropInfo?.newResource?.id
+      || dropInfo?.event.getResources?.()?.[0]?.id
       || instance?.instructor_employee_id;
 
     if (!activeOrgId || !instance?.id || !nextStart || !nextResourceId) {
-      pendingDropInfo.revert();
+      dropInfo?.revert?.();
       clearPendingDrop();
       toast.error('לא ניתן לעדכן את השיעור כרגע.');
+      return;
+    }
+
+    if (pendingDropInfo.availabilityState?.status === 'outside_availability' && !pendingDropInfo.useSchedulingOverride) {
+      toast.error('כדי לשמור שיעור מחוץ לזמינות יש לסמן אותו כחריגה חד-פעמית.');
+      return;
+    }
+
+    if (pendingDropInfo.useSchedulingOverride && !String(pendingDropInfo.overrideReason || '').trim()) {
+      toast.error('יש למלא סיבת חריגה לפני שמירת השיבוץ החריג.');
       return;
     }
 
@@ -374,7 +662,7 @@ export default function ReinexFullCalendar({
 
       if (conflictResponse?.has_conflicts || (conflictResponse?.conflicts || []).length > 0) {
         const firstMessage = conflictResponse?.conflicts?.[0]?.message || 'נמצאה התנגשות. השיעור לא הועבר.';
-        pendingDropInfo.revert();
+        dropInfo.revert();
         toast.error(firstMessage);
         clearPendingDrop();
         return;
@@ -389,14 +677,22 @@ export default function ReinexFullCalendar({
           instructor_employee_id: nextResourceId,
           duration_minutes: instance.duration_minutes,
           status: instance.status,
+          metadata: buildSchedulingOverrideMetadata(instance.metadata, {
+            enabled: pendingDropInfo.useSchedulingOverride,
+            reason: pendingDropInfo.overrideReason,
+          }),
         },
       });
 
-      toast.success('השיעור עודכן.');
+      toast.success(
+        pendingDropInfo.useSchedulingOverride
+          ? 'השיעור עודכן ונשמר כחריגה חד-פעמית.'
+          : 'השיעור עודכן.',
+      );
       clearPendingDrop();
       onEventRescheduled?.();
     } catch (error) {
-      pendingDropInfo.revert();
+      dropInfo.revert();
       toast.error(error?.message || 'העברת השיעור נכשלה.');
       clearPendingDrop();
     } finally {
@@ -405,7 +701,7 @@ export default function ReinexFullCalendar({
   }, [activeOrgId, clearPendingDrop, onEventRescheduled, pendingDropInfo]);
 
   const cancelPendingDrop = useCallback(() => {
-    pendingDropInfo?.revert?.();
+    pendingDropInfo?.rawInfo?.revert?.();
     clearPendingDrop();
   }, [clearPendingDrop, pendingDropInfo]);
 
@@ -472,7 +768,7 @@ export default function ReinexFullCalendar({
   if (!mappedResources.length && !isLoading) {
     return (
       <div className="reinex-fullcalendar-empty">
-        אין מדריכים להצגה
+        אין מדריכים זמינים או שיעורים קיימים בטווח שנבחר
       </div>
     );
   }
@@ -524,14 +820,15 @@ export default function ReinexFullCalendar({
           eventResourceEditable
           selectable
           selectMirror
+          selectAllow={handleSelectAllow}
           select={handleDateSelect}
           allDaySlot={false}
           slotEventOverlap={false}
           eventMinHeight={12}
           eventShortHeight={18}
           nowIndicator
-          slotMinTime="06:00:00"
-          slotMaxTime="22:00:00"
+          slotMinTime={availabilityPresentation.slotMinTime}
+          slotMaxTime={availabilityPresentation.slotMaxTime}
           height="auto"
           resourceOrder="title"
           eventClick={handleEventClick}
@@ -562,14 +859,48 @@ export default function ReinexFullCalendar({
       <AlertDialog open={!!pendingDropInfo} onOpenChange={(open) => { if (!open) cancelPendingDrop(); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>האם להעביר את השיעור למועד זה?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {pendingDropInfo?.availabilityState?.status === 'outside_availability'
+                ? 'המועד מחוץ לזמינות המדריך/ה'
+                : 'האם להעביר את השיעור למועד זה?'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              הפעולה תעדכן את מועד השיעור ותבדוק התנגשויות לפני השמירה.
+              {pendingDropInfo?.availabilityState?.status === 'outside_availability'
+                ? 'אפשר עדיין לשמור את ההעברה כחריגה חד-פעמית. יש לציין סיבה כדי שהחריגה תהיה ברורה למשתמשים ולמעקב.'
+                : 'הפעולה תעדכן את מועד השיעור ותבדוק התנגשויות לפני השמירה.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {pendingDropInfo?.availabilityState?.status === 'outside_availability' ? (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                {pendingDropInfo.availabilityState.message}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pending-drop-override-reason">סיבת חריגה *</Label>
+                <Textarea
+                  id="pending-drop-override-reason"
+                  rows={3}
+                  value={pendingDropInfo.overrideReason}
+                  onChange={(event) => setPendingDropInfo((current) => (
+                    current
+                      ? { ...current, useSchedulingOverride: true, overrideReason: event.target.value }
+                      : current
+                  ))}
+                  placeholder="לדוגמה: חלון חד-פעמי בחופשה, טיפול חריג או התאמה זמנית."
+                />
+              </div>
+            </div>
+          ) : null}
+          {pendingDropInfo?.availabilityState?.status === 'within_availability' && pendingDropInfo?.rawInfo?.event?.extendedProps?.instance?.metadata?.scheduling_override?.reason ? (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                השיעור מסומן כרגע כחריגה חד-פעמית. אם תאשרו את ההעברה הזאת, סימון החריגה יוסר כי המועד החדש כבר נמצא בתוך חלונות הזמינות.
+              </div>
+            </div>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel onClick={cancelPendingDrop}>ביטול</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmPendingDrop}>אישור</AlertDialogAction>
+            <AlertDialogAction onClick={confirmPendingDrop} disabled={pendingDropConfirmDisabled}>אישור</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
 import { Label } from '../../../components/ui/label';
@@ -14,8 +14,11 @@ import { toast } from 'sonner';
 import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, MessageCircle, Mail, ThumbsUp, ThumbsDown, UserPlus, RotateCcw } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Textarea } from '../../../components/ui/textarea';
+import { Checkbox } from '../../../components/ui/checkbox';
 import { LockedCorrectionPanel } from './LockedCorrectionPanel';
 import { useVersionConflictResolver } from './useVersionConflictResolver';
+import { dayTokenForJsDay } from '@/lib/day-of-week.js';
+import { hasConfiguredAvailability, isWithinAvailabilityWindows } from '@/lib/instructor-availability.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -48,6 +51,77 @@ function toUtcIsoString(dateString, timeString) {
   return localDate.toISOString();
 }
 
+function getDayTokenForDateString(dateString) {
+  if (!dateString) return null;
+
+  const [year, month, day] = String(dateString).split('-').map(Number);
+  const localDate = new Date(year, (month || 1) - 1, day || 1, 0, 0, 0, 0);
+  if (Number.isNaN(localDate.getTime())) {
+    return null;
+  }
+
+  return dayTokenForJsDay(localDate.getDay());
+}
+
+function buildSchedulingOverrideMetadata(baseMetadata, { enabled, reason }) {
+  const nextMetadata = baseMetadata && typeof baseMetadata === 'object' && !Array.isArray(baseMetadata)
+    ? { ...baseMetadata }
+    : {};
+
+  if (!enabled) {
+    delete nextMetadata.scheduling_override;
+    return nextMetadata;
+  }
+
+  const trimmedReason = String(reason || '').trim();
+  const existingOverride = nextMetadata.scheduling_override && typeof nextMetadata.scheduling_override === 'object'
+    ? nextMetadata.scheduling_override
+    : {};
+
+  nextMetadata.scheduling_override = {
+    type: 'one_time_exception',
+    reason: trimmedReason,
+    created_by_ui: true,
+    created_at: existingOverride.created_at || new Date().toISOString(),
+  };
+
+  return nextMetadata;
+}
+
+function resolveLessonSchedulingAvailability({ capability, date, time, durationMinutes }) {
+  if (!capability) {
+    return {
+      status: 'missing_capability',
+      message: 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.',
+    };
+  }
+
+  if (!hasConfiguredAvailability(capability.availability_windows)) {
+    return {
+      status: 'missing_availability',
+      message: 'לשירות הזה עדיין לא הוגדרה זמינות אצל המדריך/ה שנבחר/ה.',
+    };
+  }
+
+  const day = getDayTokenForDateString(date);
+  if (!day || !time || !isWithinAvailabilityWindows({
+    availabilityWindows: capability.availability_windows,
+    day,
+    startTime: time,
+    durationMinutes,
+  })) {
+    return {
+      status: 'outside_instructor_service_availability',
+      message: 'המועד שנבחר נמצא מחוץ לחלונות הזמינות של השירות אצל המדריך/ה.',
+    };
+  }
+
+  return {
+    status: 'within_availability',
+    message: '',
+  };
+}
+
 function isCancellationStatus(status) {
   return status === 'cancelled_student' || status === 'cancelled_clinic';
 }
@@ -78,6 +152,18 @@ function getDisplayParticipants(instance) {
 }
 
 function resolveMutationError(error) {
+  if (error?.message === 'missing_instructor_service_capability') {
+    return 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.';
+  }
+  if (error?.message === 'missing_instructor_service_availability') {
+    return 'לשירות הזה עדיין לא הוגדרה זמינות אצל המדריך/ה שנבחר/ה.';
+  }
+  if (error?.message === 'outside_instructor_service_availability') {
+    return 'המועד שנבחר נמצא מחוץ לחלונות הזמינות של השירות אצל המדריך/ה.';
+  }
+  if (error?.message === 'failed_to_validate_instructor_availability') {
+    return 'לא הצלחנו לבדוק את זמינות המדריך/ה כרגע. נסו שוב.';
+  }
   if (error?.status === 423) {
     return 'השיעור נעול לשינוי ישיר. יש להשתמש בזרימת התיקון.';
   }
@@ -301,22 +387,35 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     status: 'scheduled',
     closed_reason: '',
   });
+  const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
+
+  const resetEditState = useCallback((instanceValue = displayInstance) => {
+    if (!instanceValue) {
+      return;
+    }
+
+    const dateTime = new Date(instanceValue.datetime_start);
+    setFormData({
+      instructor_employee_id: instanceValue.instructor_employee_id || '',
+      service_id: instanceValue.service_id || '',
+      date: toLocalDateString(dateTime),
+      time: dateTime.toTimeString().slice(0, 5),
+      duration_minutes: instanceValue.duration_minutes || 60,
+      status: instanceValue.status || 'scheduled',
+      closed_reason: instanceValue.closed_reason || '',
+    });
+    const existingOverrideReason = typeof instanceValue?.metadata?.scheduling_override?.reason === 'string'
+      ? instanceValue.metadata.scheduling_override.reason
+      : '';
+    setUseSchedulingOverride(Boolean(existingOverrideReason));
+    setOverrideReason(existingOverrideReason);
+  }, [displayInstance]);
 
   // Initialize form data when instance changes
   useEffect(() => {
-    if (displayInstance) {
-      const dateTime = new Date(displayInstance.datetime_start);
-      setFormData({
-        instructor_employee_id: displayInstance.instructor_employee_id || '',
-        service_id: displayInstance.service_id || '',
-        date: toLocalDateString(dateTime),
-        time: dateTime.toTimeString().slice(0, 5),
-        duration_minutes: displayInstance.duration_minutes || 60,
-        status: displayInstance.status || 'scheduled',
-        closed_reason: displayInstance.closed_reason || '',
-      });
-    }
-  }, [displayInstance]);
+    resetEditState(displayInstance);
+  }, [displayInstance, resetEditState]);
 
   // Reset local reminder optimistic state when a different instance is opened
   useEffect(() => {
@@ -565,6 +664,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           service_id: payload.formData.service_id,
           status: payload.formData.status,
           expected_version: latestValue.version,
+          metadata: buildSchedulingOverrideMetadata(latestValue.metadata, {
+            enabled: payload.useSchedulingOverride,
+            reason: payload.overrideReason,
+          }),
         };
         if (isCancellationStatus(payload.formData.status) || payload.formData.status === 'no_show') {
           body.closed_reason = payload.formData.closed_reason || null;
@@ -644,6 +747,19 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setError(null);
 
     try {
+      if (schedulingAvailabilityState.status === 'missing_capability') {
+        throw new Error('missing_instructor_service_capability');
+      }
+      if (schedulingAvailabilityState.status === 'missing_availability') {
+        throw new Error('missing_instructor_service_availability');
+      }
+      if (schedulingAvailabilityState.status === 'outside_instructor_service_availability' && !useSchedulingOverride) {
+        throw new Error('outside_instructor_service_availability');
+      }
+      if (useSchedulingOverride && !overrideReason.trim()) {
+        throw new Error('יש למלא סיבת חריגה לפני שמירת שיבוץ מחוץ לזמינות.');
+      }
+
       const datetime_start = toUtcIsoString(formData.date, formData.time);
       if (!datetime_start) {
         throw new Error('תאריך או שעה אינם תקינים.');
@@ -658,6 +774,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         service_id: formData.service_id,
         status: formData.status,
         expected_version: instance.version,
+        metadata: buildSchedulingOverrideMetadata(displayInstance?.metadata, {
+          enabled: useSchedulingOverride,
+          reason: overrideReason,
+        }),
       };
 
       if (isCancellationStatus(formData.status) || formData.status === 'no_show') {
@@ -675,6 +795,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       console.error('Error updating lesson:', err);
       const handled = await handleVersionConflict(err, createSaveConflictAdapter(), {
         formData: { ...formData },
+        useSchedulingOverride,
+        overrideReason,
       });
       if (!handled) {
         setError(resolveMutationError(err));
@@ -1132,6 +1254,23 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
+  const schedulingOverrideReason = typeof displayInstance?.metadata?.scheduling_override?.reason === 'string'
+    ? displayInstance.metadata.scheduling_override.reason
+    : '';
+  const selectedInstructorCapability = useMemo(() => {
+    const selectedInstructor = (instructors || []).find(
+      (instructor) => String(instructor.id) === String(formData.instructor_employee_id || ''),
+    );
+    return (selectedInstructor?.service_capabilities || []).find(
+      (capability) => String(capability.service_id) === String(formData.service_id || ''),
+    ) || null;
+  }, [formData.instructor_employee_id, formData.service_id, instructors]);
+  const schedulingAvailabilityState = useMemo(() => resolveLessonSchedulingAvailability({
+    capability: selectedInstructorCapability,
+    date: formData.date,
+    time: formData.time,
+    durationMinutes: Number(formData.duration_minutes) || 0,
+  }), [formData.date, formData.duration_minutes, formData.time, selectedInstructorCapability]);
   const activeServices = services?.filter(s => s.is_active) || [];
   const isReportable = displayInstance?.status === 'scheduled';
   const isOperationallyOpen = !instance?.is_locked && !displayInstance?.is_closed;
@@ -1174,7 +1313,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           <DialogTitle className="flex items-center justify-between">
             <span>פרטי שיעור</span>
             {!isEditMode && canEdit && (
-              <Button variant="ghost" size="sm" onClick={() => setIsEditMode(true)}>
+              <Button variant="ghost" size="sm" onClick={() => {
+                resetEditState();
+                setIsEditMode(true);
+              }}>
                 <Pencil className="h-4 w-4 ms-2" />
                 עריכה
               </Button>
@@ -1276,6 +1418,16 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           </Alert>
         )}
 
+        {schedulingOverrideReason && !isEditMode && (
+          <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+            <AlertTriangle className="h-4 w-4 text-amber-700" />
+            <AlertDescription>
+              <div className="font-medium">שיעור זה מסומן כחריגה חד-פעמית.</div>
+              <div className="mt-1 text-sm">הסיבה שנשמרה: {schedulingOverrideReason}</div>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {isEditMode ? (
           // Edit Mode
           <div className="space-y-4">
@@ -1359,6 +1511,54 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               />
             </div>
 
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="lesson-scheduling-override"
+                  checked={useSchedulingOverride}
+                  onCheckedChange={(checked) => setUseSchedulingOverride(checked === true)}
+                  disabled={schedulingAvailabilityState.status === 'missing_capability' || schedulingAvailabilityState.status === 'missing_availability'}
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="lesson-scheduling-override">שיבוץ חד-פעמי חריג</Label>
+                  <p className="text-sm text-slate-600">
+                    מאפשר לשמור שיעור מחוץ לחלונות הזמינות של המדריך/ה כשיש צורך תפעולי נקודתי.
+                  </p>
+                </div>
+              </div>
+
+              {(schedulingAvailabilityState.status === 'missing_capability' || schedulingAvailabilityState.status === 'missing_availability') && (
+                <Alert className="border-red-300 bg-red-50 text-red-950">
+                  <AlertTriangle className="h-4 w-4 text-red-700" />
+                  <AlertDescription>{schedulingAvailabilityState.message}</AlertDescription>
+                </Alert>
+              )}
+
+              {schedulingAvailabilityState.status === 'outside_instructor_service_availability' && (
+                <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+                  <AlertTriangle className="h-4 w-4 text-amber-700" />
+                  <AlertDescription>
+                    {useSchedulingOverride
+                      ? 'השיעור יישמר כחריגה חד-פעמית מחלונות הזמינות.'
+                      : 'המועד שנבחר מחוץ לזמינות. כדי לשמור אותו יש לסמן חריגה חד-פעמית ולציין סיבה.'}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {useSchedulingOverride && (
+                <div className="space-y-2">
+                  <Label htmlFor="lesson-override-reason">סיבת החריגה *</Label>
+                  <Textarea
+                    id="lesson-override-reason"
+                    rows={3}
+                    value={overrideReason}
+                    onChange={(event) => setOverrideReason(event.target.value)}
+                    placeholder="לדוגמה: פעילות חג, טיפול חריג או חלון זמני פנוי."
+                  />
+                </div>
+              )}
+            </div>
+
             {/* Status */}
             <div>
               <Label htmlFor="status">סטטוס</Label>
@@ -1406,7 +1606,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setIsEditMode(false)}
+                onClick={() => {
+                  resetEditState();
+                  setIsEditMode(false);
+                }}
                 disabled={isSaving}
               >
                 ביטול

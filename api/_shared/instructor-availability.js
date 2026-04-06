@@ -1,6 +1,8 @@
 import { daySortValue, normalizeDayToken } from './day-of-week.js';
 import { normalizeString } from './org-bff.js';
 
+export const DEFAULT_SCHEDULING_TIMEZONE = 'Asia/Jerusalem';
+
 export function normalizeClockTime(value) {
   const normalized = normalizeString(value);
   if (!normalized) return '';
@@ -97,4 +99,29 @@ export function getAvailabilityWindowsForDay(availabilityWindows, day) {
       end: normalizeClockTime(window?.end),
     }))
     .filter((window) => window.start && window.end);
+}
+
+export function extractScheduleSlotFromIso(datetimeValue, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
+  const date = new Date(datetimeValue);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+
+  const partMap = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const day = normalizeDayToken(partMap.weekday);
+  const startTime = normalizeClockTime(`${partMap.hour || ''}:${partMap.minute || ''}`);
+
+  if (!day || !startTime) {
+    return null;
+  }
+
+  return { day, startTime };
 }

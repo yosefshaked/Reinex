@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Clock, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DAY_OPTIONS } from '@/lib/day-of-week.js';
+import { getAvailabilityDayTokens } from '@/lib/instructor-availability.js';
 
 function formatTime(timeString) {
   if (!timeString) return '';
@@ -101,6 +102,20 @@ export function TemplateGrid({
     return map;
   }, [templates, showInactive]);
 
+  const availabilityDaysByInstructor = useMemo(() => {
+    const map = new Map();
+    for (const instructor of instructors || []) {
+      const days = new Set();
+      for (const capability of instructor?.service_capabilities || []) {
+        for (const day of getAvailabilityDayTokens(capability?.availability_windows)) {
+          days.add(day);
+        }
+      }
+      map.set(String(instructor?.id || ''), days);
+    }
+    return map;
+  }, [instructors]);
+
   if (!instructors || instructors.length === 0) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-500">
@@ -143,17 +158,24 @@ export function TemplateGrid({
               {instructors.map((instructor) => {
                 const cellKey = `${instructor.id}|${day.value}`;
                 const cellTemplates = grouped.get(cellKey) || [];
+                const hasAvailabilityOnDay = availabilityDaysByInstructor.get(String(instructor.id))?.has(day.value) === true;
+                const isUnavailableCell = !hasAvailabilityOnDay && cellTemplates.length === 0;
 
                 return (
                   <td
                     key={cellKey}
                     className={cn(
-                      'border-b border-s border-gray-200 px-2 py-1.5 align-top min-h-[60px] hover:bg-blue-50/30 cursor-pointer transition-colors',
+                      'border-b border-s border-gray-200 px-2 py-1.5 align-top min-h-[60px] transition-colors',
+                      !isUnavailableCell && 'hover:bg-blue-50/30 cursor-pointer',
+                      isUnavailableCell && 'bg-slate-50 text-slate-400',
                       String(highlightedInstructorId || '') === String(instructor.id || '') &&
                         String(highlightedDayOfWeek || '') === String(day.value) &&
                         'bg-primary/5 ring-2 ring-inset ring-primary/40',
                     )}
                     onClick={(e) => {
+                      if (isUnavailableCell) {
+                        return;
+                      }
                       // Only fire cell click if they didn't click a template card
                       if (e.target === e.currentTarget || e.target.closest('td') === e.currentTarget) {
                         onCellClick?.(instructor, day.value);
@@ -172,9 +194,14 @@ export function TemplateGrid({
                           }}
                         />
                       ))}
-                      {cellTemplates.length === 0 && (
+                      {cellTemplates.length === 0 && !isUnavailableCell && (
                         <div className="text-gray-300 text-xs text-center py-3 opacity-0 group-hover:opacity-100 transition-opacity">
                           + הוסף תבנית
+                        </div>
+                      )}
+                      {cellTemplates.length === 0 && isUnavailableCell && (
+                        <div className="text-xs text-center py-3">
+                          אין זמינות
                         </div>
                       )}
                     </div>
