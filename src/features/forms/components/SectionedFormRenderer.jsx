@@ -401,14 +401,16 @@ export default function SectionedFormRenderer({
   schema,
   visibilityRules = [],
   answers = {},
+  evaluationAnswers,
   onAnswersChange,
   readOnly = false,
   validationErrors = {},
   className,
 }) {
+  const effectiveAnswers = evaluationAnswers && typeof evaluationAnswers === 'object' ? evaluationAnswers : answers;
   const visibleSections = useMemo(
-    () => getVisibleSections(schema, visibilityRules, answers),
-    [schema, visibilityRules, answers],
+    () => getVisibleSections(schema, visibilityRules, effectiveAnswers),
+    [schema, visibilityRules, effectiveAnswers],
   );
 
   const updateAnswer = (questionId, nextValue) => {

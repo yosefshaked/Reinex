@@ -12,8 +12,6 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { buildInitialAnswers, normalizeFormSchema, normalizeVisibilityRules } from '@/features/forms/lib/form-schema.js';
 
-const WAITING_LIST_SYSTEM_PREVIEW = ['פרטי תלמיד/ה', 'פרטי התקשרות', 'שירותים נוספים', 'זמינות מועדפת', 'פרטי מימון'];
-
 export default function FormPreviewPage() {
   const navigate = useNavigate();
   const { formId = '' } = useParams();
@@ -73,10 +71,16 @@ export default function FormPreviewPage() {
           </Card>
           {formUsage === 'waiting_list_intake' ? (
             <Card>
-              <CardContent className="grid grid-cols-1 gap-2 p-4 md:grid-cols-2">
-                {WAITING_LIST_SYSTEM_PREVIEW.map((item) => (
-                  <div key={item} className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">{item}</div>
-                ))}
+              <CardContent className="space-y-3 p-4">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">שם פרטי של התלמיד/ה</div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">שם משפחה של התלמיד/ה</div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">מספר זהות</div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">מי איש הקשר</div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">טלפון</div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">אימייל</div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 md:col-span-2">שירותים נוספים, זמינות ופרטי מימון מוצגים כאן לפי בחירות הלקוח/ה</div>
+                </div>
               </CardContent>
             </Card>
           ) : null}

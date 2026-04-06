@@ -33,6 +33,50 @@ export const QUESTION_TYPE_DEFINITIONS = [
   { type: 'signature', label: 'חתימה' },
 ];
 
+export const WAITING_LIST_BUILT_IN_QUESTIONS = [
+  { id: 'wl_student_first_name', type: 'short_text', label: 'שם פרטי של התלמיד/ה' },
+  { id: 'wl_student_last_name', type: 'short_text', label: 'שם משפחה של התלמיד/ה' },
+  { id: 'wl_identity_number', type: 'israeli_id', label: 'מספר זהות' },
+  {
+    id: 'wl_contact_relationship',
+    type: 'single_select',
+    label: 'מי איש הקשר',
+    options: [
+      { value: 'self', label: 'התלמיד/ה עצמו/ה' },
+      { value: 'mother', label: 'אם' },
+      { value: 'father', label: 'אב' },
+      { value: 'caretaker', label: 'מטפל/ת' },
+      { value: 'other', label: 'אחר' },
+    ],
+  },
+  { id: 'wl_contact_name', type: 'short_text', label: 'שם איש הקשר / האפוטרופוס' },
+  { id: 'wl_phone', type: 'phone', label: 'טלפון' },
+  { id: 'wl_email', type: 'email', label: 'אימייל' },
+  { id: 'wl_additional_service_ids', type: 'multi_select', label: 'שירותים נוספים' },
+  { id: 'wl_preferred_days', type: 'multi_select', label: 'ימים מועדפים' },
+  {
+    id: 'wl_payment_path_intent',
+    type: 'single_select',
+    label: 'מסלול מימון',
+    options: [
+      { value: 'unsure', label: 'לא בטוח/ה, צריך עזרה' },
+      { value: 'private', label: 'תשלום פרטי' },
+      { value: 'hmo', label: 'דרך קופת חולים / גורם מממן' },
+    ],
+  },
+  { id: 'wl_hmo_provider_name', type: 'short_text', label: 'שם קופת חולים / גורם מממן' },
+  {
+    id: 'wl_hmo_approval_status',
+    type: 'single_select',
+    label: 'סטטוס אישור קופת חולים',
+    options: [
+      { value: 'no_approval_yet', label: 'אין אישור עדיין' },
+      { value: 'send_separately', label: 'האישור יישלח בנפרד בוואטסאפ/אימייל' },
+    ],
+  },
+  { id: 'wl_notes', type: 'long_text', label: 'הערות נוספות' },
+];
+
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -92,7 +136,12 @@ export function createQuestion(type = 'short_text') {
 
 function normalizeQuestionType(type, fieldDef = {}) {
   const normalized = normalizeText(type).toLowerCase();
-  if (normalized) return normalized;
+  if (normalized) {
+    if (QUESTION_TYPE_DEFINITIONS.some((item) => item.type === normalized)) return normalized;
+    if (normalized === 'string') return fieldDef['x-ui-widget'] === 'textarea' ? 'long_text' : 'short_text';
+    if (normalized === 'boolean') return 'yes_no';
+    if (normalized === 'integer' || normalized === 'float' || normalized === 'decimal') return 'number';
+  }
 
   if (Array.isArray(fieldDef.enum)) return 'single_select';
   if (fieldDef.type === 'boolean') return 'yes_no';
@@ -244,9 +293,16 @@ export function getQuestionsInOrder(schema) {
   })));
 }
 
-export function getAvailableSourceQuestions(schema, targetType, targetId) {
+export function getWaitingListBuiltInQuestions() {
+  return WAITING_LIST_BUILT_IN_QUESTIONS.map((question) => ({
+    ...question,
+    options: Array.isArray(question.options) ? question.options.map((option) => ({ ...option })) : [],
+  }));
+}
+
+export function getAvailableSourceQuestions(schema, targetType, targetId, { formUsage = 'general' } = {}) {
   const normalized = normalizeFormSchema(schema);
-  const available = [];
+  const available = formUsage === 'waiting_list_intake' ? getWaitingListBuiltInQuestions() : [];
 
   for (const section of normalized.sections) {
     if (targetType === 'section' && section.id === targetId) {

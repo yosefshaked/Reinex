@@ -87,6 +87,25 @@ function selectedDaysCoveredByRanges(preferredDays, preferredTimesByDay) {
   return preferredDays.every((day) => coveredDays.has(day));
 }
 
+function buildWaitingListEvaluationAnswers(intakeValues, customAnswers) {
+  return {
+    ...customAnswers,
+    wl_student_first_name: intakeValues?.studentFirstName || '',
+    wl_student_last_name: intakeValues?.studentLastName || '',
+    wl_identity_number: intakeValues?.identityNumber || '',
+    wl_contact_relationship: intakeValues?.contactRelationship || '',
+    wl_contact_name: intakeValues?.contactRelationship === 'self' ? '' : (intakeValues?.contactName || ''),
+    wl_phone: intakeValues?.phone || '',
+    wl_email: intakeValues?.email || '',
+    wl_additional_service_ids: Array.isArray(intakeValues?.additionalServiceIds) ? intakeValues.additionalServiceIds : [],
+    wl_preferred_days: Array.isArray(intakeValues?.preferredDays) ? intakeValues.preferredDays : [],
+    wl_payment_path_intent: intakeValues?.paymentPathIntent || '',
+    wl_hmo_provider_name: intakeValues?.paymentPathIntent === 'hmo' ? (intakeValues?.hmoProviderName || '') : '',
+    wl_hmo_approval_status: intakeValues?.paymentPathIntent === 'hmo' ? (intakeValues?.hmoApprovalStatus || '') : '',
+    wl_notes: intakeValues?.notes || '',
+  };
+}
+
 function validateInviteIntake(values) {
   const errors = {};
   if (!String(values.studentFirstName || '').trim()) errors.studentFirstName = 'יש למלא שם פרטי.';
@@ -199,146 +218,6 @@ function getPublicInputClass(hasError) {
   }`;
 }
 
-function PublicTextWidget(props) {
-  const { id, value, onChange, placeholder, disabled, readonly, required, type = 'text', rawErrors } = props;
-  return (
-    <Input
-      id={id}
-      type={type}
-      value={value ?? ''}
-      required={required}
-      disabled={disabled || readonly}
-      placeholder={placeholder}
-      className={getPublicInputClass(Boolean(rawErrors?.length))}
-      onChange={(event) => onChange(event.target.value)}
-    />
-  );
-}
-
-function PublicNumberWidget(props) {
-  const { id, value, onChange, placeholder, disabled, readonly, required, rawErrors } = props;
-  return (
-    <Input
-      id={id}
-      type="number"
-      value={value ?? ''}
-      required={required}
-      disabled={disabled || readonly}
-      placeholder={placeholder}
-      className={getPublicInputClass(Boolean(rawErrors?.length))}
-      onChange={(event) => onChange(event.target.value === '' ? undefined : Number(event.target.value))}
-    />
-  );
-}
-
-function PublicTextareaWidget(props) {
-  const { id, value, onChange, placeholder, disabled, readonly, required, rawErrors } = props;
-  return (
-    <Textarea
-      id={id}
-      value={value ?? ''}
-      required={required}
-      disabled={disabled || readonly}
-      placeholder={placeholder}
-      rows={4}
-      className={`min-h-[120px] rounded-xl border bg-white px-3 py-2 text-sm shadow-sm ${rawErrors?.length ? 'border-red-300' : 'border-slate-200'}`}
-      onChange={(event) => onChange(event.target.value)}
-    />
-  );
-}
-
-function PublicSelectWidget(props) {
-  const { id, value, onChange, disabled, readonly, required, options, rawErrors, placeholder } = props;
-  return (
-    <select
-      id={id}
-      value={value ?? ''}
-      required={required}
-      disabled={disabled || readonly}
-      className={`h-11 w-full rounded-xl border bg-white px-3 text-sm shadow-sm ${rawErrors?.length ? 'border-red-300' : 'border-slate-200'}`}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      <option value="">{placeholder || 'בחרו אפשרות'}</option>
-      {(options?.enumOptions || []).map((option) => (
-        <option key={String(option.value)} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function PublicCheckboxWidget(props) {
-  const { id, value, onChange, disabled, readonly, rawErrors } = props;
-  const isLocked = disabled || readonly;
-  const selectedValue = typeof value === 'boolean' ? value : null;
-  return (
-    <div className={`rounded-2xl border bg-white p-3 shadow-sm ${rawErrors?.length ? 'border-red-300' : 'border-slate-200'}`}>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {[
-          { value: true, label: 'כן' },
-          { value: false, label: 'לא' },
-        ].map((option) => {
-          const checked = selectedValue === option.value;
-          return (
-            <label
-              key={String(option.value)}
-              className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm transition-colors ${
-                checked
-                  ? 'border-primary bg-primary/8 text-primary'
-                  : 'border-slate-200 bg-slate-50 text-slate-700'
-              } ${isLocked ? 'cursor-not-allowed opacity-70' : 'hover:border-slate-300 hover:bg-white'}`}
-            >
-              <span className="font-medium">{option.label}</span>
-              <input
-                id={checked ? id : undefined}
-                type="radio"
-                name={id}
-                checked={checked}
-                disabled={isLocked}
-                className="h-4 w-4 accent-primary"
-                onChange={() => onChange(option.value)}
-              />
-            </label>
-          );
-        })}
-      </div>
-      <input id={id} type="hidden" value={selectedValue === null ? '' : String(selectedValue)} readOnly />
-      {selectedValue === null ? (
-        <p className="mt-2 text-xs text-slate-500">בחרו תשובה אחת כדי להמשיך.</p>
-      ) : null}
-    </div>
-  );
-}
-
-function PublicFieldTemplate(props) {
-  const { id, label, required, children, errors, help, hidden, displayLabel, description, rawErrors } = props;
-  if (hidden) return <div className="hidden">{children}</div>;
-  if (id === 'root') return children;
-  return (
-    <div className={`space-y-2 rounded-2xl border bg-slate-50/70 p-4 ${rawErrors?.length ? 'border-red-200' : 'border-slate-200'}`}>
-      {displayLabel && label ? <RequiredLabel htmlFor={id} required={required}>{label}</RequiredLabel> : null}
-      {description}
-      {children}
-      {errors}
-      {help}
-    </div>
-  );
-}
-
-function PublicObjectFieldTemplate(props) {
-  return <div className="space-y-4">{props.properties.map((property) => <div key={property.name}>{property.content}</div>)}</div>;
-}
-
-function PublicTitleFieldTemplate(props) {
-  return <h3 id={props.id} className="text-base font-semibold text-slate-900">{props.title}</h3>;
-}
-
-function PublicDescriptionFieldTemplate(props) {
-  if (!props.description) return null;
-  return <p id={props.id} className="text-sm text-slate-600">{props.description}</p>;
-}
-
 export default function SubmitFormPage() {
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState('login');
@@ -399,9 +278,13 @@ export default function SubmitFormPage() {
     () => (submissionMode === 'invite' ? validateInviteIntake(intakeValues) : {}),
     [intakeValues, submissionMode],
   );
+  const visibilityEvaluationAnswers = useMemo(
+    () => (submissionMode === 'invite' ? buildWaitingListEvaluationAnswers(intakeValues, answers) : answers),
+    [answers, intakeValues, submissionMode],
+  );
   const visibleCustomSections = useMemo(
-    () => getVisibleSections(formSchema, visibilityRules, answers),
-    [answers, formSchema, visibilityRules],
+    () => getVisibleSections(formSchema, visibilityRules, visibilityEvaluationAnswers),
+    [formSchema, visibilityEvaluationAnswers, visibilityRules],
   );
 
   useEffect(() => {
@@ -1168,6 +1051,7 @@ export default function SubmitFormPage() {
                       schema={formSchema}
                       visibilityRules={visibilityRules}
                       answers={answers}
+                      evaluationAnswers={visibilityEvaluationAnswers}
                       onAnswersChange={setAnswers}
                       validationErrors={customValidationErrors}
                     />
