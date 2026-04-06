@@ -33,6 +33,7 @@ import LandingPage from './pages/LandingPage.jsx';
 import PendingReportsPage from './features/sessions/pages/PendingReportsPage.jsx';
 import FormsListPage from './features/forms/pages/FormsListPage.jsx';
 import FormBuilderPage from './features/forms/pages/FormBuilderPage.jsx';
+import FormPreviewPage from './features/forms/pages/FormPreviewPage.jsx';
 import SubmitFormPage from './pages/SubmitFormPage.jsx';
 import { bootstrapSupabaseCallback } from './auth/bootstrapSupabaseCallback.js';
 
@@ -97,6 +98,7 @@ function App({ config = null }) {
                     <Route path="/financials" element={<FinancialsPage />} />
                     <Route path="/forms" element={<FormsListPage />} />
                     <Route path="/forms/:formId" element={<FormBuilderPage />} />
+                    <Route path="/forms/:formId/preview" element={<FormPreviewPage />} />
                     <Route path="/pending-reports" element={<PendingReportsPage />} />
                     <Route path="/admin/pending-reports" element={<Navigate to="/pending-reports" replace />} />
                     <Route path="/students/:id/:tab?" element={<StudentDetailPage />} />

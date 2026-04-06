@@ -17,6 +17,13 @@ import {
 import { sendBrevoEmail } from '../_shared/brevo.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import {
+  evaluateAlertFlags,
+  hydrateAnswersForReview,
+  normalizeFormSchema,
+  prepareAnswersForStorage,
+  resolvePublicFormState,
+} from '../_shared/forms-runtime.js';
 
 const OTP_DIGITS = 6;
 const OTP_TTL_MINUTES = 15;
@@ -892,10 +899,30 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
     }
   }
 
-  const payload = rows.map((row) => ({
-    ...row,
-    form_name: formsById.get(row.form_id)?.name || null,
-  }));
+  const payload = rows.map((row) => {
+    const schemaSnapshot = normalizeFormSchema(normalizeJsonObject(row?.metadata?.schema_snapshot, {}));
+    const baseAnswers = normalizeJsonObject(row.answers, {});
+    const hydratedAnswers = baseAnswers?.custom_answers && typeof baseAnswers.custom_answers === 'object' && !Array.isArray(baseAnswers.custom_answers)
+      ? {
+          ...baseAnswers,
+          custom_answers: hydrateAnswersForReview({
+            formSchema: schemaSnapshot,
+            answers: baseAnswers.custom_answers,
+            env,
+          }),
+        }
+      : hydrateAnswersForReview({
+          formSchema: schemaSnapshot,
+          answers: baseAnswers,
+          env,
+        });
+
+    return {
+      ...row,
+      answers: hydratedAnswers,
+      form_name: formsById.get(row.form_id)?.name || null,
+    };
+  });
 
   return respond(context, 200, payload);
 }
@@ -976,10 +1003,10 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
       form_id: formId,
       student_id: studentId,
       answers: {},
-      alert_flags: {},
+      alert_flags: { has_red_flags: false, highest_severity: null, hits: [] },
       otp_metadata: { delivery_method: deliveryMethod, otp_status: 'pending', sent_via: [deliveryMethod] },
       source: deliveryMethod,
-      submitted_at: nowIso,
+      submitted_at: null,
       metadata: submissionMetadata,
     })
     .select('id')
@@ -1556,7 +1583,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   const { data: form, error: formError } = await tenantClient
     .from('forms')
-    .select('id, form_schema')
+    .select('id, name, description, form_schema, alert_rules, visibility_rules, metadata')
     .eq('id', submission.form_id)
     .maybeSingle();
 
@@ -1564,10 +1591,15 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
+  const publicFormState = resolvePublicFormState(form, { allowDraftFallback: true });
+
   return respond(context, 200, {
     submission_id: submission.id,
     org_id: orgId,
-    form_schema: normalizeJsonObject(form.form_schema, { type: 'object', properties: {}, required: [] }),
+    form_name: form.name || '',
+    form_description: form.description || '',
+    form_schema: publicFormState.form_schema,
+    visibility_rules: publicFormState.visibility_rules,
   });
 }
 
@@ -1636,23 +1668,38 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   const nowIso = getNowIso();
   const currentMetadata = normalizeJsonObject(submission.metadata, {});
 
-  // Fetch real form schema server-side for trusted snapshot (don't trust client input)
-  let serverFormSchema = {};
+  let publicFormState = {
+    form_schema: normalizeFormSchema({}),
+    visibility_rules: [],
+    alert_rules: [],
+  };
   if (submission.form_id && UUID_PATTERN.test(String(submission.form_id))) {
     const { data: formRecord } = await tenantClient
       .from('forms')
-      .select('form_schema')
+      .select('form_schema, alert_rules, visibility_rules, metadata')
       .eq('id', submission.form_id)
       .maybeSingle();
-    if (formRecord?.form_schema) {
-      serverFormSchema = formRecord.form_schema;
+    if (formRecord) {
+      publicFormState = resolvePublicFormState(formRecord, { allowDraftFallback: true });
     }
   }
+
+  const preparedAnswers = prepareAnswersForStorage({
+    formSchema: publicFormState.form_schema,
+    answers,
+    env,
+  });
+  const alertFlags = evaluateAlertFlags({
+    formSchema: publicFormState.form_schema,
+    alertRules: publicFormState.alert_rules,
+    answers: preparedAnswers,
+  });
 
   const { error: updateSubmissionError } = await tenantClient
     .from('form_submissions')
     .update({
-      answers,
+      answers: preparedAnswers,
+      alert_flags: alertFlags,
       submitted_at: nowIso,
       otp_metadata: {
         ...normalizeJsonObject(submission.otp_metadata, {}),
@@ -1665,7 +1712,9 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
         ...currentMetadata,
         workflow_status: 'submitted',
         submitted_at: nowIso,
-        schema_snapshot: serverFormSchema,
+        schema_snapshot: publicFormState.form_schema,
+        visibility_rules_snapshot: publicFormState.visibility_rules,
+        alert_rules_snapshot: publicFormState.alert_rules,
         submit_ip: ipAddress || null,
         submit_ip_at: nowIso,
       },
@@ -1735,6 +1784,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
         form_id: routingRow?.metadata?.form_id || null,
         student_id: submission.student_id,
         delivery_method: routingRow?.metadata?.delivery_method || null,
+        has_red_flags: alertFlags.has_red_flags,
       },
     });
   } catch (auditError) {

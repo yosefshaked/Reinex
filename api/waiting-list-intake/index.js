@@ -16,6 +16,11 @@ import {
   respond,
 } from '../_shared/org-bff.js';
 import { sendBrevoEmail } from '../_shared/brevo.js';
+import {
+  evaluateAlertFlags,
+  prepareAnswersForStorage,
+  resolvePublicFormState,
+} from '../_shared/forms-runtime.js';
 
 const ROUTING_CATEGORY = 'waiting_list_intake';
 const DEFAULT_INVITE_TTL_MINUTES = 10080;
@@ -300,7 +305,7 @@ async function findStudentByIdentityNumber(tenantClient, identityNumber, { exclu
 async function requireWaitingListIntakeForm(tenantClient, formId) {
   const { data, error } = await tenantClient
     .from('forms')
-    .select('id, name, description, form_usage, form_schema, is_active')
+    .select('id, name, description, form_usage, form_schema, alert_rules, visibility_rules, metadata, is_active')
     .eq('id', formId)
     .maybeSingle();
   if (error) throw new Error(`failed_to_load_form:${error.message}`);
@@ -799,14 +804,14 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
       form_id: formId,
       student_id: studentId,
       answers: {},
-      alert_flags: {},
+      alert_flags: { has_red_flags: false, highest_severity: null, hits: [] },
       otp_metadata: {
         access_mode: 'invite_token',
         delivery_method: deliveryMethod,
         invite_status: 'pending',
       },
       source: deliveryMethod,
-      submitted_at: nowIso,
+      submitted_at: null,
       metadata: {
         workflow_status: 'pending',
         workflow_kind: 'waiting_list_intake',
@@ -995,7 +1000,7 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
   }
 
   const [{ data: form }, { data: student }, services] = await Promise.all([
-    tenantClient.from('forms').select('id, name, description, form_schema, form_usage').eq('id', submission.form_id).maybeSingle(),
+    tenantClient.from('forms').select('id, name, description, form_schema, alert_rules, visibility_rules, metadata, form_usage').eq('id', submission.form_id).maybeSingle(),
     tenantClient.from('students').select('id, first_name, last_name, identity_number, phone, email').eq('id', submission.student_id).maybeSingle(),
     listActiveServices(tenantClient),
   ]);
@@ -1003,6 +1008,8 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
   if (!form || form.form_usage !== 'waiting_list_intake') {
     return respond(context, 404, { message: 'form_not_found' });
   }
+
+  const publicFormState = resolvePublicFormState(form, { allowDraftFallback: true });
 
   const primaryServiceId = normalizeUuid(submissionMetadata.primary_service_id);
 
@@ -1013,7 +1020,8 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
     expires_at: routingRow.expires_at || null,
     form_name: form.name || 'טופס רשימת המתנה',
     form_description: form.description || '',
-    form_schema: form.form_schema && typeof form.form_schema === 'object' ? form.form_schema : { type: 'object', properties: {}, required: [] },
+    form_schema: publicFormState.form_schema,
+    visibility_rules: publicFormState.visibility_rules,
     prospect: {
       student_id: student?.id || null,
       student_first_name: student?.first_name || '',
@@ -1070,13 +1078,15 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
   }
 
   const [{ data: form }, services] = await Promise.all([
-    tenantClient.from('forms').select('id, form_schema, form_usage').eq('id', submission.form_id).maybeSingle(),
+    tenantClient.from('forms').select('id, form_schema, alert_rules, visibility_rules, metadata, form_usage').eq('id', submission.form_id).maybeSingle(),
     listActiveServices(tenantClient),
   ]);
 
   if (!form || form.form_usage !== 'waiting_list_intake') {
     return respond(context, 404, { message: 'form_not_found' });
   }
+
+  const publicFormState = resolvePublicFormState(form, { allowDraftFallback: true });
 
   const intake = body?.intake && typeof body.intake === 'object' && !Array.isArray(body.intake) ? body.intake : {};
   const customAnswers = normalizeCustomAnswers(body?.custom_answers ?? body?.customAnswers);
@@ -1130,6 +1140,17 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
           .filter((value) => value && value !== primaryServiceId && serviceById.has(value)),
       ))
     : [];
+
+  const preparedCustomAnswers = prepareAnswersForStorage({
+    formSchema: publicFormState.form_schema,
+    answers: customAnswers,
+    env,
+  });
+  const alertFlags = evaluateAlertFlags({
+    formSchema: publicFormState.form_schema,
+    alertRules: publicFormState.alert_rules,
+    answers: preparedCustomAnswers,
+  });
 
   const requestedServiceIds = [primaryServiceId, ...additionalServiceIds];
   const nowIso = getNowIso();
@@ -1275,9 +1296,10 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
           primary_service_id: primaryServiceId,
           requested_additional_service_ids: additionalServiceIds,
         },
-        custom_answers: customAnswers,
+        custom_answers: preparedCustomAnswers,
       },
       submitted_at: nowIso,
+      alert_flags: alertFlags,
       metadata: {
         ...currentSubmissionMetadata,
         workflow_status: 'submitted',
@@ -1288,7 +1310,9 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
         contact_relationship: contactRelationship,
         guardian_id: guardianId || null,
         hmo_provider_name: effectiveHmoProviderName,
-        schema_snapshot: form.form_schema && typeof form.form_schema === 'object' ? form.form_schema : {},
+        schema_snapshot: publicFormState.form_schema,
+        visibility_rules_snapshot: publicFormState.visibility_rules,
+        alert_rules_snapshot: publicFormState.alert_rules,
       },
       otp_metadata: {
         access_mode: 'invite_token',
@@ -1323,6 +1347,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     details: {
       origin: 'public_waiting_list_intake',
       requested_service_ids: requestedServiceIds,
+      has_red_flags: alertFlags.has_red_flags,
     },
   });
 

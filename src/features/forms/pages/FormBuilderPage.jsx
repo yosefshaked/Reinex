@@ -1,844 +1,275 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import Form from '@rjsf/core';
-import validator from '@rjsf/validator-ajv8';
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
+import { useNavigate, useParams } from 'react-router-dom';
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import {
-  ArrowRight,
-  Loader2,
-  AlertCircle,
-  Save,
-  Type,
-  Hash,
-  ToggleLeft,
-  List,
-  AlignLeft,
-  Trash2,
-  ChevronRight,
-  GripVertical,
-} from 'lucide-react';
+import { AlertCircle, ArrowRight, Eye, GripVertical, Layers3, Loader2, Plus, Save, Send, Trash2 } from 'lucide-react';
+import PageLayout from '@/components/ui/PageLayout.jsx';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
-import { Separator } from '@/components/ui/separator';
-import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
+import SectionedFormRenderer from '@/features/forms/components/SectionedFormRenderer.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import {
+  buildInitialAnswers,
+  createQuestion,
+  createSection,
+  getAvailableSourceQuestions,
+  getQuestionsInOrder,
+  normalizeAlertRules,
+  normalizeFormSchema,
+  normalizeVisibilityRules,
+  QUESTION_TYPE_DEFINITIONS,
+} from '@/features/forms/lib/form-schema.js';
 import { cn } from '@/lib/utils';
 
-// ── Field type definitions ──────────────────────────────────────
-const FIELD_TYPES = [
-  { type: 'text', label: 'שדה טקסט', icon: Type, schema: { type: 'string' } },
-  { type: 'textarea', label: 'טקסט ארוך', icon: AlignLeft, schema: { type: 'string' }, uiWidget: 'textarea' },
-  { type: 'number', label: 'מספר', icon: Hash, schema: { type: 'number' } },
-  { type: 'boolean', label: 'כן / לא', icon: ToggleLeft, schema: { type: 'boolean', default: false } },
-  {
-    type: 'select',
-    label: 'בחירה מרשימה',
-    icon: List,
-    schema: { type: 'string', enum: ['אפשרות 1', 'אפשרות 2'] },
-  },
+const WAITING_LIST_SYSTEM_PREVIEW = ['פרטי תלמיד/ה', 'פרטי התקשרות', 'שירותים נוספים', 'זמינות מועדפת', 'פרטי מימון'];
+const RULE_OPERATORS = [
+  { value: 'equals', label: 'שווה ל' },
+  { value: 'not_equals', label: 'לא שווה ל' },
+  { value: 'includes', label: 'מכיל' },
+  { value: 'not_includes', label: 'לא מכיל' },
+  { value: 'is_true', label: 'מסומן ככן' },
+  { value: 'is_false', label: 'מסומן כלא' },
+  { value: 'is_empty', label: 'ריק' },
+  { value: 'is_not_empty', label: 'לא ריק' },
 ];
+const ALERT_SEVERITIES = ['low', 'medium', 'high'];
 
-const WAITING_LIST_SYSTEM_FIELDS = [
-  { key: 'student_first_name', label: 'שם פרטי של התלמיד/ה', placeholder: 'שם פרטי', type: 'text', required: true },
-  { key: 'student_last_name', label: 'שם משפחה של התלמיד/ה', placeholder: 'שם משפחה', type: 'text', required: true },
-  { key: 'contact_name', label: 'שם איש קשר / אפוטרופוס', placeholder: 'שם איש קשר', type: 'text', conditionalRequired: true },
-  { key: 'contact_relationship', label: 'קרבה לתלמיד/ה', type: 'select', required: true, options: ['בחרו קרבה לתלמיד/ה', 'התלמיד/ה עצמו/ה', 'אם', 'אב', 'מטפל/ת', 'אחר'] },
-  { key: 'identity_number', label: 'מספר זהות', placeholder: 'מספר זהות של התלמיד/ה', type: 'text', required: true },
-  { key: 'phone', label: 'טלפון', placeholder: '05X-XXXXXXX', type: 'text' },
-  { key: 'email', label: 'אימייל', placeholder: 'name@example.com', type: 'text' },
-  { key: 'additional_services', label: 'שירותים נוספים שמעניינים אותך', type: 'multi-select-note' },
-  { key: 'preferred_days', label: 'ימי זמינות מועדפים', type: 'day-selector', required: true },
-  { key: 'preferred_times', label: 'טווחי שעות מועדפים', type: 'time-ranges', required: true },
-  { key: 'payment_path_intent', label: 'סוג תשלום מבוקש', type: 'select', options: ['לא בטוח/ה, צריך עזרה', 'תשלום פרטי', 'דרך קופת חולים / גורם מממן'] },
-  { key: 'hmo_provider_name', label: 'שם קופת החולים / הגורם המממן', placeholder: 'למשל: כללית', type: 'text', conditionalRequired: true },
-  { key: 'hmo_approval_status', label: 'סטטוס אישור קופת חולים', type: 'select', conditionalRequired: true, options: ['בחרו סטטוס אישור', 'אין אישור עדיין', 'האישור יישלח בנפרד בוואטסאפ/אימייל'] },
-  { key: 'notes', label: 'הערות נוספות', placeholder: 'פרטים נוספים שחשוב שנדע', type: 'textarea' },
-];
-
-// ── Helpers ──────────────────────────────────────────────────────
-
-function generateFieldId() {
-  return `field_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-}
-
-function buildEmptySchema() {
-  return {
-    type: 'object',
-    properties: {},
-    required: [],
-  };
-}
-
-/** Get ordered field keys from the schema */
-function getFieldOrder(schema) {
-  const properties = schema?.properties || {};
-  const propertyKeys = Object.keys(properties);
-
-  if (Array.isArray(schema?.['x-field-order']) && schema['x-field-order'].length > 0) {
-    const orderedExisting = schema['x-field-order'].filter((key) => propertyKeys.includes(key));
-    const missing = propertyKeys.filter((key) => !orderedExisting.includes(key));
-    return [...orderedExisting, ...missing];
-  }
-
-  return propertyKeys;
-}
-
-/** Build rjsf uiSchema from our formSchema metadata */
-function buildUiSchema(formSchema) {
-  const ui = { 'ui:order': getFieldOrder(formSchema) };
-  const props = formSchema?.properties || {};
-  for (const [key, fieldDef] of Object.entries(props)) {
-    if (fieldDef['x-ui-widget']) {
-      ui[key] = { 'ui:widget': fieldDef['x-ui-widget'] };
-    }
-    if (fieldDef['x-placeholder']) {
-      ui[key] = { ...(ui[key] || {}), 'ui:placeholder': fieldDef['x-placeholder'] };
-    }
-  }
-  return ui;
-}
-
-// ── Toolbox (add field buttons) ─────────────────────────────────
-
-function Toolbox({ onAddField }) {
-  return (
-    <div className="space-y-2">
-      <h3 className="text-sm font-semibold text-neutral-700 mb-3">הוספת שדה</h3>
-      <div className="grid grid-cols-1 gap-2">
-        {FIELD_TYPES.map((ft) => (
-          <Button
-            key={ft.type}
-            variant="outline"
-            className="justify-start gap-2 h-auto py-2.5"
-            onClick={() => onAddField(ft)}
-          >
-            <ft.icon className="h-4 w-4 text-primary shrink-0" />
-            <span>{ft.label}</span>
-          </Button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Field Inspector (edit properties of selected field) ─────────
-
-function FieldInspector({ fieldDef, required, onUpdate, onToggleRequired, onDelete, onDeselect }) {
-  const title = fieldDef?.title || '';
-  const placeholder = fieldDef?.['x-placeholder'] || '';
-  const enumValues = fieldDef?.enum || [];
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onDeselect}>
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        <h3 className="text-sm font-semibold text-neutral-700 truncate">עריכת שדה</h3>
-      </div>
-
-      <Separator />
-
-      <div className="space-y-2">
-        <Label htmlFor="field-title">שאלה / כותרת</Label>
-        <Input
-          id="field-title"
-          value={title}
-          onChange={(e) => onUpdate({ ...fieldDef, title: e.target.value })}
-          placeholder="הזן את השאלה לתלמיד"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="field-placeholder">טקסט עזר (Placeholder)</Label>
-        <Input
-          id="field-placeholder"
-          value={placeholder}
-          onChange={(e) => onUpdate({ ...fieldDef, 'x-placeholder': e.target.value || undefined })}
-          placeholder="טקסט שיופיע בתוך השדה"
-        />
-      </div>
-
-      <div className="flex items-center justify-between">
-        <Label htmlFor="field-required">שדה חובה</Label>
-        <Switch id="field-required" checked={required} onCheckedChange={onToggleRequired} />
-      </div>
-
-      {/* Enum editor for select fields */}
-      {Array.isArray(fieldDef?.enum) && (
-        <div className="space-y-2">
-          <Label>אפשרויות בחירה</Label>
-          {enumValues.map((opt, idx) => (
-            <div key={idx} className="flex gap-2 items-center">
-              <GripVertical className="h-4 w-4 text-neutral-300 shrink-0" />
-              <Input
-                value={opt}
-                onChange={(e) => {
-                  const updated = [...enumValues];
-                  updated[idx] = e.target.value;
-                  onUpdate({ ...fieldDef, enum: updated });
-                }}
-                placeholder={`אפשרות ${idx + 1}`}
-              />
-              {enumValues.length > 1 && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0 text-red-500 hover:text-red-600"
-                  onClick={() => {
-                    const updated = enumValues.filter((_, i) => i !== idx);
-                    onUpdate({ ...fieldDef, enum: updated });
-                  }}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
-          ))}
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={() => onUpdate({ ...fieldDef, enum: [...enumValues, `אפשרות ${enumValues.length + 1}`] })}
-          >
-            + הוסף אפשרות
-          </Button>
-        </div>
-      )}
-
-      <Separator />
-
-      <Button
-        variant="destructive"
-        size="sm"
-        className="w-full gap-2"
-        onClick={onDelete}
-      >
-        <Trash2 className="h-4 w-4" />
-        מחק שדה
-      </Button>
-    </div>
-  );
-}
-
-// ── Canvas field wrapper (clickable overlay on each field) ───────
-
-function CanvasFieldTemplate(props) {
-  const {
-    id,
-    children,
-    classNames,
-    label,
-    required,
-    displayLabel,
-    description,
-    errors,
-    help,
-    hidden,
-    selectedField,
-    onSelectField,
-  } = props;
-
-  if (hidden) {
-    return <div className="hidden">{children}</div>;
-  }
-
-  // The root-level object template has id "root" — skip wrapping it
-  if (id === 'root') return children;
-
-  // rjsf ids are like "root_field_123..." — extract the field key
-  const fieldKey = id.replace(/^root_/, '');
-  const isSelected = selectedField === fieldKey;
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      className={cn(
-        'relative rounded-md border-2 border-transparent p-2 -m-2 transition-colors cursor-pointer',
-        isSelected ? 'border-primary bg-primary/5' : 'hover:border-neutral-300 hover:bg-neutral-50',
-        classNames,
-      )}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelectField(fieldKey);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onSelectField(fieldKey);
-        }
-      }}
-    >
-      <div className="space-y-1">
-        {displayLabel && label ? (
-          <label htmlFor={id} className="text-sm font-medium text-neutral-900">
-            {label}
-            {required ? <span className="ms-1 text-red-500">*</span> : null}
-          </label>
-        ) : null}
-        {description}
-        {children}
-        {errors}
-        {help}
-      </div>
-    </div>
-  );
-}
-
-function SortableCanvasField({ property }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: property.name,
-  });
-
+function SortableCard({ id, selected, onSelect, title, subtitle, badges, children }) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id });
   return (
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn(
-        'relative rounded-md transition-shadow',
-        isDragging ? 'bg-white shadow-md' : 'bg-transparent',
-      )}
+      className={cn('rounded-3xl border bg-white p-4 shadow-sm', selected ? 'border-primary/40 ring-2 ring-primary/10' : 'border-slate-200')}
+      onClick={onSelect}
     >
-      <button
-        type="button"
-        aria-label="גרור שדה לשינוי סדר"
-        className="absolute start-1 top-1 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600"
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical className="h-4 w-4" />
-      </button>
-      <div className="ps-8">{property.content}</div>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 text-slate-400 hover:text-slate-700" {...attributes} {...listeners}>
+              <GripVertical className="h-4 w-4" />
+            </button>
+            <span className="text-sm font-semibold text-slate-900">{title}</span>
+            {badges}
+          </div>
+          {subtitle ? <p className="text-xs text-slate-500">{subtitle}</p> : null}
+        </div>
+      </div>
+      {children}
     </div>
   );
 }
 
-function CanvasObjectFieldTemplate(props) {
-  const { properties } = props;
-  const sortableIds = properties.filter((property) => !property.hidden).map((property) => property.name);
-
-  return (
-    <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-      <div className="space-y-3">
-        {properties.map((property) => {
-          if (property.hidden) {
-            return (
-              <div key={property.name} className="hidden">
-                {property.content}
-              </div>
-            );
-          }
-
-          return <SortableCanvasField key={property.name} property={property} />;
-        })}
-      </div>
-    </SortableContext>
-  );
+function createRule(questionId = '') {
+  return { id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, source_question_id: questionId, operator: 'equals', value: '' };
 }
 
-function WaitingListIntakePreview() {
-  const renderFieldLabel = (field) => (
-    <>
-      {field.label}
-      {field.required ? <span className="ms-1 text-red-500">*</span> : null}
-      {field.conditionalRequired ? <span className="ms-1 text-amber-500">*</span> : null}
-    </>
-  );
-
-  const findField = (key) => WAITING_LIST_SYSTEM_FIELDS.find((field) => field.key === key);
-  const studentFields = ['student_first_name', 'student_last_name', 'identity_number', 'contact_relationship', 'contact_name'].map(findField).filter(Boolean);
-  const contactFields = ['phone', 'email'].map(findField).filter(Boolean);
-  const fundingFields = ['payment_path_intent', 'hmo_provider_name', 'hmo_approval_status', 'notes'].map(findField).filter(Boolean);
-  const additionalServicesField = findField('additional_services');
-  const preferredDaysField = findField('preferred_days');
-  const preferredTimesField = findField('preferred_times');
-
-  const renderBasicField = (field, options = {}) => {
-    if (!field) return null;
-
-    if (field.type === 'select') {
-      return (
-        <div key={field.key} className="space-y-2">
-          <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
-          <Select disabled value="">
-            <SelectTrigger className="bg-white/80 text-slate-400">
-              <SelectValue placeholder={field.options?.[0] || 'בחרו אפשרות'} />
-            </SelectTrigger>
-            <SelectContent>
-              {(field.options || []).slice(1).map((option) => (
-                <SelectItem key={option} value={option}>{option}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {options.helpText ? <p className="text-xs text-slate-400">{options.helpText}</p> : null}
-        </div>
-      );
-    }
-
-    if (field.type === 'textarea') {
-      return (
-        <div key={field.key} className="space-y-2">
-          <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
-          <Textarea disabled rows={4} placeholder={field.placeholder} className="bg-white/80 text-slate-500 placeholder:text-slate-400" />
-        </div>
-      );
-    }
-
-    return (
-      <div key={field.key} className="space-y-2">
-        <Label className="text-slate-700">{renderFieldLabel(field)}</Label>
-        <Input disabled placeholder={field.placeholder} className="bg-white/80 text-slate-500 placeholder:text-slate-400" />
-      </div>
-    );
-  };
-
-  return (
-    <div className="mb-6 rounded-xl border border-dashed border-slate-300 bg-slate-100/70 p-4 opacity-70">
-      <div className="mb-4 space-y-1">
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="border-slate-300 text-slate-600">מערכת</Badge>
-          <h3 className="text-sm font-semibold text-slate-700">שאלות קבועות לטופס רשימת המתנה</h3>
-        </div>
-        <p className="text-xs text-slate-500">
-          השדות האלה מוצגים תמיד בטופס הציבורי וממופים אוטומטית לפרופיל המתעניין ולרשומת ההמתנה. אי אפשר לערוך אותם דרך הבונה.
-        </p>
-        <p className="text-xs text-slate-400">
-          <span className="text-red-500">*</span> שדה חובה קבוע, <span className="text-amber-500">*</span> שדה חובה מותנה בהתאם לבחירה בטופס.
-        </p>
-      </div>
-
-      <div className="space-y-5">
-        <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
-          <p className="text-sm font-medium text-slate-700">שירות מבוקש</p>
-          <p className="mt-1 text-xs text-slate-500">מוצג מהשירות שנבחר בזמן שליחת הקישור, לא מהבונה.</p>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 space-y-1">
-            <h4 className="text-sm font-semibold text-slate-900">פרטי תלמיד/ה</h4>
-            <p className="text-xs text-slate-500">אותו מבנה שיופיע ללקוח/ה בטופס הציבורי.</p>
-          </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {studentFields
-              .filter((field) => field.key !== 'contact_name')
-              .map((field) => renderBasicField(field, field.key === 'contact_relationship'
-                ? { helpText: 'שם איש הקשר מוצג רק אחרי בחירת קרבה שאינה "התלמיד/ה עצמו/ה".' }
-                : {}))}
-          </div>
-          <div className="mt-4 opacity-75">
-            {renderBasicField(findField('contact_name'))}
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 space-y-1">
-            <h4 className="text-sm font-semibold text-slate-900">פרטי התקשרות</h4>
-            <p className="text-xs text-slate-500">פרטים ליצירת קשר לאחר שליחת הטופס.</p>
-          </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {contactFields.map((field) => renderBasicField(field))}
-          </div>
-        </div>
-
-        {additionalServicesField ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-4 space-y-1">
-              <h4 className="text-sm font-semibold text-slate-900">שירותים נוספים</h4>
-              <p className="text-xs text-slate-500">החלק הזה מופיע רק אם השולח מאפשר לבקש שירותים נוספים.</p>
-            </div>
-            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              {['שירות נוסף א׳', 'שירות נוסף ב׳'].map((label) => (
-                <label key={label} className="flex items-center gap-3 rounded-xl bg-white px-3 py-3 text-sm text-slate-500 shadow-sm">
-                  <Checkbox disabled />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 space-y-1">
-            <h4 className="text-sm font-semibold text-slate-900">זמינות מועדפת</h4>
-            <p className="text-xs text-slate-500">נדרש לבחור לפחות יום אחד ולהגדיר עבורו טווח שעות מלא.</p>
-          </div>
-          {preferredDaysField ? (
-            <div className="space-y-2">
-              <Label className="text-slate-700">{renderFieldLabel(preferredDaysField)}</Label>
-              <div className="flex flex-wrap gap-2">
-                {['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'].map((day) => (
-                  <Button key={day} type="button" variant="outline" disabled className="border-slate-300 bg-white text-slate-500">
-                    {day}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          {preferredTimesField ? (
-            <div className="mt-4 space-y-2">
-              <Label className="text-slate-700">{renderFieldLabel(preferredTimesField)}</Label>
-              <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
-                <div className="mb-2 text-sm font-medium text-slate-600">יום לדוגמה</div>
-                <div className="flex items-center gap-2">
-                  <Input type="time" disabled value="09:00" className="bg-slate-50 text-slate-500" />
-                  <span className="text-sm text-slate-400">עד</span>
-                  <Input type="time" disabled value="12:00" className="bg-slate-50 text-slate-500" />
-                  <Button type="button" variant="outline" disabled>הסר</Button>
-                </div>
-                <div className="mt-2">
-                  <Button type="button" variant="outline" disabled>הוסף טווח</Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 space-y-1">
-            <h4 className="text-sm font-semibold text-slate-900">פרטי מימון</h4>
-            <p className="text-xs text-slate-500">שדות ה-HMO מופיעים רק אם נבחר מסלול תשלום דרך קופת חולים / גורם מממן.</p>
-          </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {fundingFields
-              .filter((field) => !['hmo_provider_name', 'hmo_approval_status', 'notes'].includes(field.key))
-              .map((field) => renderBasicField(field, field.key === 'payment_path_intent'
-                ? { helpText: 'בחירת HMO תציג גם את שם הקופה וגם את סטטוס האישור.' }
-                : {}))}
-          </div>
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 opacity-75">
-            {renderBasicField(findField('hmo_provider_name'))}
-            {renderBasicField(findField('hmo_approval_status'))}
-          </div>
-          <div className="mt-4">
-            {renderBasicField(findField('notes'))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+function createRuleGroup(targetType, targetId) {
+  return { id: `group_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, target_type: targetType, target_id: targetId, mode: 'all', rules: [createRule()] };
 }
 
-// ── Main Page Component ─────────────────────────────────────────
+function emptyPublishedVersion(metadata, fallbackVersion) {
+  const publishedVersion = Number(metadata?.published_version);
+  return Number.isFinite(publishedVersion) && publishedVersion > 0 ? publishedVersion : fallbackVersion;
+}
+
+function getQuestionOptions(question) {
+  if (question.type === 'yes_no') {
+    return [{ value: true, label: 'כן' }, { value: false, label: 'לא' }];
+  }
+  return Array.isArray(question.options) ? question.options : [];
+}
 
 export default function FormBuilderPage() {
-  const { formId } = useParams();
   const navigate = useNavigate();
-  const { activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { formId = '' } = useParams();
   const { session } = useSupabase();
+  const { activeOrgId } = useOrg();
+  const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
-  const [formData, setFormData] = useState(null);
-  const [formSchema, setFormSchema] = useState(buildEmptySchema);
-  const [selectedField, setSelectedField] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState('');
-  const [dirty, setDirty] = useState(false);
+  const [mode, setMode] = useState('edit');
+  const [formName, setFormName] = useState('');
+  const [description, setDescription] = useState('');
   const [formUsage, setFormUsage] = useState('general');
+  const [schema, setSchema] = useState(normalizeFormSchema({}));
+  const [visibilityRules, setVisibilityRules] = useState([]);
+  const [alertRules, setAlertRules] = useState([]);
+  const [selected, setSelected] = useState({ type: 'section', id: '' });
+  const [previewAnswers, setPreviewAnswers] = useState({});
+  const [version, setVersion] = useState(1);
+  const [publishedVersion, setPublishedVersion] = useState(1);
+  const [lastSavedAt, setLastSavedAt] = useState('');
+  const [publishedAt, setPublishedAt] = useState('');
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const canLoad = Boolean(session && activeOrgId && formId);
 
-  const canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection);
-
-  // ── Load form ───────────────────────────────────────────────
   const loadForm = useCallback(async () => {
-    if (!canFetch || !formId) return;
+    if (!canLoad) return;
     setLoading(true);
     setError('');
     try {
-      const data = await authenticatedFetch(`forms/${formId}`, {
-        session,
-        params: { org_id: activeOrgId },
-      });
-      setFormData(data);
-      setFormUsage(data?.form_usage === 'waiting_list_intake' ? 'waiting_list_intake' : 'general');
-      const schema = data?.form_schema && typeof data.form_schema === 'object' && data.form_schema.type
-        ? data.form_schema
-        : buildEmptySchema();
-      setFormSchema(schema);
-    } catch (err) {
-      console.error('Failed to load form', err);
-      setError(err?.message || 'שגיאה בטעינת הטופס');
+      const data = await authenticatedFetch(`forms/${formId}`, { session, params: { org_id: activeOrgId } });
+      const normalizedSchema = normalizeFormSchema(data?.form_schema || {});
+      setFormName(String(data?.name || ''));
+      setDescription(String(data?.description || ''));
+      setFormUsage(String(data?.form_usage || 'general'));
+      setSchema(normalizedSchema);
+      setVisibilityRules(normalizeVisibilityRules(data?.visibility_rules));
+      setAlertRules(normalizeAlertRules(data?.alert_rules));
+      setVersion(Number(data?.version || 1));
+      setPublishedVersion(emptyPublishedVersion(data?.metadata, Number(data?.version || 1)));
+      setLastSavedAt(String(data?.metadata?.draft_saved_at || data?.updated_at || ''));
+      setPublishedAt(String(data?.metadata?.published_at || data?.published_at || ''));
+      setPreviewAnswers(buildInitialAnswers(normalizedSchema));
+      setSelected({ type: 'section', id: normalizedSchema.sections[0]?.id || '' });
+    } catch (loadError) {
+      console.error('Failed to load form', loadError);
+      setError(loadError?.message || 'טעינת הטופס נכשלה');
     } finally {
       setLoading(false);
     }
-  }, [canFetch, formId, session, activeOrgId]);
+  }, [activeOrgId, canLoad, formId, session]);
 
   useEffect(() => {
-    if (canFetch) void loadForm();
-  }, [canFetch, loadForm]);
+    void loadForm();
+  }, [loadForm]);
 
-  // ── Schema mutation helpers ─────────────────────────────────
-  const updateSchema = useCallback((updater) => {
-    setFormSchema((prev) => {
-      const next = updater(prev);
-      return next;
-    });
-    setDirty(true);
-  }, []);
+  const selectedSection = useMemo(() => schema.sections.find((section) => section.id === selected.id) || null, [schema.sections, selected.id]);
+  const selectedQuestion = useMemo(() => getQuestionsInOrder(schema).find((question) => question.id === selected.id) || null, [schema, selected.id]);
+  const availableSources = useMemo(() => getAvailableSourceQuestions(schema, selected.type, selected.id), [schema, selected]);
+  const selectedGroups = useMemo(
+    () => visibilityRules.filter((group) => group.target_type === selected.type && group.target_id === selected.id),
+    [selected, visibilityRules],
+  );
 
-  const addField = useCallback((fieldType) => {
-    const key = generateFieldId();
-    updateSchema((prev) => {
-      const properties = { ...prev.properties };
-      const schemaDef = { ...fieldType.schema, title: fieldType.label };
-      if (fieldType.uiWidget) schemaDef['x-ui-widget'] = fieldType.uiWidget;
-      properties[key] = schemaDef;
-      const order = [...getFieldOrder(prev), key];
-      return { ...prev, properties, 'x-field-order': order };
-    });
-    setSelectedField(key);
-  }, [updateSchema]);
+  const updateSchema = (updater) => setSchema((prev) => normalizeFormSchema(typeof updater === 'function' ? updater(prev) : updater));
+  const addSection = () => updateSchema((prev) => {
+    const nextSection = createSection();
+    setSelected({ type: 'section', id: nextSection.id });
+    return { ...prev, sections: [...prev.sections, nextSection] };
+  });
+  const addQuestion = (type) => updateSchema((prev) => {
+    const targetSectionId = selected.type === 'section' ? selected.id : selectedQuestion?.section_id || prev.sections[0]?.id;
+    const nextQuestion = createQuestion(type);
+    setSelected({ type: 'question', id: nextQuestion.id });
+    return { ...prev, sections: prev.sections.map((section) => section.id === targetSectionId ? { ...section, questions: [...section.questions, nextQuestion] } : section) };
+  });
 
-  const updateField = useCallback((key, fieldDef) => {
-    updateSchema((prev) => ({
-      ...prev,
-      properties: { ...prev.properties, [key]: fieldDef },
-    }));
-  }, [updateSchema]);
+  useEffect(() => {
+    setPreviewAnswers((prev) => ({ ...buildInitialAnswers(schema), ...prev }));
+  }, [schema]);
 
-  const toggleFieldRequired = useCallback((key) => {
-    updateSchema((prev) => {
-      const required = Array.isArray(prev.required) ? [...prev.required] : [];
-      const idx = required.indexOf(key);
-      if (idx >= 0) required.splice(idx, 1);
-      else required.push(key);
-      return { ...prev, required };
-    });
-  }, [updateSchema]);
-
-  const deleteField = useCallback((key) => {
-    updateSchema((prev) => {
-      const properties = { ...prev.properties };
-      delete properties[key];
-      const required = (prev.required || []).filter((r) => r !== key);
-      const order = getFieldOrder(prev).filter((k) => k !== key);
-      return { ...prev, properties, required, 'x-field-order': order };
-    });
-    setSelectedField(null);
-  }, [updateSchema]);
-
-  const handleDragEnd = useCallback((event) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    updateSchema((prev) => {
-      const currentOrder = getFieldOrder(prev);
-      if (currentOrder.length < 2) return prev;
-
-      const oldIndex = currentOrder.indexOf(String(active.id));
-      const newIndex = currentOrder.indexOf(String(over.id));
-      if (oldIndex < 0 || newIndex < 0) return prev;
-
-      return {
-        ...prev,
-        'x-field-order': arrayMove(currentOrder, oldIndex, newIndex),
-      };
-    });
-  }, [updateSchema]);
-
-  // ── Save ────────────────────────────────────────────────────
-  const handleSave = useCallback(async () => {
-    if (!canFetch || !formId) return;
-    setSaving(true);
+  const persistForm = async (publish = false) => {
+    const actionLabel = publish ? 'publishing' : 'saving';
+    if (publish) setPublishing(true); else setSaving(true);
     try {
-      const resp = await authenticatedFetch(`forms/${formId}`, {
-        session,
+      const payload = await authenticatedFetch(`forms/${formId}`, {
         method: 'PUT',
+        session,
         body: {
           org_id: activeOrgId,
+          name: formName,
+          description,
           form_usage: formUsage,
-          form_schema: formSchema,
+          form_schema: schema,
+          visibility_rules: visibilityRules,
+          alert_rules: alertRules,
+          action: publish ? 'publish' : 'save_draft',
+          publish,
         },
       });
-      setFormData(resp);
-      setDirty(false);
-      toast.success('הטופס נשמר בהצלחה');
-    } catch (err) {
-      console.error('Failed to save form', err);
-      toast.error(err?.message || 'שגיאה בשמירת הטופס');
+      setVersion(Number(payload?.version || version));
+      setPublishedVersion(emptyPublishedVersion(payload?.metadata, Number(payload?.version || version)));
+      setLastSavedAt(String(payload?.metadata?.draft_saved_at || payload?.updated_at || new Date().toISOString()));
+      setPublishedAt(String(payload?.metadata?.published_at || payload?.published_at || publishedAt));
+      toast.success(publish ? 'הטופס פורסם' : 'טיוטת הטופס נשמרה');
+    } catch (saveError) {
+      console.error(`Failed ${actionLabel} form`, saveError);
+      toast.error(saveError?.message || (publish ? 'פרסום הטופס נכשל' : 'שמירת הטופס נכשלה'));
     } finally {
-      setSaving(false);
+      if (publish) setPublishing(false); else setSaving(false);
     }
-  }, [canFetch, formId, session, activeOrgId, formSchema, formUsage]);
+  };
 
-  // ── Build rjsf props ───────────────────────────────────────
-  const uiSchema = useMemo(() => buildUiSchema(formSchema), [formSchema]);
-  const fieldOrder = useMemo(() => getFieldOrder(formSchema), [formSchema]);
-  const hasFields = fieldOrder.length > 0;
-  const selectedDef = selectedField ? formSchema?.properties?.[selectedField] : null;
-  const selectedRequired = selectedField ? (formSchema?.required || []).includes(selectedField) : false;
+  const handleDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return;
+    updateSchema((prev) => {
+      const [activeKind, activeId] = String(active.id).split(':');
+      const [overKind, overId] = String(over.id).split(':');
+      if (activeKind === 'section' && overKind === 'section') {
+        const ids = prev.sections.map((section) => section.id);
+        return { ...prev, sections: arrayMove(prev.sections, ids.indexOf(activeId), ids.indexOf(overId)) };
+      }
+      if (activeKind === 'question' && overKind === 'question') {
+        const nextSections = prev.sections.map((section) => ({ ...section, questions: [...section.questions] }));
+        let sourceIndex = -1;
+        let sourceSectionIndex = -1;
+        let targetIndex = -1;
+        let targetSectionIndex = -1;
+        nextSections.forEach((section, index) => {
+          const activeIndex = section.questions.findIndex((question) => question.id === activeId);
+          const overIndex = section.questions.findIndex((question) => question.id === overId);
+          if (activeIndex >= 0) { sourceSectionIndex = index; sourceIndex = activeIndex; }
+          if (overIndex >= 0) { targetSectionIndex = index; targetIndex = overIndex; }
+        });
+        if (sourceSectionIndex < 0 || targetSectionIndex < 0) return prev;
+        const [movedQuestion] = nextSections[sourceSectionIndex].questions.splice(sourceIndex, 1);
+        nextSections[targetSectionIndex].questions.splice(targetIndex, 0, movedQuestion);
+        return { ...prev, sections: nextSections };
+      }
+      return prev;
+    });
+  };
 
-  // Custom FieldTemplate that wraps each field with click handling
-  const fieldTemplateProps = useMemo(
-    () => ({ selectedField, onSelectField: setSelectedField }),
-    [selectedField],
-  );
-  const CustomFieldTemplate = useCallback(
-    (props) => <CanvasFieldTemplate {...props} {...fieldTemplateProps} />,
-    [fieldTemplateProps],
-  );
-
-  // ── Render ─────────────────────────────────────────────────
+  const updateVisibilityGroup = (groupId, updater) => setVisibilityRules((prev) => prev.map((group) => group.id === groupId ? updater(group) : group));
+  const updateAlertRule = (questionId, option, enabled, severity = 'medium', note = '') => setAlertRules((prev) => {
+    const existing = prev.find((rule) => rule.question_id === questionId && String(rule.value) === String(option.value));
+    if (enabled && existing) return prev.map((rule) => rule.id === existing.id ? { ...rule, severity, note } : rule);
+    if (enabled) return [...prev, { id: `alert_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, question_id: questionId, value: option.value, severity, note }];
+    return prev.filter((rule) => !(rule.question_id === questionId && String(rule.value) === String(option.value)));
+  });
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="h-6 w-6 animate-spin text-neutral-400" />
-        <span className="ms-2 text-sm text-neutral-500">טוען טופס...</span>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-        <AlertCircle className="h-8 w-8 text-red-500" />
-        <p className="text-sm text-red-600">{error}</p>
-        <Button variant="outline" size="sm" onClick={loadForm}>נסה שוב</Button>
-      </div>
-    );
+    return <PageLayout title="בונה הטפסים"><Card><CardContent className="flex items-center justify-center gap-2 p-16"><Loader2 className="h-5 w-5 animate-spin" /><span>טוען טופס...</span></CardContent></Card></PageLayout>;
   }
 
   return (
-    <div className="flex h-full flex-col bg-neutral-50">
-      {/* ── Header bar ── */}
-      <div className="flex items-center justify-between border-b border-border bg-white px-4 py-3 shadow-sm">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate('/forms')}>
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-          <div>
-            <h1 className="text-base font-semibold leading-tight">{formData?.name || 'עורך טופס'}</h1>
-            <div className="mt-0.5 flex items-center gap-2">
-              {formData?.version && (
-                <Badge variant="outline" className="text-xs">v{formData.version}</Badge>
-              )}
-              <Badge variant={formUsage === 'waiting_list_intake' ? 'default' : 'secondary'} className="text-xs">
-                {formUsage === 'waiting_list_intake' ? 'רשימת המתנה' : 'כללי'}
-              </Badge>
-            </div>
-          </div>
+    <PageLayout
+      title="בונה הטפסים"
+      description="עריכת סעיפים, שאלות, תנאי חשיפה, דגלים אדומים ופרסום טופס"
+      actions={<div className="flex items-center gap-2"><Button variant="outline" className="gap-2" onClick={() => navigate('/forms')}><ArrowRight className="h-4 w-4" />חזרה לרשימה</Button><Button variant="outline" className="gap-2" onClick={() => navigate(`/forms/${formId}/preview`)}><Eye className="h-4 w-4" />תצוגה מלאה</Button><Button className="gap-2" variant="outline" disabled={saving || publishing} onClick={() => void persistForm(false)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}שמור טיוטה</Button><Button className="gap-2" disabled={saving || publishing} onClick={() => void persistForm(true)}>{publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}פרסם</Button></div>}
+    >
+      {error ? <Alert className="mb-4"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert> : null}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
+        <Card className="xl:sticky xl:top-4 xl:h-fit"><CardContent className="space-y-4 p-4"><div className="space-y-2"><Label>מצב</Label><Tabs value={mode} onValueChange={setMode}><TabsList className="grid w-full grid-cols-2"><TabsTrigger value="edit">עריכה</TabsTrigger><TabsTrigger value="preview">תצוגה</TabsTrigger></TabsList></Tabs></div><Separator /><div className="space-y-2"><Label>פרטי טופס</Label><Input value={formName} onChange={(event) => setFormName(event.target.value)} placeholder="שם הטופס" /><Textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="תיאור קצר" rows={3} /><Select value={formUsage} onValueChange={setFormUsage}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="general">טופס כללי</SelectItem><SelectItem value="waiting_list_intake">טופס רשימת המתנה</SelectItem></SelectContent></Select><div className="flex flex-wrap gap-2 text-xs text-slate-500"><Badge variant="outline">טיוטה v{version}</Badge><Badge variant="outline">פורסם v{publishedVersion}</Badge>{lastSavedAt ? <Badge variant="outline">נשמר {new Date(lastSavedAt).toLocaleString('he-IL')}</Badge> : null}{publishedAt ? <Badge variant="outline">פורסם {new Date(publishedAt).toLocaleDateString('he-IL')}</Badge> : null}</div></div><Separator /><div className="space-y-2"><Button className="w-full gap-2" variant="outline" onClick={addSection}><Layers3 className="h-4 w-4" />הוסף סעיף</Button><div className="grid grid-cols-1 gap-2">{QUESTION_TYPE_DEFINITIONS.map((definition) => <Button key={definition.type} variant="ghost" className="justify-start rounded-xl border border-slate-200" onClick={() => addQuestion(definition.type)}><Plus className="me-2 h-4 w-4" />{definition.label}</Button>)}</div></div></CardContent></Card>
+        <div className="space-y-4">
+          {formUsage === 'waiting_list_intake' ? <Card><CardContent className="p-4"><div className="mb-3 flex items-center gap-2"><Badge variant="outline">קבוע</Badge><span className="text-sm font-semibold text-slate-700">חלק מערכת לרשימת המתנה</span></div><div className="grid grid-cols-1 gap-2 md:grid-cols-2">{WAITING_LIST_SYSTEM_PREVIEW.map((item) => <div key={item} className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">{item}</div>)}</div></CardContent></Card> : null}
+          {mode === 'preview' ? <SectionedFormRenderer schema={schema} visibilityRules={visibilityRules} answers={previewAnswers} onAnswersChange={setPreviewAnswers} /> : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}><SortableContext items={schema.sections.map((section) => `section:${section.id}`)} strategy={verticalListSortingStrategy}>{schema.sections.map((section) => <SortableCard key={section.id} id={`section:${section.id}`} selected={selected.type === 'section' && selected.id === section.id} onSelect={() => setSelected({ type: 'section', id: section.id })} title={section.title} subtitle={section.description} badges={<Badge variant="outline">{section.questions.length} שאלות</Badge>}><SortableContext items={section.questions.map((question) => `question:${question.id}`)} strategy={verticalListSortingStrategy}><div className="space-y-3">{section.questions.map((question) => <SortableCard key={question.id} id={`question:${question.id}`} selected={selected.type === 'question' && selected.id === question.id} onSelect={() => setSelected({ type: 'question', id: question.id })} title={question.label} subtitle={question.description} badges={<div className="flex flex-wrap gap-1"><Badge variant="secondary">{QUESTION_TYPE_DEFINITIONS.find((item) => item.type === question.type)?.label || question.type}</Badge>{question.required ? <Badge variant="outline" className="text-red-600">חובה</Badge> : null}{visibilityRules.some((group) => group.target_type === 'question' && group.target_id === question.id) ? <Badge variant="outline">מותנה</Badge> : null}{alertRules.some((rule) => rule.question_id === question.id) ? <Badge variant="outline">דגלים</Badge> : null}</div>} />)}</div></SortableContext></SortableCard>)}</SortableContext></DndContext>}
         </div>
-
-        <div className="flex items-center gap-3">
-          <div className="min-w-48">
-            <Select
-              value={formUsage}
-              onValueChange={(value) => {
-                setFormUsage(value);
-                setDirty(true);
-              }}
-            >
-              <SelectTrigger className="h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="general">טופס כללי</SelectItem>
-                <SelectItem value="waiting_list_intake">טופס רשימת המתנה</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            className="gap-2"
-            disabled={saving || !dirty}
-            onClick={handleSave}
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            שמור שינויים
-          </Button>
-        </div>
+        <Card className="xl:sticky xl:top-4 xl:h-fit"><CardContent className="space-y-4 p-4">{selected.type === 'section' && selectedSection ? <><div className="space-y-2"><Label>שם הסעיף</Label><Input value={selectedSection.title} onChange={(event) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => section.id === selectedSection.id ? { ...section, title: event.target.value } : section) }))} /></div><div className="space-y-2"><Label>תיאור</Label><Textarea rows={3} value={selectedSection.description} onChange={(event) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => section.id === selectedSection.id ? { ...section, description: event.target.value } : section) }))} /></div><Button variant="destructive" className="w-full gap-2" disabled={schema.sections.length === 1} onClick={() => updateSchema((prev) => ({ ...prev, sections: prev.sections.filter((section) => section.id !== selectedSection.id) }))}><Trash2 className="h-4 w-4" />מחק סעיף</Button></> : null}
+          {selected.type === 'question' && selectedQuestion ? <><div className="space-y-2"><Label>כותרת שאלה</Label><Input value={selectedQuestion.label} onChange={(event) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => ({ ...section, questions: section.questions.map((question) => question.id === selectedQuestion.id ? { ...question, label: event.target.value } : question) })) }))} /></div><div className="space-y-2"><Label>תיאור / הסבר</Label><Textarea rows={3} value={selectedQuestion.description || ''} onChange={(event) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => ({ ...section, questions: section.questions.map((question) => question.id === selectedQuestion.id ? { ...question, description: event.target.value } : question) })) }))} /></div><div className="space-y-2"><Label>סוג שאלה</Label><Select value={selectedQuestion.type} onValueChange={(value) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => ({ ...section, questions: section.questions.map((question) => question.id === selectedQuestion.id ? { ...question, type: value, options: createQuestion(value).options } : question) })) }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{QUESTION_TYPE_DEFINITIONS.map((definition) => <SelectItem key={definition.type} value={definition.type}>{definition.label}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Placeholder</Label><Input value={selectedQuestion.placeholder || ''} onChange={(event) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => ({ ...section, questions: section.questions.map((question) => question.id === selectedQuestion.id ? { ...question, placeholder: event.target.value } : question) })) }))} /></div><div className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3"><div><p className="text-sm font-medium">שדה חובה</p><p className="text-xs text-slate-500">הלקוח לא יוכל לשלוח בלי לענות</p></div><Switch checked={selectedQuestion.required} onCheckedChange={(checked) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => ({ ...section, questions: section.questions.map((question) => question.id === selectedQuestion.id ? { ...question, required: checked } : question) })) }))} /></div>{['single_select', 'multi_select', 'approval'].includes(selectedQuestion.type) ? <div className="space-y-2"><Label>אפשרויות</Label>{getQuestionOptions(selectedQuestion).map((option, index) => <div key={`${selectedQuestion.id}_${index}`} className="flex items-center gap-2"><Input value={option.label} onChange={(event) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => ({ ...section, questions: section.questions.map((question) => question.id === selectedQuestion.id ? { ...question, options: getQuestionOptions(question).map((currentOption, optionIndex) => optionIndex === index ? { ...currentOption, label: event.target.value, value: question.type === 'approval' ? true : event.target.value } : currentOption) } : question) })) }))} /><Button variant="outline" size="icon" onClick={() => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => ({ ...section, questions: section.questions.map((question) => question.id === selectedQuestion.id ? { ...question, options: getQuestionOptions(question).filter((_, optionIndex) => optionIndex !== index) } : question) })) }))}><Trash2 className="h-4 w-4" /></Button></div>)}{selectedQuestion.type !== 'approval' ? <Button variant="outline" className="w-full" onClick={() => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => ({ ...section, questions: section.questions.map((question) => question.id === selectedQuestion.id ? { ...question, options: [...getQuestionOptions(question), { value: `אפשרות ${getQuestionOptions(question).length + 1}`, label: `אפשרות ${getQuestionOptions(question).length + 1}` }] } : question) })) }))}>הוסף אפשרות</Button> : null}</div> : null}<Button variant="destructive" className="w-full gap-2" onClick={() => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => ({ ...section, questions: section.questions.filter((question) => question.id !== selectedQuestion.id) })) }))}><Trash2 className="h-4 w-4" />מחק שאלה</Button></> : null}
+          <Separator />
+          {selected.id ? <div className="space-y-3"><div className="flex items-center justify-between"><div><h4 className="text-sm font-semibold text-slate-900">תנאי חשיפה</h4><p className="text-xs text-slate-500">הצג פריט זה רק כאשר תשובות קודמות עומדות בתנאים.</p></div><Button variant="outline" size="sm" onClick={() => setVisibilityRules((prev) => [...prev, createRuleGroup(selected.type, selected.id)])}>הוסף קבוצה</Button></div>{selectedGroups.length === 0 ? <p className="text-xs text-slate-500">אין תנאי חשיפה. הפריט יוצג תמיד.</p> : selectedGroups.map((group) => <div key={group.id} className="rounded-2xl border border-slate-200 p-3"><div className="mb-2 flex items-center justify-between"><Select value={group.mode} onValueChange={(value) => updateVisibilityGroup(group.id, (current) => ({ ...current, mode: value }))}><SelectTrigger className="w-40"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">כל התנאים</SelectItem><SelectItem value="any">לפחות תנאי אחד</SelectItem></SelectContent></Select><Button variant="ghost" size="icon" onClick={() => setVisibilityRules((prev) => prev.filter((item) => item.id !== group.id))}><Trash2 className="h-4 w-4" /></Button></div><div className="space-y-2">{group.rules.map((rule) => { const sourceQuestion = availableSources.find((question) => question.id === rule.source_question_id); const options = sourceQuestion ? getQuestionOptions(sourceQuestion) : []; const operatorNeedsValue = !['is_true', 'is_false', 'is_empty', 'is_not_empty'].includes(rule.operator); return <div key={rule.id} className="space-y-2 rounded-2xl bg-slate-50 p-3"><Select value={rule.source_question_id} onValueChange={(value) => updateVisibilityGroup(group.id, (current) => ({ ...current, rules: current.rules.map((item) => item.id === rule.id ? { ...item, source_question_id: value } : item) }))}><SelectTrigger><SelectValue placeholder="שאלת מקור" /></SelectTrigger><SelectContent>{availableSources.map((question) => <SelectItem key={question.id} value={question.id}>{question.label}</SelectItem>)}</SelectContent></Select><Select value={rule.operator} onValueChange={(value) => updateVisibilityGroup(group.id, (current) => ({ ...current, rules: current.rules.map((item) => item.id === rule.id ? { ...item, operator: value } : item) }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{RULE_OPERATORS.map((operator) => <SelectItem key={operator.value} value={operator.value}>{operator.label}</SelectItem>)}</SelectContent></Select>{operatorNeedsValue ? options.length > 0 ? <Select value={String(rule.value ?? '')} onValueChange={(value) => updateVisibilityGroup(group.id, (current) => ({ ...current, rules: current.rules.map((item) => item.id === rule.id ? { ...item, value: sourceQuestion?.type === 'yes_no' ? value === 'true' : value } : item) }))}><SelectTrigger><SelectValue placeholder="ערך" /></SelectTrigger><SelectContent>{options.map((option) => <SelectItem key={String(option.value)} value={String(option.value)}>{option.label}</SelectItem>)}</SelectContent></Select> : <Input value={String(rule.value ?? '')} onChange={(event) => updateVisibilityGroup(group.id, (current) => ({ ...current, rules: current.rules.map((item) => item.id === rule.id ? { ...item, value: event.target.value } : item) }))} placeholder="ערך להשוואה" /> : null}<div className="flex justify-end"><Button variant="ghost" size="sm" onClick={() => updateVisibilityGroup(group.id, (current) => ({ ...current, rules: current.rules.filter((item) => item.id !== rule.id) }))}>מחק תנאי</Button></div></div>; })}</div><Button variant="outline" className="mt-2 w-full" onClick={() => updateVisibilityGroup(group.id, (current) => ({ ...current, rules: [...current.rules, createRule(availableSources[0]?.id || '')] }))}>הוסף תנאי</Button></div>)}</div> : null}
+          {selectedQuestion && ['single_select', 'multi_select', 'yes_no'].includes(selectedQuestion.type) ? <><Separator /><div className="space-y-3"><h4 className="text-sm font-semibold text-slate-900">דגלים אדומים</h4>{getQuestionOptions(selectedQuestion).map((option) => { const existingRule = alertRules.find((rule) => rule.question_id === selectedQuestion.id && String(rule.value) === String(option.value)); return <div key={`${selectedQuestion.id}_${String(option.value)}`} className="space-y-2 rounded-2xl border border-slate-200 p-3"><div className="flex items-center justify-between"><div><p className="text-sm font-medium">{option.label}</p><p className="text-xs text-slate-500">סימון תשובה זו כרגישה קלינית / תפעולית.</p></div><Checkbox checked={Boolean(existingRule)} onCheckedChange={(checked) => updateAlertRule(selectedQuestion.id, option, checked === true, existingRule?.severity || 'medium', existingRule?.note || '')} /></div>{existingRule ? <div className="space-y-2"><Select value={existingRule.severity} onValueChange={(value) => updateAlertRule(selectedQuestion.id, option, true, value, existingRule.note || '')}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ALERT_SEVERITIES.map((severity) => <SelectItem key={severity} value={severity}>{severity}</SelectItem>)}</SelectContent></Select><Textarea rows={2} placeholder="הערה לצוות" value={existingRule.note || ''} onChange={(event) => updateAlertRule(selectedQuestion.id, option, true, existingRule.severity, event.target.value)} /></div> : null}</div>; })}</div></> : null}</CardContent></Card>
       </div>
-
-      {/* ── Two-pane layout ── */}
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar (Inspector / Toolbox) — appears on start side (right in RTL) */}
-        <aside className="w-72 shrink-0 overflow-y-auto border-s border-border bg-white p-4">
-          {selectedField && selectedDef ? (
-            <FieldInspector
-              fieldKey={selectedField}
-              fieldDef={selectedDef}
-              required={selectedRequired}
-              onUpdate={(def) => updateField(selectedField, def)}
-              onToggleRequired={() => toggleFieldRequired(selectedField)}
-              onDelete={() => deleteField(selectedField)}
-              onDeselect={() => setSelectedField(null)}
-            />
-          ) : (
-            <Toolbox onAddField={addField} />
-          )}
-        </aside>
-
-        {/* Canvas (live preview) */}
-        <main
-          className="flex-1 overflow-y-auto bg-neutral-50 p-6"
-          onClick={() => setSelectedField(null)}
-        >
-          <div className="mx-auto max-w-2xl">
-            <Card className="overflow-hidden border-slate-200 shadow-sm">
-              <CardHeader className="border-b border-slate-100 bg-white">
-                <CardTitle className="text-lg">{formData?.name || 'טופס חדש'}</CardTitle>
-                {formData?.description && (
-                  <p className="text-sm text-neutral-500">{formData.description}</p>
-                )}
-              </CardHeader>
-              <CardContent className="bg-slate-50/50 pt-6">
-                {formUsage === 'waiting_list_intake' && <WaitingListIntakePreview />}
-                {hasFields ? (
-                  <Form
-                    schema={formSchema}
-                    uiSchema={uiSchema}
-                    validator={validator}
-                    templates={{
-                      FieldTemplate: CustomFieldTemplate,
-                      ObjectFieldTemplate: CanvasObjectFieldTemplate,
-                    }}
-                    // Prevent actual submissions — this is a builder preview
-                    onSubmit={(e) => e.preventDefault?.()}
-                    // Suppress the default submit button
-                    children={<span />}
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-12 text-center">
-                    <Type className="h-10 w-10 text-neutral-300 mb-3" />
-                    <p className="text-sm text-neutral-500 mb-1">הטופס ריק</p>
-                    <p className="text-xs text-neutral-400">בחר סוג שדה מהתפריט כדי להתחיל לבנות את הטופס</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </main>
-      </div>
-      </DndContext>
-    </div>
+    </PageLayout>
   );
 }

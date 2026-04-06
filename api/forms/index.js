@@ -12,6 +12,12 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import {
+  normalizeAlertRules,
+  normalizeFormSchema,
+  normalizeVisibilityRules,
+} from '../_shared/forms-runtime.js';
 
 const SELECT_FIELDS = 'id, name, description, form_usage, form_schema, alert_rules, visibility_rules, is_active, version, created_by, created_at, updated_at, metadata';
 
@@ -36,6 +42,25 @@ function normalizeFormUsage(value) {
   const normalized = normalizeString(value).toLowerCase();
   if (!normalized) return '';
   return normalized === 'waiting_list_intake' ? normalized : normalized === 'general' ? normalized : '';
+}
+
+function resolveUpdatedMetadata(existingMetadata, updates = {}) {
+  return {
+    ...(existingMetadata && typeof existingMetadata === 'object' && !Array.isArray(existingMetadata) ? existingMetadata : {}),
+    ...updates,
+  };
+}
+
+async function writeTenantFormAudit(tenantClient, context, params) {
+  try {
+    await logTenantAuditEvent(tenantClient, params);
+  } catch (auditError) {
+    context.log?.warn?.('forms failed to write tenant audit event', {
+      message: auditError?.message,
+      eventType: params?.eventType,
+      resourceId: params?.resourceId,
+    });
+  }
 }
 
 export default async function forms(context, req) {
@@ -167,7 +192,9 @@ export default async function forms(context, req) {
 
     const description = normalizeOptionalText(body?.description);
     const formUsage = normalizeFormUsage(body?.form_usage ?? body?.formUsage) || 'general';
-    const formSchema = normalizeOptionalJson(body?.form_schema ?? body?.formSchema);
+    const formSchema = normalizeFormSchema(normalizeOptionalJson(body?.form_schema ?? body?.formSchema) || {});
+    const alertRules = normalizeAlertRules(body?.alert_rules ?? body?.alertRules);
+    const visibilityRules = normalizeVisibilityRules(body?.visibility_rules ?? body?.visibilityRules);
 
     const { data, error } = await tenantClient
       .from('forms')
@@ -175,8 +202,18 @@ export default async function forms(context, req) {
         name,
         description,
         form_usage: formUsage,
-        form_schema: formSchema || {},
+        form_schema: formSchema,
+        alert_rules: alertRules,
+        visibility_rules: visibilityRules,
         created_by: userId,
+        metadata: {
+          published_form_schema: formSchema,
+          published_alert_rules: alertRules,
+          published_visibility_rules: visibilityRules,
+          published_version: 1,
+          draft_saved_at: new Date().toISOString(),
+        },
+        published_at: new Date().toISOString(),
       })
       .select(SELECT_FIELDS)
       .single();
@@ -197,6 +234,14 @@ export default async function forms(context, req) {
       resourceId: data.id,
       details: { name },
     });
+    await writeTenantFormAudit(tenantClient, context, {
+      actorUserId: userId,
+      eventType: 'form.template_created',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'form',
+      resourceId: data.id,
+      afterState: { name: data.name, version: data.version, form_usage: data.form_usage, is_active: data.is_active },
+    });
 
     return respond(context, 201, data);
   }
@@ -211,7 +256,7 @@ export default async function forms(context, req) {
     // Fetch existing to get current version
     const { data: existing, error: fetchError } = await tenantClient
       .from('forms')
-      .select('version')
+      .select('version, metadata, form_schema, alert_rules, visibility_rules, published_at')
       .eq('id', formId)
       .maybeSingle();
 
@@ -229,6 +274,7 @@ export default async function forms(context, req) {
     };
 
     let schemaChanged = false;
+    const publishRequested = body?.publish === true || body?.action === 'publish';
 
     if (Object.prototype.hasOwnProperty.call(body, 'name')) {
       const name = normalizeString(body.name);
@@ -255,13 +301,48 @@ export default async function forms(context, req) {
       if (formSchema === null && (body?.form_schema !== null && body?.formSchema !== null)) {
         return respond(context, 400, { message: 'invalid_form_schema' });
       }
-      updates.form_schema = formSchema || {};
+      updates.form_schema = normalizeFormSchema(formSchema || {});
+      schemaChanged = true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'alert_rules') || Object.prototype.hasOwnProperty.call(body, 'alertRules')) {
+      updates.alert_rules = normalizeAlertRules(body?.alert_rules ?? body?.alertRules);
+      schemaChanged = true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'visibility_rules') || Object.prototype.hasOwnProperty.call(body, 'visibilityRules')) {
+      updates.visibility_rules = normalizeVisibilityRules(body?.visibility_rules ?? body?.visibilityRules);
       schemaChanged = true;
     }
 
     // Increment version when form schema is modified
     if (schemaChanged) {
       updates.version = existing.version + 1;
+    }
+
+    const nextSchema = updates.form_schema || normalizeFormSchema(existing.form_schema || {});
+    const nextAlertRules = Object.prototype.hasOwnProperty.call(updates, 'alert_rules')
+      ? updates.alert_rules
+      : normalizeAlertRules(existing.alert_rules);
+    const nextVisibilityRules = Object.prototype.hasOwnProperty.call(updates, 'visibility_rules')
+      ? updates.visibility_rules
+      : normalizeVisibilityRules(existing.visibility_rules);
+
+    updates.metadata = resolveUpdatedMetadata(existing.metadata, {
+      draft_saved_at: updates.updated_at,
+    });
+
+    if (publishRequested) {
+      const publishVersion = updates.version || existing.version;
+      updates.metadata = resolveUpdatedMetadata(updates.metadata, {
+        published_form_schema: nextSchema,
+        published_alert_rules: nextAlertRules,
+        published_visibility_rules: nextVisibilityRules,
+        published_version: publishVersion,
+        published_by: userId,
+        published_at: updates.updated_at,
+      });
+      updates.published_at = updates.updated_at;
     }
 
     if (Object.keys(updates).length <= 1) {
@@ -298,6 +379,41 @@ export default async function forms(context, req) {
         new_version: data.version,
       },
     });
+    await writeTenantFormAudit(tenantClient, context, {
+      actorUserId: userId,
+      eventType: publishRequested ? 'form.template_published' : 'form.template_updated',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'form',
+      resourceId: formId,
+      beforeState: {
+        version: existing.version,
+        published_at: existing.published_at,
+      },
+      afterState: {
+        version: data.version,
+        published_at: data.published_at,
+      },
+      details: {
+        updated_fields: Object.keys(updates).filter((k) => k !== 'updated_at'),
+        published: publishRequested,
+      },
+    });
+
+    if (publishRequested) {
+      await logAuditEvent(supabase, {
+        orgId,
+        userId,
+        userEmail,
+        userRole: role,
+        actionType: AUDIT_ACTIONS.FORM_TEMPLATE_PUBLISHED,
+        actionCategory: AUDIT_CATEGORIES.FORMS,
+        resourceType: 'form',
+        resourceId: formId,
+        details: {
+          published_version: data?.metadata?.published_version || data.version,
+        },
+      });
+    }
 
     return respond(context, 200, data);
   }
@@ -335,6 +451,14 @@ export default async function forms(context, req) {
       resourceType: 'form',
       resourceId: formId,
       details: { name: data.name },
+    });
+    await writeTenantFormAudit(tenantClient, context, {
+      actorUserId: userId,
+      eventType: 'form.template_deactivated',
+      retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+      resourceType: 'form',
+      resourceId: formId,
+      afterState: { is_active: data.is_active, name: data.name },
     });
 
     return respond(context, 200, data);

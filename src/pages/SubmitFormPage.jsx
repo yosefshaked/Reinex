@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import Form from '@rjsf/core';
-import validator from '@rjsf/validator-ajv8';
 import { Loader2, ShieldCheck, FileCheck2, Info, UserRound, PhoneCall, CalendarClock, WalletCards, ClipboardList, CheckCircle2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,6 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import SectionedFormRenderer, { validateVisibleAnswers } from '@/features/forms/components/SectionedFormRenderer.jsx';
+import { buildInitialAnswers, getVisibleSections, normalizeFormSchema, normalizeVisibilityRules } from '@/features/forms/lib/form-schema.js';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'ראשון', short: 'א' },
@@ -41,16 +41,6 @@ const HMO_APPROVAL_OPTIONS = [
   { value: 'no_approval_yet', label: 'אין אישור עדיין' },
   { value: 'send_separately', label: 'האישור יישלח בנפרד בוואטסאפ/אימייל' },
 ];
-
-function normalizeSchema(schema) {
-  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
-    return { type: 'object', properties: {}, required: [] };
-  }
-  if (!schema.type) {
-    return { ...schema, type: 'object' };
-  }
-  return schema;
-}
 
 function normalizePreferredTimesByDay(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -356,10 +346,12 @@ export default function SubmitFormPage() {
   const [identityNumber, setIdentityNumber] = useState('');
   const [otp, setOtp] = useState('');
   const [submissionId, setSubmissionId] = useState('');
-  const [formSchema, setFormSchema] = useState({ type: 'object', properties: {}, required: [] });
+  const [formSchema, setFormSchema] = useState(normalizeFormSchema({}));
+  const [visibilityRules, setVisibilityRules] = useState([]);
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [answers, setAnswers] = useState({});
+  const [customValidationErrors, setCustomValidationErrors] = useState({});
   const [inviteToken, setInviteToken] = useState('');
   const [inviteConfig, setInviteConfig] = useState({
     primaryServiceId: '',
@@ -407,6 +399,20 @@ export default function SubmitFormPage() {
     () => (submissionMode === 'invite' ? validateInviteIntake(intakeValues) : {}),
     [intakeValues, submissionMode],
   );
+  const visibleCustomSections = useMemo(
+    () => getVisibleSections(formSchema, visibilityRules, answers),
+    [answers, formSchema, visibilityRules],
+  );
+
+  useEffect(() => {
+    if (Object.keys(customValidationErrors).length > 0) {
+      setCustomValidationErrors(validateVisibleAnswers(visibleCustomSections, answers));
+    }
+  }, [answers, customValidationErrors, visibleCustomSections]);
+
+  useEffect(() => {
+    setCustomValidationErrors({});
+  }, [submissionId, inviteToken, formSchema]);
 
   useEffect(() => {
     try {
@@ -440,7 +446,10 @@ export default function SubmitFormPage() {
 
         setInviteToken(String(payload?.invite_token || invite));
         setSubmissionId(String(payload?.submission_id || ''));
-        setFormSchema(normalizeSchema(payload?.form_schema));
+        const normalizedSchema = normalizeFormSchema(payload?.form_schema || {});
+        setFormSchema(normalizedSchema);
+        setVisibilityRules(normalizeVisibilityRules(payload?.visibility_rules));
+        setAnswers(buildInitialAnswers(normalizedSchema));
         setFormName(String(payload?.form_name || ''));
         setFormDescription(String(payload?.form_description || ''));
         setInviteConfig({
@@ -535,7 +544,12 @@ export default function SubmitFormPage() {
       }
 
       setSubmissionId(String(payload?.submission_id || submissionId || ''));
-      setFormSchema(normalizeSchema(payload?.form_schema));
+      const normalizedSchema = normalizeFormSchema(payload?.form_schema || {});
+      setFormSchema(normalizedSchema);
+      setVisibilityRules(normalizeVisibilityRules(payload?.visibility_rules));
+      setAnswers(buildInitialAnswers(normalizedSchema));
+      setFormName(String(payload?.form_name || ''));
+      setFormDescription(String(payload?.form_description || ''));
       setStep('form');
     } catch (verifyError) {
       console.error('Verify failed', verifyError);
@@ -545,7 +559,10 @@ export default function SubmitFormPage() {
     }
   };
 
-  const handleSubmitForm = async ({ formData }) => {
+  const handleSubmitForm = async () => {
+    const nextCustomValidationErrors = validateVisibleAnswers(visibleCustomSections, answers);
+    setCustomValidationErrors(nextCustomValidationErrors);
+
     if (submissionMode === 'invite') {
       if (!inviteToken) {
         setError('חסר מזהה קישור, נא לפתוח את הקישור מחדש.');
@@ -555,6 +572,10 @@ export default function SubmitFormPage() {
 
       if (Object.keys(inviteValidationErrors).length > 0) {
         setError('יש להשלים את כל שדות החובה המסומנים לפני שליחת הטופס.');
+        return;
+      }
+      if (Object.keys(nextCustomValidationErrors).length > 0) {
+        setError('יש להשלים את כל השאלות הנדרשות לפני שליחת הטופס.');
         return;
       }
 
@@ -583,7 +604,7 @@ export default function SubmitFormPage() {
               hmo_provider_name: intakeValues.paymentPathIntent === 'hmo' ? intakeValues.hmoProviderName : undefined,
               notes: intakeValues.notes,
             },
-            custom_answers: formData || {},
+            custom_answers: answers || {},
           }),
         });
 
@@ -608,6 +629,10 @@ export default function SubmitFormPage() {
       setError('חסר מזהה שליחה, נא לחזור למסך האימות.');
       return;
     }
+    if (Object.keys(nextCustomValidationErrors).length > 0) {
+      setError('יש להשלים את כל השאלות הנדרשות לפני שליחת הטופס.');
+      return;
+    }
 
     setSubmitLoading(true);
     setError('');
@@ -619,8 +644,7 @@ export default function SubmitFormPage() {
         body: JSON.stringify({
           submission_id: submissionId,
           otp,
-          answers: formData || {},
-          form_schema: formSchema,
+          answers: answers || {},
         }),
       });
 
@@ -1133,36 +1157,27 @@ export default function SubmitFormPage() {
                       <p className="text-xs text-slate-500">מלאו כל שאלה רלוונטית כדי שנוכל להמשיך את הטיפול מהר יותר.</p>
                     </div>
                   </div>
-
-                  <Form
-                    schema={formSchema}
-                    validator={validator}
-                    formData={answers}
-                    widgets={{
-                      TextWidget: PublicTextWidget,
-                      EmailWidget: PublicTextWidget,
-                      PasswordWidget: PublicTextWidget,
-                      NumberWidget: PublicNumberWidget,
-                      TextareaWidget: PublicTextareaWidget,
-                      SelectWidget: PublicSelectWidget,
-                      CheckboxWidget: PublicCheckboxWidget,
+                  <form
+                    className="space-y-4"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void handleSubmitForm();
                     }}
-                    templates={{
-                      FieldTemplate: PublicFieldTemplate,
-                      ObjectFieldTemplate: PublicObjectFieldTemplate,
-                      TitleFieldTemplate: PublicTitleFieldTemplate,
-                      DescriptionFieldTemplate: PublicDescriptionFieldTemplate,
-                    }}
-                    onChange={(event) => setAnswers(event.formData || {})}
-                    onSubmit={handleSubmitForm}
                   >
+                    <SectionedFormRenderer
+                      schema={formSchema}
+                      visibilityRules={visibilityRules}
+                      answers={answers}
+                      onAnswersChange={setAnswers}
+                      validationErrors={customValidationErrors}
+                    />
                     <div className="pt-4">
                       <Button type="submit" className="h-11 w-full gap-2 rounded-xl" disabled={submitLoading}>
                         {submitLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                         שלח טופס
                       </Button>
                     </div>
-                  </Form>
+                  </form>
                 </div>
               </div>
             )}

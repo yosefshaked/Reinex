@@ -18,6 +18,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import SendFormDialog from '@/features/students/components/SendFormDialog.jsx';
 import ResendOtpDialog from '@/features/students/components/ResendOtpDialog.jsx';
 import { toast } from 'sonner';
+import { findQuestionLabel, normalizeFormSchema } from '@/features/forms/lib/form-schema.js';
 
 function normalizeWaPhone(value) {
   const digits = String(value || '').replace(/[^\d]/g, '');
@@ -108,16 +109,18 @@ function getOtpStatus(submission) {
 }
 
 function countAlerts(submission) {
-  const flags = submission?.alert_flags;
-  if (Array.isArray(flags)) return flags.length;
-  if (flags && typeof flags === 'object') return Object.keys(flags).length;
-  return 0;
+  const hits = Array.isArray(submission?.alert_flags?.hits) ? submission.alert_flags.hits : [];
+  if (hits.length) return hits.length;
+  return submission?.alert_flags?.has_red_flags ? 1 : 0;
 }
 
 function buildAnswerEntries(submission) {
-  const answers = submission?.answers;
-  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return [];
-  return Object.entries(answers).slice(0, 30);
+  const rawAnswers = submission?.answers;
+  if (!rawAnswers || typeof rawAnswers !== 'object' || Array.isArray(rawAnswers)) return [];
+  const customAnswers = rawAnswers?.custom_answers && typeof rawAnswers.custom_answers === 'object' && !Array.isArray(rawAnswers.custom_answers)
+    ? rawAnswers.custom_answers
+    : rawAnswers;
+  return Object.entries(customAnswers).slice(0, 30);
 }
 
 function getSubmissionSchemaSnapshot(submission) {
@@ -130,23 +133,50 @@ function getSubmissionSchemaSnapshot(submission) {
 
 function resolveAnswerLabel(submission, fieldKey) {
   const schema = getSubmissionSchemaSnapshot(submission);
-  const properties = schema?.properties;
-  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
-    return fieldKey;
+  if (!schema) return fieldKey;
+  return findQuestionLabel(normalizeFormSchema(schema), fieldKey);
+}
+
+function SignaturePreview({ value }) {
+  const canvasRef = React.useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const strokes = Array.isArray(value?.preview_strokes) ? value.preview_strokes : [];
+    if (!canvas || !strokes.length) return;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = '#0f172a';
+    context.lineWidth = 2;
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    strokes.forEach((stroke) => {
+      if (!Array.isArray(stroke) || stroke.length === 0) return;
+      context.beginPath();
+      context.moveTo(Number(stroke[0]?.x || 0), Number(stroke[0]?.y || 0));
+      stroke.slice(1).forEach((point) => context.lineTo(Number(point?.x || 0), Number(point?.y || 0)));
+      context.stroke();
+    });
+  }, [value]);
+
+  if (!Array.isArray(value?.preview_strokes) || value.preview_strokes.length === 0) {
+    return <p className="text-zinc-800 break-words whitespace-pre-wrap">{JSON.stringify(value)}</p>;
   }
 
-  const fieldSchema = properties[fieldKey];
-  if (!fieldSchema || typeof fieldSchema !== 'object' || Array.isArray(fieldSchema)) {
-    return fieldKey;
+  return <canvas ref={canvasRef} width={320} height={110} className="h-[110px] w-full rounded-lg border border-slate-200 bg-white" />;
+}
+
+function renderAnswerValue(value) {
+  if (value && typeof value === 'object' && value._type === 'signature') {
+    return <SignaturePreview value={value} />;
   }
-
-  const title = typeof fieldSchema.title === 'string' ? fieldSchema.title.trim() : '';
-  if (title) return title;
-
-  const label = typeof fieldSchema.label === 'string' ? fieldSchema.label.trim() : '';
-  if (label) return label;
-
-  return fieldKey;
+  if (Array.isArray(value)) {
+    return <p className="text-zinc-800 break-words whitespace-pre-wrap">{value.join(', ')}</p>;
+  }
+  return <p className="text-zinc-800 break-words whitespace-pre-wrap">{typeof value === 'string' ? value : JSON.stringify(value)}</p>;
 }
 
 export default function StudentFormsTab({ studentId, student, canEdit = false }) {
@@ -363,11 +393,29 @@ export default function StudentFormsTab({ studentId, student, canEdit = false })
                                     {submission.answersEntries.map(([key, value]) => (
                                       <div key={`${submission.id}-${key}`} className="rounded-md border bg-white p-2">
                                         <p className="text-xs font-semibold text-zinc-600 mb-1">{resolveAnswerLabel(submission, key)}</p>
-                                        <p className="text-zinc-800 break-words whitespace-pre-wrap">{typeof value === 'string' ? value : JSON.stringify(value)}</p>
+                                        {renderAnswerValue(value)}
                                       </div>
                                     ))}
                                   </div>
                                 )}
+
+                                {submission.alertsCount > 0 && Array.isArray(submission?.alert_flags?.hits) ? (
+                                  <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+                                    <p className="text-xs font-semibold text-amber-800">דגלים אדומים שזוהו בטופס</p>
+                                    <div className="space-y-2">
+                                      {submission.alert_flags.hits.map((hit, index) => (
+                                        <div key={`${submission.id}_hit_${index}`} className="rounded-md border border-amber-200 bg-white p-2 text-sm">
+                                          <div className="flex items-center gap-2">
+                                            <Badge variant="outline">{String(hit?.severity || 'medium')}</Badge>
+                                            <span className="font-medium text-zinc-800">{String(hit?.question_label || hit?.question_id || 'דגל')}</span>
+                                          </div>
+                                          <p className="mt-1 text-zinc-700">תשובה: {typeof hit?.answer_value === 'string' ? hit.answer_value : JSON.stringify(hit?.answer_value)}</p>
+                                          {hit?.note ? <p className="mt-1 text-xs text-zinc-500">{hit.note}</p> : null}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : null}
 
                                 {canEdit && !isSubmitted && (
                                   <div className="pt-2 border-t border-border">

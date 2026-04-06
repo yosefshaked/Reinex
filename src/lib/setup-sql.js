@@ -2569,6 +2569,15 @@ ALTER TABLE public.form_submissions
 
 DO $$
 BEGIN
+  BEGIN
+    ALTER TABLE public.form_submissions ALTER COLUMN submitted_at DROP NOT NULL;
+  EXCEPTION
+    WHEN undefined_column THEN NULL;
+  END;
+END$$;
+
+DO $$
+BEGIN
   ALTER TABLE public.form_submissions
     ADD CONSTRAINT form_submissions_form_id_fkey
     FOREIGN KEY (form_id) REFERENCES public.forms(id);
