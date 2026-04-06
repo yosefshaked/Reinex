@@ -36,13 +36,6 @@ function deriveEmployeeType(employee) {
   return 'office';
 }
 
-function getSourceWorkingDays(employee) {
-  if (deriveEmployeeType(employee) === 'instructor') {
-    return Array.isArray(employee?.instructor_profile?.working_days) ? employee.instructor_profile.working_days : [];
-  }
-  return Array.isArray(employee?.working_days) ? employee.working_days : [];
-}
-
 function buildInitialState(employee) {
   const employeeType = deriveEmployeeType(employee);
   const payrollModel = employee?.payroll_model || (employeeType === 'instructor' ? 'lesson_based' : 'hourly');
@@ -64,14 +57,14 @@ function buildInitialState(employee) {
     leaveFixedDayRate: employee?.leave_fixed_day_rate ?? '',
     employmentScope: employee?.employment_scope || '',
     notes: employee?.notes || '',
-    officeWorkingDays: employeeType === 'office' ? getSourceWorkingDays(employee) : [],
-    conversionWorkingDays: employeeType === 'instructor' ? getSourceWorkingDays(employee) : [],
+    officeWorkingDays: employeeType === 'office' && Array.isArray(employee?.working_days) ? employee.working_days : [],
     conversionBreakTimeMinutes: employee?.instructor_profile?.break_time_minutes ?? '',
     conversionCapabilities: Array.isArray(employee?.service_capabilities)
       ? employee.service_capabilities.map((capability) => ({
           service_id: capability.service_id,
           max_students: capability.max_students ?? 1,
           base_rate: capability.base_rate ?? 0,
+          availability_windows: Array.isArray(capability?.availability_windows) ? capability.availability_windows : [],
           metadata: capability.metadata || {},
         }))
       : [],
@@ -185,16 +178,6 @@ export default function EditEmployeeDialog({
     });
   };
 
-  const toggleConversionWorkingDay = (dayValue) => {
-    setForm((prev) => {
-      const current = Array.isArray(prev.conversionWorkingDays) ? prev.conversionWorkingDays : [];
-      const next = current.includes(dayValue)
-        ? current.filter((item) => item !== dayValue)
-        : [...current, dayValue].sort((a, b) => a - b);
-      return { ...prev, conversionWorkingDays: next };
-    });
-  };
-
   const addConversionCapability = () => {
     const existingIds = new Set(form.conversionCapabilities.map((capability) => capability.service_id).filter(Boolean));
     const hasUnselectedRow = form.conversionCapabilities.some((capability) => !capability.service_id);
@@ -218,6 +201,7 @@ export default function EditEmployeeDialog({
           service_id: '',
           max_students: 1,
           base_rate: 0,
+          availability_windows: [],
           metadata: {},
         },
       ],
@@ -246,10 +230,6 @@ export default function EditEmployeeDialog({
     }
 
     if (isRoleConversion) {
-      if (form.conversionWorkingDays.length === 0) {
-        toast.error('נדרש להגדיר ימי עבודה למדריך לפני שינוי התפקיד.');
-        return;
-      }
       if (form.conversionCapabilities.length === 0) {
         toast.error('נדרש להגדיר לפחות שירות אחד לפני שינוי התפקיד.');
         return;
@@ -289,12 +269,12 @@ export default function EditEmployeeDialog({
       }
 
       if (isRoleConversion) {
-        payload.working_days = form.conversionWorkingDays;
         payload.break_time_minutes = form.conversionBreakTimeMinutes === '' ? null : Number(form.conversionBreakTimeMinutes);
         payload.service_capabilities = form.conversionCapabilities.map((capability) => ({
           service_id: capability.service_id,
           max_students: capability.max_students === '' ? 1 : Number(capability.max_students),
           base_rate: capability.base_rate === '' ? 0 : Number(capability.base_rate),
+          availability_windows: Array.isArray(capability.availability_windows) ? capability.availability_windows : [],
           metadata: capability.metadata || {},
         }));
       }
@@ -390,7 +370,7 @@ export default function EditEmployeeDialog({
             </div>
             {isRoleConversion ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900">
-                שינוי התפקיד למדריך יישמר רק לאחר השלמת ימי העבודה והשירותים בחלק ההמרה שלמטה.
+                שינוי התפקיד למדריך יישמר רק לאחר השלמת השירותים הבסיסיים בחלק ההמרה שלמטה. את חלונות הזמינות לשירות מגדירים מיד לאחר מכן במסך השירותים והזמינות.
               </div>
             ) : null}
           </Section>
@@ -493,7 +473,7 @@ export default function EditEmployeeDialog({
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-xs text-slate-500">
-                ימי העבודה למדריכים מנוהלים דרך פרופיל המדריך, למעט בהמרה ממשרד למדריך.
+                לעובדי הדרכה זמינות תפעולית מנוהלת ברמת השירות, ולא דרך כרטיס העובד הכללי.
               </div>
             )}
           </Section>
@@ -503,13 +483,8 @@ export default function EditEmployeeDialog({
             <Section
               title="המרה למדריך"
               icon={Briefcase}
-              description="השלם זמינות מדריך ושירותים באותו תהליך לפני שינוי התפקיד"
+              description="השלם שירותים למדריך. זמינות לפי שירות מוגדרת לאחר ההמרה במסך השירותים והזמינות."
             >
-              <div className="space-y-3">
-                <div className="text-xs font-medium text-slate-600">ימי עבודה למדריך</div>
-                <WorkingDaysPicker value={form.conversionWorkingDays} onToggle={toggleConversionWorkingDay} disabled={isSaving} />
-              </div>
-
               <div className="space-y-2">
                 <Label htmlFor="break_time_minutes" className="text-xs text-slate-600">משך הפסקה בין שיעורים (דקות)</Label>
                 <Input
@@ -533,7 +508,7 @@ export default function EditEmployeeDialog({
 
                 {form.conversionCapabilities.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-xs text-slate-500">
-                    נדרש לפחות שירות אחד כדי להשלים את ההמרה למדריך.
+                    נדרש לפחות שירות אחד כדי להשלים את ההמרה למדריך. לאחר השמירה יש להגדיר זמינות לפי שירות.
                   </div>
                 ) : null}
 

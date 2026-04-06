@@ -14,6 +14,8 @@ import { ComboBoxField } from '@/components/ui/forms-ui';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { DAY_OPTIONS, normalizeDayToken } from '@/lib/day-of-week.js';
+import { toast } from 'sonner';
+import { hasConfiguredAvailability, isWithinAvailabilityWindows } from '@/lib/instructor-availability.js';
 
 function formatTemplateTime(timeString) {
   if (!timeString) return '—';
@@ -47,9 +49,21 @@ function rangeOverlap(startA, endA, startB, endB) {
 
 /**
  * AddTemplateDialog — Create a new lesson template
- * @param {{ open, onClose, onSuccess, defaultInstructorId?, defaultDayOfWeek? }} props
  */
-export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorId, defaultDayOfWeek }) {
+export function AddTemplateDialog({
+  open,
+  onClose,
+  onSuccess,
+  defaultInstructorId,
+  defaultDayOfWeek,
+  defaultStudentId = '',
+  defaultServiceId = '',
+  defaultTimeOfDay = '09:00',
+  defaultDurationMinutes = 60,
+  waitingListEntryId = '',
+  waitingListContext = null,
+  onFixAvailability,
+}) {
   const { activeOrgId } = useOrg();
   const { session } = useAuth();
   const { instructors, isLoading: instructorsLoading } = useCalendarInstructors();
@@ -61,42 +75,65 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
   const [existingTemplatesLoading, setExistingTemplatesLoading] = useState(false);
 
   const { students, loadingStudents: studentsLoading } = useStudents({
-    status: 'active',
+    status: waitingListEntryId ? 'all' : 'active',
     enabled: open && !!activeOrgId,
     orgId: activeOrgId,
   });
 
   const [studentLabel, setStudentLabel] = useState('');
   const [formData, setFormData] = useState({
-    student_id: '',
+    student_id: defaultStudentId || '',
     instructor_employee_id: defaultInstructorId || '',
-    service_id: '',
+    service_id: defaultServiceId || '',
     day_of_week: normalizeDayToken(defaultDayOfWeek) || '',
-    time_of_day: '09:00',
-    duration_minutes: 60,
+    time_of_day: defaultTimeOfDay || '09:00',
+    duration_minutes: Number(defaultDurationMinutes) || 60,
     valid_from: new Date().toISOString().split('T')[0],
     valid_until: '',
   });
 
   const [error, setError] = useState(null);
+  const selectedStudent = students.find((student) => student.id === formData.student_id) || null;
+  const selectedInstructor = (instructors || []).find((instructor) => instructor.id === formData.instructor_employee_id) || null;
+  const selectedCapability = (selectedInstructor?.service_capabilities || []).find((capability) => capability.service_id === formData.service_id) || null;
+  const shouldActivateStudentFromWaitingList = Boolean(
+    waitingListEntryId
+    && selectedStudent
+    && selectedStudent.is_active === false,
+  );
+  const missingCapability = Boolean(formData.instructor_employee_id && formData.service_id && !selectedCapability);
+  const missingAvailability = Boolean(selectedCapability && !hasConfiguredAvailability(selectedCapability.availability_windows));
+  const outsideAvailability = Boolean(
+    selectedCapability
+    && hasConfiguredAvailability(selectedCapability.availability_windows)
+    && formData.day_of_week
+    && formData.time_of_day
+    && Number(formData.duration_minutes) > 0
+    && !isWithinAvailabilityWindows({
+      availabilityWindows: selectedCapability.availability_windows,
+      day: formData.day_of_week,
+      startTime: formData.time_of_day,
+      durationMinutes: Number(formData.duration_minutes),
+    }),
+  );
 
   // Reset form when dialog opens with defaults
   useEffect(() => {
     if (open) {
       setStudentLabel('');
       setFormData({
-        student_id: '',
+        student_id: defaultStudentId || '',
         instructor_employee_id: defaultInstructorId || '',
-        service_id: '',
+        service_id: defaultServiceId || '',
         day_of_week: normalizeDayToken(defaultDayOfWeek) || '',
-        time_of_day: '09:00',
-        duration_minutes: 60,
+        time_of_day: defaultTimeOfDay || '09:00',
+        duration_minutes: Number(defaultDurationMinutes) || 60,
         valid_from: new Date().toISOString().split('T')[0],
         valid_until: '',
       });
       setError(null);
     }
-  }, [open, defaultInstructorId, defaultDayOfWeek]);
+  }, [open, defaultInstructorId, defaultDayOfWeek, defaultStudentId, defaultServiceId, defaultTimeOfDay, defaultDurationMinutes]);
 
   // Fetch services
   useEffect(() => {
@@ -220,7 +257,22 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
       return;
     }
 
-    const { error: apiError } = await createTemplate({
+    if (missingCapability) {
+      setError('לא הוגדרה יכולת שירות מתאימה למדריך/ה עבור השירות שנבחר.');
+      return;
+    }
+
+    if (missingAvailability) {
+      setError('לא הוגדרה זמינות לשירות הזה אצל המדריך/ה שנבחר/ה.');
+      return;
+    }
+
+    if (outsideAvailability) {
+      setError('השיבוץ שנבחר נמצא מחוץ לחלונות הזמינות שהוגדרו עבור השירות הזה.');
+      return;
+    }
+
+    const { data: createdTemplate, error: apiError } = await createTemplate({
       student_id: formData.student_id,
       instructor_employee_id: formData.instructor_employee_id,
       service_id: formData.service_id,
@@ -229,15 +281,42 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
       duration_minutes: Number(formData.duration_minutes),
       valid_from: formData.valid_from,
       valid_until: formData.valid_until || null,
+      waiting_list_entry_id: waitingListEntryId || null,
     });
 
     if (apiError) {
       setError(
         apiError === 'duplicate_template_conflict'
           ? 'לא ניתן ליצור תבנית זהה וחופפת (תלמיד+מדריך+יום+שעה) כאשר כבר קיימת תבנית פעילה.'
+          : apiError === 'waiting_list_entry_not_found'
+            ? 'רשומת ההמתנה כבר אינה זמינה. אפשר לחזור לרשימת ההמתנה ולרענן את הנתונים.'
+          : apiError === 'waiting_list_entry_not_open'
+            ? 'רשומת ההמתנה כבר אינה פתוחה לשיבוץ.'
+          : apiError === 'waiting_list_student_mismatch' || apiError === 'waiting_list_service_mismatch'
+            ? 'נתוני השיבוץ אינם תואמים עוד לרשומת ההמתנה. אפשר לחזור לרשימת ההמתנה ולבחור שוב.'
+          : apiError === 'missing_instructor_service_capability'
+            ? 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה לשירות הזה.'
+          : apiError === 'missing_instructor_service_availability'
+            ? 'לשירות הזה עדיין לא הוגדרה זמינות אצל המדריך/ה שנבחר/ה.'
+          : apiError === 'outside_instructor_service_availability'
+            ? 'השיבוץ שנבחר נמצא מחוץ לחלונות הזמינות שהוגדרו עבור השירות הזה.'
+          : apiError === 'failed_to_activate_student_from_waiting_list'
+            ? 'התבנית לא נשמרה כי לא הצלחנו להפעיל את התלמיד/ה מתוך רשומת ההמתנה. אפשר לנסות שוב.'
+          : apiError === 'failed_to_link_waiting_list_entry'
+            ? 'התבנית לא נשמרה כי לא הצלחנו לעדכן את רשומת ההמתנה. אפשר לנסות שוב.'
+          : apiError === 'failed_to_finalize_waiting_list_match'
+            ? 'השיבוץ לא הושלם עד הסוף. לא פרסמנו את התבנית ורצוי לנסות שוב.'
           : apiError,
       );
       return;
+    }
+
+    if (createdTemplate?.waiting_list_match?.student_reactivated) {
+      toast.success('התבנית נשמרה והתלמיד/ה הופעל/ה מחדש באופן אוטומטי.');
+    } else if (waitingListEntryId) {
+      toast.success('התבנית נשמרה ורשומת ההמתנה עודכנה לשיבוץ.');
+    } else {
+      toast.success('התבנית נשמרה בהצלחה.');
     }
 
     onSuccess?.();
@@ -246,9 +325,17 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
 
   const studentOptions = (students || []).map((s) => ({
     value: s.id,
-    label: `${`${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() || 'ללא שם'}${s.identity_number ? ` • ${s.identity_number}` : ''}`,
+    label: `${`${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() || 'ללא שם'}${s.identity_number ? ` • ${s.identity_number}` : ''}${s.is_active === false ? ' • לא פעיל/ה' : ''}${s.onboarding_status === 'pending_wl_form' ? ' • מתעניין/ת' : ''}`,
     searchText: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''} ${s.identity_number || ''}`.toLowerCase(),
   }));
+
+  useEffect(() => {
+    if (!open || !formData.student_id || studentLabel) return;
+    const match = studentOptions.find((option) => option.value === formData.student_id);
+    if (match?.label) {
+      setStudentLabel(match.label);
+    }
+  }, [open, formData.student_id, studentLabel, studentOptions]);
 
   const activeExistingTemplates = existingTemplates.filter((template) => template.is_active);
   const activeServices = (services || []).filter((s) => s?.is_active === true);
@@ -262,6 +349,63 @@ export function AddTemplateDialog({ open, onClose, onSuccess, defaultInstructorI
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {waitingListContext ? (
+            <Alert>
+              <AlertDescription>
+                השדות מולאו מתוך רשומת ההמתנה של {waitingListContext.studentName || 'המתעניין/ת'}
+                {waitingListContext.serviceName ? ` עבור השירות ${waitingListContext.serviceName}` : ''}.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {waitingListEntryId && selectedStudent ? (
+            <Alert variant={shouldActivateStudentFromWaitingList ? 'default' : 'default'}>
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                {shouldActivateStudentFromWaitingList
+                  ? 'שמירת התבנית תפעיל מחדש את התלמיד/ה ותעדכן את רשומת ההמתנה לשיבוץ. מומלץ לעדכן את המשפחה לאחר השלמת השיבוץ.'
+                  : 'שמירת התבנית תעדכן את רשומת ההמתנה לשיבוץ. אפשר עדיין לשנות את פרטי התבנית לפני השמירה.'}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {(missingCapability || missingAvailability || outsideAvailability) && formData.instructor_employee_id && formData.service_id ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription className="space-y-3">
+                <div>
+                  {missingCapability
+                    ? 'למדריך/ה שנבחר/ה אין יכולת שירות מוגדרת עבור השירות הזה.'
+                    : missingAvailability
+                      ? 'לשירות הזה עדיין לא הוגדרה זמינות אצל המדריך/ה שנבחר/ה.'
+                      : 'יום/שעת התבנית נמצאים מחוץ לחלונות הזמינות שהוגדרו עבור השירות הזה.'}
+                </div>
+                {typeof onFixAvailability === 'function' ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onFixAvailability({
+                      instructorId: formData.instructor_employee_id,
+                      serviceId: formData.service_id,
+                      studentId: formData.student_id,
+                      waitingListEntryId,
+                      waitingListContext,
+                      fixType: missingCapability
+                        ? 'missing_service_capability'
+                        : missingAvailability
+                          ? 'missing_instructor_service_availability'
+                          : 'outside_instructor_service_availability',
+                      source: 'add',
+                    })}
+                  >
+                    תקן זמינות
+                  </Button>
+                ) : null}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
           {/* Student */}
           <div>
             <Label htmlFor="template-student">תלמיד *</Label>

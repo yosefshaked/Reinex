@@ -12,6 +12,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { DAY_OPTIONS, normalizeDayToken } from '@/lib/day-of-week.js';
+import { hasConfiguredAvailability, isWithinAvailabilityWindows } from '@/lib/instructor-availability.js';
 
 function formatTime(timeString) {
   if (!timeString) return '';
@@ -28,7 +29,7 @@ function getPersonName(person) {
  * TemplateEditDialog — View / Edit / Delete an existing template
  * @param {{ template, open, onClose, onUpdate }} props
  */
-export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
+export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAvailability }) {
   const { activeOrgId } = useOrg();
   const { session } = useAuth();
   const { instructors, isLoading: instructorsLoading } = useCalendarInstructors();
@@ -141,9 +142,41 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
   const serviceName = template.service?.name || '—';
   const dayLabel = DAY_OPTIONS.find((d) => d.value === normalizeDayToken(template.day_of_week))?.label || '—';
   const activeServices = (services || []).filter((s) => s?.is_active === true);
+  const selectedInstructor = (instructors || []).find((instructor) => instructor.id === formData.instructor_employee_id) || null;
+  const selectedCapability = (selectedInstructor?.service_capabilities || []).find((capability) => capability.service_id === formData.service_id) || null;
+  const missingCapability = Boolean(formData.instructor_employee_id && formData.service_id && !selectedCapability);
+  const missingAvailability = Boolean(selectedCapability && !hasConfiguredAvailability(selectedCapability.availability_windows));
+  const outsideAvailability = Boolean(
+    selectedCapability
+    && hasConfiguredAvailability(selectedCapability.availability_windows)
+    && formData.day_of_week
+    && formData.time_of_day
+    && Number(formData.duration_minutes) > 0
+    && !isWithinAvailabilityWindows({
+      availabilityWindows: selectedCapability.availability_windows,
+      day: formData.day_of_week,
+      startTime: formData.time_of_day,
+      durationMinutes: Number(formData.duration_minutes),
+    })
+  );
 
   async function handleSave() {
     setError(null);
+
+    if (missingCapability) {
+      setError('לא ניתן לשמור בלי יכולת שירות פעילה למדריך/ה עבור השירות שנבחר.');
+      return;
+    }
+
+    if (missingAvailability) {
+      setError('לא ניתן לשמור בלי חלונות זמינות שהוגדרו למדריך/ה עבור השירות שנבחר.');
+      return;
+    }
+
+    if (outsideAvailability) {
+      setError('היום או השעה שנבחרו נמצאים מחוץ לחלונות הזמינות שהוגדרו למדריך/ה עבור השירות.');
+      return;
+    }
 
     const updates = {};
 
@@ -180,6 +213,12 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
       setError(
         apiError === 'duplicate_template_conflict'
           ? 'לא ניתן לשמור תבנית זהה וחופפת (תלמיד+מדריך+יום+שעה) כאשר כבר קיימת תבנית פעילה.'
+          : apiError === 'missing_instructor_service_capability'
+            ? 'לא ניתן לשמור בלי יכולת שירות פעילה למדריך/ה עבור השירות שנבחר.'
+            : apiError === 'missing_instructor_service_availability'
+              ? 'לא ניתן לשמור בלי חלונות זמינות שהוגדרו למדריך/ה עבור השירות שנבחר.'
+              : apiError === 'outside_instructor_service_availability'
+                ? 'היום או השעה שנבחרו נמצאים מחוץ לחלונות הזמינות שהוגדרו למדריך/ה עבור השירות.'
           : apiError,
       );
       return;
@@ -429,7 +468,33 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate }) {
             {error && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
+                <AlertDescription className="space-y-3">
+                  <div>{error}</div>
+                  {(missingCapability || missingAvailability || outsideAvailability) && typeof onFixAvailability === 'function' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onFixAvailability({
+                        instructorId: formData.instructor_employee_id,
+                        serviceId: formData.service_id,
+                        studentId: template.student_id,
+                        waitingListContext: {
+                          studentName,
+                          serviceName,
+                        },
+                        fixType: missingCapability
+                          ? 'missing_service_capability'
+                          : missingAvailability
+                            ? 'missing_instructor_service_availability'
+                            : 'outside_instructor_service_availability',
+                        source: 'edit',
+                      })}
+                    >
+                      תקן זמינות
+                    </Button>
+                  ) : null}
+                </AlertDescription>
               </Alert>
             )}
 

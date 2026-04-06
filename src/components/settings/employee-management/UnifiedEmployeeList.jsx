@@ -32,11 +32,11 @@ import EmployeeWizardDialog from './EmployeeWizardDialog.jsx';
 import EmployeeActivityTimeline from './EmployeeActivityTimeline.jsx';
 import EmployeeAttendancePanel from './EmployeeAttendancePanel.jsx';
 import EditEmployeeDialog from './EditEmployeeDialog.jsx';
-import EditInstructorProfileDialog from './EditInstructorProfileDialog.jsx';
 import EditServiceCapabilitiesDialog from './EditServiceCapabilitiesDialog.jsx';
 import EmployeeFinancePanel from './EmployeeFinancePanel.jsx';
 import EmployeeLeavePanel from './EmployeeLeavePanel.jsx';
 import LinkEmployeeMemberDialog from './LinkEmployeeMemberDialog.jsx';
+import { getAvailabilitySummary } from '@/lib/instructor-availability.js';
 
 const REQUEST = { idle: 'idle', loading: 'loading' };
 const TAB_KEYS = {
@@ -132,15 +132,8 @@ function getServiceName(services, serviceId, fallbackName) {
   return fallbackName || services.find((service) => service.id === serviceId)?.name || 'שירות';
 }
 
-function getEmployeeWorkingDays(employee) {
-  if (getEmployeeType(employee) === 'instructor') {
-    return Array.isArray(employee?.instructor_profile?.working_days) ? employee.instructor_profile.working_days : [];
-  }
-  return Array.isArray(employee?.working_days) ? employee.working_days : [];
-}
-
 function getWorkingDaysSummary(employee) {
-  const workingDays = getEmployeeWorkingDays(employee);
+  const workingDays = Array.isArray(employee?.working_days) ? employee.working_days : [];
   if (!Array.isArray(workingDays) || workingDays.length === 0) return 'לא הוגדרו ימי עבודה';
   return workingDays
     .slice()
@@ -296,7 +289,6 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
 
   const [showWizard, setShowWizard] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
-  const [showProfileDialog, setShowProfileDialog] = useState(false);
   const [showCapabilitiesDialog, setShowCapabilitiesDialog] = useState(false);
   const [showLinkDialog, setShowLinkDialog] = useState(false);
   const [inviteUserDialogOpen, setInviteUserDialogOpen] = useState(false);
@@ -450,6 +442,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     (currentEmployee?.service_capabilities || []).map((capability) => ({
       ...capability,
       name: getServiceName(services, capability.service_id),
+      availabilitySummary: getAvailabilitySummary(capability.availability_windows),
     }))
   ), [currentEmployee, services]);
 
@@ -828,12 +821,12 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                 </TabsList>
                 <TabsContent value={TAB_KEYS.overview} className="space-y-3">
                   {currentEmployeeSetupIncomplete ? (
-                    <SectionCard title="השלמת הגדרת מדריך" description="העובד מסומן כמדריך אבל חסרים לו ימי עבודה או שירותים">
+                    <SectionCard title="השלמת הגדרת מדריך" description="העובד מסומן כמדריך אבל חסרים לו חלונות זמינות או שירותים פעילים">
                       <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-3 py-3 text-sm text-amber-900">
-                        כדי שהעובד יהיה מוכן לשיבוץ, יש להשלים ימי עבודה ולפחות שירות אחד.
+                        כדי שהעובד יהיה מוכן לשיבוץ, יש להשלים לפחות שירות אחד וחלונות זמינות לשירות.
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <Button size="sm" variant="outline" onClick={() => setShowProfileDialog(true)}>
+                        <Button size="sm" variant="outline" onClick={() => setShowCapabilitiesDialog(true)}>
                           <Clock className="me-2 h-4 w-4" />
                           השלם זמינות
                         </Button>
@@ -916,23 +909,31 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                   <div className="grid gap-3 xl:grid-cols-2">
                     <SectionCard
                       title="זמינות"
-                      description={getEmployeeType(currentEmployee) === 'instructor' ? 'ימי עבודה והפסקה בין שיעורים' : 'ימי עבודה שבועיים של העובד'}
+                      description={getEmployeeType(currentEmployee) === 'instructor' ? 'חלונות זמינות לפי שירות' : 'ימי עבודה שבועיים של העובד'}
                       action={getEmployeeType(currentEmployee) === 'instructor' ? (
-                        <Button size="sm" variant="outline" onClick={() => setShowProfileDialog(true)}>
+                        <Button size="sm" variant="outline" onClick={() => setShowCapabilitiesDialog(true)}>
                           <Clock className="me-2 h-4 w-4" />
                           נהל זמינות
                         </Button>
                       ) : (
                         <Button size="sm" variant="outline" onClick={() => openEmployeeEditor(currentEmployee)}>
                           <Clock className="me-2 h-4 w-4" />
-                          ערוך ימי עבודה
+                          ערוך זמינות
                         </Button>
                       )}
                     >
                       {getEmployeeType(currentEmployee) === 'instructor' ? (
-                        <div className="grid gap-x-4 gap-y-0 md:grid-cols-2">
-                          <Row label="ימי עבודה" value={getWorkingDaysSummary(currentEmployee)} />
-                          <Row label="משך הפסקה" value={currentEmployee.instructor_profile?.break_time_minutes != null ? `${currentEmployee.instructor_profile.break_time_minutes} דקות` : 'לא הוגדר'} />
+                        <div className="space-y-2">
+                          {currentEmployeeServices.length > 0 ? currentEmployeeServices.map((capability) => (
+                            <div key={capability.service_id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-3">
+                              <div className="text-sm font-bold text-slate-900">{capability.name}</div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                {capability.setup_incomplete ? 'נדרשת הגדרת זמינות' : `ימי זמינות ${capability.availabilitySummary || '—'}`}
+                              </div>
+                            </div>
+                          )) : (
+                            <EmptyState title="אין שירותים מוגדרים" body="הוסף שירותים כדי לנהל זמינות לפי שירות." />
+                          )}
                         </div>
                       ) : (
                         <div className="space-y-0">
@@ -957,7 +958,9 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                           {currentEmployeeServices.map((capability) => (
                             <div key={capability.service_id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-3">
                               <div className="text-sm font-bold text-slate-900">{capability.name}</div>
-                              <div className="mt-1 text-xs text-slate-500">קיבולת {capability.max_students || 1} • תעריף בסיס {capability.base_rate != null ? `₪${capability.base_rate}` : 'לא הוגדר'}</div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                קיבולת {capability.max_students || 1} • תעריף בסיס {capability.base_rate != null ? `₪${capability.base_rate}` : 'לא הוגדר'} • {capability.setup_incomplete ? 'זמינות חסרה' : `ימי זמינות ${capability.availabilitySummary || '—'}`}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -974,7 +977,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                       title="שיעורים קרובים"
                       description="שיעורים ב-2 החודשים הקרובים"
                       action={getEmployeeType(currentEmployee) === 'instructor' ? (
-                        <Button size="sm" variant="outline" onClick={() => setShowProfileDialog(true)}>
+                        <Button size="sm" variant="outline" onClick={() => setShowCapabilitiesDialog(true)}>
                           <Calendar className="me-2 h-4 w-4" />
                           זמינות
                         </Button>
@@ -989,16 +992,15 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                       )}
                     </SectionCard>
 
-                    <SectionCard title="הגדרות תזמון" description="ימי עבודה, הפסקות ושירותים שהמדריך יכול לספק">
+                    <SectionCard title="הגדרות תזמון" description="זמינות לפי שירות, שירותים פעילים וסטטוס ההשלמה">
                       {getEmployeeType(currentEmployee) === 'instructor' ? (
                         <div className="space-y-0">
-                          <Row label="ימי עבודה" value={getWorkingDaysSummary(currentEmployee)} />
-                          <Row label="הפסקה בין שיעורים" value={currentEmployee.instructor_profile?.break_time_minutes != null ? `${currentEmployee.instructor_profile.break_time_minutes} דקות` : 'לא הוגדר'} />
                           <Row label="מספר שירותים" value={`${currentEmployeeServices.length}`} />
                           <Row label="שירות ראשון" value={currentEmployeeServices[0]?.name || '—'} />
+                          <Row label="סטטוס זמינות" value={currentEmployeeSetupIncomplete ? 'נדרשת השלמה' : 'תקין'} />
                         </div>
                       ) : (
-                        <EmptyState title="אין הגדרות מדריך" body="רק מדריכים משתמשים ב-working_days, break_time ושירותים." />
+                        <EmptyState title="אין הגדרות מדריך" body="רק מדריכים משתמשים בשירותים וזמינות לפי שירות." />
                       )}
                     </SectionCard>
                   </div>
@@ -1092,17 +1094,6 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
         orgId={orgId}
         session={session}
         availableServices={services}
-        onSaved={async () => {
-          await refetchInstructors();
-          await fetchOverviewInstances();
-        }}
-      />
-      <EditInstructorProfileDialog
-        open={showProfileDialog}
-        onOpenChange={setShowProfileDialog}
-        instructor={currentEmployee}
-        orgId={orgId}
-        session={session}
         onSaved={async () => {
           await refetchInstructors();
           await fetchOverviewInstances();

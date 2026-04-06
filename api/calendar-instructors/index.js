@@ -123,7 +123,7 @@ export default async function (context, req) {
       .in('employee_id', instructorIds),
     tenantClient
       .from('instructor_service_capabilities')
-      .select('employee_id, service_id, max_students, base_rate, metadata')
+      .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
       .in('employee_id', instructorIds),
   ]);
 
@@ -174,6 +174,8 @@ export default async function (context, req) {
       service_id: cap.service_id,
       max_students: cap.max_students,
       base_rate: cap.base_rate,
+      availability_windows: Array.isArray(cap.availability_windows) ? cap.availability_windows : [],
+      setup_incomplete: !hasConfiguredAvailability(cap.availability_windows),
       metadata: cap.metadata,
     });
   });
@@ -196,3 +198,4 @@ export default async function (context, req) {
 
   return respond(context, 200, transformedInstructors);
 }
+import { hasConfiguredAvailability } from '../_shared/instructor-availability.js';

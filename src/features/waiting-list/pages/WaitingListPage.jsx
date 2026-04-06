@@ -1,10 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Pencil, Send, ExternalLink, Mail, MessageCircle } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import {
+  Plus,
+  Pencil,
+  Send,
+  ExternalLink,
+  Mail,
+  MessageCircle,
+  Clock3,
+  UserRound,
+  Sparkles,
+  CalendarPlus2,
+  ArrowLeft,
+  AlertTriangle,
+} from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ComboBoxField, SelectField, TextAreaField, TextField } from '@/components/ui/forms-ui';
 import { Switch } from '@/components/ui/switch';
@@ -50,6 +62,10 @@ const STATUS_BADGE_VARIANTS = {
   matched: 'default',
   closed: 'outline',
 };
+const SUGGESTION_MODE_OPTIONS = [
+  { value: 'capacity', label: 'מקום פנוי בתבניות' },
+  { value: 'empty_slots', label: 'חלונות פנויים בלו״ז' },
+];
 
 const EMPTY_RANGE = { start: '', end: '' };
 const FORM_USAGE_WAITING_LIST = 'waiting_list_intake';
@@ -241,7 +257,101 @@ function buildInitialForm(entry, studentMap) {
   };
 }
 
+function formatEntryCreatedAt(value) {
+  if (!value) return '—';
+  try {
+    return new Intl.DateTimeFormat('he-IL', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'Asia/Jerusalem',
+    }).format(new Date(value));
+  } catch {
+    return '—';
+  }
+}
+
+function compareWaitingListEntries(left, right) {
+  const leftPriority = Number(Boolean(left?.priority_flag));
+  const rightPriority = Number(Boolean(right?.priority_flag));
+  if (leftPriority !== rightPriority) {
+    return rightPriority - leftPriority;
+  }
+
+  const leftCreated = new Date(left?.created_at || 0).getTime();
+  const rightCreated = new Date(right?.created_at || 0).getTime();
+  return leftCreated - rightCreated;
+}
+
+function getStatusLabel(status) {
+  return STATUS_OPTIONS.find((option) => option.value === status)?.label || '—';
+}
+
+function getEntryIntakeMeta(entry) {
+  return entry?.metadata && typeof entry.metadata === 'object' ? entry.metadata : {};
+}
+
+function getPaymentPathLabel(meta) {
+  if (meta.payment_path_intent === 'hmo') return 'קופת חולים';
+  if (meta.payment_path_intent === 'private') return 'פרטי';
+  if (meta.payment_path_intent === 'unsure') return 'צריך עזרה';
+  return '';
+}
+
+function getContactRelationshipLabel(meta) {
+  switch (meta.contact_relationship) {
+    case 'mother':
+      return 'אם';
+    case 'father':
+      return 'אב';
+    case 'caretaker':
+      return 'מטפל/ת';
+    case 'other':
+      return 'אחר';
+    case 'self':
+      return 'התלמיד/ה עצמו/ה';
+    default:
+      return '';
+  }
+}
+
+function getHmoApprovalLabel(meta) {
+  if (meta.payment_path_intent !== 'hmo') return '';
+  if (meta.hmo_approval_status === 'send_separately') return 'יישלח בנפרד';
+  if (meta.hmo_approval_status === 'no_approval_yet') return 'ללא אישור';
+  return '';
+}
+
+function mapWaitingListSuggestionsErrorMessage(code) {
+  switch (String(code || '').trim()) {
+    case 'waiting_list_entry_not_found':
+      return 'רשומת ההמתנה כבר אינה זמינה. אפשר לרענן את התור ולבחור רשומה אחרת.';
+    case 'failed_to_load_instructors':
+    case 'failed_to_load_instructor_capabilities':
+    case 'failed_to_load_instructor_profiles':
+    case 'failed_to_load_lesson_templates':
+    case 'failed_to_load_waiting_list_entry':
+      return 'לא הצלחנו לחשב הצעות שיבוץ כרגע. אפשר לנסות שוב בעוד כמה רגעים.';
+    default:
+      return 'טעינת הצעות השיבוץ נכשלה. אפשר לנסות שוב.';
+  }
+}
+
+function mapWaitingListSuggestionsBlockingReason(code) {
+  switch (String(code || '').trim()) {
+    case 'missing_service_availability':
+      return 'לא נמצאה זמינות שירות מוגדרת עבור המדריכים/ות שיכולים לספק את השירות הזה.';
+    case 'missing_service_capability':
+      return 'כרגע אין מדריך/ה עם יכולת שירות פעילה עבור השירות המבוקש.';
+    case 'no_matching_slots':
+      return 'כרגע אין חלונות פנויים שתואמים לרשומת ההמתנה במצב ההצעות הנוכחי.';
+    default:
+      return 'לא נמצאו כרגע הצעות מתאימות במצב זה.';
+  }
+}
+
 export default function WaitingListPage() {
+  const navigate = useNavigate();
   const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
   const { session } = useSupabase();
 
@@ -269,6 +379,15 @@ export default function WaitingListPage() {
   const [inviteError, setInviteError] = useState('');
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
   const [inviteResult, setInviteResult] = useState(null);
+  const [selectedEntryId, setSelectedEntryId] = useState('');
+  const [suggestionMode, setSuggestionMode] = useState('capacity');
+  const [suggestions, setSuggestions] = useState([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState('');
+  const [suggestionsMeta, setSuggestionsMeta] = useState({
+    blockingReason: '',
+    fixTargets: [],
+  });
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -306,6 +425,14 @@ export default function WaitingListPage() {
   const waitingListFormOptions = useMemo(
     () => (waitingListForms || []).map((form) => ({ value: form.id, label: form.name })),
     [waitingListForms]
+  );
+  const sortedEntries = useMemo(
+    () => [...entries].sort(compareWaitingListEntries),
+    [entries]
+  );
+  const selectedEntry = useMemo(
+    () => sortedEntries.find((entry) => entry.id === selectedEntryId) || null,
+    [sortedEntries, selectedEntryId]
   );
 
   const loadWaitingListForms = useCallback(async () => {
@@ -383,6 +510,77 @@ export default function WaitingListPage() {
   useEffect(() => {
     void loadEntries();
   }, [loadEntries]);
+
+  useEffect(() => {
+    if (!sortedEntries.length) {
+      setSelectedEntryId('');
+      return;
+    }
+
+    setSelectedEntryId((current) => (
+      current && sortedEntries.some((entry) => entry.id === current)
+        ? current
+        : sortedEntries[0].id
+    ));
+  }, [sortedEntries]);
+
+  useEffect(() => {
+    if (!canFetch || !selectedEntry?.id) {
+      setSuggestions([]);
+      setSuggestionsError('');
+      setSuggestionsMeta({ blockingReason: '', fixTargets: [] });
+      setLoadingSuggestions(false);
+      return;
+    }
+
+    if (!['new', 'open'].includes(String(selectedEntry.status || '').toLowerCase())) {
+      setSuggestions([]);
+      setSuggestionsError('');
+      setSuggestionsMeta({ blockingReason: '', fixTargets: [] });
+      setLoadingSuggestions(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function fetchSuggestions() {
+      setLoadingSuggestions(true);
+      setSuggestionsError('');
+      try {
+        const payload = await authenticatedFetch('waiting-list-suggestions', {
+          session,
+          params: {
+            org_id: activeOrgId,
+            entry_id: selectedEntry.id,
+            mode: suggestionMode,
+          },
+        });
+
+        if (!cancelled) {
+          setSuggestions(Array.isArray(payload?.suggestions) ? payload.suggestions : []);
+          setSuggestionsMeta({
+            blockingReason: String(payload?.blocking_reason || ''),
+            fixTargets: Array.isArray(payload?.fix_availability_targets) ? payload.fix_availability_targets : [],
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSuggestions([]);
+          setSuggestionsError(mapWaitingListSuggestionsErrorMessage(error?.data?.message || error?.message));
+          setSuggestionsMeta({ blockingReason: '', fixTargets: [] });
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingSuggestions(false);
+        }
+      }
+    }
+
+    void fetchSuggestions();
+    return () => {
+      cancelled = true;
+    };
+  }, [canFetch, selectedEntry?.id, selectedEntry?.status, suggestionMode, session, activeOrgId]);
 
   const openCreateDialog = () => {
     setFormValues(buildInitialForm(null, studentOptionMap));
@@ -537,6 +735,47 @@ export default function WaitingListPage() {
   const handlePrepareAdditionalInvite = () => {
     resetInviteComposer();
   };
+
+  const handleOpenSuggestionInTemplateManager = useCallback((suggestion) => {
+    if (!selectedEntry) return;
+    const selectedService = services.find((service) => service.id === selectedEntry.desired_service_id);
+
+    const params = new URLSearchParams({
+      waiting_list_entry_id: selectedEntry.id,
+      suggestion_mode: suggestion.mode || suggestionMode,
+      student_id: selectedEntry.student_id || '',
+      student_name: buildStudentName(selectedEntry.student),
+      service_id: selectedEntry.desired_service_id || '',
+      service_name: selectedEntry.service?.name || '',
+      instructor_id: suggestion.instructor_id || '',
+      day_of_week: String(suggestion.day_of_week ?? ''),
+      time_of_day: suggestion.time_of_day || '',
+      duration_minutes: String(suggestion.duration_minutes || selectedService?.duration_minutes || 60),
+    });
+
+    if (suggestion.source_template_id) {
+      params.set('source_template_id', suggestion.source_template_id);
+    }
+
+    navigate(`/calendar/templates?${params.toString()}`);
+  }, [navigate, selectedEntry, suggestionMode, services]);
+
+  const handleFixAvailabilityTarget = useCallback((target) => {
+    if (!selectedEntry || !target?.instructor_id || !target?.service_id) return;
+
+    const params = new URLSearchParams({
+      fix_availability: '1',
+      fix_type: target.fix_type || suggestionsMeta.blockingReason || '',
+      waiting_list_entry_id: selectedEntry.id,
+      student_id: selectedEntry.student_id || '',
+      student_name: buildStudentName(selectedEntry.student),
+      service_id: target.service_id || selectedEntry.desired_service_id || '',
+      service_name: selectedEntry.service?.name || '',
+      instructor_id: target.instructor_id,
+    });
+
+    navigate(`/calendar/templates?${params.toString()}`);
+  }, [navigate, selectedEntry, suggestionsMeta.blockingReason]);
 
   const inviteWhatsappLink = useMemo(() => {
     if (!inviteResult?.invite_url || !inviteResult?.phone) return '';
@@ -784,151 +1023,298 @@ export default function WaitingListPage() {
   }
 
   return (
-    <PageLayout title="רשימת המתנה" description="ניהול תלמידים הממתינים לשיבוץ" actions={pageActions}>
+    <PageLayout title="רשימת המתנה" description="מרחב עבודה לשיבוץ וניהול מתעניינים" actions={pageActions}>
       <Card className="mb-4">
         <CardContent className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div className="max-w-xs">
               <SelectField
                 id="waiting-list-status-filter"
-                label="תצוגה"
+                label="תצוגת תור"
                 value={statusFilter}
                 onChange={setStatusFilter}
                 options={STATUS_FILTER_OPTIONS}
               />
             </div>
-            {loadingMeta && (
-              <div className="text-xs text-neutral-500">טוען רשימות נתונים...</div>
-            )}
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>סה״כ רשומות: {sortedEntries.length}</span>
+              <span>•</span>
+              <span>חדשות: {entries.filter((entry) => entry.status === 'new').length}</span>
+              <span>•</span>
+              <span>דחופות: {entries.filter((entry) => entry.priority_flag).length}</span>
+              {loadingMeta ? <span>• טוען נתוני עזר...</span> : null}
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">רשומות בהמתנה</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="text-sm text-neutral-500">טוען רשומות...</div>
-          ) : listError ? (
-            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{listError}</div>
-          ) : entries.length === 0 ? (
-            <div className="text-sm text-neutral-500">לא נמצאו רשומות.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>תלמיד</TableHead>
-                    <TableHead>יצירת קשר</TableHead>
-                    <TableHead>שירות מבוקש</TableHead>
-                    <TableHead>ימי זמינות</TableHead>
-                    <TableHead>זמני העדפה</TableHead>
-                    <TableHead>עדיפות</TableHead>
-                    <TableHead>סטטוס</TableHead>
-                    <TableHead>פרטי קליטה</TableHead>
-                    <TableHead>פעולות</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {entries.map((entry) => {
-                    const isPriority = Boolean(entry.priority_flag);
-                    const statusLabel = STATUS_OPTIONS.find((option) => option.value === entry.status)?.label || '—';
-                    const intakeMeta = entry?.metadata && typeof entry.metadata === 'object' ? entry.metadata : {};
-                    const isProspect = entry?.student?.onboarding_status === 'pending_wl_form';
-                    const paymentPathLabel = intakeMeta.payment_path_intent === 'hmo'
-                      ? 'קופת חולים'
-                      : intakeMeta.payment_path_intent === 'private'
-                        ? 'פרטי'
-                        : intakeMeta.payment_path_intent === 'unsure'
-                          ? 'צריך עזרה'
-                          : '';
-                    const hmoProviderName = intakeMeta.payment_path_intent === 'hmo'
-                      ? String(intakeMeta.hmo_provider_name || '').trim()
-                      : '';
-                    const contactRelationshipLabel = intakeMeta.contact_relationship === 'mother'
-                      ? 'אם'
-                      : intakeMeta.contact_relationship === 'father'
-                        ? 'אב'
-                        : intakeMeta.contact_relationship === 'caretaker'
-                          ? 'מטפל/ת'
-                          : intakeMeta.contact_relationship === 'other'
-                            ? 'אחר'
-                            : intakeMeta.contact_relationship === 'self'
-                              ? 'התלמיד/ה עצמו/ה'
-                              : '';
-                    const hmoApprovalLabel = intakeMeta.payment_path_intent === 'hmo' && (intakeMeta.hmo_approval_status === 'send_separately' || intakeMeta.hmo_approval_status === 'has_approval')
-                      ? 'יישלח בנפרד'
-                        : intakeMeta.payment_path_intent === 'hmo' && intakeMeta.hmo_approval_status === 'no_approval_yet'
-                          ? 'ללא אישור'
-                          : '';
-                    return (
-                      <TableRow
-                        key={entry.id}
-                        className={cn(
-                          isPriority && 'border-s-4 border-red-400 bg-red-50/40'
-                        )}
-                      >
-                        <TableCell className="font-medium">
-                          <div className="flex flex-col gap-1">
-                            <Link to={`/students/${entry.student_id}`} className="font-medium text-primary hover:underline">
-                              {buildStudentName(entry.student)}
-                            </Link>
-                            {isProspect ? (
-                              <Badge variant="outline" className="w-fit">מתעניין / טופס המתנה</Badge>
-                            ) : null}
-                            {intakeMeta.source === 'waiting_list_intake' ? (
-                              <Badge variant="secondary" className="w-fit">נוצר מטופס</Badge>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm text-neutral-600">
-                          <div className="flex flex-col gap-1">
-                            <span>{entry?.student?.phone || '—'}</span>
-                            <span>{entry?.student?.email || '—'}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>{entry.service?.name || '—'}</TableCell>
-                        <TableCell>{formatPreferredDays(entry.preferred_days)}</TableCell>
-                        <TableCell className="text-sm text-neutral-600">
-                          {formatPreferredTimes(entry.preferred_times)}
-                        </TableCell>
-                        <TableCell>
-                          {isPriority ? (
-                            <Badge variant="destructive">דחוף</Badge>
-                          ) : (
-                            <Badge variant="secondary">רגיל</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={STATUS_BADGE_VARIANTS[entry.status] || 'outline'}>{statusLabel}</Badge>
-                        </TableCell>
-                        <TableCell className="text-sm text-neutral-600">
-                          <div className="flex flex-col gap-1">
-                            {intakeMeta.contact_relationship && intakeMeta.contact_relationship !== 'self' && intakeMeta.contact_name ? <span>איש קשר: {intakeMeta.contact_name}</span> : null}
-                            {intakeMeta.contact_relationship && intakeMeta.contact_relationship !== 'self' && contactRelationshipLabel ? <span>קשר לתלמיד/ה: {contactRelationshipLabel}</span> : null}
-                            {paymentPathLabel ? <span>מסלול תשלום: {paymentPathLabel}</span> : null}
-                            {hmoProviderName ? <span>גורם מממן: {hmoProviderName}</span> : null}
-                            {hmoApprovalLabel ? <span>אישור גורם מממן: {hmoApprovalLabel}</span> : null}
-                            {entry.notes ? <span>הערות: {entry.notes}</span> : null}
-                            {!intakeMeta.contact_name && !contactRelationshipLabel && !paymentPathLabel && !hmoProviderName && !hmoApprovalLabel && !entry.notes ? <span>—</span> : null}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="icon" onClick={() => openEditDialog(entry)}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+      {listError ? (
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{listError}</div>
+      ) : null}
+
+      <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)_380px]">
+        <Card className="min-h-[70vh]">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">תור טיפול</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {loading ? (
+              <div className="text-sm text-neutral-500">טוען רשומות...</div>
+            ) : sortedEntries.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border p-6 text-sm text-neutral-500">
+                לא נמצאו רשומות בתצוגה הנוכחית.
+              </div>
+            ) : (
+              sortedEntries.map((entry) => {
+                const intakeMeta = getEntryIntakeMeta(entry);
+                const isSelected = selectedEntryId === entry.id;
+                const isProspect = entry?.student?.onboarding_status === 'pending_wl_form';
+
+                return (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    onClick={() => setSelectedEntryId(entry.id)}
+                    className={cn(
+                      'w-full rounded-2xl border p-4 text-right transition-colors',
+                      isSelected
+                        ? 'border-primary bg-primary/5 shadow-sm'
+                        : 'border-border/70 bg-background hover:border-primary/30 hover:bg-muted/30',
+                      entry.priority_flag && 'border-red-300',
+                    )}
+                  >
+                    <div className="mb-2 flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="font-medium text-foreground">{buildStudentName(entry.student)}</div>
+                        <div className="text-sm text-muted-foreground">{entry.service?.name || 'ללא שירות'}</div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <Badge variant={STATUS_BADGE_VARIANTS[entry.status] || 'outline'}>
+                          {getStatusLabel(entry.status)}
+                        </Badge>
+                        {entry.priority_flag ? <Badge variant="destructive">דחוף</Badge> : null}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1 text-xs text-muted-foreground">
+                      <div>נוצר: {formatEntryCreatedAt(entry.created_at)}</div>
+                      <div>ימי זמינות: {formatPreferredDays(entry.preferred_days)}</div>
+                      <div>טווחים: {formatPreferredTimes(entry.preferred_times)}</div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {isProspect ? <Badge variant="outline">מתעניין/ת</Badge> : null}
+                      {intakeMeta.source === 'waiting_list_intake' ? <Badge variant="secondary">נוצר מטופס</Badge> : null}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="min-h-[70vh]">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">פרטי רשומה</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!selectedEntry ? (
+              <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+                בחרו רשומה מהתור כדי לראות את פרטי המתעניין/ת ולפתוח הצעות שיבוץ.
+              </div>
+            ) : (
+              (() => {
+                const intakeMeta = getEntryIntakeMeta(selectedEntry);
+                const isProspect = selectedEntry?.student?.onboarding_status === 'pending_wl_form';
+                const paymentPathLabel = getPaymentPathLabel(intakeMeta);
+                const contactRelationshipLabel = getContactRelationshipLabel(intakeMeta);
+                const hmoApprovalLabel = getHmoApprovalLabel(intakeMeta);
+
+                return (
+                  <div className="space-y-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <UserRound className="h-4 w-4 text-muted-foreground" />
+                          <h2 className="text-lg font-semibold text-foreground">{buildStudentName(selectedEntry.student)}</h2>
+                        </div>
+                        <div className="text-sm text-muted-foreground">{selectedEntry.service?.name || 'ללא שירות מוגדר'}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={STATUS_BADGE_VARIANTS[selectedEntry.status] || 'outline'}>
+                            {getStatusLabel(selectedEntry.status)}
+                          </Badge>
+                          {selectedEntry.priority_flag ? <Badge variant="destructive">עדיפות גבוהה</Badge> : null}
+                          {isProspect ? <Badge variant="outline">מתעניין/ת</Badge> : null}
+                          {intakeMeta.source === 'waiting_list_intake' ? <Badge variant="secondary">נוצר מטופס</Badge> : null}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" size="sm" onClick={() => openEditDialog(selectedEntry)} className="gap-2">
+                          <Pencil className="h-4 w-4" />
+                          עריכת רשומה
+                        </Button>
+                        <Button asChild variant="outline" size="sm" className="gap-2">
+                          <Link to={`/students/${selectedEntry.student_id}`}>
+                            <ArrowLeft className="h-4 w-4" />
+                            פתח כרטיס תלמיד
+                          </Link>
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-2xl border border-border/70 bg-background p-4">
+                        <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                          <Clock3 className="h-4 w-4 text-muted-foreground" />
+                          זמינות והעדפות
+                        </div>
+                        <div className="space-y-2 text-sm text-muted-foreground">
+                          <div>ימי זמינות: <span className="font-medium text-foreground">{formatPreferredDays(selectedEntry.preferred_days)}</span></div>
+                          <div>טווחי זמן: <span className="font-medium text-foreground">{formatPreferredTimes(selectedEntry.preferred_times)}</span></div>
+                          <div>נוצר: <span className="font-medium text-foreground">{formatEntryCreatedAt(selectedEntry.created_at)}</span></div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-border/70 bg-background p-4">
+                        <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                          <Sparkles className="h-4 w-4 text-muted-foreground" />
+                          פרטי קליטה
+                        </div>
+                        <div className="space-y-2 text-sm text-muted-foreground">
+                          <div>טלפון: <span className="font-medium text-foreground">{selectedEntry?.student?.phone || '—'}</span></div>
+                          <div>אימייל: <span className="font-medium text-foreground">{selectedEntry?.student?.email || '—'}</span></div>
+                          {intakeMeta.contact_relationship && intakeMeta.contact_relationship !== 'self' && intakeMeta.contact_name ? (
+                            <div>איש קשר: <span className="font-medium text-foreground">{intakeMeta.contact_name}</span></div>
+                          ) : null}
+                          {intakeMeta.contact_relationship && intakeMeta.contact_relationship !== 'self' && contactRelationshipLabel ? (
+                            <div>קשר למתעניין/ת: <span className="font-medium text-foreground">{contactRelationshipLabel}</span></div>
+                          ) : null}
+                          {paymentPathLabel ? (
+                            <div>מסלול תשלום: <span className="font-medium text-foreground">{paymentPathLabel}</span></div>
+                          ) : null}
+                          {intakeMeta.hmo_provider_name ? (
+                            <div>גורם מממן: <span className="font-medium text-foreground">{intakeMeta.hmo_provider_name}</span></div>
+                          ) : null}
+                          {hmoApprovalLabel ? (
+                            <div>סטטוס אישור: <span className="font-medium text-foreground">{hmoApprovalLabel}</span></div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-border/70 bg-background p-4">
+                      <div className="mb-2 text-sm font-medium text-foreground">הערות ודגשים</div>
+                      <div className="text-sm text-muted-foreground">
+                        {selectedEntry.notes?.trim() ? selectedEntry.notes : 'אין הערות נוספות ברשומה זו.'}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="min-h-[70vh]">
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-base">הצעות שיבוץ</CardTitle>
+              <div className="flex items-center gap-2 rounded-full bg-muted p-1">
+                {SUGGESTION_MODE_OPTIONS.map((option) => (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    size="sm"
+                    variant={suggestionMode === option.value ? 'default' : 'ghost'}
+                    className="h-8 rounded-full px-3 text-xs"
+                    onClick={() => setSuggestionMode(option.value)}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!selectedEntry ? (
+              <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+                בחרו רשומה מהתור כדי לראות הצעות שיבוץ.
+              </div>
+            ) : !['new', 'open'].includes(String(selectedEntry.status || '').toLowerCase()) ? (
+              <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+                הצעות שיבוץ מוצגות רק לרשומות חדשות או פתוחות.
+              </div>
+            ) : loadingSuggestions ? (
+              <div className="text-sm text-muted-foreground">מחשב הצעות שיבוץ...</div>
+            ) : suggestionsError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{suggestionsError}</div>
+            ) : suggestions.length === 0 ? (
+              <div className="space-y-3 rounded-xl border border-dashed border-border p-6">
+                <div className="text-sm text-muted-foreground">
+                  {mapWaitingListSuggestionsBlockingReason(suggestionsMeta.blockingReason)}
+                </div>
+                {suggestionsMeta.fixTargets.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-foreground">מדריכים/ות שדורשים השלמת זמינות לשירות:</div>
+                    {suggestionsMeta.fixTargets.map((target) => (
+                      <div
+                        key={`${target.instructor_id}-${target.service_id}`}
+                        className="flex flex-col gap-2 rounded-xl border border-border/70 bg-background p-3 md:flex-row md:items-center md:justify-between"
+                      >
+                        <div className="text-sm text-muted-foreground">
+                          <span className="font-medium text-foreground">{target.instructor_name || 'מדריך/ה'}</span>
+                          {' '}
+                          {target.fix_type === 'missing_service_capability'
+                            ? 'עדיין ללא יכולת שירות וזמינות עבור השירות הזה.'
+                            : 'עדיין ללא חלונות זמינות לשירות הזה.'}
+                        </div>
+                        <Button type="button" variant="outline" className="gap-2" onClick={() => handleFixAvailabilityTarget(target)}>
+                          <CalendarPlus2 className="h-4 w-4" />
+                          {target.fix_type === 'missing_service_capability' ? 'הגדר שירות וזמינות' : 'תקן זמינות'}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              suggestions.map((suggestion, index) => (
+                <div key={`${suggestion.mode}-${suggestion.instructor_id}-${suggestion.day_of_week}-${suggestion.time_of_day}-${index}`} className="rounded-2xl border border-border/70 bg-background p-4">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="font-medium text-foreground">{suggestion.instructor_name || 'ללא מדריך/ה'}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {suggestion.day_label} · {suggestion.time_of_day} · {suggestion.duration_minutes} דק׳
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge variant={suggestion.mode === 'capacity' ? 'default' : 'secondary'}>
+                        {suggestion.mode === 'capacity' ? 'מקום פנוי' : 'חלון פנוי'}
+                      </Badge>
+                      {suggestion.mode === 'capacity' ? (
+                        <span className="text-xs text-muted-foreground">
+                          {suggestion.current_students}/{suggestion.capacity} תלמידים
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mb-4 flex items-start gap-2 rounded-xl bg-muted/40 p-3 text-sm text-muted-foreground">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                    <span>{suggestion.match_reason}</span>
+                  </div>
+
+                  <Button type="button" className="w-full gap-2" onClick={() => handleOpenSuggestionInTemplateManager(suggestion)}>
+                    <CalendarPlus2 className="h-4 w-4" />
+                    פתח בניהול תבניות
+                  </Button>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
         <DialogContent className="sm:max-w-2xl">

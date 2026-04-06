@@ -1,21 +1,49 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout';
 import { Button } from '@/components/ui/button';
-import { Plus, ArrowRight, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Plus, ArrowRight, Loader2, Eye, EyeOff, Sparkles } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { TemplateGrid } from '../components/TemplateManager/TemplateGrid';
 import { AddTemplateDialog } from '../components/TemplateManager/AddTemplateDialog';
 import { TemplateEditDialog } from '../components/TemplateManager/TemplateEditDialog';
 import { useTemplates } from '../hooks/useTemplates';
 import { useCalendarInstructors } from '../hooks/useCalendar';
+import EditServiceCapabilitiesDialog from '@/components/settings/employee-management/EditServiceCapabilitiesDialog.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { useAuth } from '@/auth/AuthContext.jsx';
 
 export default function TemplateManagerPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { activeOrgId } = useOrg();
+  const { session } = useAuth();
 
   const [showInactive, setShowInactive] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [addDefaults, setAddDefaults] = useState({ instructorId: null, dayOfWeek: null });
+  const [addDefaults, setAddDefaults] = useState({
+    instructorId: null,
+    dayOfWeek: null,
+    studentId: '',
+    serviceId: '',
+    timeOfDay: '09:00',
+    durationMinutes: 60,
+    waitingListEntryId: '',
+    waitingListContext: null,
+  });
   const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [showCapabilitiesDialog, setShowCapabilitiesDialog] = useState(false);
+  const [availabilityContext, setAvailabilityContext] = useState({
+    instructorId: '',
+    serviceId: '',
+    waitingListEntryId: '',
+    studentId: '',
+    studentName: '',
+    serviceName: '',
+    fixType: '',
+    source: 'add',
+  });
+  const consumedSeedRef = useRef('');
 
   const { templates, isLoading: templatesLoading, error: templatesError, refetch: refetchTemplates } = useTemplates({ showInactive });
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
@@ -23,8 +51,99 @@ export default function TemplateManagerPage() {
   const isLoading = templatesLoading || instructorsLoading;
   const errorMsg = templatesError || instructorsError;
 
+  const waitingListSeed = useMemo(() => {
+    const waitingListEntryId = searchParams.get('waiting_list_entry_id') || '';
+    if (!waitingListEntryId) return null;
+
+    return {
+      seedKey: searchParams.toString(),
+      waitingListEntryId,
+      suggestionMode: searchParams.get('suggestion_mode') || '',
+      instructorId: searchParams.get('instructor_id') || null,
+      dayOfWeek: searchParams.get('day_of_week') || null,
+      timeOfDay: searchParams.get('time_of_day') || '09:00',
+      durationMinutes: Number(searchParams.get('duration_minutes')) || 60,
+      studentId: searchParams.get('student_id') || '',
+      studentName: searchParams.get('student_name') || '',
+      serviceId: searchParams.get('service_id') || '',
+      serviceName: searchParams.get('service_name') || '',
+      sourceTemplateId: searchParams.get('source_template_id') || '',
+    };
+  }, [searchParams]);
+
+  const fixAvailabilitySeed = useMemo(() => {
+    if (searchParams.get('fix_availability') !== '1') return null;
+    const instructorId = searchParams.get('instructor_id') || '';
+    const serviceId = searchParams.get('service_id') || '';
+    if (!instructorId || !serviceId) return null;
+
+    return {
+      seedKey: searchParams.toString(),
+      instructorId,
+      serviceId,
+      waitingListEntryId: searchParams.get('waiting_list_entry_id') || '',
+      studentId: searchParams.get('student_id') || '',
+      studentName: searchParams.get('student_name') || '',
+      serviceName: searchParams.get('service_name') || '',
+      fixType: searchParams.get('fix_type') || '',
+    };
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!waitingListSeed?.waitingListEntryId) return;
+    if (consumedSeedRef.current === waitingListSeed.seedKey) return;
+
+    consumedSeedRef.current = waitingListSeed.seedKey;
+    setAddDefaults({
+      instructorId: waitingListSeed.instructorId,
+      dayOfWeek: waitingListSeed.dayOfWeek,
+      studentId: waitingListSeed.studentId,
+      serviceId: waitingListSeed.serviceId,
+      timeOfDay: waitingListSeed.timeOfDay,
+      durationMinutes: waitingListSeed.durationMinutes,
+      waitingListEntryId: waitingListSeed.waitingListEntryId,
+      waitingListContext: {
+        studentName: waitingListSeed.studentName,
+        serviceName: waitingListSeed.serviceName,
+      },
+    });
+    setShowAddDialog(true);
+  }, [waitingListSeed]);
+
+  useEffect(() => {
+    if (!fixAvailabilitySeed?.instructorId || !fixAvailabilitySeed?.serviceId) return;
+    if (consumedSeedRef.current === fixAvailabilitySeed.seedKey) return;
+
+    consumedSeedRef.current = fixAvailabilitySeed.seedKey;
+    setAvailabilityContext({
+      instructorId: fixAvailabilitySeed.instructorId,
+      serviceId: fixAvailabilitySeed.serviceId,
+      waitingListEntryId: fixAvailabilitySeed.waitingListEntryId,
+      studentId: fixAvailabilitySeed.studentId,
+      studentName: fixAvailabilitySeed.studentName,
+      serviceName: fixAvailabilitySeed.serviceName,
+      fixType: fixAvailabilitySeed.fixType,
+      source: 'waiting_list',
+    });
+    setShowCapabilitiesDialog(true);
+  }, [fixAvailabilitySeed]);
+
+  const currentAvailabilityInstructor = useMemo(
+    () => instructors.find((instructor) => instructor.id === availabilityContext.instructorId) || null,
+    [instructors, availabilityContext.instructorId],
+  );
+
   function handleCellClick(instructor, dayOfWeek) {
-    setAddDefaults({ instructorId: instructor.id, dayOfWeek });
+    setAddDefaults({
+      instructorId: instructor.id,
+      dayOfWeek,
+      studentId: '',
+      serviceId: '',
+      timeOfDay: '09:00',
+      durationMinutes: 60,
+      waitingListEntryId: '',
+      waitingListContext: null,
+    });
     setShowAddDialog(true);
   }
 
@@ -34,6 +153,53 @@ export default function TemplateManagerPage() {
 
   function handleAddSuccess() {
     refetchTemplates();
+  }
+
+  function handleFixAvailability({
+    instructorId,
+    serviceId,
+    studentId = '',
+    waitingListEntryId = '',
+    waitingListContext = null,
+    fixType = '',
+    source = 'add',
+  }) {
+    setAvailabilityContext({
+      instructorId: instructorId || '',
+      serviceId: serviceId || '',
+      waitingListEntryId: waitingListEntryId || '',
+      studentId: studentId || '',
+      studentName: waitingListContext?.studentName || '',
+      serviceName: waitingListContext?.serviceName || '',
+      fixType: fixType || '',
+      source,
+    });
+    if (source !== 'edit') {
+      setShowAddDialog(false);
+    }
+    setShowCapabilitiesDialog(true);
+  }
+
+  async function handleAvailabilitySaved() {
+    refetchTemplates();
+    setShowCapabilitiesDialog(false);
+
+    if (availabilityContext.source !== 'edit' && availabilityContext.instructorId && availabilityContext.serviceId) {
+      setAddDefaults((prev) => ({
+        ...prev,
+        instructorId: availabilityContext.instructorId,
+        serviceId: availabilityContext.serviceId,
+        studentId: availabilityContext.studentId || prev.studentId,
+        waitingListEntryId: availabilityContext.waitingListEntryId || prev.waitingListEntryId,
+        waitingListContext: availabilityContext.studentName || availabilityContext.serviceName
+          ? {
+              studentName: availabilityContext.studentName,
+              serviceName: availabilityContext.serviceName,
+            }
+          : prev.waitingListContext,
+      }));
+      setShowAddDialog(true);
+    }
   }
 
   function handleUpdateSuccess() {
@@ -58,7 +224,16 @@ export default function TemplateManagerPage() {
           </Button>
           <Button
             onClick={() => {
-              setAddDefaults({ instructorId: null, dayOfWeek: null });
+              setAddDefaults({
+                instructorId: null,
+                dayOfWeek: null,
+                studentId: '',
+                serviceId: '',
+                timeOfDay: '09:00',
+                durationMinutes: 60,
+                waitingListEntryId: '',
+                waitingListContext: null,
+              });
               setShowAddDialog(true);
             }}
             className="gap-1"
@@ -87,6 +262,23 @@ export default function TemplateManagerPage() {
         </div>
       )}
 
+      {!isLoading && !errorMsg && (waitingListSeed || fixAvailabilitySeed) ? (
+        <Alert className="mb-4 border-primary/30 bg-primary/5">
+          <Sparkles className="h-4 w-4" />
+          <AlertDescription>
+            {fixAvailabilitySeed
+              ? 'מצב תיקון זמינות פעיל.'
+              : 'מצב שיבוץ מרשימת ההמתנה פעיל.'}
+            {(fixAvailabilitySeed?.studentName || waitingListSeed?.studentName)
+              ? ` ${fixAvailabilitySeed?.studentName || waitingListSeed?.studentName} נמצא/ת בהקשר הפעולה הנוכחי.`
+              : ''}
+            {(fixAvailabilitySeed?.serviceName || waitingListSeed?.serviceName)
+              ? ` השירות המבוקש: ${fixAvailabilitySeed?.serviceName || waitingListSeed?.serviceName}.`
+              : ''}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {/* Grid */}
       {!isLoading && !errorMsg && (
         <TemplateGrid
@@ -95,6 +287,9 @@ export default function TemplateManagerPage() {
           onTemplateClick={handleTemplateClick}
           onCellClick={handleCellClick}
           showInactive={showInactive}
+          highlightedInstructorId={waitingListSeed?.instructorId || null}
+          highlightedDayOfWeek={waitingListSeed?.dayOfWeek || null}
+          highlightedTemplateId={waitingListSeed?.sourceTemplateId || null}
         />
       )}
 
@@ -113,6 +308,36 @@ export default function TemplateManagerPage() {
         onSuccess={handleAddSuccess}
         defaultInstructorId={addDefaults.instructorId}
         defaultDayOfWeek={addDefaults.dayOfWeek}
+        defaultStudentId={addDefaults.studentId}
+        defaultServiceId={addDefaults.serviceId}
+        defaultTimeOfDay={addDefaults.timeOfDay}
+        defaultDurationMinutes={addDefaults.durationMinutes}
+          waitingListEntryId={addDefaults.waitingListEntryId}
+          waitingListContext={addDefaults.waitingListContext}
+          onFixAvailability={handleFixAvailability}
+      />
+
+      <EditServiceCapabilitiesDialog
+        open={showCapabilitiesDialog}
+        onOpenChange={setShowCapabilitiesDialog}
+        instructor={currentAvailabilityInstructor}
+        orgId={activeOrgId}
+        session={session}
+        onSaved={handleAvailabilitySaved}
+        focusServiceId={availabilityContext.serviceId}
+        introMessage={
+          availabilityContext.fixType === 'missing_service_capability'
+            ? (availabilityContext.serviceName
+                ? `הגדירו את השירות ${availabilityContext.serviceName} ואת חלונות הזמינות שלו עבור המדריך/ה.`
+                : 'הגדירו שירות וחלונות זמינות עבור המדריך/ה.')
+            : availabilityContext.fixType === 'outside_instructor_service_availability'
+              ? (availabilityContext.serviceName
+                  ? `עדכנו את חלונות הזמינות של ${availabilityContext.serviceName} או התאימו את שעת התבנית.`
+                  : 'עדכנו את חלונות הזמינות או התאימו את שעת התבנית.')
+              : availabilityContext.serviceName
+                ? `השלימו חלונות זמינות עבור השירות ${availabilityContext.serviceName}.`
+                : 'השלימו חלונות זמינות עבור השירות הנבחר.'
+        }
       />
 
       <TemplateEditDialog
@@ -120,6 +345,7 @@ export default function TemplateManagerPage() {
         open={!!selectedTemplate}
         onClose={() => setSelectedTemplate(null)}
         onUpdate={handleUpdateSuccess}
+        onFixAvailability={handleFixAvailability}
       />
     </PageLayout>
   );

@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar.jsx';
-import { Loader2, UserPlus, UserX, RotateCcw, Check, ChevronDown, MailPlus, Settings, Briefcase } from 'lucide-react';
+import { Loader2, UserPlus, UserX, RotateCcw, Check, ChevronDown, MailPlus, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client';
 import { useInstructorTypes } from '@/features/instructors/hooks/useInstructorTypes.js';
@@ -17,7 +17,6 @@ import { cn } from '@/lib/utils';
 import { useInstructors } from '@/hooks/useOrgData.js';
 import InviteUserDialog from './InviteUserDialog.jsx';
 import CreateManualInstructorDialog from './CreateManualInstructorDialog.jsx';
-import EditInstructorProfileDialog from './EditInstructorProfileDialog.jsx';
 import EditServiceCapabilitiesDialog from './EditServiceCapabilitiesDialog.jsx';
 
 const REQUEST = { idle: 'idle', loading: 'loading', error: 'error' };
@@ -30,7 +29,6 @@ export default function DirectoryView({ session, orgId, canLoad }) {
   const [saveState, setSaveState] = useState(SAVE.idle);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [showManualDialog, setShowManualDialog] = useState(false);
-  const [showProfileDialog, setShowProfileDialog] = useState(false);
   const [showCapabilitiesDialog, setShowCapabilitiesDialog] = useState(false);
   const [editingInstructor, setEditingInstructor] = useState(null);
 
@@ -94,11 +92,6 @@ export default function DirectoryView({ session, orgId, canLoad }) {
     } finally {
       setSaveState(SAVE.idle);
     }
-  };
-
-  const handleEditProfile = (instructor) => {
-    setEditingInstructor(instructor);
-    setShowProfileDialog(true);
   };
 
   const handleEditCapabilities = (instructor) => {
@@ -356,23 +349,12 @@ export default function DirectoryView({ session, orgId, canLoad }) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleEditProfile(instructor)}
-                      disabled={isSaving}
-                      className="gap-2 h-10"
-                    >
-                      <Settings className="h-4 w-4" />
-                      <span>פרופיל</span>
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
                       onClick={() => handleEditCapabilities(instructor)}
                       disabled={isSaving}
                       className="gap-2 h-10"
                     >
-                      <Briefcase className="h-4 w-4" />
-                      <span>שירותים</span>
+                      <Settings className="h-4 w-4" />
+                      <span>שירותים וזמינות</span>
                     </Button>
 
                     <Button
@@ -500,18 +482,6 @@ export default function DirectoryView({ session, orgId, canLoad }) {
         orgId={orgId}
         session={session}
         onSuccess={() => {
-          void refetchInstructors();
-        }}
-      />
-
-      {/* Profile Dialog */}
-      <EditInstructorProfileDialog
-        open={showProfileDialog}
-        onOpenChange={setShowProfileDialog}
-        instructor={editingInstructor}
-        orgId={orgId}
-        session={session}
-        onSaved={() => {
           void refetchInstructors();
         }}
       />

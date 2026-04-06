@@ -3,6 +3,7 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
   ensureMembership,
+  isAdminOrOffice,
   isAdminRole,
   normalizeString,
   readEnv,
@@ -13,6 +14,8 @@ import {
 import { parseJsonBodyWithLimit, validateInstructorCreate, validateInstructorUpdate } from '../_shared/validation.js';
 import { ensureInstructorColors } from '../_shared/instructor-colors.js';
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
+import { normalizeAvailabilityWindows, hasConfiguredAvailability } from '../_shared/instructor-availability.js';
+import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 
 const EMPLOYEE_SELECT_COLUMNS = 'id, user_id, first_name, middle_name, last_name, employee_id, employee_type, payroll_model, current_rate, monthly_salary_amount, phone, email, start_date, is_active, notes, working_days, annual_leave_days, leave_pay_method, leave_fixed_day_rate, employment_scope, metadata, instructor_types';
 
@@ -79,8 +82,17 @@ function normalizeServiceCapabilitiesInput(value) {
       service_id: serviceId,
       max_students: Number.isFinite(Number(item?.max_students)) ? Math.max(1, Number(item.max_students)) : 1,
       base_rate: Number.isFinite(Number(item?.base_rate)) ? Number(item.base_rate) : 0,
+      availability_windows: [],
       metadata: item?.metadata && typeof item.metadata === 'object' ? item.metadata : {},
     });
+  }
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const availabilityResult = normalizeAvailabilityWindows(value[index]?.availability_windows ?? value[index]?.availabilityWindows);
+    if (!availabilityResult.valid) {
+      return { provided: true, valid: false, value: [] };
+    }
+    normalized[index].availability_windows = availabilityResult.value;
   }
 
   return { provided: true, valid: true, value: normalized };
@@ -112,9 +124,8 @@ function hasIncompleteInstructorSetup(employee, profile, capabilities) {
   if (employeeType !== 'instructor') {
     return false;
   }
-  const workingDays = Array.isArray(profile?.working_days) ? profile.working_days : [];
   const capabilityRows = Array.isArray(capabilities) ? capabilities : [];
-  return workingDays.length === 0 || capabilityRows.length === 0;
+  return capabilityRows.length === 0 || capabilityRows.some((capability) => !hasConfiguredAvailability(capability?.availability_windows));
 }
 
 async function enrichEmployees({ tenantClient, employees }) {
@@ -126,11 +137,11 @@ async function enrichEmployees({ tenantClient, employees }) {
   const [{ data: profiles }, { data: capabilities }] = await Promise.all([
     tenantClient
       .from('instructor_profiles')
-      .select('employee_id, working_days, break_time_minutes, metadata')
+      .select('employee_id, break_time_minutes, metadata')
       .in('employee_id', employeeIds),
     tenantClient
       .from('instructor_service_capabilities')
-      .select('employee_id, service_id, max_students, base_rate, metadata')
+      .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
       .in('employee_id', employeeIds),
   ]);
 
@@ -145,7 +156,10 @@ async function enrichEmployees({ tenantClient, employees }) {
 
   return employees.map((employee) => {
     const profile = profileMap.get(employee.id) || null;
-    const capabilityRows = capabilitiesMap.get(employee.id) || [];
+    const capabilityRows = (capabilitiesMap.get(employee.id) || []).map((capability) => ({
+      ...capability,
+      setup_incomplete: !hasConfiguredAvailability(capability?.availability_windows),
+    }));
     return {
       ...employee,
       instructor_profile: profile,
@@ -191,33 +205,114 @@ async function fetchUnlinkedMembers({ supabase, orgId, enrichedEmployees }) {
 }
 
 async function writeServiceCapabilities(tenantClient, instructorId, serviceCapabilities) {
-  const { error: deleteError } = await tenantClient
+  const normalizedCapabilities = Array.isArray(serviceCapabilities) ? serviceCapabilities : [];
+  const { data: previousRows, error: previousError } = await tenantClient
     .from('instructor_service_capabilities')
-    .delete()
+    .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
     .eq('employee_id', instructorId);
 
-  if (deleteError) {
-    throw deleteError;
+  if (previousError) {
+    throw previousError;
   }
 
-  if (!Array.isArray(serviceCapabilities) || serviceCapabilities.length === 0) {
-    return;
-  }
-
-  const insertPayload = serviceCapabilities.map((capability) => ({
+  const previousCapabilities = Array.isArray(previousRows) ? previousRows : [];
+  const nextPayload = normalizedCapabilities.map((capability) => ({
     employee_id: instructorId,
     service_id: capability.service_id,
     max_students: capability.max_students || 1,
     base_rate: capability.base_rate || 0,
+    availability_windows: capability.availability_windows || [],
     metadata: capability.metadata || {},
   }));
 
-  const { error: insertError } = await tenantClient
-    .from('instructor_service_capabilities')
-    .insert(insertPayload);
+  const rollbackToPrevious = async () => {
+    const previousPayload = previousCapabilities.map((capability) => ({
+      employee_id: instructorId,
+      service_id: capability.service_id,
+      max_students: capability.max_students || 1,
+      base_rate: capability.base_rate || 0,
+      availability_windows: capability.availability_windows || [],
+      metadata: capability.metadata || {},
+    }));
 
-  if (insertError) {
-    throw insertError;
+    if (previousPayload.length > 0) {
+      const { error: restoreError } = await tenantClient
+        .from('instructor_service_capabilities')
+        .upsert(previousPayload, { onConflict: 'employee_id,service_id' });
+      if (restoreError) {
+        throw restoreError;
+      }
+    }
+
+    const previousServiceIds = previousCapabilities
+      .map((capability) => capability.service_id)
+      .filter(Boolean);
+    const previousServiceSet = new Set(previousServiceIds);
+    const restoredRowsToDelete = normalizedCapabilities
+      .map((capability) => capability.service_id)
+      .filter((serviceId) => serviceId && !previousServiceSet.has(serviceId));
+
+    if (restoredRowsToDelete.length > 0) {
+      const { error: cleanupError } = await tenantClient
+        .from('instructor_service_capabilities')
+        .delete()
+        .eq('employee_id', instructorId)
+        .in('service_id', restoredRowsToDelete);
+      if (cleanupError) {
+        throw cleanupError;
+      }
+    }
+  };
+
+  try {
+    if (nextPayload.length > 0) {
+      const { error: upsertError } = await tenantClient
+        .from('instructor_service_capabilities')
+        .upsert(nextPayload, { onConflict: 'employee_id,service_id' });
+
+      if (upsertError) {
+        throw upsertError;
+      }
+    }
+
+    const nextServiceIds = nextPayload
+      .map((capability) => capability.service_id)
+      .filter(Boolean);
+    const nextServiceSet = new Set(nextServiceIds);
+    const removedServiceIds = previousCapabilities
+      .map((capability) => capability.service_id)
+      .filter((serviceId) => serviceId && !nextServiceSet.has(serviceId));
+
+    if (removedServiceIds.length > 0) {
+      const { error: deleteError } = await tenantClient
+        .from('instructor_service_capabilities')
+        .delete()
+        .eq('employee_id', instructorId)
+        .in('service_id', removedServiceIds);
+      if (deleteError) {
+        throw deleteError;
+      }
+    }
+  } catch (error) {
+    try {
+      await rollbackToPrevious();
+    } catch (rollbackError) {
+      error.rollbackError = rollbackError;
+    }
+    throw error;
+  }
+}
+
+async function writeTenantAudit(context, tenantClient, params) {
+  try {
+    await logTenantAuditEvent(tenantClient, params);
+  } catch (error) {
+    context.log?.warn?.('instructors failed to write tenant audit', {
+      message: error?.message,
+      eventType: params?.eventType,
+      resourceType: params?.resourceType,
+      resourceId: params?.resourceId,
+    });
   }
 }
 
@@ -278,6 +373,7 @@ export default async function (context, req) {
   }
 
   const isAdmin = isAdminRole(role);
+  const isOffice = !isAdmin && isAdminOrOffice(role);
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
   if (tenantError) {
     return respond(context, tenantError.status, tenantError.body);
@@ -425,11 +521,8 @@ export default async function (context, req) {
       return respond(context, 500, { message: 'failed_to_save_instructor' });
     }
 
-    if (employeeType === 'instructor' && (workingDaysInput.provided || body?.break_time_minutes !== undefined)) {
+    if (employeeType === 'instructor' && body?.break_time_minutes !== undefined) {
       const profilePayload = { employee_id: data.id };
-      if (workingDaysInput.provided) {
-        profilePayload.working_days = workingDaysInput.value;
-      }
       if (body?.break_time_minutes !== undefined) {
         profilePayload.break_time_minutes = body.break_time_minutes;
       }
@@ -446,7 +539,21 @@ export default async function (context, req) {
 
     if (employeeType === 'instructor' && serviceCapabilitiesInput.provided) {
       try {
+        const beforeCapabilities = [];
         await writeServiceCapabilities(tenantClient, data.id, serviceCapabilitiesInput.value);
+        await writeTenantAudit(context, tenantClient, {
+          actorUserId: userId,
+          eventType: 'instructor.service_capabilities.updated',
+          retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+          resourceType: 'employee',
+          resourceId: data.id,
+          beforeState: beforeCapabilities,
+          afterState: serviceCapabilitiesInput.value,
+          details: {
+            origin: 'api/instructors',
+            action: 'create',
+          },
+        });
       } catch (serviceError) {
         context.log?.error?.('instructors failed to save instructor services', { message: serviceError.message });
         return respond(context, 500, { message: 'failed_to_save_service_capabilities' });
@@ -530,10 +637,21 @@ export default async function (context, req) {
 
     const isSelf = existingEmployee.user_id === userId;
     if (!isAdmin) {
-      const allowedKeys = ['__metadata_custom_preanswers'];
-      const disallowed = Object.keys(updates).filter((key) => !allowedKeys.includes(key));
-      if (disallowed.length > 0 || !isSelf) {
-        return respond(context, 403, { message: 'forbidden' });
+      if (isOffice) {
+        const officeAllowedKeys = ['__metadata_custom_preanswers'];
+        const officeDisallowed = Object.keys(updates).filter((key) => !officeAllowedKeys.includes(key));
+        const officeConfigOnly = officeDisallowed.length === 0
+          && (serviceCapabilitiesInput.provided || body?.break_time_minutes !== undefined || Boolean(updates.__metadata_custom_preanswers));
+
+        if (!officeConfigOnly) {
+          return respond(context, 403, { message: 'forbidden' });
+        }
+      } else {
+        const allowedKeys = ['__metadata_custom_preanswers'];
+        const disallowed = Object.keys(updates).filter((key) => !allowedKeys.includes(key));
+        if (disallowed.length > 0 || !isSelf) {
+          return respond(context, 403, { message: 'forbidden' });
+        }
       }
     }
 
@@ -565,9 +683,6 @@ export default async function (context, req) {
     }
 
     if (isRoleConversionToInstructor) {
-      if (!workingDaysInput.provided || !Array.isArray(workingDaysInput.value) || workingDaysInput.value.length === 0) {
-        return respond(context, 400, { message: 'instructor_working_days_required' });
-      }
       if (!serviceCapabilitiesInput.provided || serviceCapabilitiesInput.value.length === 0) {
         return respond(context, 400, { message: 'instructor_service_capabilities_required' });
       }
@@ -611,11 +726,8 @@ export default async function (context, req) {
       employeeRecord = data;
     }
 
-    if (targetEmployeeType === 'instructor' && (workingDaysInput.provided || body?.break_time_minutes !== undefined)) {
+    if (targetEmployeeType === 'instructor' && body?.break_time_minutes !== undefined) {
       const profilePayload = { employee_id: instructorId };
-      if (workingDaysInput.provided) {
-        profilePayload.working_days = workingDaysInput.value;
-      }
       if (body?.break_time_minutes !== undefined) {
         profilePayload.break_time_minutes = body.break_time_minutes;
       }
@@ -633,10 +745,34 @@ export default async function (context, req) {
 
     if (serviceCapabilitiesInput.provided) {
       try {
+        const { data: previousCapabilities } = await tenantClient
+          .from('instructor_service_capabilities')
+          .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
+          .eq('employee_id', instructorId);
         await writeServiceCapabilities(tenantClient, instructorId, serviceCapabilitiesInput.value);
         changedFields.push('service_capabilities');
+        await writeTenantAudit(context, tenantClient, {
+          actorUserId: userId,
+          eventType: 'instructor.service_capabilities.updated',
+          retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+          resourceType: 'employee',
+          resourceId: instructorId,
+          beforeState: previousCapabilities || [],
+          afterState: serviceCapabilitiesInput.value,
+          details: {
+            origin: 'api/instructors',
+            action: 'update',
+          },
+        });
       } catch (serviceError) {
         context.log?.error?.('instructors failed to update service capabilities', { message: serviceError.message, instructorId });
+        if (serviceError?.rollbackError) {
+          context.log?.error?.('instructors failed to rollback service capabilities', {
+            message: serviceError.rollbackError.message,
+            instructorId,
+          });
+          return respond(context, 500, { message: 'failed_to_restore_service_capabilities' });
+        }
         return respond(context, 500, { message: 'failed_to_update_service_capabilities' });
       }
     }

@@ -23,7 +23,7 @@ function getInstructorName(instructor) {
 /**
  * Single template card inside the grid cell
  */
-function TemplateCard({ template, onClick }) {
+function TemplateCard({ template, onClick, isHighlighted = false }) {
   const studentName = getStudentName(template.student);
   const serviceName = template.service?.name || '—';
   const serviceColor = template.service?.color || '#6B7280';
@@ -38,6 +38,7 @@ function TemplateCard({ template, onClick }) {
         'w-full text-end rounded-md px-2 py-1.5 text-xs border transition-shadow cursor-pointer',
         'hover:shadow-md hover:border-white/60',
         isInactive && 'opacity-50 line-through',
+        isHighlighted && 'ring-2 ring-primary/60 shadow-md',
       )}
       style={{
         backgroundColor: `${serviceColor}22`,
@@ -72,7 +73,16 @@ function TemplateCard({ template, onClick }) {
  * Columns = Instructors, Rows = Days of week (Sunday-Saturday)
  * Each cell shows templates for that instructor/day pair
  */
-export function TemplateGrid({ templates, instructors, onTemplateClick, onCellClick, showInactive }) {
+export function TemplateGrid({
+  templates,
+  instructors,
+  onTemplateClick,
+  onCellClick,
+  showInactive,
+  highlightedInstructorId = null,
+  highlightedDayOfWeek = null,
+  highlightedTemplateId = null,
+}) {
   // Group templates by instructor_employee_id + day_of_week
   const grouped = useMemo(() => {
     const map = new Map(); // key: `${instructorId}|${dayOfWeek}` → template[]
@@ -137,7 +147,12 @@ export function TemplateGrid({ templates, instructors, onTemplateClick, onCellCl
                 return (
                   <td
                     key={cellKey}
-                    className="border-b border-s border-gray-200 px-2 py-1.5 align-top min-h-[60px] hover:bg-blue-50/30 cursor-pointer transition-colors"
+                    className={cn(
+                      'border-b border-s border-gray-200 px-2 py-1.5 align-top min-h-[60px] hover:bg-blue-50/30 cursor-pointer transition-colors',
+                      String(highlightedInstructorId || '') === String(instructor.id || '') &&
+                        String(highlightedDayOfWeek || '') === String(day.value) &&
+                        'bg-primary/5 ring-2 ring-inset ring-primary/40',
+                    )}
                     onClick={(e) => {
                       // Only fire cell click if they didn't click a template card
                       if (e.target === e.currentTarget || e.target.closest('td') === e.currentTarget) {
@@ -150,6 +165,7 @@ export function TemplateGrid({ templates, instructors, onTemplateClick, onCellCl
                         <TemplateCard
                           key={t.id}
                           template={t}
+                          isHighlighted={String(highlightedTemplateId || '') === String(t.id || '')}
                           onClick={(tmpl) => {
                             // Prevent cell click
                             onTemplateClick?.(tmpl);

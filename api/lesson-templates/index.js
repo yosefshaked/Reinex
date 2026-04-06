@@ -2,7 +2,9 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { normalizeDayToken, daySortValue } from '../_shared/day-of-week.js';
+import { hasConfiguredAvailability, isWithinAvailabilityWindows } from '../_shared/instructor-availability.js';
 import {
   UUID_PATTERN,
   ensureMembership,
@@ -205,6 +207,75 @@ async function serviceExists(tenantClient, serviceId) {
   return Boolean(data?.id);
 }
 
+async function validateInstructorServiceAvailability(tenantClient, {
+  instructorEmployeeId,
+  serviceId,
+  dayOfWeek,
+  timeOfDay,
+  durationMinutes,
+}) {
+  const { data, error } = await tenantClient
+    .from('instructor_service_capabilities')
+    .select('employee_id, service_id, availability_windows')
+    .eq('employee_id', instructorEmployeeId)
+    .eq('service_id', serviceId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return { ok: false, code: 'missing_instructor_service_capability' };
+  }
+
+  if (!hasConfiguredAvailability(data.availability_windows)) {
+    return { ok: false, code: 'missing_instructor_service_availability' };
+  }
+
+  if (!isWithinAvailabilityWindows({
+    availabilityWindows: data.availability_windows,
+    day: dayOfWeek,
+    startTime: timeOfDay,
+    durationMinutes,
+  })) {
+    return { ok: false, code: 'outside_instructor_service_availability' };
+  }
+
+  return { ok: true, code: null };
+}
+
+async function writeTenantAudit(context, tenantClient, params) {
+  try {
+    await logTenantAuditEvent(tenantClient, params);
+  } catch (auditError) {
+    context.log?.warn?.('lesson-templates failed to write tenant audit event', {
+      message: auditError?.message,
+      eventType: params?.eventType,
+      resourceType: params?.resourceType,
+      resourceId: params?.resourceId,
+    });
+  }
+}
+
+async function rollbackCreatedTemplate(context, tenantClient, templateId, details = {}) {
+  const rollbackResult = await tenantClient
+    .from('lesson_templates')
+    .delete()
+    .eq('id', templateId);
+
+  if (rollbackResult.error) {
+    context.log?.error?.('lesson-templates failed to rollback created template', {
+      message: rollbackResult.error.message,
+      templateId,
+      ...details,
+    });
+    return { ok: false, error: rollbackResult.error };
+  }
+
+  return { ok: true, error: null };
+}
+
 export default async function lessonTemplates(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
 
@@ -372,6 +443,7 @@ export default async function lessonTemplates(context, req) {
     const studentId = normalizeUuid(body?.student_id || body?.studentId);
     const instructorEmployeeId = normalizeUuid(body?.instructor_employee_id || body?.instructorEmployeeId);
     const serviceId = normalizeUuid(body?.service_id || body?.serviceId);
+    const waitingListEntryId = normalizeUuid(body?.waiting_list_entry_id || body?.waitingListEntryId);
     const dayOfWeek = normalizeDayOfWeek(body?.day_of_week ?? body?.dayOfWeek);
     const timeOfDay = normalizeTime(body?.time_of_day || body?.timeOfDay);
     const durationMinutes = Number(body?.duration_minutes ?? body?.durationMinutes);
@@ -426,6 +498,83 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 400, { message: 'invalid_valid_until' });
     }
 
+    try {
+      const availabilityResult = await validateInstructorServiceAvailability(tenantClient, {
+        instructorEmployeeId,
+        serviceId,
+        dayOfWeek,
+        timeOfDay,
+        durationMinutes,
+      });
+      if (!availabilityResult.ok) {
+        return respond(context, 409, { message: availabilityResult.code });
+      }
+    } catch (availabilityError) {
+      context.log?.error?.('lesson-templates failed to validate instructor service availability on create', {
+        message: availabilityError.message,
+        instructorEmployeeId,
+        serviceId,
+      });
+      return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+    }
+
+    let waitingListEntry = null;
+    let studentBeforeMatch = null;
+    if (waitingListEntryId) {
+      const { data: waitingListData, error: waitingListError } = await tenantClient
+        .from('waiting_list_entries')
+        .select('id, student_id, desired_service_id, status, metadata')
+        .eq('id', waitingListEntryId)
+        .maybeSingle();
+
+      if (waitingListError) {
+        context.log?.error?.('lesson-templates failed to load waiting-list entry for create', {
+          message: waitingListError.message,
+          waitingListEntryId,
+        });
+        return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+      }
+
+      if (!waitingListData) {
+        return respond(context, 404, { message: 'waiting_list_entry_not_found' });
+      }
+
+      if (!['new', 'open'].includes(normalizeString(waitingListData.status).toLowerCase())) {
+        return respond(context, 409, { message: 'waiting_list_entry_not_open' });
+      }
+
+      if (waitingListData.student_id !== studentId) {
+        return respond(context, 400, { message: 'waiting_list_student_mismatch' });
+      }
+
+      if (waitingListData.desired_service_id !== serviceId) {
+        return respond(context, 400, { message: 'waiting_list_service_mismatch' });
+      }
+
+      waitingListEntry = waitingListData;
+
+      const { data: studentData, error: studentError } = await tenantClient
+        .from('students')
+        .select('id, first_name, middle_name, last_name, is_active, onboarding_status, metadata')
+        .eq('id', studentId)
+        .maybeSingle();
+
+      if (studentError) {
+        context.log?.error?.('lesson-templates failed to load student for waiting-list match', {
+          message: studentError.message,
+          studentId,
+          waitingListEntryId,
+        });
+        return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+      }
+
+      if (!studentData) {
+        return respond(context, 400, { message: 'invalid_student_id' });
+      }
+
+      studentBeforeMatch = studentData;
+    }
+
     const { conflict, error: conflictCheckError } = await findExactTemplateConflict(tenantClient, {
       studentId,
       instructorEmployeeId,
@@ -478,6 +627,157 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 500, { message: 'failed_to_create_lesson_template' });
     }
 
+    let studentAfterActivation = null;
+    let studentReactivated = false;
+
+    if (waitingListEntry && studentBeforeMatch?.is_active === false) {
+      const activationTimestamp = new Date().toISOString();
+      const activationMetadata = studentBeforeMatch?.metadata && typeof studentBeforeMatch.metadata === 'object'
+        ? studentBeforeMatch.metadata
+        : {};
+      const activationPayload = {
+        is_active: true,
+        metadata: {
+          ...activationMetadata,
+          reactivated_from_waiting_list_entry_id: waitingListEntry.id,
+          reactivated_from_template_id: data.id,
+          reactivated_at: activationTimestamp,
+          reactivated_by_user_id: userId,
+        },
+      };
+
+      if (normalizeString(studentBeforeMatch.onboarding_status) === 'pending_wl_form') {
+        activationPayload.onboarding_status = 'approved';
+      }
+
+      const { data: activatedStudent, error: activationError } = await tenantClient
+        .from('students')
+        .update(activationPayload)
+        .eq('id', studentBeforeMatch.id)
+        .select('id, first_name, middle_name, last_name, is_active, onboarding_status, metadata')
+        .single();
+
+      if (activationError) {
+        context.log?.error?.('lesson-templates failed to activate student during waiting-list match', {
+          message: activationError.message,
+          waitingListEntryId: waitingListEntry.id,
+          templateId: data.id,
+          studentId: studentBeforeMatch.id,
+        });
+
+        const rollbackTemplateResult = await rollbackCreatedTemplate(context, tenantClient, data.id, {
+          waitingListEntryId: waitingListEntry.id,
+          studentId: studentBeforeMatch.id,
+          reason: 'student_activation_failed',
+        });
+
+        return respond(
+          context,
+          500,
+          { message: rollbackTemplateResult.ok ? 'failed_to_activate_student_from_waiting_list' : 'failed_to_finalize_waiting_list_match' },
+        );
+      }
+
+      studentAfterActivation = activatedStudent;
+      studentReactivated = true;
+    }
+
+    if (waitingListEntry) {
+      const matchTimestamp = new Date().toISOString();
+      const existingMetadata = waitingListEntry?.metadata && typeof waitingListEntry.metadata === 'object'
+        ? waitingListEntry.metadata
+        : {};
+      const nextMetadata = {
+        ...existingMetadata,
+        matched_template_id: data.id,
+        matched_at: matchTimestamp,
+        matched_by_user_id: userId,
+      };
+
+      const { data: matchedEntry, error: waitingListUpdateError } = await tenantClient
+        .from('waiting_list_entries')
+        .update({
+          status: 'matched',
+          metadata: nextMetadata,
+        })
+        .eq('id', waitingListEntry.id)
+        .select('id, student_id, desired_service_id, status, metadata')
+        .single();
+
+      if (waitingListUpdateError) {
+        context.log?.error?.('lesson-templates failed to mark waiting-list entry as matched', {
+          message: waitingListUpdateError.message,
+          waitingListEntryId: waitingListEntry.id,
+          templateId: data.id,
+        });
+
+        const rollbackTemplateResult = await rollbackCreatedTemplate(context, tenantClient, data.id, {
+          waitingListEntryId: waitingListEntry.id,
+          studentId,
+          reason: 'waiting_list_update_failed',
+        });
+        let rollbackStudentOk = true;
+
+        if (studentReactivated && studentBeforeMatch) {
+          const { error: rollbackStudentError } = await tenantClient
+            .from('students')
+            .update({
+              is_active: studentBeforeMatch.is_active,
+              onboarding_status: studentBeforeMatch.onboarding_status,
+              metadata: studentBeforeMatch.metadata || null,
+            })
+            .eq('id', studentBeforeMatch.id);
+
+          if (rollbackStudentError) {
+            rollbackStudentOk = false;
+            context.log?.error?.('lesson-templates failed to rollback student activation after waiting-list update failure', {
+              message: rollbackStudentError.message,
+              waitingListEntryId: waitingListEntry.id,
+              templateId: data.id,
+              studentId: studentBeforeMatch.id,
+            });
+          }
+        }
+
+        return respond(
+          context,
+          500,
+          { message: rollbackTemplateResult.ok && rollbackStudentOk ? 'failed_to_link_waiting_list_entry' : 'failed_to_finalize_waiting_list_match' },
+        );
+      }
+
+      if (studentReactivated && studentAfterActivation) {
+        await writeTenantAudit(context, tenantClient, {
+          actorUserId: userId,
+          eventType: 'student.reactivated_from_waiting_list_match',
+          retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+          resourceType: 'student',
+          resourceId: studentAfterActivation.id,
+          beforeState: studentBeforeMatch,
+          afterState: studentAfterActivation,
+          details: {
+            origin: 'api/lesson-templates',
+            waiting_list_entry_id: waitingListEntry.id,
+            lesson_template_id: data.id,
+          },
+        });
+      }
+
+      await writeTenantAudit(context, tenantClient, {
+        actorUserId: userId,
+        eventType: 'waiting_list.entry.matched',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'waiting_list_entry',
+        resourceId: matchedEntry.id,
+        beforeState: waitingListEntry,
+        afterState: matchedEntry,
+        details: {
+          origin: 'api/lesson-templates',
+          lesson_template_id: data.id,
+        },
+      });
+    }
+
     try {
       await logAuditEvent(supabase, {
         orgId,
@@ -497,6 +797,7 @@ export default async function lessonTemplates(context, req) {
           valid_from: data.valid_from,
           valid_until: data.valid_until,
           duration_minutes: data.duration_minutes,
+          waiting_list_entry_id: waitingListEntryId || null,
         },
       });
     } catch (auditError) {
@@ -506,7 +807,15 @@ export default async function lessonTemplates(context, req) {
       });
     }
 
-    return respond(context, 201, data);
+    return respond(context, 201, {
+      ...data,
+      waiting_list_match: waitingListEntry
+        ? {
+            waiting_list_entry_id: waitingListEntry.id,
+            student_reactivated: studentReactivated,
+          }
+        : null,
+    });
   }
 
   if (method === 'PUT') {
@@ -519,7 +828,7 @@ export default async function lessonTemplates(context, req) {
 
     const { data: existingTemplate, error: existingTemplateError } = await tenantClient
       .from('lesson_templates')
-      .select('id, student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active')
+      .select('id, student_id, instructor_employee_id, service_id, day_of_week, time_of_day, duration_minutes, valid_from, valid_until, is_active')
       .eq('id', templateId)
       .maybeSingle();
 
@@ -638,6 +947,25 @@ export default async function lessonTemplates(context, req) {
 
     if (nextTemplateState.valid_until && nextTemplateState.valid_until < nextTemplateState.valid_from) {
       return respond(context, 400, { message: 'invalid_valid_until' });
+    }
+
+    try {
+      const availabilityResult = await validateInstructorServiceAvailability(tenantClient, {
+        instructorEmployeeId: nextTemplateState.instructor_employee_id,
+        serviceId: updates.service_id ?? existingTemplate.service_id,
+        dayOfWeek: nextTemplateState.day_of_week,
+        timeOfDay: nextTemplateState.time_of_day,
+        durationMinutes: updates.duration_minutes ?? existingTemplate.duration_minutes,
+      });
+      if (!availabilityResult.ok) {
+        return respond(context, 409, { message: availabilityResult.code });
+      }
+    } catch (availabilityError) {
+      context.log?.error?.('lesson-templates failed to validate instructor service availability on update', {
+        message: availabilityError.message,
+        templateId,
+      });
+      return respond(context, 500, { message: 'failed_to_update_lesson_template' });
     }
 
     const isReactivating = !existingTemplate.is_active && nextTemplateState.is_active;

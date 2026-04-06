@@ -809,16 +809,17 @@ CREATE INDEX IF NOT EXISTS finance_corrections_employee_date_idx
 
 CREATE TABLE IF NOT EXISTS public.instructor_profiles (
   employee_id uuid PRIMARY KEY,
-  working_days int[] NULL,
   break_time_minutes int NULL,
   metadata jsonb NULL
 );
 
 ALTER TABLE public.instructor_profiles
   ADD COLUMN IF NOT EXISTS employee_id uuid,
-  ADD COLUMN IF NOT EXISTS working_days int[],
   ADD COLUMN IF NOT EXISTS break_time_minutes int,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+ALTER TABLE public.instructor_profiles
+  DROP COLUMN IF EXISTS working_days;
 
 DO $$
 BEGIN
@@ -840,6 +841,7 @@ CREATE TABLE IF NOT EXISTS public.instructor_service_capabilities (
   service_id uuid NOT NULL,
   max_students int NOT NULL DEFAULT 1,
   base_rate numeric NULL,
+  availability_windows jsonb NOT NULL DEFAULT '[]'::jsonb,
   metadata jsonb NULL
 );
 
@@ -848,7 +850,22 @@ ALTER TABLE public.instructor_service_capabilities
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS max_students int,
   ADD COLUMN IF NOT EXISTS base_rate numeric,
+  ADD COLUMN IF NOT EXISTS availability_windows jsonb,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+UPDATE public.instructor_service_capabilities
+SET availability_windows = '[]'::jsonb
+WHERE availability_windows IS NULL;
+
+DO $$
+BEGIN
+  ALTER TABLE public.instructor_service_capabilities
+    ALTER COLUMN availability_windows SET DEFAULT '[]'::jsonb;
+  ALTER TABLE public.instructor_service_capabilities
+    ALTER COLUMN availability_windows SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
 
 DO $$
 BEGIN

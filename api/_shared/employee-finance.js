@@ -230,7 +230,7 @@ export async function loadInstructorProfilesMap(tenantClient, employeeIds = []) 
 
   const { data, error } = await tenantClient
     .from('instructor_profiles')
-    .select('employee_id, working_days, break_time_minutes, metadata')
+    .select('employee_id, break_time_minutes, metadata')
     .in('employee_id', ids);
 
   if (error && error.code !== '42P01') {
@@ -253,12 +253,7 @@ export function normalizeWorkingDays(value) {
   return [];
 }
 
-export function resolveEmployeeWorkingDays(employee, profile = null) {
-  const fromProfile = normalizeWorkingDays(profile?.working_days);
-  if (fromProfile.length > 0) {
-    return fromProfile;
-  }
-
+export function resolveEmployeeWorkingDays(employee) {
   const fromEmployee = normalizeWorkingDays(employee?.working_days);
   if (fromEmployee.length > 0) {
     return fromEmployee;
