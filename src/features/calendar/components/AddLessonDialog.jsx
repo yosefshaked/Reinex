@@ -19,6 +19,11 @@ import {
   getAvailabilityWindowsForDay,
   hasConfiguredAvailability,
 } from '@/lib/instructor-availability.js';
+import {
+  buildSchedulingOverrideReasonDetails,
+  hasValidSchedulingOverrideReason,
+  SCHEDULING_OVERRIDE_REASON_OPTIONS,
+} from '../utils/schedulingOverride.js';
 import { parseLocalDateString } from '../utils/localDate.js';
 
 function toLocalDateString(dateObj) {
@@ -114,7 +119,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   const [error, setError] = useState(null);
   const [studentDetails, setStudentDetails] = useState(null); // Cache first student details
   const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
-  const [overrideReason, setOverrideReason] = useState('');
+  const [selectedOverrideReasonCode, setSelectedOverrideReasonCode] = useState('');
+  const [customOverrideReason, setCustomOverrideReason] = useState('');
 
   useEffect(() => {
     if (!open) {
@@ -127,7 +133,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     setStudentDetails(null);
     setIsGroupSession(false);
     setUseSchedulingOverride(false);
-    setOverrideReason('');
+    setSelectedOverrideReasonCode('');
+    setCustomOverrideReason('');
   }, [open, defaultDate, defaultSelection]);
 
   useEffect(() => {
@@ -379,7 +386,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         setError('לא נמצאה שעה זמינה ביום שנבחר עבור השירות והמדריך/ה.');
         return;
       }
-      if (useSchedulingOverride && !overrideReason.trim()) {
+      if (useSchedulingOverride && !hasValidSchedulingOverrideReason(selectedOverrideReasonCode, customOverrideReason)) {
         setError('יש למלא סיבת חריגה לפני יצירת שיעור חד-פעמי מחוץ לזמינות.');
         return;
       }
@@ -388,6 +395,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         setError('תאריך או שעה אינם תקינים.');
         return;
       }
+      const overrideReasonDetails = buildSchedulingOverrideReasonDetails(selectedOverrideReasonCode, customOverrideReason);
 
       await authenticatedFetch('calendar/instances', {
         method: 'POST',
@@ -404,7 +412,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             ? {
                 scheduling_override: {
                   type: 'one_time_exception',
-                  reason: overrideReason.trim(),
+                  reason: overrideReasonDetails.reason,
+                  reason_code: overrideReasonDetails.reasonCode,
                   created_by_ui: true,
                 },
               }
@@ -623,6 +632,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 size="sm"
                 onClick={() => {
                   setUseSchedulingOverride((prev) => !prev);
+                  setSelectedOverrideReasonCode('');
+                  setCustomOverrideReason('');
                   setError(null);
                 }}
               >
@@ -741,14 +752,36 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 />
               </div>
               <div>
-                <Label htmlFor="override-reason">סיבת החריגה *</Label>
-                <Textarea
-                  id="override-reason"
-                  rows={3}
-                  value={overrideReason}
-                  onChange={(event) => setOverrideReason(event.target.value)}
-                  placeholder="למשל: חופשה, תגבור חד-פעמי, חלון זמני פנוי, שירות מיוחד"
-                />
+                <Label htmlFor="override-reason-code">סיבת החריגה *</Label>
+                <Select value={selectedOverrideReasonCode} onValueChange={setSelectedOverrideReasonCode}>
+                  <SelectTrigger id="override-reason-code">
+                    <SelectValue placeholder="בחרו סיבה" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SCHEDULING_OVERRIDE_REASON_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {selectedOverrideReasonCode === 'custom' ? (
+                <div>
+                  <Label htmlFor="override-custom-reason">פירוט נוסף *</Label>
+                  <Textarea
+                    id="override-custom-reason"
+                    rows={3}
+                    value={customOverrideReason}
+                    onChange={(event) => setCustomOverrideReason(event.target.value)}
+                    placeholder="כתבו סיבה מותאמת אישית רק אם היא לא קיימת ברשימה."
+                  />
+                </div>
+              ) : null}
+              <div>
+                <p className="text-xs text-amber-800">
+                  בחרו את הסיבה הקרובה ביותר. השתמשו ב"אחר" רק כשאין התאמה ברשימה.
+                </p>
               </div>
             </div>
           )}
@@ -797,7 +830,9 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 || !formData.date
                 || !formData.time
                 || formData.student_ids.length === 0
-                || (useSchedulingOverride ? !overrideReason.trim() : (!hasAvailableSlots && !formData.time))
+                || (useSchedulingOverride
+                  ? !hasValidSchedulingOverrideReason(selectedOverrideReasonCode, customOverrideReason)
+                  : (!hasAvailableSlots && !formData.time))
               }
             >
               {isSubmitting ? (

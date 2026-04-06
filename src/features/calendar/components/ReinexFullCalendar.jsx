@@ -30,8 +30,15 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog.jsx';
 import { Textarea } from '@/components/ui/textarea.jsx';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
 import { formatTimeDisplay, getInstanceStatusIcon } from '../utils/timeGrid';
 import { mapInstancesToEvents, mapInstructorsToResources } from '../utils/fullcalendar-adapter.js';
+import {
+  buildSchedulingOverrideReasonDetails,
+  hasValidSchedulingOverrideReason,
+  resolveSchedulingOverrideFormState,
+  SCHEDULING_OVERRIDE_REASON_OPTIONS,
+} from '../utils/schedulingOverride.js';
 import {
   buildInstructorDayMessage,
   buildInstructorWeekMessage,
@@ -96,7 +103,11 @@ function getLocalStartTime(date) {
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
-function buildSchedulingOverrideMetadata(baseMetadata, { enabled, reason }) {
+function buildSchedulingOverrideMetadata(baseMetadata, {
+  enabled,
+  selectedReasonCode,
+  customReason,
+}) {
   const nextMetadata = baseMetadata && typeof baseMetadata === 'object' && !Array.isArray(baseMetadata)
     ? { ...baseMetadata }
     : {};
@@ -106,14 +117,15 @@ function buildSchedulingOverrideMetadata(baseMetadata, { enabled, reason }) {
     return nextMetadata;
   }
 
-  const trimmedReason = String(reason || '').trim();
+  const { reasonCode, reason } = buildSchedulingOverrideReasonDetails(selectedReasonCode, customReason);
   const existingOverride = nextMetadata.scheduling_override && typeof nextMetadata.scheduling_override === 'object'
     ? nextMetadata.scheduling_override
     : {};
 
   nextMetadata.scheduling_override = {
     type: 'one_time_exception',
-    reason: trimmedReason,
+    reason,
+    reason_code: reasonCode,
     created_by_ui: true,
     created_at: existingOverride.created_at || new Date().toISOString(),
   };
@@ -169,8 +181,10 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
   const instancesArray = Array.isArray(instances) ? instances : [];
   const eventInstructorIds = new Set(instancesArray.map((instance) => String(instance?.instructor_employee_id || '')).filter(Boolean));
   const visibleInstructors = [];
-  const backgroundEvents = [];
+  const availabilityEvents = [];
+  const unavailableEvents = [];
   const boundMinutes = [];
+  const availabilityWindowMap = new Map();
 
   for (const instructor of instructorsArray) {
     if (!instructor?.id) continue;
@@ -199,7 +213,16 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
       if (startMinutes == null || endMinutes == null || !dateString) continue;
 
       boundMinutes.push(startMinutes, endMinutes);
-      backgroundEvents.push({
+      const availabilityKey = `${instructor.id}__${window.day}`;
+      if (!availabilityWindowMap.has(availabilityKey)) {
+        availabilityWindowMap.set(availabilityKey, []);
+      }
+      availabilityWindowMap.get(availabilityKey).push({
+        startMinutes,
+        endMinutes,
+      });
+
+      availabilityEvents.push({
         id: `availability_${instructor.id}_${window.day}_${window.start}_${window.end}`,
         resourceId: String(instructor.id),
         start: `${dateString}T${window.start}:00`,
@@ -231,7 +254,7 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
   if (boundMinutes.length === 0) {
     return {
       visibleInstructors,
-      backgroundEvents,
+      backgroundEvents: [...unavailableEvents, ...availabilityEvents],
       slotMinTime: '08:00:00',
       slotMaxTime: '18:00:00',
     };
@@ -240,9 +263,45 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
   const minMinutes = Math.max(0, Math.floor(Math.min(...boundMinutes) / 15) * 15 - 30);
   const maxMinutes = Math.min(24 * 60, Math.ceil(Math.max(...boundMinutes) / 15) * 15 + 30);
 
+  for (const instructor of visibleInstructors) {
+    for (const viewDate of viewDates) {
+      const availabilityKey = `${instructor.id}__${viewDate.dayToken}`;
+      const windows = [...(availabilityWindowMap.get(availabilityKey) || [])]
+        .sort((left, right) => left.startMinutes - right.startMinutes);
+
+      let cursor = minMinutes;
+      for (const window of windows) {
+        const gapStart = cursor;
+        const gapEnd = Math.min(maxMinutes, window.startMinutes);
+        if (gapEnd > gapStart) {
+          unavailableEvents.push({
+            id: `unavailable_${instructor.id}_${viewDate.dayToken}_${gapStart}_${gapEnd}`,
+            resourceId: String(instructor.id),
+            start: `${viewDate.dateString}T${formatCalendarTime(gapStart).slice(0, 5)}:00`,
+            end: `${viewDate.dateString}T${formatCalendarTime(gapEnd).slice(0, 5)}:00`,
+            display: 'background',
+            classNames: ['reinex-calendar-unavailable'],
+          });
+        }
+        cursor = Math.max(cursor, window.endMinutes);
+      }
+
+      if (cursor < maxMinutes) {
+        unavailableEvents.push({
+          id: `unavailable_${instructor.id}_${viewDate.dayToken}_${cursor}_${maxMinutes}`,
+          resourceId: String(instructor.id),
+          start: `${viewDate.dateString}T${formatCalendarTime(cursor).slice(0, 5)}:00`,
+          end: `${viewDate.dateString}T${formatCalendarTime(maxMinutes).slice(0, 5)}:00`,
+          display: 'background',
+          classNames: ['reinex-calendar-unavailable'],
+        });
+      }
+    }
+  }
+
   return {
     visibleInstructors,
-    backgroundEvents,
+    backgroundEvents: [...unavailableEvents, ...availabilityEvents],
     slotMinTime: formatCalendarTime(minMinutes),
     slotMaxTime: formatCalendarTime(Math.max(minMinutes + 60, maxMinutes)),
   };
@@ -477,7 +536,7 @@ export default function ReinexFullCalendar({
     if (pendingDropInfo.availabilityState?.status === 'outside_availability' && !pendingDropInfo.useSchedulingOverride) {
       return true;
     }
-    if (pendingDropInfo.useSchedulingOverride && !String(pendingDropInfo.overrideReason || '').trim()) {
+    if (pendingDropInfo.useSchedulingOverride && !hasValidSchedulingOverrideReason(pendingDropInfo.selectedReasonCode, pendingDropInfo.customReason)) {
       return true;
     }
     return false;
@@ -603,12 +662,13 @@ export default function ReinexFullCalendar({
       return;
     }
 
-    const existingOverrideReason = String(instance?.metadata?.scheduling_override?.reason || '').trim();
+    const overrideState = resolveSchedulingOverrideFormState(instance?.metadata?.scheduling_override);
     setPendingDropInfo({
       rawInfo: info,
       availabilityState,
       useSchedulingOverride: availabilityState.status === 'outside_availability',
-      overrideReason: existingOverrideReason,
+      selectedReasonCode: overrideState.selectedReasonCode || '',
+      customReason: overrideState.customReason || '',
     });
   }, [activeOrgId, instructorMap]);
 
@@ -640,7 +700,7 @@ export default function ReinexFullCalendar({
       return;
     }
 
-    if (pendingDropInfo.useSchedulingOverride && !String(pendingDropInfo.overrideReason || '').trim()) {
+    if (pendingDropInfo.useSchedulingOverride && !hasValidSchedulingOverrideReason(pendingDropInfo.selectedReasonCode, pendingDropInfo.customReason)) {
       toast.error('יש למלא סיבת חריגה לפני שמירת השיבוץ החריג.');
       return;
     }
@@ -679,7 +739,8 @@ export default function ReinexFullCalendar({
           status: instance.status,
           metadata: buildSchedulingOverrideMetadata(instance.metadata, {
             enabled: pendingDropInfo.useSchedulingOverride,
-            reason: pendingDropInfo.overrideReason,
+            selectedReasonCode: pendingDropInfo.selectedReasonCode,
+            customReason: pendingDropInfo.customReason,
           }),
         },
       });
@@ -876,18 +937,39 @@ export default function ReinexFullCalendar({
                 {pendingDropInfo.availabilityState.message}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="pending-drop-override-reason">סיבת חריגה *</Label>
-                <Textarea
-                  id="pending-drop-override-reason"
-                  rows={3}
-                  value={pendingDropInfo.overrideReason}
-                  onChange={(event) => setPendingDropInfo((current) => (
+                <Label htmlFor="pending-drop-override-reason-code">סיבת חריגה *</Label>
+                <Select
+                  value={pendingDropInfo.selectedReasonCode || ''}
+                  onValueChange={(value) => setPendingDropInfo((current) => (
                     current
-                      ? { ...current, useSchedulingOverride: true, overrideReason: event.target.value }
+                      ? { ...current, useSchedulingOverride: true, selectedReasonCode: value }
                       : current
                   ))}
-                  placeholder="לדוגמה: חלון חד-פעמי בחופשה, טיפול חריג או התאמה זמנית."
-                />
+                >
+                  <SelectTrigger id="pending-drop-override-reason-code">
+                    <SelectValue placeholder="בחרו סיבה" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SCHEDULING_OVERRIDE_REASON_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {pendingDropInfo.selectedReasonCode === 'custom' ? (
+                  <Textarea
+                    id="pending-drop-override-custom-reason"
+                    rows={3}
+                    value={pendingDropInfo.customReason || ''}
+                    onChange={(event) => setPendingDropInfo((current) => (
+                      current
+                        ? { ...current, useSchedulingOverride: true, customReason: event.target.value }
+                        : current
+                    ))}
+                    placeholder="כתבו סיבה מותאמת אישית רק אם היא לא קיימת ברשימה."
+                  />
+                ) : null}
               </div>
             </div>
           ) : null}

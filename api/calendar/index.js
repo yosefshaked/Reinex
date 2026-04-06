@@ -226,6 +226,7 @@ function normalizeSchedulingOverrideMetadata(metadata) {
   const normalizedOverride = {
     type: 'one_time_exception',
     reason,
+    ...(normalizeString(rawOverride.reason_code) ? { reason_code: normalizeString(rawOverride.reason_code) } : {}),
     created_by_ui: rawOverride.created_by_ui === true,
     created_at: normalizeString(rawOverride.created_at) || new Date().toISOString(),
   };

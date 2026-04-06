@@ -19,6 +19,12 @@ import { LockedCorrectionPanel } from './LockedCorrectionPanel';
 import { useVersionConflictResolver } from './useVersionConflictResolver';
 import { dayTokenForJsDay } from '@/lib/day-of-week.js';
 import { hasConfiguredAvailability, isWithinAvailabilityWindows } from '@/lib/instructor-availability.js';
+import {
+  buildSchedulingOverrideReasonDetails,
+  hasValidSchedulingOverrideReason,
+  resolveSchedulingOverrideFormState,
+  SCHEDULING_OVERRIDE_REASON_OPTIONS,
+} from '../utils/schedulingOverride.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -63,7 +69,7 @@ function getDayTokenForDateString(dateString) {
   return dayTokenForJsDay(localDate.getDay());
 }
 
-function buildSchedulingOverrideMetadata(baseMetadata, { enabled, reason }) {
+function buildSchedulingOverrideMetadata(baseMetadata, { enabled, selectedReasonCode, customReason }) {
   const nextMetadata = baseMetadata && typeof baseMetadata === 'object' && !Array.isArray(baseMetadata)
     ? { ...baseMetadata }
     : {};
@@ -73,14 +79,15 @@ function buildSchedulingOverrideMetadata(baseMetadata, { enabled, reason }) {
     return nextMetadata;
   }
 
-  const trimmedReason = String(reason || '').trim();
+  const { reasonCode, reason } = buildSchedulingOverrideReasonDetails(selectedReasonCode, customReason);
   const existingOverride = nextMetadata.scheduling_override && typeof nextMetadata.scheduling_override === 'object'
     ? nextMetadata.scheduling_override
     : {};
 
   nextMetadata.scheduling_override = {
     type: 'one_time_exception',
-    reason: trimmedReason,
+    reason,
+    reason_code: reasonCode,
     created_by_ui: true,
     created_at: existingOverride.created_at || new Date().toISOString(),
   };
@@ -388,7 +395,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     closed_reason: '',
   });
   const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
-  const [overrideReason, setOverrideReason] = useState('');
+  const [selectedOverrideReasonCode, setSelectedOverrideReasonCode] = useState('');
+  const [customOverrideReason, setCustomOverrideReason] = useState('');
 
   const resetEditState = useCallback((instanceValue = displayInstance) => {
     if (!instanceValue) {
@@ -405,11 +413,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       status: instanceValue.status || 'scheduled',
       closed_reason: instanceValue.closed_reason || '',
     });
-    const existingOverrideReason = typeof instanceValue?.metadata?.scheduling_override?.reason === 'string'
-      ? instanceValue.metadata.scheduling_override.reason
-      : '';
-    setUseSchedulingOverride(Boolean(existingOverrideReason));
-    setOverrideReason(existingOverrideReason);
+    const overrideState = resolveSchedulingOverrideFormState(instanceValue?.metadata?.scheduling_override);
+    setUseSchedulingOverride(overrideState.enabled);
+    setSelectedOverrideReasonCode(overrideState.selectedReasonCode);
+    setCustomOverrideReason(overrideState.customReason);
   }, [displayInstance]);
 
   // Initialize form data when instance changes
@@ -666,7 +673,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           expected_version: latestValue.version,
           metadata: buildSchedulingOverrideMetadata(latestValue.metadata, {
             enabled: payload.useSchedulingOverride,
-            reason: payload.overrideReason,
+            selectedReasonCode: payload.selectedOverrideReasonCode,
+            customReason: payload.customOverrideReason,
           }),
         };
         if (isCancellationStatus(payload.formData.status) || payload.formData.status === 'no_show') {
@@ -756,7 +764,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       if (schedulingAvailabilityState.status === 'outside_instructor_service_availability' && !useSchedulingOverride) {
         throw new Error('outside_instructor_service_availability');
       }
-      if (useSchedulingOverride && !overrideReason.trim()) {
+      if (useSchedulingOverride && !hasValidSchedulingOverrideReason(selectedOverrideReasonCode, customOverrideReason)) {
         throw new Error('יש למלא סיבת חריגה לפני שמירת שיבוץ מחוץ לזמינות.');
       }
 
@@ -776,7 +784,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         expected_version: instance.version,
         metadata: buildSchedulingOverrideMetadata(displayInstance?.metadata, {
           enabled: useSchedulingOverride,
-          reason: overrideReason,
+          selectedReasonCode: selectedOverrideReasonCode,
+          customReason: customOverrideReason,
         }),
       };
 
@@ -796,7 +805,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       const handled = await handleVersionConflict(err, createSaveConflictAdapter(), {
         formData: { ...formData },
         useSchedulingOverride,
-        overrideReason,
+        selectedOverrideReasonCode,
+        customOverrideReason,
       });
       if (!handled) {
         setError(resolveMutationError(err));
@@ -1254,9 +1264,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
-  const schedulingOverrideReason = typeof displayInstance?.metadata?.scheduling_override?.reason === 'string'
-    ? displayInstance.metadata.scheduling_override.reason
-    : '';
+  const schedulingOverrideState = useMemo(
+    () => resolveSchedulingOverrideFormState(displayInstance?.metadata?.scheduling_override),
+    [displayInstance?.metadata?.scheduling_override],
+  );
+  const schedulingOverrideReason = schedulingOverrideState.resolvedReason || '';
   const selectedInstructorCapability = useMemo(() => {
     const selectedInstructor = (instructors || []).find(
       (instructor) => String(instructor.id) === String(formData.instructor_employee_id || ''),
@@ -1547,14 +1559,28 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
               {useSchedulingOverride && (
                 <div className="space-y-2">
-                  <Label htmlFor="lesson-override-reason">סיבת החריגה *</Label>
-                  <Textarea
-                    id="lesson-override-reason"
-                    rows={3}
-                    value={overrideReason}
-                    onChange={(event) => setOverrideReason(event.target.value)}
-                    placeholder="לדוגמה: פעילות חג, טיפול חריג או חלון זמני פנוי."
-                  />
+                  <Label htmlFor="lesson-override-reason-code">סיבת החריגה *</Label>
+                  <Select value={selectedOverrideReasonCode} onValueChange={setSelectedOverrideReasonCode}>
+                    <SelectTrigger id="lesson-override-reason-code">
+                      <SelectValue placeholder="בחרו סיבה" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SCHEDULING_OVERRIDE_REASON_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedOverrideReasonCode === 'custom' ? (
+                    <Textarea
+                      id="lesson-override-custom-reason"
+                      rows={3}
+                      value={customOverrideReason}
+                      onChange={(event) => setCustomOverrideReason(event.target.value)}
+                      placeholder="כתבו סיבה מותאמת אישית רק אם היא לא קיימת ברשימה."
+                    />
+                  ) : null}
                 </div>
               )}
             </div>
