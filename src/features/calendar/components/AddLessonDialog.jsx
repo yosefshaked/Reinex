@@ -274,6 +274,13 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     selectedDayToken,
     useSchedulingOverride,
   ]);
+  const showSchedulingOverrideCta = Boolean(
+    formData.instructor_employee_id
+    && formData.service_id
+    && formData.time
+    && !useSchedulingOverride
+    && selectedTimeOutsideAvailability,
+  );
 
   useEffect(() => {
     if (useSchedulingOverride) {
@@ -505,12 +512,14 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
           <DialogDescription className="sr-only">יצירת שיעור חדש עבור תלמידים נבחרים.</DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Student - FIRST FIELD */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <Label htmlFor="students">תלמיד *</Label>
-              {formData.student_ids.length > 0 && !isGroupSession && (
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">משתתפים</p>
+                <p className="text-xs text-slate-500">בחרו תלמיד/ה ראשי/ת, ובמידת הצורך הוסיפו משתתפים נוספים.</p>
+              </div>
+              {formData.student_ids.length > 0 && !isGroupSession ? (
                 <Button
                   type="button"
                   variant="outline"
@@ -521,53 +530,53 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                   <Users className="h-4 w-4" />
                   להוסיף תלמידים נוספים
                 </Button>
-              )}
+              ) : null}
             </div>
-            {studentsLoading && (
-              <div className="text-sm text-gray-500 mb-2 flex items-center gap-2">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                טוען תלמידים...
-              </div>
-            )}
-            {studentsError && !studentsLoading && (
-              <div className="text-sm text-red-600 mb-2">
-                {studentsError}
-              </div>
-            )}
-            {!studentsLoading && !studentsError && studentOptions.length === 0 && (
-              <div className="text-sm text-amber-600 mb-2">
-                לא נמצאו תלמידים
-              </div>
-            )}
-            
-            {/* Primary student selection */}
-            <ComboBoxField
-              id="primary-student"
-              name="primary-student"
-              options={studentOptions}
-              value={formData.student_ids[0] ? students.find(s => s.id === formData.student_ids[0])?.label || '' : ''}
-              onChange={(value) => {
-                const student = students.find(s => 
-                  `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() === value.trim()
-                );
-                const newIds = student ? [student.id] : [];
-                if (isGroupSession) {
-                  // Keep existing secondary students
-                  const otherIds = formData.student_ids.slice(1);
-                  setFormData({ ...formData, student_ids: [...newIds, ...otherIds] });
-                } else {
-                  setFormData({ ...formData, student_ids: newIds });
-                }
-              }}
-              placeholder={studentsLoading ? "טוען..." : "בחר תלמיד"}
-              disabled={studentsLoading || studentOptions.length === 0}
-              emptyMessage="לא נמצאו תלמידים"
-            />
+            <div className="space-y-2">
+              <Label htmlFor="students">תלמיד *</Label>
+              {studentsLoading ? (
+                <div className="text-sm text-gray-500 mb-2 flex items-center gap-2">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  טוען תלמידים...
+                </div>
+              ) : null}
+              {studentsError && !studentsLoading ? (
+                <div className="text-sm text-red-600 mb-2">
+                  {studentsError}
+                </div>
+              ) : null}
+              {!studentsLoading && !studentsError && studentOptions.length === 0 ? (
+                <div className="text-sm text-amber-600 mb-2">
+                  לא נמצאו תלמידים
+                </div>
+              ) : null}
 
-            {/* Additional students for group sessions */}
-            {isGroupSession && (
-              <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                <div className="flex items-center justify-between mb-2">
+              <ComboBoxField
+                id="primary-student"
+                name="primary-student"
+                options={studentOptions}
+                value={formData.student_ids[0] ? students.find(s => s.id === formData.student_ids[0])?.label || '' : ''}
+                onChange={(value) => {
+                  const student = students.find(s =>
+                    `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() === value.trim()
+                  );
+                  const newIds = student ? [student.id] : [];
+                  if (isGroupSession) {
+                    const otherIds = formData.student_ids.slice(1);
+                    setFormData({ ...formData, student_ids: [...newIds, ...otherIds] });
+                  } else {
+                    setFormData({ ...formData, student_ids: newIds });
+                  }
+                }}
+                placeholder={studentsLoading ? "טוען..." : "בחר תלמיד"}
+                disabled={studentsLoading || studentOptions.length === 0}
+                emptyMessage="לא נמצאו תלמידים"
+              />
+            </div>
+
+            {isGroupSession ? (
+              <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="mb-2 flex items-center justify-between">
                   <Label>תלמידים נוספים</Label>
                   <Button
                     type="button"
@@ -600,13 +609,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                   </SelectContent>
                 </Select>
 
-                {/* List of added students */}
-                {formData.student_ids.length > 1 && (
+                {formData.student_ids.length > 1 ? (
                   <div className="mt-3 space-y-2">
                     {formData.student_ids.slice(1).map((studentId) => {
                       const student = students.find(s => s.id === studentId);
                       return (
-                        <div key={studentId} className="flex items-center justify-between p-2 bg-white rounded border">
+                        <div key={studentId} className="flex items-center justify-between rounded border bg-white p-2">
                           <span>{student?.label}</span>
                           <Button
                             type="button"
@@ -615,7 +623,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                             onClick={() => {
                               setFormData({
                                 ...formData,
-                                student_ids: formData.student_ids.filter(id => id !== studentId)
+                                student_ids: formData.student_ids.filter(id => id !== studentId),
                               });
                             }}
                           >
@@ -625,128 +633,142 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                       );
                     })}
                   </div>
-                )}
-              </div>
-            )}
-
-            {!isGroupSession && formData.student_ids.length > 0 && studentDetails && (
-              <div className="mt-2 p-2 bg-blue-50 rounded text-sm">
-                <p className="font-medium">{studentDetails.first_name} {studentDetails.last_name}</p>
-              </div>
-            )}
-          </div>
-
-          {/* Service - AUTO-POPULATED */}
-          <div>
-            <Label htmlFor="service">שירות *</Label>
-            {servicesError && (
-              <div className="text-sm text-red-600 mb-2">{servicesError}</div>
-            )}
-            <Select
-              value={formData.service_id}
-              onValueChange={(value) => {
-                const selectedService = activeServices.find((service) => String(service.id) === String(value));
-                setFormData((prev) => ({
-                  ...prev,
-                  service_id: String(value),
-                  duration_minutes: selectedService?.duration_minutes || prev.duration_minutes,
-                }));
-              }}
-              disabled={servicesLoading || !formData.student_ids.length}
-            >
-              <SelectTrigger id="service">
-                <SelectValue placeholder={formData.student_ids.length ? "בחר שירות" : "בחר תלמיד תחילה"} />
-              </SelectTrigger>
-              <SelectContent>
-                {activeServices.map((service) => (
-                  <SelectItem key={service.id} value={String(service.id)}>
-                    {service.name || service.service_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-900">שיבוץ לפי זמינות</p>
-                <p className="text-xs text-slate-600">
-                  ברירת המחדל מציגה רק מדריכים ושעות זמינים לשירות ולתאריך שנבחרו.
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant={useSchedulingOverride ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  setUseSchedulingOverride((prev) => !prev);
-                  setSelectedOverrideReasonCode('');
-                  setCustomOverrideReason('');
-                  setError(null);
-                }}
-              >
-                {useSchedulingOverride ? 'בטל שיבוץ חריג' : 'שיבוץ חד-פעמי חריג'}
-              </Button>
-            </div>
-            <p className="mt-2 text-xs text-slate-500">
-              שיבוץ חריג מיועד לחגים, שירות מיוחד או חלון זמני פנוי, ואינו משנה את הזמינות הקבועה של המדריך/ה.
-            </p>
-          </div>
-
-          {/* Instructor - AUTO-POPULATED */}
-          <div>
-            <Label htmlFor="instructor">מדריך *</Label>
-            {instructorsError && (
-              <div className="text-sm text-red-600 mb-2">{instructorsError}</div>
-            )}
-            {!useSchedulingOverride && formData.service_id && selectedDayToken && instructorOptions.length === 0 ? (
-              <div className="mb-2 text-sm text-amber-700">
-                אין כרגע מדריכים זמינים עבור השירות והתאריך שנבחרו. אפשר לעבור לשיבוץ חד-פעמי חריג במקרה חריג.
+                ) : null}
               </div>
             ) : null}
-            <Select
-              value={formData.instructor_employee_id}
-              onValueChange={(value) => setFormData({ ...formData, instructor_employee_id: String(value) })}
-              disabled={instructorsLoading || instructorOptions.length === 0}
-            >
-              <SelectTrigger id="instructor">
-                <SelectValue placeholder={useSchedulingOverride ? 'בחר מדריך/ה בעל/ת יכולת שירות' : 'בחר מדריך/ה זמין/ה'} />
-              </SelectTrigger>
-              <SelectContent>
-                {instructorOptions.map((instructor) => (
-                  <SelectItem key={instructor.id} value={String(instructor.id)}>
-                    {instructor.full_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+
+            {!isGroupSession && formData.student_ids.length > 0 && studentDetails ? (
+              <div className="mt-3 rounded-xl bg-blue-50 p-2 text-sm">
+                <p className="font-medium">{studentDetails.first_name} {studentDetails.last_name}</p>
+              </div>
+            ) : null}
           </div>
 
-          {/* Date */}
-          <div>
-            <Label htmlFor="date">תאריך *</Label>
-            <Input
-              id="date"
-              type="date"
-              value={formData.date}
-              onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-              required
-            />
-          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-4">
+              <p className="text-sm font-semibold text-slate-900">פרטי שיבוץ</p>
+              <p className="text-xs text-slate-500">הגדירו את השירות, התאריך ופרטי המפגש. לאחר מכן יוצגו המדריכים והשעות הרלוונטיים.</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="service">שירות *</Label>
+                {servicesError ? (
+                  <div className="text-sm text-red-600">{servicesError}</div>
+                ) : null}
+                <Select
+                  value={formData.service_id}
+                  onValueChange={(value) => {
+                    const selectedService = activeServices.find((service) => String(service.id) === String(value));
+                    setFormData((prev) => ({
+                      ...prev,
+                      service_id: String(value),
+                      duration_minutes: selectedService?.duration_minutes || prev.duration_minutes,
+                    }));
+                  }}
+                  disabled={servicesLoading || !formData.student_ids.length}
+                >
+                  <SelectTrigger id="service">
+                    <SelectValue placeholder={formData.student_ids.length ? "בחר שירות" : "בחר תלמיד תחילה"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeServices.map((service) => (
+                      <SelectItem key={service.id} value={String(service.id)}>
+                        {service.name || service.service_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-          {/* Duration */}
-          <div>
-            <Label htmlFor="duration">משך (דקות) *</Label>
-            <Input
-              id="duration"
-              type="number"
-              min="15"
-              step="15"
-              value={formData.duration_minutes}
-              onChange={(e) => setFormData({ ...formData, duration_minutes: parseInt(e.target.value, 10) || 60 })}
-              required
-            />
+              <div className="space-y-2">
+                <Label htmlFor="date">תאריך *</Label>
+                <Input
+                  id="date"
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="instructor">מדריך *</Label>
+                {instructorsError ? (
+                  <div className="text-sm text-red-600">{instructorsError}</div>
+                ) : null}
+                {!useSchedulingOverride && formData.service_id && selectedDayToken && instructorOptions.length === 0 ? (
+                  <div className="text-sm text-amber-700">
+                    אין כרגע מדריכים זמינים עבור השירות והתאריך שנבחרו.
+                  </div>
+                ) : null}
+                <Select
+                  value={formData.instructor_employee_id}
+                  onValueChange={(value) => setFormData({ ...formData, instructor_employee_id: String(value) })}
+                  disabled={instructorsLoading || instructorOptions.length === 0}
+                >
+                  <SelectTrigger id="instructor">
+                    <SelectValue placeholder={useSchedulingOverride ? 'בחר מדריך/ה בעל/ת יכולת שירות' : 'בחר מדריך/ה זמין/ה'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {instructorOptions.map((instructor) => (
+                      <SelectItem key={instructor.id} value={String(instructor.id)}>
+                        {instructor.full_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="duration">משך (דקות) *</Label>
+                <Input
+                  id="duration"
+                  type="number"
+                  min="15"
+                  step="15"
+                  value={formData.duration_minutes}
+                  onChange={(e) => setFormData({ ...formData, duration_minutes: parseInt(e.target.value, 10) || 60 })}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="time">שעה *</Label>
+                {!formData.instructor_employee_id || !formData.service_id || !selectedDayToken ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                    בחרו שירות, תאריך ומדריך/ה כדי לראות את השעות הזמינות.
+                  </div>
+                ) : !useSchedulingOverride && !hasAvailableSlots ? (
+                  <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    אין שעות פנויות התואמות את חלונות הזמינות עבור היום הזה.
+                  </div>
+                ) : !useSchedulingOverride ? (
+                  <Select
+                    value={formData.time || undefined}
+                    onValueChange={(value) => setFormData((prev) => ({ ...prev, time: value }))}
+                  >
+                    <SelectTrigger id="time">
+                      <SelectValue placeholder="בחר שעה זמינה" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableTimeSlots.map((time) => (
+                        <SelectItem key={time} value={time}>
+                          {formatTimeLabel(time)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    id="time"
+                    type="time"
+                    value={formData.time}
+                    onChange={(e) => setFormData({ ...formData, time: e.target.value })}
+                    required
+                  />
+                )}
+              </div>
+            </div>
           </div>
 
           {formData.instructor_employee_id && formData.service_id && !useSchedulingOverride && missingCapability ? (
@@ -772,77 +794,67 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             </Alert>
           ) : null}
 
-          {!useSchedulingOverride ? (
-            <div>
-              <Label htmlFor="time">שעה *</Label>
-              {!formData.instructor_employee_id || !formData.service_id || !selectedDayToken ? (
-                <div className="mt-1 text-sm text-slate-500">בחרו מדריך/ה, שירות ותאריך כדי לראות את השעות הזמינות.</div>
-              ) : !hasAvailableSlots ? (
-                <div className="mt-1 text-sm text-amber-700">אין שעות פנויות התואמות את חלונות הזמינות עבור היום הזה.</div>
-              ) : (
-                <Select
-                  value={formData.time || undefined}
-                  onValueChange={(value) => setFormData((prev) => ({ ...prev, time: value }))}
-                >
-                  <SelectTrigger id="time">
-                    <SelectValue placeholder="בחר שעה זמינה" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableTimeSlots.map((time) => (
-                      <SelectItem key={time} value={time}>
-                        {formatTimeLabel(time)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-          ) : (
+          {(showSchedulingOverrideCta || useSchedulingOverride) ? (
             <div className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50/70 p-4">
-              <div>
-                <Label htmlFor="time">שעה חריגה *</Label>
-                <Input
-                  id="time"
-                  type="time"
-                  value={formData.time}
-                  onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                  required
-                />
-              </div>
-              <div>
-                <Label htmlFor="override-reason-code">סיבת החריגה *</Label>
-                <Select value={selectedOverrideReasonCode} onValueChange={setSelectedOverrideReasonCode}>
-                  <SelectTrigger id="override-reason-code">
-                    <SelectValue placeholder="בחרו סיבה" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SCHEDULING_OVERRIDE_REASON_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {selectedOverrideReasonCode === 'custom' ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <Label htmlFor="override-custom-reason">פירוט נוסף *</Label>
-                  <Textarea
-                    id="override-custom-reason"
-                    rows={3}
-                    value={customOverrideReason}
-                    onChange={(event) => setCustomOverrideReason(event.target.value)}
-                    placeholder="כתבו סיבה מותאמת אישית רק אם היא לא קיימת ברשימה."
-                  />
+                  <p className="text-sm font-semibold text-amber-950">שיבוץ חד-פעמי חריג</p>
+                  <p className="text-xs text-amber-800">
+                    הפעילו את האפשרות הזו רק אם רוצים לקבוע שיעור מחוץ לחלונות הזמינות של המדריך/ה.
+                  </p>
                 </div>
-              ) : null}
-              <div>
-                <p className="text-xs text-amber-800">
-                  בחרו את הסיבה הקרובה ביותר. השתמשו ב"אחר" רק כשאין התאמה ברשימה.
-                </p>
+                <Button
+                  type="button"
+                  variant={useSchedulingOverride ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    setUseSchedulingOverride((prev) => !prev);
+                    setSelectedOverrideReasonCode('');
+                    setCustomOverrideReason('');
+                    setError(null);
+                  }}
+                >
+                  {useSchedulingOverride ? 'בטל שיבוץ חריג' : 'הפעל שיבוץ חד-פעמי חריג'}
+                </Button>
               </div>
+              {useSchedulingOverride ? (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="override-reason-code">סיבת החריגה *</Label>
+                    <Select value={selectedOverrideReasonCode} onValueChange={setSelectedOverrideReasonCode}>
+                      <SelectTrigger id="override-reason-code">
+                        <SelectValue placeholder="בחרו סיבה" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SCHEDULING_OVERRIDE_REASON_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {selectedOverrideReasonCode === 'custom' ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="override-custom-reason">פירוט נוסף *</Label>
+                      <Textarea
+                        id="override-custom-reason"
+                        rows={3}
+                        value={customOverrideReason}
+                        onChange={(event) => setCustomOverrideReason(event.target.value)}
+                        placeholder="כתבו סיבה מותאמת אישית רק אם היא לא קיימת ברשימה."
+                      />
+                    </div>
+                  ) : null}
+                  <div>
+                    <p className="text-xs text-amber-800">
+                      בחרו את הסיבה הקרובה ביותר. השתמשו ב״אחר״ רק כשאין התאמה ברשימה.
+                    </p>
+                  </div>
+                </>
+              ) : null}
             </div>
-          )}
+          ) : null}
 
           {/* Conflicts Warning */}
           {isCheckingConflicts && (
@@ -888,6 +900,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 || !formData.date
                 || !formData.time
                 || formData.student_ids.length === 0
+                || (!useSchedulingOverride && selectedTimeOutsideAvailability)
                 || (useSchedulingOverride
                   ? !hasValidSchedulingOverrideReason(selectedOverrideReasonCode, customOverrideReason)
                   : (!hasAvailableSlots && !formData.time))
