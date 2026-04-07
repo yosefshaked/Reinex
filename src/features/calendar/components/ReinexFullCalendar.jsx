@@ -684,30 +684,15 @@ export default function ReinexFullCalendar({
   }, [onSlotSelect]);
 
   const handleSelectAllow = useCallback((selectInfo) => {
-    const instructor = instructorMap.get(String(selectInfo.resource?.id || ''));
     const startDate = selectInfo.start instanceof Date ? selectInfo.start : null;
     const endDate = selectInfo.end instanceof Date ? selectInfo.end : null;
-    if (!instructor || !startDate || !endDate) {
+    if (!selectInfo.resource?.id || !startDate || !endDate) {
       return false;
     }
 
-    const dayToken = dayTokenForJsDay(startDate.getDay());
-    const startTime = getLocalStartTime(startDate);
     const durationMinutes = Math.max(15, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
-    if (!dayToken || !startTime || durationMinutes <= 0) {
-      return false;
-    }
-
-    return (instructor.service_capabilities || []).some((capability) =>
-      hasConfiguredAvailability(capability?.availability_windows)
-      && isWithinAvailabilityWindows({
-        availabilityWindows: capability.availability_windows,
-        day: dayToken,
-        startTime,
-        durationMinutes,
-      }),
-    );
-  }, [instructorMap]);
+    return durationMinutes > 0;
+  }, []);
 
   const handleEventDrop = useCallback((info) => {
     const instance = info.event.extendedProps?.instance;

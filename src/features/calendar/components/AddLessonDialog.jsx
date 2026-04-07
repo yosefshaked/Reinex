@@ -18,6 +18,7 @@ import {
   buildAvailabilityTimeSlots,
   getAvailabilityWindowsForDay,
   hasConfiguredAvailability,
+  isWithinAvailabilityWindows,
 } from '@/lib/instructor-availability.js';
 import {
   buildSchedulingOverrideReasonDetails,
@@ -207,8 +208,29 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   }, [formData.service_id, selectedDayToken, serviceQualifiedInstructors]);
 
   const instructorOptions = useMemo(
-    () => (useSchedulingOverride ? serviceQualifiedInstructors : dateAvailableInstructors),
-    [dateAvailableInstructors, serviceQualifiedInstructors, useSchedulingOverride],
+    () => {
+      const baseOptions = useSchedulingOverride ? serviceQualifiedInstructors : dateAvailableInstructors;
+      if (!formData.instructor_employee_id) {
+        return baseOptions;
+      }
+
+      const hasSelectedInstructor = baseOptions.some(
+        (instructor) => String(instructor.id) === String(formData.instructor_employee_id),
+      );
+      if (hasSelectedInstructor) {
+        return baseOptions;
+      }
+
+      const selectedInstructorOption = serviceQualifiedInstructors.find(
+        (instructor) => String(instructor.id) === String(formData.instructor_employee_id),
+      );
+      if (!selectedInstructorOption) {
+        return baseOptions;
+      }
+
+      return [...baseOptions, selectedInstructorOption];
+    },
+    [dateAvailableInstructors, formData.instructor_employee_id, serviceQualifiedInstructors, useSchedulingOverride],
   );
 
   const availableTimeSlots = useMemo(() => {
@@ -225,6 +247,33 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   const missingCapability = Boolean(formData.instructor_employee_id && formData.service_id && !selectedCapability);
   const missingAvailability = Boolean(selectedCapability && !hasConfiguredAvailability(selectedCapability.availability_windows));
   const hasAvailableSlots = availableTimeSlots.length > 0;
+  const selectedTimeOutsideAvailability = useMemo(() => {
+    if (
+      useSchedulingOverride
+      || !selectedCapability
+      || !selectedDayToken
+      || !formData.time
+      || missingCapability
+      || missingAvailability
+    ) {
+      return false;
+    }
+
+    return !isWithinAvailabilityWindows({
+      availabilityWindows: selectedCapability.availability_windows,
+      day: selectedDayToken,
+      startTime: formData.time,
+      durationMinutes: Number(formData.duration_minutes) || 0,
+    });
+  }, [
+    formData.duration_minutes,
+    formData.time,
+    missingAvailability,
+    missingCapability,
+    selectedCapability,
+    selectedDayToken,
+    useSchedulingOverride,
+  ]);
 
   useEffect(() => {
     if (useSchedulingOverride) {
@@ -711,6 +760,15 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>לשירות הזה עדיין לא הוגדרה זמינות אצל המדריך/ה שנבחר/ה.</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {formData.instructor_employee_id && formData.service_id && !useSchedulingOverride && selectedTimeOutsideAvailability ? (
+            <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                השעה שנבחרה נמצאת מחוץ לזמינות המוגדרת של המדריך/ה עבור השירות הזה. אפשר לעבור ל״שיבוץ חד-פעמי חריג״ כדי להמשיך עם סיבת חריגה.
+              </AlertDescription>
             </Alert>
           ) : null}
 
