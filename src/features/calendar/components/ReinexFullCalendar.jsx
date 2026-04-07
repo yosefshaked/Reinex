@@ -464,14 +464,20 @@ export default function ReinexFullCalendar({
   instances,
   instructors,
   isLoading = false,
-  onDateChange,
-  onViewModeChange,
+  calendarNavigationRef,
   onSlotSelect,
   onEventClick,
+  onDateChange,
+  onViewModeChange,
   onEventRescheduled,
 }) {
   const calendarRef = useRef(null);
   const pendingCalendarSyncRef = useRef(null);
+  const initialCalendarDateRef = useRef(currentDate);
+  const lastReportedCalendarStateRef = useRef({
+    date: currentDate,
+    view: viewMode,
+  });
   const runtimeConfig = useRuntimeConfig();
   const { activeOrgId } = useOrg();
   const [updatingEventId, setUpdatingEventId] = useState(null);
@@ -496,6 +502,7 @@ export default function ReinexFullCalendar({
   );
   const schedulerLicenseKey = useMemo(() => resolveSchedulerLicenseKey(runtimeConfig), [runtimeConfig]);
   const fullCalendarView = resolveCalendarView(viewMode);
+  const initialCalendarViewRef = useRef(fullCalendarView);
   const pendingDropConfirmDisabled = useMemo(() => {
     if (!pendingDropInfo) return false;
     if (pendingDropInfo.availabilityState?.status === 'outside_availability' && !pendingDropInfo.useSchedulingOverride) {
@@ -506,6 +513,34 @@ export default function ReinexFullCalendar({
     }
     return false;
   }, [pendingDropInfo]);
+
+  useEffect(() => {
+    if (!calendarNavigationRef) {
+      return undefined;
+    }
+
+    calendarNavigationRef.current = {
+      next() {
+        calendarRef.current?.getApi?.()?.next();
+      },
+      prev() {
+        calendarRef.current?.getApi?.()?.prev();
+      },
+      today() {
+        calendarRef.current?.getApi?.()?.today();
+      },
+      gotoDate(date) {
+        if (!date) return;
+        calendarRef.current?.getApi?.()?.gotoDate(date);
+      },
+    };
+
+    return () => {
+      if (calendarNavigationRef.current) {
+        calendarNavigationRef.current = null;
+      }
+    };
+  }, [calendarNavigationRef]);
 
   useEffect(() => {
     if (!schedulerLicenseKey) {
@@ -519,6 +554,22 @@ export default function ReinexFullCalendar({
       return;
     }
 
+    const lastReportedCalendarState = lastReportedCalendarStateRef.current;
+    if (
+      lastReportedCalendarState
+      && lastReportedCalendarState.date === currentDate
+      && lastReportedCalendarState.view === viewMode
+    ) {
+      pendingCalendarSyncRef.current = null;
+      return;
+    }
+
+    const activeCalendarDate = toLocalDateString(api.getDate?.());
+    if (api.view.type === fullCalendarView && activeCalendarDate === currentDate) {
+      pendingCalendarSyncRef.current = null;
+      return;
+    }
+
     pendingCalendarSyncRef.current = {
       date: currentDate,
       view: fullCalendarView,
@@ -529,7 +580,7 @@ export default function ReinexFullCalendar({
     } else {
       api.gotoDate(currentDate);
     }
-  }, [currentDate, fullCalendarView]);
+  }, [currentDate, fullCalendarView, viewMode]);
 
   const handleDatesSet = useCallback((info) => {
     const nextViewMode = info.view.type === 'resourceTimeGridWeek' ? 'week' : 'day';
@@ -543,6 +594,11 @@ export default function ReinexFullCalendar({
       && pendingSync.date === nextDate,
     );
 
+    lastReportedCalendarStateRef.current = {
+      date: nextDate || currentDate,
+      view: nextViewMode,
+    };
+
     if (isControlledSync) {
       pendingCalendarSyncRef.current = null;
     }
@@ -551,8 +607,8 @@ export default function ReinexFullCalendar({
       onViewModeChange?.(nextViewMode);
     }
 
-    if (typeof onDateChange === 'function' && nextViewMode === 'day' && !isControlledSync && nextDate && nextDate !== currentDate) {
-      onDateChange(nextDate);
+    if (nextDate && nextDate !== currentDate) {
+      onDateChange?.(nextDate);
     }
   }, [currentDate, onDateChange, onViewModeChange, viewMode]);
 
@@ -833,8 +889,8 @@ export default function ReinexFullCalendar({
         <FullCalendar
           ref={calendarRef}
           plugins={[resourceTimeGridPlugin, timeGridPlugin, interactionPlugin]}
-          initialView={fullCalendarView}
-          initialDate={currentDate}
+          initialView={initialCalendarViewRef.current}
+          initialDate={initialCalendarDateRef.current}
           schedulerLicenseKey={schedulerLicenseKey || 'GPL-v3'}
           locale={heLocale}
           direction="rtl"

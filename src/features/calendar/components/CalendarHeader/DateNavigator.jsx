@@ -5,8 +5,13 @@ import { addLocalDays, getTodayLocalDateString, getWeekRangeDateStrings, parseLo
 /**
  * DateNavigator component - navigate between days/weeks and select date
  */
-export function DateNavigator({ currentDate, onDateChange, viewMode = 'day' }) {
+export function DateNavigator({ currentDate, onDateChange, onNavigate, viewMode = 'day' }) {
   const handlePrev = () => {
+    if (typeof onNavigate === 'function') {
+      onNavigate('prev');
+      return;
+    }
+
     const days = viewMode === 'week' ? 7 : 1;
     const date = addLocalDays(currentDate, -days);
     if (date) {
@@ -15,6 +20,11 @@ export function DateNavigator({ currentDate, onDateChange, viewMode = 'day' }) {
   };
 
   const handleNext = () => {
+    if (typeof onNavigate === 'function') {
+      onNavigate('next');
+      return;
+    }
+
     const days = viewMode === 'week' ? 7 : 1;
     const date = addLocalDays(currentDate, days);
     if (date) {
@@ -23,6 +33,11 @@ export function DateNavigator({ currentDate, onDateChange, viewMode = 'day' }) {
   };
 
   const handleToday = () => {
+    if (typeof onNavigate === 'function') {
+      onNavigate('today');
+      return;
+    }
+
     onDateChange(getTodayLocalDateString());
   };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import PageLayout from '@/components/ui/PageLayout';
 import { Button } from '@/components/ui/button';
 import { Plus, LayoutTemplate, Wand2 } from 'lucide-react';
@@ -9,12 +9,13 @@ import { AddLessonDialog } from '../components/AddLessonDialog';
 import { ManualGenerationDialog } from '../components/ManualGenerationDialog';
 import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
 import ReinexFullCalendar from '../components/ReinexFullCalendar';
-import { getTodayLocalDateString, getWeekStartDate, parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
+import { addLocalDays, getTodayLocalDateString, getWeekStartDate, parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
 
 const CALENDAR_DATE_KEY = 'reinex_calendar_date';
 const CALENDAR_VIEW_KEY = 'reinex_calendar_view'; // 'day' or 'week'
 
 export default function CalendarPage() {
+  const calendarNavigationRef = useRef(null);
   const [currentDate, setCurrentDateState] = useState(() => {
     const fallbackDate = getTodayLocalDateString();
     if (typeof window !== 'undefined') {
@@ -64,6 +65,35 @@ export default function CalendarPage() {
   const setViewMode = (mode) => {
     setViewModeState(mode);
   };
+
+  const handleCalendarNavigate = useCallback((action) => {
+    const calendarNavigation = calendarNavigationRef.current;
+    if (calendarNavigation && typeof calendarNavigation[action] === 'function') {
+      calendarNavigation[action]();
+      return;
+    }
+
+    if (action === 'today') {
+      setCurrentDate(getTodayLocalDateString());
+      return;
+    }
+
+    const days = viewMode === 'week' ? 7 : 1;
+    if (action === 'next') {
+      const nextDate = addLocalDays(currentDate, days);
+      if (nextDate) {
+        setCurrentDate(nextDate);
+      }
+      return;
+    }
+
+    if (action === 'prev') {
+      const prevDate = addLocalDays(currentDate, -days);
+      if (prevDate) {
+        setCurrentDate(prevDate);
+      }
+    }
+  }, [currentDate, viewMode]);
 
   const dateForQuery = viewMode === 'week'
     ? toLocalDateString(getWeekStartDate(currentDate))
@@ -125,7 +155,7 @@ export default function CalendarPage() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <CalendarHeader currentDate={currentDate} onDateChange={setCurrentDate} viewMode={viewMode} />
+            <CalendarHeader currentDate={currentDate} onDateChange={setCurrentDate} onNavigate={handleCalendarNavigate} viewMode={viewMode} />
             <div className="flex items-center gap-1 border-s border-gray-300 ps-4">
               <Button 
                 variant={viewMode === 'day' ? 'default' : 'outline'} 
@@ -173,6 +203,7 @@ export default function CalendarPage() {
             instances={instances}
             instructors={instructors}
             isLoading={isCalendarLoading}
+            calendarNavigationRef={calendarNavigationRef}
             onDateChange={setCurrentDate}
             onViewModeChange={setViewMode}
             onSlotSelect={handleSlotSelect}
