@@ -82,7 +82,7 @@ function buildInstanceSelect(options = {}) {
     'metadata',
     'instructor:Employees(id, first_name, middle_name, last_name, name)',
     'service:Services(id, name, color, duration_minutes)',
-    `participants:${participantsJoin}(id, student_id, participant_status, version, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, metadata, student:students(id, first_name, middle_name, last_name))`,
+    `participants:${participantsJoin}(id, client_profile_id, student_id, participant_status, version, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, metadata, student:students(id, first_name, middle_name, last_name), client_profile:client_profiles(id, first_name, middle_name, last_name))`,
   ].join(',');
 }
 
@@ -164,6 +164,7 @@ export default async function lessonInstances(context, req) {
     const date = normalizeString(req?.query?.date || body?.date);
     const requestedInstructorId = normalizeUuid(req?.query?.instructor_id || req?.query?.instructorId);
     const requestedStudentId = normalizeUuid(req?.query?.student_id || req?.query?.studentId);
+    const requestedClientProfileId = normalizeUuid(req?.query?.client_profile_id || req?.query?.clientProfileId);
 
     if (lessonInstanceId) {
       let builder = tenantClient
@@ -203,7 +204,7 @@ export default async function lessonInstances(context, req) {
       return respond(context, 400, { message: 'invalid_date' });
     }
 
-    const selectClause = requestedStudentId
+    const selectClause = requestedStudentId || requestedClientProfileId
       ? buildInstanceSelect({ participantsJoin: 'lesson_participants!inner' })
       : buildInstanceSelect();
 
@@ -225,6 +226,9 @@ export default async function lessonInstances(context, req) {
 
     if (requestedStudentId) {
       builder = builder.eq('participants.student_id', requestedStudentId);
+    }
+    if (requestedClientProfileId) {
+      builder = builder.eq('participants.client_profile_id', requestedClientProfileId);
     }
 
     const { data, error } = await builder;
@@ -251,6 +255,11 @@ export default async function lessonInstances(context, req) {
       : Array.isArray(body?.studentIds)
         ? body.studentIds
         : [];
+    const clientProfileIds = Array.isArray(body?.client_profile_ids)
+      ? body.client_profile_ids
+      : Array.isArray(body?.clientProfileIds)
+        ? body.clientProfileIds
+        : [];
 
     if (!datetimeStart || Number.isNaN(Date.parse(datetimeStart))) {
       return respond(context, 400, { message: 'invalid_datetime_start' });
@@ -271,9 +280,12 @@ export default async function lessonInstances(context, req) {
     const normalizedStudentIds = Array.from(
       new Set(studentIds.map((value) => normalizeUuid(value)).filter(Boolean)),
     );
+    const normalizedClientProfileIds = Array.from(
+      new Set(clientProfileIds.map((value) => normalizeUuid(value)).filter(Boolean)),
+    );
 
-    if (normalizedStudentIds.length === 0) {
-      return respond(context, 400, { message: 'missing_student_ids' });
+    if (normalizedStudentIds.length === 0 && normalizedClientProfileIds.length === 0) {
+      return respond(context, 400, { message: 'missing_participants' });
     }
 
     const { data: instanceRow, error: instanceError } = await tenantClient
@@ -298,11 +310,50 @@ export default async function lessonInstances(context, req) {
       return respond(context, 500, { message: 'failed_to_create_lesson_instance' });
     }
 
-    const participantsPayload = normalizedStudentIds.map((studentId) => ({
-      lesson_instance_id: instanceRow.id,
-      student_id: studentId,
-      participant_status: 'scheduled',
-    }));
+    const participantsPayload = [
+      ...normalizedStudentIds.map((studentId) => ({
+        lesson_instance_id: instanceRow.id,
+        client_profile_id: null,
+        student_id: studentId,
+        participant_status: 'scheduled',
+      })),
+      ...normalizedClientProfileIds.map((clientProfileId) => ({
+        lesson_instance_id: instanceRow.id,
+        client_profile_id: clientProfileId,
+        student_id: null,
+        participant_status: 'scheduled',
+      })),
+    ];
+
+    if (normalizedClientProfileIds.length > 0) {
+      const { data: linkedStudents } = await tenantClient
+        .from('students')
+        .select('id, client_profile_id')
+        .in('client_profile_id', normalizedClientProfileIds);
+      const linkedStudentByClientProfile = new Map((linkedStudents || []).map((row) => [row.client_profile_id, row.id]));
+      participantsPayload.forEach((participant) => {
+        if (!participant.student_id && participant.client_profile_id) {
+          participant.student_id = linkedStudentByClientProfile.get(participant.client_profile_id) || null;
+        }
+      });
+    }
+
+    if (normalizedStudentIds.length > 0) {
+      const { data: studentProfiles } = await tenantClient
+        .from('students')
+        .select('id, client_profile_id')
+        .in('id', normalizedStudentIds);
+      const profileByStudentId = new Map((studentProfiles || []).map((row) => [row.id, row.client_profile_id]));
+      participantsPayload.forEach((participant) => {
+        if (participant.student_id && !participant.client_profile_id) {
+          participant.client_profile_id = profileByStudentId.get(participant.student_id) || null;
+        }
+      });
+    }
+
+    if (participantsPayload.some((participant) => !participant.client_profile_id)) {
+      return respond(context, 400, { message: 'invalid_participants_missing_client_profile' });
+    }
 
     const { error: participantsError } = await tenantClient
       .from('lesson_participants')
@@ -546,9 +597,10 @@ export default async function lessonInstances(context, req) {
     if (action === 'add-participant') {
       const instanceId = normalizeUuid(body?.instance_id || body?.instanceId);
       const studentId = normalizeUuid(body?.student_id || body?.studentId);
+      const clientProfileId = normalizeUuid(body?.client_profile_id || body?.clientProfileId);
 
       if (!instanceId) return respond(context, 400, { message: 'missing_instance_id' });
-      if (!studentId) return respond(context, 400, { message: 'missing_student_id' });
+      if (!studentId && !clientProfileId) return respond(context, 400, { message: 'missing_client_profile_or_student_id' });
 
       const { error: addStateError, result: addMutationState } = await fetchLessonMutationState(tenantClient, { instanceId });
       if (addStateError) {
@@ -567,6 +619,29 @@ export default async function lessonInstances(context, req) {
         return respond(context, 422, { message: 'instance_not_scheduled' });
       }
 
+
+      let resolvedStudentId = studentId;
+      let resolvedClientProfileId = clientProfileId;
+      if (resolvedStudentId && !resolvedClientProfileId) {
+        const { data: studentRow } = await tenantClient
+          .from('students')
+          .select('id, client_profile_id')
+          .eq('id', resolvedStudentId)
+          .maybeSingle();
+        resolvedClientProfileId = studentRow?.client_profile_id || '';
+      }
+      if (resolvedClientProfileId && !resolvedStudentId) {
+        const { data: studentRow } = await tenantClient
+          .from('students')
+          .select('id, client_profile_id')
+          .eq('client_profile_id', resolvedClientProfileId)
+          .maybeSingle();
+        resolvedStudentId = studentRow?.id || '';
+      }
+
+      if (!resolvedClientProfileId) {
+        return respond(context, 400, { message: 'missing_client_profile_link' });
+      }
 
       // Capacity check: cancelled/absent participants do not count toward max_students
       const [{ data: activeParticipants, error: countError }, { data: capability }] = await Promise.all([
@@ -601,7 +676,12 @@ export default async function lessonInstances(context, req) {
 
       const { data: newParticipant, error: insertError } = await tenantClient
         .from('lesson_participants')
-        .insert({ lesson_instance_id: instanceId, student_id: studentId, participant_status: 'scheduled' })
+        .insert({
+          lesson_instance_id: instanceId,
+          client_profile_id: resolvedClientProfileId,
+          student_id: resolvedStudentId || null,
+          participant_status: 'scheduled',
+        })
         .select('id')
         .single();
 
@@ -618,7 +698,12 @@ export default async function lessonInstances(context, req) {
           retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
           resourceType: 'lesson_participant',
           resourceId: newParticipant.id,
-          afterState: { lesson_instance_id: instanceId, student_id: studentId, participant_status: 'scheduled' },
+          afterState: {
+            lesson_instance_id: instanceId,
+            client_profile_id: resolvedClientProfileId,
+            student_id: resolvedStudentId || null,
+            participant_status: 'scheduled',
+          },
           details: { origin: 'api/lesson-instances', action: 'add-participant' },
         });
       } catch (auditError) {
@@ -643,10 +728,11 @@ export default async function lessonInstances(context, req) {
 
     // bulk-cancel: Cancel all future lesson instances for a student from a given date
     const studentId = normalizeUuid(body?.student_id || body?.studentId);
+    const clientProfileId = normalizeUuid(body?.client_profile_id || body?.clientProfileId);
     const fromDate = normalizeString(body?.from_date || body?.fromDate);
 
-    if (!studentId) {
-      return respond(context, 400, { message: 'missing_student_id' });
+    if (!studentId && !clientProfileId) {
+      return respond(context, 400, { message: 'missing_client_profile_or_student_id' });
     }
     if (!fromDate || !isIsoDate(fromDate)) {
       return respond(context, 400, { message: 'invalid_from_date' });
@@ -655,12 +741,17 @@ export default async function lessonInstances(context, req) {
     const fromDatetime = `${fromDate}T00:00:00.000Z`;
 
     // Find all future lesson_instances where this student is a participant and status is 'scheduled'
-    const { data: futureInstances, error: fetchErr } = await tenantClient
+    let futureParticipantsQuery = tenantClient
       .from('lesson_participants')
       .select('id, lesson_instance_id, lesson_instance:lesson_instances(id, datetime_start, status)')
-      .eq('student_id', studentId)
       .gte('lesson_instance.datetime_start', fromDatetime)
       .eq('lesson_instance.status', 'scheduled');
+
+    futureParticipantsQuery = studentId
+      ? futureParticipantsQuery.eq('student_id', studentId)
+      : futureParticipantsQuery.eq('client_profile_id', clientProfileId);
+
+    const { data: futureInstances, error: fetchErr } = await futureParticipantsQuery;
 
     if (fetchErr) {
       context.log?.error?.('lesson-instances bulk-cancel failed to find instances', { message: fetchErr.message });

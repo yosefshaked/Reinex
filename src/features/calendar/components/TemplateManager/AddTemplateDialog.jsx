@@ -61,6 +61,7 @@ export function AddTemplateDialog({
   onSuccess,
   defaultInstructorId,
   defaultDayOfWeek,
+  defaultClientProfileId = '',
   defaultStudentId = '',
   defaultServiceId = '',
   defaultTimeOfDay = '09:00',
@@ -84,9 +85,11 @@ export function AddTemplateDialog({
     enabled: open && !!activeOrgId,
     orgId: activeOrgId,
   });
+  const [waitingListProfile, setWaitingListProfile] = useState(null);
 
   const [studentLabel, setStudentLabel] = useState('');
   const [formData, setFormData] = useState({
+    client_profile_id: defaultClientProfileId || '',
     student_id: defaultStudentId || '',
     instructor_employee_id: defaultInstructorId || '',
     service_id: defaultServiceId || '',
@@ -99,6 +102,7 @@ export function AddTemplateDialog({
 
   const [error, setError] = useState(null);
   const selectedStudent = students.find((student) => student.id === formData.student_id) || null;
+  const selectedClientProfile = selectedStudent || (waitingListProfile?.id === formData.client_profile_id ? waitingListProfile : null);
   const selectedInstructor = (instructors || []).find((instructor) => instructor.id === formData.instructor_employee_id) || null;
   const selectedCapability = (selectedInstructor?.service_capabilities || []).find((capability) => capability.service_id === formData.service_id) || null;
   const availableDayTokens = getAvailabilityDayTokens(selectedCapability?.availability_windows || []);
@@ -107,11 +111,6 @@ export function AddTemplateDialog({
     day: formData.day_of_week,
     durationMinutes: Number(formData.duration_minutes) || 0,
   });
-  const shouldActivateStudentFromWaitingList = Boolean(
-    waitingListEntryId
-    && selectedStudent
-    && selectedStudent.is_active === false,
-  );
   const missingCapability = Boolean(formData.instructor_employee_id && formData.service_id && !selectedCapability);
   const missingAvailability = Boolean(selectedCapability && !hasConfiguredAvailability(selectedCapability.availability_windows));
   const outsideAvailability = Boolean(
@@ -163,6 +162,7 @@ export function AddTemplateDialog({
     if (open) {
       setStudentLabel('');
       setFormData({
+        client_profile_id: defaultClientProfileId || '',
         student_id: defaultStudentId || '',
         instructor_employee_id: defaultInstructorId || '',
         service_id: defaultServiceId || '',
@@ -174,7 +174,36 @@ export function AddTemplateDialog({
       });
       setError(null);
     }
-  }, [open, defaultInstructorId, defaultDayOfWeek, defaultStudentId, defaultServiceId, defaultTimeOfDay, defaultDurationMinutes]);
+  }, [open, defaultInstructorId, defaultDayOfWeek, defaultClientProfileId, defaultStudentId, defaultServiceId, defaultTimeOfDay, defaultDurationMinutes]);
+
+  useEffect(() => {
+    if (!open || !activeOrgId || !session || !defaultClientProfileId || defaultStudentId) {
+      setWaitingListProfile(null);
+      return;
+    }
+
+    let cancelled = false;
+    async function fetchWaitingListProfile() {
+      try {
+        const payload = await authenticatedFetch(`client-profiles/${defaultClientProfileId}`, {
+          session,
+          params: { org_id: activeOrgId },
+        });
+        if (!cancelled) {
+          setWaitingListProfile(payload || null);
+        }
+      } catch {
+        if (!cancelled) {
+          setWaitingListProfile(null);
+        }
+      }
+    }
+
+    void fetchWaitingListProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, activeOrgId, session, defaultClientProfileId, defaultStudentId]);
 
   // Fetch services
   useEffect(() => {
@@ -268,8 +297,8 @@ export function AddTemplateDialog({
     e.preventDefault();
     setError(null);
 
-    if (!formData.student_id) {
-      setError('יש לבחור תלמיד');
+    if (!formData.student_id && !formData.client_profile_id) {
+      setError('יש לבחור תלמיד/ה או רשומת לקוח/ה להמרה');
       return;
     }
     if (!formData.instructor_employee_id) {
@@ -314,6 +343,7 @@ export function AddTemplateDialog({
     }
 
     const { data: createdTemplate, error: apiError } = await createTemplate({
+      client_profile_id: formData.client_profile_id || null,
       student_id: formData.student_id,
       instructor_employee_id: formData.instructor_employee_id,
       service_id: formData.service_id,
@@ -352,8 +382,8 @@ export function AddTemplateDialog({
       return;
     }
 
-    if (createdTemplate?.waiting_list_match?.student_reactivated) {
-      toast.success('התבנית נשמרה והתלמיד/ה הופעל/ה מחדש באופן אוטומטי.');
+    if (createdTemplate?.waiting_list_match?.student_created) {
+      toast.success('התבנית נשמרה ונוצר כרטיס תלמיד/ה מתוך רשומת הלקוח/ה.');
     } else if (waitingListEntryId) {
       toast.success('התבנית נשמרה ורשומת ההמתנה עודכנה לשיבוץ.');
     } else {
@@ -366,7 +396,7 @@ export function AddTemplateDialog({
 
   const studentOptions = (students || []).map((s) => ({
     value: s.id,
-    label: `${`${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() || 'ללא שם'}${s.identity_number ? ` • ${s.identity_number}` : ''}${s.is_active === false ? ' • לא פעיל/ה' : ''}${s.onboarding_status === 'pending_wl_form' ? ' • מתעניין/ת' : ''}`,
+    label: `${`${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() || 'ללא שם'}${s.identity_number ? ` • ${s.identity_number}` : ''}${s.is_active === false ? ' • לא פעיל/ה' : ''}`,
     searchText: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''} ${s.identity_number || ''}`.toLowerCase(),
   }));
 
@@ -399,13 +429,13 @@ export function AddTemplateDialog({
             </Alert>
           ) : null}
 
-          {waitingListEntryId && selectedStudent ? (
-            <Alert variant={shouldActivateStudentFromWaitingList ? 'default' : 'default'}>
+          {waitingListEntryId && selectedClientProfile ? (
+            <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                {shouldActivateStudentFromWaitingList
-                  ? 'שמירת התבנית תפעיל מחדש את התלמיד/ה ותעדכן את רשומת ההמתנה לשיבוץ. מומלץ לעדכן את המשפחה לאחר השלמת השיבוץ.'
-                  : 'שמירת התבנית תעדכן את רשומת ההמתנה לשיבוץ. אפשר עדיין לשנות את פרטי התבנית לפני השמירה.'}
+                {formData.student_id
+                  ? 'שמירת התבנית תעדכן את רשומת ההמתנה לשיבוץ. אפשר עדיין לשנות את פרטי התבנית לפני השמירה.'
+                  : 'שמירת התבנית תיצור כרטיס תלמיד/ה מתוך רשומת הלקוח/ה ותעדכן את רשומת ההמתנה לשיבוץ.'}
               </AlertDescription>
             </Alert>
           ) : null}
@@ -429,6 +459,7 @@ export function AddTemplateDialog({
                     onClick={() => onFixAvailability({
                       instructorId: formData.instructor_employee_id,
                       serviceId: formData.service_id,
+                      clientProfileId: formData.client_profile_id,
                       studentId: formData.student_id,
                       waitingListEntryId,
                       waitingListContext,
@@ -447,40 +478,50 @@ export function AddTemplateDialog({
             </Alert>
           ) : null}
 
-          {/* Student */}
-          <div>
-            <Label htmlFor="template-student">תלמיד *</Label>
-            {studentsLoading ? (
-              <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                טוען תלמידים...
+          {/* Student / Client */}
+          {formData.client_profile_id && !formData.student_id ? (
+            <div className="rounded-md border border-border bg-muted/30 p-3">
+              <Label className="mb-2 block">לקוח/ה להמרה</Label>
+              <div className="text-sm font-medium">{personName(selectedClientProfile)}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                יצירת תבנית קבועה תהפוך את רשומת הלקוח/ה לתלמיד/ה כחלק מהאישור.
               </div>
-            ) : (
-              <ComboBoxField
-                id="template-student"
-                options={studentOptions}
-                value={studentLabel}
-                onChange={(value) => {
-                  setStudentLabel(value);
-                  const exactMatches = studentOptions.filter((opt) => opt.label === value);
-                  setFormData((prev) => ({
-                    ...prev,
-                    student_id: exactMatches.length === 1 ? exactMatches[0].value : '',
-                  }));
-                }}
-                onOptionSelect={(option) => {
-                  setStudentLabel(option?.label || '');
-                  setFormData((prev) => ({
-                    ...prev,
-                    student_id: option?.value || '',
-                  }));
-                }}
-                allowCustomValue={false}
-                placeholder="חפש תלמיד..."
-                emptyMessage="לא נמצאו תלמידים"
-              />
-            )}
-          </div>
+            </div>
+          ) : (
+            <div>
+              <Label htmlFor="template-student">תלמיד *</Label>
+              {studentsLoading ? (
+                <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  טוען תלמידים...
+                </div>
+              ) : (
+                <ComboBoxField
+                  id="template-student"
+                  options={studentOptions}
+                  value={studentLabel}
+                  onChange={(value) => {
+                    setStudentLabel(value);
+                    const exactMatches = studentOptions.filter((opt) => opt.label === value);
+                    setFormData((prev) => ({
+                      ...prev,
+                      student_id: exactMatches.length === 1 ? exactMatches[0].value : '',
+                    }));
+                  }}
+                  onOptionSelect={(option) => {
+                    setStudentLabel(option?.label || '');
+                    setFormData((prev) => ({
+                      ...prev,
+                      student_id: option?.value || '',
+                    }));
+                  }}
+                  allowCustomValue={false}
+                  placeholder="חפש תלמיד..."
+                  emptyMessage="לא נמצאו תלמידים"
+                />
+              )}
+            </div>
+          )}
 
           {formData.student_id && (
             <div className="space-y-2">

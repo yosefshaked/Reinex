@@ -8,10 +8,12 @@ import { cn } from '@/lib/utils';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import HiddenUatAdminToolsDialog from '@/features/admin/components/HiddenUatAdminToolsDialog.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { normalizeMembershipRole, isAdminOrOffice } from '@/features/students/utils/endpoints.js';
 import {
   LayoutDashboard,
   Calendar,
   Users,
+  UserRound,
   UserCog,
   ListChecks,
   ClipboardList,
@@ -29,6 +31,7 @@ const NAV_ITEMS = [
   { key: 'dashboard', label: 'דשבורד', to: '/dashboard', icon: LayoutDashboard, end: true },
   { key: 'calendar', label: 'יומן', to: '/calendar', icon: Calendar },
   { key: 'students', label: 'תלמידים', to: '/students-list', icon: Users },
+  { key: 'one-time-customers', label: 'לקוחות חד-פעמיים', to: '/one-time-customers', icon: UserRound },
   { key: 'waiting-list', label: 'רשימת המתנה', to: '/waiting-list', icon: ClipboardList },
   { key: 'employees', label: 'עובדים', to: '/employees', icon: UserCog },
   { key: 'services', label: 'שירותים', to: '/services', icon: ListChecks },
@@ -55,9 +58,16 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
   const [authError, setAuthError] = useState('');
   const expanded = pinned || hovered;
   const location = useLocation();
-  const { activeOrgId } = useOrg();
+  const { activeOrgId, activeOrg } = useOrg();
+  const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || '');
+  const canManageClients = isAdminOrOffice(membershipRole);
 
-  const items = useMemo(() => NAV_ITEMS, []);
+  const items = useMemo(
+    () => NAV_ITEMS.filter((item) => (
+      canManageClients || !['one-time-customers', 'waiting-list'].includes(item.key)
+    )),
+    [canManageClients],
+  );
 
   function resetSequence() {
     setSequenceState({ step: 0, startedAt: 0 });

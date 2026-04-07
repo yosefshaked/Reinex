@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Calendar,
   Users,
+  UserRound,
   Menu,
   UserCog,
   ListChecks,
@@ -22,6 +23,8 @@ import {
   SheetClose,
 } from '@/components/ui/sheet.jsx';
 import useKeyboardAwareBottomOffset from '@/hooks/useKeyboardAwareBottomOffset.js';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { normalizeMembershipRole, isAdminOrOffice } from '@/features/students/utils/endpoints.js';
 
 const PRIMARY_ITEMS = [
   { key: 'dashboard', label: 'דשבורד', to: '/dashboard', icon: LayoutDashboard, end: true },
@@ -31,6 +34,7 @@ const PRIMARY_ITEMS = [
 
 const DRAWER_ITEMS = [
   { key: 'waiting-list', label: 'רשימת המתנה', to: '/waiting-list', icon: ClipboardList },
+  { key: 'one-time-customers', label: 'לקוחות חד-פעמיים', to: '/one-time-customers', icon: UserRound },
   { key: 'employees', label: 'עובדים', to: '/employees', icon: UserCog },
   { key: 'services', label: 'שירותים', to: '/services', icon: ListChecks },
   { key: 'financials', label: 'כספים', to: '/financials', icon: Coins },
@@ -59,9 +63,17 @@ function NavItem({ to, end, label, icon: Icon }) {
 
 export default function MobileNav() {
   const keyboardOffset = useKeyboardAwareBottomOffset();
+  const { activeOrg } = useOrg();
+  const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || '');
+  const canManageClients = isAdminOrOffice(membershipRole);
 
   const primaryItems = useMemo(() => PRIMARY_ITEMS, []);
-  const drawerItems = useMemo(() => DRAWER_ITEMS, []);
+  const drawerItems = useMemo(
+    () => DRAWER_ITEMS.filter((item) => (
+      canManageClients || !['waiting-list', 'one-time-customers'].includes(item.key)
+    )),
+    [canManageClients],
+  );
 
   return (
     <nav

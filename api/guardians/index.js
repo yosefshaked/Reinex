@@ -19,7 +19,7 @@ function normalizeStoredText(value) {
  * GET    /api/guardians          - List all guardians for organization
  * POST   /api/guardians          - Create new guardian
  * PUT    /api/guardians/:id      - Update guardian
- * DELETE /api/guardians/:id      - Delete guardian (requires no linked students)
+ * DELETE /api/guardians/:id      - Delete guardian (requires no linked client profiles)
  */
 export default async function handler(context, req) {
   // Read environment and get Supabase admin config
@@ -138,28 +138,44 @@ async function handleGet(context, tenantClient) {
 
   const guardianIds = guardians.map(guardian => guardian.id);
   const { data: links, error: linksError } = await tenantClient
-    .from('student_guardians')
-    .select('guardian_id, relationship, is_primary, students(id, first_name, last_name)')
+    .from('client_guardians')
+    .select('guardian_id, client_profile_id, relationship, is_primary, client_profile:client_profiles(id, first_name, middle_name, last_name)')
     .in('guardian_id', guardianIds);
 
   if (linksError) {
-    context.log.error('[guardians/GET] student_guardians query error:', linksError);
+    context.log.error('[guardians/GET] client_guardians query error:', linksError);
     return respond(context, 500, { error: 'database_error', message: linksError.message });
   }
+
+  const linkedProfileIds = Array.from(new Set((links || []).map((link) => link?.client_profile_id).filter(Boolean)));
+  const { data: students, error: studentsError } = linkedProfileIds.length > 0
+    ? await tenantClient
+      .from('students')
+      .select('id, client_profile_id')
+      .in('client_profile_id', linkedProfileIds)
+    : { data: [], error: null };
+
+  if (studentsError) {
+    context.log.error('[guardians/GET] students query error:', studentsError);
+    return respond(context, 500, { error: 'database_error', message: studentsError.message });
+  }
+
+  const studentIdByClientProfile = new Map((students || []).map((student) => [student.client_profile_id, student.id]));
 
   const linksByGuardian = new Map();
   (links || []).forEach(link => {
     if (!linksByGuardian.has(link.guardian_id)) {
       linksByGuardian.set(link.guardian_id, []);
     }
-    const student = link.students;
-    const studentName = student
-      ? `${student.first_name || ''} ${student.last_name || ''}`.trim()
+    const profile = link.client_profile;
+    const profileName = profile
+      ? `${profile.first_name || ''} ${profile.middle_name || ''} ${profile.last_name || ''}`.trim()
       : null;
 
     linksByGuardian.get(link.guardian_id).push({
-      student_id: student?.id || null,
-      student_name: studentName,
+      client_profile_id: profile?.id || null,
+      student_id: profile?.id ? (studentIdByClientProfile.get(profile.id) || null) : null,
+      student_name: profileName,
       relationship: link.relationship || null,
       is_primary: Boolean(link.is_primary),
     });
@@ -341,9 +357,9 @@ async function handlePut(context, req, tenantClient, guardianId, userId) {
  * DELETE /api/guardians/:id - Delete guardian
  */
 async function handleDelete(context, tenantClient, guardianId) {
-  // Check if guardian has students (via junction table per PRD)
+  // Check if guardian has linked client profiles
   const { data: links, error: checkError } = await tenantClient
-    .from('student_guardians')
+    .from('client_guardians')
     .select('id')
     .eq('guardian_id', guardianId)
     .limit(1);
@@ -355,8 +371,8 @@ async function handleDelete(context, tenantClient, guardianId) {
 
   if (links && links.length > 0) {
     return respond(context, 400, { 
-      error: 'guardian_has_students', 
-      message: 'Cannot delete guardian with students. Remove student links first.' 
+      error: 'guardian_has_clients', 
+      message: 'Cannot delete guardian with linked clients. Remove guardian links first.' 
     });
   }
 

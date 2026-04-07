@@ -6,7 +6,6 @@ import {
   UUID_PATTERN,
   ensureMembership,
   isAdminOrOffice,
-  isAdminRole,
   normalizeString,
   parseRequestBody,
   readEnv,
@@ -24,6 +23,10 @@ import {
   prepareAnswersForStorage,
   resolvePublicFormState,
 } from '../_shared/forms-runtime.js';
+import {
+  findClientProfileById,
+  resolveClientProfileDestination,
+} from '../_shared/client-profiles.js';
 
 const OTP_DIGITS = 6;
 const OTP_TTL_MINUTES = 15;
@@ -260,62 +263,90 @@ function resolveClientIp(req) {
   return '';
 }
 
-async function resolveStudentDestination(tenantClient, studentId, fieldName) {
-  const { data: student, error: studentError } = await tenantClient
-    .from('students')
-    .select(`id, ${fieldName}`)
-    .eq('id', studentId)
-    .maybeSingle();
+async function resolveSubmissionSubject(tenantClient, { clientProfileId, studentId }) {
+  let profile = null;
+  let student = null;
 
-  if (studentError) throw studentError;
-
-  const direct = normalizeString(student?.[fieldName]);
-  if (direct) return direct;
-
-  const { data: links, error: linksError } = await tenantClient
-    .from('student_guardians')
-    .select('guardian_id, is_primary')
-    .eq('student_id', studentId)
-    .order('is_primary', { ascending: false });
-
-  if (linksError) throw linksError;
-
-  const guardianIds = (Array.isArray(links) ? links : [])
-    .map((row) => row?.guardian_id)
-    .filter(Boolean);
-
-  if (!guardianIds.length) return '';
-
-  const { data: guardians, error: guardiansError } = await tenantClient
-    .from('guardians')
-    .select(`id, ${fieldName}`)
-    .in('id', guardianIds);
-
-  if (guardiansError) throw guardiansError;
-
-  const byId = new Map((Array.isArray(guardians) ? guardians : []).map((g) => [g.id, g]));
-
-  for (const link of links || []) {
-    const value = normalizeString(byId.get(link.guardian_id)?.[fieldName]);
-    if (value) return value;
+  if (UUID_PATTERN.test(String(studentId || ''))) {
+    const { data, error } = await tenantClient
+      .from('students')
+      .select('id, client_profile_id')
+      .eq('id', studentId)
+      .maybeSingle();
+    if (error) {
+      return { clientProfileId: null, studentId: null, profile: null, student: null, identityNumber: '', error };
+    }
+    student = data || null;
+    if (!clientProfileId && student?.client_profile_id) {
+      clientProfileId = student.client_profile_id;
+    }
   }
 
-  return '';
+  if (UUID_PATTERN.test(String(clientProfileId || ''))) {
+    const { data, error } = await findClientProfileById(tenantClient, clientProfileId);
+    if (error) {
+      return { clientProfileId: null, studentId: null, profile: null, student: null, identityNumber: '', error };
+    }
+    profile = data || null;
+  }
+
+  if (!student && profile?.id) {
+    const { data, error } = await tenantClient
+      .from('students')
+      .select('id, client_profile_id')
+      .eq('client_profile_id', profile.id)
+      .maybeSingle();
+    if (error) {
+      return { clientProfileId: profile?.id || null, studentId: null, profile, student: null, identityNumber: '', error };
+    }
+    student = data || null;
+  }
+
+  return {
+    clientProfileId: profile?.id || student?.client_profile_id || null,
+    studentId: student?.id || null,
+    profile,
+    student,
+    identityNumber: normalizeIdentityNumber(profile?.identity_number),
+    error: null,
+  };
 }
 
-async function findTenantOtpChallenge(tenantClient, { studentId, submissionId, otp }) {
+async function resolveSubmissionDestination(tenantClient, clientProfileId, deliveryMethod) {
+  if (!UUID_PATTERN.test(String(clientProfileId || ''))) {
+    return '';
+  }
+  const value = await resolveClientProfileDestination(tenantClient, clientProfileId, deliveryMethod);
+  return deliveryMethod === 'whatsapp'
+    ? normalizePhone(value)
+    : normalizeString(value).toLowerCase();
+}
+
+function withOtpSubjectFilter(query, { clientProfileId, studentId }) {
+  if (UUID_PATTERN.test(String(clientProfileId || ''))) {
+    return query.eq('client_profile_id', clientProfileId);
+  }
+  if (UUID_PATTERN.test(String(studentId || ''))) {
+    return query.eq('student_id', studentId);
+  }
+  return query.eq('id', '__no_match__');
+}
+
+async function findTenantOtpChallenge(tenantClient, { clientProfileId, studentId, submissionId, otp }) {
   const tokenHash = hashOtp(otp);
   const nowIso = getNowIso();
 
-  const { data, error } = await tenantClient
+  const { data, error } = await withOtpSubjectFilter(
+    tenantClient
     .from('otp_challenges')
     .select('id, status, expires_at, metadata')
-    .eq('student_id', studentId)
     .eq('token_hash', tokenHash)
     .in('status', ['pending', 'verified'])
     .gt('expires_at', nowIso)
     .order('expires_at', { ascending: false })
-    .limit(10);
+    .limit(10),
+    { clientProfileId, studentId },
+  );
 
   if (error) throw error;
 
@@ -323,19 +354,21 @@ async function findTenantOtpChallenge(tenantClient, { studentId, submissionId, o
   return rows.find((row) => String(row?.metadata?.submission_id || '') === submissionId) || null;
 }
 
-async function findTenantPendingOtpChallenge(tenantClient, { studentId, submissionId, otp }) {
+async function findTenantPendingOtpChallenge(tenantClient, { clientProfileId, studentId, submissionId, otp }) {
   const tokenHash = hashOtp(otp);
   const nowIso = getNowIso();
 
-  const { data, error } = await tenantClient
+  const { data, error } = await withOtpSubjectFilter(
+    tenantClient
     .from('otp_challenges')
     .select('id, status, expires_at, metadata')
-    .eq('student_id', studentId)
     .eq('token_hash', tokenHash)
     .eq('status', 'pending')
     .gt('expires_at', nowIso)
     .order('expires_at', { ascending: false })
-    .limit(10);
+    .limit(10),
+    { clientProfileId, studentId },
+  );
 
   if (error) throw error;
 
@@ -358,7 +391,7 @@ async function findActiveRoutingRowsBySubmission(controlClient, submissionId) {
   return Array.isArray(data) ? data : [];
 }
 
-async function findReusableSubmissionAccess(tenantClient, controlClient, { orgId, studentId, submissionId }) {
+async function findReusableSubmissionAccess(tenantClient, controlClient, { orgId, clientProfileId, studentId, submissionId }) {
   const routingRows = await findActiveRoutingRowsBySubmission(controlClient, submissionId);
 
   for (const routingRow of routingRows) {
@@ -372,6 +405,7 @@ async function findReusableSubmissionAccess(tenantClient, controlClient, { orgId
     }
 
     const otpChallenge = await findTenantPendingOtpChallenge(tenantClient, {
+      clientProfileId,
       studentId,
       submissionId,
       otp: otpCode,
@@ -481,7 +515,7 @@ async function findActiveRoutingByIdentity(controlClient, identityNumber, otp) {
     .select('id, org_id, routing_info, expires_at, metadata')
     .eq('category', ROUTING_CATEGORY)
     .contains('routing_info', {
-      student_identity_number: identityNumber,
+      access_identity_number: identityNumber,
       otp_code: otp,
     })
     .gt('expires_at', nowIso)
@@ -542,7 +576,7 @@ async function findActiveRoutingRowsByIdentity(controlClient, identityNumber) {
     .from('active_routing')
     .select('id, org_id, routing_info, expires_at, metadata')
     .eq('category', ROUTING_CATEGORY)
-    .contains('routing_info', { student_identity_number: identityNumber })
+    .contains('routing_info', { access_identity_number: identityNumber })
     .gt('expires_at', nowIso)
     .order('created_at', { ascending: false });
 
@@ -595,7 +629,7 @@ async function deleteActiveRoutingRowsByIdentity(controlClient, identityNumber) 
     .from('active_routing')
     .delete()
     .eq('category', ROUTING_CATEGORY)
-    .contains('routing_info', { student_identity_number: identityNumber });
+    .contains('routing_info', { access_identity_number: identityNumber });
 
   if (error) throw error;
 }
@@ -605,17 +639,17 @@ async function cancelPendingOtpsForLockdown(context, controlClient, env, routing
 
   for (const row of routingRows || []) {
     const orgId = normalizeString(row?.org_id);
-    const studentId = normalizeString(row?.metadata?.student_id);
-    if (!UUID_PATTERN.test(orgId) || !UUID_PATTERN.test(studentId)) {
+    const clientProfileId = normalizeString(row?.metadata?.client_profile_id);
+    if (!UUID_PATTERN.test(orgId) || !UUID_PATTERN.test(clientProfileId)) {
       continue;
     }
 
     const orgTargets = targetsByOrg.get(orgId) || new Set();
-    orgTargets.add(studentId);
+    orgTargets.add(clientProfileId);
     targetsByOrg.set(orgId, orgTargets);
   }
 
-  for (const [orgId, studentIds] of targetsByOrg.entries()) {
+  for (const [orgId, clientProfileIds] of targetsByOrg.entries()) {
     const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
     if (tenantError) {
       context.log?.warn?.('form-submissions lockdown failed resolving tenant client', {
@@ -628,7 +662,7 @@ async function cancelPendingOtpsForLockdown(context, controlClient, env, routing
     const { error } = await tenantClient
       .from('otp_challenges')
       .update({ status: 'cancelled' })
-      .in('student_id', Array.from(studentIds))
+      .in('client_profile_id', Array.from(clientProfileIds))
       .eq('status', 'pending');
 
     if (error) {
@@ -670,14 +704,6 @@ async function resolveOrganizationSenderName(controlClient, orgId, context) {
     });
     return '';
   }
-}
-
-async function resolveSubmissionDestination(tenantClient, studentId, deliveryMethod) {
-  if (deliveryMethod === 'whatsapp') {
-    return normalizePhone(await resolveStudentDestination(tenantClient, studentId, 'phone'));
-  }
-
-  return normalizeString(await resolveStudentDestination(tenantClient, studentId, 'email')).toLowerCase();
 }
 
 function formatExpirationForDelivery(expiresAt) {
@@ -753,6 +779,7 @@ async function createSubmissionAccessArtifacts({
   orgId,
   userId,
   submissionId,
+  clientProfileId,
   studentId,
   formId,
   identityNumber,
@@ -766,6 +793,7 @@ async function createSubmissionAccessArtifacts({
   const { error: otpError } = await tenantClient
     .from('otp_challenges')
     .insert({
+      client_profile_id: clientProfileId,
       student_id: studentId,
       channel: deliveryMethod,
       destination,
@@ -789,13 +817,15 @@ async function createSubmissionAccessArtifacts({
       org_id: orgId,
       category: ROUTING_CATEGORY,
       routing_info: {
-        student_identity_number: identityNumber,
+        access_identity_number: identityNumber,
+        client_profile_id: clientProfileId,
         otp_code: otpCode,
         submission_id: submissionId,
       },
       expires_at: expiresAt,
       created_by: userId,
       metadata: {
+        client_profile_id: clientProfileId,
         student_id: studentId,
         form_id: formId,
         delivery_method: deliveryMethod,
@@ -831,11 +861,12 @@ async function fetchStudentIdsByInstructor(tenantClient, instructorEmployeeId) {
 
 async function listStudentSubmissions(context, req, { controlClient, env, orgId, userId, role }) {
   const canManageRoster = isAdminOrOffice(role);
-  const studentId = normalizeString(req?.query?.student_id || req?.query?.studentId);
+  const requestedStudentId = normalizeString(req?.query?.student_id || req?.query?.studentId);
+  const requestedClientProfileId = normalizeString(req?.query?.client_profile_id || req?.query?.clientProfileId);
   const limit = parseLimit(req?.query?.limit, 50, 200);
 
-  if (!UUID_PATTERN.test(studentId)) {
-    return respond(context, 400, { message: 'invalid_student_id' });
+  if (!UUID_PATTERN.test(requestedStudentId) && !UUID_PATTERN.test(requestedClientProfileId)) {
+    return respond(context, 400, { message: 'invalid_client_profile_or_student_id' });
   }
 
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
@@ -851,6 +882,25 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
     return respond(context, 500, { message: 'failed_to_load_form_submissions' });
   }
 
+  let studentId = UUID_PATTERN.test(requestedStudentId) ? requestedStudentId : '';
+  let clientProfileId = UUID_PATTERN.test(requestedClientProfileId) ? requestedClientProfileId : '';
+
+  if (studentId && !clientProfileId) {
+    const { data: student, error: studentError } = await tenantClient
+      .from('students')
+      .select('id, client_profile_id')
+      .eq('id', studentId)
+      .maybeSingle();
+    if (studentError) {
+      context.log?.error?.('form-submissions failed resolving student client profile', {
+        message: studentError?.message,
+        studentId,
+      });
+      return respond(context, 500, { message: 'failed_to_load_form_submissions' });
+    }
+    clientProfileId = student?.client_profile_id || '';
+  }
+
   if (!canManageRoster) {
     const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(tenantClient, userId);
     if (lessonError) {
@@ -860,22 +910,30 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
       });
       return respond(context, 500, { message: 'failed_to_check_student_access' });
     }
-    if (!studentIds.includes(studentId)) {
+    if (!studentId || !studentIds.includes(studentId)) {
       return respond(context, 403, { message: 'forbidden' });
     }
   }
 
-  const { data: submissions, error: submissionsError } = await tenantClient
+  let submissionsQuery = tenantClient
     .from('form_submissions')
-    .select('id, form_id, student_id, answers, alert_flags, otp_metadata, source, submitted_at, metadata')
-    .eq('student_id', studentId)
+    .select('id, form_id, client_profile_id, student_id, answers, alert_flags, otp_metadata, source, submitted_at, metadata')
     .order('submitted_at', { ascending: false })
     .limit(limit);
+
+  if (clientProfileId) {
+    submissionsQuery = submissionsQuery.eq('client_profile_id', clientProfileId);
+  } else {
+    submissionsQuery = submissionsQuery.eq('student_id', studentId);
+  }
+
+  const { data: submissions, error: submissionsError } = await submissionsQuery;
 
   if (submissionsError) {
     context.log?.error?.('form-submissions failed loading student submissions', {
       message: submissionsError?.message,
       studentId,
+      clientProfileId,
     });
     return respond(context, 500, { message: 'failed_to_load_form_submissions' });
   }
@@ -928,36 +986,38 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
 }
 
 async function initiateSubmission(context, req, { controlClient, env, orgId, userId, userEmail, role }) {
-  if (!isAdminRole(role)) {
+  if (!isAdminOrOffice(role)) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
   const body = parseRequestBody(req);
   const formId = normalizeString(body?.form_id || body?.formId);
-  const studentId = normalizeString(body?.student_id || body?.studentId);
+  const requestedStudentId = normalizeString(body?.student_id || body?.studentId);
+  const requestedClientProfileId = normalizeString(body?.client_profile_id || body?.clientProfileId);
   const deliveryMethod = normalizeDeliveryMethod(body?.delivery_method || body?.deliveryMethod);
 
   const rawTtl = Number(body?.expires_in_minutes ?? body?.expiresInMinutes);
   const ttlMinutes = (Number.isFinite(rawTtl) && rawTtl > 0) ? Math.min(rawTtl, 20160) : 10080;
 
   if (!UUID_PATTERN.test(formId)) return respond(context, 400, { message: 'invalid_form_id' });
-  if (!UUID_PATTERN.test(studentId)) return respond(context, 400, { message: 'invalid_student_id' });
+  if (!UUID_PATTERN.test(requestedStudentId) && !UUID_PATTERN.test(requestedClientProfileId)) {
+    return respond(context, 400, { message: 'invalid_client_profile_or_student_id' });
+  }
   if (!deliveryMethod) return respond(context, 400, { message: 'invalid_delivery_method' });
 
   const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
   if (tenantError) return respond(context, tenantError.status, tenantError.body);
 
-  const [{ data: form, error: formError }, { data: student, error: studentError }] = await Promise.all([
+  const [{ data: form, error: formError }, subject] = await Promise.all([
     tenantClient
       .from('forms')
       .select('id, name, is_active')
       .eq('id', formId)
       .maybeSingle(),
-    tenantClient
-      .from('students')
-      .select('id, first_name, last_name, identity_number, phone, email')
-      .eq('id', studentId)
-      .maybeSingle(),
+    resolveSubmissionSubject(tenantClient, {
+      clientProfileId: requestedClientProfileId,
+      studentId: requestedStudentId,
+    }),
   ]);
 
   if (formError) {
@@ -965,26 +1025,30 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     return respond(context, 500, { message: 'failed_to_load_form' });
   }
   if (!form || !form.is_active) return respond(context, 404, { message: 'form_not_found' });
-
-  if (studentError) {
-    context.log?.error?.('form-submissions failed to load student', { message: studentError?.message, studentId });
-    return respond(context, 500, { message: 'failed_to_load_student' });
+  if (subject.error) {
+    context.log?.error?.('form-submissions failed to load submission subject', {
+      message: subject.error?.message,
+      formId,
+      clientProfileId: requestedClientProfileId,
+      studentId: requestedStudentId,
+    });
+    return respond(context, 500, { message: 'failed_to_load_client_profile' });
   }
-  if (!student) return respond(context, 404, { message: 'student_not_found' });
+  if (!subject.profile) return respond(context, 404, { message: 'client_profile_not_found' });
 
-  const identityNumber = normalizeIdentityNumber(student.identity_number);
+  const identityNumber = subject.identityNumber;
   if (!identityNumber) {
-    return respond(context, 400, { message: 'student_identity_number_missing' });
+    return respond(context, 400, { message: 'client_profile_identity_number_missing' });
   }
 
   let destination = '';
   try {
-    destination = await resolveSubmissionDestination(tenantClient, studentId, deliveryMethod);
+    destination = await resolveSubmissionDestination(tenantClient, subject.clientProfileId, deliveryMethod);
     if (!destination) {
-      return respond(context, 400, { message: deliveryMethod === 'whatsapp' ? 'student_phone_missing' : 'student_email_missing' });
+      return respond(context, 400, { message: deliveryMethod === 'whatsapp' ? 'client_phone_missing' : 'client_email_missing' });
     }
   } catch (error) {
-    context.log?.error?.('form-submissions failed resolving destination', { message: error?.message, studentId });
+    context.log?.error?.('form-submissions failed resolving destination', { message: error?.message, clientProfileId: subject.clientProfileId });
     return respond(context, 500, { message: 'failed_to_resolve_destination' });
   }
 
@@ -1001,7 +1065,8 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     .from('form_submissions')
     .insert({
       form_id: formId,
-      student_id: studentId,
+      client_profile_id: subject.clientProfileId,
+      student_id: subject.studentId,
       answers: {},
       alert_flags: { has_red_flags: false, highest_severity: null, hits: [] },
       otp_metadata: { delivery_method: deliveryMethod, otp_status: 'pending', sent_via: [deliveryMethod] },
@@ -1016,7 +1081,8 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     context.log?.error?.('form-submissions failed to create submission', {
       message: submissionError?.message,
       formId,
-      studentId,
+      studentId: subject.studentId,
+      clientProfileId: subject.clientProfileId,
     });
     return respond(context, 500, { message: 'failed_to_create_submission' });
   }
@@ -1030,7 +1096,8 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
       orgId,
       userId,
       submissionId: submission.id,
-      studentId,
+      clientProfileId: subject.clientProfileId,
+      studentId: subject.studentId,
       formId,
       identityNumber,
       deliveryMethod,
@@ -1122,7 +1189,8 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     resourceType: 'form_submission',
     resourceId: submission.id,
     details: {
-      student_id: studentId,
+      client_profile_id: subject.clientProfileId,
+      student_id: subject.studentId,
       form_id: formId,
       delivery_method: deliveryMethod,
       source: deliveryMethod,
@@ -1133,7 +1201,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
 }
 
 async function resendSubmission(context, req, { controlClient, env, orgId, userId, userEmail, role }) {
-  if (!isAdminRole(role)) {
+  if (!isAdminOrOffice(role)) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
@@ -1152,7 +1220,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
 
   const { data: submission, error: submissionError } = await tenantClient
     .from('form_submissions')
-    .select('id, form_id, student_id, metadata, otp_metadata')
+    .select('id, form_id, client_profile_id, student_id, metadata, otp_metadata')
     .eq('id', submissionId)
     .maybeSingle();
 
@@ -1170,9 +1238,12 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
     return respond(context, 409, { message: 'submission_already_completed' });
   }
 
-  const [{ data: form, error: formError }, { data: student, error: studentError }] = await Promise.all([
+  const [{ data: form, error: formError }, subject] = await Promise.all([
     tenantClient.from('forms').select('id, name').eq('id', submission.form_id).maybeSingle(),
-    tenantClient.from('students').select('id, identity_number, phone, email').eq('id', submission.student_id).maybeSingle(),
+    resolveSubmissionSubject(tenantClient, {
+      clientProfileId: submission.client_profile_id,
+      studentId: submission.student_id,
+    }),
   ]);
 
   if (formError) {
@@ -1184,33 +1255,33 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
     return respond(context, 500, { message: 'failed_to_load_form' });
   }
   if (!form) return respond(context, 404, { message: 'form_not_found' });
-
-  if (studentError) {
-    context.log?.error?.('form-submissions failed loading student for resend', {
-      message: studentError?.message,
+  if (subject.error) {
+    context.log?.error?.('form-submissions failed loading submission subject for resend', {
+      message: subject.error?.message,
       submissionId,
+      clientProfileId: submission.client_profile_id,
       studentId: submission.student_id,
     });
-    return respond(context, 500, { message: 'failed_to_load_student' });
+    return respond(context, 500, { message: 'failed_to_load_client_profile' });
   }
-  if (!student) return respond(context, 404, { message: 'student_not_found' });
+  if (!subject.profile) return respond(context, 404, { message: 'client_profile_not_found' });
 
-  const identityNumber = normalizeIdentityNumber(student.identity_number);
+  const identityNumber = subject.identityNumber;
   if (!identityNumber) {
-    return respond(context, 400, { message: 'student_identity_number_missing' });
+    return respond(context, 400, { message: 'client_profile_identity_number_missing' });
   }
 
   let destination = '';
   try {
-    destination = await resolveSubmissionDestination(tenantClient, submission.student_id, deliveryMethod);
+    destination = await resolveSubmissionDestination(tenantClient, subject.clientProfileId, deliveryMethod);
     if (!destination) {
-      return respond(context, 400, { message: deliveryMethod === 'whatsapp' ? 'student_phone_missing' : 'student_email_missing' });
+      return respond(context, 400, { message: deliveryMethod === 'whatsapp' ? 'client_phone_missing' : 'client_email_missing' });
     }
   } catch (destinationError) {
     context.log?.error?.('form-submissions failed resolving destination for resend', {
       message: destinationError?.message,
       submissionId,
-      studentId: submission.student_id,
+      clientProfileId: subject.clientProfileId,
     });
     return respond(context, 500, { message: 'failed_to_resolve_destination' });
   }
@@ -1239,6 +1310,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   try {
     const reusableAccess = await findReusableSubmissionAccess(tenantClient, controlClient, {
       orgId,
+      clientProfileId: subject.clientProfileId,
       studentId: submission.student_id,
       submissionId,
     });
@@ -1281,6 +1353,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
         orgId,
         userId,
         submissionId,
+        clientProfileId: subject.clientProfileId,
         studentId: submission.student_id,
         formId: submission.form_id,
         identityNumber,
@@ -1313,7 +1386,6 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   const { error: updateSubmissionError } = await tenantClient
     .from('form_submissions')
     .update({
-      submitted_at: nowIso,
       source: deliveryMethod,
       otp_metadata: {
         ...existingOtpMetadata,
@@ -1380,6 +1452,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
     resourceType: 'form_submission',
     resourceId: submissionId,
     details: {
+      client_profile_id: subject.clientProfileId,
       student_id: submission.student_id,
       form_id: submission.form_id,
       delivery_method: deliveryMethod,
@@ -1480,7 +1553,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   const { data: submission, error: submissionError } = await tenantClient
     .from('form_submissions')
-    .select('id, student_id, form_id, metadata, otp_metadata')
+    .select('id, client_profile_id, student_id, form_id, metadata, otp_metadata')
     .eq('id', submissionId)
     .maybeSingle();
 
@@ -1503,13 +1576,21 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
   }
 
-  const { data: student, error: studentError } = await tenantClient
-    .from('students')
-    .select('id, identity_number')
-    .eq('id', submission.student_id)
-    .maybeSingle();
+  const subject = await resolveSubmissionSubject(tenantClient, {
+    clientProfileId: submission.client_profile_id,
+    studentId: submission.student_id,
+  });
 
-  if (studentError || !student || normalizeIdentityNumber(student.identity_number) !== identityNumber) {
+  if (subject.error) {
+    context.log?.error?.('form-submissions verify failed loading submission subject', {
+      message: subject.error?.message,
+      submissionId,
+      clientProfileId: submission.client_profile_id,
+    });
+    return respond(context, 500, { message: 'failed_to_verify_otp' });
+  }
+
+  if (!subject.profile || subject.identityNumber !== identityNumber) {
     try {
       const result = await processFailedVerifyAttempt(context, {
         controlClient,
@@ -1531,6 +1612,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
   let otpChallenge;
   try {
     otpChallenge = await findTenantPendingOtpChallenge(tenantClient, {
+      clientProfileId: submission.client_profile_id,
       studentId: submission.student_id,
       submissionId,
       otp: otpCode,
@@ -1636,7 +1718,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
 
   const { data: submission, error: submissionError } = await tenantClient
     .from('form_submissions')
-    .select('id, student_id, form_id, metadata, otp_metadata, submitted_at')
+    .select('id, client_profile_id, student_id, form_id, metadata, otp_metadata, submitted_at')
     .eq('id', submissionId)
     .maybeSingle();
 
@@ -1652,6 +1734,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   let otpChallenge;
   try {
     otpChallenge = await findTenantOtpChallenge(tenantClient, {
+      clientProfileId: submission.client_profile_id,
       studentId: submission.student_id,
       submissionId,
       otp: otpCode,
@@ -1782,6 +1865,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
       details: {
         origin: 'public_form_submission',
         form_id: routingRow?.metadata?.form_id || null,
+        client_profile_id: submission.client_profile_id,
         student_id: submission.student_id,
         delivery_method: routingRow?.metadata?.delivery_method || null,
         has_red_flags: alertFlags.has_red_flags,

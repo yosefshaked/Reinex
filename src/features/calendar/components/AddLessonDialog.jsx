@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useOrg } from '@/org/OrgContext';
-import { useStudents } from '@/hooks/useOrgData';
+import { useStudents, useClientProfiles } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { Loader2, AlertCircle, Users, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -71,6 +71,17 @@ function formatTimeLabel(timeString) {
   return `${hours}:${minutes}`;
 }
 
+function buildParticipantToken(kind, id) {
+  return `${kind}:${id}`;
+}
+
+function parseParticipantToken(token) {
+  const [kind, id] = String(token || '').split(':');
+  if (!id) return null;
+  if (kind !== 'student' && kind !== 'client') return null;
+  return { kind, id };
+}
+
 function buildInitialFormData(defaultDate, defaultSelection) {
   const baseDate = defaultSelection?.start instanceof Date
     ? toLocalDateString(defaultSelection.start)
@@ -84,6 +95,7 @@ function buildInitialFormData(defaultDate, defaultSelection) {
 
   return {
     student_ids: [],
+    client_profile_ids: [],
     instructor_employee_id: defaultSelection?.resourceId ? String(defaultSelection.resourceId) : '',
     service_id: '',
     date: baseDate,
@@ -110,6 +122,11 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     enabled: open && !!activeOrgId,
     orgId: activeOrgId,
   });
+  const { clientProfiles, loadingClientProfiles } = useClientProfiles({
+    status: 'non_student',
+    enabled: open && !!activeOrgId,
+    orgId: activeOrgId,
+  });
   const [isGroupSession, setIsGroupSession] = useState(false);
   
   const [formData, setFormData] = useState(() => buildInitialFormData(defaultDate, defaultSelection));
@@ -122,6 +139,11 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
   const [selectedOverrideReasonCode, setSelectedOverrideReasonCode] = useState('');
   const [customOverrideReason, setCustomOverrideReason] = useState('');
+
+  const participantTokens = useMemo(() => ([
+    ...(formData.student_ids || []).map((id) => `student:${id}`),
+    ...(formData.client_profile_ids || []).map((id) => `client:${id}`),
+  ]), [formData.client_profile_ids, formData.student_ids]);
 
   useEffect(() => {
     if (!open) {
@@ -291,6 +313,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   );
   const showsRegularInstructorNotice = Boolean(
     formData.student_ids.length === 1
+    && formData.client_profile_ids.length === 0
     && studentRegularInstructor?.id
     && formData.instructor_employee_id
     && String(studentRegularInstructor.id) !== String(formData.instructor_employee_id),
@@ -369,16 +392,58 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     useSchedulingOverride,
   ]);
 
+  const participantOptions = useMemo(() => {
+    const studentOptions = (students || []).map((student) => ({
+      value: buildParticipantToken('student', student.id),
+      kind: 'student',
+      id: student.id,
+      label: `${student.first_name || ''} ${student.middle_name || ''} ${student.last_name || ''}`.trim() || 'ללא שם',
+      searchText: `${student.first_name || ''} ${student.middle_name || ''} ${student.last_name || ''} ${student.identity_number || ''}`.toLowerCase(),
+      raw: student,
+    }));
+
+    const clientOptions = (clientProfiles || []).map((profile) => ({
+      value: buildParticipantToken('client', profile.id),
+      kind: 'client',
+      id: profile.id,
+      label: `${profile.first_name || ''} ${profile.middle_name || ''} ${profile.last_name || ''}`.trim() || 'ללא שם',
+      searchText: `${profile.first_name || ''} ${profile.middle_name || ''} ${profile.last_name || ''} ${profile.identity_number || ''}`.toLowerCase(),
+      raw: profile,
+    }));
+
+    return [...studentOptions, ...clientOptions];
+  }, [clientProfiles, students]);
+  const participantOptionByToken = useMemo(
+    () => new Map(participantOptions.map((option) => [option.value, option])),
+    [participantOptions],
+  );
+
+  const firstParticipant = useMemo(() => {
+    const [firstToken] = participantTokens;
+    if (!firstToken) return null;
+    const parsed = parseParticipantToken(firstToken);
+    if (!parsed) return null;
+    if (parsed.kind === 'student') {
+      return students.find((student) => student.id === parsed.id) || null;
+    }
+    return clientProfiles.find((profile) => profile.id === parsed.id) || null;
+  }, [clientProfiles, participantTokens, students]);
+
   // When first student is selected, auto-populate service and only fill instructor if the form does not already have one.
   useEffect(() => {
-    if (formData.student_ids.length === 0) {
+    if (participantTokens.length === 0) {
       setStudentDetails(null);
       setFormData(prev => ({ ...prev, service_id: '' }));
       return;
     }
 
-    const firstStudentId = formData.student_ids[0];
-    const student = students.find(s => s.id === firstStudentId);
+    const parsed = parseParticipantToken(participantTokens[0]);
+    if (!parsed || parsed.kind !== 'student') {
+      setStudentDetails(null);
+      return;
+    }
+
+    const student = students.find(s => s.id === parsed.id);
 
     if (student) {
       setStudentDetails(student);
@@ -399,7 +464,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         instructor_employee_id: prev.instructor_employee_id || nextInstructorId || '',
       }));
     }
-  }, [formData.student_ids, students, services, instructors]);
+  }, [participantTokens, students, services, instructors]);
 
   // Check conflicts when form data changes
   const checkConflicts = useCallback(async () => {
@@ -429,6 +494,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
           duration_minutes: formData.duration_minutes,
           instructor_employee_id: formData.instructor_employee_id,
           student_ids: formData.student_ids,
+          client_profile_ids: formData.client_profile_ids,
           service_id: formData.service_id,
         },
       });
@@ -442,7 +508,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   }, [formData, activeOrgId, session, services]);
 
   useEffect(() => {
-    if (!formData.instructor_employee_id || !formData.date || !formData.time || formData.student_ids.length === 0) {
+    if (!formData.instructor_employee_id || !formData.date || !formData.time || participantTokens.length === 0) {
       setConflicts([]);
       return;
     }
@@ -452,7 +518,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     }, 500); // Debounce
 
     return () => clearTimeout(timeoutId);
-  }, [formData, activeOrgId, checkConflicts]);
+  }, [formData, activeOrgId, checkConflicts, participantTokens.length]);
 
   async function handleSubmit(e) {
     if (!activeOrgId) {
@@ -510,6 +576,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
           instructor_employee_id: formData.instructor_employee_id,
           service_id: formData.service_id,
           student_ids: formData.student_ids,
+          client_profile_ids: formData.client_profile_ids,
           created_source: 'one_time',
           metadata: useSchedulingOverride
             ? {
@@ -545,12 +612,6 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     }
   }
 
-  const studentOptions = students.map(s => ({
-    value: s.id,
-    label: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() || 'ללא שם',
-    searchText: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''} ${s.identity_number || ''}`.toLowerCase(),
-  }));
-
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -564,9 +625,9 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-slate-900">משתתפים</p>
-                <p className="text-xs text-slate-500">בחרו תלמיד/ה ראשי/ת, ובמידת הצורך הוסיפו משתתפים נוספים.</p>
+                <p className="text-xs text-slate-500">בחרו לקוח/ה ראשי/ת, ובמידת הצורך הוסיפו משתתפים נוספים.</p>
               </div>
-              {formData.student_ids.length > 0 && !isGroupSession ? (
+              {participantTokens.length > 0 && !isGroupSession ? (
                 <Button
                   type="button"
                   variant="outline"
@@ -575,16 +636,16 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                   className="gap-1 ms-auto"
                 >
                   <Users className="h-4 w-4" />
-                  להוסיף תלמידים נוספים
+                  להוסיף משתתפים נוספים
                 </Button>
               ) : null}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="students">תלמיד *</Label>
-              {studentsLoading ? (
+              <Label htmlFor="students">לקוח/ה *</Label>
+              {studentsLoading || loadingClientProfiles ? (
                 <div className="text-sm text-gray-500 mb-2 flex items-center gap-2">
                   <Loader2 className="h-3 w-3 animate-spin" />
-                  טוען תלמידים...
+                  טוען לקוחות...
                 </div>
               ) : null}
               {studentsError && !studentsLoading ? (
@@ -592,39 +653,45 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                   {studentsError}
                 </div>
               ) : null}
-              {!studentsLoading && !studentsError && studentOptions.length === 0 ? (
+              {!studentsLoading && !loadingClientProfiles && !studentsError && participantOptions.length === 0 ? (
                 <div className="text-sm text-amber-600 mb-2">
-                  לא נמצאו תלמידים
+                  לא נמצאו לקוחות
                 </div>
               ) : null}
 
               <ComboBoxField
                 id="primary-student"
                 name="primary-student"
-                options={studentOptions}
-                value={formData.student_ids[0] ? students.find(s => s.id === formData.student_ids[0])?.label || '' : ''}
+                options={participantOptions}
+                value={participantOptionByToken.get(participantTokens[0])?.label || ''}
                 onChange={(value) => {
-                  const student = students.find(s =>
-                    `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() === value.trim()
-                  );
-                  const newIds = student ? [student.id] : [];
+                  const participant = participantOptions.find((option) => option.label.trim() === value.trim());
+                  const nextState = { student_ids: [], client_profile_ids: [] };
+                  if (participant?.kind === 'student') {
+                    nextState.student_ids = [participant.id];
+                  } else if (participant?.kind === 'client') {
+                    nextState.client_profile_ids = [participant.id];
+                  }
                   if (isGroupSession) {
-                    const otherIds = formData.student_ids.slice(1);
-                    setFormData({ ...formData, student_ids: [...newIds, ...otherIds] });
+                    setFormData({
+                      ...formData,
+                      student_ids: [...nextState.student_ids, ...formData.student_ids.slice(1)],
+                      client_profile_ids: [...nextState.client_profile_ids, ...formData.client_profile_ids.slice(1)],
+                    });
                   } else {
-                    setFormData({ ...formData, student_ids: newIds });
+                    setFormData({ ...formData, ...nextState });
                   }
                 }}
-                placeholder={studentsLoading ? "טוען..." : "בחר תלמיד"}
-                disabled={studentsLoading || studentOptions.length === 0}
-                emptyMessage="לא נמצאו תלמידים"
+                placeholder={studentsLoading || loadingClientProfiles ? "טוען..." : "בחר לקוח/ה"}
+                disabled={studentsLoading || loadingClientProfiles || participantOptions.length === 0}
+                emptyMessage="לא נמצאו לקוחות"
               />
             </div>
 
             {isGroupSession ? (
               <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <Label>תלמידים נוספים</Label>
+                  <Label>משתתפים נוספים</Label>
                   <Button
                     type="button"
                     variant="ghost"
@@ -636,42 +703,51 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 </div>
                 <Select
                   value=""
-                  onValueChange={(studentId) => {
-                    if (!formData.student_ids.includes(studentId)) {
-                      setFormData({ ...formData, student_ids: [...formData.student_ids, studentId] });
+                  onValueChange={(token) => {
+                    const parsed = parseParticipantToken(token);
+                    if (!parsed || participantTokens.includes(token)) {
+                      return;
                     }
+                    setFormData((prev) => ({
+                      ...prev,
+                      student_ids: parsed.kind === 'student' ? [...prev.student_ids, parsed.id] : prev.student_ids,
+                      client_profile_ids: parsed.kind === 'client' ? [...prev.client_profile_ids, parsed.id] : prev.client_profile_ids,
+                    }));
                   }}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="הוסף תלמיד נוסף" />
+                    <SelectValue placeholder="הוסף משתתף/ת" />
                   </SelectTrigger>
                   <SelectContent>
-                    {students
-                      .filter(s => !formData.student_ids.includes(s.id))
-                      .map((student) => (
-                        <SelectItem key={student.id} value={student.id}>
-                          {student.label}
+                    {participantOptions
+                      .filter((option) => !participantTokens.includes(option.value))
+                      .map((participant) => (
+                        <SelectItem key={participant.value} value={participant.value}>
+                          {participant.label}
                         </SelectItem>
                       ))}
                   </SelectContent>
                 </Select>
 
-                {formData.student_ids.length > 1 ? (
+                {participantTokens.length > 1 ? (
                   <div className="mt-3 space-y-2">
-                    {formData.student_ids.slice(1).map((studentId) => {
-                      const student = students.find(s => s.id === studentId);
+                    {participantTokens.slice(1).map((token) => {
+                      const option = participantOptionByToken.get(token);
+                      const parsed = parseParticipantToken(token);
                       return (
-                        <div key={studentId} className="flex items-center justify-between rounded border bg-white p-2">
-                          <span>{student?.label}</span>
+                        <div key={token} className="flex items-center justify-between rounded border bg-white p-2">
+                          <span>{option?.label}</span>
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
                             onClick={() => {
-                              setFormData({
-                                ...formData,
-                                student_ids: formData.student_ids.filter(id => id !== studentId),
-                              });
+                              if (!parsed) return;
+                              setFormData((prev) => ({
+                                ...prev,
+                                student_ids: parsed.kind === 'student' ? prev.student_ids.filter((id) => id !== parsed.id) : prev.student_ids,
+                                client_profile_ids: parsed.kind === 'client' ? prev.client_profile_ids.filter((id) => id !== parsed.id) : prev.client_profile_ids,
+                              }));
                             }}
                           >
                             <X className="h-4 w-4" />
@@ -684,9 +760,9 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
               </div>
             ) : null}
 
-            {!isGroupSession && formData.student_ids.length > 0 && studentDetails ? (
+            {!isGroupSession && participantTokens.length > 0 && firstParticipant ? (
               <div className="mt-3 rounded-xl bg-blue-50 p-2 text-sm">
-                <p className="font-medium">{studentDetails.first_name} {studentDetails.last_name}</p>
+                <p className="font-medium">{participantOptionByToken.get(participantTokens[0])?.label || `${firstParticipant.first_name || ''} ${firstParticipant.last_name || ''}`.trim()}</p>
               </div>
             ) : null}
 
@@ -739,10 +815,10 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                       duration_minutes: Number(nextSelectedService?.duration_minutes) || prev.duration_minutes,
                     }));
                   }}
-                  disabled={servicesLoading || !formData.student_ids.length}
+                  disabled={servicesLoading || participantTokens.length === 0}
                 >
                   <SelectTrigger id="service">
-                    <SelectValue placeholder={formData.student_ids.length ? "בחר שירות" : "בחר תלמיד תחילה"} />
+                    <SelectValue placeholder={participantTokens.length ? "בחר שירות" : "בחר לקוח/ה תחילה"} />
                   </SelectTrigger>
                   <SelectContent>
                     {activeServices.map((service) => (
@@ -973,7 +1049,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 || !formData.instructor_employee_id
                 || !formData.date
                 || !formData.time
-                || formData.student_ids.length === 0
+                || participantTokens.length === 0
                 || (!useSchedulingOverride && selectedTimeOutsideAvailability)
                 || (useSchedulingOverride
                   ? !hasValidSchedulingOverrideReason(selectedOverrideReasonCode, customOverrideReason)

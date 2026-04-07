@@ -374,7 +374,7 @@ export function coerceOnboardingStatus(raw) {
     completed: 'approved',
   };
   const normalized = legacyAliasMap[trimmed] || trimmed;
-  const validStatuses = ['not_started', 'pending_forms', 'pending_wl_form', 'approved'];
+  const validStatuses = ['not_started', 'pending_forms', 'approved'];
   if (validStatuses.includes(normalized)) {
     return { value: normalized, valid: true };
   }

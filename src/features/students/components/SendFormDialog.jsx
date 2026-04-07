@@ -77,9 +77,14 @@ function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName, e
   };
 }
 
-export default function SendFormDialog({ open, onOpenChange, student, onSent }) {
+function buildSubjectName(subject) {
+  return [subject?.first_name, subject?.middle_name, subject?.last_name].filter(Boolean).join(' ').trim() || 'הלקוח/ה';
+}
+
+export default function SendFormDialog({ open, onOpenChange, student = null, clientProfile = null, onSent }) {
   const { session } = useSupabase();
   const { activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const subject = clientProfile || student;
 
   const [templates, setTemplates] = useState([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
@@ -129,7 +134,7 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
   );
 
   const handleSend = async () => {
-    if (!student?.id || !selectedFormId || !activeOrgId) {
+    if (!subject?.id || !selectedFormId || !activeOrgId) {
       toast.error('חסרים נתונים לשליחת הטופס');
       return;
     }
@@ -148,7 +153,8 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
         body: {
           org_id: activeOrgId,
           form_id: selectedFormId,
-          student_id: student.id,
+          client_profile_id: clientProfile?.id || subject?.client_profile_id || subject?.id,
+          student_id: student?.id || null,
           delivery_method: deliveryMethod,
           expires_in_minutes: expiresInMinutes,
         },
@@ -167,7 +173,7 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
         throw new Error('response_missing_whatsapp_payload');
       }
 
-      const accessIdentifier = String(response?.access_identifier || student?.identity_number || student?.national_id || '');
+      const accessIdentifier = String(response?.access_identifier || subject?.identity_number || subject?.national_id || '');
       const expiresAt = String(response?.expires_at || '');
       const submitLink = buildSubmissionLink({ accessIdentifier, otp });
       const wa = buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, selectedTemplate?.name || 'טופס', expiresAt);
@@ -195,7 +201,7 @@ export default function SendFormDialog({ open, onOpenChange, student, onSent }) 
         <DialogHeader>
           <DialogTitle>שלח טופס</DialogTitle>
           <DialogDescription>
-            בחר תבנית טופס וערוץ שליחה עבור {student?.first_name || 'התלמיד'}.
+            בחר תבנית טופס וערוץ שליחה עבור {buildSubjectName(subject)}.
           </DialogDescription>
         </DialogHeader>
 

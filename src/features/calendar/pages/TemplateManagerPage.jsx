@@ -24,6 +24,7 @@ export default function TemplateManagerPage() {
   const [addDefaults, setAddDefaults] = useState({
     instructorId: null,
     dayOfWeek: null,
+    clientProfileId: '',
     studentId: '',
     serviceId: '',
     timeOfDay: '09:00',
@@ -37,6 +38,7 @@ export default function TemplateManagerPage() {
     instructorId: '',
     serviceId: '',
     waitingListEntryId: '',
+    clientProfileId: '',
     studentId: '',
     studentName: '',
     serviceName: '',
@@ -63,6 +65,7 @@ export default function TemplateManagerPage() {
       dayOfWeek: searchParams.get('day_of_week') || null,
       timeOfDay: searchParams.get('time_of_day') || '09:00',
       durationMinutes: Number(searchParams.get('duration_minutes')) || 60,
+      clientProfileId: searchParams.get('client_profile_id') || '',
       studentId: searchParams.get('student_id') || '',
       studentName: searchParams.get('student_name') || '',
       serviceId: searchParams.get('service_id') || '',
@@ -82,6 +85,7 @@ export default function TemplateManagerPage() {
       instructorId,
       serviceId,
       waitingListEntryId: searchParams.get('waiting_list_entry_id') || '',
+      clientProfileId: searchParams.get('client_profile_id') || '',
       studentId: searchParams.get('student_id') || '',
       studentName: searchParams.get('student_name') || '',
       serviceName: searchParams.get('service_name') || '',
@@ -97,6 +101,7 @@ export default function TemplateManagerPage() {
     setAddDefaults({
       instructorId: waitingListSeed.instructorId,
       dayOfWeek: waitingListSeed.dayOfWeek,
+      clientProfileId: waitingListSeed.clientProfileId,
       studentId: waitingListSeed.studentId,
       serviceId: waitingListSeed.serviceId,
       timeOfDay: waitingListSeed.timeOfDay,
@@ -119,6 +124,7 @@ export default function TemplateManagerPage() {
       instructorId: fixAvailabilitySeed.instructorId,
       serviceId: fixAvailabilitySeed.serviceId,
       waitingListEntryId: fixAvailabilitySeed.waitingListEntryId,
+      clientProfileId: fixAvailabilitySeed.clientProfileId,
       studentId: fixAvailabilitySeed.studentId,
       studentName: fixAvailabilitySeed.studentName,
       serviceName: fixAvailabilitySeed.serviceName,
@@ -137,6 +143,7 @@ export default function TemplateManagerPage() {
     setAddDefaults({
       instructorId: instructor.id,
       dayOfWeek,
+      clientProfileId: '',
       studentId: '',
       serviceId: '',
       timeOfDay: '09:00',
@@ -158,6 +165,7 @@ export default function TemplateManagerPage() {
   function handleFixAvailability({
     instructorId,
     serviceId,
+    clientProfileId = '',
     studentId = '',
     waitingListEntryId = '',
     waitingListContext = null,
@@ -168,6 +176,7 @@ export default function TemplateManagerPage() {
       instructorId: instructorId || '',
       serviceId: serviceId || '',
       waitingListEntryId: waitingListEntryId || '',
+      clientProfileId: clientProfileId || '',
       studentId: studentId || '',
       studentName: waitingListContext?.studentName || '',
       serviceName: waitingListContext?.serviceName || '',
@@ -190,6 +199,7 @@ export default function TemplateManagerPage() {
         instructorId: availabilityContext.instructorId,
         serviceId: availabilityContext.serviceId,
         studentId: availabilityContext.studentId || prev.studentId,
+        clientProfileId: availabilityContext.clientProfileId || prev.clientProfileId,
         waitingListEntryId: availabilityContext.waitingListEntryId || prev.waitingListEntryId,
         waitingListContext: availabilityContext.studentName || availabilityContext.serviceName
           ? {
@@ -308,6 +318,7 @@ export default function TemplateManagerPage() {
         onSuccess={handleAddSuccess}
         defaultInstructorId={addDefaults.instructorId}
         defaultDayOfWeek={addDefaults.dayOfWeek}
+        defaultClientProfileId={addDefaults.clientProfileId}
         defaultStudentId={addDefaults.studentId}
         defaultServiceId={addDefaults.serviceId}
         defaultTimeOfDay={addDefaults.timeOfDay}

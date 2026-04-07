@@ -678,7 +678,6 @@ export default function StudentsPage() {
                     <TableBody>
                       {filteredStudents.map((student) => {
                         const isInactive = student.is_active === false;
-                        const isProspect = student.onboarding_status === 'pending_wl_form';
                         const missingIdentityNumber = !(student.identity_number || student.national_id)?.trim();
                         const summary = complianceSummary[student.id] || {};
                         const hasExpiredDocs = summary.expiredDocuments > 0;
@@ -712,11 +711,6 @@ export default function StudentsPage() {
                                 {isInactive && (
                                   <Badge variant="secondary" className="w-fit bg-neutral-200 text-neutral-700">
                                     לא פעיל
-                                  </Badge>
-                                )}
-                                {isProspect && (
-                                  <Badge variant="outline" className="w-fit">
-                                    מתעניין / ממתין לטופס
                                   </Badge>
                                 )}
                                 {missingIdentityNumber && (
@@ -931,12 +925,12 @@ export default function StudentsPage() {
       {/* Admin-only: Edit Student Modal */}
       {isAdmin && studentForEdit && (
         <EditStudentModal
-          open={isEditOpen}
+          open={Boolean(studentForEdit)}
           student={studentForEdit}
           isSubmitting={isUpdatingStudent}
           error={updateError}
-          onClose={handleCloseEdit}
-          onSubmit={handleUpdateStudent}
+          onClose={handleEditModalClose}
+          onSubmit={handleEditSubmit}
         />
       )}
 

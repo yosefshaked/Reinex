@@ -21,6 +21,12 @@ import {
   prepareAnswersForStorage,
   resolvePublicFormState,
 } from '../_shared/forms-runtime.js';
+import {
+  createOrReuseClientProfile,
+  createOrReuseGuardian,
+  upsertClientGuardianLink,
+  findClientProfileByIdentityNumber,
+} from '../_shared/client-profiles.js';
 
 const ROUTING_CATEGORY = 'waiting_list_intake';
 const DEFAULT_INVITE_TTL_MINUTES = 10080;
@@ -282,26 +288,6 @@ function parseInviteTtlMinutes(raw) {
   return Math.min(parsed, MAX_INVITE_TTL_MINUTES);
 }
 
-function splitContactName(value) {
-  const normalized = normalizeString(value);
-  if (!normalized) return { firstName: '', lastName: '' };
-  const parts = normalized.split(/\s+/).filter(Boolean);
-  if (parts.length <= 1) return { firstName: parts[0] || normalized, lastName: '' };
-  return { firstName: parts.shift() || normalized, lastName: parts.join(' ') };
-}
-
-async function findStudentByIdentityNumber(tenantClient, identityNumber, { excludeId } = {}) {
-  if (!identityNumber) return { data: null, error: null };
-  let query = tenantClient
-    .from('students')
-    .select('id, first_name, last_name, identity_number, phone, email, onboarding_status, is_active')
-    .eq('identity_number', identityNumber)
-    .limit(1);
-  if (excludeId) query = query.neq('id', excludeId);
-  const { data, error } = await query.maybeSingle();
-  return { data, error };
-}
-
 async function requireWaitingListIntakeForm(tenantClient, formId) {
   const { data, error } = await tenantClient
     .from('forms')
@@ -394,15 +380,15 @@ async function findActiveInviteRoutingBySubmission(controlClient, submissionId) 
   return data || null;
 }
 
-async function findPendingIntakeSubmission(tenantClient, { studentId, formId, primaryServiceId, allowAdditionalServices }) {
-  if (!UUID_PATTERN.test(String(studentId || '')) || !UUID_PATTERN.test(String(formId || '')) || !UUID_PATTERN.test(String(primaryServiceId || ''))) {
+async function findPendingIntakeSubmission(tenantClient, { clientProfileId, formId, primaryServiceId, allowAdditionalServices }) {
+  if (!UUID_PATTERN.test(String(clientProfileId || '')) || !UUID_PATTERN.test(String(formId || '')) || !UUID_PATTERN.test(String(primaryServiceId || ''))) {
     return null;
   }
 
   const { data, error } = await tenantClient
     .from('form_submissions')
     .select('id, metadata, submitted_at')
-    .eq('student_id', studentId)
+    .eq('client_profile_id', clientProfileId)
     .eq('form_id', formId)
     .contains('metadata', {
       workflow_kind: 'waiting_list_intake',
@@ -423,170 +409,42 @@ function normalizeCustomAnswers(value) {
 }
 
 async function createOrReuseProspectStudent(tenantClient, payload) {
-  const identityNumber = normalizeIdentityNumber(payload.identity_number);
-
-  if (identityNumber) {
-    const { data: existingStudent, error } = await findStudentByIdentityNumber(tenantClient, identityNumber);
-    if (error) throw new Error(`failed_to_lookup_student:${error.message}`);
-
-    if (existingStudent) {
-      const safeUpdates = {};
-      const phone = normalizePhone(payload.phone);
-      const email = normalizeEmail(payload.email);
-      if (!normalizeString(existingStudent.phone) && phone) safeUpdates.phone = phone;
-      if (!normalizeString(existingStudent.email) && email) safeUpdates.email = email;
-      if (Object.keys(safeUpdates).length) {
-        const { data: updatedStudent, error: updateError } = await tenantClient
-          .from('students')
-          .update({ ...safeUpdates, updated_at: getNowIso() })
-          .eq('id', existingStudent.id)
-          .select('id, first_name, last_name, identity_number, phone, email, onboarding_status, is_active')
-          .single();
-        if (updateError || !updatedStudent?.id) {
-          throw new Error(`failed_to_update_student:${updateError?.message || 'unknown_error'}`);
-        }
-        return {
-          studentId: updatedStudent.id,
-          action: 'updated_existing',
-          beforeState: existingStudent,
-          afterState: updatedStudent,
-        };
-      }
-      return {
-        studentId: existingStudent.id,
-        action: 'reused_existing',
-        beforeState: existingStudent,
-        afterState: existingStudent,
-      };
-    }
-  }
-
   const firstName = normalizeString(payload.student_first_name || payload.studentFirstName);
   const lastName = normalizeString(payload.student_last_name || payload.studentLastName);
   if (!firstName || !lastName) {
     throw new Error('missing_student_name');
   }
-  const { data, error } = await tenantClient
+  const result = await createOrReuseClientProfile(tenantClient, {
+    first_name: firstName,
+    last_name: lastName,
+    identity_number: normalizeIdentityNumber(payload.identity_number) || null,
+    phone: normalizePhone(payload.phone) || null,
+    email: normalizeEmail(payload.email) || null,
+    default_notification_method: normalizeDeliveryMethod(payload.delivery_method) || 'whatsapp',
+    onboarding_status: 'pending_forms',
+    is_active: false,
+    metadata: {
+      source: 'waiting_list_intake',
+      internal_note: normalizeString(payload.internal_note) || null,
+    },
+  });
+
+  const { data: studentRow, error: studentLookupError } = await tenantClient
     .from('students')
-    .insert({
-      first_name: firstName,
-      last_name: lastName,
-      identity_number: identityNumber || null,
-      phone: normalizePhone(payload.phone) || null,
-      email: normalizeEmail(payload.email) || null,
-      default_notification_method: normalizeDeliveryMethod(payload.delivery_method) || 'whatsapp',
-      notes_internal: normalizeString(payload.internal_note) || null,
-      onboarding_status: 'pending_wl_form',
-      is_active: false,
-    })
-    .select('id, first_name, last_name, identity_number, phone, email, onboarding_status, is_active')
-    .single();
-
-  if (error || !data?.id) {
-    throw new Error(`failed_to_create_student:${error?.message || 'unknown_error'}`);
+    .select('id')
+    .eq('client_profile_id', result.clientProfileId)
+    .maybeSingle();
+  if (studentLookupError) {
+    throw new Error(`failed_to_lookup_student:${studentLookupError.message}`);
   }
 
   return {
-    studentId: data.id,
-    action: 'created',
-    beforeState: null,
-    afterState: data,
+    clientProfileId: result.clientProfileId,
+    studentId: studentRow?.id || '',
+    action: result.action,
+    beforeState: result.beforeState,
+    afterState: result.afterState,
   };
-}
-
-async function createOrReuseGuardian(tenantClient, { contactName, phone, email }) {
-  const normalizedContactName = normalizeString(contactName);
-  if (!normalizedContactName) return null;
-
-  const { firstName, lastName } = splitContactName(normalizedContactName);
-  const normalizedPhone = normalizePhone(phone);
-  const normalizedEmail = normalizeEmail(email);
-
-  let existingGuardian = null;
-
-  if (normalizedPhone) {
-    const { data, error } = await tenantClient
-      .from('guardians')
-      .select('id, phone, email')
-      .eq('phone', normalizedPhone)
-      .limit(1)
-      .maybeSingle();
-    if (error) throw new Error(`failed_to_lookup_guardian:${error.message}`);
-    existingGuardian = data || null;
-  }
-
-  if (!existingGuardian && normalizedEmail) {
-    const { data, error } = await tenantClient
-      .from('guardians')
-      .select('id, phone, email')
-      .eq('email', normalizedEmail)
-      .limit(1)
-      .maybeSingle();
-    if (error) throw new Error(`failed_to_lookup_guardian:${error.message}`);
-    existingGuardian = data || null;
-  }
-
-  if (existingGuardian?.id) {
-    const updates = {};
-    if (!normalizePhone(existingGuardian.phone) && normalizedPhone) updates.phone = normalizedPhone;
-    if (!normalizeEmail(existingGuardian.email) && normalizedEmail) updates.email = normalizedEmail;
-    if (Object.keys(updates).length) {
-      const { data: updatedGuardian, error } = await tenantClient
-        .from('guardians')
-        .update(updates)
-        .eq('id', existingGuardian.id)
-        .select('id, first_name, last_name, phone, email')
-        .single();
-      if (error || !updatedGuardian?.id) throw new Error(`failed_to_update_guardian:${error?.message || 'unknown_error'}`);
-      return {
-        guardianId: updatedGuardian.id,
-        action: 'updated_existing',
-        beforeState: existingGuardian,
-        afterState: updatedGuardian,
-      };
-    }
-    return {
-      guardianId: existingGuardian.id,
-      action: 'reused_existing',
-      beforeState: existingGuardian,
-      afterState: existingGuardian,
-    };
-  }
-
-  const { data, error } = await tenantClient
-    .from('guardians')
-    .insert({
-      first_name: firstName || normalizedContactName,
-      last_name: lastName || null,
-      phone: normalizedPhone || null,
-      email: normalizedEmail || null,
-    })
-    .select('id, first_name, last_name, phone, email')
-    .single();
-
-  if (error || !data?.id) {
-    throw new Error(`failed_to_create_guardian:${error?.message || 'unknown_error'}`);
-  }
-
-  return {
-    guardianId: data.id,
-    action: 'created',
-    beforeState: null,
-    afterState: data,
-  };
-}
-
-async function upsertGuardianLink(tenantClient, { studentId, guardianId, relationship }) {
-  if (!UUID_PATTERN.test(String(studentId || '')) || !UUID_PATTERN.test(String(guardianId || ''))) return;
-  const { error } = await tenantClient
-    .from('student_guardians')
-    .upsert({
-      student_id: studentId,
-      guardian_id: guardianId,
-      relationship,
-      is_primary: true,
-    }, { onConflict: 'student_id,guardian_id' });
-  if (error) throw new Error(`failed_to_link_guardian:${error.message}`);
 }
 
 async function writeTenantAudit(context, tenantClient, params) {
@@ -665,6 +523,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
   if (!service) return respond(context, 404, { message: 'service_not_found' });
 
   let studentId = '';
+  let clientProfileId = '';
   let studentResult = null;
   try {
     studentResult = await createOrReuseProspectStudent(tenantClient, {
@@ -677,6 +536,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
       internal_note: internalNote,
     });
     studentId = studentResult?.studentId || '';
+    clientProfileId = studentResult?.clientProfileId || '';
   } catch (error) {
     const message = String(error?.message || '');
     if (message.startsWith('failed_to_lookup_student:')) {
@@ -703,23 +563,24 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
       correlationId,
       actorUserId: userId,
       eventType: studentResult.action === 'created'
-        ? 'student.waiting_list_prospect.created'
-        : 'student.waiting_list_prospect.updated',
+        ? 'client_profile.waiting_list_prospect.created'
+        : 'client_profile.waiting_list_prospect.updated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
-      resourceType: 'student',
-      resourceId: studentId,
+      resourceType: 'client_profile',
+      resourceId: clientProfileId,
       beforeState: studentResult.beforeState,
       afterState: studentResult.afterState,
       details: {
         origin: 'api/waiting-list-intake',
-        onboarding_status: 'pending_wl_form',
+        onboarding_status: 'pending_forms',
+        student_id: studentId || null,
       },
     });
   }
 
   try {
     const existingSubmission = await findPendingIntakeSubmission(tenantClient, {
-      studentId,
+      clientProfileId,
       formId,
       primaryServiceId: desiredServiceId,
       allowAdditionalServices,
@@ -734,6 +595,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
           invite_url: inviteUrl,
           expires_at: existingRouting.expires_at || null,
           student_id: studentId,
+          client_profile_id: clientProfileId,
           submission_id: existingSubmission.id,
           student_first_name: studentFirstName,
           student_last_name: studentLastName,
@@ -778,6 +640,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
           details: {
             submission_id: existingSubmission.id,
             student_id: studentId,
+            client_profile_id: clientProfileId,
             form_id: formId,
             desired_service_id: desiredServiceId,
             delivery_method: deliveryMethod,
@@ -792,6 +655,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
     context.log?.error?.('waiting-list-intake failed to resolve reusable invite state', {
       message: error?.message,
       studentId,
+      clientProfileId,
       formId,
       desiredServiceId,
     });
@@ -802,6 +666,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
     .from('form_submissions')
     .insert({
       form_id: formId,
+      client_profile_id: clientProfileId,
       student_id: studentId,
       answers: {},
       alert_flags: { has_red_flags: false, highest_severity: null, hits: [] },
@@ -847,6 +712,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
     resourceId: submissionId,
     afterState: {
       id: submissionId,
+      client_profile_id: clientProfileId,
       student_id: studentId,
       form_id: formId,
       workflow_status: 'pending',
@@ -868,9 +734,10 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
       category: ROUTING_CATEGORY,
       expires_at: expiresAt,
       created_by: userId,
-      routing_info: { submission_id: submission.id },
+      routing_info: { submission_id: submission.id, client_profile_id: clientProfileId },
       metadata: {
       student_id: studentId,
+      client_profile_id: clientProfileId,
       form_id: formId,
       delivery_method: deliveryMethod,
       student_first_name: studentFirstName,
@@ -910,6 +777,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
     invite_url: inviteUrl,
     expires_at: expiresAt,
     student_id: studentId,
+    client_profile_id: clientProfileId,
     submission_id: submissionId,
     student_first_name: studentFirstName,
     student_last_name: studentLastName,
@@ -953,6 +821,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
     details: {
       submission_id: submissionId,
       student_id: studentId,
+      client_profile_id: clientProfileId,
       form_id: formId,
       desired_service_id: desiredServiceId,
       delivery_method: deliveryMethod,
@@ -985,7 +854,7 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
 
   const { data: submission, error: submissionError } = await tenantClient
     .from('form_submissions')
-    .select('id, student_id, form_id, answers, metadata, submitted_at')
+    .select('id, client_profile_id, student_id, form_id, answers, metadata, submitted_at')
     .eq('id', submissionId)
     .maybeSingle();
 
@@ -999,9 +868,9 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
     return respond(context, 409, { message: 'invite_already_completed' });
   }
 
-  const [{ data: form }, { data: student }, services] = await Promise.all([
+  const [{ data: form }, { data: clientProfile }, services] = await Promise.all([
     tenantClient.from('forms').select('id, name, description, form_schema, alert_rules, visibility_rules, metadata, form_usage').eq('id', submission.form_id).maybeSingle(),
-    tenantClient.from('students').select('id, first_name, last_name, identity_number, phone, email').eq('id', submission.student_id).maybeSingle(),
+    tenantClient.from('client_profiles').select('id, first_name, last_name, identity_number, phone, email').eq('id', submission.client_profile_id).maybeSingle(),
     listActiveServices(tenantClient),
   ]);
 
@@ -1023,14 +892,15 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
     form_schema: publicFormState.form_schema,
     visibility_rules: publicFormState.visibility_rules,
     prospect: {
-      student_id: student?.id || null,
-      student_first_name: student?.first_name || '',
-      student_last_name: student?.last_name || '',
+      client_profile_id: clientProfile?.id || null,
+      student_id: submission.student_id || null,
+      student_first_name: clientProfile?.first_name || '',
+      student_last_name: clientProfile?.last_name || '',
       contact_name: normalizeString(submissionMetadata.contact_name) || '',
       contact_relationship: normalizeGuardianRelationship(submissionMetadata.contact_relationship, { allowEmpty: true }),
-      identity_number: student?.identity_number || '',
-      phone: student?.phone || '',
-      email: student?.email || '',
+      identity_number: clientProfile?.identity_number || '',
+      phone: clientProfile?.phone || '',
+      email: clientProfile?.email || '',
     },
     intake_config: {
       primary_service_id: primaryServiceId || null,
@@ -1063,7 +933,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
 
   const { data: submission, error: submissionError } = await tenantClient
     .from('form_submissions')
-    .select('id, student_id, form_id, answers, metadata, submitted_at')
+    .select('id, client_profile_id, student_id, form_id, answers, metadata, submitted_at')
     .eq('id', submissionId)
     .maybeSingle();
 
@@ -1158,20 +1028,27 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
 
   let identityConflictStudentId = '';
   if (identityNumber) {
-    const { data: conflictStudent, error } = await findStudentByIdentityNumber(tenantClient, identityNumber, {
-      excludeId: submission.student_id,
+    const { data: conflictProfile, error } = await findClientProfileByIdentityNumber(tenantClient, identityNumber, {
+      excludeId: submission.client_profile_id,
     });
     if (error) {
       context.log?.error?.('waiting-list-intake failed to validate submitted identity number', {
         message: error.message,
-        studentId: submission.student_id,
+        clientProfileId: submission.client_profile_id,
       });
       return respond(context, 500, { message: 'failed_to_validate_identity_number' });
     }
-    if (conflictStudent?.id) identityConflictStudentId = conflictStudent.id;
+    if (conflictProfile?.id) {
+      const { data: conflictStudent } = await tenantClient
+        .from('students')
+        .select('id')
+        .eq('client_profile_id', conflictProfile.id)
+        .maybeSingle();
+      if (conflictStudent?.id) identityConflictStudentId = conflictStudent.id;
+    }
   }
 
-  const studentUpdates = {
+  const clientProfileUpdates = {
     first_name: studentFirstName,
     last_name: studentLastName,
     phone: phone || null,
@@ -1179,18 +1056,18 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     updated_at: nowIso,
   };
   if (identityNumber && !identityConflictStudentId) {
-    studentUpdates.identity_number = identityNumber;
+    clientProfileUpdates.identity_number = identityNumber;
   }
 
   const { error: updateStudentError } = await tenantClient
-    .from('students')
-    .update(studentUpdates)
-    .eq('id', submission.student_id);
+    .from('client_profiles')
+    .update(clientProfileUpdates)
+    .eq('id', submission.client_profile_id);
 
   if (updateStudentError) {
     context.log?.error?.('waiting-list-intake failed to update prospect student from submission', {
       message: updateStudentError.message,
-      studentId: submission.student_id,
+      clientProfileId: submission.client_profile_id,
     });
     return respond(context, 500, { message: 'failed_to_update_student' });
   }
@@ -1198,14 +1075,15 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
   await writeTenantAudit(context, tenantClient, {
     correlationId,
     actorUserId: null,
-    eventType: 'student.waiting_list_intake_profile_updated',
+    eventType: 'client_profile.waiting_list_intake_profile_updated',
     retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
-    resourceType: 'student',
-    resourceId: submission.student_id,
-    afterState: studentUpdates,
+    resourceType: 'client_profile',
+    resourceId: submission.client_profile_id,
+    afterState: clientProfileUpdates,
     details: {
       origin: 'public_waiting_list_intake',
       identity_number_conflict_student_id: identityConflictStudentId || null,
+      student_id: submission.student_id || null,
     },
   });
 
@@ -1220,8 +1098,8 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
       });
       guardianId = guardianResult?.guardianId || null;
       if (guardianId) {
-        await upsertGuardianLink(tenantClient, {
-          studentId: submission.student_id,
+        await upsertClientGuardianLink(tenantClient, {
+          clientProfileId: submission.client_profile_id,
           guardianId,
           relationship: contactRelationship,
         });
@@ -1230,7 +1108,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
       const message = String(error?.message || '');
       context.log?.error?.('waiting-list-intake failed to create or link guardian', {
         message,
-        studentId: submission.student_id,
+        clientProfileId: submission.client_profile_id,
       });
       return respond(context, 500, { message: 'failed_to_link_guardian' });
     }
@@ -1250,7 +1128,8 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
       afterState: guardianResult.afterState,
       details: {
         origin: 'public_waiting_list_intake',
-        student_id: submission.student_id,
+        client_profile_id: submission.client_profile_id,
+        student_id: submission.student_id || null,
       },
     });
   }
@@ -1259,12 +1138,13 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     await writeTenantAudit(context, tenantClient, {
       correlationId,
       actorUserId: null,
-      eventType: 'student.guardian_linked_from_waiting_list_intake',
+      eventType: 'client_profile.guardian_linked_from_waiting_list_intake',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
-      resourceType: 'student_guardian',
-      resourceId: `${submission.student_id}:${guardianId}`,
+      resourceType: 'client_guardian',
+      resourceId: `${submission.client_profile_id}:${guardianId}`,
       afterState: {
-        student_id: submission.student_id,
+        client_profile_id: submission.client_profile_id,
+        student_id: submission.student_id || null,
         guardian_id: guardianId,
         relationship: contactRelationship,
         is_primary: true,
@@ -1286,8 +1166,10 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
           contact_relationship: contactRelationship,
           phone: phone || null,
           email: email || null,
-          identity_number: identityNumber || null,
-          preferred_days: preferredDays,
+        identity_number: identityNumber || null,
+        client_profile_id: submission.client_profile_id,
+        student_id: submission.student_id || null,
+        preferred_days: preferredDays,
           preferred_times: preferredTimes,
           payment_path_intent: paymentPathIntent,
           hmo_approval_status: effectiveHmoApprovalStatus,
@@ -1369,7 +1251,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     const { data: existingEntry, error: existingEntryError } = await tenantClient
       .from('waiting_list_entries')
       .select('id, metadata')
-      .eq('student_id', submission.student_id)
+      .eq('client_profile_id', submission.client_profile_id)
       .eq('desired_service_id', serviceId)
       .in('status', REVIEWABLE_WAITING_LIST_STATUSES)
       .order('created_at', { ascending: false })
@@ -1379,7 +1261,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     if (existingEntryError) {
       context.log?.error?.('waiting-list-intake failed to load existing waiting-list entry', {
         message: existingEntryError.message,
-        studentId: submission.student_id,
+        clientProfileId: submission.client_profile_id,
         serviceId,
       });
       return respond(context, 500, { message: 'failed_to_create_waiting_list' });
@@ -1392,6 +1274,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
       const { error: updateEntryError } = await tenantClient
         .from('waiting_list_entries')
         .update({
+          latest_submission_id: submissionId,
           preferred_days: preferredDays,
           preferred_times: preferredTimes,
           notes: prospectNotes || null,
@@ -1433,7 +1316,9 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
       const { data: insertedEntry, error: insertEntryError } = await tenantClient
         .from('waiting_list_entries')
         .insert({
+          client_profile_id: submission.client_profile_id,
           student_id: submission.student_id,
+          latest_submission_id: submissionId,
           desired_service_id: serviceId,
           preferred_days: preferredDays,
           preferred_times: preferredTimes,
@@ -1441,13 +1326,13 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
           status: 'new',
           metadata: intakeMetadata,
         })
-        .select('id, student_id, desired_service_id, preferred_days, preferred_times, notes, status, metadata')
+        .select('id, client_profile_id, student_id, desired_service_id, preferred_days, preferred_times, notes, status, metadata')
         .single();
 
       if (insertEntryError || !insertedEntry?.id) {
         context.log?.error?.('waiting-list-intake failed to insert waiting-list entry', {
           message: insertEntryError?.message,
-          studentId: submission.student_id,
+          clientProfileId: submission.client_profile_id,
           serviceId,
         });
         return respond(context, 500, { message: 'failed_to_create_waiting_list' });
@@ -1484,6 +1369,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
   return respond(context, 200, {
     message: 'submitted',
     submission_id: submissionId,
+    client_profile_id: submission.client_profile_id,
     student_id: submission.student_id,
     requested_service_ids: requestedServiceIds,
     identity_number_conflict_student_id: identityConflictStudentId || null,

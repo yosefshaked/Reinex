@@ -304,3 +304,57 @@ export function useStudents(options = {}) {
     refetchStudents: refetch,
   };
 }
+
+export function useClientProfiles(options = {}) {
+  const {
+    status = 'non_student',
+    enabled = true,
+    orgId,
+    session,
+    resetOnDisable = true,
+    extraParams = {},
+    search = '',
+    pagination = false,
+    limit = 25,
+    offset = 0,
+  } = options;
+
+  const params = useMemo(() => ({
+    status,
+    ...(pagination ? { pagination: '1', limit, offset } : {}),
+    ...(search ? { search } : {}),
+    ...extraParams,
+  }), [status, pagination, limit, offset, search, extraParams]);
+
+  const { data, loading, error, refetch } = useOrgDataResource({
+    resource: 'client-profiles',
+    path: 'client-profiles',
+    enabled,
+    orgId,
+    session,
+    resetOnDisable,
+    params,
+  });
+
+  const clientProfiles = pagination && data && typeof data === 'object' && Array.isArray(data.data)
+    ? data.data
+    : (Array.isArray(data) ? data : []);
+
+  const paginationInfo = pagination && data && typeof data === 'object'
+    ? {
+        total: Number.isFinite(data.total) ? data.total : clientProfiles.length,
+        pageSize: Number.isFinite(data.page_size) ? data.page_size : limit,
+        page: Number.isFinite(data.page) ? data.page : (Math.floor(offset / Math.max(limit, 1)) + 1),
+        offset: Number.isFinite(data.offset) ? data.offset : offset,
+        hasMore: Boolean(data.has_more),
+      }
+    : null;
+
+  return {
+    clientProfiles,
+    clientProfilesPagination: paginationInfo,
+    loadingClientProfiles: loading,
+    clientProfilesError: error,
+    refetchClientProfiles: refetch,
+  };
+}

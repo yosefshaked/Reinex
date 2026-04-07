@@ -400,6 +400,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
   const endDateParam = normalizeString(queryParams.end_date || queryParams.end);
   const instructorIdParam = normalizeString(queryParams.instructor_id);
   const studentIdParam = normalizeString(queryParams.student_id);
+  const clientProfileIdParam = normalizeString(queryParams.client_profile_id || queryParams.clientProfileId);
 
   // Determine date range
   let startDate, endDate;
@@ -426,7 +427,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
   }
 
   // Build query
-  const participantsJoin = studentIdParam ? 'lesson_participants!inner' : 'lesson_participants';
+  const participantsJoin = studentIdParam || clientProfileIdParam ? 'lesson_participants!inner' : 'lesson_participants';
 
   let instancesQuery = tenantClient
     .from('lesson_instances')
@@ -447,6 +448,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
       updated_at,
       participants:${participantsJoin}(
         id,
+        client_profile_id,
         student_id,
         participant_status,
         version,
@@ -460,6 +462,15 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
         documented_at,
         metadata,
         student:students(
+          id,
+          first_name,
+          middle_name,
+          last_name,
+          phone,
+          email,
+          default_notification_method
+        ),
+        client_profile:client_profiles(
           id,
           first_name,
           middle_name,
@@ -495,6 +506,9 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
   if (studentIdParam) {
     instancesQuery = instancesQuery.eq('participants.student_id', studentIdParam);
   }
+  if (clientProfileIdParam) {
+    instancesQuery = instancesQuery.eq('participants.client_profile_id', clientProfileIdParam);
+  }
 
   // Non-admin/office users: filter by their instructor record
   if (!canManageAll) {
@@ -528,40 +542,49 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
     });
   }
 
-  const studentIds = Array.from(new Set(
+  const clientProfileIds = Array.from(new Set(
     (instances || []).flatMap((instance) => (
       Array.isArray(instance.participants)
-        ? instance.participants.map((participant) => participant?.student_id).filter(Boolean)
+        ? instance.participants.map((participant) => participant?.client_profile_id).filter(Boolean)
         : []
     )),
   ));
 
-  const primaryGuardianLinkByStudent = new Map();
-  if (studentIds.length > 0) {
-    const { data: studentGuardianLinks, error: linksError } = await tenantClient
-      .from('student_guardians')
-      .select('student_id, guardian_id, relationship, is_primary, created_at')
-      .in('student_id', studentIds)
-      .order('student_id', { ascending: true })
+  const clientProfileIdByStudentId = new Map();
+  for (const instance of instances || []) {
+    for (const participant of Array.isArray(instance?.participants) ? instance.participants : []) {
+      if (participant?.student_id && participant?.client_profile_id) {
+        clientProfileIdByStudentId.set(participant.student_id, participant.client_profile_id);
+      }
+    }
+  }
+
+  const primaryGuardianLinkByClientProfile = new Map();
+  if (clientProfileIds.length > 0) {
+    const { data: clientGuardianLinks, error: linksError } = await tenantClient
+      .from('client_guardians')
+      .select('client_profile_id, guardian_id, relationship, is_primary, created_at')
+      .in('client_profile_id', clientProfileIds)
+      .order('client_profile_id', { ascending: true })
       .order('is_primary', { ascending: false })
       .order('created_at', { ascending: true });
 
     if (linksError) {
-      context.log?.warn?.('calendar/instances failed to fetch student_guardians links', {
+      context.log?.warn?.('calendar/instances failed to fetch client_guardians links', {
         message: linksError.message,
       });
     } else {
-      for (const link of studentGuardianLinks || []) {
-        if (!link?.student_id || !link?.guardian_id) continue;
-        if (!primaryGuardianLinkByStudent.has(link.student_id)) {
-          primaryGuardianLinkByStudent.set(link.student_id, link);
+      for (const link of clientGuardianLinks || []) {
+        if (!link?.client_profile_id || !link?.guardian_id) continue;
+        if (!primaryGuardianLinkByClientProfile.has(link.client_profile_id)) {
+          primaryGuardianLinkByClientProfile.set(link.client_profile_id, link);
         }
       }
     }
   }
 
   const guardianIds = Array.from(new Set(
-    Array.from(primaryGuardianLinkByStudent.values()).map((link) => link.guardian_id).filter(Boolean),
+    Array.from(primaryGuardianLinkByClientProfile.values()).map((link) => link.guardian_id).filter(Boolean),
   ));
   const guardiansById = new Map();
 
@@ -588,6 +611,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
     const participants = Array.isArray(instance.participants) 
       ? instance.participants.map(p => ({
           id: p.id,
+          client_profile_id: p.client_profile_id,
           student_id: p.student_id,
           participant_status: p.participant_status,
           version: p.version ?? 1,
@@ -599,6 +623,34 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
           reminder_seen: p.reminder_seen,
           attendance_confirmed_at: p.attendance_confirmed_at,
           documented_at: p.documented_at,
+          client_profile: p.client_profile ? {
+            id: p.client_profile.id,
+            first_name: p.client_profile.first_name,
+            middle_name: p.client_profile.middle_name,
+            last_name: p.client_profile.last_name,
+            full_name: [p.client_profile.first_name, p.client_profile.middle_name, p.client_profile.last_name]
+              .filter(Boolean)
+              .join(' '),
+            phone: p.client_profile.phone ?? null,
+            email: p.client_profile.email ?? null,
+            default_notification_method: p.client_profile.default_notification_method ?? 'whatsapp',
+            primary_guardian: (() => {
+              const link = primaryGuardianLinkByClientProfile.get(p.client_profile_id);
+              if (!link) return null;
+              const guardian = guardiansById.get(link.guardian_id);
+              if (!guardian) return null;
+              return {
+                id: guardian.id,
+                first_name: guardian.first_name,
+                middle_name: guardian.middle_name,
+                last_name: guardian.last_name,
+                phone: guardian.phone ?? null,
+                email: guardian.email ?? null,
+                relationship: link.relationship ?? null,
+                is_primary: link.is_primary ?? true,
+              };
+            })(),
+          } : null,
           student: p.student ? {
             id: p.student.id,
             first_name: p.student.first_name,
@@ -611,7 +663,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
             email: p.student.email ?? null,
             default_notification_method: p.student.default_notification_method ?? 'whatsapp',
             primary_guardian: (() => {
-              const link = primaryGuardianLinkByStudent.get(p.student_id);
+      const link = primaryGuardianLinkByClientProfile.get(clientProfileIdByStudentId.get(p.student_id));
               if (!link) return null;
               const guardian = guardiansById.get(link.guardian_id);
               if (!guardian) return null;
@@ -684,8 +736,12 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
   if (!body.service_id) {
     return respond(context, 400, { message: 'missing service_id' });
   }
-  if (!body.student_ids || !Array.isArray(body.student_ids) || body.student_ids.length === 0) {
-    return respond(context, 400, { message: 'missing or invalid student_ids array' });
+  const studentIds = Array.isArray(body.student_ids) ? body.student_ids.filter(Boolean) : [];
+  const clientProfileIds = Array.isArray(body.client_profile_ids || body.clientProfileIds)
+    ? (body.client_profile_ids || body.clientProfileIds).filter(Boolean)
+    : [];
+  if (studentIds.length === 0 && clientProfileIds.length === 0) {
+    return respond(context, 400, { message: 'missing_or_invalid_participants' });
   }
 
   const requestedStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : 'scheduled';
@@ -797,9 +853,34 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
   }
 
   // Create participants
-  const participantData = body.student_ids.map(studentId => ({
+  const participantRecords = [
+    ...studentIds.map((studentId) => ({
+      client_profile_id: null,
+      student_id: studentId,
+    })),
+    ...clientProfileIds.map((clientProfileId) => ({
+      client_profile_id: clientProfileId,
+      student_id: null,
+    })),
+  ];
+
+  if (clientProfileIds.length > 0) {
+    const { data: linkedStudents } = await tenantClient
+      .from('students')
+      .select('id, client_profile_id')
+      .in('client_profile_id', clientProfileIds);
+    const linkedStudentByClientProfile = new Map((linkedStudents || []).map((row) => [row.client_profile_id, row.id]));
+    participantRecords.forEach((record) => {
+      if (!record.student_id && record.client_profile_id) {
+        record.student_id = linkedStudentByClientProfile.get(record.client_profile_id) || null;
+      }
+    });
+  }
+
+  const participantData = participantRecords.map((participant) => ({
     lesson_instance_id: instance.id,
-    student_id: studentId,
+    client_profile_id: participant.client_profile_id || null,
+    student_id: participant.student_id || null,
     participant_status: 'scheduled',
     price_charged: null,
     pricing_breakdown: null,
@@ -844,7 +925,8 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
         duration_minutes: instance.duration_minutes,
         instructor_employee_id: instance.instructor_employee_id,
         service_id: instance.service_id,
-        student_ids: body.student_ids,
+        student_ids: studentIds,
+        client_profile_ids: clientProfileIds,
         created_source: instance.created_source,
         ...buildSchedulingOverrideAuditDetails(normalizedSchedulingMetadata.metadata),
       },
@@ -866,7 +948,8 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
       afterState: instance,
       details: {
         origin: 'api/calendar',
-        student_ids: body.student_ids,
+        student_ids: studentIds,
+        client_profile_ids: clientProfileIds,
         ...buildSchedulingOverrideAuditDetails(normalizedSchedulingMetadata.metadata),
       },
     });

@@ -141,6 +141,10 @@ function mapWaitingListInviteErrorMessage(code) {
   }
 }
 
+function resolveEntryPerson(entry) {
+  return entry?.client_profile || entry?.student || null;
+}
+
 function buildStudentName(student) {
   if (!student) return '';
   const name = [student.first_name, student.middle_name, student.last_name]
@@ -240,14 +244,15 @@ function formatPreferredTimes(preferredTimes = []) {
 }
 
 function buildInitialForm(entry, studentMap) {
-  const studentOption = entry?.student_id && studentMap?.get(entry.student_id)
-    ? studentMap.get(entry.student_id)
-    : buildStudentOption(entry?.student);
+  const profileOption = entry?.client_profile_id && studentMap?.get(entry.client_profile_id)
+    ? studentMap.get(entry.client_profile_id)
+    : buildStudentOption(resolveEntryPerson(entry));
 
   return {
     id: entry?.id || '',
+    clientProfileId: entry?.client_profile_id || entry?.student?.client_profile_id || '',
     studentId: entry?.student_id || '',
-    studentSearch: studentOption || '',
+    studentSearch: profileOption || '',
     serviceId: entry?.desired_service_id || '',
     preferredDays: Array.isArray(entry?.preferred_days) ? entry.preferred_days : [],
     preferredTimesByDay: buildPreferredTimesMap(entry?.preferred_times),
@@ -359,7 +364,7 @@ export default function WaitingListPage() {
   const canManage = isAdminOrOffice(membershipRole);
 
   const [entries, setEntries] = useState([]);
-  const [students, setStudents] = useState([]);
+  const [clientProfiles, setClientProfiles] = useState([]);
   const [services, setServices] = useState([]);
   const [waitingListForms, setWaitingListForms] = useState([]);
   const [loadingWaitingListForms, setLoadingWaitingListForms] = useState(false);
@@ -401,22 +406,25 @@ export default function WaitingListPage() {
 
   const studentOptionMap = useMemo(() => {
     const map = new Map();
-    students.forEach((student) => {
-      map.set(student.id, buildStudentOption(student));
+    clientProfiles.forEach((profile) => {
+      map.set(profile.id, buildStudentOption(profile));
     });
     return map;
-  }, [students]);
+  }, [clientProfiles]);
 
   const studentLabelToId = useMemo(() => {
     const map = new Map();
-    students.forEach((student) => {
-      const label = buildStudentOption(student);
-      map.set(label.toLowerCase(), student.id);
+    clientProfiles.forEach((profile) => {
+      const label = buildStudentOption(profile);
+      map.set(label.toLowerCase(), {
+        clientProfileId: profile.id,
+        studentId: profile.student_id || '',
+      });
     });
     return map;
-  }, [students]);
+  }, [clientProfiles]);
 
-  const studentOptions = useMemo(() => students.map(buildStudentOption), [students]);
+  const studentOptions = useMemo(() => clientProfiles.map(buildStudentOption), [clientProfiles]);
 
   const serviceOptions = useMemo(
     () => (services || []).map((service) => ({ value: service.id, label: service.name })),
@@ -459,19 +467,19 @@ export default function WaitingListPage() {
     setListError('');
 
     try {
-      const [studentsPayload, servicesPayload] = await Promise.all([
-        authenticatedFetch('students-list', {
-          session,
-          params: { org_id: activeOrgId, status: 'active' },
-        }),
+      const [servicesPayload, clientProfilesPayload] = await Promise.all([
         authenticatedFetch('services', {
           session,
           params: { org_id: activeOrgId },
         }),
+        authenticatedFetch('client-profiles', {
+          session,
+          params: { org_id: activeOrgId, status: 'all' },
+        }),
       ]);
 
-      setStudents(Array.isArray(studentsPayload) ? studentsPayload : []);
       setServices(Array.isArray(servicesPayload) ? servicesPayload : []);
+      setClientProfiles(Array.isArray(clientProfilesPayload) ? clientProfilesPayload : []);
     } catch (err) {
       setListError(err?.message || 'טעינת הנתונים נכשלה.');
     } finally {
@@ -598,11 +606,12 @@ export default function WaitingListPage() {
 
   const handleStudentChange = (value) => {
     const normalized = String(value || '').trim();
-    const matchId = studentLabelToId.get(normalized.toLowerCase()) || '';
+    const match = studentLabelToId.get(normalized.toLowerCase()) || null;
     setFormValues((prev) => ({
       ...prev,
       studentSearch: normalized,
-      studentId: matchId,
+      clientProfileId: match?.clientProfileId || '',
+      studentId: match?.studentId || '',
     }));
   };
 
@@ -744,7 +753,8 @@ export default function WaitingListPage() {
       waiting_list_entry_id: selectedEntry.id,
       suggestion_mode: suggestion.mode || suggestionMode,
       student_id: selectedEntry.student_id || '',
-      student_name: buildStudentName(selectedEntry.student),
+      client_profile_id: selectedEntry.client_profile_id || '',
+      student_name: buildStudentName(resolveEntryPerson(selectedEntry)),
       service_id: selectedEntry.desired_service_id || '',
       service_name: selectedEntry.service?.name || '',
       instructor_id: suggestion.instructor_id || '',
@@ -768,7 +778,8 @@ export default function WaitingListPage() {
       fix_type: target.fix_type || suggestionsMeta.blockingReason || '',
       waiting_list_entry_id: selectedEntry.id,
       student_id: selectedEntry.student_id || '',
-      student_name: buildStudentName(selectedEntry.student),
+      client_profile_id: selectedEntry.client_profile_id || '',
+      student_name: buildStudentName(resolveEntryPerson(selectedEntry)),
       service_id: target.service_id || selectedEntry.desired_service_id || '',
       service_name: selectedEntry.service?.name || '',
       instructor_id: target.instructor_id,
@@ -845,14 +856,15 @@ export default function WaitingListPage() {
         session,
       });
       toast.success('התלמיד נוסף בהצלחה');
-      setStudents((prev) => {
-        if (!createdStudent?.id) return prev;
-        if (prev.some((student) => student.id === createdStudent.id)) return prev;
-        return [createdStudent, ...prev];
-      });
+      setClientProfiles((prev) => prev.map((profile) => (
+        profile.id === createdStudent?.client_profile_id
+          ? { ...profile, student_id: createdStudent.id, is_student: true }
+          : profile
+      )));
       if (createdStudent?.id) {
         setFormValues((prev) => ({
           ...prev,
+          clientProfileId: createdStudent.client_profile_id || prev.clientProfileId,
           studentId: createdStudent.id,
           studentSearch: buildStudentOption(createdStudent),
         }));
@@ -934,7 +946,7 @@ export default function WaitingListPage() {
     };
     setTouched(nextTouched);
 
-    if (!formValues.studentId || !formValues.serviceId) {
+    if (!formValues.clientProfileId || !formValues.serviceId) {
       return;
     }
 
@@ -943,6 +955,7 @@ export default function WaitingListPage() {
 
     const payload = {
       org_id: activeOrgId,
+      client_profile_id: formValues.clientProfileId,
       student_id: formValues.studentId,
       desired_service_id: formValues.serviceId,
       preferred_days: formValues.preferredDays.length ? formValues.preferredDays : [],
@@ -970,7 +983,7 @@ export default function WaitingListPage() {
     }
   };
 
-  const studentError = touched.studentId && !formValues.studentId ? 'בחרו תלמיד מהרשימה.' : '';
+  const studentError = touched.studentId && !formValues.clientProfileId ? 'בחרו לקוח/ה מהרשימה.' : '';
   const serviceError = touched.serviceId && !formValues.serviceId ? 'בחרו שירות.' : '';
 
   const pageActions = canManage ? (
@@ -1068,7 +1081,7 @@ export default function WaitingListPage() {
               sortedEntries.map((entry) => {
                 const intakeMeta = getEntryIntakeMeta(entry);
                 const isSelected = selectedEntryId === entry.id;
-                const isProspect = entry?.student?.onboarding_status === 'pending_wl_form';
+                const person = resolveEntryPerson(entry);
 
                 return (
                   <button
@@ -1085,7 +1098,7 @@ export default function WaitingListPage() {
                   >
                     <div className="mb-2 flex items-start justify-between gap-3">
                       <div className="space-y-1">
-                        <div className="font-medium text-foreground">{buildStudentName(entry.student)}</div>
+                        <div className="font-medium text-foreground">{buildStudentName(person)}</div>
                         <div className="text-sm text-muted-foreground">{entry.service?.name || 'ללא שירות'}</div>
                       </div>
                       <div className="flex flex-col items-end gap-1">
@@ -1103,7 +1116,7 @@ export default function WaitingListPage() {
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {isProspect ? <Badge variant="outline">מתעניין/ת</Badge> : null}
+                      {!entry?.student_id ? <Badge variant="outline">טרם הומר/ה לתלמיד/ה</Badge> : null}
                       {intakeMeta.source === 'waiting_list_intake' ? <Badge variant="secondary">נוצר מטופס</Badge> : null}
                     </div>
                   </button>
@@ -1125,7 +1138,7 @@ export default function WaitingListPage() {
             ) : (
               (() => {
                 const intakeMeta = getEntryIntakeMeta(selectedEntry);
-                const isProspect = selectedEntry?.student?.onboarding_status === 'pending_wl_form';
+                const person = resolveEntryPerson(selectedEntry);
                 const paymentPathLabel = getPaymentPathLabel(intakeMeta);
                 const contactRelationshipLabel = getContactRelationshipLabel(intakeMeta);
                 const hmoApprovalLabel = getHmoApprovalLabel(intakeMeta);
@@ -1136,7 +1149,7 @@ export default function WaitingListPage() {
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
                           <UserRound className="h-4 w-4 text-muted-foreground" />
-                          <h2 className="text-lg font-semibold text-foreground">{buildStudentName(selectedEntry.student)}</h2>
+                          <h2 className="text-lg font-semibold text-foreground">{buildStudentName(person)}</h2>
                         </div>
                         <div className="text-sm text-muted-foreground">{selectedEntry.service?.name || 'ללא שירות מוגדר'}</div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -1144,7 +1157,7 @@ export default function WaitingListPage() {
                             {getStatusLabel(selectedEntry.status)}
                           </Badge>
                           {selectedEntry.priority_flag ? <Badge variant="destructive">עדיפות גבוהה</Badge> : null}
-                          {isProspect ? <Badge variant="outline">מתעניין/ת</Badge> : null}
+                          {!selectedEntry?.student_id ? <Badge variant="outline">טרם הומר/ה לתלמיד/ה</Badge> : null}
                           {intakeMeta.source === 'waiting_list_intake' ? <Badge variant="secondary">נוצר מטופס</Badge> : null}
                         </div>
                       </div>
@@ -1155,10 +1168,10 @@ export default function WaitingListPage() {
                           עריכת רשומה
                         </Button>
                         <Button asChild variant="outline" size="sm" className="gap-2">
-                          <Link to={`/students/${selectedEntry.student_id}`}>
-                            <ArrowLeft className="h-4 w-4" />
-                            פתח כרטיס תלמיד
-                          </Link>
+                      <Link to={selectedEntry.student_id ? `/students/${selectedEntry.student_id}` : `/one-time-customers/${selectedEntry.client_profile_id}`}>
+                        <ArrowLeft className="h-4 w-4" />
+                        {selectedEntry.student_id ? 'פתח כרטיס תלמיד' : 'פתח כרטיס לקוח/ה'}
+                      </Link>
                         </Button>
                       </div>
                     </div>
@@ -1182,8 +1195,8 @@ export default function WaitingListPage() {
                           פרטי קליטה
                         </div>
                         <div className="space-y-2 text-sm text-muted-foreground">
-                          <div>טלפון: <span className="font-medium text-foreground">{selectedEntry?.student?.phone || '—'}</span></div>
-                          <div>אימייל: <span className="font-medium text-foreground">{selectedEntry?.student?.email || '—'}</span></div>
+                          <div>טלפון: <span className="font-medium text-foreground">{person?.phone || '—'}</span></div>
+                          <div>אימייל: <span className="font-medium text-foreground">{person?.email || '—'}</span></div>
                           {intakeMeta.contact_relationship && intakeMeta.contact_relationship !== 'self' && intakeMeta.contact_name ? (
                             <div>איש קשר: <span className="font-medium text-foreground">{intakeMeta.contact_name}</span></div>
                           ) : null}
@@ -1526,11 +1539,11 @@ export default function WaitingListPage() {
               <ComboBoxField
                 id="waiting-student"
                 name="student"
-                label="תלמיד"
+                label="לקוח/ה / תלמיד/ה"
                 value={formValues.studentSearch}
                 onChange={handleStudentChange}
                 options={studentOptions}
-                placeholder="בחרו תלמיד מהרשימה"
+                placeholder="בחרו לקוח/ה מהרשימה"
                 required
                 error={studentError}
               />

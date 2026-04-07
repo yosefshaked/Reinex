@@ -33,6 +33,162 @@ import {
   coerceOptionalJsonb,
   coerceOnboardingStatus,
 } from '../_shared/student-validation.js';
+import {
+  createOrReuseClientProfile,
+  findClientProfileByIdentityNumber,
+  fetchPrimaryGuardianForClientProfile,
+  upsertClientGuardianLink,
+  buildClientProfileDisplayName,
+} from '../_shared/client-profiles.js';
+
+const CLIENT_PROFILE_FIELD_NAMES = new Set([
+  'first_name',
+  'middle_name',
+  'last_name',
+  'identity_number',
+  'date_of_birth',
+  'phone',
+  'email',
+  'default_notification_method',
+  'tags',
+  'onboarding_status',
+  'is_active',
+]);
+
+function mergeStudentWithClientProfile(studentRow, clientProfileRow, guardian = null) {
+  const student = studentRow || {};
+  const profile = clientProfileRow || {};
+
+  return {
+    ...student,
+    client_profile_id: profile.id || student.client_profile_id || null,
+    first_name: profile.first_name ?? student.first_name ?? '',
+    middle_name: profile.middle_name ?? student.middle_name ?? null,
+    last_name: profile.last_name ?? student.last_name ?? '',
+    full_name: buildClientProfileDisplayName(profile.id ? profile : student),
+    identity_number: profile.identity_number ?? student.identity_number ?? null,
+    date_of_birth: profile.date_of_birth ?? student.date_of_birth ?? null,
+    phone: profile.phone ?? student.phone ?? null,
+    email: profile.email ?? student.email ?? null,
+    default_notification_method: profile.default_notification_method ?? student.default_notification_method ?? 'whatsapp',
+    tags: Array.isArray(profile.tags) ? profile.tags : [],
+    onboarding_status: profile.onboarding_status ?? 'not_started',
+    is_active: profile.is_active !== false && student.is_active !== false,
+    client_profile: profile.id
+      ? {
+          id: profile.id,
+          first_name: profile.first_name,
+          middle_name: profile.middle_name,
+          last_name: profile.last_name,
+          full_name: buildClientProfileDisplayName(profile),
+          identity_number: profile.identity_number,
+          date_of_birth: profile.date_of_birth,
+          phone: profile.phone,
+          email: profile.email,
+          default_notification_method: profile.default_notification_method || 'whatsapp',
+          tags: Array.isArray(profile.tags) ? profile.tags : [],
+          onboarding_status: profile.onboarding_status || 'not_started',
+          is_active: profile.is_active !== false,
+          metadata: profile.metadata || null,
+        }
+      : null,
+    guardian: guardian || null,
+  };
+}
+
+async function fetchClientProfilesByIds(tenantClient, clientProfileIds) {
+  const ids = Array.from(new Set((clientProfileIds || []).filter(Boolean)));
+  if (!ids.length) {
+    return { data: new Map(), error: null };
+  }
+
+  const { data, error } = await tenantClient
+    .from('client_profiles')
+    .select('*')
+    .in('id', ids);
+
+  if (error) {
+    return { data: new Map(), error };
+  }
+
+  return {
+    data: new Map((data || []).map((row) => [row.id, row])),
+    error: null,
+  };
+}
+
+async function fetchPrimaryGuardiansByClientProfileIds(tenantClient, clientProfileIds) {
+  const ids = Array.from(new Set((clientProfileIds || []).filter(Boolean)));
+  if (!ids.length) {
+    return { data: new Map(), error: null };
+  }
+
+  const { data: links, error: linksError } = await tenantClient
+    .from('client_guardians')
+    .select('client_profile_id, guardian_id, relationship, is_primary')
+    .in('client_profile_id', ids)
+    .order('is_primary', { ascending: false });
+
+  if (linksError) {
+    return { data: new Map(), error: linksError };
+  }
+
+  const chosenLinks = new Map();
+  for (const link of links || []) {
+    const clientProfileId = normalizeString(link?.client_profile_id);
+    if (!clientProfileId || chosenLinks.has(clientProfileId)) continue;
+    chosenLinks.set(clientProfileId, link);
+  }
+
+  const guardianIds = Array.from(new Set(Array.from(chosenLinks.values()).map((link) => normalizeString(link?.guardian_id)).filter(Boolean)));
+  if (!guardianIds.length) {
+    return { data: new Map(), error: null };
+  }
+
+  const { data: guardians, error: guardiansError } = await tenantClient
+    .from('guardians')
+    .select('id, first_name, middle_name, last_name, phone, email')
+    .in('id', guardianIds);
+
+  if (guardiansError) {
+    return { data: new Map(), error: guardiansError };
+  }
+
+  const guardianMap = new Map((guardians || []).map((row) => [row.id, row]));
+  const result = new Map();
+
+  for (const [clientProfileId, link] of chosenLinks.entries()) {
+    const guardian = guardianMap.get(link.guardian_id);
+    if (!guardian) continue;
+    result.set(clientProfileId, {
+      id: guardian.id,
+      first_name: guardian.first_name,
+      middle_name: guardian.middle_name || null,
+      last_name: guardian.last_name,
+      phone: guardian.phone || null,
+      email: guardian.email || null,
+      relationship: link.relationship,
+      is_primary: link.is_primary ?? true,
+    });
+  }
+
+  return { data: result, error: null };
+}
+
+function partitionStudentAndProfileUpdates(updates = {}) {
+  const studentUpdates = {};
+  const clientProfileUpdates = {};
+
+  Object.entries(updates || {}).forEach(([key, value]) => {
+    if (CLIENT_PROFILE_FIELD_NAMES.has(key)) {
+      clientProfileUpdates[key] = value;
+    } else {
+      studentUpdates[key] = value;
+    }
+  });
+
+  return { studentUpdates, clientProfileUpdates };
+}
 
 function extractStudentId(context, req, body) {
   const candidate =
@@ -47,22 +203,40 @@ function extractStudentId(context, req, body) {
 }
 
 async function findStudentByIdentityNumber(tenantClient, identityNumber, { excludeId } = {}) {
-  if (!identityNumber) {
-    return { data: null, error: null };
+  const { data: clientProfile, error } = await findClientProfileByIdentityNumber(tenantClient, identityNumber);
+  if (error || !clientProfile?.id) {
+    return { data: null, error };
   }
 
   let query = tenantClient
     .from('students')
-    .select('id, first_name, last_name, is_active, identity_number')
-    .eq('identity_number', identityNumber)
+    .select('id, client_profile_id, is_active')
+    .eq('client_profile_id', clientProfile.id)
     .limit(1);
 
   if (excludeId) {
     query = query.neq('id', excludeId);
   }
 
-  const { data, error } = await query.maybeSingle();
-  return { data, error };
+  const { data: student, error: studentError } = await query.maybeSingle();
+  if (studentError) {
+    return { data: null, error: studentError };
+  }
+
+  return {
+    data: student
+      ? mergeStudentWithClientProfile(student, clientProfile)
+      : {
+          id: null,
+          client_profile_id: clientProfile.id,
+          first_name: clientProfile.first_name,
+          last_name: clientProfile.last_name,
+          identity_number: clientProfile.identity_number,
+          is_active: clientProfile.is_active !== false,
+          client_profile: clientProfile,
+        },
+    error: null,
+  };
 }
 
 /**
@@ -71,40 +245,14 @@ async function findStudentByIdentityNumber(tenantClient, identityNumber, { exclu
  */
 async function fetchPrimaryGuardian(tenantClient, studentId) {
   if (!studentId) return { guardian: null, error: null };
-
-  const { data, error } = await tenantClient
-    .from('student_guardians')
-    .select('guardian_id, relationship, is_primary')
-    .eq('student_id', studentId)
-    .order('is_primary', { ascending: false })
-    .limit(1);
-
-  if (error) return { guardian: null, error };
-  if (!data || !data.length) return { guardian: null, error: null };
-
-  const link = data[0];
-  const { data: guardianRow, error: guardianError } = await tenantClient
-    .from('guardians')
-    .select('id, first_name, middle_name, last_name, phone, email')
-    .eq('id', link.guardian_id)
+  const { data: student, error: studentError } = await tenantClient
+    .from('students')
+    .select('client_profile_id')
+    .eq('id', studentId)
     .maybeSingle();
-
-  if (guardianError) return { guardian: null, error: guardianError };
-  if (!guardianRow) return { guardian: null, error: null };
-
-  return {
-    guardian: {
-      id: guardianRow.id,
-      first_name: guardianRow.first_name,
-      middle_name: guardianRow.middle_name || null,
-      last_name: guardianRow.last_name,
-      phone: guardianRow.phone || null,
-      email: guardianRow.email || null,
-      relationship: link.relationship,
-      is_primary: link.is_primary ?? true,
-    },
-    error: null,
-  };
+  if (studentError) return { guardian: null, error: studentError };
+  if (!student?.client_profile_id) return { guardian: null, error: null };
+  return fetchPrimaryGuardianForClientProfile(tenantClient, student.client_profile_id);
 }
 
 function parseTimeToMinutes(value) {
@@ -677,9 +825,6 @@ function buildStudentUpdates(body) {
 
 function determineStatusFilter(query, canViewInactive = true) {
   const status = normalizeString(query?.status);
-  if (canViewInactive && status === 'prospects') {
-    return 'prospects';
-  }
   if (canViewInactive && status === 'inactive') {
     return 'inactive';
   }
@@ -836,11 +981,21 @@ export default async function handler(context, req) {
         }
       }
 
-      // Join primary guardian
-      const { guardian, error: guardianError } = await fetchPrimaryGuardian(
+      const { data: clientProfiles, error: clientProfileError } = await fetchClientProfilesByIds(
         tenantClient,
-        singleStudentId,
+        [singleStudent.client_profile_id],
       );
+
+      if (clientProfileError) {
+        context.log?.error?.('students-list failed to load single student client profile', {
+          message: clientProfileError.message,
+          studentId: singleStudentId,
+        });
+        return respond(context, 500, { message: 'failed_to_load_student' });
+      }
+
+      // Join primary guardian
+      const { guardian, error: guardianError } = await fetchPrimaryGuardian(tenantClient, singleStudentId);
 
       if (guardianError) {
         context.log?.warn?.('students-list failed to load guardian for single student', {
@@ -850,10 +1005,11 @@ export default async function handler(context, req) {
         // Non-fatal: return student without guardian data
       }
 
-      return respond(context, 200, {
-        ...singleStudent,
-        guardian: guardian || null,
-      });
+      return respond(context, 200, mergeStudentWithClientProfile(
+        singleStudent,
+        clientProfiles.get(singleStudent.client_profile_id) || null,
+        guardian || null,
+      ));
     }
 
     // ── List GET (existing behaviour) ──
@@ -959,8 +1115,6 @@ export default async function handler(context, req) {
     const statusFilter = determineStatusFilter(req?.query, instructorsCanViewInactive);
     if (statusFilter === 'active') {
       builder = builder.eq('is_active', true);
-    } else if (statusFilter === 'prospects') {
-      builder = builder.eq('is_active', false).eq('onboarding_status', 'pending_wl_form');
     } else if (statusFilter === 'inactive') {
       builder = builder.eq('is_active', false);
     }
@@ -992,6 +1146,31 @@ export default async function handler(context, req) {
     }
 
     let normalizedData = Array.isArray(data) ? data : [];
+
+    const { data: clientProfilesById, error: profilesError } = await fetchClientProfilesByIds(
+      tenantClient,
+      normalizedData.map((student) => student?.client_profile_id).filter(Boolean),
+    );
+
+    if (profilesError) {
+      context.log?.error?.('students-list failed to load client profiles for roster', { message: profilesError.message });
+      return respond(context, 500, { message: 'failed_to_load_students' });
+    }
+
+    const { data: guardiansByClientProfileId, error: guardiansError } = await fetchPrimaryGuardiansByClientProfileIds(
+      tenantClient,
+      normalizedData.map((student) => student?.client_profile_id).filter(Boolean),
+    );
+
+    if (guardiansError) {
+      context.log?.warn?.('students-list failed to load guardians for roster', { message: guardiansError.message });
+    }
+
+    normalizedData = normalizedData.map((student) => mergeStudentWithClientProfile(
+      student,
+      clientProfilesById.get(student.client_profile_id) || null,
+      guardiansByClientProfileId.get(student.client_profile_id) || null,
+    ));
 
     if (studentSearch.hasQuery) {
       normalizedData = filterStudentsBySearchTerms(normalizedData, studentSearch);
@@ -1127,15 +1306,36 @@ export default async function handler(context, req) {
     }
 
     // Build metadata with creator information
-    const metadata = {
+    const studentMetadata = {
       created_by: userId,
       created_at: new Date().toISOString(),
       created_role: role,
     };
 
+    let clientProfileResult;
+    try {
+      clientProfileResult = await createOrReuseClientProfile(tenantClient, {
+        ...normalized.payload,
+        metadata: {
+          created_by: userId,
+          created_at: new Date().toISOString(),
+          created_role: role,
+          source: 'students_list',
+        },
+      });
+    } catch (profileError) {
+      context.log?.error?.('students-list failed to create or reuse client profile', { message: profileError.message });
+      return respond(context, 500, { message: 'failed_to_create_student' });
+    }
+
     const recordToInsert = {
-      ...normalized.payload,
-      metadata,
+      client_profile_id: clientProfileResult.clientProfileId,
+      medical_provider: normalized.payload.medical_provider,
+      special_rate: normalized.payload.special_rate,
+      medical_flags: normalized.payload.medical_flags,
+      notes_internal: normalized.payload.notes_internal,
+      is_active: normalized.payload.is_active,
+      metadata: studentMetadata,
     };
 
     const { data, error } = await tenantClient
@@ -1149,21 +1349,25 @@ export default async function handler(context, req) {
       return respond(context, 500, { message: 'failed_to_create_student' });
     }
 
-    // If guardian provided, create the relationship in student_guardians table
+    // If guardian provided, create the relationship in client_guardians table
     let guardianLinkAudit = null;
     if (normalized.guardianId) {
-      const { error: relationError } = await tenantClient
-        .from('student_guardians')
-        .insert({
-          student_id: data.id,
+      try {
+        await upsertClientGuardianLink(tenantClient, {
+          clientProfileId: clientProfileResult.clientProfileId,
+          guardianId: normalized.guardianId,
+          relationship: normalized.guardianRelationship,
+        });
+        guardianLinkAudit = {
+          requested: true,
+          action: 'linked',
+          success: true,
           guardian_id: normalized.guardianId,
           relationship: normalized.guardianRelationship,
-          is_primary: true, // Mark as primary guardian
-        });
-
-      if (relationError) {
+        };
+      } catch (relationError) {
         context.log?.error?.('students-list failed to create guardian relationship', {
-          message: relationError.message,
+          message: relationError?.message,
           studentId: data.id,
           guardianId: normalized.guardianId,
         });
@@ -1173,20 +1377,18 @@ export default async function handler(context, req) {
           success: false,
           guardian_id: normalized.guardianId,
           relationship: normalized.guardianRelationship,
-          error: relationError.message,
-        };
-        // Student created but guardian relation failed - log but don't fail the request
-        // The student can be edited later to add the guardian
-      } else {
-        guardianLinkAudit = {
-          requested: true,
-          action: 'linked',
-          success: true,
-          guardian_id: normalized.guardianId,
-          relationship: normalized.guardianRelationship,
+          error: relationError?.message || 'unknown_error',
         };
       }
     }
+
+    const { data: clientProfilesAfterCreate } = await fetchClientProfilesByIds(tenantClient, [clientProfileResult.clientProfileId]);
+    const { guardian } = await fetchPrimaryGuardianForClientProfile(tenantClient, clientProfileResult.clientProfileId);
+    const responsePayload = mergeStudentWithClientProfile(
+      data,
+      clientProfilesAfterCreate.get(clientProfileResult.clientProfileId) || null,
+      guardian || null,
+    );
 
     // Audit log: student created
     await logAuditEvent(supabase, {
@@ -1199,12 +1401,13 @@ export default async function handler(context, req) {
       resourceType: 'student',
       resourceId: data.id,
       details: {
-        student_name: `${data.first_name} ${data.last_name}`.trim(),
+        student_name: responsePayload.full_name,
+        client_profile_id: clientProfileResult.clientProfileId,
         guardian_link: guardianLinkAudit,
       },
     });
 
-    return respond(context, 201, data);
+    return respond(context, 201, responsePayload);
   }
 
   // PUT: Update existing student
@@ -1269,12 +1472,27 @@ export default async function handler(context, req) {
     return respond(context, 404, { message: 'student_not_found' });
   }
 
+  const { data: existingClientProfile, error: existingClientProfileError } = await tenantClient
+    .from('client_profiles')
+    .select('*')
+    .eq('id', existingStudent.client_profile_id)
+    .maybeSingle();
+
+  if (existingClientProfileError) {
+    context.log?.error?.('students-list failed to fetch existing client profile', {
+      message: existingClientProfileError.message,
+      studentId,
+      clientProfileId: existingStudent.client_profile_id,
+    });
+    return respond(context, 500, { message: 'failed_to_fetch_student' });
+  }
+
   if (Object.prototype.hasOwnProperty.call(normalizedUpdates.updates, 'identity_number')) {
     const desiredIdentityNumber = normalizedUpdates.updates.identity_number;
 
     if (desiredIdentityNumber) {
-      const { data: conflict, error: lookupError } = await findStudentByIdentityNumber(tenantClient, desiredIdentityNumber, {
-        excludeId: studentId,
+      const { data: conflict, error: lookupError } = await findClientProfileByIdentityNumber(tenantClient, desiredIdentityNumber, {
+        excludeId: existingStudent.client_profile_id,
       });
 
       if (lookupError) {
@@ -1291,10 +1509,14 @@ export default async function handler(context, req) {
     }
   }
 
+  const { studentUpdates, clientProfileUpdates } = partitionStudentAndProfileUpdates(normalizedUpdates.updates);
+
   // Determine which fields actually changed
   const changedFields = [];
   for (const [key, newValue] of Object.entries(normalizedUpdates.updates)) {
-    const oldValue = existingStudent[key];
+    const oldValue = CLIENT_PROFILE_FIELD_NAMES.has(key)
+      ? existingClientProfile?.[key]
+      : existingStudent[key];
     // Handle null/undefined as equivalent
     const normalizedOld = oldValue === null || oldValue === undefined ? null : oldValue;
     const normalizedNew = newValue === null || newValue === undefined ? null : newValue;
@@ -1315,7 +1537,7 @@ export default async function handler(context, req) {
   };
 
   const updatesWithMetadata = {
-    ...normalizedUpdates.updates,
+    ...studentUpdates,
     metadata: updatedMetadata,
   };
 
@@ -1328,20 +1550,48 @@ export default async function handler(context, req) {
     };
   }
 
-  const { data, error } = await tenantClient
-    .from('students')
-    .update(updatesWithMetadata)
-    .eq('id', studentId)
-    .select()
-    .maybeSingle();
+  let clientProfileAfterUpdate = null;
+  if (Object.keys(clientProfileUpdates).length > 0) {
+    const { data: updatedClientProfile, error: clientProfileUpdateError } = await tenantClient
+      .from('client_profiles')
+      .update({
+        ...clientProfileUpdates,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existingStudent.client_profile_id)
+      .select('*')
+      .maybeSingle();
 
-  if (error) {
-    context.log?.error?.('students-list failed to update student', { message: error.message, studentId });
-    return respond(context, 500, { message: 'failed_to_update_student' });
+    if (clientProfileUpdateError) {
+      context.log?.error?.('students-list failed to update client profile', {
+        message: clientProfileUpdateError.message,
+        studentId,
+        clientProfileId: existingStudent.client_profile_id,
+      });
+      return respond(context, 500, { message: 'failed_to_update_student' });
+    }
+
+    clientProfileAfterUpdate = updatedClientProfile;
   }
 
-  if (!data) {
-    return respond(context, 404, { message: 'student_not_found' });
+  let data = existingStudent;
+  if (Object.keys(updatesWithMetadata).length > 1 || Object.prototype.hasOwnProperty.call(updatesWithMetadata, 'metadata')) {
+    const { data: updatedStudent, error } = await tenantClient
+      .from('students')
+      .update(updatesWithMetadata)
+      .eq('id', studentId)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      context.log?.error?.('students-list failed to update student', { message: error.message, studentId });
+      return respond(context, 500, { message: 'failed_to_update_student' });
+    }
+
+    if (!updatedStudent) {
+      return respond(context, 404, { message: 'student_not_found' });
+    }
+    data = updatedStudent;
   }
 
   // ── Guardian upsert / delete in student_guardians ──
@@ -1363,9 +1613,9 @@ export default async function handler(context, req) {
 
     // First check if a row already exists for this student.
     const { data: existingLink, error: linkLookupError } = await tenantClient
-      .from('student_guardians')
+      .from('client_guardians')
       .select('id, guardian_id, relationship')
-      .eq('student_id', studentId)
+      .eq('client_profile_id', existingStudent.client_profile_id)
       .order('is_primary', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -1399,7 +1649,7 @@ export default async function handler(context, req) {
 
         if (Object.keys(linkUpdates).length > 0) {
           const { error: linkUpdateError } = await tenantClient
-            .from('student_guardians')
+            .from('client_guardians')
             .update(linkUpdates)
             .eq('id', existingLink.id);
 
@@ -1420,9 +1670,9 @@ export default async function handler(context, req) {
       } else {
         // Insert new link
         const { error: linkInsertError } = await tenantClient
-          .from('student_guardians')
+          .from('client_guardians')
           .insert({
-            student_id: studentId,
+            client_profile_id: existingStudent.client_profile_id,
             guardian_id: normalizedUpdates.guardianId,
             relationship: normalizedUpdates.guardianRelationship,
             is_primary: true,
@@ -1445,9 +1695,9 @@ export default async function handler(context, req) {
     } else if (existingLink) {
       // guardianId is null -> clear the guardian link
       const { error: deleteError } = await tenantClient
-        .from('student_guardians')
+        .from('client_guardians')
         .delete()
-        .eq('student_id', studentId);
+        .eq('client_profile_id', existingStudent.client_profile_id);
 
       if (deleteError) {
         context.log?.error?.('students-list failed to delete guardian link', {
@@ -1464,6 +1714,26 @@ export default async function handler(context, req) {
     }
   }
 
+  const { data: clientProfilesAfterUpdate, error: clientProfileReloadError } = await fetchClientProfilesByIds(
+    tenantClient,
+    [existingStudent.client_profile_id],
+  );
+
+  if (clientProfileReloadError) {
+    context.log?.error?.('students-list failed to reload updated client profile', {
+      message: clientProfileReloadError.message,
+      studentId,
+      clientProfileId: existingStudent.client_profile_id,
+    });
+    return respond(context, 500, { message: 'failed_to_update_student' });
+  }
+
+  const mergedResponse = mergeStudentWithClientProfile(
+    data,
+    clientProfileAfterUpdate || clientProfilesAfterUpdate.get(existingStudent.client_profile_id) || null,
+    (await fetchPrimaryGuardianForClientProfile(tenantClient, existingStudent.client_profile_id)).guardian || null,
+  );
+
   // Audit log: student updated
   await logAuditEvent(supabase, {
     orgId,
@@ -1476,12 +1746,13 @@ export default async function handler(context, req) {
     resourceId: studentId,
     details: {
       updated_fields: Array.from(new Set(changedFields)),
-      student_name: `${data.first_name} ${data.last_name}`.trim(),
+      student_name: mergedResponse.full_name,
+      client_profile_id: existingStudent.client_profile_id,
       guardian_change: guardianAudit,
     },
   });
 
-  return respond(context, 200, data);
+  return respond(context, 200, mergedResponse);
   }
 
   // PATCH: Update student status (soft-delete, suspend/activate)
@@ -1494,7 +1765,7 @@ export default async function handler(context, req) {
   // Fetch existing student
   const { data: existingStudent, error: fetchError } = await tenantClient
     .from('students')
-    .select('id, first_name, last_name, is_active')
+    .select('id, client_profile_id, is_active')
     .eq('id', studentId)
     .maybeSingle();
 
@@ -1508,6 +1779,21 @@ export default async function handler(context, req) {
 
   if (!existingStudent) {
     return respond(context, 404, { message: 'student_not_found' });
+  }
+
+  const { data: existingClientProfile, error: existingClientProfileError } = await tenantClient
+    .from('client_profiles')
+    .select('id, first_name, last_name, is_active, metadata')
+    .eq('id', existingStudent.client_profile_id)
+    .maybeSingle();
+
+  if (existingClientProfileError || !existingClientProfile) {
+    context.log?.error?.('students-list failed to fetch client profile for PATCH', {
+      message: existingClientProfileError?.message,
+      studentId,
+      clientProfileId: existingStudent.client_profile_id,
+    });
+    return respond(context, 500, { message: 'failed_to_fetch_student' });
   }
 
   // Extract status change
@@ -1525,7 +1811,7 @@ export default async function handler(context, req) {
     return respond(context, 400, { message: 'invalid_is_active' });
   }
 
-  const oldIsActive = existingStudent.is_active;
+  const oldIsActive = existingClientProfile.is_active !== false;
 
   // No change needed
   if (oldIsActive === newIsActive) {
@@ -1533,18 +1819,18 @@ export default async function handler(context, req) {
   }
 
   // Update is_active
-  const { data: updated, error: updateError } = await tenantClient
-    .from('students')
+  const { data: updatedProfile, error: updateError } = await tenantClient
+    .from('client_profiles')
     .update({
       is_active: newIsActive,
       metadata: {
-        ...existingStudent.metadata,
+        ...existingClientProfile.metadata,
         status_updated_by: userId,
         status_updated_at: new Date().toISOString(),
       },
     })
-    .eq('id', studentId)
-    .select()
+    .eq('id', existingStudent.client_profile_id)
+    .select('*')
     .maybeSingle();
 
   if (updateError) {
@@ -1554,6 +1840,13 @@ export default async function handler(context, req) {
     });
     return respond(context, 500, { message: 'failed_to_update_student' });
   }
+
+  await tenantClient
+    .from('students')
+    .update({ is_active: newIsActive })
+    .eq('id', studentId);
+
+  const updated = mergeStudentWithClientProfile(existingStudent, updatedProfile || existingClientProfile);
 
   // Audit: status changed
   await logAuditEvent(supabase, {
@@ -1567,6 +1860,7 @@ export default async function handler(context, req) {
     resourceId: studentId,
     details: {
       student_name: `${updated.first_name} ${updated.last_name}`.trim(),
+      client_profile_id: existingStudent.client_profile_id,
       status_change: oldIsActive ? 'suspended' : 'reactivated',
       status_before: oldIsActive,
       status_after: newIsActive,

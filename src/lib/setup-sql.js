@@ -141,9 +141,10 @@ BEGIN
   SET onboarding_status = CASE
     WHEN onboarding_status = 'in_progress' THEN 'pending_forms'
     WHEN onboarding_status = 'completed' THEN 'approved'
+    WHEN onboarding_status = 'pending_wl_form' THEN 'pending_forms'
     ELSE onboarding_status
   END
-  WHERE onboarding_status IN ('in_progress', 'completed');
+  WHERE onboarding_status IN ('in_progress', 'completed', 'pending_wl_form');
 
   IF EXISTS (
     SELECT 1
@@ -156,7 +157,7 @@ BEGIN
 
   ALTER TABLE public.students
     ADD CONSTRAINT students_onboarding_status_check
-    CHECK (onboarding_status IN ('not_started','pending_forms','pending_wl_form','approved'));
+    CHECK (onboarding_status IN ('not_started','pending_forms','approved'));
 EXCEPTION
   WHEN others THEN NULL;
 END $$;
@@ -208,30 +209,62 @@ CREATE INDEX IF NOT EXISTS guardians_name_idx
   ON public.guardians (first_name, last_name);
 
 -- -----------------------------------------------------------------
--- public.student_guardians
+-- public.client_profiles
 -- -----------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS public.student_guardians (
+CREATE TABLE IF NOT EXISTS public.client_profiles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  student_id uuid NOT NULL,
-  guardian_id uuid NOT NULL,
-  relationship text NOT NULL,
-  is_primary boolean NOT NULL DEFAULT false,
-  created_at timestamptz NOT NULL DEFAULT now()
+  first_name text NOT NULL,
+  middle_name text NULL,
+  last_name text NOT NULL,
+  identity_number text NULL,
+  phone text NULL,
+  email text NULL,
+  date_of_birth date NULL,
+  default_notification_method text NOT NULL DEFAULT 'whatsapp',
+  tags uuid[] NULL,
+  onboarding_status text NOT NULL DEFAULT 'not_started',
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
 );
 
-ALTER TABLE public.student_guardians
-  ADD COLUMN IF NOT EXISTS student_id uuid,
-  ADD COLUMN IF NOT EXISTS guardian_id uuid,
-  ADD COLUMN IF NOT EXISTS relationship text,
-  ADD COLUMN IF NOT EXISTS is_primary boolean,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz;
+ALTER TABLE public.client_profiles
+  ADD COLUMN IF NOT EXISTS first_name text,
+  ADD COLUMN IF NOT EXISTS middle_name text,
+  ADD COLUMN IF NOT EXISTS last_name text,
+  ADD COLUMN IF NOT EXISTS identity_number text,
+  ADD COLUMN IF NOT EXISTS phone text,
+  ADD COLUMN IF NOT EXISTS email text,
+  ADD COLUMN IF NOT EXISTS date_of_birth date,
+  ADD COLUMN IF NOT EXISTS default_notification_method text,
+  ADD COLUMN IF NOT EXISTS tags uuid[],
+  ADD COLUMN IF NOT EXISTS onboarding_status text,
+  ADD COLUMN IF NOT EXISTS is_active boolean,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
 DO $$
 BEGIN
-  ALTER TABLE public.student_guardians
-    ADD CONSTRAINT student_guardians_student_id_fkey
-    FOREIGN KEY (student_id) REFERENCES public.students(id);
+  ALTER TABLE public.client_profiles ALTER COLUMN first_name SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.client_profiles ALTER COLUMN last_name SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.client_profiles
+    ADD CONSTRAINT client_profiles_default_notification_method_check
+    CHECK (default_notification_method IN ('whatsapp','email'));
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -239,8 +272,251 @@ END $$;
 
 DO $$
 BEGIN
-  ALTER TABLE public.student_guardians
-    ADD CONSTRAINT student_guardians_guardian_id_fkey
+  UPDATE public.client_profiles
+  SET onboarding_status = CASE
+    WHEN onboarding_status = 'in_progress' THEN 'pending_forms'
+    WHEN onboarding_status = 'completed' THEN 'approved'
+    ELSE onboarding_status
+  END
+  WHERE onboarding_status IN ('in_progress', 'completed');
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'client_profiles_onboarding_status_check'
+      AND conrelid = 'public.client_profiles'::regclass
+  ) THEN
+    ALTER TABLE public.client_profiles DROP CONSTRAINT client_profiles_onboarding_status_check;
+  END IF;
+
+  ALTER TABLE public.client_profiles
+    ADD CONSTRAINT client_profiles_onboarding_status_check
+    CHECK (onboarding_status IN ('not_started','pending_forms','approved'));
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS client_profiles_is_active_idx ON public.client_profiles (is_active);
+CREATE INDEX IF NOT EXISTS client_profiles_name_idx ON public.client_profiles (first_name, last_name);
+
+DO $$
+BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS client_profiles_identity_number_unique_idx
+    ON public.client_profiles (identity_number)
+    WHERE identity_number IS NOT NULL AND identity_number <> '';
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+ALTER TABLE public.students
+  ADD COLUMN IF NOT EXISTS client_profile_id uuid;
+
+DO $$
+BEGIN
+  ALTER TABLE public.students
+    ADD CONSTRAINT students_client_profile_id_fkey
+    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS students_client_profile_id_uidx
+    ON public.students (client_profile_id)
+    WHERE client_profile_id IS NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+DECLARE
+  student_row record;
+  profile_id uuid;
+BEGIN
+  FOR student_row IN
+    SELECT id, first_name, middle_name, last_name, identity_number, phone, email, date_of_birth,
+           default_notification_method, tags, onboarding_status, is_active, created_at, updated_at, metadata
+    FROM public.students
+    WHERE client_profile_id IS NULL
+  LOOP
+    SELECT id
+    INTO profile_id
+    FROM public.client_profiles
+    WHERE identity_number IS NOT DISTINCT FROM student_row.identity_number
+      AND (
+        student_row.identity_number IS NOT NULL
+        OR (
+          first_name IS NOT DISTINCT FROM student_row.first_name
+          AND middle_name IS NOT DISTINCT FROM student_row.middle_name
+          AND last_name IS NOT DISTINCT FROM student_row.last_name
+          AND phone IS NOT DISTINCT FROM student_row.phone
+          AND email IS NOT DISTINCT FROM student_row.email
+        )
+      )
+    ORDER BY created_at
+    LIMIT 1;
+
+    IF profile_id IS NULL THEN
+      INSERT INTO public.client_profiles (
+        first_name,
+        middle_name,
+        last_name,
+        identity_number,
+        phone,
+        email,
+        date_of_birth,
+        default_notification_method,
+        tags,
+        onboarding_status,
+        is_active,
+        created_at,
+        updated_at,
+        metadata
+      ) VALUES (
+        student_row.first_name,
+        student_row.middle_name,
+        student_row.last_name,
+        student_row.identity_number,
+        student_row.phone,
+        student_row.email,
+        student_row.date_of_birth,
+        COALESCE(student_row.default_notification_method, 'whatsapp'),
+        student_row.tags,
+        CASE
+          WHEN student_row.onboarding_status = 'pending_wl_form' THEN 'pending_forms'
+          ELSE COALESCE(student_row.onboarding_status, 'not_started')
+        END,
+        COALESCE(student_row.is_active, true),
+        COALESCE(student_row.created_at, now()),
+        COALESCE(student_row.updated_at, COALESCE(student_row.created_at, now())),
+        student_row.metadata
+      )
+      RETURNING id INTO profile_id;
+    END IF;
+
+    UPDATE public.students
+    SET client_profile_id = profile_id
+    WHERE id = student_row.id;
+  END LOOP;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.students ALTER COLUMN client_profile_id SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.sync_student_person_fields_from_client_profile()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  profile_row public.client_profiles%ROWTYPE;
+BEGIN
+  IF NEW.client_profile_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT *
+  INTO profile_row
+  FROM public.client_profiles
+  WHERE id = NEW.client_profile_id;
+
+  IF profile_row.id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  NEW.first_name := profile_row.first_name;
+  NEW.middle_name := profile_row.middle_name;
+  NEW.last_name := profile_row.last_name;
+  NEW.identity_number := profile_row.identity_number;
+  NEW.phone := profile_row.phone;
+  NEW.email := profile_row.email;
+  NEW.date_of_birth := profile_row.date_of_birth;
+  NEW.default_notification_method := profile_row.default_notification_method;
+  NEW.tags := profile_row.tags;
+  NEW.onboarding_status := profile_row.onboarding_status;
+  NEW.is_active := profile_row.is_active;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS students_sync_person_fields_from_client_profile_trigger ON public.students;
+CREATE TRIGGER students_sync_person_fields_from_client_profile_trigger
+  BEFORE INSERT OR UPDATE OF client_profile_id
+  ON public.students
+  FOR EACH ROW
+  EXECUTE FUNCTION public.sync_student_person_fields_from_client_profile();
+
+CREATE OR REPLACE FUNCTION public.sync_client_profile_changes_to_students()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  UPDATE public.students
+  SET
+    first_name = NEW.first_name,
+    middle_name = NEW.middle_name,
+    last_name = NEW.last_name,
+    identity_number = NEW.identity_number,
+    phone = NEW.phone,
+    email = NEW.email,
+    date_of_birth = NEW.date_of_birth,
+    default_notification_method = NEW.default_notification_method,
+    tags = NEW.tags,
+    onboarding_status = NEW.onboarding_status,
+    is_active = NEW.is_active
+  WHERE client_profile_id = NEW.id;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS client_profiles_sync_to_students_trigger ON public.client_profiles;
+CREATE TRIGGER client_profiles_sync_to_students_trigger
+  AFTER UPDATE OF first_name, middle_name, last_name, identity_number, phone, email, date_of_birth, default_notification_method, tags, onboarding_status, is_active
+  ON public.client_profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.sync_client_profile_changes_to_students();
+
+-- -----------------------------------------------------------------
+-- public.client_guardians
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.client_guardians (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_profile_id uuid NOT NULL,
+  guardian_id uuid NOT NULL,
+  relationship text NOT NULL,
+  is_primary boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.client_guardians
+  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
+  ADD COLUMN IF NOT EXISTS guardian_id uuid,
+  ADD COLUMN IF NOT EXISTS relationship text,
+  ADD COLUMN IF NOT EXISTS is_primary boolean,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz;
+
+DO $$
+BEGIN
+  ALTER TABLE public.client_guardians
+    ADD CONSTRAINT client_guardians_client_profile_id_fkey
+    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.client_guardians
+    ADD CONSTRAINT client_guardians_guardian_id_fkey
     FOREIGN KEY (guardian_id) REFERENCES public.guardians(id);
 EXCEPTION
   WHEN duplicate_object THEN
@@ -249,19 +525,35 @@ END $$;
 
 DO $$
 BEGIN
-  ALTER TABLE public.student_guardians
-    ADD CONSTRAINT student_guardians_relationship_check
+  ALTER TABLE public.client_guardians
+    ADD CONSTRAINT client_guardians_relationship_check
     CHECK (relationship IN ('father','mother','self','caretaker','other'));
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
 END $$;
 
-CREATE UNIQUE INDEX IF NOT EXISTS student_guardians_student_guardian_uidx
-  ON public.student_guardians (student_id, guardian_id);
+CREATE UNIQUE INDEX IF NOT EXISTS client_guardians_client_guardian_uidx
+  ON public.client_guardians (client_profile_id, guardian_id);
 
-CREATE INDEX IF NOT EXISTS student_guardians_student_id_idx
-  ON public.student_guardians (student_id);
+CREATE INDEX IF NOT EXISTS client_guardians_client_profile_id_idx
+  ON public.client_guardians (client_profile_id);
+
+DO $$
+BEGIN
+  INSERT INTO public.client_guardians (client_profile_id, guardian_id, relationship, is_primary, created_at)
+  SELECT s.client_profile_id, sg.guardian_id, sg.relationship, sg.is_primary, sg.created_at
+  FROM public.student_guardians sg
+  JOIN public.students s ON s.id = sg.student_id
+  WHERE s.client_profile_id IS NOT NULL
+  ON CONFLICT (client_profile_id, guardian_id) DO UPDATE
+  SET relationship = EXCLUDED.relationship,
+      is_primary = EXCLUDED.is_primary;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DROP TABLE IF EXISTS public.student_guardians;
 
 -- -----------------------------------------------------------------
 -- public.Employees (complete table with payroll fields)
@@ -1276,7 +1568,8 @@ CREATE INDEX IF NOT EXISTS lesson_instances_applied_override_id_idx ON public.le
 CREATE TABLE IF NOT EXISTS public.lesson_participants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   lesson_instance_id uuid NOT NULL,
-  student_id uuid NOT NULL,
+  client_profile_id uuid NOT NULL,
+  student_id uuid NULL,
   participant_status text NOT NULL,
   price_charged numeric NULL,
   pricing_breakdown jsonb NULL,
@@ -1296,6 +1589,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_participants (
 
 ALTER TABLE public.lesson_participants
   ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
+  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS participant_status text,
   ADD COLUMN IF NOT EXISTS price_charged numeric,
@@ -1326,6 +1620,16 @@ END $$;
 DO $$
 BEGIN
   ALTER TABLE public.lesson_participants
+    ADD CONSTRAINT lesson_participants_client_profile_id_fkey
+    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_participants
     ADD CONSTRAINT lesson_participants_student_id_fkey
     FOREIGN KEY (student_id) REFERENCES public.students(id);
 EXCEPTION
@@ -1343,11 +1647,32 @@ EXCEPTION
     NULL;
 END $$;
 
-CREATE UNIQUE INDEX IF NOT EXISTS lesson_participants_instance_student_uidx
-  ON public.lesson_participants (lesson_instance_id, student_id);
+CREATE UNIQUE INDEX IF NOT EXISTS lesson_participants_instance_client_profile_uidx
+  ON public.lesson_participants (lesson_instance_id, client_profile_id);
+
+CREATE INDEX IF NOT EXISTS lesson_participants_client_profile_id_idx
+  ON public.lesson_participants (client_profile_id);
 
 CREATE INDEX IF NOT EXISTS lesson_participants_student_id_idx
   ON public.lesson_participants (student_id);
+
+DO $$
+BEGIN
+  UPDATE public.lesson_participants lp
+  SET client_profile_id = s.client_profile_id
+  FROM public.students s
+  WHERE lp.student_id = s.id
+    AND lp.client_profile_id IS NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_participants ALTER COLUMN client_profile_id SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
 
 CREATE INDEX IF NOT EXISTS lesson_participants_locked_at_idx
   ON public.lesson_participants (locked_at) WHERE locked_at IS NOT NULL;
@@ -2557,7 +2882,8 @@ CREATE INDEX IF NOT EXISTS forms_form_usage_idx ON public.forms (form_usage);
 CREATE TABLE IF NOT EXISTS public.form_submissions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   form_id uuid NOT NULL,
-  student_id uuid NOT NULL,
+  client_profile_id uuid NOT NULL,
+  student_id uuid NULL,
   answers jsonb NOT NULL,
   alert_flags jsonb NULL,
   otp_metadata jsonb NOT NULL,
@@ -2572,6 +2898,7 @@ CREATE TABLE IF NOT EXISTS public.form_submissions (
 
 ALTER TABLE public.form_submissions
   ADD COLUMN IF NOT EXISTS form_id uuid,
+  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS answers jsonb,
   ADD COLUMN IF NOT EXISTS alert_flags jsonb,
@@ -2598,6 +2925,16 @@ BEGIN
   ALTER TABLE public.form_submissions
     ADD CONSTRAINT form_submissions_form_id_fkey
     FOREIGN KEY (form_id) REFERENCES public.forms(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.form_submissions
+    ADD CONSTRAINT form_submissions_client_profile_id_fkey
+    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -2636,6 +2973,9 @@ END $$;
 CREATE INDEX IF NOT EXISTS form_submissions_form_id_idx
   ON public.form_submissions (form_id);
 
+CREATE INDEX IF NOT EXISTS form_submissions_client_profile_id_idx
+  ON public.form_submissions (client_profile_id);
+
 CREATE INDEX IF NOT EXISTS form_submissions_student_id_idx
   ON public.form_submissions (student_id);
 
@@ -2648,6 +2988,7 @@ CREATE INDEX IF NOT EXISTS form_submissions_submitted_by_guardian_id_idx
 
 CREATE TABLE IF NOT EXISTS public.otp_challenges (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_profile_id uuid NOT NULL,
   student_id uuid NULL,
   channel text NOT NULL,
   destination text NOT NULL,
@@ -2661,6 +3002,7 @@ CREATE TABLE IF NOT EXISTS public.otp_challenges (
 );
 
 ALTER TABLE public.otp_challenges
+  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS channel text,
   ADD COLUMN IF NOT EXISTS destination text,
@@ -2671,6 +3013,16 @@ ALTER TABLE public.otp_challenges
   ADD COLUMN IF NOT EXISTS attempts int,
   ADD COLUMN IF NOT EXISTS ip text,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.otp_challenges
+    ADD CONSTRAINT otp_challenges_client_profile_id_fkey
+    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
 
 DO $$
 BEGIN
@@ -2702,6 +3054,9 @@ EXCEPTION
     NULL;
 END $$;
 
+CREATE INDEX IF NOT EXISTS otp_challenges_client_profile_id_idx
+  ON public.otp_challenges (client_profile_id);
+
 CREATE INDEX IF NOT EXISTS otp_challenges_student_id_idx
   ON public.otp_challenges (student_id);
 
@@ -2717,7 +3072,8 @@ CREATE INDEX IF NOT EXISTS otp_challenges_expires_at_idx
 
 CREATE TABLE IF NOT EXISTS public.waiting_list_entries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  student_id uuid NOT NULL,
+  client_profile_id uuid NOT NULL,
+  student_id uuid NULL,
   desired_service_id uuid NOT NULL,
   preferred_days int[] NULL,
   preferred_times jsonb NULL,
@@ -2728,10 +3084,12 @@ CREATE TABLE IF NOT EXISTS public.waiting_list_entries (
   notes text NULL,
   status text NOT NULL DEFAULT 'open',
   created_at timestamptz NOT NULL DEFAULT now(),
+  latest_submission_id uuid NULL,
   metadata jsonb NULL
 );
 
 ALTER TABLE public.waiting_list_entries
+  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS desired_service_id uuid,
   ADD COLUMN IF NOT EXISTS preferred_days int[],
@@ -2743,13 +3101,34 @@ ALTER TABLE public.waiting_list_entries
   ADD COLUMN IF NOT EXISTS notes text,
   ADD COLUMN IF NOT EXISTS status text,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS latest_submission_id uuid,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.waiting_list_entries
+    ADD CONSTRAINT waiting_list_entries_client_profile_id_fkey
+    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
 
 DO $$
 BEGIN
   ALTER TABLE public.waiting_list_entries
     ADD CONSTRAINT waiting_list_entries_student_id_fkey
     FOREIGN KEY (student_id) REFERENCES public.students(id);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.waiting_list_entries
+    ADD CONSTRAINT waiting_list_entries_latest_submission_id_fkey
+    FOREIGN KEY (latest_submission_id) REFERENCES public.form_submissions(id);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -2783,11 +3162,58 @@ EXCEPTION
   WHEN others THEN NULL;
 END $$;
 
+CREATE INDEX IF NOT EXISTS waiting_list_entries_client_profile_id_idx
+  ON public.waiting_list_entries (client_profile_id);
+
 CREATE INDEX IF NOT EXISTS waiting_list_entries_student_id_idx
   ON public.waiting_list_entries (student_id);
 
 CREATE INDEX IF NOT EXISTS waiting_list_entries_status_idx
   ON public.waiting_list_entries (status);
+
+DO $$
+BEGIN
+  UPDATE public.form_submissions fs
+  SET client_profile_id = s.client_profile_id
+  FROM public.students s
+  WHERE fs.student_id = s.id
+    AND fs.client_profile_id IS NULL;
+
+  UPDATE public.otp_challenges oc
+  SET client_profile_id = s.client_profile_id
+  FROM public.students s
+  WHERE oc.student_id = s.id
+    AND oc.client_profile_id IS NULL;
+
+  UPDATE public.waiting_list_entries wle
+  SET client_profile_id = s.client_profile_id
+  FROM public.students s
+  WHERE wle.student_id = s.id
+    AND wle.client_profile_id IS NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.form_submissions ALTER COLUMN client_profile_id SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.otp_challenges ALTER COLUMN client_profile_id SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.waiting_list_entries ALTER COLUMN client_profile_id SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
 
 -- -----------------------------------------------------------------
 -- public."Settings" (cross-feature configuration)
@@ -3508,7 +3934,8 @@ CREATE INDEX IF NOT EXISTS dashboard_tasks_resource_idx ON public.dashboard_task
 -- Enable RLS on all tables (both domain and payroll)
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.guardians ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.student_guardians ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.client_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.client_guardians ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."Employees" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."Services" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."RateHistory" ENABLE ROW LEVEL SECURITY;
@@ -3551,7 +3978,8 @@ BEGIN
   FOREACH tbl IN ARRAY ARRAY[
     'students',
     'guardians',
-    'student_guardians',
+    'client_profiles',
+    'client_guardians',
     'Employees',
     'Services',
     'RateHistory',
@@ -3618,7 +4046,8 @@ GRANT USAGE ON SCHEMA public TO app_user;
 
 GRANT ALL ON TABLE public.students TO app_user;
 GRANT ALL ON TABLE public.guardians TO app_user;
-GRANT ALL ON TABLE public.student_guardians TO app_user;
+GRANT ALL ON TABLE public.client_profiles TO app_user;
+GRANT ALL ON TABLE public.client_guardians TO app_user;
 GRANT ALL ON TABLE public."Employees" TO app_user;
 GRANT ALL ON TABLE public."Services" TO app_user;
 GRANT ALL ON TABLE public."RateHistory" TO app_user;
@@ -3663,7 +4092,8 @@ DECLARE
   required_tables constant text[] := array[
     'students',
     'guardians',
-    'student_guardians',
+    'client_profiles',
+    'client_guardians',
     'Employees',
     'Services',
     'RateHistory',

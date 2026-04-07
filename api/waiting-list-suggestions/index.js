@@ -58,6 +58,7 @@ function parseIsoDateInTimezone(date = new Date(), timeZone = 'Asia/Jerusalem') 
 function buildEntrySelect() {
   return [
     'id',
+    'client_profile_id',
     'student_id',
     'desired_service_id',
     'preferred_days',
@@ -68,6 +69,7 @@ function buildEntrySelect() {
     'created_at',
     'metadata',
     'student:students(id, first_name, middle_name, last_name, identity_number, phone, email)',
+    'client_profile:client_profiles(id, first_name, middle_name, last_name, identity_number, phone, email)',
     'service:Services(id, name, duration_minutes)',
   ].join(',');
 }
@@ -230,7 +232,7 @@ function buildCapacitySuggestions({ entry, capabilityMap, instructorMap, validTe
     const currentStudents = templates.length;
     const availableSeats = maxStudents - currentStudents;
     if (availableSeats <= 0) continue;
-    if (templates.some((template) => template.student_id === entry.student_id)) continue;
+    if (entry.student_id && templates.some((template) => template.student_id === entry.student_id)) continue;
 
     const startMinutes = timeToMinutes(anchor.time_of_day);
     if (startMinutes == null) continue;

@@ -96,7 +96,6 @@ export function StudentFilterSection({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="active">פעילים בלבד</SelectItem>
-                  <SelectItem value="prospects">מתעניינים בלבד</SelectItem>
                   <SelectItem value="inactive">לא פעילים בלבד</SelectItem>
                   <SelectItem value="all">הכל</SelectItem>
                 </SelectContent>

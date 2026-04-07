@@ -111,7 +111,9 @@ function normalizeBoolean(value, defaultValue = false) {
 function buildWaitingListSelect() {
   return [
     'id',
+    'client_profile_id',
     'student_id',
+    'latest_submission_id',
     'desired_service_id',
     'preferred_days',
     'preferred_times',
@@ -120,7 +122,8 @@ function buildWaitingListSelect() {
     'status',
     'created_at',
     'metadata',
-    'student:students(id, first_name, middle_name, last_name, identity_number, phone, email, onboarding_status, is_active)',
+    'student:students(id, client_profile_id)',
+    'client_profile:client_profiles(id, first_name, middle_name, last_name, identity_number, phone, email, onboarding_status, is_active, tags)',
     'service:Services(id, name)',
   ].join(',');
 }
@@ -234,6 +237,7 @@ export default async function waitingList(context, req) {
   }
 
   if (method === 'POST') {
+    const clientProfileId = normalizeUuid(body?.client_profile_id || body?.clientProfileId);
     const studentId = normalizeUuid(body?.student_id || body?.studentId);
     const serviceId = normalizeUuid(body?.desired_service_id || body?.desiredServiceId || body?.service_id || body?.serviceId);
     const preferredDays = normalizePreferredDays(body?.preferred_days ?? body?.preferredDays);
@@ -243,8 +247,8 @@ export default async function waitingList(context, req) {
     const rawStatus = normalizeString(body?.status);
     const status = rawStatus ? normalizeStatus(rawStatus) : 'open';
 
-    if (!studentId) {
-      return respond(context, 400, { message: 'invalid_student_id' });
+    if (!clientProfileId && !studentId) {
+      return respond(context, 400, { message: 'invalid_client_profile_id' });
     }
 
     if (!serviceId) {
@@ -256,7 +260,8 @@ export default async function waitingList(context, req) {
     }
 
     const payload = {
-      student_id: studentId,
+      client_profile_id: clientProfileId || null,
+      student_id: studentId || null,
       desired_service_id: serviceId,
       preferred_days: preferredDays,
       preferred_times: preferredTimes,
@@ -301,10 +306,18 @@ export default async function waitingList(context, req) {
 
   if ('student_id' in body || 'studentId' in body) {
     const studentId = normalizeUuid(body?.student_id || body?.studentId);
-    if (!studentId) {
+    if ((body?.student_id || body?.studentId) && !studentId) {
       return respond(context, 400, { message: 'invalid_student_id' });
     }
     updates.student_id = studentId;
+  }
+
+  if ('client_profile_id' in body || 'clientProfileId' in body) {
+    const clientProfileId = normalizeUuid(body?.client_profile_id || body?.clientProfileId);
+    if ((body?.client_profile_id || body?.clientProfileId) && !clientProfileId) {
+      return respond(context, 400, { message: 'invalid_client_profile_id' });
+    }
+    updates.client_profile_id = clientProfileId;
   }
 
   if ('desired_service_id' in body || 'desiredServiceId' in body || 'service_id' in body || 'serviceId' in body) {

@@ -19,7 +19,8 @@ const MAX_BODY_BYTES = 64 * 1024;
  *   - datetime_start (required)
  *   - duration_minutes (required)
  *   - instructor_employee_id (required)
- *   - student_ids (array, required)
+ *   - student_ids (array, optional)
+ *   - client_profile_ids (array, optional)
  *   - exclude_instance_id (UUID, optional, for edits)
  *
  * Returns: Array of conflicts with type and details
@@ -96,8 +97,12 @@ async function handleConflictCheck(context, body, tenantClient) {
   if (!body.instructor_employee_id) {
     return respond(context, 400, { message: 'missing instructor_employee_id' });
   }
-  if (!body.student_ids || !Array.isArray(body.student_ids)) {
-    return respond(context, 400, { message: 'missing or invalid student_ids array' });
+  const studentIds = Array.isArray(body.student_ids) ? body.student_ids.filter(Boolean) : [];
+  const clientProfileIds = Array.isArray(body.client_profile_ids || body.clientProfileIds)
+    ? (body.client_profile_ids || body.clientProfileIds).filter(Boolean)
+    : [];
+  if (studentIds.length === 0 && clientProfileIds.length === 0) {
+    return respond(context, 400, { message: 'missing_or_invalid_participants' });
   }
 
   const startTime = new Date(body.datetime_start);
@@ -114,8 +119,13 @@ async function handleConflictCheck(context, body, tenantClient) {
       service_id,
       status,
       lesson_participants (
+        client_profile_id,
         student_id,
         students (
+          first_name,
+          last_name
+        ),
+        client_profiles (
           first_name,
           last_name
         )
@@ -171,8 +181,8 @@ async function handleConflictCheck(context, body, tenantClient) {
     }
 
     // Check student overlap
-    const instanceStudentIds = (instance.lesson_participants || []).map(p => p.student_id);
-    const overlappingStudents = body.student_ids.filter(id => instanceStudentIds.includes(id));
+    const instanceStudentIds = (instance.lesson_participants || []).map(p => p.student_id).filter(Boolean);
+    const overlappingStudents = studentIds.filter(id => instanceStudentIds.includes(id));
 
     if (overlappingStudents.length > 0) {
       overlappingStudents.forEach(studentId => {
@@ -191,6 +201,27 @@ async function handleConflictCheck(context, body, tenantClient) {
         });
       });
     }
+
+    const instanceClientProfileIds = (instance.lesson_participants || []).map(p => p.client_profile_id).filter(Boolean);
+    const overlappingClientProfiles = clientProfileIds.filter(id => instanceClientProfileIds.includes(id));
+
+    if (overlappingClientProfiles.length > 0) {
+      overlappingClientProfiles.forEach(clientProfileId => {
+        const participant = instance.lesson_participants.find(p => p.client_profile_id === clientProfileId);
+        const clientName = participant?.client_profiles
+          ? `${participant.client_profiles.first_name} ${participant.client_profiles.last_name}`.trim()
+          : 'לא ידוע';
+
+        conflicts.push({
+          type: 'client_profile_overlap',
+          instance_id: instance.id,
+          client_profile_id: clientProfileId,
+          message: `${clientName || 'הלקוח/ה'} כבר משובץ/ת לשיעור אחר בזמן זה`,
+          datetime_start: instance.datetime_start,
+          duration_minutes: instance.duration_minutes,
+        });
+      });
+    }
   });
 
   // Check capacity (if instructor_service_capabilities exists)
@@ -202,11 +233,12 @@ async function handleConflictCheck(context, body, tenantClient) {
       .eq('service_id', body.service_id)
       .single();
 
-    if (capability && capability.max_students && body.student_ids.length > capability.max_students) {
+    const participantCount = studentIds.length + clientProfileIds.length;
+    if (capability && capability.max_students && participantCount > capability.max_students) {
       conflicts.push({
         type: 'capacity_exceeded',
-        message: `מספר התלמידים (${body.student_ids.length}) עולה על הקיבולת המקסימלית (${capability.max_students})`,
-        current_count: body.student_ids.length,
+        message: `מספר המשתתפים (${participantCount}) עולה על הקיבולת המקסימלית (${capability.max_students})`,
+        current_count: participantCount,
         max_capacity: capability.max_students,
       });
     }

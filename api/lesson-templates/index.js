@@ -16,6 +16,7 @@ import {
   resolveOrgId,
   resolveTenantClient,
 } from '../_shared/org-bff.js';
+import { ensureStudentForClientProfile } from '../_shared/client-profiles.js';
 
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
@@ -441,6 +442,7 @@ export default async function lessonTemplates(context, req) {
 
   if (method === 'POST') {
     const studentId = normalizeUuid(body?.student_id || body?.studentId);
+    const clientProfileIdFromBody = normalizeUuid(body?.client_profile_id || body?.clientProfileId);
     const instructorEmployeeId = normalizeUuid(body?.instructor_employee_id || body?.instructorEmployeeId);
     const serviceId = normalizeUuid(body?.service_id || body?.serviceId);
     const waitingListEntryId = normalizeUuid(body?.waiting_list_entry_id || body?.waitingListEntryId);
@@ -450,7 +452,7 @@ export default async function lessonTemplates(context, req) {
     const validFrom = normalizeString(body?.valid_from || body?.validFrom);
     const validUntil = normalizeString(body?.valid_until || body?.validUntil);
 
-    if (!studentId) {
+    if (!studentId && !clientProfileIdFromBody && !waitingListEntryId) {
       return respond(context, 400, { message: 'invalid_student_id' });
     }
 
@@ -520,10 +522,14 @@ export default async function lessonTemplates(context, req) {
 
     let waitingListEntry = null;
     let studentBeforeMatch = null;
+    let clientProfileBeforeMatch = null;
+    let studentCreated = false;
+    let effectiveStudentId = studentId;
+    let resolvedClientProfileId = clientProfileIdFromBody;
     if (waitingListEntryId) {
       const { data: waitingListData, error: waitingListError } = await tenantClient
         .from('waiting_list_entries')
-        .select('id, student_id, desired_service_id, status, metadata')
+        .select('id, client_profile_id, student_id, desired_service_id, status, metadata')
         .eq('id', waitingListEntryId)
         .maybeSingle();
 
@@ -543,7 +549,7 @@ export default async function lessonTemplates(context, req) {
         return respond(context, 409, { message: 'waiting_list_entry_not_open' });
       }
 
-      if (waitingListData.student_id !== studentId) {
+      if (effectiveStudentId && waitingListData.student_id && waitingListData.student_id !== effectiveStudentId) {
         return respond(context, 400, { message: 'waiting_list_student_mismatch' });
       }
 
@@ -552,17 +558,53 @@ export default async function lessonTemplates(context, req) {
       }
 
       waitingListEntry = waitingListData;
+      resolvedClientProfileId = waitingListData.client_profile_id || resolvedClientProfileId;
+
+      if (resolvedClientProfileId) {
+        const { data: clientProfileData, error: clientProfileError } = await tenantClient
+          .from('client_profiles')
+          .select('id, first_name, middle_name, last_name, is_active, onboarding_status, metadata')
+          .eq('id', resolvedClientProfileId)
+          .maybeSingle();
+        if (clientProfileError) {
+          context.log?.error?.('lesson-templates failed to load client profile for waiting-list match', {
+            message: clientProfileError.message,
+            waitingListEntryId,
+            clientProfileId: resolvedClientProfileId,
+          });
+          return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+        }
+        clientProfileBeforeMatch = clientProfileData;
+      }
+
+      if (!effectiveStudentId && resolvedClientProfileId) {
+        try {
+          const ensuredStudent = await ensureStudentForClientProfile(tenantClient, resolvedClientProfileId);
+          if (ensuredStudent.error || !ensuredStudent.student?.id) {
+            return respond(context, 500, { message: 'failed_to_activate_student_from_waiting_list' });
+          }
+          effectiveStudentId = ensuredStudent.student.id;
+          studentCreated = ensuredStudent.created === true;
+        } catch (studentEnsureError) {
+          context.log?.error?.('lesson-templates failed to convert client profile to student during waiting-list match', {
+            message: studentEnsureError?.message,
+            waitingListEntryId,
+            clientProfileId: resolvedClientProfileId,
+          });
+          return respond(context, 500, { message: 'failed_to_activate_student_from_waiting_list' });
+        }
+      }
 
       const { data: studentData, error: studentError } = await tenantClient
         .from('students')
         .select('id, first_name, middle_name, last_name, is_active, onboarding_status, metadata')
-        .eq('id', studentId)
+        .eq('id', effectiveStudentId)
         .maybeSingle();
 
       if (studentError) {
         context.log?.error?.('lesson-templates failed to load student for waiting-list match', {
           message: studentError.message,
-          studentId,
+          studentId: effectiveStudentId,
           waitingListEntryId,
         });
         return respond(context, 500, { message: 'failed_to_create_lesson_template' });
@@ -573,10 +615,25 @@ export default async function lessonTemplates(context, req) {
       }
 
       studentBeforeMatch = studentData;
+    } else if (!effectiveStudentId && resolvedClientProfileId) {
+      try {
+        const ensuredStudent = await ensureStudentForClientProfile(tenantClient, resolvedClientProfileId);
+        if (ensuredStudent.error || !ensuredStudent.student?.id) {
+          return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+        }
+        effectiveStudentId = ensuredStudent.student.id;
+        studentCreated = ensuredStudent.created === true;
+      } catch (studentEnsureError) {
+        context.log?.error?.('lesson-templates failed to ensure student overlay from client profile on create', {
+          message: studentEnsureError?.message,
+          clientProfileId: resolvedClientProfileId,
+        });
+        return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+      }
     }
 
     const { conflict, error: conflictCheckError } = await findExactTemplateConflict(tenantClient, {
-      studentId,
+      studentId: effectiveStudentId,
       instructorEmployeeId,
       dayOfWeek,
       timeOfDay,
@@ -587,7 +644,7 @@ export default async function lessonTemplates(context, req) {
     if (conflictCheckError) {
       context.log?.error?.('lesson-templates failed to check duplicate conflict', {
         message: conflictCheckError.message,
-        studentId,
+        studentId: effectiveStudentId,
       });
       return respond(context, 500, { message: 'failed_to_create_lesson_template' });
     }
@@ -602,7 +659,7 @@ export default async function lessonTemplates(context, req) {
     const { data, error } = await tenantClient
       .from('lesson_templates')
       .insert({
-        student_id: studentId,
+        student_id: effectiveStudentId,
         instructor_employee_id: instructorEmployeeId,
         service_id: serviceId,
         day_of_week: dayOfWeek,
@@ -623,17 +680,17 @@ export default async function lessonTemplates(context, req) {
         });
       }
 
-      context.log?.error?.('lesson-templates failed to create template', { message: error.message, studentId });
+      context.log?.error?.('lesson-templates failed to create template', { message: error.message, studentId: effectiveStudentId });
       return respond(context, 500, { message: 'failed_to_create_lesson_template' });
     }
 
     let studentAfterActivation = null;
     let studentReactivated = false;
 
-    if (waitingListEntry && studentBeforeMatch?.is_active === false) {
+    if (waitingListEntry && clientProfileBeforeMatch?.is_active === false) {
       const activationTimestamp = new Date().toISOString();
-      const activationMetadata = studentBeforeMatch?.metadata && typeof studentBeforeMatch.metadata === 'object'
-        ? studentBeforeMatch.metadata
+      const activationMetadata = clientProfileBeforeMatch?.metadata && typeof clientProfileBeforeMatch.metadata === 'object'
+        ? clientProfileBeforeMatch.metadata
         : {};
       const activationPayload = {
         is_active: true,
@@ -646,14 +703,14 @@ export default async function lessonTemplates(context, req) {
         },
       };
 
-      if (normalizeString(studentBeforeMatch.onboarding_status) === 'pending_wl_form') {
+      if (normalizeString(clientProfileBeforeMatch.onboarding_status) === 'pending_forms') {
         activationPayload.onboarding_status = 'approved';
       }
 
       const { data: activatedStudent, error: activationError } = await tenantClient
-        .from('students')
+        .from('client_profiles')
         .update(activationPayload)
-        .eq('id', studentBeforeMatch.id)
+        .eq('id', resolvedClientProfileId)
         .select('id, first_name, middle_name, last_name, is_active, onboarding_status, metadata')
         .single();
 
@@ -662,12 +719,12 @@ export default async function lessonTemplates(context, req) {
           message: activationError.message,
           waitingListEntryId: waitingListEntry.id,
           templateId: data.id,
-          studentId: studentBeforeMatch.id,
+          clientProfileId: resolvedClientProfileId,
         });
 
         const rollbackTemplateResult = await rollbackCreatedTemplate(context, tenantClient, data.id, {
           waitingListEntryId: waitingListEntry.id,
-          studentId: studentBeforeMatch.id,
+          clientProfileId: resolvedClientProfileId,
           reason: 'student_activation_failed',
         });
 
@@ -680,6 +737,10 @@ export default async function lessonTemplates(context, req) {
 
       studentAfterActivation = activatedStudent;
       studentReactivated = true;
+      await tenantClient
+        .from('students')
+        .update({ is_active: true })
+        .eq('id', effectiveStudentId);
     }
 
     if (waitingListEntry) {
@@ -713,20 +774,20 @@ export default async function lessonTemplates(context, req) {
 
         const rollbackTemplateResult = await rollbackCreatedTemplate(context, tenantClient, data.id, {
           waitingListEntryId: waitingListEntry.id,
-          studentId,
+          studentId: effectiveStudentId,
           reason: 'waiting_list_update_failed',
         });
         let rollbackStudentOk = true;
 
-        if (studentReactivated && studentBeforeMatch) {
+        if (studentReactivated && clientProfileBeforeMatch) {
           const { error: rollbackStudentError } = await tenantClient
-            .from('students')
+            .from('client_profiles')
             .update({
-              is_active: studentBeforeMatch.is_active,
-              onboarding_status: studentBeforeMatch.onboarding_status,
-              metadata: studentBeforeMatch.metadata || null,
+              is_active: clientProfileBeforeMatch?.is_active,
+              onboarding_status: clientProfileBeforeMatch?.onboarding_status,
+              metadata: clientProfileBeforeMatch?.metadata || null,
             })
-            .eq('id', studentBeforeMatch.id);
+            .eq('id', resolvedClientProfileId);
 
           if (rollbackStudentError) {
             rollbackStudentOk = false;
@@ -734,9 +795,13 @@ export default async function lessonTemplates(context, req) {
               message: rollbackStudentError.message,
               waitingListEntryId: waitingListEntry.id,
               templateId: data.id,
-              studentId: studentBeforeMatch.id,
+              clientProfileId: resolvedClientProfileId,
             });
           }
+          await tenantClient
+            .from('students')
+            .update({ is_active: studentBeforeMatch?.is_active ?? false })
+            .eq('id', effectiveStudentId);
         }
 
         return respond(
@@ -751,9 +816,9 @@ export default async function lessonTemplates(context, req) {
           actorUserId: userId,
           eventType: 'student.reactivated_from_waiting_list_match',
           retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
-          resourceType: 'student',
+          resourceType: 'client_profile',
           resourceId: studentAfterActivation.id,
-          beforeState: studentBeforeMatch,
+          beforeState: clientProfileBeforeMatch,
           afterState: studentAfterActivation,
           details: {
             origin: 'api/lesson-templates',
@@ -812,6 +877,7 @@ export default async function lessonTemplates(context, req) {
       waiting_list_match: waitingListEntry
         ? {
             waiting_list_entry_id: waitingListEntry.id,
+            student_created: studentCreated,
             student_reactivated: studentReactivated,
           }
         : null,
