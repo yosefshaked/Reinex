@@ -916,19 +916,17 @@ export default function ReinexFullCalendar({
     );
   }, [openInstructorWhatsApp]);
 
-  if (!mappedResources.length && !isLoading) {
-    return (
-      <div className="reinex-fullcalendar-empty">
-        אין מדריכים זמינים או שיעורים קיימים בטווח שנבחר
-      </div>
-    );
-  }
-
   return (
     <div className="reinex-fullcalendar-shell">
       {(isLoading || updatingEventId) ? (
         <div className="reinex-fullcalendar-loading">
           <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+        </div>
+      ) : null}
+
+      {!mappedResources.length && !isLoading ? (
+        <div className="reinex-fullcalendar-empty">
+          אין מדריכים זמינים או שיעורים קיימים בטווח שנבחר
         </div>
       ) : null}
 
