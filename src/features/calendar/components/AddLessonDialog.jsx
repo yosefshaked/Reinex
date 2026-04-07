@@ -186,6 +186,10 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     () => (instructors || []).find((instructor) => String(instructor.id) === String(formData.instructor_employee_id || '')) || null,
     [formData.instructor_employee_id, instructors],
   );
+  const studentRegularInstructor = useMemo(
+    () => (instructors || []).find((instructor) => String(instructor.id) === String(studentDetails?.instructor_employee_id || '')) || null,
+    [instructors, studentDetails?.instructor_employee_id],
+  );
   const selectedCapability = useMemo(
     () => (selectedInstructor?.service_capabilities || []).find((capability) => String(capability.service_id) === String(formData.service_id || '')) || null,
     [selectedInstructor, formData.service_id],
@@ -285,6 +289,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     && !useSchedulingOverride
     && selectedTimeOutsideAvailability,
   );
+  const showsRegularInstructorNotice = Boolean(
+    formData.student_ids.length === 1
+    && studentRegularInstructor?.id
+    && formData.instructor_employee_id
+    && String(studentRegularInstructor.id) !== String(formData.instructor_employee_id),
+  );
   const displayedTimeOptions = useMemo(() => {
     if (!formData.time || availableTimeSlots.includes(formData.time)) {
       return availableTimeSlots.map((time) => ({
@@ -359,7 +369,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     useSchedulingOverride,
   ]);
 
-  // When first student is selected, auto-populate service and instructor (only if valid)
+  // When first student is selected, auto-populate service and only fill instructor if the form does not already have one.
   useEffect(() => {
     if (formData.student_ids.length === 0) {
       setStudentDetails(null);
@@ -386,7 +396,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       setFormData(prev => ({
         ...prev,
         service_id: nextServiceId || prev.service_id,
-        instructor_employee_id: nextInstructorId || prev.instructor_employee_id,
+        instructor_employee_id: prev.instructor_employee_id || nextInstructorId || '',
       }));
     }
   }, [formData.student_ids, students, services, instructors]);
@@ -678,6 +688,33 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
               <div className="mt-3 rounded-xl bg-blue-50 p-2 text-sm">
                 <p className="font-medium">{studentDetails.first_name} {studentDetails.last_name}</p>
               </div>
+            ) : null}
+
+            {showsRegularInstructorNotice ? (
+              <Alert className="mt-3 border-blue-200 bg-blue-50 text-blue-950">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="space-y-3">
+                  <div>
+                    לתלמיד/ה משויך/ת בדרך כלל <strong>{studentRegularInstructor.full_name}</strong>, אבל השעה שבחרתם בלוח משויכת כרגע ל-<strong>{selectedInstructor?.full_name || 'מדריך/ה אחר/ת'}</strong>.
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setFormData((prev) => ({
+                        ...prev,
+                        instructor_employee_id: String(studentRegularInstructor.id),
+                      }))}
+                    >
+                      החלף למדריך/ה הרגיל/ה
+                    </Button>
+                    <div className="flex items-center text-xs text-blue-800">
+                      אפשר גם להמשיך עם המדריך/ה שנבחר/ה מהלוח.
+                    </div>
+                  </div>
+                </AlertDescription>
+              </Alert>
             ) : null}
           </div>
 
