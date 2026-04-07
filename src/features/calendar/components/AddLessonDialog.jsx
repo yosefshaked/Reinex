@@ -177,6 +177,10 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     () => (services || []).filter((service) => service?.is_active === true),
     [services],
   );
+  const selectedService = useMemo(
+    () => activeServices.find((service) => String(service.id) === String(formData.service_id || '')) || null,
+    [activeServices, formData.service_id],
+  );
   const selectedDayToken = useMemo(() => getDayTokenForLocalDate(formData.date), [formData.date]);
   const selectedInstructor = useMemo(
     () => (instructors || []).find((instructor) => String(instructor.id) === String(formData.instructor_employee_id || '')) || null,
@@ -300,6 +304,20 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       })),
     ];
   }, [availableTimeSlots, formData.time]);
+
+  useEffect(() => {
+    const serviceDuration = Number(selectedService?.duration_minutes) || 0;
+    if (!selectedService?.id || serviceDuration <= 0) {
+      return;
+    }
+
+    setFormData((prev) => (
+      String(prev.service_id || '') === String(selectedService.id)
+      && Number(prev.duration_minutes) !== serviceDuration
+        ? { ...prev, duration_minutes: serviceDuration }
+        : prev
+    ));
+  }, [selectedService]);
 
   useEffect(() => {
     if (useSchedulingOverride) {
@@ -677,11 +695,11 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 <Select
                   value={formData.service_id}
                   onValueChange={(value) => {
-                    const selectedService = activeServices.find((service) => String(service.id) === String(value));
+                    const nextSelectedService = activeServices.find((service) => String(service.id) === String(value));
                     setFormData((prev) => ({
                       ...prev,
                       service_id: String(value),
-                      duration_minutes: selectedService?.duration_minutes || prev.duration_minutes,
+                      duration_minutes: Number(nextSelectedService?.duration_minutes) || prev.duration_minutes,
                     }));
                   }}
                   disabled={servicesLoading || !formData.student_ids.length}
