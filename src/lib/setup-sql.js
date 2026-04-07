@@ -5,9 +5,13 @@ export const SETUP_SQL_SCRIPT = String.raw`-- ==================================
 --
 -- This script implements the complete Reinex domain as described in the PRD:
 -- 1. Lessons & Scheduling (Templates, Instances, Overrides, Participants)
--- 2. Students & Guardians (with medical flags, onboarding forms, OTP security)
--- 3. Forms & Submissions (with alert rules, visibility rules, OTP metadata)
--- 4. Commitments & Consumption (prepaid packages, HMO support)
+-- 2. Client Profiles, Students & Guardians
+--    - client_profiles is the canonical human/customer root
+--    - students is an operational overlay for enrolled/ongoing customers
+--    - client_guardians is the canonical guardian linkage table
+-- 3. Forms, Submissions, OTP & Routing
+--    - form_submissions, otp_challenges, and waiting_list_entries root to client_profile_id
+-- 4. Commitments & Consumption (prepaid packages, HMO support; student-only in this phase)
 -- 5. Waiting List (with priority, preferences, conflict detection)
 -- 6. Instructors, Payroll, Attendance & Leave (Employees, Services, RateHistory, LessonEarnings, Attendance, Leave, Finance Corrections)
 -- 7. Settings (cross-feature configuration)
@@ -17,12 +21,21 @@ export const SETUP_SQL_SCRIPT = String.raw`-- ==================================
 -- - Tenant schema is "public" (product-agnostic, no tuttiud references).
 -- - Idempotent DDL: CREATE TABLE/COLUMN IF NOT EXISTS, INSERT...ON CONFLICT DO NOTHING.
 -- - Supports weekly generation engine with template versioning and undo capability.
--- - Supports partial attendance (group lessons) via lesson_participants per student per instance.
+-- - Supports partial attendance (group lessons) via lesson_participants rooted to client_profile_id with optional student_id.
 -- - Supports service-per-student pricing overrides and HMO-specific rules via metadata.
 -- - RLS enabled on all tables; uniform policies for authenticated users.
 -- - Final SELECT prints a dedicated JWT key; replace the placeholder secret first.
 --
--- Patch Notes (2025-12-15):
+-- Patch Notes (2026-04-07):
+-- - Refactored person identity to client_profiles as the canonical root entity
+-- - Reduced students to an operational overlay linked by client_profile_id
+-- - Replaced student_guardians with client_guardians and migrated links during setup
+-- - Rooted waiting_list_entries, form_submissions, otp_challenges, and lesson_participants to client_profile_id
+-- - Removed mirrored person/lifecycle columns from students after backfill
+-- - Removed client-profile -> students mirror sync triggers after migration
+-- - Kept recurring templates / commitments / HMO / current billing student-only in this phase
+--
+-- Historical Patch Notes (2025-12-15):
 -- - Removed Documents.entity_type CHECK constraint (validation in UI layer)
 -- - Removed redundant ALTER TABLE ADD COLUMN id statements (id already in CREATE TABLE)
 -- - Added lesson_instances.applied_override_id for override traceability
