@@ -140,6 +140,12 @@
   pointer-events: none;
 }
 
+.reinex-fullcalendar .fc .reinex-calendar-selection {
+  background: linear-gradient(180deg, rgb(59 130 246 / 0.14), rgb(59 130 246 / 0.2));
+  border-inline-start: 2px solid rgb(59 130 246 / 0.55);
+  box-shadow: inset 0 0 0 1px rgb(59 130 246 / 0.18);
+}
+
 .reinex-fullcalendar .fc .fc-event,
 .reinex-fullcalendar .fc .fc-timeline-event {
   border: none;

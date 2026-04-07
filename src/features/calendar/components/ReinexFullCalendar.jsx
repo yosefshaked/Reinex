@@ -39,14 +39,7 @@ import {
   resolveSchedulingOverrideFormState,
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
 } from '../utils/schedulingOverride.js';
-import {
-  buildInstructorDayMessage,
-  buildInstructorWeekMessage,
-  getInstructorDayLessons,
-  getInstructorWeekLessons,
-} from '../utils/instructor-whatsapp.js';
 import { addLocalDays, CALENDAR_WEEK_START, getWeekStartDate, parseLocalDateString, toLocalDateString as toCalendarLocalDateString } from '../utils/localDate.js';
-import InstructorWhatsAppDialog from './InstructorWhatsAppDialog.jsx';
 import './reinex-fullcalendar.css';
 
 function toLocalDateString(dateObj) {
@@ -452,11 +445,13 @@ export default function ReinexFullCalendar({
   instructors,
   isLoading = false,
   calendarNavigationRef,
+  selectedSlot,
   onSlotSelect,
   onEventClick,
   onDateChange,
   onViewModeChange,
   onEventRescheduled,
+  onOpenInstructorWhatsApp,
 }) {
   const calendarRef = useRef(null);
   const pendingCalendarSyncRef = useRef(null);
@@ -469,7 +464,6 @@ export default function ReinexFullCalendar({
   const { activeOrgId } = useOrg();
   const [updatingEventId, setUpdatingEventId] = useState(null);
   const [pendingDropInfo, setPendingDropInfo] = useState(null);
-  const [whatsAppCompose, setWhatsAppCompose] = useState(null);
 
   const availabilityPresentation = useMemo(
     () => buildAvailabilityPresentationContext({ currentDate, viewMode, instructors, instances }),
@@ -480,8 +474,25 @@ export default function ReinexFullCalendar({
     [instructors],
   );
   const mappedEvents = useMemo(
-    () => mapInstancesToEvents(instances),
-    [instances],
+    () => {
+      const baseEvents = mapInstancesToEvents(instances);
+      if (!(selectedSlot?.start instanceof Date) || !(selectedSlot?.end instanceof Date) || !selectedSlot?.resourceId) {
+        return baseEvents;
+      }
+
+      return [
+        ...baseEvents,
+        {
+          id: 'pending-calendar-selection',
+          start: selectedSlot.start,
+          end: selectedSlot.end,
+          resourceId: String(selectedSlot.resourceId),
+          display: 'background',
+          classNames: ['reinex-calendar-selection'],
+        },
+      ];
+    },
+    [instances, selectedSlot],
   );
   const mappedResources = useMemo(
     () => mapInstructorsToResources(availabilityPresentation.visibleInstructors),
@@ -825,39 +836,6 @@ export default function ReinexFullCalendar({
     clearPendingDrop();
   }, [clearPendingDrop, pendingDropInfo]);
 
-  const closeWhatsAppCompose = useCallback(() => {
-    setWhatsAppCompose(null);
-  }, []);
-
-  const openInstructorWhatsApp = useCallback((instructor, mode) => {
-    if (!instructor?.id) {
-      return;
-    }
-
-    const lessons = mode === 'week'
-      ? getInstructorWeekLessons(instances, instructor.id, currentDate)
-      : getInstructorDayLessons(instances, instructor.id, currentDate);
-
-    if (!lessons.length) {
-      toast.error(mode === 'week' ? 'אין שיעורים מתוכננים או שהושלמו למדריך זה השבוע.' : 'אין שיעורים מתוכננים או שהושלמו למדריך זה ביום זה.');
-      return;
-    }
-
-    const message = mode === 'week'
-      ? buildInstructorWeekMessage({ instructorName: instructor.full_name || 'מדריך', dateString: currentDate, lessons })
-      : buildInstructorDayMessage({ instructorName: instructor.full_name || 'מדריך', dateString: currentDate, lessons });
-
-    setWhatsAppCompose({
-      mode,
-      title: mode === 'week' ? `שליחת סיכום שבועי ל-${instructor.full_name}` : `שליחת סיכום יומי ל-${instructor.full_name}`,
-      description: instructor.phone
-        ? 'ההודעה מוכנה לשליחה. ניתן לערוך לפני פתיחה ב-WhatsApp.'
-        : 'למדריך אין מספר טלפון שמור. יש להזין מספר טלפון כדי להמשיך.',
-      phone: instructor.phone || '',
-      message,
-    });
-  }, [currentDate, instances]);
-
   const handleResourceLabelContent = useCallback((arg) => {
     const instructor = arg.resource?.extendedProps?.instructor;
     if (!instructor) {
@@ -875,7 +853,7 @@ export default function ReinexFullCalendar({
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            openInstructorWhatsApp(instructor, 'day');
+            onOpenInstructorWhatsApp?.(instructor);
           }}
         >
           <WhatsAppIcon className="h-3.5 w-3.5" />
@@ -883,7 +861,7 @@ export default function ReinexFullCalendar({
         </Button>
       </div>
     );
-  }, [openInstructorWhatsApp]);
+  }, [onOpenInstructorWhatsApp]);
 
   return (
     <div className="reinex-fullcalendar-shell">
@@ -1026,22 +1004,6 @@ export default function ReinexFullCalendar({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <InstructorWhatsAppDialog
-        open={!!whatsAppCompose}
-        onOpenChange={(open) => {
-          if (!open) {
-            closeWhatsAppCompose();
-          }
-        }}
-        mode={whatsAppCompose?.mode || 'day'}
-        title={whatsAppCompose?.title || ''}
-        description={whatsAppCompose?.description || ''}
-        phone={whatsAppCompose?.phone || ''}
-        onPhoneChange={(value) => setWhatsAppCompose((current) => (current ? { ...current, phone: value } : current))}
-        message={whatsAppCompose?.message || ''}
-        onMessageChange={(value) => setWhatsAppCompose((current) => (current ? { ...current, message: value } : current))}
-      />
     </div>
   );
 }

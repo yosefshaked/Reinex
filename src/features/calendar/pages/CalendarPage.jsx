@@ -12,6 +12,9 @@ import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalend
 import ReinexFullCalendar from '../components/ReinexFullCalendar';
 import CalendarWorkspaceDock from '../components/CalendarWorkspaceDock.jsx';
 import InstructorWhatsAppDialog from '../components/InstructorWhatsAppDialog.jsx';
+import EditServiceCapabilitiesDialog from '@/components/settings/employee-management/EditServiceCapabilitiesDialog.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { useAuth } from '@/auth/AuthContext.jsx';
 import { buildCalendarWorkspaceSummary } from '../utils/calendarWorkspace.js';
 import {
   buildInstructorDayMessage,
@@ -43,12 +46,15 @@ export default function CalendarPage() {
   });
 
   const navigate = useNavigate();
+  const { activeOrgId } = useOrg();
+  const { session } = useAuth();
   const [selectedInstance, setSelectedInstance] = useState(null);
   const [showInstanceDialog, setShowInstanceDialog] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showGenerationDialog, setShowGenerationDialog] = useState(false);
   const [pendingSlotSelection, setPendingSlotSelection] = useState(null);
   const [whatsAppCompose, setWhatsAppCompose] = useState(null);
+  const [availabilityFixIssue, setAvailabilityFixIssue] = useState(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -108,7 +114,12 @@ export default function CalendarPage() {
     ? toLocalDateString(getWeekStartDate(currentDate))
     : currentDate;
 
-  const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
+  const {
+    instructors,
+    isLoading: instructorsLoading,
+    error: instructorsError,
+    refetch: refetchInstructors,
+  } = useCalendarInstructors();
   const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(dateForQuery, viewMode);
   const isCalendarLoading = instructorsLoading || instancesLoading;
 
@@ -204,6 +215,10 @@ export default function CalendarPage() {
       instructorName: instructor?.full_name || 'מדריך/ה',
     };
   }, [instructors, pendingSlotSelection]);
+  const availabilityFixInstructor = useMemo(
+    () => instructors.find((instructor) => String(instructor.id) === String(availabilityFixIssue?.instructorId || '')) || null,
+    [availabilityFixIssue?.instructorId, instructors],
+  );
 
   const openInstructorWhatsApp = useCallback((instructorOverride = null) => {
     const sourceInstructor = instructorOverride
@@ -240,6 +255,18 @@ export default function CalendarPage() {
       message,
     });
   }, [currentDate, instructors, instances, selectedInstance, viewMode]);
+  const handleFixAvailabilityIssue = useCallback((issue) => {
+    if (!issue?.instructorId || !issue?.focusServiceId) {
+      toast.error('לא נמצא שירות מתאים לתיקון הזמינות.');
+      return;
+    }
+
+    setAvailabilityFixIssue(issue);
+  }, []);
+  const handleAvailabilityFixSaved = useCallback(() => {
+    setAvailabilityFixIssue(null);
+    refetchInstructors();
+  }, [refetchInstructors]);
 
   return (
     <PageLayout title="לוח זמנים">
@@ -307,6 +334,7 @@ export default function CalendarPage() {
               onOpenTemplates={() => navigate('/calendar/templates')}
               onOpenSelectedLesson={handleOpenSelectedLesson}
               onOpenInstructorWhatsApp={openInstructorWhatsApp}
+              onFixAvailabilityIssue={handleFixAvailabilityIssue}
             />
 
             <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -317,11 +345,13 @@ export default function CalendarPage() {
                 instructors={instructors}
                 isLoading={isCalendarLoading}
                 calendarNavigationRef={calendarNavigationRef}
+                selectedSlot={pendingSlotSelection}
                 onDateChange={setCurrentDate}
                 onViewModeChange={setViewMode}
                 onSlotSelect={handleSlotSelect}
                 onEventClick={handleInstanceClick}
                 onEventRescheduled={handleRescheduleSuccess}
+                onOpenInstructorWhatsApp={openInstructorWhatsApp}
               />
             </div>
           </div>
@@ -364,6 +394,23 @@ export default function CalendarPage() {
         onPhoneChange={(value) => setWhatsAppCompose((current) => (current ? { ...current, phone: value } : current))}
         message={whatsAppCompose?.message || ''}
         onMessageChange={(value) => setWhatsAppCompose((current) => (current ? { ...current, message: value } : current))}
+      />
+
+      <EditServiceCapabilitiesDialog
+        open={!!availabilityFixIssue && !!availabilityFixInstructor}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAvailabilityFixIssue(null);
+          }
+        }}
+        instructor={availabilityFixInstructor}
+        orgId={activeOrgId}
+        session={session}
+        onSaved={handleAvailabilityFixSaved}
+        focusServiceId={availabilityFixIssue?.focusServiceId || ''}
+        introMessage={availabilityFixIssue?.blocksVisibility
+          ? 'למדריך/ה אין חלונות זמינות מוגדרים לשירות זה, ולכן הוא/היא לא מופיעים כרגע בלוח.'
+          : 'לשירות זה חסרה זמינות מוגדרת. אפשר לעדכן כאן ולהמשיך לעבוד בלוח.'}
       />
     </PageLayout>
   );

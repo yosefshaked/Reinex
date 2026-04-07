@@ -45,6 +45,8 @@ export function getVisibleCalendarInstructors({ instructors, instances, currentD
 }
 
 export function buildCalendarWorkspaceSummary({ currentDate, viewMode, instances, instructors }) {
+  const viewDates = buildCalendarViewDates(currentDate, viewMode);
+  const dayTokens = viewDates.map((entry) => entry.dayToken).filter(Boolean);
   const visibleInstructors = getVisibleCalendarInstructors({ instructors, instances, currentDate, viewMode });
   const visibleInstructorIds = new Set(visibleInstructors.map((instructor) => String(instructor.id)));
   const allInstructors = Array.isArray(instructors) ? instructors : [];
@@ -56,7 +58,30 @@ export function buildCalendarWorkspaceSummary({ currentDate, viewMode, instances
   const undocumentedCompleted = visibleInstances.filter((instance) =>
     instance?.status === 'completed' && instance?.documentation_status === 'undocumented',
   );
-  const availabilityIssues = allInstructors
+  const attentionLessons = visibleInstances
+    .map((instance) => {
+      const hasException = Boolean(instance?.metadata?.scheduling_override);
+      const needsDocumentation = instance?.status === 'completed' && instance?.documentation_status === 'undocumented';
+      if (!hasException && !needsDocumentation) {
+        return null;
+      }
+
+      return {
+        id: instance.id,
+        instance,
+        hasException,
+        needsDocumentation,
+      };
+    })
+    .filter(Boolean);
+  const scopedAvailabilityInstructors = visibleInstructors.length > 0
+    ? visibleInstructors
+    : allInstructors.filter((instructor) => {
+        const capabilities = Array.isArray(instructor?.service_capabilities) ? instructor.service_capabilities : [];
+        return capabilities.some((capability) => !hasConfiguredAvailability(capability?.availability_windows))
+          && capabilities.some((capability) => dayTokens.some((dayToken) => getAvailabilityWindowsForDay(capability?.availability_windows, dayToken).length === 0));
+      });
+  const availabilityIssues = scopedAvailabilityInstructors
     .map((instructor) => {
       const capabilities = Array.isArray(instructor?.service_capabilities) ? instructor.service_capabilities : [];
       const missingAvailabilityCapabilities = capabilities.filter((capability) => !hasConfiguredAvailability(capability?.availability_windows));
@@ -69,17 +94,21 @@ export function buildCalendarWorkspaceSummary({ currentDate, viewMode, instances
         instructorName: instructor.full_name || instructor.email || 'מדריך/ה',
         missingCount: missingAvailabilityCapabilities.length,
         blocksVisibility: !visibleInstructorIds.has(String(instructor.id)),
+        focusServiceId: missingAvailabilityCapabilities[0]?.service_id || '',
+        missingServiceIds: missingAvailabilityCapabilities.map((capability) => capability.service_id).filter(Boolean),
       };
     })
     .filter(Boolean);
+  const scheduledCount = visibleInstances.filter((instance) => instance?.status === 'scheduled').length;
 
   return {
     visibleInstructors,
     visibleInstances,
-    scheduledCount: visibleInstances.length,
+    scheduledCount,
     exceptionLessons,
     undocumentedCompleted,
+    attentionLessons,
     availabilityIssues,
-    attentionCount: exceptionLessons.length + undocumentedCompleted.length + availabilityIssues.length,
+    attentionCount: attentionLessons.length + availabilityIssues.length,
   };
 }
