@@ -1,18 +1,29 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import PageLayout from '@/components/ui/PageLayout';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge.jsx';
 import { Plus, LayoutTemplate, Wand2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { CalendarHeader } from '../components/CalendarHeader/CalendarHeader';
+import { DateNavigator } from '../components/CalendarHeader/DateNavigator.jsx';
 import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
 import { AddLessonDialog } from '../components/AddLessonDialog';
 import { ManualGenerationDialog } from '../components/ManualGenerationDialog';
 import { useCalendarInstances, useCalendarInstructors } from '../hooks/useCalendar';
 import ReinexFullCalendar from '../components/ReinexFullCalendar';
+import CalendarWorkspaceDock from '../components/CalendarWorkspaceDock.jsx';
+import InstructorWhatsAppDialog from '../components/InstructorWhatsAppDialog.jsx';
+import { buildCalendarWorkspaceSummary } from '../utils/calendarWorkspace.js';
+import {
+  buildInstructorDayMessage,
+  buildInstructorWeekMessage,
+  getInstructorDayLessons,
+  getInstructorWeekLessons,
+} from '../utils/instructor-whatsapp.js';
 import { addLocalDays, getTodayLocalDateString, getWeekStartDate, parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
+import { toast } from 'sonner';
 
 const CALENDAR_DATE_KEY = 'reinex_calendar_date';
-const CALENDAR_VIEW_KEY = 'reinex_calendar_view'; // 'day' or 'week'
+const CALENDAR_VIEW_KEY = 'reinex_calendar_view';
 
 export default function CalendarPage() {
   const calendarNavigationRef = useRef(null);
@@ -24,9 +35,7 @@ export default function CalendarPage() {
     }
     return fallbackDate;
   });
-
   const [viewMode, setViewModeState] = useState(() => {
-    // Get saved view mode or default to 'day'
     if (typeof window !== 'undefined') {
       return sessionStorage.getItem(CALENDAR_VIEW_KEY) || 'day';
     }
@@ -35,18 +44,18 @@ export default function CalendarPage() {
 
   const navigate = useNavigate();
   const [selectedInstance, setSelectedInstance] = useState(null);
+  const [showInstanceDialog, setShowInstanceDialog] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showGenerationDialog, setShowGenerationDialog] = useState(false);
   const [pendingSlotSelection, setPendingSlotSelection] = useState(null);
+  const [whatsAppCompose, setWhatsAppCompose] = useState(null);
 
-  // Save date to sessionStorage whenever it changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
       sessionStorage.setItem(CALENDAR_DATE_KEY, currentDate);
     }
   }, [currentDate]);
 
-  // Save view mode to sessionStorage whenever it changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
       sessionStorage.setItem(CALENDAR_VIEW_KEY, viewMode);
@@ -103,6 +112,11 @@ export default function CalendarPage() {
   const { instances, isLoading: instancesLoading, error: instancesError, refetch: refetchInstances } = useCalendarInstances(dateForQuery, viewMode);
   const isCalendarLoading = instructorsLoading || instancesLoading;
 
+  const workspaceSummary = useMemo(
+    () => buildCalendarWorkspaceSummary({ currentDate, viewMode, instances, instructors }),
+    [currentDate, instructors, instances, viewMode],
+  );
+
   useEffect(() => {
     if (!selectedInstance?.id || !Array.isArray(instances) || instancesLoading) {
       return;
@@ -115,15 +129,45 @@ export default function CalendarPage() {
     }
 
     setSelectedInstance(null);
+    setShowInstanceDialog(false);
   }, [instances, instancesLoading, selectedInstance?.id]);
 
+  const clearSelections = useCallback(() => {
+    setPendingSlotSelection(null);
+    setSelectedInstance(null);
+    setShowInstanceDialog(false);
+  }, []);
+
+  useEffect(() => {
+    setPendingSlotSelection(null);
+    setSelectedInstance(null);
+    setShowInstanceDialog(false);
+  }, [currentDate, viewMode]);
+
   const handleInstanceClick = (instance) => {
+    setPendingSlotSelection(null);
     setSelectedInstance(instance);
+    setShowInstanceDialog(true);
   };
 
   const handleCloseDialog = () => {
-    setSelectedInstance(null);
+    setShowInstanceDialog(false);
   };
+
+  const handleOpenSelectedLesson = useCallback(() => {
+    if (selectedInstance) {
+      setShowInstanceDialog(true);
+    }
+  }, [selectedInstance]);
+
+  const handleOpenCreateLesson = useCallback(() => {
+    setShowAddDialog(true);
+  }, []);
+
+  const handleOpenBlankCreateLesson = useCallback(() => {
+    setPendingSlotSelection(null);
+    setShowAddDialog(true);
+  }, []);
 
   const handleAddSuccess = () => {
     refetchInstances();
@@ -135,10 +179,7 @@ export default function CalendarPage() {
   };
 
   const handleRescheduleSuccess = () => {
-    // Refresh instances after successful reschedule
     refetchInstances();
-    // Close any open detail dialog
-    setSelectedInstance(null);
   };
 
   const handleGenerationApplied = () => {
@@ -146,88 +187,157 @@ export default function CalendarPage() {
   };
 
   const handleSlotSelect = (selection) => {
+    setSelectedInstance(null);
+    setShowInstanceDialog(false);
     setPendingSlotSelection(selection);
-    setShowAddDialog(true);
   };
+
+  const selectedSlotSummary = useMemo(() => {
+    if (!pendingSlotSelection?.start || !pendingSlotSelection?.end) {
+      return null;
+    }
+
+    const instructor = instructors.find((entry) => String(entry.id) === String(pendingSlotSelection.resourceId || ''));
+    return {
+      ...pendingSlotSelection,
+      startDateString: toLocalDateString(pendingSlotSelection.start),
+      instructorName: instructor?.full_name || 'מדריך/ה',
+    };
+  }, [instructors, pendingSlotSelection]);
+
+  const openInstructorWhatsApp = useCallback((instructorOverride = null) => {
+    const sourceInstructor = instructorOverride
+      || selectedInstance?.instructor
+      || instructors.find((instructor) => String(instructor.id) === String(selectedInstance?.instructor_employee_id || ''))
+      || null;
+
+    if (!sourceInstructor?.id) {
+      toast.error('לא נבחר מדריך/ה לשליחת סיכום.');
+      return;
+    }
+
+    const mode = viewMode === 'week' ? 'week' : 'day';
+    const lessons = mode === 'week'
+      ? getInstructorWeekLessons(instances, sourceInstructor.id, currentDate)
+      : getInstructorDayLessons(instances, sourceInstructor.id, currentDate);
+
+    if (!lessons.length) {
+      toast.error(mode === 'week' ? 'אין שיעורים מתוכננים או שהושלמו למדריך זה השבוע.' : 'אין שיעורים מתוכננים או שהושלמו למדריך זה ביום זה.');
+      return;
+    }
+
+    const message = mode === 'week'
+      ? buildInstructorWeekMessage({ instructorName: sourceInstructor.full_name || 'מדריך', dateString: currentDate, lessons })
+      : buildInstructorDayMessage({ instructorName: sourceInstructor.full_name || 'מדריך', dateString: currentDate, lessons });
+
+    setWhatsAppCompose({
+      mode,
+      title: mode === 'week' ? `שליחת סיכום שבועי ל-${sourceInstructor.full_name}` : `שליחת סיכום יומי ל-${sourceInstructor.full_name}`,
+      description: sourceInstructor.phone
+        ? 'ההודעה מוכנה לשליחה. ניתן לערוך לפני פתיחה ב-WhatsApp.'
+        : 'למדריך אין מספר טלפון שמור. יש להזין מספר טלפון כדי להמשיך.',
+      phone: sourceInstructor.phone || '',
+      message,
+    });
+  }, [currentDate, instructors, instances, selectedInstance, viewMode]);
 
   return (
     <PageLayout title="לוח זמנים">
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CalendarHeader currentDate={currentDate} onDateChange={setCurrentDate} onNavigate={handleCalendarNavigate} viewMode={viewMode} />
-            <div className="flex items-center gap-1 border-s border-gray-300 ps-4">
-              <Button 
-                variant={viewMode === 'day' ? 'default' : 'outline'} 
+        <div className="rounded-3xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={handleOpenBlankCreateLesson} className="gap-2">
+                <Plus className="h-4 w-4" />
+                שיעור חדש
+              </Button>
+              <Button variant="outline" onClick={() => setShowGenerationDialog(true)} className="gap-2">
+                <Wand2 className="h-4 w-4" />
+                יצירה מתבניות
+              </Button>
+              <Button variant="outline" onClick={() => navigate('/calendar/templates')} className="gap-2">
+                <LayoutTemplate className="h-4 w-4" />
+                תבניות
+              </Button>
+            </div>
+
+            <div className="flex justify-center">
+              <DateNavigator currentDate={currentDate} onDateChange={setCurrentDate} onNavigate={handleCalendarNavigate} viewMode={viewMode} />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                variant={viewMode === 'day' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => setViewMode('day')}
               >
                 יום
               </Button>
-              <Button 
-                variant={viewMode === 'week' ? 'default' : 'outline'} 
+              <Button
+                variant={viewMode === 'week' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => setViewMode('week')}
               >
                 שבוע
               </Button>
+              <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                דורש תשומת לב: {workspaceSummary.attentionCount}
+              </Badge>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setShowGenerationDialog(true)} className="gap-2">
-              <Wand2 className="h-4 w-4" />
-              יצירה מתבניות
-            </Button>
-            <Button variant="outline" onClick={() => navigate('/calendar/templates')} className="gap-2">
-              <LayoutTemplate className="h-4 w-4" />
-              תבניות
-            </Button>
-            <Button onClick={() => setShowAddDialog(true)} className="gap-2">
-              <Plus className="h-4 w-4" />
-              שיעור חדש
-            </Button>
           </div>
         </div>
 
-        {/* Error State */}
-        {(instructorsError || instancesError) && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+        {(instructorsError || instancesError) ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
             שגיאה בטעינת הנתונים: {instructorsError || instancesError}
           </div>
-        )}
+        ) : null}
 
-        {!instructorsError && !instancesError && (
-          <ReinexFullCalendar
-            currentDate={currentDate}
-            viewMode={viewMode}
-            instances={instances}
-            instructors={instructors}
-            isLoading={isCalendarLoading}
-            calendarNavigationRef={calendarNavigationRef}
-            onDateChange={setCurrentDate}
-            onViewModeChange={setViewMode}
-            onSlotSelect={handleSlotSelect}
-            onEventClick={handleInstanceClick}
-            onEventRescheduled={handleRescheduleSuccess}
-          />
-        )}
+        {!instructorsError && !instancesError ? (
+          <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+            <CalendarWorkspaceDock
+              currentDate={currentDate}
+              viewMode={viewMode}
+              summary={workspaceSummary}
+              selectedInstance={selectedInstance}
+              selectedSlot={selectedSlotSummary}
+              onClearSelection={clearSelections}
+              onOpenCreateLesson={handleOpenCreateLesson}
+              onOpenManualGeneration={() => setShowGenerationDialog(true)}
+              onOpenTemplates={() => navigate('/calendar/templates')}
+              onOpenSelectedLesson={handleOpenSelectedLesson}
+              onOpenInstructorWhatsApp={openInstructorWhatsApp}
+            />
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+              <ReinexFullCalendar
+                currentDate={currentDate}
+                viewMode={viewMode}
+                instances={instances}
+                instructors={instructors}
+                isLoading={isCalendarLoading}
+                calendarNavigationRef={calendarNavigationRef}
+                onDateChange={setCurrentDate}
+                onViewModeChange={setViewMode}
+                onSlotSelect={handleSlotSelect}
+                onEventClick={handleInstanceClick}
+                onEventRescheduled={handleRescheduleSuccess}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
 
-      {/* Instance Details Dialog */}
       <LessonInstanceDialog
         instance={selectedInstance}
-        open={!!selectedInstance}
+        open={showInstanceDialog && !!selectedInstance}
         onClose={handleCloseDialog}
         onUpdate={handleUpdateSuccess}
       />
 
-      {/* Add Lesson Dialog */}
       <AddLessonDialog
         open={showAddDialog}
-        onClose={() => {
-          setShowAddDialog(false);
-          setPendingSlotSelection(null);
-        }}
+        onClose={() => setShowAddDialog(false)}
         onSuccess={handleAddSuccess}
         defaultDate={currentDate}
         defaultSelection={pendingSlotSelection}
@@ -238,6 +348,22 @@ export default function CalendarPage() {
         onClose={() => setShowGenerationDialog(false)}
         defaultDate={currentDate}
         onApplied={handleGenerationApplied}
+      />
+
+      <InstructorWhatsAppDialog
+        open={!!whatsAppCompose}
+        onOpenChange={(open) => {
+          if (!open) {
+            setWhatsAppCompose(null);
+          }
+        }}
+        mode={whatsAppCompose?.mode || 'day'}
+        title={whatsAppCompose?.title || ''}
+        description={whatsAppCompose?.description || ''}
+        phone={whatsAppCompose?.phone || ''}
+        onPhoneChange={(value) => setWhatsAppCompose((current) => (current ? { ...current, phone: value } : current))}
+        message={whatsAppCompose?.message || ''}
+        onMessageChange={(value) => setWhatsAppCompose((current) => (current ? { ...current, message: value } : current))}
       />
     </PageLayout>
   );

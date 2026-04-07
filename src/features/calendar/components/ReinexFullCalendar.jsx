@@ -899,24 +899,6 @@ export default function ReinexFullCalendar({
         </div>
       ) : null}
 
-      {viewMode === 'week' ? (
-        <div className="reinex-fullcalendar-week-actions">
-          {instructors.map((instructor) => (
-            <Button
-              key={instructor.id}
-              type="button"
-              variant="outline"
-              size="sm"
-              className="reinex-fullcalendar-week-actions__button"
-              onClick={() => openInstructorWhatsApp(instructor, 'week')}
-            >
-              <WhatsAppIcon className="h-3.5 w-3.5" />
-              {instructor.full_name}
-            </Button>
-          ))}
-        </div>
-      ) : null}
-
       <div className={`reinex-fullcalendar ${hasVisibleResources ? '' : 'reinex-fullcalendar--collapsed'}`.trim()}>
         <FullCalendar
           ref={calendarRef}

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calendar UI Suggestion 02</title>
+  <style>
+    :root { --bg:#eef2f7; --panel:#fff; --line:#d8deeb; --text:#111a2d; --muted:#66728a; --primary:#1f6fff; --accent:#ecf4ff; --success:#ecfbf2; --warn:#fff3e5; --shadow:0 18px 45px -30px rgba(31,41,55,.35); }
+    * { box-sizing:border-box; } body { margin:0; background:linear-gradient(180deg,#eef2f7,#f8f9fc); color:var(--text); font-family:"Segoe UI",Tahoma,sans-serif; }
+    .page { max-width:1560px; margin:0 auto; padding:24px; } .titlebar { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+    .titlebar h1 { margin:0; font-size:2rem; } .titlebar p { margin:8px 0 0; color:var(--muted); } .btn { border:1px solid var(--line); background:white; border-radius:14px; padding:11px 14px; font-weight:700; box-shadow:var(--shadow); } .btn.primary { background:linear-gradient(135deg,#235cff,#5a71ff); color:white; border-color:transparent; }
+    .layout { display:grid; grid-template-columns:320px 1fr; gap:18px; } .panel { background:rgba(255,255,255,.88); border:1px solid rgba(216,222,235,.95); border-radius:24px; box-shadow:var(--shadow); backdrop-filter:blur(12px); }
+    .dock { padding:18px; } .dock h2 { margin:0 0 12px; font-size:1.05rem; } .metric-row { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; } .metric { border:1px solid var(--line); background:#fbfcff; border-radius:18px; padding:12px; } .metric strong { display:block; font-size:1.25rem; margin-top:4px; }
+    .quick-list { display:flex; flex-direction:column; gap:10px; } .item { border:1px solid var(--line); border-radius:18px; padding:12px; background:white; } .item .tag { display:inline-flex; padding:4px 9px; border-radius:999px; font-size:.72rem; font-weight:700; margin-bottom:8px; } .item .tag.warn { background:var(--warn); color:#8a4b00; } .item .tag.ok { background:var(--success); color:#157347; } .item .title { font-weight:800; margin-bottom:5px; } .item .meta { color:var(--muted); font-size:.86rem; }
+    .calendar-wrap { overflow:hidden; } .toolbar { padding:16px 18px; border-bottom:1px solid var(--line); display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:16px; } .toolbar .center { text-align:center; font-weight:800; font-size:1.2rem; }
+    .filters { display:flex; gap:8px; flex-wrap:wrap; } .pill { padding:8px 11px; border-radius:999px; border:1px solid var(--line); font-size:.8rem; color:var(--muted); background:white; } .pill.active { background:#edf4ff; color:#2257c9; border-color:#cfe0ff; }
+    .calendar { display:grid; grid-template-columns:88px repeat(4,1fr); min-height:820px; } .head { padding:14px 10px; border-left:1px solid var(--line); border-bottom:1px solid var(--line); background:#f8faff; text-align:center; font-weight:800; } .head small { display:block; color:var(--muted); font-weight:600; margin-top:4px; }
+    .times,.col { position:relative; border-left:1px solid var(--line); } .hour { height:70px; border-bottom:1px solid var(--line); display:flex; justify-content:center; padding-top:6px; color:#24324d; background:#fbfcff; }
+    .grid { position:absolute; inset:0; background-image:linear-gradient(to bottom,transparent 0,transparent 34px,rgba(179,190,210,.45) 34px,transparent 35px),linear-gradient(to bottom,transparent 0,transparent 69px,rgba(214,220,232,.8) 69px,transparent 70px); background-size:100% 35px,100% 70px; }
+    .focus-window { position:absolute; left:10px; right:10px; border-radius:18px; background:linear-gradient(180deg,rgba(255,255,255,.92),rgba(237,244,255,.96)); box-shadow:inset 0 0 0 1px rgba(63,113,216,.16); } .dimmed { position:absolute; left:0; right:0; background:linear-gradient(180deg,rgba(244,247,252,.85),rgba(239,242,248,.92)); }
+    .lesson { position:absolute; left:12px; right:12px; border-radius:18px; padding:10px 12px; background:linear-gradient(135deg,#3f80f6,#286be4); color:white; font-weight:800; box-shadow:0 18px 26px -18px rgba(34,88,194,.8); } .lesson small { display:block; margin-top:5px; font-size:.78rem; opacity:.92; } .lesson.green { background:linear-gradient(135deg,#22b573,#159c62); }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="titlebar">
+      <div><h1>לוח זמנים</h1><p>הצעה 2: דף תפעול עם dock צדדי, כדי שהלוח לא יהיה לבד בלי הקשר</p></div>
+      <div style="display:flex; gap:10px;"><button class="btn">תבניות</button><button class="btn">יצירה מתבניות</button><button class="btn primary">+ שיעור חדש</button></div>
+    </div>
+    <div class="layout">
+      <aside class="panel dock">
+        <h2>מה דורש טיפול עכשיו</h2>
+        <div class="metric-row"><div class="metric">שיעורים היום<strong>12</strong></div><div class="metric">חריגות<strong>2</strong></div><div class="metric">ממתינים<strong>5</strong></div></div>
+        <div class="quick-list">
+          <div class="item"><span class="tag warn">חריגה</span><div class="title">נועם שחר • רכיבה טיפולית</div><div class="meta">18:00, מחוץ לחלון זמינות, דורש אישור</div></div>
+          <div class="item"><span class="tag ok">רשימת המתנה</span><div class="title">הוצע חלון חדש למדריך שקד יוסף</div><div class="meta">יום רביעי 16:30, מקום פנוי בתבנית</div></div>
+          <div class="item"><span class="tag warn">חסר</span><div class="title">זמינות לא הוגדרה לשירות קלינאות</div><div class="meta">לחיצה תוביל ישירות לתיקון זמינות</div></div>
+        </div>
+      </aside>
+      <section class="panel calendar-wrap">
+        <div class="toolbar"><div class="filters"><span class="pill active">יום</span><span class="pill">שבוע</span><span class="pill">זמינות</span></div><div class="center">יום רביעי, 25 במרץ 2026</div><div class="filters"><span class="pill">‹</span><span class="pill">היום</span><span class="pill">›</span></div></div>
+        <div class="calendar">
+          <div class="head"></div><div class="head">שקד יוסף<small>2 שירותים פעילים</small></div><div class="head">יוסף ישראל<small>זמינות חלקית</small></div><div class="head">מדריך חדש<small>חלונות ערב בלבד</small></div><div class="head">מדריכה נוספת<small>קלינאות ורכיבה</small></div>
+          <div class="times"><div class="hour">14:00</div><div class="hour">15:00</div><div class="hour">16:00</div><div class="hour">17:00</div><div class="hour">18:00</div><div class="hour">19:00</div><div class="hour">20:00</div><div class="hour">21:00</div></div>
+          <div class="col"><div class="grid"></div><div class="dimmed" style="top:0;height:230px;"></div><div class="focus-window" style="top:230px;height:270px;"></div><div class="dimmed" style="top:500px;height:260px;"></div><div class="lesson" style="top:442px;">בדיקה בדיקה +1 • רכיבה טיפולית<small>17:00–17:45</small></div><div class="lesson" style="top:546px;">נועם שחר +1 • רכיבה טיפולית<small>18:00–18:45</small></div></div>
+          <div class="col"><div class="grid"></div><div class="dimmed" style="top:0;height:120px;"></div><div class="focus-window" style="top:120px;height:400px;"></div><div class="dimmed" style="top:520px;height:240px;"></div></div>
+          <div class="col"><div class="grid"></div><div class="dimmed" style="top:0;height:360px;"></div><div class="focus-window" style="top:360px;height:260px;"></div><div class="dimmed" style="top:620px;height:140px;"></div><div class="lesson green" style="top:404px;">קלינאות תקשורת<small>19:10–19:55</small></div></div>
+          <div class="col"><div class="grid"></div><div class="dimmed" style="top:0;height:190px;"></div><div class="focus-window" style="top:190px;height:460px;"></div><div class="dimmed" style="top:650px;height:110px;"></div></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>
