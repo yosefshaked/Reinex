@@ -276,6 +276,19 @@ function resolveCalendarView(viewMode) {
   return viewMode === 'week' ? 'resourceTimeGridWeek' : 'resourceTimeGridDay';
 }
 
+function resolveVisibleCalendarDate(info, nextViewMode) {
+  if (nextViewMode === 'week') {
+    return info.start instanceof Date ? info.start : (info.view?.currentStart instanceof Date ? info.view.currentStart : null);
+  }
+
+  const activeMarker = info.view?.calendar?.getDate?.();
+  if (activeMarker instanceof Date && !Number.isNaN(activeMarker.getTime())) {
+    return activeMarker;
+  }
+
+  return info.start instanceof Date ? info.start : null;
+}
+
 function resolveSchedulerLicenseKey(runtimeConfig) {
   return (
     runtimeConfig?.fullcalendarSchedulerLicenseKey
@@ -636,7 +649,7 @@ export default function ReinexFullCalendar({
 
   const handleDatesSet = useCallback((info) => {
     const nextViewMode = info.view.type === 'resourceTimeGridWeek' ? 'week' : 'day';
-    const activeDate = info.view.currentStart || info.start;
+    const activeDate = resolveVisibleCalendarDate(info, nextViewMode);
     const nextDate = toLocalDateString(activeDate);
     const pendingSync = pendingCalendarSyncRef.current;
     const isControlledSync = Boolean(

@@ -58,12 +58,12 @@ export default function CalendarPage() {
       ? newDate
       : toLocalDateString(newDate);
     if (parseLocalDateString(normalizedDate || '')) {
-      setCurrentDateState(normalizedDate);
+      setCurrentDateState((current) => (current === normalizedDate ? current : normalizedDate));
     }
   };
 
   const setViewMode = (mode) => {
-    setViewModeState(mode);
+    setViewModeState((current) => (current === mode ? current : mode));
   };
 
   const handleCalendarNavigate = useCallback((action) => {
