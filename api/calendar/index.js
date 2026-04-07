@@ -464,7 +464,16 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
         metadata,
         student:students(
           id,
-          client_profile_id
+          client_profile_id,
+          client_profile:client_profiles(
+            id,
+            first_name,
+            middle_name,
+            last_name,
+            phone,
+            email,
+            default_notification_method
+          )
         ),
         client_profile:client_profiles(
           id,
@@ -605,78 +614,73 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
   // Transform data for frontend consumption
   const transformedInstances = (instances || []).map(instance => {
     const participants = Array.isArray(instance.participants) 
-      ? instance.participants.map(p => ({
-          id: p.id,
-          client_profile_id: p.client_profile_id,
-          student_id: p.student_id,
-          participant_status: p.participant_status,
-          version: p.version ?? 1,
-          price_charged: p.price_charged,
-          pricing_breakdown: p.pricing_breakdown,
-          commitment_id: p.commitment_id,
-          documentation_ref: p.documentation_ref,
-          reminder_sent: p.reminder_sent,
-          reminder_seen: p.reminder_seen,
-          attendance_confirmed_at: p.attendance_confirmed_at,
-          documented_at: p.documented_at,
-          client_profile: p.client_profile ? {
-            id: p.client_profile.id,
-            first_name: p.client_profile.first_name,
-            middle_name: p.client_profile.middle_name,
-            last_name: p.client_profile.last_name,
-            full_name: [p.client_profile.first_name, p.client_profile.middle_name, p.client_profile.last_name]
-              .filter(Boolean)
-              .join(' '),
-            phone: p.client_profile.phone ?? null,
-            email: p.client_profile.email ?? null,
-            default_notification_method: p.client_profile.default_notification_method ?? 'whatsapp',
-            primary_guardian: (() => {
-              const link = primaryGuardianLinkByClientProfile.get(p.client_profile_id);
-              if (!link) return null;
-              const guardian = guardiansById.get(link.guardian_id);
-              if (!guardian) return null;
-              return {
-                id: guardian.id,
-                first_name: guardian.first_name,
-                middle_name: guardian.middle_name,
-                last_name: guardian.last_name,
-                phone: guardian.phone ?? null,
-                email: guardian.email ?? null,
-                relationship: link.relationship ?? null,
-                is_primary: link.is_primary ?? true,
-              };
-            })(),
-          } : null,
-          student: p.student ? {
-            id: p.student.id,
-            client_profile_id: p.student.client_profile_id || p.client_profile_id || p.client_profile?.id || null,
-            first_name: p.client_profile?.first_name || '',
-            middle_name: p.client_profile?.middle_name || null,
-            last_name: p.client_profile?.last_name || '',
-            full_name: [p.client_profile?.first_name, p.client_profile?.middle_name, p.client_profile?.last_name]
-              .filter(Boolean)
-              .join(' '),
-            phone: p.client_profile?.phone ?? null,
-            email: p.client_profile?.email ?? null,
-            default_notification_method: p.client_profile?.default_notification_method ?? 'whatsapp',
-            primary_guardian: (() => {
-      const link = primaryGuardianLinkByClientProfile.get(clientProfileIdByStudentId.get(p.student_id));
-              if (!link) return null;
-              const guardian = guardiansById.get(link.guardian_id);
-              if (!guardian) return null;
-              return {
-                id: guardian.id,
-                first_name: guardian.first_name,
-                middle_name: guardian.middle_name,
-                last_name: guardian.last_name,
-                phone: guardian.phone ?? null,
-                email: guardian.email ?? null,
-                relationship: link.relationship ?? null,
-                is_primary: link.is_primary ?? true,
-              };
-            })(),
-          } : null,
-        }))
+      ? instance.participants.map((p) => {
+          const resolvedProfile = p.client_profile || p.student?.client_profile || null;
+          const resolvedClientProfileId = p.client_profile_id || p.student?.client_profile_id || resolvedProfile?.id || null;
+          const resolvedGuardianLink = primaryGuardianLinkByClientProfile.get(resolvedClientProfileId);
+          const resolvedGuardian = resolvedGuardianLink?.guardian_id ? guardiansById.get(resolvedGuardianLink.guardian_id) : null;
+
+          return {
+            id: p.id,
+            client_profile_id: resolvedClientProfileId,
+            student_id: p.student_id,
+            participant_status: p.participant_status,
+            version: p.version ?? 1,
+            price_charged: p.price_charged,
+            pricing_breakdown: p.pricing_breakdown,
+            commitment_id: p.commitment_id,
+            documentation_ref: p.documentation_ref,
+            reminder_sent: p.reminder_sent,
+            reminder_seen: p.reminder_seen,
+            attendance_confirmed_at: p.attendance_confirmed_at,
+            documented_at: p.documented_at,
+            client_profile: resolvedProfile ? {
+              id: resolvedProfile.id,
+              first_name: resolvedProfile.first_name,
+              middle_name: resolvedProfile.middle_name,
+              last_name: resolvedProfile.last_name,
+              full_name: [resolvedProfile.first_name, resolvedProfile.middle_name, resolvedProfile.last_name]
+                .filter(Boolean)
+                .join(' '),
+              phone: resolvedProfile.phone ?? null,
+              email: resolvedProfile.email ?? null,
+              default_notification_method: resolvedProfile.default_notification_method ?? 'whatsapp',
+              primary_guardian: resolvedGuardian ? {
+                id: resolvedGuardian.id,
+                first_name: resolvedGuardian.first_name,
+                middle_name: resolvedGuardian.middle_name,
+                last_name: resolvedGuardian.last_name,
+                phone: resolvedGuardian.phone ?? null,
+                email: resolvedGuardian.email ?? null,
+                relationship: resolvedGuardianLink.relationship ?? null,
+                is_primary: resolvedGuardianLink.is_primary ?? true,
+              } : null,
+            } : null,
+            student: p.student ? {
+              id: p.student.id,
+              client_profile_id: resolvedClientProfileId,
+              first_name: resolvedProfile?.first_name || '',
+              middle_name: resolvedProfile?.middle_name || null,
+              last_name: resolvedProfile?.last_name || '',
+              full_name: [resolvedProfile?.first_name, resolvedProfile?.middle_name, resolvedProfile?.last_name]
+                .filter(Boolean)
+                .join(' '),
+              phone: resolvedProfile?.phone ?? null,
+              email: resolvedProfile?.email ?? null,
+              default_notification_method: resolvedProfile?.default_notification_method ?? 'whatsapp',
+              primary_guardian: resolvedGuardian ? {
+                id: resolvedGuardian.id,
+                first_name: resolvedGuardian.first_name,
+                middle_name: resolvedGuardian.middle_name,
+                last_name: resolvedGuardian.last_name,
+                phone: resolvedGuardian.phone ?? null,
+                email: resolvedGuardian.email ?? null,
+                relationship: resolvedGuardianLink.relationship ?? null,
+                is_primary: resolvedGuardianLink.is_primary ?? true,
+              } : null,
+            } : null,
+          };
+        })
       : [];
 
     return {
