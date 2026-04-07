@@ -176,13 +176,10 @@ function resolveCalendarAvailabilityState({ instructorMap, instructorId, service
 function buildAvailabilityPresentationContext({ currentDate, viewMode, instructors, instances }) {
   const viewDates = resolveViewDates(currentDate, viewMode);
   const dayTokens = viewDates.map((entry) => entry.dayToken).filter(Boolean);
-  const dayDateMap = new Map(viewDates.map((entry) => [entry.dayToken, entry.dateString]));
   const instructorsArray = Array.isArray(instructors) ? instructors : [];
   const instancesArray = Array.isArray(instances) ? instances : [];
   const eventInstructorIds = new Set(instancesArray.map((instance) => String(instance?.instructor_employee_id || '')).filter(Boolean));
   const visibleInstructors = [];
-  const availabilityEvents = [];
-  const inverseAvailabilityEvents = [];
   const boundMinutes = [];
 
   for (const instructor of instructorsArray) {
@@ -208,29 +205,9 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
     for (const window of relevantWindows) {
       const startMinutes = timeToMinutes(window.start);
       const endMinutes = timeToMinutes(window.end);
-      const dateString = dayDateMap.get(window.day);
-      if (startMinutes == null || endMinutes == null || !dateString) continue;
+      if (startMinutes == null || endMinutes == null) continue;
 
       boundMinutes.push(startMinutes, endMinutes);
-      const groupId = `availability_${instructor.id}_${window.day}`;
-
-      availabilityEvents.push({
-        id: `availability_${instructor.id}_${window.day}_${window.start}_${window.end}`,
-        resourceId: String(instructor.id),
-        start: `${dateString}T${window.start}:00`,
-        end: `${dateString}T${window.end}:00`,
-        display: 'background',
-        classNames: ['reinex-calendar-availability'],
-      });
-      inverseAvailabilityEvents.push({
-        id: `availability_inverse_${instructor.id}_${window.day}_${window.start}_${window.end}`,
-        groupId,
-        resourceId: String(instructor.id),
-        start: `${dateString}T${window.start}:00`,
-        end: `${dateString}T${window.end}:00`,
-        display: 'inverse-background',
-        classNames: ['reinex-calendar-unavailable'],
-      });
     }
   }
 
@@ -246,7 +223,6 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
   if (visibleInstructors.length === 0) {
     return {
       visibleInstructors: [],
-      backgroundEvents: [],
       slotMinTime: '08:00:00',
       slotMaxTime: '18:00:00',
     };
@@ -255,7 +231,6 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
   if (boundMinutes.length === 0) {
     return {
       visibleInstructors,
-      backgroundEvents: [...inverseAvailabilityEvents, ...availabilityEvents],
       slotMinTime: '08:00:00',
       slotMaxTime: '18:00:00',
     };
@@ -266,7 +241,6 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
 
   return {
     visibleInstructors,
-    backgroundEvents: [...inverseAvailabilityEvents, ...availabilityEvents],
     slotMinTime: formatCalendarTime(minMinutes),
     slotMaxTime: formatCalendarTime(Math.max(minMinutes + 60, maxMinutes)),
   };
@@ -506,8 +480,8 @@ export default function ReinexFullCalendar({
     [instructors],
   );
   const mappedEvents = useMemo(
-    () => [...availabilityPresentation.backgroundEvents, ...mapInstancesToEvents(instances)],
-    [availabilityPresentation.backgroundEvents, instances],
+    () => mapInstancesToEvents(instances),
+    [instances],
   );
   const mappedResources = useMemo(
     () => mapInstructorsToResources(availabilityPresentation.visibleInstructors),
@@ -967,6 +941,7 @@ export default function ReinexFullCalendar({
           schedulerLicenseKey={schedulerLicenseKey || 'GPL-v3'}
           locale={heLocale}
           direction="rtl"
+          businessHours
           firstDay={CALENDAR_WEEK_START}
           datesAboveResources={viewMode === 'week'}
           headerToolbar={false}
