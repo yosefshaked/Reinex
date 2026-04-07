@@ -13,6 +13,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ComboBoxField } from '@/components/ui/forms-ui';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
+import CreateClientProfileDialog from '@/features/clients/components/CreateClientProfileDialog.jsx';
 import { dayTokenForJsDay } from '@/lib/day-of-week.js';
 import {
   buildAvailabilityTimeSlots,
@@ -122,7 +123,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     enabled: open && !!activeOrgId,
     orgId: activeOrgId,
   });
-  const { clientProfiles, loadingClientProfiles } = useClientProfiles({
+  const { clientProfiles, loadingClientProfiles, refetchClientProfiles } = useClientProfiles({
     status: 'non_student',
     enabled: open && !!activeOrgId,
     orgId: activeOrgId,
@@ -139,6 +140,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
   const [selectedOverrideReasonCode, setSelectedOverrideReasonCode] = useState('');
   const [customOverrideReason, setCustomOverrideReason] = useState('');
+  const [createClientOpen, setCreateClientOpen] = useState(false);
+  const [createdClientProfiles, setCreatedClientProfiles] = useState([]);
 
   const participantTokens = useMemo(() => ([
     ...(formData.student_ids || []).map((id) => `student:${id}`),
@@ -158,6 +161,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     setUseSchedulingOverride(false);
     setSelectedOverrideReasonCode('');
     setCustomOverrideReason('');
+    setCreatedClientProfiles([]);
   }, [open, defaultDate, defaultSelection]);
 
   useEffect(() => {
@@ -402,7 +406,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       raw: student,
     }));
 
-    const clientOptions = (clientProfiles || []).map((profile) => ({
+    const uniqueClientProfiles = [
+      ...(clientProfiles || []),
+      ...createdClientProfiles.filter((createdProfile) => !(clientProfiles || []).some((profile) => profile.id === createdProfile.id)),
+    ];
+
+    const clientOptions = uniqueClientProfiles.map((profile) => ({
       value: buildParticipantToken('client', profile.id),
       kind: 'client',
       id: profile.id,
@@ -412,7 +421,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     }));
 
     return [...studentOptions, ...clientOptions];
-  }, [clientProfiles, students]);
+  }, [clientProfiles, createdClientProfiles, students]);
   const participantOptionByToken = useMemo(
     () => new Map(participantOptions.map((option) => [option.value, option])),
     [participantOptions],
@@ -613,8 +622,9 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   }
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+    <>
+      <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>שיעור חדש</DialogTitle>
           <DialogDescription className="sr-only">יצירת שיעור חדש עבור תלמידים נבחרים.</DialogDescription>
@@ -627,18 +637,28 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 <p className="text-sm font-semibold text-slate-900">משתתפים</p>
                 <p className="text-xs text-slate-500">בחרו לקוח/ה ראשי/ת, ובמידת הצורך הוסיפו משתתפים נוספים.</p>
               </div>
-              {participantTokens.length > 0 && !isGroupSession ? (
+              <div className="ms-auto flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setIsGroupSession(true)}
-                  className="gap-1 ms-auto"
+                  onClick={() => setCreateClientOpen(true)}
                 >
-                  <Users className="h-4 w-4" />
-                  להוסיף משתתפים נוספים
+                  לקוח/ה חדש/ה
                 </Button>
-              ) : null}
+                {participantTokens.length > 0 && !isGroupSession ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsGroupSession(true)}
+                    className="gap-1"
+                  >
+                    <Users className="h-4 w-4" />
+                    להוסיף משתתפים נוספים
+                  </Button>
+                ) : null}
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="students">לקוח/ה *</Label>
@@ -1067,7 +1087,32 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             </Button>
           </DialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+      <CreateClientProfileDialog
+        open={createClientOpen}
+        onOpenChange={setCreateClientOpen}
+        session={session}
+        orgId={activeOrgId}
+        createdFrom="calendar_add_lesson"
+        title="יצירת לקוח/ה חד-פעמי/ת לשיעור"
+        description="יוצרים כרטיס לקוח/ה חד-פעמי/ת ואז ממשיכים ישירות לשיבוץ השיעור שבחרתם."
+        onSuccess={(profile) => {
+          setCreatedClientProfiles((prev) => (
+            profile?.id && !prev.some((row) => row.id === profile.id)
+              ? [...prev, profile]
+              : prev
+          ));
+          void refetchClientProfiles();
+          setIsGroupSession(false);
+          setStudentDetails(null);
+          setFormData((prev) => ({
+            ...prev,
+            student_ids: [],
+            client_profile_ids: profile?.id ? [profile.id] : [],
+          }));
+        }}
+      />
+    </>
   );
 }

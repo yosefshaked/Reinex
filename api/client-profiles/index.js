@@ -23,7 +23,7 @@ import {
   coerceTags,
   validateIsraeliPhone,
 } from '../_shared/student-validation.js';
-import { fetchPrimaryGuardianForClientProfile } from '../_shared/client-profiles.js';
+import { createOrReuseClientProfile, fetchPrimaryGuardianForClientProfile } from '../_shared/client-profiles.js';
 
 function buildDisplayName(row) {
   return [row?.first_name, row?.middle_name, row?.last_name].filter(Boolean).join(' ').trim() || 'ללא שם';
@@ -141,8 +141,8 @@ function buildUpdatePayload(body) {
 
 export default async function handler(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
-  if (!['GET', 'PATCH'].includes(method)) {
-    return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET,PATCH' });
+  if (!['GET', 'POST', 'PATCH'].includes(method)) {
+    return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET,POST,PATCH' });
   }
 
   const env = readEnv(context);
@@ -298,6 +298,117 @@ export default async function handler(context, req) {
   if (!isAdminOrOffice(role)) {
     return respond(context, 403, { message: 'forbidden' });
   }
+
+  if (method === 'POST') {
+    const firstName = normalizeString(body?.first_name ?? body?.firstName);
+    const middleName = normalizeString(body?.middle_name ?? body?.middleName) || null;
+    const lastName = normalizeString(body?.last_name ?? body?.lastName);
+
+    if (!firstName) {
+      return respond(context, 400, { message: 'invalid_first_name' });
+    }
+    if (!lastName) {
+      return respond(context, 400, { message: 'invalid_last_name' });
+    }
+
+    const identityNumberResult = coerceIdentityNumber(body?.identity_number ?? body?.identityNumber);
+    if (!identityNumberResult.valid) {
+      return respond(context, 400, { message: 'invalid_identity_number' });
+    }
+
+    const phoneResult = validateIsraeliPhone(body?.phone);
+    if (!phoneResult.valid) {
+      return respond(context, 400, { message: 'invalid_phone' });
+    }
+
+    const emailResult = coerceEmail(body?.email);
+    if (!emailResult.valid) {
+      return respond(context, 400, { message: 'invalid_email' });
+    }
+
+    const dateOfBirthResult = coerceOptionalDate(body?.date_of_birth ?? body?.dateOfBirth);
+    if (!dateOfBirthResult.valid) {
+      return respond(context, 400, { message: 'invalid_date_of_birth' });
+    }
+
+    const notificationMethodResult = coerceNotificationMethod(body?.default_notification_method ?? body?.defaultNotificationMethod);
+    if (!notificationMethodResult.valid) {
+      return respond(context, 400, { message: 'invalid_notification_method' });
+    }
+
+    let result;
+    try {
+      result = await createOrReuseClientProfile(tenantClient, {
+        first_name: firstName,
+        middle_name: middleName,
+        last_name: lastName,
+        identity_number: identityNumberResult.value,
+        phone: phoneResult.value,
+        email: emailResult.value,
+        date_of_birth: dateOfBirthResult.value,
+        default_notification_method: notificationMethodResult.value || 'whatsapp',
+        onboarding_status: 'not_started',
+        is_active: true,
+        metadata: {
+          source: 'one_time_customer_manual_create',
+          created_from: normalizeString(body?.created_from ?? body?.createdFrom) || 'ui',
+        },
+      });
+    } catch (createError) {
+      context.log?.error?.('client-profiles failed to create profile', {
+        message: createError?.message,
+        orgId,
+        userId,
+      });
+      return respond(context, 500, { message: 'failed_to_create_client_profile' });
+    }
+
+    const { data: profile, error: profileError } = await tenantClient
+      .from('client_profiles')
+      .select('*')
+      .eq('id', result.clientProfileId)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      return respond(context, 500, { message: 'failed_to_load_client_profile' });
+    }
+
+    const { data: student } = await tenantClient
+      .from('students')
+      .select('id')
+      .eq('client_profile_id', result.clientProfileId)
+      .maybeSingle();
+    const { guardian } = await fetchPrimaryGuardianForClientProfile(tenantClient, result.clientProfileId);
+    const merged = mergeClientProfile(profile, student?.id || null, guardian || null);
+
+    try {
+      await logTenantAuditEvent(tenantClient, {
+        actorUserId: userId,
+        eventType: result.action === 'created' ? 'client_profile.created' : 'client_profile.reused_for_one_time_customer',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'client_profile',
+        resourceId: result.clientProfileId,
+        beforeState: result.beforeState,
+        afterState: profile,
+        details: {
+          origin: 'api/client-profiles',
+          action: result.action,
+          created_from: normalizeString(body?.created_from ?? body?.createdFrom) || 'ui',
+        },
+      });
+    } catch (auditError) {
+      context.log?.warn?.('client-profiles failed to write create audit event', {
+        message: auditError?.message,
+        clientProfileId: result.clientProfileId,
+      });
+    }
+
+    return respond(context, result.action === 'created' ? 201 : 200, {
+      ...merged,
+      action: result.action,
+    });
+  }
+
   if (!clientProfileId || !UUID_PATTERN.test(clientProfileId)) {
     return respond(context, 400, { message: 'invalid_client_profile_id' });
   }

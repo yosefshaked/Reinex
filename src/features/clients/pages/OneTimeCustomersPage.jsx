@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card.jsx';
 import { Input } from '@/components/ui/input.jsx';
@@ -11,6 +11,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useClientProfiles } from '@/hooks/useOrgData.js';
 import { normalizeMembershipRole, isAdminOrOffice } from '@/features/students/utils/endpoints.js';
 import SendFormDialog from '@/features/students/components/SendFormDialog.jsx';
+import CreateClientProfileDialog from '@/features/clients/components/CreateClientProfileDialog.jsx';
 
 function renderDisplayName(profile) {
   return profile?.full_name || [profile?.first_name, profile?.middle_name, profile?.last_name].filter(Boolean).join(' ').trim() || 'ללא שם';
@@ -18,10 +19,12 @@ function renderDisplayName(profile) {
 
 export default function OneTimeCustomersPage() {
   const { clientProfileId } = useParams();
+  const navigate = useNavigate();
   const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
   const { session } = useSupabase();
   const [search, setSearch] = useState('');
   const [sendFormOpen, setSendFormOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || '');
   const canManage = isAdminOrOffice(membershipRole);
@@ -164,6 +167,11 @@ export default function OneTimeCustomersPage() {
     <PageLayout
       title="לקוחות חד-פעמיים"
       subtitle="לקוחות עם היסטוריה של טפסים או מפגשים חד-פעמיים, בלי להפוך אותם אוטומטית לתלמידים."
+      actions={(
+        <Button type="button" onClick={() => setCreateOpen(true)}>
+          צור לקוח/ה חד-פעמי/ת
+        </Button>
+      )}
     >
       <div className="space-y-6">
         <Card className="border-border/70 shadow-sm">
@@ -261,6 +269,19 @@ export default function OneTimeCustomersPage() {
             </Card>
           )) : null}
         </div>
+        <CreateClientProfileDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          session={session}
+          orgId={activeOrgId}
+          createdFrom="one_time_customers_page"
+          onSuccess={(profile) => {
+            void refetchClientProfiles();
+            if (profile?.id) {
+              navigate(`/one-time-customers/${profile.id}`);
+            }
+          }}
+        />
       </div>
     </PageLayout>
   );
