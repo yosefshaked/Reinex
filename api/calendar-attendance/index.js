@@ -12,6 +12,7 @@ import {
 import {
   ensureMembership,
   isAdminRole,
+  normalizeString,
   readEnv,
   respond,
   resolveOrgId,
@@ -35,6 +36,14 @@ import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_sh
 import { normalizeWorkflowDecision } from '../_shared/calendar-workflow-decisions.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
+
+function normalizeNullableId(value) {
+  const normalized = normalizeString(value);
+  if (!normalized || normalized.toLowerCase() === 'null') {
+    return null;
+  }
+  return normalized;
+}
 
 function roundCurrency(value) {
   return Number(Number(value || 0).toFixed(2));
@@ -501,6 +510,8 @@ async function buildParticipantStatusPreview(tenantClient, body, {
 
   const targetParticipantBefore = currentParticipants.find((row) => row.id === body.participant_id) || participant;
   const targetParticipantAfter = projectedParticipants.find((row) => row.id === body.participant_id) || targetParticipantBefore;
+  const normalizedParticipantStudentId = normalizeNullableId(participant?.student_id);
+  const normalizedParticipantClientProfileId = normalizeNullableId(participant?.client_profile_id);
   const targetPricingBreakdown = targetParticipantBefore?.pricing_breakdown && typeof targetParticipantBefore.pricing_breakdown === 'object'
     ? targetParticipantBefore.pricing_breakdown
     : null;
@@ -545,16 +556,18 @@ async function buildParticipantStatusPreview(tenantClient, body, {
       .select('id, first_name, middle_name, last_name')
       .eq('id', instanceDetail.instructor_employee_id)
       .maybeSingle(),
-    tenantClient
-      .from('students')
-      .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
-      .eq('id', participant.student_id)
-      .maybeSingle(),
-    participant.client_profile_id
+    normalizedParticipantStudentId
+      ? tenantClient
+        .from('students')
+        .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
+        .eq('id', normalizedParticipantStudentId)
+        .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    normalizedParticipantClientProfileId
       ? tenantClient
         .from('client_profiles')
         .select('id, first_name, middle_name, last_name')
-        .eq('id', participant.client_profile_id)
+        .eq('id', normalizedParticipantClientProfileId)
         .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     tenantClient
@@ -632,6 +645,7 @@ async function buildParticipantStatusPreview(tenantClient, body, {
     return sum;
   }, 0));
   const projectedBillingDecision = targetParticipantAfter?.student_id
+    && normalizeNullableId(targetParticipantAfter.student_id)
     ? buildBillingDecision({
         participant: targetParticipantAfter,
         instance: {
@@ -1371,13 +1385,16 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
           && (commitment?.commitment_type === 'hmo' || Boolean(commitment?.hmo_provider_id));
 
         if (isHmo) {
-          const { data: student } = await tenantClient
-            .from('students')
-            .select('client_profile:client_profiles(first_name, last_name)')
-            .eq('id', participantDetail.student_id)
-            .maybeSingle();
+          const normalizedParticipantDetailStudentId = normalizeNullableId(participantDetail.student_id);
+          const { data: student } = normalizedParticipantDetailStudentId
+            ? await tenantClient
+              .from('students')
+              .select('client_profile:client_profiles(first_name, last_name)')
+              .eq('id', normalizedParticipantDetailStudentId)
+              .maybeSingle()
+            : { data: null };
 
-          const studentName = [student?.client_profile?.first_name, student?.client_profile?.last_name].filter(Boolean).join(' ') || 'תלמיד';
+          const studentName = [student?.client_profile?.first_name, student?.client_profile?.last_name].filter(Boolean).join(' ') || 'לקוח';
           const lessonDate = instanceDetail?.datetime_start
             ? new Date(instanceDetail.datetime_start).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' })
             : '';
@@ -1395,7 +1412,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
             createdBy: userId,
             metadata: {
               lesson_instance_id: body.instance_id,
-              student_id: participantDetail.student_id,
+              student_id: normalizedParticipantDetailStudentId,
               commitment_id: participantDetail.commitment_id,
             },
           });
@@ -1435,7 +1452,9 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
     }
   }
 
-  if (participantUpdate.participant_status === 'scheduled' && participant?.student_id) {
+  const normalizedParticipantAuditStudentId = normalizeNullableId(participant?.student_id);
+
+  if (participantUpdate.participant_status === 'scheduled' && normalizedParticipantAuditStudentId) {
     const auditDetails = {
       action_label_he: 'שוחזרה נוכחות תלמיד לשיעור מתוכנן',
       lesson_instance_id: body.instance_id,
@@ -1461,7 +1480,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
           actionType: 'student.lesson_attendance_restored',
           actionCategory: AUDIT_CATEGORIES.STUDENTS,
           resourceType: 'student',
-          resourceId: participant.student_id,
+          resourceId: normalizedParticipantAuditStudentId,
           details: auditDetails,
         });
       }
@@ -1500,7 +1519,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
   if (
     participantUpdate.participant_status
     && participantUpdate.participant_status !== 'scheduled'
-    && participant?.student_id
+    && normalizedParticipantAuditStudentId
     && participant.participant_status !== participantUpdate.participant_status
   ) {
     const auditDetails = {
@@ -1528,7 +1547,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
           actionType: 'student.lesson_attendance_changed',
           actionCategory: AUDIT_CATEGORIES.STUDENTS,
           resourceType: 'student',
-          resourceId: participant.student_id,
+          resourceId: normalizedParticipantAuditStudentId,
           details: auditDetails,
         });
       }
