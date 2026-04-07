@@ -121,12 +121,17 @@ async function handleConflictCheck(context, body, tenantClient) {
       lesson_participants (
         client_profile_id,
         student_id,
-        students (
-          first_name,
-          last_name
+        student:students (
+          client_profile_id,
+          client_profile:client_profiles (
+            first_name,
+            middle_name,
+            last_name
+          )
         ),
-        client_profiles (
+        client_profile:client_profiles (
           first_name,
+          middle_name,
           last_name
         )
       ),
@@ -187,15 +192,16 @@ async function handleConflictCheck(context, body, tenantClient) {
     if (overlappingStudents.length > 0) {
       overlappingStudents.forEach(studentId => {
         const participant = instance.lesson_participants.find(p => p.student_id === studentId);
-        const studentName = participant?.students
-          ? `${participant.students.first_name} ${participant.students.last_name}`
+        const studentProfile = participant?.student?.client_profile || participant?.client_profile || null;
+        const studentName = studentProfile
+          ? [studentProfile.first_name, studentProfile.middle_name, studentProfile.last_name].filter(Boolean).join(' ').trim()
           : 'לא ידוע';
 
         conflicts.push({
           type: 'student_overlap',
           instance_id: instance.id,
           student_id: studentId,
-          message: `התלמיד ${studentName} כבר משובץ לשיעור אחר בזמן זה`,
+          message: `${studentName || 'הלקוח/ה'} כבר משובץ/ת לשיעור אחר בזמן זה`,
           datetime_start: instance.datetime_start,
           duration_minutes: instance.duration_minutes,
         });
@@ -208,8 +214,9 @@ async function handleConflictCheck(context, body, tenantClient) {
     if (overlappingClientProfiles.length > 0) {
       overlappingClientProfiles.forEach(clientProfileId => {
         const participant = instance.lesson_participants.find(p => p.client_profile_id === clientProfileId);
-        const clientName = participant?.client_profiles
-          ? `${participant.client_profiles.first_name} ${participant.client_profiles.last_name}`.trim()
+        const clientProfile = participant?.client_profile || participant?.student?.client_profile || null;
+        const clientName = clientProfile
+          ? [clientProfile.first_name, clientProfile.middle_name, clientProfile.last_name].filter(Boolean).join(' ').trim()
           : 'לא ידוע';
 
         conflicts.push({

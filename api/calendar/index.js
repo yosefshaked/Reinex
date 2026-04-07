@@ -784,6 +784,95 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     return respond(context, 400, { message: 'invalid service_id' });
   }
 
+  const participantRows = [];
+
+  if (studentIds.length > 0) {
+    const { data: studentRows, error: studentRowsError } = await tenantClient
+      .from('students')
+      .select('id, client_profile_id')
+      .in('id', studentIds);
+
+    if (studentRowsError) {
+      context.log?.error?.('calendar/instances failed to validate student participants', {
+        message: studentRowsError.message,
+        orgId,
+        studentIds,
+      });
+      return respond(context, 500, { message: 'failed_to_validate_participants' });
+    }
+
+    const studentById = new Map((studentRows || []).map((row) => [row.id, row]));
+    const missingStudentId = studentIds.find((studentId) => !studentById.has(studentId) || !studentById.get(studentId)?.client_profile_id);
+    if (missingStudentId) {
+      return respond(context, 400, { message: 'invalid_student_id' });
+    }
+
+    for (const studentId of studentIds) {
+      const row = studentById.get(studentId);
+      participantRows.push({
+        client_profile_id: row.client_profile_id,
+        student_id: row.id,
+      });
+    }
+  }
+
+  if (clientProfileIds.length > 0) {
+    const { data: clientProfileRows, error: clientProfileRowsError } = await tenantClient
+      .from('client_profiles')
+      .select('id, is_active')
+      .in('id', clientProfileIds);
+
+    if (clientProfileRowsError) {
+      context.log?.error?.('calendar/instances failed to validate client participants', {
+        message: clientProfileRowsError.message,
+        orgId,
+        clientProfileIds,
+      });
+      return respond(context, 500, { message: 'failed_to_validate_participants' });
+    }
+
+    const clientProfileById = new Map((clientProfileRows || []).map((row) => [row.id, row]));
+    const missingClientProfileId = clientProfileIds.find((clientProfileId) => !clientProfileById.has(clientProfileId));
+    if (missingClientProfileId) {
+      return respond(context, 400, { message: 'invalid_client_profile_id' });
+    }
+
+    const { data: linkedStudents, error: linkedStudentsError } = await tenantClient
+      .from('students')
+      .select('id, client_profile_id')
+      .in('client_profile_id', clientProfileIds);
+
+    if (linkedStudentsError) {
+      context.log?.error?.('calendar/instances failed to resolve linked students for client participants', {
+        message: linkedStudentsError.message,
+        orgId,
+        clientProfileIds,
+      });
+      return respond(context, 500, { message: 'failed_to_validate_participants' });
+    }
+
+    const linkedStudentByClientProfile = new Map((linkedStudents || []).map((row) => [row.client_profile_id, row.id]));
+    for (const clientProfileId of clientProfileIds) {
+      participantRows.push({
+        client_profile_id: clientProfileId,
+        student_id: linkedStudentByClientProfile.get(clientProfileId) || null,
+      });
+    }
+  }
+
+  const participantByClientProfileId = new Map();
+  for (const row of participantRows) {
+    if (!row?.client_profile_id || participantByClientProfileId.has(row.client_profile_id)) {
+      continue;
+    }
+    participantByClientProfileId.set(row.client_profile_id, row);
+  }
+
+  const resolvedParticipants = Array.from(participantByClientProfileId.values());
+  if (resolvedParticipants.length === 0) {
+    return respond(context, 400, { message: 'missing_or_invalid_participants' });
+  }
+
   const leaveConflict = await assertNoLeaveForLesson(tenantClient, {
     employeeId: body.instructor_employee_id,
     date: toDateKey(body.datetime_start),
@@ -850,31 +939,7 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
   }
 
   // Create participants
-  const participantRecords = [
-    ...studentIds.map((studentId) => ({
-      client_profile_id: null,
-      student_id: studentId,
-    })),
-    ...clientProfileIds.map((clientProfileId) => ({
-      client_profile_id: clientProfileId,
-      student_id: null,
-    })),
-  ];
-
-  if (clientProfileIds.length > 0) {
-    const { data: linkedStudents } = await tenantClient
-      .from('students')
-      .select('id, client_profile_id')
-      .in('client_profile_id', clientProfileIds);
-    const linkedStudentByClientProfile = new Map((linkedStudents || []).map((row) => [row.client_profile_id, row.id]));
-    participantRecords.forEach((record) => {
-      if (!record.student_id && record.client_profile_id) {
-        record.student_id = linkedStudentByClientProfile.get(record.client_profile_id) || null;
-      }
-    });
-  }
-
-  const participantData = participantRecords.map((participant) => ({
+  const participantData = resolvedParticipants.map((participant) => ({
     lesson_instance_id: instance.id,
     client_profile_id: participant.client_profile_id || null,
     student_id: participant.student_id || null,
