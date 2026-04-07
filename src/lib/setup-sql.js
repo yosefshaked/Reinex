@@ -1582,6 +1582,13 @@ EXCEPTION
   WHEN others THEN NULL;
 END $$;
 
+DO $$
+BEGIN
+  ALTER TABLE public.lesson_participants ALTER COLUMN student_id DROP NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
 CREATE INDEX IF NOT EXISTS lesson_participants_locked_at_idx
   ON public.lesson_participants (locked_at) WHERE locked_at IS NOT NULL;
 
