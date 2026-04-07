@@ -140,10 +140,26 @@
   pointer-events: none;
 }
 
-.reinex-fullcalendar .fc .reinex-calendar-selection {
-  background: linear-gradient(180deg, rgb(59 130 246 / 0.14), rgb(59 130 246 / 0.2));
-  border-inline-start: 2px solid rgb(59 130 246 / 0.55);
-  box-shadow: inset 0 0 0 1px rgb(59 130 246 / 0.18);
+.reinex-fullcalendar .fc .fc-bg-event.reinex-calendar-selection,
+.reinex-fullcalendar .fc .fc-highlight {
+  opacity: 1 !important;
+  background:
+    linear-gradient(180deg, rgb(96 165 250 / 0.14), rgb(59 130 246 / 0.22)),
+    repeating-linear-gradient(
+      135deg,
+      rgb(59 130 246 / 0.1) 0px,
+      rgb(59 130 246 / 0.1) 8px,
+      rgb(255 255 255 / 0.08) 8px,
+      rgb(255 255 255 / 0.08) 16px
+    ) !important;
+  box-shadow:
+    inset 3px 0 0 rgb(37 99 235 / 0.55),
+    inset 0 0 0 1px rgb(59 130 246 / 0.24),
+    inset 0 12px 20px -18px rgb(59 130 246 / 0.38);
+}
+
+.reinex-fullcalendar .fc .fc-bg-event.reinex-calendar-selection {
+  z-index: 2;
 }
 
 .reinex-fullcalendar .fc .fc-event,
