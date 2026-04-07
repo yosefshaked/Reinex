@@ -83,6 +83,25 @@ function parseParticipantToken(token) {
   return { kind, id };
 }
 
+function extractCreatedClientProfile(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  if (payload.id) {
+    return payload;
+  }
+
+  if (payload.client_profile && typeof payload.client_profile === 'object' && payload.client_profile.id) {
+    return {
+      ...payload.client_profile,
+      ...(payload.student_id ? { student_id: payload.student_id } : {}),
+    };
+  }
+
+  return null;
+}
+
 function buildInitialFormData(defaultDate, defaultSelection) {
   const baseDate = defaultSelection?.start instanceof Date
     ? toLocalDateString(defaultSelection.start)
@@ -435,8 +454,10 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     if (parsed.kind === 'student') {
       return students.find((student) => student.id === parsed.id) || null;
     }
-    return clientProfiles.find((profile) => profile.id === parsed.id) || null;
-  }, [clientProfiles, participantTokens, students]);
+    return clientProfiles.find((profile) => profile.id === parsed.id)
+      || createdClientProfiles.find((profile) => profile.id === parsed.id)
+      || null;
+  }, [clientProfiles, createdClientProfiles, participantTokens, students]);
 
   // When first student is selected, auto-populate service and only fill instructor if the form does not already have one.
   useEffect(() => {
@@ -1097,7 +1118,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         createdFrom="calendar_add_lesson"
         title="יצירת לקוח/ה חד-פעמי/ת לשיעור"
         description="יוצרים כרטיס לקוח/ה חד-פעמי/ת ואז ממשיכים ישירות לשיבוץ השיעור שבחרתם."
-        onSuccess={(profile) => {
+        onSuccess={(payload) => {
+          const profile = extractCreatedClientProfile(payload);
           setCreatedClientProfiles((prev) => (
             profile?.id && !prev.some((row) => row.id === profile.id)
               ? [...prev, profile]
