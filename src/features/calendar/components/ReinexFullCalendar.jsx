@@ -514,6 +514,38 @@ export default function ReinexFullCalendar({
     return false;
   }, [pendingDropInfo]);
 
+  const navigateCalendarWithoutApi = useCallback((action) => {
+    if (typeof onDateChange !== 'function') {
+      return;
+    }
+
+    if (action === 'today') {
+      onDateChange(toCalendarLocalDateString(new Date()));
+      return;
+    }
+
+    const days = viewMode === 'week' ? 7 : 1;
+    if (action === 'next') {
+      const nextDate = addLocalDays(currentDate, days);
+      if (nextDate) {
+        onDateChange(nextDate);
+      }
+      return;
+    }
+
+    if (action === 'prev') {
+      const prevDate = addLocalDays(currentDate, -days);
+      if (prevDate) {
+        onDateChange(prevDate);
+      }
+      return;
+    }
+
+    if (typeof action === 'string' && action) {
+      onDateChange(action);
+    }
+  }, [currentDate, onDateChange, viewMode]);
+
   useEffect(() => {
     if (!calendarNavigationRef) {
       return undefined;
@@ -521,17 +553,37 @@ export default function ReinexFullCalendar({
 
     calendarNavigationRef.current = {
       next() {
-        calendarRef.current?.getApi?.()?.next();
+        const api = calendarRef.current?.getApi?.();
+        if (api) {
+          api.next();
+          return;
+        }
+        navigateCalendarWithoutApi('next');
       },
       prev() {
-        calendarRef.current?.getApi?.()?.prev();
+        const api = calendarRef.current?.getApi?.();
+        if (api) {
+          api.prev();
+          return;
+        }
+        navigateCalendarWithoutApi('prev');
       },
       today() {
-        calendarRef.current?.getApi?.()?.today();
+        const api = calendarRef.current?.getApi?.();
+        if (api) {
+          api.today();
+          return;
+        }
+        navigateCalendarWithoutApi('today');
       },
       gotoDate(date) {
         if (!date) return;
-        calendarRef.current?.getApi?.()?.gotoDate(date);
+        const api = calendarRef.current?.getApi?.();
+        if (api) {
+          api.gotoDate(date);
+          return;
+        }
+        navigateCalendarWithoutApi(date);
       },
     };
 
@@ -540,7 +592,7 @@ export default function ReinexFullCalendar({
         calendarNavigationRef.current = null;
       }
     };
-  }, [calendarNavigationRef]);
+  }, [calendarNavigationRef, navigateCalendarWithoutApi]);
 
   useEffect(() => {
     if (!schedulerLicenseKey) {
