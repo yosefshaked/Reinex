@@ -281,6 +281,25 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     && !useSchedulingOverride
     && selectedTimeOutsideAvailability,
   );
+  const displayedTimeOptions = useMemo(() => {
+    if (!formData.time || availableTimeSlots.includes(formData.time)) {
+      return availableTimeSlots.map((time) => ({
+        value: time,
+        label: formatTimeLabel(time),
+      }));
+    }
+
+    return [
+      {
+        value: formData.time,
+        label: `${formatTimeLabel(formData.time)} · נבחר מחוץ לזמינות`,
+      },
+      ...availableTimeSlots.map((time) => ({
+        value: time,
+        label: formatTimeLabel(time),
+      })),
+    ];
+  }, [availableTimeSlots, formData.time]);
 
   useEffect(() => {
     if (useSchedulingOverride) {
@@ -302,13 +321,13 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     }
 
     if (hasAvailableSlots) {
-      if (!availableTimeSlots.includes(formData.time)) {
+      if (!formData.time) {
         setFormData((prev) => ({ ...prev, time: availableTimeSlots[0] }));
       }
       return;
     }
 
-    if (formData.time) {
+    if (!formData.time) {
       setFormData((prev) => ({ ...prev, time: '' }));
     }
   }, [
@@ -748,12 +767,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                     onValueChange={(value) => setFormData((prev) => ({ ...prev, time: value }))}
                   >
                     <SelectTrigger id="time">
-                      <SelectValue placeholder="בחר שעה זמינה" />
+                      <SelectValue placeholder="בחר שעה" />
                     </SelectTrigger>
                     <SelectContent>
-                      {availableTimeSlots.map((time) => (
-                        <SelectItem key={time} value={time}>
-                          {formatTimeLabel(time)}
+                      {displayedTimeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
