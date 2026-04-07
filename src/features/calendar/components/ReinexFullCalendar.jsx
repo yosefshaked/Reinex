@@ -513,6 +513,7 @@ export default function ReinexFullCalendar({
     () => mapInstructorsToResources(availabilityPresentation.visibleInstructors),
     [availabilityPresentation.visibleInstructors],
   );
+  const hasVisibleResources = mappedResources.length > 0;
   const schedulerLicenseKey = useMemo(() => resolveSchedulerLicenseKey(runtimeConfig), [runtimeConfig]);
   const fullCalendarView = resolveCalendarView(viewMode);
   const initialCalendarViewRef = useRef(fullCalendarView);
@@ -646,6 +647,15 @@ export default function ReinexFullCalendar({
       api.gotoDate(currentDate);
     }
   }, [currentDate, fullCalendarView, viewMode]);
+
+  useEffect(() => {
+    if (!hasVisibleResources) {
+      return;
+    }
+
+    const api = calendarRef.current?.getApi?.();
+    api?.updateSize?.();
+  }, [hasVisibleResources, currentDate, viewMode]);
 
   const handleDatesSet = useCallback((info) => {
     const nextViewMode = info.view.type === 'resourceTimeGridWeek' ? 'week' : 'day';
@@ -924,7 +934,7 @@ export default function ReinexFullCalendar({
         </div>
       ) : null}
 
-      {!mappedResources.length && !isLoading ? (
+      {!hasVisibleResources && !isLoading ? (
         <div className="reinex-fullcalendar-empty">
           אין מדריכים זמינים או שיעורים קיימים בטווח שנבחר
         </div>
@@ -948,7 +958,7 @@ export default function ReinexFullCalendar({
         </div>
       ) : null}
 
-      <div className="reinex-fullcalendar">
+      <div className={`reinex-fullcalendar ${hasVisibleResources ? '' : 'reinex-fullcalendar--collapsed'}`.trim()}>
         <FullCalendar
           ref={calendarRef}
           plugins={[resourceTimeGridPlugin, timeGridPlugin, interactionPlugin]}
