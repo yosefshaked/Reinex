@@ -182,9 +182,8 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
   const eventInstructorIds = new Set(instancesArray.map((instance) => String(instance?.instructor_employee_id || '')).filter(Boolean));
   const visibleInstructors = [];
   const availabilityEvents = [];
-  const unavailableEvents = [];
+  const inverseAvailabilityEvents = [];
   const boundMinutes = [];
-  const availabilityWindowMap = new Map();
 
   for (const instructor of instructorsArray) {
     if (!instructor?.id) continue;
@@ -213,14 +212,7 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
       if (startMinutes == null || endMinutes == null || !dateString) continue;
 
       boundMinutes.push(startMinutes, endMinutes);
-      const availabilityKey = `${instructor.id}__${window.day}`;
-      if (!availabilityWindowMap.has(availabilityKey)) {
-        availabilityWindowMap.set(availabilityKey, []);
-      }
-      availabilityWindowMap.get(availabilityKey).push({
-        startMinutes,
-        endMinutes,
-      });
+      const groupId = `availability_${instructor.id}_${window.day}`;
 
       availabilityEvents.push({
         id: `availability_${instructor.id}_${window.day}_${window.start}_${window.end}`,
@@ -229,6 +221,15 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
         end: `${dateString}T${window.end}:00`,
         display: 'background',
         classNames: ['reinex-calendar-availability'],
+      });
+      inverseAvailabilityEvents.push({
+        id: `availability_inverse_${instructor.id}_${window.day}_${window.start}_${window.end}`,
+        groupId,
+        resourceId: String(instructor.id),
+        start: `${dateString}T${window.start}:00`,
+        end: `${dateString}T${window.end}:00`,
+        display: 'inverse-background',
+        classNames: ['reinex-calendar-unavailable'],
       });
     }
   }
@@ -254,7 +255,7 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
   if (boundMinutes.length === 0) {
     return {
       visibleInstructors,
-      backgroundEvents: [...unavailableEvents, ...availabilityEvents],
+      backgroundEvents: [...inverseAvailabilityEvents, ...availabilityEvents],
       slotMinTime: '08:00:00',
       slotMaxTime: '18:00:00',
     };
@@ -263,45 +264,9 @@ function buildAvailabilityPresentationContext({ currentDate, viewMode, instructo
   const minMinutes = Math.max(0, Math.floor(Math.min(...boundMinutes) / 15) * 15 - 30);
   const maxMinutes = Math.min(24 * 60, Math.ceil(Math.max(...boundMinutes) / 15) * 15 + 30);
 
-  for (const instructor of visibleInstructors) {
-    for (const viewDate of viewDates) {
-      const availabilityKey = `${instructor.id}__${viewDate.dayToken}`;
-      const windows = [...(availabilityWindowMap.get(availabilityKey) || [])]
-        .sort((left, right) => left.startMinutes - right.startMinutes);
-
-      let cursor = minMinutes;
-      for (const window of windows) {
-        const gapStart = cursor;
-        const gapEnd = Math.min(maxMinutes, window.startMinutes);
-        if (gapEnd > gapStart) {
-          unavailableEvents.push({
-            id: `unavailable_${instructor.id}_${viewDate.dayToken}_${gapStart}_${gapEnd}`,
-            resourceId: String(instructor.id),
-            start: `${viewDate.dateString}T${formatCalendarTime(gapStart).slice(0, 5)}:00`,
-            end: `${viewDate.dateString}T${formatCalendarTime(gapEnd).slice(0, 5)}:00`,
-            display: 'background',
-            classNames: ['reinex-calendar-unavailable'],
-          });
-        }
-        cursor = Math.max(cursor, window.endMinutes);
-      }
-
-      if (cursor < maxMinutes) {
-        unavailableEvents.push({
-          id: `unavailable_${instructor.id}_${viewDate.dayToken}_${cursor}_${maxMinutes}`,
-          resourceId: String(instructor.id),
-          start: `${viewDate.dateString}T${formatCalendarTime(cursor).slice(0, 5)}:00`,
-          end: `${viewDate.dateString}T${formatCalendarTime(maxMinutes).slice(0, 5)}:00`,
-          display: 'background',
-          classNames: ['reinex-calendar-unavailable'],
-        });
-      }
-    }
-  }
-
   return {
     visibleInstructors,
-    backgroundEvents: [...unavailableEvents, ...availabilityEvents],
+    backgroundEvents: [...inverseAvailabilityEvents, ...availabilityEvents],
     slotMinTime: formatCalendarTime(minMinutes),
     slotMaxTime: formatCalendarTime(Math.max(minMinutes + 60, maxMinutes)),
   };
@@ -506,7 +471,7 @@ export default function ReinexFullCalendar({
   onEventRescheduled,
 }) {
   const calendarRef = useRef(null);
-  const isProgrammaticMoveRef = useRef(false);
+  const pendingCalendarSyncRef = useRef(null);
   const runtimeConfig = useRuntimeConfig();
   const { activeOrgId } = useOrg();
   const [updatingEventId, setUpdatingEventId] = useState(null);
@@ -554,36 +519,40 @@ export default function ReinexFullCalendar({
       return;
     }
 
-    isProgrammaticMoveRef.current = true;
+    pendingCalendarSyncRef.current = {
+      date: currentDate,
+      view: fullCalendarView,
+    };
 
     if (api.view.type !== fullCalendarView) {
       api.changeView(fullCalendarView, currentDate);
     } else {
       api.gotoDate(currentDate);
     }
-
-    const releaseTimer = window.setTimeout(() => {
-      isProgrammaticMoveRef.current = false;
-    }, 50);
-
-    return () => {
-      window.clearTimeout(releaseTimer);
-      isProgrammaticMoveRef.current = false;
-    };
   }, [currentDate, fullCalendarView]);
 
   const handleDatesSet = useCallback((info) => {
     const nextViewMode = info.view.type === 'resourceTimeGridWeek' ? 'week' : 'day';
+    const activeDate = info.view.currentStart || info.start;
+    const nextDate = toLocalDateString(activeDate);
+    const pendingSync = pendingCalendarSyncRef.current;
+    const isControlledSync = Boolean(
+      pendingSync
+      && pendingSync.view === info.view.type
+      && nextDate
+      && pendingSync.date === nextDate,
+    );
+
+    if (isControlledSync) {
+      pendingCalendarSyncRef.current = null;
+    }
+
     if (nextViewMode !== viewMode) {
       onViewModeChange?.(nextViewMode);
     }
 
-    if (typeof onDateChange === 'function' && nextViewMode === 'day') {
-      const activeDate = info.view.currentStart || info.start;
-      const nextDate = toLocalDateString(activeDate);
-      if (!isProgrammaticMoveRef.current && nextDate && nextDate !== currentDate) {
-        onDateChange(nextDate);
-      }
+    if (typeof onDateChange === 'function' && nextViewMode === 'day' && !isControlledSync && nextDate && nextDate !== currentDate) {
+      onDateChange(nextDate);
     }
   }, [currentDate, onDateChange, onViewModeChange, viewMode]);
 
