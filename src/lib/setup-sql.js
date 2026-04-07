@@ -538,6 +538,7 @@ CREATE TABLE IF NOT EXISTS public."Services" (
   "name" text NOT NULL,
   "duration_minutes" bigint,
   "payment_model" text,
+  "default_customer_charge_amount" numeric,
   "color" text,
   "is_active" boolean NOT NULL DEFAULT true,
   "metadata" jsonb,
@@ -548,6 +549,7 @@ ALTER TABLE public."Services"
   ADD COLUMN IF NOT EXISTS "name" text,
   ADD COLUMN IF NOT EXISTS "duration_minutes" bigint,
   ADD COLUMN IF NOT EXISTS "payment_model" text,
+  ADD COLUMN IF NOT EXISTS "default_customer_charge_amount" numeric,
   ADD COLUMN IF NOT EXISTS "color" text,
   ADD COLUMN IF NOT EXISTS "is_active" boolean,
   ADD COLUMN IF NOT EXISTS "metadata" jsonb;
@@ -557,6 +559,16 @@ BEGIN
   ALTER TABLE public."Services"
     ADD CONSTRAINT "Services_payment_model_check"
     CHECK ("payment_model" IS NULL OR "payment_model" IN ('fixed_rate', 'per_student'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public."Services"
+    ADD CONSTRAINT "Services_default_customer_charge_amount_non_negative_check"
+    CHECK ("default_customer_charge_amount" IS NULL OR "default_customer_charge_amount" >= 0);
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -2364,12 +2376,15 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS public.ledger_transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  student_id uuid NOT NULL,
-  commitment_id uuid NOT NULL,
+  client_profile_id uuid NOT NULL,
+  student_id uuid NULL,
+  commitment_id uuid NULL,
   transaction_type text NOT NULL,
   usage_type text NOT NULL,
   amount numeric NOT NULL,
   source_ref uuid NULL,
+  invoice_id text NULL,
+  invoice_link text NULL,
   notes text NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -2377,16 +2392,62 @@ CREATE TABLE IF NOT EXISTS public.ledger_transactions (
 );
 
 ALTER TABLE public.ledger_transactions
+  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS commitment_id uuid,
   ADD COLUMN IF NOT EXISTS transaction_type text,
   ADD COLUMN IF NOT EXISTS usage_type text,
   ADD COLUMN IF NOT EXISTS amount numeric,
   ADD COLUMN IF NOT EXISTS source_ref uuid,
+  ADD COLUMN IF NOT EXISTS invoice_id text,
+  ADD COLUMN IF NOT EXISTS invoice_link text,
   ADD COLUMN IF NOT EXISTS notes text,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS updated_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  UPDATE public.ledger_transactions lt
+  SET client_profile_id = s.client_profile_id
+  FROM public.students s
+  WHERE lt.client_profile_id IS NULL
+    AND lt.student_id = s.id
+    AND s.client_profile_id IS NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.ledger_transactions ALTER COLUMN student_id DROP NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.ledger_transactions ALTER COLUMN commitment_id DROP NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.ledger_transactions ALTER COLUMN client_profile_id SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.ledger_transactions
+    ADD CONSTRAINT ledger_transactions_client_profile_id_fkey
+    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id) ON DELETE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
 
 DO $$
 BEGIN
@@ -2465,6 +2526,8 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_commitment_id_idx
   ON public.ledger_transactions (commitment_id);
+CREATE INDEX IF NOT EXISTS ledger_transactions_client_profile_id_idx
+  ON public.ledger_transactions (client_profile_id);
 CREATE INDEX IF NOT EXISTS ledger_transactions_student_id_idx
   ON public.ledger_transactions (student_id);
 CREATE INDEX IF NOT EXISTS ledger_transactions_transaction_type_idx
@@ -2481,18 +2544,32 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   v_commitment_student_id uuid;
+  v_commitment_client_profile_id uuid;
 BEGIN
-  SELECT c.student_id
-    INTO v_commitment_student_id
+  IF NEW.client_profile_id IS NULL THEN
+    RAISE EXCEPTION 'ledger_transactions.client_profile_id is required';
+  END IF;
+
+  IF NEW.commitment_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT c.student_id, s.client_profile_id
+    INTO v_commitment_student_id, v_commitment_client_profile_id
   FROM public.commitments c
+  LEFT JOIN public.students s ON s.id = c.student_id
   WHERE c.id = NEW.commitment_id;
 
   IF v_commitment_student_id IS NULL THEN
     RAISE EXCEPTION 'Invalid commitment_id for ledger transaction';
   END IF;
 
-  IF v_commitment_student_id <> NEW.student_id THEN
+  IF NEW.student_id IS NULL OR v_commitment_student_id <> NEW.student_id THEN
     RAISE EXCEPTION 'ledger_transactions.commitment_id must belong to the same student';
+  END IF;
+
+  IF v_commitment_client_profile_id IS NULL OR v_commitment_client_profile_id <> NEW.client_profile_id THEN
+    RAISE EXCEPTION 'ledger_transactions.commitment_id must belong to the same client profile';
   END IF;
 
   RETURN NEW;
@@ -2516,9 +2593,10 @@ EXECUTE FUNCTION public.validate_ledger_commitment_ownership();
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'commitments') THEN
-    INSERT INTO public.ledger_transactions (id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata)
+    INSERT INTO public.ledger_transactions (id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata)
     SELECT
       md5('commitment-credit:' || c.id::text)::uuid,
+      s.client_profile_id,
       c.student_id,
       c.id,
       'CREDIT',
@@ -2530,6 +2608,7 @@ BEGIN
       COALESCE(c.updated_at, c.created_at),
       jsonb_build_object('migration', 'commitment_to_credit', 'original_commitment_id', c.id)
     FROM public.commitments c
+    LEFT JOIN public.students s ON s.id = c.student_id
     WHERE c.total_amount > 0
     ON CONFLICT (id) DO UPDATE
       SET notes = EXCLUDED.notes
@@ -2543,9 +2622,10 @@ END $$;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'consumption_entries') THEN
-    INSERT INTO public.ledger_transactions (id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata)
+    INSERT INTO public.ledger_transactions (id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata)
     SELECT
       e.id,
+      COALESCE(lp.client_profile_id, s.client_profile_id, cs.client_profile_id),
       COALESCE(e.student_id, lp.student_id, c.student_id),
       e.commitment_id,
       CASE WHEN e.amount_charged < 0 THEN 'CREDIT' ELSE 'DEBIT' END,
@@ -2568,8 +2648,10 @@ BEGIN
     FROM public.consumption_entries e
     LEFT JOIN public.lesson_participants lp ON lp.id = e.lesson_participant_id
     LEFT JOIN public.commitments c ON c.id = e.commitment_id
+    LEFT JOIN public.students s ON s.id = e.student_id
+    LEFT JOIN public.students cs ON cs.id = c.student_id
     WHERE e.commitment_id IS NOT NULL
-      AND COALESCE(e.student_id, lp.student_id, c.student_id) IS NOT NULL
+      AND COALESCE(lp.client_profile_id, s.client_profile_id, cs.client_profile_id) IS NOT NULL
     ON CONFLICT DO NOTHING;
   END IF;
 END $$;

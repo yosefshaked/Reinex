@@ -21,7 +21,12 @@ import {
 
 const COMMITMENT_TYPES = new Set(['package', 'subscription', 'hmo', 'manual_credit']);
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
-const ACTIONABLE_BILLING_STATUSES = new Set(['pending_commitment', 'pending_commitment_configuration', 'invalid_commitment']);
+const ACTIONABLE_BILLING_STATUSES = new Set([
+  'pending_commitment',
+  'pending_commitment_configuration',
+  'invalid_commitment',
+  'pending_service_default_charge_amount',
+]);
 const BILLING_BREAKDOWN_VERSION = 1;
 
 function isPlainObject(value) {
@@ -105,7 +110,7 @@ async function loadServicesMap(tenantClient, serviceIds = []) {
 
   const { data, error } = await tenantClient
     .from('Services')
-    .select('id, name, color, is_active')
+    .select('id, name, color, is_active, default_customer_charge_amount')
     .in('id', ids);
 
   if (error) {
@@ -115,10 +120,13 @@ async function loadServicesMap(tenantClient, serviceIds = []) {
     throw error;
   }
 
-  return new Map((data || []).map((row) => [row.id, {
-    ...row,
-    service_name: normalizeString(row?.name) || 'שירות',
-  }]));
+    return new Map((data || []).map((row) => [row.id, {
+      ...row,
+      service_name: normalizeString(row?.name) || 'שירות',
+      default_customer_charge_amount: row?.default_customer_charge_amount == null
+        ? null
+        : roundCurrency(Number(row.default_customer_charge_amount)),
+    }]));
 }
 
 export async function loadCommitmentsMap(tenantClient, commitmentIds = []) {
@@ -350,6 +358,129 @@ export function buildBillingDecision({ participant, instance, commitment, polici
   };
 }
 
+export function buildDirectClientBillingDecision({
+  participant,
+  instance,
+  service,
+  policies,
+  syncedAt = new Date().toISOString(),
+}) {
+  const participantStatus = normalizeString(participant?.participant_status).toLowerCase();
+  const lessonStatus = normalizeString(instance?.status).toLowerCase();
+  const lessonDate = toDateKey(instance?.datetime_start);
+  const storedPricingBreakdown = isPlainObject(participant?.pricing_breakdown) ? participant.pricing_breakdown : null;
+  const policyAllowsCharge = RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)
+    ? Boolean(lessonStatus !== 'cancelled_clinic' && policies?.billingConsumptionPolicy?.[participantStatus])
+    : false;
+
+  const shouldPreserveStoredCharge = Boolean(
+    policyAllowsCharge
+    && storedPricingBreakdown?.billing_status === 'charged'
+    && storedPricingBreakdown?.billing_mode === 'direct_client'
+    && Number.isFinite(Number(participant?.price_charged))
+  );
+
+  if (shouldPreserveStoredCharge) {
+    const preservedChargeAmount = roundCurrency(Number(participant.price_charged));
+    return {
+      shouldCharge: true,
+      chargeAmount: preservedChargeAmount,
+      coverage: {
+        eligible: true,
+        covered_service_id: instance?.service_id || null,
+        student_charge_amount: preservedChargeAmount,
+        insurer_claim_amount: 0,
+        metadata: storedPricingBreakdown,
+      },
+      billingStatus: 'charged',
+      billingReason: storedPricingBreakdown?.billing_reason || 'direct_client_charge',
+      requiresAttention: false,
+      usageType: 'standard',
+      pricingBreakdown: {
+        ...storedPricingBreakdown,
+        synced_at: syncedAt,
+        lesson_date: lessonDate || null,
+        charge_amount: preservedChargeAmount,
+        student_charge_amount: preservedChargeAmount,
+        insurer_claim_amount: 0,
+        billing_status: 'charged',
+        billing_reason: storedPricingBreakdown?.billing_reason || 'direct_client_charge',
+        policy_allowed: true,
+        requires_attention: false,
+        billing_mode: 'direct_client',
+      },
+    };
+  }
+
+  let billingStatus = 'pending_attendance';
+  let billingReason = 'participant_not_resolved';
+  let chargeAmount = null;
+  let requiresAttention = false;
+
+  if (!RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)) {
+    billingStatus = 'pending_attendance';
+    billingReason = 'participant_not_resolved';
+  } else if (!policyAllowsCharge) {
+    billingStatus = 'not_chargeable';
+    billingReason = lessonStatus === 'cancelled_clinic'
+      ? 'lesson_cancelled_by_clinic'
+      : 'policy_excluded_status';
+  } else if (!Number.isFinite(Number(service?.default_customer_charge_amount))) {
+    billingStatus = 'pending_service_default_charge_amount';
+    billingReason = 'missing_service_default_customer_charge_amount';
+    requiresAttention = true;
+  } else {
+    billingStatus = 'charged';
+    billingReason = 'direct_client_charge';
+    chargeAmount = roundCurrency(Number(service.default_customer_charge_amount));
+  }
+
+  return {
+    shouldCharge: chargeAmount != null,
+    chargeAmount,
+    coverage: chargeAmount != null
+      ? {
+          eligible: true,
+          covered_service_id: instance?.service_id || null,
+          student_charge_amount: chargeAmount,
+          insurer_claim_amount: 0,
+          metadata: null,
+        }
+      : null,
+    billingStatus,
+    billingReason,
+    requiresAttention,
+    usageType: 'standard',
+    pricingBreakdown: {
+      version: BILLING_BREAKDOWN_VERSION,
+      synced_at: syncedAt,
+      policy_snapshot: {
+        billing_consumption_policy: policies?.billingConsumptionPolicy || null,
+        instructor_earnings_policy: policies?.instructorEarningsPolicy || null,
+      },
+      lesson_status: lessonStatus || null,
+      lesson_date: lessonDate || null,
+      participant_status: participantStatus || null,
+      selected_commitment_id: null,
+      selected_commitment_type: null,
+      selected_commitment_service_id: null,
+      selected_commitment_active: null,
+      selected_commitment_expires_at: null,
+      default_charge_amount: service?.default_customer_charge_amount ?? null,
+      charge_amount: chargeAmount,
+      covered_service_id: instance?.service_id || null,
+      student_charge_amount: chargeAmount,
+      insurer_claim_amount: null,
+      billing_status: billingStatus,
+      billing_reason: billingReason,
+      policy_allowed: policyAllowsCharge,
+      requires_attention: requiresAttention,
+      usage_type: 'standard',
+      billing_mode: 'direct_client',
+    },
+  };
+}
+
 function enrichCommitment(commitment, studentMap, serviceMap) {
   return {
     ...commitment,
@@ -490,7 +621,7 @@ async function fetchLessonBillingHistory(tenantClient, {
 async function fetchBillingEntries(tenantClient, { studentId = '', commitmentBalanceMap = new Map() } = {}) {
   let query = tenantClient
     .from('ledger_transactions')
-    .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata')
+    .select('id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, invoice_id, invoice_link, notes, created_at, updated_at, metadata')
     .order('created_at', { ascending: false });
 
   if (studentId) {
@@ -550,6 +681,8 @@ async function fetchBillingEntries(tenantClient, { studentId = '', commitmentBal
       transfer_ref: entry.metadata?.transfer_ref || null,
       source_type: entry.metadata?.original_source_type || (entry.transaction_type === 'CREDIT' ? 'credit' : entry.usage_type),
       amount_charged: entry.transaction_type === 'CREDIT' ? -entry.amount : entry.amount,
+      invoice_id: entry.invoice_id || null,
+      invoice_link: entry.invoice_link || null,
       student: studentMap.get(entry.student_id) || null,
       commitment,
     };
@@ -647,7 +780,7 @@ function buildSnapshotSummary({ commitments = [], billingQueue = [], lessonHisto
 async function loadParticipantWithInstance(tenantClient, lessonParticipantId) {
   const { data, error } = await tenantClient
     .from('lesson_participants')
-    .select('id, lesson_instance_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id')
+    .select('id, lesson_instance_id, client_profile_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id')
     .eq('id', lessonParticipantId)
     .maybeSingle();
 
@@ -759,7 +892,7 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
 
   const { data: participants, error: participantsError } = await tenantClient
     .from('lesson_participants')
-    .select('id, lesson_instance_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id, attendance_confirmed_at')
+    .select('id, lesson_instance_id, client_profile_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id, attendance_confirmed_at')
     .eq('lesson_instance_id', lessonInstanceId);
 
   if (participantsError) {
@@ -769,6 +902,8 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
   const policies = await loadFinancePolicies(tenantClient);
   const commitmentIds = Array.from(new Set((participants || []).map((row) => row.commitment_id).filter(Boolean)));
   const commitmentMap = await loadCommitmentsMap(tenantClient, commitmentIds);
+  const serviceMap = await loadServicesMap(tenantClient, [instance.service_id]);
+  const instanceService = serviceMap.get(instance.service_id) || null;
   const syncedAt = new Date().toISOString();
   let updatedParticipants = 0;
   const attentionRequired = [];
@@ -780,17 +915,26 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
       commitmentMap,
       actorUserId,
     });
-    const decision = buildBillingDecision({
-      participant,
-      instance,
-      commitment: commitment || null,
-      policies,
-      syncedAt,
-    });
+    const decision = participant?.student_id
+      ? buildBillingDecision({
+          participant,
+          instance,
+          commitment: commitment || null,
+          policies,
+          syncedAt,
+        })
+      : buildDirectClientBillingDecision({
+          participant,
+          instance,
+          service: instanceService,
+          policies,
+          syncedAt,
+        });
 
     let lessonEntryId = null;
     if (decision.shouldCharge) {
       lessonEntryId = await upsertLessonLedgerEntry(tenantClient, {
+        client_profile_id: participant.client_profile_id,
         student_id: participant.student_id,
         commitment_id: commitment?.id || null,
         transaction_type: 'DEBIT',
@@ -850,6 +994,7 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
       if (RESOLVED_PARTICIPANT_STATUSES.has(pStatus)) {
         attentionRequired.push({
           participant_id: participant.id,
+          client_profile_id: participant.client_profile_id || null,
           student_id: participant.student_id,
           billing_status: decision.billingStatus,
           billing_reason: decision.billingReason,

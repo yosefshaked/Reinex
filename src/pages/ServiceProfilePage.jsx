@@ -137,6 +137,7 @@ export default function ServiceProfilePage() {
                 </div>
                 <div>משך: {service.duration_minutes ? `${service.duration_minutes} דק׳` : 'לא הוגדר'}</div>
                 <div>מודל תשלום: {getPaymentModelLabel(service.payment_model)}</div>
+                <div>מחיר לקוח חד-פעמי: {service.default_customer_charge_amount == null ? 'לא הוגדר' : `${service.default_customer_charge_amount} ₪`}</div>
                 <div className="flex items-center gap-2">
                   <span>צבע:</span>
                   {service.color ? (

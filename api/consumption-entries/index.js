@@ -24,6 +24,26 @@ const VALID_CREDIT_TYPES = new Set(['manual_topup', 'commitment_creation', 'tran
 const VALID_DEBIT_TYPES = new Set(['standard', 'double', 'cross_service', 'manual_adjustment']);
 const MANUAL_ENTRY_TYPES = new Set(['manual_topup', 'manual_adjustment']);
 
+async function resolveLinkedStudentForClientProfile(tenantClient, clientProfileId) {
+  const normalizedClientProfileId = normalizeString(clientProfileId);
+  if (!normalizedClientProfileId) {
+    return null;
+  }
+
+  const { data, error } = await tenantClient
+    .from('students')
+    .select('id')
+    .eq('client_profile_id', normalizedClientProfileId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    throw error;
+  }
+
+  return data?.id || null;
+}
+
 function resolveTransactionFields(body) {
   const direction = normalizeString(body?.direction).toLowerCase();
   const usageType = normalizeString(body?.usage_type).toLowerCase();
@@ -98,16 +118,20 @@ export default async function (context, req) {
   if (method === 'GET') {
     let query = tenantClient
       .from('ledger_transactions')
-      .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata')
+      .select('id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, invoice_id, invoice_link, notes, created_at, updated_at, metadata')
       .order('created_at', { ascending: false });
 
     const studentId = normalizeString(req?.query?.student_id);
+    const clientProfileId = normalizeString(req?.query?.client_profile_id || req?.query?.clientProfileId);
     const commitmentId = normalizeString(req?.query?.commitment_id);
     const transactionType = normalizeString(req?.query?.transaction_type).toUpperCase();
     const usageType = normalizeString(req?.query?.usage_type).toLowerCase();
 
     if (studentId) {
       query = query.eq('student_id', studentId);
+    }
+    if (clientProfileId) {
+      query = query.eq('client_profile_id', clientProfileId);
     }
     if (commitmentId) {
       query = query.eq('commitment_id', commitmentId);
@@ -178,12 +202,47 @@ export default async function (context, req) {
     return respond(context, 200, result);
   }
 
+  if ((method === 'POST' || method === 'PUT') && action === 'update_invoice_fields') {
+    const id = normalizeString(body?.id);
+    if (!id) {
+      return respond(context, 400, { message: 'missing_ledger_transaction_id' });
+    }
+
+    const invoiceId = normalizeString(body?.invoice_id ?? body?.invoiceId) || null;
+    const invoiceLink = normalizeString(body?.invoice_link ?? body?.invoiceLink) || null;
+
+    const { data, error } = await tenantClient
+      .from('ledger_transactions')
+      .update({
+        invoice_id: invoiceId,
+        invoice_link: invoiceLink,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select('id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, invoice_id, invoice_link, notes, created_at, updated_at, metadata')
+      .maybeSingle();
+
+    if (error) {
+      context.log?.error?.('ledger-transactions failed to update invoice fields', { message: error.message });
+      return respond(context, 500, { message: 'failed_to_update_ledger_transaction' });
+    }
+    if (!data) {
+      return respond(context, 404, { message: 'ledger_transaction_not_found' });
+    }
+
+    return respond(context, 200, data);
+  }
+
   if (method === 'POST' || method === 'PUT') {
     const txFields = resolveTransactionFields(body);
     const amount = Math.abs(Number(body?.amount ?? body?.amount_charged ?? 0));
     const effectiveDate = normalizeString(body?.effective_date);
     const notes = normalizeString(body?.notes);
     const commitmentId = normalizeString(body?.commitment_id);
+    let clientProfileId = normalizeString(body?.client_profile_id ?? body?.clientProfileId) || null;
+    let studentId = normalizeString(body?.student_id) || null;
+    const invoiceId = normalizeString(body?.invoice_id ?? body?.invoiceId) || null;
+    const invoiceLink = normalizeString(body?.invoice_link ?? body?.invoiceLink) || null;
 
     if (!MANUAL_ENTRY_TYPES.has(txFields.usage_type)) {
       return respond(context, 400, { message: 'invalid_usage_type_for_manual_entry' });
@@ -197,17 +256,43 @@ export default async function (context, req) {
     if (txFields.usage_type === 'manual_adjustment' && txFields.transaction_type === 'DEBIT' && !notes) {
       return respond(context, 400, { message: 'notes_required_for_adjustment' });
     }
-    if (!commitmentId) {
-      return respond(context, 400, { message: 'commitment_id_required' });
+    if (!clientProfileId && !studentId) {
+      return respond(context, 400, { message: 'client_profile_id_or_student_id_required' });
     }
 
+    if (commitmentId && !studentId) {
+      studentId = await resolveLinkedStudentForClientProfile(tenantClient, clientProfileId);
+    }
+    if (commitmentId && !studentId) {
+      return respond(context, 400, { message: 'commitment_id_required' });
+    }
+    if (!clientProfileId && studentId) {
+      const { data: studentRow, error: studentError } = await tenantClient
+        .from('students')
+        .select('client_profile_id')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (studentError) {
+        context.log?.error?.('ledger-transactions failed to resolve student client profile', { message: studentError.message });
+        return respond(context, 500, { message: 'failed_to_resolve_client_profile' });
+      }
+      if (!studentRow?.client_profile_id) {
+        return respond(context, 400, { message: 'client_profile_id_or_student_id_required' });
+      }
+      clientProfileId = studentRow.client_profile_id;
+    }
+    const resolvedClientProfileId = clientProfileId;
+
     const payload = {
-      student_id: normalizeString(body?.student_id) || null,
-      commitment_id: commitmentId,
+      client_profile_id: resolvedClientProfileId,
+      student_id: studentId,
+      commitment_id: commitmentId || null,
       transaction_type: txFields.transaction_type,
       usage_type: txFields.usage_type,
       amount,
       source_ref: null,
+      invoice_id: invoiceId,
+      invoice_link: invoiceLink,
       notes: notes || null,
       updated_at: new Date().toISOString(),
       metadata: {
@@ -222,7 +307,7 @@ export default async function (context, req) {
       const { data, error } = await tenantClient
         .from('ledger_transactions')
         .insert(payload)
-        .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata')
+        .select('id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, invoice_id, invoice_link, notes, created_at, updated_at, metadata')
         .single();
 
       if (error) {
@@ -242,7 +327,7 @@ export default async function (context, req) {
       .from('ledger_transactions')
       .update(payload)
       .eq('id', id)
-      .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata')
+      .select('id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, invoice_id, invoice_link, notes, created_at, updated_at, metadata')
       .maybeSingle();
 
     if (error) {

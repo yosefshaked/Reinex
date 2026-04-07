@@ -26,7 +26,7 @@ function normalizeOptionalNumber(value) {
   if (!Number.isFinite(numberValue)) {
     return { value: null, valid: false };
   }
-  return { value: numberValue, valid: numberValue > 0 };
+  return { value: numberValue, valid: numberValue >= 0 };
 }
 
 function normalizeOptionalText(value) {
@@ -158,7 +158,7 @@ export default async function services(context, req) {
   if (method === 'GET') {
     const { data, error } = await tenantClient
       .from('Services')
-      .select('id, name, duration_minutes, payment_model, color, is_active, metadata')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata')
       .order('name', { ascending: true });
 
     if (error) {
@@ -194,6 +194,13 @@ export default async function services(context, req) {
       return respond(context, 400, { message: 'invalid_color' });
     }
 
+    const defaultCustomerChargeAmountResult = normalizeOptionalNumber(
+      body?.default_customer_charge_amount ?? body?.defaultCustomerChargeAmount
+    );
+    if (!defaultCustomerChargeAmountResult.valid) {
+      return respond(context, 400, { message: 'invalid_default_customer_charge_amount' });
+    }
+
     const isActiveResult = normalizeOptionalBoolean(body?.is_active ?? body?.isActive);
     if (!isActiveResult.valid) {
       return respond(context, 400, { message: 'invalid_is_active' });
@@ -210,11 +217,12 @@ export default async function services(context, req) {
         name,
         duration_minutes: durationResult.value,
         payment_model: paymentModelResult.value,
+        default_customer_charge_amount: defaultCustomerChargeAmountResult.value,
         color: colorResult.value,
         is_active: isActiveResult.value === null ? true : isActiveResult.value,
         metadata: metadataResult.value,
       })
-      .select('id, name, duration_minutes, payment_model, color, is_active, metadata')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata')
       .single();
 
     if (error) {
@@ -257,6 +265,21 @@ export default async function services(context, req) {
       updates.payment_model = paymentModelResult.value;
     }
 
+    if (
+      Object.prototype.hasOwnProperty.call(body, 'default_customer_charge_amount')
+      || Object.prototype.hasOwnProperty.call(body, 'defaultCustomerChargeAmount')
+    ) {
+      const defaultCustomerChargeAmountResult = normalizeOptionalNumber(
+        Object.prototype.hasOwnProperty.call(body, 'default_customer_charge_amount')
+          ? body.default_customer_charge_amount
+          : body.defaultCustomerChargeAmount
+      );
+      if (!defaultCustomerChargeAmountResult.valid) {
+        return respond(context, 400, { message: 'invalid_default_customer_charge_amount' });
+      }
+      updates.default_customer_charge_amount = defaultCustomerChargeAmountResult.value;
+    }
+
     if (Object.prototype.hasOwnProperty.call(body, 'color')) {
       const colorResult = normalizeOptionalText(body?.color);
       if (!colorResult.valid) {
@@ -289,7 +312,7 @@ export default async function services(context, req) {
       .from('Services')
       .update(updates)
       .eq('id', serviceId)
-      .select('id, name, duration_minutes, payment_model, color, is_active, metadata')
+      .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata')
       .maybeSingle();
 
     if (error) {

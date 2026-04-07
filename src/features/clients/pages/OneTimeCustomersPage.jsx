@@ -12,6 +12,7 @@ import { useClientProfiles } from '@/hooks/useOrgData.js';
 import { normalizeMembershipRole, isAdminOrOffice } from '@/features/students/utils/endpoints.js';
 import SendFormDialog from '@/features/students/components/SendFormDialog.jsx';
 import CreateClientProfileDialog from '@/features/clients/components/CreateClientProfileDialog.jsx';
+import ClientBillingWorkspace from '@/features/clients/components/ClientBillingWorkspace.jsx';
 
 function renderDisplayName(profile) {
   return profile?.full_name || [profile?.first_name, profile?.middle_name, profile?.last_name].filter(Boolean).join(' ').trim() || 'ללא שם';
@@ -64,7 +65,7 @@ export default function OneTimeCustomersPage() {
     return (
       <PageLayout
         title="כרטיס לקוח/ה חד-פעמי/ת"
-        subtitle="פרופיל לקוח/ה שאינו/ה תלמיד/ה פעיל/ה, עם גישה לטפסים ולהיסטוריית קשר."
+        subtitle="פרופיל לקוח/ה שאינו/ה תלמיד/ה פעיל/ה, עם גישה לטפסים, לשיעורים חד-פעמיים ולמעקב כספי."
         actions={(
           <Button asChild variant="outline" size="sm" className="gap-2">
             <Link to="/one-time-customers">
@@ -156,6 +157,8 @@ export default function OneTimeCustomersPage() {
                   void refetchClientProfiles();
                 }}
               />
+
+              <ClientBillingWorkspace clientProfile={selectedProfile} />
             </>
           ) : null}
         </div>

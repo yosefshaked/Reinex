@@ -33,6 +33,7 @@ function buildInitialForm(service) {
     name: service?.name || '',
     durationMinutes: service?.duration_minutes ?? '',
     paymentModel: normalizePaymentModel(service?.payment_model || ''),
+    defaultCustomerChargeAmount: service?.default_customer_charge_amount ?? '',
     color: service?.color || '#3b82f6',
     isActive: service?.is_active ?? true,
   };
@@ -110,6 +111,7 @@ export default function ServicesPage() {
     const nextTouched = {
       name: true,
       durationMinutes: true,
+      defaultCustomerChargeAmount: true,
     };
     setTouched(nextTouched);
 
@@ -121,6 +123,10 @@ export default function ServicesPage() {
     if (formValues.durationMinutes !== '' && (!Number.isFinite(durationNumber) || durationNumber <= 0)) {
       return;
     }
+    const defaultCustomerChargeAmount = formValues.defaultCustomerChargeAmount === '' ? null : Number(formValues.defaultCustomerChargeAmount);
+    if (formValues.defaultCustomerChargeAmount !== '' && (!Number.isFinite(defaultCustomerChargeAmount) || defaultCustomerChargeAmount < 0)) {
+      return;
+    }
 
     setIsSubmitting(true);
     setError('');
@@ -130,6 +136,7 @@ export default function ServicesPage() {
       name: formValues.name.trim(),
       duration_minutes: durationNumber,
       payment_model: formValues.paymentModel || null,
+      default_customer_charge_amount: defaultCustomerChargeAmount,
       color: formValues.color || null,
       is_active: formValues.isActive,
     };
@@ -155,6 +162,11 @@ export default function ServicesPage() {
   const nameError = touched.name && !formValues.name.trim() ? 'יש להזין שם שירות.' : '';
   const durationError = touched.durationMinutes && formValues.durationMinutes !== '' && (!Number.isFinite(Number(formValues.durationMinutes)) || Number(formValues.durationMinutes) <= 0)
     ? 'יש להזין משך תקין.'
+    : '';
+  const defaultCustomerChargeAmountError = touched.defaultCustomerChargeAmount
+    && formValues.defaultCustomerChargeAmount !== ''
+    && (!Number.isFinite(Number(formValues.defaultCustomerChargeAmount)) || Number(formValues.defaultCustomerChargeAmount) < 0)
+    ? 'יש להזין מחיר תקין.'
     : '';
 
   const handleToggleActive = async (service) => {
@@ -247,6 +259,7 @@ export default function ServicesPage() {
                     <TableHead>שם</TableHead>
                     <TableHead>משך</TableHead>
                     <TableHead>מודל תשלום</TableHead>
+                    <TableHead>מחיר לקוח חד-פעמי</TableHead>
                     <TableHead>צבע</TableHead>
                     <TableHead>סטטוס</TableHead>
                     <TableHead>פעולות</TableHead>
@@ -264,6 +277,9 @@ export default function ServicesPage() {
                         {service.duration_minutes ? `${service.duration_minutes} דק׳` : '—'}
                       </TableCell>
                       <TableCell>{getPaymentModelLabel(service.payment_model)}</TableCell>
+                      <TableCell>
+                        {service.default_customer_charge_amount == null ? '—' : `${service.default_customer_charge_amount} ₪`}
+                      </TableCell>
                       <TableCell>
                         {service.color ? (
                           <span className="inline-flex items-center gap-2">
@@ -355,6 +371,21 @@ export default function ServicesPage() {
               disabled={isSubmitting}
               error={error === 'invalid_payment_model' ? 'יש לבחור מודל תשלום תקין.' : ''}
               description="אופציונלי"
+            />
+
+            <TextField
+              id="service-default-customer-charge"
+              name="defaultCustomerChargeAmount"
+              label="מחיר לקוח חד-פעמי"
+              type="number"
+              min="0"
+              step="0.01"
+              value={formValues.defaultCustomerChargeAmount}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              disabled={isSubmitting}
+              error={defaultCustomerChargeAmountError}
+              description="משמש לחיוב אוטומטי של לקוח חד-פעמי אחרי הגעה."
             />
 
             <TextField

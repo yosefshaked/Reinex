@@ -19,6 +19,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { useServices } from '@/hooks/useOrgData.js';
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 import HmoAuthorizationManager from '@/features/students/components/HmoAuthorizationManager.jsx';
+import LedgerInvoiceDialog from '@/features/finance/components/LedgerInvoiceDialog.jsx';
 import {
   buildCommitmentMetadataPayload,
   buildInitialCommitmentForm,
@@ -296,6 +297,8 @@ export default function StudentBillingWorkspace({
     amountCharged: '',
     effectiveDate: '',
     notes: '',
+    invoiceId: '',
+    invoiceLink: '',
   });
   const [transferForm, setTransferForm] = useState({
     sourceCommitmentId: '',
@@ -308,6 +311,7 @@ export default function StudentBillingWorkspace({
   });
   const [assignmentValues, setAssignmentValues] = useState({});
   const [selectedHmoAuthorizationId, setSelectedHmoAuthorizationId] = useState('');
+  const [invoiceDialogEntry, setInvoiceDialogEntry] = useState(null);
 
   const actionableHistory = useMemo(
     () => billingQueue.filter((item) => item.student_id === studentId),
@@ -573,6 +577,8 @@ export default function StudentBillingWorkspace({
       amountCharged: '',
       effectiveDate: '',
       notes: '',
+      invoiceId: '',
+      invoiceLink: '',
     });
   }
 
@@ -589,6 +595,8 @@ export default function StudentBillingWorkspace({
       amountCharged: Number(entry.amount || Math.abs(entry.amount_charged) || 0) || '',
       effectiveDate: entry.effective_date || entry.metadata?.effective_date || '',
       notes: entry.notes || '',
+      invoiceId: entry.invoice_id || '',
+      invoiceLink: entry.invoice_link || '',
     });
   }
 
@@ -613,6 +621,8 @@ export default function StudentBillingWorkspace({
           amount: Math.abs(Number(entryForm.amountCharged)),
           effective_date: entryForm.effectiveDate || null,
           notes: entryForm.notes || null,
+          invoice_id: entryForm.invoiceId || null,
+          invoice_link: entryForm.invoiceLink || null,
         },
       });
       resetEntryForm();
@@ -650,6 +660,33 @@ export default function StudentBillingWorkspace({
     } catch (error) {
       console.error('Failed to delete manual billing entry', error);
       toast.error(error?.message || 'מחיקת ההתאמה נכשלה.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSaveInvoiceFields({ id, invoice_id, invoice_link }) {
+    if (!activeOrgId || !id || !canMutateBilling) return;
+    setSaving(true);
+    try {
+      await authenticatedFetch('consumption-entries', {
+        session,
+        method: 'POST',
+        body: {
+          org_id: activeOrgId,
+          action: 'update_invoice_fields',
+          id,
+          invoice_id,
+          invoice_link,
+        },
+      });
+      setInvoiceDialogEntry(null);
+      await loadData();
+      await notifyDataChanged();
+      toast.success('פרטי החשבונית עודכנו.');
+    } catch (error) {
+      console.error('Failed to update invoice fields', error);
+      toast.error(error?.message || 'עדכון פרטי החשבונית נכשל.');
     } finally {
       setSaving(false);
     }
@@ -1041,6 +1078,30 @@ export default function StudentBillingWorkspace({
                         onChange={(event) => setEntryForm((current) => ({ ...current, notes: event.target.value }))}
                         disabled={saving}
                         placeholder="למשל: זיכוי עקב תקלה, החזר חלקי, תיקון יתרה"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="manual-entry-invoice-id-inline" className="text-xs text-slate-600">מספר חשבונית</Label>
+                      <Input
+                        id="manual-entry-invoice-id-inline"
+                        value={entryForm.invoiceId}
+                        onChange={(event) => setEntryForm((current) => ({ ...current, invoiceId: event.target.value }))}
+                        disabled={saving}
+                        placeholder="אופציונלי"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="manual-entry-invoice-link-inline" className="text-xs text-slate-600">קישור לחשבונית</Label>
+                      <Input
+                        id="manual-entry-invoice-link-inline"
+                        value={entryForm.invoiceLink}
+                        onChange={(event) => setEntryForm((current) => ({ ...current, invoiceLink: event.target.value }))}
+                        disabled={saving}
+                        dir="ltr"
+                        placeholder="https://..."
                       />
                     </div>
                   </div>
@@ -1447,12 +1508,25 @@ export default function StudentBillingWorkspace({
                           {formatDate(entry.effective_date || entry.metadata?.effective_date || entry.created_at)}
                           {entry.commitment ? ` • ${getCommitmentLabel(entry.commitment, services)}` : ''}
                           {linkedTransfer?.target_commitments?.length ? ` • יעד: ${linkedTransfer.target_commitments.map((commitment) => getServiceName(services, commitment.service_id)).join(', ')}` : ''}
+                          {entry.invoice_id ? ` • חשבונית ${entry.invoice_id}` : ''}
                           {entry.notes ? ` • ${entry.notes}` : ''}
                         </div>
+                        {entry.invoice_link ? (
+                          <div className="mt-1 text-xs">
+                            <a href={entry.invoice_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                              פתח קישור לחשבונית
+                            </a>
+                          </div>
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge variant="outline" className={txBadge.className}>{txBadge.label}</Badge>
                         <Badge variant="outline">{entry.commitment_id ? 'משויך להתחייבות' : 'ללא התחייבות'}</Badge>
+                        {canMutateBilling ? (
+                          <Button type="button" size="sm" variant="outline" onClick={() => setInvoiceDialogEntry(entry)} disabled={saving}>
+                            חשבונית
+                          </Button>
+                        ) : null}
                         {isManualEntry && canMutateBilling ? (
                           <Button type="button" size="sm" variant="outline" onClick={() => startEditingEntry(entry)} disabled={saving}>
                             ערוך
@@ -1546,6 +1620,18 @@ export default function StudentBillingWorkspace({
           )}
         </div>
       </section>
+
+      <LedgerInvoiceDialog
+        open={Boolean(invoiceDialogEntry)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setInvoiceDialogEntry(null);
+          }
+        }}
+        entry={invoiceDialogEntry}
+        saving={saving}
+        onSave={handleSaveInvoiceFields}
+      />
     </div>
   );
 }

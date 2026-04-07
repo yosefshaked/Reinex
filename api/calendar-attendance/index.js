@@ -26,7 +26,7 @@ import {
   syncInstructorAttendanceFromLessons,
   validateInstructorRateForLesson,
 } from '../_shared/employee-finance.js';
-import { buildBillingDecision, loadCommitmentsMap, syncLessonBillingArtifacts } from '../_shared/student-billing.js';
+import { buildBillingDecision, buildDirectClientBillingDecision, loadCommitmentsMap, syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
@@ -526,7 +526,7 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   const lessonDate = new Date(instanceDetail.datetime_start || Date.now());
   const lessonDateKey = String(instanceDetail.datetime_start || '').slice(0, 10);
   const policiesPromise = loadFinancePolicies(tenantClient);
-  const [{ data: dayLessons, error: dayLessonsError }, { data: systemAttendanceRecord, error: attendanceError }, { data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }, { data: capabilityRow, error: capabilityError }, policies] = await Promise.all([
+  const [{ data: dayLessons, error: dayLessonsError }, { data: systemAttendanceRecord, error: attendanceError }, { data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }, { data: clientProfileRow, error: clientProfileError }, { data: serviceRow, error: serviceError }, { data: capabilityRow, error: capabilityError }, policies] = await Promise.all([
     tenantClient
       .from('lesson_instances')
       .select('id, status, duration_minutes')
@@ -550,6 +550,18 @@ async function buildParticipantStatusPreview(tenantClient, body, {
       .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
       .eq('id', participant.student_id)
       .maybeSingle(),
+    participant.client_profile_id
+      ? tenantClient
+        .from('client_profiles')
+        .select('id, first_name, middle_name, last_name')
+        .eq('id', participant.client_profile_id)
+        .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    tenantClient
+      .from('Services')
+      .select('id, name, default_customer_charge_amount')
+      .eq('id', instanceDetail.service_id)
+      .maybeSingle(),
     tenantClient
       .from('instructor_service_capabilities')
       .select('base_rate')
@@ -563,6 +575,8 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   if (attendanceError && attendanceError.code !== 'PGRST116' && attendanceError.code !== '42P01') throw attendanceError;
   if (employeeError && employeeError.code !== 'PGRST116') throw employeeError;
   if (studentError && studentError.code !== 'PGRST116') throw studentError;
+  if (clientProfileError && clientProfileError.code !== 'PGRST116') throw clientProfileError;
+  if (serviceError && serviceError.code !== 'PGRST116') throw serviceError;
   if (capabilityError && capabilityError.code !== 'PGRST116' && capabilityError.code !== '42P01') throw capabilityError;
   const commitmentMap = await loadCommitmentsMap(
     tenantClient,
@@ -617,23 +631,34 @@ async function buildParticipantStatusPreview(tenantClient, body, {
     if (row.transaction_type === 'CREDIT') return sum - Number(row.amount || 0);
     return sum;
   }, 0));
-  const projectedBillingDecision = buildBillingDecision({
-    participant: targetParticipantAfter,
-    instance: {
-      ...instanceDetail,
-      status: projectedInstanceStatus,
-    },
-    commitment: commitmentRow || null,
-    policies,
-  });
+  const projectedBillingDecision = targetParticipantAfter?.student_id
+    ? buildBillingDecision({
+        participant: targetParticipantAfter,
+        instance: {
+          ...instanceDetail,
+          status: projectedInstanceStatus,
+        },
+        commitment: commitmentRow || null,
+        policies,
+      })
+    : buildDirectClientBillingDecision({
+        participant: targetParticipantAfter,
+        instance: {
+          ...instanceDetail,
+          status: projectedInstanceStatus,
+        },
+        service: serviceRow || null,
+        policies,
+      });
   const projectedChargeAmount = roundCurrency(Number(projectedBillingDecision?.chargeAmount || 0));
 
   const instructorName = [employeeRow?.first_name, employeeRow?.middle_name, employeeRow?.last_name].filter(Boolean).join(' ').trim() || 'המדריך';
+  const resolvedProfile = studentRow?.client_profile || clientProfileRow || null;
   const studentName = [
-    studentRow?.client_profile?.first_name,
-    studentRow?.client_profile?.middle_name,
-    studentRow?.client_profile?.last_name,
-  ].filter(Boolean).join(' ').trim() || 'התלמיד';
+    resolvedProfile?.first_name,
+    resolvedProfile?.middle_name,
+    resolvedProfile?.last_name,
+  ].filter(Boolean).join(' ').trim() || 'הלקוח/ה';
   const monthLabel = lessonDate.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
 
   const impacts = [];
