@@ -27,6 +27,8 @@ import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-a
 import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
 import {
+  buildUtcBoundsForTimezoneDateRange,
+  getCurrentDateInTimezone,
   extractScheduleSlotFromIso,
   hasConfiguredAvailability,
   isWithinAvailabilityWindows,
@@ -416,7 +418,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
     endDate = dateParam;
   } else {
     // Default to today
-    const today = new Date().toISOString().split('T')[0];
+    const today = getCurrentDateInTimezone();
     startDate = today;
     endDate = today;
   }
@@ -425,6 +427,11 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
     return respond(context, 400, { message: 'invalid date format, use YYYY-MM-DD' });
+  }
+
+  const utcBounds = buildUtcBoundsForTimezoneDateRange(startDate, endDate);
+  if (!utcBounds) {
+    return respond(context, 400, { message: 'invalid date range' });
   }
 
   // Build query
@@ -499,8 +506,8 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
         email
       )
     `)
-    .gte('datetime_start', `${startDate}T00:00:00`)
-    .lte('datetime_start', `${endDate}T23:59:59`)
+    .gte('datetime_start', utcBounds.startIso)
+    .lte('datetime_start', utcBounds.endIso)
     .order('datetime_start', { ascending: true });
 
   // Filter by instructor if provided

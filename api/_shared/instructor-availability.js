@@ -3,6 +3,61 @@ import { normalizeString } from './org-bff.js';
 
 export const DEFAULT_SCHEDULING_TIMEZONE = 'Asia/Jerusalem';
 
+function getTimeZonePartMap(date, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+}
+
+function getTimeZoneOffsetMinutes(date, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
+  const partMap = getTimeZonePartMap(date, timeZone);
+  const utcTimestampForTimeZoneClock = Date.UTC(
+    Number(partMap.year),
+    Number(partMap.month) - 1,
+    Number(partMap.day),
+    Number(partMap.hour),
+    Number(partMap.minute),
+    Number(partMap.second),
+    0,
+  );
+
+  return Math.round((utcTimestampForTimeZoneClock - date.getTime()) / 60000);
+}
+
+function parseYmdDateString(dateString) {
+  const normalized = normalizeString(dateString);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (
+    !Number.isInteger(year)
+    || !Number.isInteger(month)
+    || !Number.isInteger(day)
+    || month < 1
+    || month > 12
+    || day < 1
+    || day > 31
+  ) {
+    return null;
+  }
+
+  return { year, month, day };
+}
+
 export function normalizeClockTime(value) {
   const normalized = normalizeString(value);
   if (!normalized) return '';
@@ -124,4 +179,49 @@ export function extractScheduleSlotFromIso(datetimeValue, timeZone = DEFAULT_SCH
   }
 
   return { day, startTime };
+}
+
+export function getCurrentDateInTimezone(timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
+  const partMap = getTimeZonePartMap(new Date(), timeZone);
+  const year = partMap.year;
+  const month = partMap.month;
+  const day = partMap.day;
+  if (!year || !month || !day) {
+    return null;
+  }
+  return `${year}-${month}-${day}`;
+}
+
+export function buildUtcIsoForTimezoneDateTime(dateString, timeString, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
+  const parsedDate = parseYmdDateString(dateString);
+  const normalizedTime = normalizeClockTime(timeString);
+  if (!parsedDate || !normalizedTime) {
+    return null;
+  }
+
+  const [hours, minutes] = normalizedTime.split(':').map(Number);
+  const naiveUtcTimestamp = Date.UTC(
+    parsedDate.year,
+    parsedDate.month - 1,
+    parsedDate.day,
+    hours,
+    minutes,
+    0,
+    0,
+  );
+  const offsetMinutes = getTimeZoneOffsetMinutes(new Date(naiveUtcTimestamp), timeZone);
+  return new Date(naiveUtcTimestamp - (offsetMinutes * 60 * 1000)).toISOString();
+}
+
+export function buildUtcBoundsForTimezoneDateRange(startDateString, endDateString, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
+  const rangeStartIso = buildUtcIsoForTimezoneDateTime(startDateString, '00:00', timeZone);
+  const rangeEndIso = buildUtcIsoForTimezoneDateTime(endDateString, '23:59', timeZone);
+  if (!rangeStartIso || !rangeEndIso) {
+    return null;
+  }
+
+  return {
+    startIso: rangeStartIso,
+    endIso: rangeEndIso,
+  };
 }
