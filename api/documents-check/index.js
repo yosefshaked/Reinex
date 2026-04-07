@@ -91,10 +91,13 @@ function parseMultipartData(req) {
 async function getEntityNames(tenantClient, entityType, entityIds) {
   if (entityType === 'student') {
     const { data: students } = await tenantClient
-      .from('Students')
-      .select('id, name')
+      .from('students')
+      .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
       .in('id', entityIds);
-    return new Map((students || []).map(s => [s.id, s.name]));
+    return new Map((students || []).map((row) => [
+      row.id,
+      [row?.client_profile?.first_name, row?.client_profile?.middle_name, row?.client_profile?.last_name].filter(Boolean).join(' ') || 'Unknown',
+    ]));
   }
   
   if (entityType === 'instructor') {

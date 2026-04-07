@@ -157,7 +157,7 @@ async function promoteScheduledParticipantsForCompletedLesson(tenantClient, {
     studentIds.length > 0
       ? tenantClient
         .from('students')
-        .select('id, first_name, last_name')
+        .select('id, client_profile:client_profiles(first_name, last_name)')
         .in('id', studentIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
@@ -184,7 +184,8 @@ async function promoteScheduledParticipantsForCompletedLesson(tenantClient, {
     }
 
     const student = participant?.student_id ? studentById.get(participant.student_id) || null : null;
-    const studentName = [student?.first_name, student?.last_name].filter(Boolean).join(' ') || 'תלמיד';
+    const studentProfile = student?.client_profile || null;
+    const studentName = [studentProfile?.first_name, studentProfile?.last_name].filter(Boolean).join(' ') || 'תלמיד';
     const description = lessonDate
       ? `שיעור של ${studentName} בתאריך ${lessonDate} דורש הגשת תביעה.`
       : `שיעור של ${studentName} דורש הגשת תביעה.`;
@@ -463,12 +464,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
         metadata,
         student:students(
           id,
-          first_name,
-          middle_name,
-          last_name,
-          phone,
-          email,
-          default_notification_method
+          client_profile_id
         ),
         client_profile:client_profiles(
           id,
@@ -653,15 +649,16 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
           } : null,
           student: p.student ? {
             id: p.student.id,
-            first_name: p.student.first_name,
-            middle_name: p.student.middle_name,
-            last_name: p.student.last_name,
-            full_name: [p.student.first_name, p.student.middle_name, p.student.last_name]
+            client_profile_id: p.student.client_profile_id || p.client_profile_id || p.client_profile?.id || null,
+            first_name: p.client_profile?.first_name || '',
+            middle_name: p.client_profile?.middle_name || null,
+            last_name: p.client_profile?.last_name || '',
+            full_name: [p.client_profile?.first_name, p.client_profile?.middle_name, p.client_profile?.last_name]
               .filter(Boolean)
               .join(' '),
-            phone: p.student.phone ?? null,
-            email: p.student.email ?? null,
-            default_notification_method: p.student.default_notification_method ?? 'whatsapp',
+            phone: p.client_profile?.phone ?? null,
+            email: p.client_profile?.email ?? null,
+            default_notification_method: p.client_profile?.default_notification_method ?? 'whatsapp',
             primary_guardian: (() => {
       const link = primaryGuardianLinkByClientProfile.get(clientProfileIdByStudentId.get(p.student_id));
               if (!link) return null;

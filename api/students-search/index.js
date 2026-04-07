@@ -2,10 +2,9 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
-  applyStudentSearchFilter,
+  fetchMatchingStudentClientProfileIds,
   filterStudentsBySearchTerms,
   parseStudentSearchQuery,
-  STUDENT_SEARCH_SELECT,
 } from '../_shared/student-search.js';
 import {
   ensureMembership,
@@ -98,7 +97,20 @@ export default async function (context, req) {
   // Build query with role-based filtering
   let builder = tenantClient
     .from('students')
-    .select(STUDENT_SEARCH_SELECT);
+    .select(`
+      id,
+      client_profile_id,
+      client_profile:client_profiles(
+        id,
+        first_name,
+        middle_name,
+        last_name,
+        identity_number,
+        phone,
+        email,
+        is_active
+      )
+    `);
 
   // Member instructors can only see students from their active templates.
   if (!isAdminRole(role)) {
@@ -119,17 +131,48 @@ export default async function (context, req) {
     builder = builder.in('id', studentIds);
   }
 
-  const { data, error } = await applyStudentSearchFilter(builder, searchSpec)
-    .order('first_name', { ascending: true })
-    .limit(25);
+  const { ids: matchingClientProfileIds, error: profileSearchError } = await fetchMatchingStudentClientProfileIds(
+    tenantClient,
+    searchSpec,
+    { limit: 250 },
+  );
+
+  if (profileSearchError) {
+    context.log?.error?.('students-search failed to query client profiles', { message: profileSearchError.message, orgId });
+    return respond(context, 500, { message: 'failed_to_search_students' });
+  }
+
+  if (!matchingClientProfileIds.length) {
+    return respond(context, 200, []);
+  }
+
+  builder = builder.in('client_profile_id', matchingClientProfileIds).limit(25);
+
+  const { data, error } = await builder;
 
   if (error) {
     context.log?.error?.('students-search failed to query roster', { message: error.message, orgId });
     return respond(context, 500, { message: 'failed_to_search_students' });
   }
 
-  const results = Array.isArray(data) ? data : [];
-  const filteredResults = filterStudentsBySearchTerms(results, searchSpec);
+  const results = (Array.isArray(data) ? data : []).map((row) => ({
+    id: row.id,
+    client_profile_id: row.client_profile_id,
+    first_name: row.client_profile?.first_name || '',
+    middle_name: row.client_profile?.middle_name || null,
+    last_name: row.client_profile?.last_name || '',
+    identity_number: row.client_profile?.identity_number || null,
+    phone: row.client_profile?.phone || null,
+    email: row.client_profile?.email || null,
+    is_active: row.client_profile?.is_active !== false,
+    client_profile: row.client_profile || null,
+  }));
+  const filteredResults = filterStudentsBySearchTerms(results, searchSpec)
+    .sort((left, right) => {
+      const leftName = [left?.first_name, left?.middle_name, left?.last_name].filter(Boolean).join(' ');
+      const rightName = [right?.first_name, right?.middle_name, right?.last_name].filter(Boolean).join(' ');
+      return leftName.localeCompare(rightName, 'he');
+    });
 
   return respond(context, 200, filteredResults.slice(0, 8));
 }

@@ -66,113 +66,30 @@ $$;
 -- =================================================================
 
 -- -----------------------------------------------------------------
--- public.students (SSOT)
+-- public.students (operational overlay)
 -- -----------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS public.students (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  first_name text NOT NULL,
-  middle_name text NULL,
-  last_name text NOT NULL,
-  identity_number text NULL,
-  phone text NULL,
-  email text NULL,
-  date_of_birth date NULL,
+  client_profile_id uuid,
   notes_internal text NULL,
   medical_provider text NULL,
-  default_notification_method text NOT NULL DEFAULT 'whatsapp',
   special_rate numeric NULL,
   medical_flags jsonb NULL,
-  tags uuid[] NULL,
-  onboarding_status text NOT NULL DEFAULT 'not_started',
-  is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL
 );
 
 ALTER TABLE public.students
-  ADD COLUMN IF NOT EXISTS first_name text,
-  ADD COLUMN IF NOT EXISTS middle_name text,
-  ADD COLUMN IF NOT EXISTS last_name text,
-  ADD COLUMN IF NOT EXISTS identity_number text,
-  ADD COLUMN IF NOT EXISTS phone text,
-  ADD COLUMN IF NOT EXISTS email text,
-  ADD COLUMN IF NOT EXISTS date_of_birth date,
+  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS notes_internal text,
   ADD COLUMN IF NOT EXISTS medical_provider text,
-  ADD COLUMN IF NOT EXISTS default_notification_method text,
   ADD COLUMN IF NOT EXISTS special_rate numeric,
   ADD COLUMN IF NOT EXISTS medical_flags jsonb,
-  ADD COLUMN IF NOT EXISTS tags uuid[],
-  ADD COLUMN IF NOT EXISTS onboarding_status text,
-  ADD COLUMN IF NOT EXISTS is_active boolean,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS updated_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.students ALTER COLUMN first_name SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.students ALTER COLUMN last_name SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.students
-    ADD CONSTRAINT students_default_notification_method_check
-    CHECK (default_notification_method IN ('whatsapp','email'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  UPDATE public.students
-  SET onboarding_status = CASE
-    WHEN onboarding_status = 'in_progress' THEN 'pending_forms'
-    WHEN onboarding_status = 'completed' THEN 'approved'
-    WHEN onboarding_status = 'pending_wl_form' THEN 'pending_forms'
-    ELSE onboarding_status
-  END
-  WHERE onboarding_status IN ('in_progress', 'completed', 'pending_wl_form');
-
-  IF EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'students_onboarding_status_check'
-      AND conrelid = 'public.students'::regclass
-  ) THEN
-    ALTER TABLE public.students DROP CONSTRAINT students_onboarding_status_check;
-  END IF;
-
-  ALTER TABLE public.students
-    ADD CONSTRAINT students_onboarding_status_check
-    CHECK (onboarding_status IN ('not_started','pending_forms','approved'));
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-CREATE INDEX IF NOT EXISTS students_is_active_idx ON public.students (is_active);
-CREATE INDEX IF NOT EXISTS students_name_idx ON public.students (first_name, last_name);
-
-DO $$
-BEGIN
-  CREATE UNIQUE INDEX IF NOT EXISTS students_identity_number_unique_idx
-    ON public.students (identity_number)
-    WHERE identity_number IS NOT NULL AND identity_number <> '';
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
 -- -----------------------------------------------------------------
 -- public.guardians
@@ -335,71 +252,80 @@ DECLARE
   student_row record;
   profile_id uuid;
 BEGIN
-  FOR student_row IN
-    SELECT id, first_name, middle_name, last_name, identity_number, phone, email, date_of_birth,
-           default_notification_method, tags, onboarding_status, is_active, created_at, updated_at, metadata
-    FROM public.students
-    WHERE client_profile_id IS NULL
-  LOOP
-    SELECT id
-    INTO profile_id
-    FROM public.client_profiles
-    WHERE identity_number IS NOT DISTINCT FROM student_row.identity_number
-      AND (
-        student_row.identity_number IS NOT NULL
-        OR (
-          first_name IS NOT DISTINCT FROM student_row.first_name
-          AND middle_name IS NOT DISTINCT FROM student_row.middle_name
-          AND last_name IS NOT DISTINCT FROM student_row.last_name
-          AND phone IS NOT DISTINCT FROM student_row.phone
-          AND email IS NOT DISTINCT FROM student_row.email
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'students'
+      AND column_name = 'first_name'
+  ) THEN
+    FOR student_row IN EXECUTE '
+      SELECT id, first_name, middle_name, last_name, identity_number, phone, email, date_of_birth,
+             default_notification_method, tags, onboarding_status, is_active, created_at, updated_at, metadata
+      FROM public.students
+      WHERE client_profile_id IS NULL
+    '
+    LOOP
+      SELECT id
+      INTO profile_id
+      FROM public.client_profiles
+      WHERE identity_number IS NOT DISTINCT FROM student_row.identity_number
+        AND (
+          student_row.identity_number IS NOT NULL
+          OR (
+            first_name IS NOT DISTINCT FROM student_row.first_name
+            AND middle_name IS NOT DISTINCT FROM student_row.middle_name
+            AND last_name IS NOT DISTINCT FROM student_row.last_name
+            AND phone IS NOT DISTINCT FROM student_row.phone
+            AND email IS NOT DISTINCT FROM student_row.email
+          )
         )
-      )
-    ORDER BY created_at
-    LIMIT 1;
+      ORDER BY created_at
+      LIMIT 1;
 
-    IF profile_id IS NULL THEN
-      INSERT INTO public.client_profiles (
-        first_name,
-        middle_name,
-        last_name,
-        identity_number,
-        phone,
-        email,
-        date_of_birth,
-        default_notification_method,
-        tags,
-        onboarding_status,
-        is_active,
-        created_at,
-        updated_at,
-        metadata
-      ) VALUES (
-        student_row.first_name,
-        student_row.middle_name,
-        student_row.last_name,
-        student_row.identity_number,
-        student_row.phone,
-        student_row.email,
-        student_row.date_of_birth,
-        COALESCE(student_row.default_notification_method, 'whatsapp'),
-        student_row.tags,
-        CASE
-          WHEN student_row.onboarding_status = 'pending_wl_form' THEN 'pending_forms'
-          ELSE COALESCE(student_row.onboarding_status, 'not_started')
-        END,
-        COALESCE(student_row.is_active, true),
-        COALESCE(student_row.created_at, now()),
-        COALESCE(student_row.updated_at, COALESCE(student_row.created_at, now())),
-        student_row.metadata
-      )
-      RETURNING id INTO profile_id;
-    END IF;
+      IF profile_id IS NULL THEN
+        INSERT INTO public.client_profiles (
+          first_name,
+          middle_name,
+          last_name,
+          identity_number,
+          phone,
+          email,
+          date_of_birth,
+          default_notification_method,
+          tags,
+          onboarding_status,
+          is_active,
+          created_at,
+          updated_at,
+          metadata
+        ) VALUES (
+          student_row.first_name,
+          student_row.middle_name,
+          student_row.last_name,
+          student_row.identity_number,
+          student_row.phone,
+          student_row.email,
+          student_row.date_of_birth,
+          COALESCE(student_row.default_notification_method, 'whatsapp'),
+          student_row.tags,
+          CASE
+            WHEN student_row.onboarding_status = 'pending_wl_form' THEN 'pending_forms'
+            ELSE COALESCE(student_row.onboarding_status, 'not_started')
+          END,
+          COALESCE(student_row.is_active, true),
+          COALESCE(student_row.created_at, now()),
+          COALESCE(student_row.updated_at, COALESCE(student_row.created_at, now())),
+          student_row.metadata
+        )
+        RETURNING id INTO profile_id;
+      END IF;
 
-    UPDATE public.students
-    SET client_profile_id = profile_id
-    WHERE id = student_row.id;
-  END LOOP;
+      UPDATE public.students
+      SET client_profile_id = profile_id
+      WHERE id = student_row.id;
+    END LOOP;
+  END IF;
 END $$;
 
 DO $$
@@ -409,79 +335,48 @@ EXCEPTION
   WHEN others THEN NULL;
 END $$;
 
-CREATE OR REPLACE FUNCTION public.sync_student_person_fields_from_client_profile()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  profile_row public.client_profiles%ROWTYPE;
-BEGIN
-  IF NEW.client_profile_id IS NULL THEN
-    RETURN NEW;
-  END IF;
-
-  SELECT *
-  INTO profile_row
-  FROM public.client_profiles
-  WHERE id = NEW.client_profile_id;
-
-  IF profile_row.id IS NULL THEN
-    RETURN NEW;
-  END IF;
-
-  NEW.first_name := profile_row.first_name;
-  NEW.middle_name := profile_row.middle_name;
-  NEW.last_name := profile_row.last_name;
-  NEW.identity_number := profile_row.identity_number;
-  NEW.phone := profile_row.phone;
-  NEW.email := profile_row.email;
-  NEW.date_of_birth := profile_row.date_of_birth;
-  NEW.default_notification_method := profile_row.default_notification_method;
-  NEW.tags := profile_row.tags;
-  NEW.onboarding_status := profile_row.onboarding_status;
-  NEW.is_active := profile_row.is_active;
-
-  RETURN NEW;
-END;
-$$;
-
 DROP TRIGGER IF EXISTS students_sync_person_fields_from_client_profile_trigger ON public.students;
-CREATE TRIGGER students_sync_person_fields_from_client_profile_trigger
-  BEFORE INSERT OR UPDATE OF client_profile_id
-  ON public.students
-  FOR EACH ROW
-  EXECUTE FUNCTION public.sync_student_person_fields_from_client_profile();
-
-CREATE OR REPLACE FUNCTION public.sync_client_profile_changes_to_students()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  UPDATE public.students
-  SET
-    first_name = NEW.first_name,
-    middle_name = NEW.middle_name,
-    last_name = NEW.last_name,
-    identity_number = NEW.identity_number,
-    phone = NEW.phone,
-    email = NEW.email,
-    date_of_birth = NEW.date_of_birth,
-    default_notification_method = NEW.default_notification_method,
-    tags = NEW.tags,
-    onboarding_status = NEW.onboarding_status,
-    is_active = NEW.is_active
-  WHERE client_profile_id = NEW.id;
-
-  RETURN NEW;
-END;
-$$;
-
 DROP TRIGGER IF EXISTS client_profiles_sync_to_students_trigger ON public.client_profiles;
-CREATE TRIGGER client_profiles_sync_to_students_trigger
-  AFTER UPDATE OF first_name, middle_name, last_name, identity_number, phone, email, date_of_birth, default_notification_method, tags, onboarding_status, is_active
-  ON public.client_profiles
-  FOR EACH ROW
-  EXECUTE FUNCTION public.sync_client_profile_changes_to_students();
+DROP FUNCTION IF EXISTS public.sync_student_person_fields_from_client_profile();
+DROP FUNCTION IF EXISTS public.sync_client_profile_changes_to_students();
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'students_default_notification_method_check'
+      AND conrelid = 'public.students'::regclass
+  ) THEN
+    ALTER TABLE public.students DROP CONSTRAINT students_default_notification_method_check;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'students_onboarding_status_check'
+      AND conrelid = 'public.students'::regclass
+  ) THEN
+    ALTER TABLE public.students DROP CONSTRAINT students_onboarding_status_check;
+  END IF;
+END $$;
+
+DROP INDEX IF EXISTS public.students_identity_number_unique_idx;
+DROP INDEX IF EXISTS public.students_is_active_idx;
+DROP INDEX IF EXISTS public.students_name_idx;
+
+ALTER TABLE public.students
+  DROP COLUMN IF EXISTS first_name,
+  DROP COLUMN IF EXISTS middle_name,
+  DROP COLUMN IF EXISTS last_name,
+  DROP COLUMN IF EXISTS identity_number,
+  DROP COLUMN IF EXISTS phone,
+  DROP COLUMN IF EXISTS email,
+  DROP COLUMN IF EXISTS date_of_birth,
+  DROP COLUMN IF EXISTS default_notification_method,
+  DROP COLUMN IF EXISTS tags,
+  DROP COLUMN IF EXISTS onboarding_status,
+  DROP COLUMN IF EXISTS is_active;
 
 -- -----------------------------------------------------------------
 -- public.client_guardians

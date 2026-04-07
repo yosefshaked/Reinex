@@ -133,8 +133,8 @@ export default async function (context, req) {
 
   // Fetch all students
   const { data: students, error: studentsError } = await tenantClient
-    .from('Students')
-    .select('id, name');
+    .from('students')
+    .select('id, client_profile:client_profiles(first_name, middle_name, last_name)');
 
   if (studentsError) {
     context.log.error('Failed to fetch students', { message: studentsError.message });
@@ -159,7 +159,7 @@ export default async function (context, req) {
     allFiles.push({
       ...doc,
       student_id: doc.entity_id,
-      student_name: student?.name || 'Unknown',
+      student_name: [student?.client_profile?.first_name, student?.client_profile?.middle_name, student?.client_profile?.last_name].filter(Boolean).join(' ') || 'Unknown',
     });
   }
 

@@ -61,7 +61,18 @@ async function loadStudentsMap(tenantClient, studentIds = []) {
 
   const { data, error } = await tenantClient
     .from('students')
-    .select('id, first_name, middle_name, last_name, special_rate, is_active')
+    .select(`
+      id,
+      client_profile_id,
+      special_rate,
+      client_profile:client_profiles(
+        id,
+        first_name,
+        middle_name,
+        last_name,
+        is_active
+      )
+    `)
     .in('id', ids);
 
   if (error) {
@@ -71,10 +82,19 @@ async function loadStudentsMap(tenantClient, studentIds = []) {
     throw error;
   }
 
-  return new Map((data || []).map((row) => [row.id, {
-    ...row,
-    full_name: buildFullName(row),
-  }]));
+  return new Map((data || []).map((row) => {
+    const profile = row?.client_profile || {};
+    return [row.id, {
+      id: row.id,
+      client_profile_id: row.client_profile_id || profile.id || null,
+      special_rate: row.special_rate,
+      is_active: profile.is_active !== false,
+      first_name: profile.first_name || '',
+      middle_name: profile.middle_name || null,
+      last_name: profile.last_name || '',
+      full_name: buildFullName(profile),
+    }];
+  }));
 }
 
 async function loadServicesMap(tenantClient, serviceIds = []) {

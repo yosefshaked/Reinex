@@ -82,8 +82,42 @@ function buildInstanceSelect(options = {}) {
     'metadata',
     'instructor:Employees(id, first_name, middle_name, last_name, name)',
     'service:Services(id, name, color, duration_minutes)',
-    `participants:${participantsJoin}(id, client_profile_id, student_id, participant_status, version, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, metadata, student:students(id, first_name, middle_name, last_name), client_profile:client_profiles(id, first_name, middle_name, last_name))`,
+    `participants:${participantsJoin}(id, client_profile_id, student_id, participant_status, version, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, metadata, student:students(id, client_profile_id), client_profile:client_profiles(id, first_name, middle_name, last_name))`,
   ].join(',');
+}
+
+function normalizeParticipantPerson(participant) {
+  if (!participant || typeof participant !== 'object') {
+    return participant;
+  }
+
+  const clientProfile = participant.client_profile || null;
+  return {
+    ...participant,
+    student: participant.student
+      ? {
+          id: participant.student.id,
+          client_profile_id: participant.student.client_profile_id || participant.client_profile_id || clientProfile?.id || null,
+          first_name: clientProfile?.first_name || '',
+          middle_name: clientProfile?.middle_name || null,
+          last_name: clientProfile?.last_name || '',
+        }
+      : null,
+    client_profile: clientProfile,
+  };
+}
+
+function normalizeLessonInstanceRecord(instance) {
+  if (!instance || typeof instance !== 'object') {
+    return instance;
+  }
+
+  return {
+    ...instance,
+    participants: Array.isArray(instance.participants)
+      ? instance.participants.map(normalizeParticipantPerson)
+      : [],
+  };
 }
 
 export default async function lessonInstances(context, req) {
@@ -188,7 +222,7 @@ export default async function lessonInstances(context, req) {
         return respond(context, 404, { message: 'lesson_instance_not_found' });
       }
 
-      const [enriched] = await enrichInstancesWithCorrectionState(tenantClient, [data]);
+      const [enriched] = await enrichInstancesWithCorrectionState(tenantClient, [normalizeLessonInstanceRecord(data)]);
       if (enriched?.version !== undefined) {
         enriched.version = normalizeEntityVersion(enriched.version);
       }
@@ -237,7 +271,10 @@ export default async function lessonInstances(context, req) {
       return respond(context, 500, { message: 'failed_to_load_lesson_instances' });
     }
 
-    const enrichedData = await enrichInstancesWithCorrectionState(tenantClient, Array.isArray(data) ? data : []);
+    const enrichedData = await enrichInstancesWithCorrectionState(
+      tenantClient,
+      (Array.isArray(data) ? data : []).map(normalizeLessonInstanceRecord),
+    );
     return respond(context, 200, enrichedData);
   }
 
@@ -392,7 +429,10 @@ export default async function lessonInstances(context, req) {
       context.log?.warn?.('lesson-instances failed to write tenant audit (create)', { message: auditError?.message, lessonInstanceId: instanceRow.id });
     }
 
-    const [enriched] = await enrichInstancesWithCorrectionState(tenantClient, data ? [data] : []);
+    const [enriched] = await enrichInstancesWithCorrectionState(
+      tenantClient,
+      data ? [normalizeLessonInstanceRecord(data)] : [],
+    );
     return respond(context, 200, enriched || data);
   }
 
@@ -575,7 +615,10 @@ export default async function lessonInstances(context, req) {
       context.log?.warn?.('lesson-instances failed to write tenant audit (update)', { message: auditError?.message, lessonInstanceId });
     }
 
-    const [enriched] = await enrichInstancesWithCorrectionState(tenantClient, data ? [data] : []);
+    const [enriched] = await enrichInstancesWithCorrectionState(
+      tenantClient,
+      data ? [normalizeLessonInstanceRecord(data)] : [],
+    );
     if (enriched?.version !== undefined) {
       enriched.version = normalizeEntityVersion(enriched.version);
     }
@@ -722,7 +765,10 @@ export default async function lessonInstances(context, req) {
       const { data: addedRefreshed, error: addedRefreshError } = await tenantClient
         .from('lesson_instances').select(buildInstanceSelect()).eq('id', instanceId).single();
       if (addedRefreshError) return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
-      const [addedEnriched] = await enrichInstancesWithCorrectionState(tenantClient, addedRefreshed ? [addedRefreshed] : []);
+      const [addedEnriched] = await enrichInstancesWithCorrectionState(
+        tenantClient,
+        addedRefreshed ? [normalizeLessonInstanceRecord(addedRefreshed)] : [],
+      );
       return respond(context, 200, addedEnriched || addedRefreshed);
     }
 

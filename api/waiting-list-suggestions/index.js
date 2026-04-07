@@ -68,7 +68,7 @@ function buildEntrySelect() {
     'notes',
     'created_at',
     'metadata',
-    'student:students(id, first_name, middle_name, last_name, identity_number, phone, email)',
+    'student:students(id, client_profile_id)',
     'client_profile:client_profiles(id, first_name, middle_name, last_name, identity_number, phone, email)',
     'service:Services(id, name, duration_minutes)',
   ].join(',');

@@ -227,11 +227,19 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
       // Get entity name for file naming (cache after first lookup)
       if (entityName === null) {
         if (entityType === 'student') {
-          const { data: student, error: studentError } = await tenantClient.from('students').select('name').eq('id', entityId).single();
+          const { data: student, error: studentError } = await tenantClient
+            .from('students')
+            .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
+            .eq('id', entityId)
+            .single();
           if (studentError) {
             console.error('Failed to fetch student name:', { entityId, error: studentError.message });
           }
-          entityName = student?.name || 'Unknown';
+          entityName = [
+            student?.client_profile?.first_name,
+            student?.client_profile?.middle_name,
+            student?.client_profile?.last_name,
+          ].filter(Boolean).join(' ') || 'Unknown';
         } else if (entityType === 'instructor') {
           const { data: instructor, error: instructorError } = await tenantClient
             .from('Employees')

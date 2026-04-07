@@ -193,11 +193,14 @@ export default async function (context, req) {
   if (allDocuments && allDocuments.length > 0) {
     const studentIds = [...new Set(allDocuments.map(doc => doc.entity_id))];
     const { data: students } = await tenantClient
-      .from('Students')
-      .select('id, name')
+      .from('students')
+      .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
       .in('id', studentIds);
 
-    const studentMap = new Map((students || []).map(s => [s.id, s.name]));
+    const studentMap = new Map((students || []).map((row) => [
+      row.id,
+      [row?.client_profile?.first_name, row?.client_profile?.middle_name, row?.client_profile?.last_name].filter(Boolean).join(' ') || 'Unknown',
+    ]));
 
     for (const doc of allDocuments) {
       duplicates.push({

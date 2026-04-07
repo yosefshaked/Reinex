@@ -9,13 +9,14 @@ function escapeStudentSearchValue(value) {
 }
 
 export function buildStudentSearchText(student) {
+  const profile = student?.client_profile || {};
   return [
-    student?.first_name,
-    student?.middle_name,
-    student?.last_name,
-    student?.identity_number,
-    student?.phone,
-    student?.email,
+    student?.first_name ?? profile.first_name,
+    student?.middle_name ?? profile.middle_name,
+    student?.last_name ?? profile.last_name,
+    student?.identity_number ?? profile.identity_number,
+    student?.phone ?? profile.phone,
+    student?.email ?? profile.email,
   ]
     .filter(Boolean)
     .join(' ')
@@ -76,4 +77,32 @@ export function filterStudentsBySearchTerms(students, searchQuery) {
     const searchableText = buildStudentSearchText(student);
     return searchSpec.searchTerms.every((term) => searchableText.includes(term));
   });
+}
+
+export async function fetchMatchingStudentClientProfileIds(tenantClient, searchQuery, { limit = 1000 } = {}) {
+  const searchSpec = typeof searchQuery === 'string'
+    ? parseStudentSearchQuery(searchQuery)
+    : searchQuery;
+
+  if (!searchSpec?.hasQuery || !searchSpec?.primaryTerm) {
+    return { ids: [], error: null };
+  }
+
+  const { data, error } = await applyStudentSearchFilter(
+    tenantClient
+      .from('client_profiles')
+      .select('id, first_name, middle_name, last_name, identity_number, phone, email')
+      .limit(limit),
+    searchSpec,
+  );
+
+  if (error) {
+    return { ids: [], error };
+  }
+
+  const filteredRows = filterStudentsBySearchTerms(Array.isArray(data) ? data : [], searchSpec);
+  return {
+    ids: filteredRows.map((row) => row.id).filter(Boolean),
+    error: null,
+  };
 }

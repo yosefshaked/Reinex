@@ -60,35 +60,29 @@ export default async function (context, req) {
     return respond(context, tenantError.status, tenantError.body);
   }
 
-  // Try RPC first (SECURITY DEFINER expected)
-  const { error: rpcError } = await tenantClient.rpc('remove_tag_from_students', { tag_to_remove: tagId });
-  if (!rpcError) {
-    return respond(context, 200, { message: 'tag_removed_via_rpc', tag_id: tagId });
-  }
-
-  context.log?.warn?.('students-remove-tag: RPC failed, falling back', { message: rpcError.message });
-
-  // Fallback: manually update affected students using service key
-  const { data: students, error: fetchError } = await tenantClient
-    .from('students')
+  const { data: clientProfiles, error: fetchError } = await tenantClient
+    .from('client_profiles')
     .select('id, tags')
     .contains('tags', [tagId]);
 
   if (fetchError) {
-    context.log?.error?.('students-remove-tag: failed to fetch students', { message: fetchError.message });
+    context.log?.error?.('students-remove-tag: failed to fetch client profiles', { message: fetchError.message });
     return respond(context, 500, { message: 'failed_to_fetch_students' });
   }
-  if (!students || students.length === 0) {
+  if (!clientProfiles || clientProfiles.length === 0) {
     return respond(context, 200, { message: 'tag_removed_no_students', tag_id: tagId, students_updated: 0 });
   }
 
   let updated = 0;
   const failures = [];
-  for (const student of students) {
-    const updatedTags = (student.tags || []).filter((id) => id !== tagId);
-    const { error } = await tenantClient.from('students').update({ tags: updatedTags }).eq('id', student.id);
+  for (const profile of clientProfiles) {
+    const updatedTags = (profile.tags || []).filter((id) => id !== tagId);
+    const { error } = await tenantClient
+      .from('client_profiles')
+      .update({ tags: updatedTags })
+      .eq('id', profile.id);
     if (error) {
-      failures.push({ student_id: student.id, message: error.message });
+      failures.push({ client_profile_id: profile.id, message: error.message });
     } else {
       updated++;
     }
@@ -98,5 +92,5 @@ export default async function (context, req) {
     return respond(context, 500, { message: 'failed_to_update_students', failures });
   }
 
-  return respond(context, 200, { message: 'tag_removed_fallback', tag_id: tagId, students_updated: updated, failures });
+  return respond(context, 200, { message: 'tag_removed_profiles', tag_id: tagId, students_updated: updated, failures });
 }

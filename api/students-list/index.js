@@ -15,7 +15,7 @@ import {
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { normalizeDayToken, daySortValue } from '../_shared/day-of-week.js';
 import {
-  applyStudentSearchFilter,
+  fetchMatchingStudentClientProfileIds,
   filterStudentsBySearchTerms,
   parseStudentSearchQuery,
 } from '../_shared/student-search.js';
@@ -73,7 +73,7 @@ function mergeStudentWithClientProfile(studentRow, clientProfileRow, guardian = 
     default_notification_method: profile.default_notification_method ?? student.default_notification_method ?? 'whatsapp',
     tags: Array.isArray(profile.tags) ? profile.tags : [],
     onboarding_status: profile.onboarding_status ?? 'not_started',
-    is_active: profile.is_active !== false && student.is_active !== false,
+    is_active: profile.is_active !== false,
     client_profile: profile.id
       ? {
           id: profile.id,
@@ -210,7 +210,7 @@ async function findStudentByIdentityNumber(tenantClient, identityNumber, { exclu
 
   let query = tenantClient
     .from('students')
-    .select('id, client_profile_id, is_active')
+    .select('id, client_profile_id')
     .eq('client_profile_id', clientProfile.id)
     .limit(1);
 
@@ -1020,7 +1020,7 @@ export default async function handler(context, req) {
     const searchTerm = normalizeString(req?.query?.search);
     const studentSearch = parseStudentSearchQuery(searchTerm);
     const tagFilter = normalizeString(req?.query?.tag ?? req?.query?.tags);
-    const requiresDerivedSchedule = sortOrder === 'schedule' || dayFilter !== null || studentSearch.requiresRefinement;
+    const requiresDerivedSchedule = sortOrder === 'schedule' || sortOrder === 'name' || dayFilter !== null || studentSearch.requiresRefinement;
 
     if (Number.isNaN(dayFilter)) {
       return respond(context, 400, { message: 'invalid_day_filter' });
@@ -1054,13 +1054,6 @@ export default async function handler(context, req) {
     let builder = tenantClient
       .from('students')
       .select('*', paginationRequested ? { count: 'exact' } : undefined);
-
-    if (sortOrder === 'name') {
-      builder = builder
-        .order('first_name', { ascending: true })
-        .order('middle_name', { ascending: true, nullsFirst: false })
-        .order('last_name', { ascending: true });
-    }
 
     let instructorFilterId = '';
 
@@ -1111,27 +1104,68 @@ export default async function handler(context, req) {
       builder = builder.in('id', studentIds);
     }
 
-    // Status filter
     const statusFilter = determineStatusFilter(req?.query, instructorsCanViewInactive);
-    if (statusFilter === 'active') {
-      builder = builder.eq('is_active', true);
-    } else if (statusFilter === 'inactive') {
-      builder = builder.eq('is_active', false);
-    }
-
-    if (studentSearch.hasQuery) {
-      builder = applyStudentSearchFilter(builder, studentSearch);
-    }
-
-    if (tagFilter) {
-      const normalizedTags = tagFilter
+    const normalizedTags = tagFilter
+      ? tagFilter
         .split(',')
         .map((value) => normalizeString(value))
-        .filter(Boolean);
+        .filter(Boolean)
+      : [];
+
+    const shouldFilterByClientProfile = statusFilter || studentSearch.hasQuery || normalizedTags.length > 0;
+    if (shouldFilterByClientProfile) {
+      let profileQuery = tenantClient
+        .from('client_profiles')
+        .select('id, first_name, middle_name, last_name, identity_number, phone, email, is_active, tags');
+
+      if (statusFilter === 'active') {
+        profileQuery = profileQuery.eq('is_active', true);
+      } else if (statusFilter === 'inactive') {
+        profileQuery = profileQuery.eq('is_active', false);
+      }
 
       if (normalizedTags.length) {
-        builder = builder.contains('tags', [normalizedTags[0]]);
+        profileQuery = profileQuery.contains('tags', [normalizedTags[0]]);
       }
+
+      let matchingClientProfileIds = null;
+      if (studentSearch.hasQuery) {
+        const { ids, error: searchError } = await fetchMatchingStudentClientProfileIds(tenantClient, studentSearch, { limit: 5000 });
+        if (searchError) {
+          context.log?.error?.('students-list failed to query client profiles for search', { message: searchError.message });
+          return respond(context, 500, { message: 'failed_to_load_students' });
+        }
+        matchingClientProfileIds = ids;
+      }
+
+      const { data: filteredProfiles, error: filteredProfilesError } = await profileQuery;
+      if (filteredProfilesError) {
+        context.log?.error?.('students-list failed to load filtered client profiles', { message: filteredProfilesError.message });
+        return respond(context, 500, { message: 'failed_to_load_students' });
+      }
+
+      let filteredProfileIds = (filteredProfiles || []).map((profile) => profile.id).filter(Boolean);
+      if (matchingClientProfileIds) {
+        const matchingSet = new Set(matchingClientProfileIds);
+        filteredProfileIds = filteredProfileIds.filter((id) => matchingSet.has(id));
+      }
+
+      if (!filteredProfileIds.length) {
+        if (!paginationRequested) {
+          return respond(context, 200, []);
+        }
+
+        return respond(context, 200, {
+          data: [],
+          total: 0,
+          page_size: limit,
+          page: Math.floor(offset / limit) + 1,
+          offset,
+          has_more: false,
+        });
+      }
+
+      builder = builder.in('client_profile_id', filteredProfileIds);
     }
 
     if (paginationRequested && !requiresDerivedSchedule) {
@@ -1171,6 +1205,10 @@ export default async function handler(context, req) {
       clientProfilesById.get(student.client_profile_id) || null,
       guardiansByClientProfileId.get(student.client_profile_id) || null,
     ));
+
+    if (sortOrder === 'name') {
+      normalizedData.sort(compareNameParts);
+    }
 
     if (studentSearch.hasQuery) {
       normalizedData = filterStudentsBySearchTerms(normalizedData, studentSearch);
@@ -1334,7 +1372,6 @@ export default async function handler(context, req) {
       special_rate: normalized.payload.special_rate,
       medical_flags: normalized.payload.medical_flags,
       notes_internal: normalized.payload.notes_internal,
-      is_active: normalized.payload.is_active,
       metadata: studentMetadata,
     };
 
@@ -1765,7 +1802,7 @@ export default async function handler(context, req) {
   // Fetch existing student
   const { data: existingStudent, error: fetchError } = await tenantClient
     .from('students')
-    .select('id, client_profile_id, is_active')
+    .select('id, client_profile_id')
     .eq('id', studentId)
     .maybeSingle();
 
@@ -1815,7 +1852,7 @@ export default async function handler(context, req) {
 
   // No change needed
   if (oldIsActive === newIsActive) {
-    return respond(context, 200, existingStudent);
+    return respond(context, 200, mergeStudentWithClientProfile(existingStudent, existingClientProfile));
   }
 
   // Update is_active
@@ -1840,11 +1877,6 @@ export default async function handler(context, req) {
     });
     return respond(context, 500, { message: 'failed_to_update_student' });
   }
-
-  await tenantClient
-    .from('students')
-    .update({ is_active: newIsActive })
-    .eq('id', studentId);
 
   const updated = mergeStudentWithClientProfile(existingStudent, updatedProfile || existingClientProfile);
 

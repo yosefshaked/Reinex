@@ -104,18 +104,34 @@ export default async function (context, req) {
     hasExcludeId: !!excludeId,
   });
 
-  let query = tenantClient
-    .from('students')
+  let profileQuery = tenantClient
+    .from('client_profiles')
     .select('id, first_name, last_name, identity_number, is_active')
     .eq('identity_number', identityNumber)
     .limit(1);
 
   if (excludeId) {
-    query = query.neq('id', excludeId);
+    const { data: excludedStudent, error: excludedStudentError } = await tenantClient
+      .from('students')
+      .select('id, client_profile_id')
+      .eq('id', excludeId)
+      .maybeSingle();
+
+    if (excludedStudentError) {
+      context.log?.error?.('[students-check-id] Failed to resolve excluded student profile', {
+        message: excludedStudentError.message,
+        excludeId,
+      });
+      return respond(context, 500, { message: 'failed_to_validate_identity_number' });
+    }
+
+    if (excludedStudent?.client_profile_id) {
+      profileQuery = profileQuery.neq('id', excludedStudent.client_profile_id);
+    }
     context.log?.info?.('[students-check-id] Excluding student ID from search', { excludeId });
   }
 
-  const { data, error } = await query.maybeSingle();
+  const { data: profile, error } = await profileQuery.maybeSingle();
 
   if (error) {
     context.log?.error?.('[students-check-id] Database query failed', {
@@ -128,7 +144,7 @@ export default async function (context, req) {
     return respond(context, 500, { message: 'failed_to_validate_identity_number' });
   }
 
-  if (!data) {
+  if (!profile) {
     context.log?.info?.('[students-check-id] No duplicate found', {
       identityNumber,
       excludeId: excludeId || 'none',
@@ -137,17 +153,41 @@ export default async function (context, req) {
     return respond(context, 200, { exists: false });
   }
 
+  const { data: student, error: studentError } = await tenantClient
+    .from('students')
+    .select('id, client_profile_id')
+    .eq('client_profile_id', profile.id)
+    .maybeSingle();
+
+  if (studentError) {
+    context.log?.error?.('[students-check-id] Failed to resolve student by client profile', {
+      message: studentError.message,
+      clientProfileId: profile.id,
+    });
+    return respond(context, 500, { message: 'failed_to_validate_identity_number' });
+  }
+
   context.log?.info?.('[students-check-id] Duplicate found', {
     identityNumber,
     excludeId: excludeId || 'none',
     duplicateStudent: {
-      id: data.id,
-      first_name: data.first_name,
-      last_name: data.last_name,
-      is_active: data.is_active,
+      id: student?.id || null,
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      is_active: profile.is_active,
     },
     result: 'exists=true',
   });
 
-  return respond(context, 200, { exists: true, student: data });
+  return respond(context, 200, {
+    exists: true,
+    student: {
+      id: student?.id || null,
+      client_profile_id: profile.id,
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      identity_number: profile.identity_number,
+      is_active: profile.is_active,
+    },
+  });
 }

@@ -547,7 +547,7 @@ async function buildParticipantStatusPreview(tenantClient, body, {
       .maybeSingle(),
     tenantClient
       .from('students')
-      .select('id, first_name, middle_name, last_name')
+      .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
       .eq('id', participant.student_id)
       .maybeSingle(),
     tenantClient
@@ -629,7 +629,11 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   const projectedChargeAmount = roundCurrency(Number(projectedBillingDecision?.chargeAmount || 0));
 
   const instructorName = [employeeRow?.first_name, employeeRow?.middle_name, employeeRow?.last_name].filter(Boolean).join(' ').trim() || 'המדריך';
-  const studentName = [studentRow?.first_name, studentRow?.middle_name, studentRow?.last_name].filter(Boolean).join(' ').trim() || 'התלמיד';
+  const studentName = [
+    studentRow?.client_profile?.first_name,
+    studentRow?.client_profile?.middle_name,
+    studentRow?.client_profile?.last_name,
+  ].filter(Boolean).join(' ').trim() || 'התלמיד';
   const monthLabel = lessonDate.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
 
   const impacts = [];
@@ -1344,11 +1348,11 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
         if (isHmo) {
           const { data: student } = await tenantClient
             .from('students')
-            .select('first_name, last_name')
+            .select('client_profile:client_profiles(first_name, last_name)')
             .eq('id', participantDetail.student_id)
             .maybeSingle();
 
-          const studentName = [student?.first_name, student?.last_name].filter(Boolean).join(' ') || 'תלמיד';
+          const studentName = [student?.client_profile?.first_name, student?.client_profile?.last_name].filter(Boolean).join(' ') || 'תלמיד';
           const lessonDate = instanceDetail?.datetime_start
             ? new Date(instanceDetail.datetime_start).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' })
             : '';

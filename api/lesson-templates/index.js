@@ -141,9 +141,35 @@ function buildTemplateSelect({ includeStudent = false } = {}) {
     'service:Services(id, name, duration_minutes, color)',
   ];
   if (includeStudent) {
-    fields.push('student:students(id, first_name, middle_name, last_name)');
+    fields.push('student:students(id, client_profile_id, client_profile:client_profiles(id, first_name, middle_name, last_name))');
   }
   return fields.join(',');
+}
+
+function normalizeTemplateStudent(student) {
+  if (!student || typeof student !== 'object') {
+    return student;
+  }
+
+  const profile = student.client_profile || null;
+  return {
+    id: student.id,
+    client_profile_id: student.client_profile_id || profile?.id || null,
+    first_name: profile?.first_name || '',
+    middle_name: profile?.middle_name || null,
+    last_name: profile?.last_name || '',
+  };
+}
+
+function normalizeTemplateRecord(template) {
+  if (!template || typeof template !== 'object') {
+    return template;
+  }
+
+  return {
+    ...template,
+    student: normalizeTemplateStudent(template.student),
+  };
 }
 
 function isDuplicateTemplateConstraintError(error) {
@@ -373,7 +399,7 @@ export default async function lessonTemplates(context, req) {
         return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
       }
 
-      const rows = Array.isArray(data) ? [...data] : [];
+      const rows = (Array.isArray(data) ? [...data] : []).map(normalizeTemplateRecord);
       rows.sort(compareTemplatesByDayAndTime);
 
       return respond(context, 200, rows);
@@ -433,7 +459,7 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
     }
 
-    return respond(context, 200, Array.isArray(data) ? data : []);
+    return respond(context, 200, (Array.isArray(data) ? data : []).map(normalizeTemplateRecord));
   }
 
   if (!isAdmin) {
@@ -521,7 +547,6 @@ export default async function lessonTemplates(context, req) {
     }
 
     let waitingListEntry = null;
-    let studentBeforeMatch = null;
     let clientProfileBeforeMatch = null;
     let studentCreated = false;
     let effectiveStudentId = studentId;
@@ -597,7 +622,7 @@ export default async function lessonTemplates(context, req) {
 
       const { data: studentData, error: studentError } = await tenantClient
         .from('students')
-        .select('id, first_name, middle_name, last_name, is_active, onboarding_status, metadata')
+        .select('id, client_profile_id')
         .eq('id', effectiveStudentId)
         .maybeSingle();
 
@@ -614,7 +639,6 @@ export default async function lessonTemplates(context, req) {
         return respond(context, 400, { message: 'invalid_student_id' });
       }
 
-      studentBeforeMatch = studentData;
     } else if (!effectiveStudentId && resolvedClientProfileId) {
       try {
         const ensuredStudent = await ensureStudentForClientProfile(tenantClient, resolvedClientProfileId);
@@ -737,10 +761,6 @@ export default async function lessonTemplates(context, req) {
 
       studentAfterActivation = activatedStudent;
       studentReactivated = true;
-      await tenantClient
-        .from('students')
-        .update({ is_active: true })
-        .eq('id', effectiveStudentId);
     }
 
     if (waitingListEntry) {
@@ -798,10 +818,6 @@ export default async function lessonTemplates(context, req) {
               clientProfileId: resolvedClientProfileId,
             });
           }
-          await tenantClient
-            .from('students')
-            .update({ is_active: studentBeforeMatch?.is_active ?? false })
-            .eq('id', effectiveStudentId);
         }
 
         return respond(
@@ -873,7 +889,7 @@ export default async function lessonTemplates(context, req) {
     }
 
     return respond(context, 201, {
-      ...data,
+      ...normalizeTemplateRecord(data),
       waiting_list_match: waitingListEntry
         ? {
             waiting_list_entry_id: waitingListEntry.id,
@@ -1145,7 +1161,7 @@ export default async function lessonTemplates(context, req) {
       });
     }
 
-    return respond(context, 200, data);
+    return respond(context, 200, normalizeTemplateRecord(data));
   }
 
   if (method === 'DELETE') {
