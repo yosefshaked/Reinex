@@ -39,6 +39,7 @@ import {
   resolveSchedulingOverrideFormState,
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
 } from '../utils/schedulingOverride.js';
+import { getParticipantDisplayName } from '../utils/participantDisplay.js';
 import { addLocalDays, CALENDAR_WEEK_START, getWeekStartDate, parseLocalDateString, toLocalDateString as toCalendarLocalDateString } from '../utils/localDate.js';
 import './reinex-fullcalendar.css';
 
@@ -314,7 +315,7 @@ function EventContent({ arg }) {
     return <div className="reinex-calendar-event">פריט חסר</div>;
   }
 
-  const firstStudentName = instance.participants?.[0]?.student?.full_name || 'ללא תלמיד';
+  const firstStudentName = getParticipantDisplayName(instance.participants?.[0], 'ללא לקוח/ה');
   const additionalCount = Math.max(0, (instance.participants?.length || 1) - 1);
   const statusInfo = getInstanceStatusIcon(instance.status, instance.documentation_status);
   const durationMinutes = Number(instance.duration_minutes) || 0;

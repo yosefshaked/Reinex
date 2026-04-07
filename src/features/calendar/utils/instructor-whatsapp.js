@@ -1,4 +1,5 @@
 import { getWeekStartDate, parseLocalDateString, toLocalDateString } from './localDate.js';
+import { getParticipantDisplayNames } from './participantDisplay.js';
 
 function formatDateLabel(dateInput) {
   const date = typeof dateInput === 'string' ? parseLocalDateString(dateInput) : dateInput;
@@ -40,13 +41,7 @@ function isSendableStatus(status) {
 }
 
 function getStudentNames(instance) {
-  const names = Array.isArray(instance?.participants)
-    ? instance.participants
-      .map((participant) => participant?.student?.full_name)
-      .filter(Boolean)
-    : [];
-
-  return names.length ? names.join(', ') : 'ללא תלמיד';
+  return getParticipantDisplayNames(instance?.participants, 'ללא לקוח/ה').join(', ');
 }
 
 function buildLessonLine(instance) {
@@ -111,7 +106,7 @@ export function getInstructorWeekLessons(instances, instructorId, dateString) {
 export function buildInstructorDayMessage({ instructorName, dateString, lessons }) {
   const lines = [
     `שלום ${instructorName},`,
-    `התלמידים שלך ל-${formatWeekdayDateLabel(dateString)}:`,
+    `הלקוחות שלך ל-${formatWeekdayDateLabel(dateString)}:`,
     '',
     ...lessons.map(buildLessonLine),
     '',
@@ -152,7 +147,7 @@ export function buildInstructorWeekMessage({ instructorName, dateString, lessons
 
   const lines = [
     `שלום ${instructorName},`,
-    `התלמידים שלך לשבוע ${formatDateLabel(weekStart)} - ${formatDateLabel(weekEnd)}:`,
+    `הלקוחות שלך לשבוע ${formatDateLabel(weekStart)} - ${formatDateLabel(weekEnd)}:`,
     '',
     ...dayBlocks,
     '',

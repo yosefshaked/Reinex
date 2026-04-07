@@ -1,3 +1,5 @@
+import { getParticipantDisplayName } from './participantDisplay.js';
+
 function toSafeNumber(value, fallback = 0) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -89,7 +91,7 @@ export function mapInstancesToEvents(instances) {
   return instances
     .filter((instance) => instance?.id && instance?.datetime_start && instance?.instructor_employee_id)
     .map((instance) => {
-      const firstStudent = instance.participants?.[0]?.student?.full_name || 'ללא תלמיד';
+      const firstStudent = getParticipantDisplayName(instance.participants?.[0], 'ללא לקוח/ה');
       const serviceName = instance.service?.service_name || 'שיעור';
 
       return {

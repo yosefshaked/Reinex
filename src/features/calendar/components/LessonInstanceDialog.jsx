@@ -25,6 +25,7 @@ import {
   resolveSchedulingOverrideFormState,
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
 } from '../utils/schedulingOverride.js';
+import { getParticipantDisplayName, resolveParticipantReminderContact } from '../utils/participantDisplay.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -330,7 +331,7 @@ function buildConflictLines(baseInstance, latestInstance, participantId) {
     const beforeParticipant = baseParticipants.find((participant) => participant.id === participantId);
     const latestParticipant = latestParticipants.find((participant) => participant.id === participantId);
     if (latestParticipant && beforeParticipant?.participant_status !== latestParticipant.participant_status) {
-      const participantName = latestParticipant.student?.full_name || beforeParticipant?.student?.full_name || 'התלמיד';
+      const participantName = getParticipantDisplayName(latestParticipant, getParticipantDisplayName(beforeParticipant, 'הלקוח/ה'));
       lines.push(`${participantName} מסומן כרגע כ-"${getParticipantStatusLabel(latestParticipant.participant_status)}".`);
     }
     const latestNotes = latestParticipant?.metadata?.notes || '';
@@ -553,31 +554,14 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   }
 
   function resolveReminderContact(participant) {
-    const student = participant?.student || null;
-    const guardian = student?.primary_guardian || null;
-
-    if (guardian) {
-      return {
-        source: 'guardian',
-        name: [guardian.first_name, guardian.middle_name, guardian.last_name].filter(Boolean).join(' ') || 'הורה/אפוטרופוס',
-        phone: guardian.phone || null,
-        email: guardian.email || null,
-      };
-    }
-
-    return {
-      source: 'student',
-      name: student?.full_name || [student?.first_name, student?.last_name].filter(Boolean).join(' ') || 'תלמיד',
-      phone: student?.phone || null,
-      email: student?.email || null,
-    };
+    return resolveParticipantReminderContact(participant);
   }
 
   function buildEmailReminderHref(lessonInstance, contact) {
     if (!contact?.email) return null;
     const dayDate = formatReminderDayDate(lessonInstance.datetime_start);
     const service = lessonInstance.service?.service_name || 'שיעור';
-    const studentName = contact.name || 'תלמיד';
+    const studentName = contact.name || 'לקוח/ה';
     const subject = encodeURIComponent(`תזכורת: ${service} – ${dayDate}`);
     const reminderText = buildReminderMessage(lessonInstance, studentName);
     const rtlBody = reminderText
@@ -617,7 +601,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     return {
       buildConflictState: ({ payload, latestValue }) => ({
         title: 'השיעור השתנה מאז שפתחתם אותו.',
-        actionLabel: `סימון תלמיד כ-${getParticipantStatusLabel(payload.requestedStatus)}`,
+        actionLabel: `סימון משתתף/ת כ-${getParticipantStatusLabel(payload.requestedStatus)}`,
         diffLines: buildConflictLines(instance, latestValue, payload.participantId),
         participantId: payload.participantId,
       }),
@@ -864,8 +848,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       onUpdate?.();
       toast.success(
         status === 'scheduled'
-          ? 'סטטוס התלמיד שוחזר למתוכנן.'
-          : `סטטוס התלמיד עודכן ל-${getParticipantStatusLabel(status)}.`
+          ? 'סטטוס המשתתף/ת שוחזר למתוכנן.'
+          : `סטטוס המשתתף/ת עודכן ל-${getParticipantStatusLabel(status)}.`
       );
       return { ok: true, error: null };
     } catch (err) {
@@ -873,7 +857,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       const participant = displayParticipants.find((entry) => entry.id === participantId);
       const handled = await handleVersionConflict(err, createAttendanceConflictAdapter(), {
         participantId,
-        participantName: participant?.student?.full_name || 'תלמיד',
+        participantName: getParticipantDisplayName(participant, 'לקוח/ה'),
         requestedStatus: status,
         notes: typeof notes === 'string' ? notes : '',
         instructorCompensationDecision: options.instructorCompensationDecision || null,
@@ -965,7 +949,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
     const currentParticipant = displayParticipants.find((entry) => entry.id === absenceForm.participantId);
     if (!currentParticipant) {
-      const missingParticipantMessage = 'לא ניתן למצוא את התלמיד לעדכון.';
+      const missingParticipantMessage = 'לא ניתן למצוא את המשתתף/ת לעדכון.';
       setAbsenceFormError(missingParticipantMessage);
       setError(missingParticipantMessage);
       toast.error(missingParticipantMessage);
@@ -1135,7 +1119,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       }
       setRestorePreview({
         participantId: participant.id,
-        participantName: participant.student?.full_name || 'תלמיד',
+        participantName: getParticipantDisplayName(participant, 'לקוח/ה'),
         targetStatus,
         notes: options.notes || '',
         instructorCompensationDecision: options.instructorCompensationDecision || null,
@@ -1217,7 +1201,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     const contact = resolveReminderContact(participant);
     const waPhone = formatPhoneForWhatsApp(contact.phone);
     if (!waPhone || !org?.id) return;
-    const studentName = contact.name || 'תלמיד';
+    const studentName = contact.name || 'לקוח/ה';
     const message = buildReminderMessage(displayInstance, studentName);
     window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
     await markReminderSent(participant.id);
@@ -1393,10 +1377,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
         {billingWarnings.length > 0 && (() => {
           const participantMap = new Map(
-            displayParticipants.map((p) => [p.student_id, p.student?.full_name || p.student?.first_name || 'תלמיד'])
+            displayParticipants.map((p) => [p.student_id, getParticipantDisplayName(p, 'לקוח/ה')])
           );
           const names = billingWarnings
-            .map((w) => participantMap.get(w.student_id) || 'תלמיד')
+            .map((w) => participantMap.get(w.student_id) || 'לקוח/ה')
             .filter((v, i, a) => a.indexOf(v) === i)
             .join(', ');
           return (
@@ -1805,7 +1789,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                       {/* Main info + attendance buttons */}
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
-                          <p className="font-medium">{participant.student?.full_name || 'לא ידוע'}</p>
+                          <p className="font-medium">{getParticipantDisplayName(participant, 'לא ידוע')}</p>
                           <div className="text-sm text-gray-600">
                             {participant.participant_status === 'attended' && '✓ נכח'}
                             {participant.participant_status === 'no_show' && '✗ לא הגיע'}
@@ -2038,7 +2022,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                       {isScheduled && canManageAll && (
                         <div className="flex items-center gap-2 pt-1.5 border-t border-gray-200 flex-wrap">
                           <span className="text-[11px] text-gray-500">
-                            {reminderContact.source === 'guardian' ? 'איש קשר: הורה' : 'איש קשר: תלמיד'}
+                            {reminderContact.source === 'guardian' ? 'איש קשר: הורה' : 'איש קשר: לקוח/ה'}
                           </span>
                           {waPhone && (
                             <Button

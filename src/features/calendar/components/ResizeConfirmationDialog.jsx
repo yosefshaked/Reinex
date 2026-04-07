@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle } from 'lucide-react';
 import { formatDateDisplay, formatTimeDisplay } from '../utils/timeGrid';
+import { getParticipantDisplayName } from '../utils/participantDisplay.js';
 
 /**
  * ResizeConfirmationDialog - confirms rescheduling of lesson instances
@@ -24,7 +25,7 @@ export function ResizeConfirmationDialog({
 }) {
   if (!instance || !pendingReschedule) return null;
 
-  const firstStudentName = instance.participants?.[0]?.student?.full_name || 'לא ידוע';
+  const firstStudentName = getParticipantDisplayName(instance.participants?.[0], 'לא ידוע');
   const newDateTime = pendingReschedule.newDateTime;
   const newDate = formatDateDisplay(newDateTime.toISOString());
   const newTime = formatTimeDisplay(newDateTime.toISOString());
@@ -41,7 +42,7 @@ export function ResizeConfirmationDialog({
           {/* Confirmation Details */}
           <div className="bg-slate-50 p-3 rounded-lg space-y-2">
             <p className="text-sm text-slate-700">
-              <span className="font-semibold">תלמיד:</span> {firstStudentName}
+              <span className="font-semibold">לקוח/ה:</span> {firstStudentName}
             </p>
             <p className="text-sm text-slate-700">
               <span className="font-semibold">שירות:</span> {instance.service?.service_name || 'לא צוין'}

@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { authenticatedFetch } from '@/lib/api-client.js'
 import { AlertTriangle, Loader2, Lock, ShieldAlert } from 'lucide-react'
+import { getParticipantDisplayName } from '../utils/participantDisplay.js'
 
 function getDisplayInstance(instance) {
   return instance?.latest_correction?.effective_state?.instance
@@ -285,7 +286,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
               {displayParticipants.map((participant) => (
                 <div key={participant.id} className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-[1fr,220px] md:items-center">
                   <div>
-                    <div className="font-medium text-slate-900">{participant.student?.full_name || 'תלמיד'}</div>
+                    <div className="font-medium text-slate-900">{getParticipantDisplayName(participant, 'לקוח/ה')}</div>
                     <div className="text-xs text-slate-500">מצב נוכחי: {participant.participant_status || '—'}</div>
                   </div>
                   <Select

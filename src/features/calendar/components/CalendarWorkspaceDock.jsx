@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card.jsx';
 import { Badge } from '@/components/ui/badge.jsx';
 import { getWeekRangeDateStrings, parseLocalDateString } from '../utils/localDate.js';
+import { getParticipantDisplayNames } from '../utils/participantDisplay.js';
 
 function formatDateLabel(dateString) {
   const date = parseLocalDateString(dateString);
@@ -34,12 +35,7 @@ function formatTimeRange(startDate, endDate) {
 }
 
 function buildParticipantLabel(instance) {
-  const participants = Array.isArray(instance?.participants) ? instance.participants : [];
-  if (!participants.length) return 'ללא משתתפים';
-  return participants
-    .map((participant) => participant?.student?.full_name)
-    .filter(Boolean)
-    .join(', ');
+  return getParticipantDisplayNames(instance?.participants, 'ללא משתתפים').join(', ');
 }
 
 function SummaryMetric({ label, value, tone = 'default' }) {
