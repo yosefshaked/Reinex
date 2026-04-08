@@ -52,6 +52,13 @@ function createDraft(blockType = SHARED_BLOCK_TYPES.QUESTION) {
   };
 }
 
+function createUnsavedDraftCache() {
+  return {
+    [SHARED_BLOCK_TYPES.QUESTION]: createDraft(SHARED_BLOCK_TYPES.QUESTION),
+    [SHARED_BLOCK_TYPES.TEXT]: createDraft(SHARED_BLOCK_TYPES.TEXT),
+  };
+}
+
 function blockTypeLabel(blockType) {
   return blockType === SHARED_BLOCK_TYPES.TEXT ? 'טקסט משותף' : 'שאלה משותפת';
 }
@@ -95,6 +102,7 @@ export default function FormBlocksPage() {
   const [blocks, setBlocks] = useState([]);
   const [selectedBlockId, setSelectedBlockId] = useState(blockId || '');
   const [draft, setDraft] = useState(createDraft());
+  const [unsavedDraftsByType, setUnsavedDraftsByType] = useState(() => createUnsavedDraftCache());
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
 
@@ -125,12 +133,44 @@ export default function FormBlocksPage() {
         session,
         params: { org_id: activeOrgId },
       });
+      setUnsavedDraftsByType(createUnsavedDraftCache());
       setDraft(data);
     } catch (loadError) {
       console.error('Failed to load form block detail', loadError);
       toast.error(loadError?.message || 'טעינת פרטי הבלוק נכשלה');
     }
   }, [activeOrgId, canLoad, session]);
+
+  const syncUnsavedDrafts = useCallback((nextDraft) => {
+    const sharedName = String(nextDraft?.name || '').trim();
+    const sharedMetadata = nextDraft?.metadata || {};
+    const sharedActive = nextDraft?.is_active ?? true;
+    setUnsavedDraftsByType((prev) => ({
+      [SHARED_BLOCK_TYPES.QUESTION]: {
+        ...(prev[SHARED_BLOCK_TYPES.QUESTION] || createDraft(SHARED_BLOCK_TYPES.QUESTION)),
+        name: sharedName,
+        metadata: sharedMetadata,
+        is_active: sharedActive,
+      },
+      [SHARED_BLOCK_TYPES.TEXT]: {
+        ...(prev[SHARED_BLOCK_TYPES.TEXT] || createDraft(SHARED_BLOCK_TYPES.TEXT)),
+        name: sharedName,
+        metadata: sharedMetadata,
+        is_active: sharedActive,
+      },
+      [nextDraft.block_type]: nextDraft,
+    }));
+  }, []);
+
+  const updateDraft = useCallback((updater) => {
+    setDraft((prev) => {
+      const nextDraft = typeof updater === 'function' ? updater(prev) : updater;
+      if (nextDraft && !nextDraft.id) {
+        syncUnsavedDrafts(nextDraft);
+      }
+      return nextDraft;
+    });
+  }, [syncUnsavedDrafts]);
 
   useEffect(() => {
     if (canLoad) {
@@ -165,15 +205,39 @@ export default function FormBlocksPage() {
     }
   }, [draft.id, selectedListBlock]);
 
-  const handleCreate = (type) => {
-    const nextDraft = createDraft(type);
+  const handleCreate = () => {
+    const nextUnsavedDrafts = createUnsavedDraftCache();
+    const nextDraft = nextUnsavedDrafts[SHARED_BLOCK_TYPES.QUESTION];
     setSelectedBlockId('');
+    setUnsavedDraftsByType(nextUnsavedDrafts);
     setDraft(nextDraft);
     navigate('/forms/shared-blocks');
   };
 
+  const handleDraftTypeChange = (blockType) => {
+    if (draft.id || blockType === draft.block_type) return;
+    const sharedName = String(draft.name || unsavedDraftsByType[blockType]?.name || '').trim();
+    const nextDraft = {
+      ...(unsavedDraftsByType[blockType] || createDraft(blockType)),
+      block_type: blockType,
+      name: sharedName,
+      metadata: draft.metadata || unsavedDraftsByType[blockType]?.metadata || {},
+      is_active: true,
+    };
+    setUnsavedDraftsByType((prev) => ({
+      ...prev,
+      [draft.block_type]: {
+        ...(prev[draft.block_type] || createDraft(draft.block_type)),
+        ...draft,
+        name: sharedName,
+      },
+      [blockType]: nextDraft,
+    }));
+    setDraft(nextDraft);
+  };
+
   const updateContent = (patch) => {
-    setDraft((prev) => ({
+    updateDraft((prev) => ({
       ...prev,
       content_schema: {
         ...prev.content_schema,
@@ -204,6 +268,7 @@ export default function FormBlocksPage() {
           metadata: draft.metadata || {},
         },
       });
+      setUnsavedDraftsByType(createUnsavedDraftCache());
       setDraft(payload);
       setSelectedBlockId(payload.id);
       navigate(`/forms/shared-blocks/${payload.id}`);
@@ -268,13 +333,9 @@ export default function FormBlocksPage() {
             <ArrowRight className="h-4 w-4" />
             חזרה לטפסים
           </Button>
-          <Button variant="outline" className="gap-2" onClick={() => handleCreate(SHARED_BLOCK_TYPES.TEXT)}>
+          <Button className="gap-2" onClick={handleCreate}>
             <Plus className="h-4 w-4" />
-            טקסט משותף
-          </Button>
-          <Button className="gap-2" onClick={() => handleCreate(SHARED_BLOCK_TYPES.QUESTION)}>
-            <Plus className="h-4 w-4" />
-            שאלה משותפת
+            צור בלוק משותף
           </Button>
         </div>
       }
@@ -353,14 +414,14 @@ export default function FormBlocksPage() {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>שם פנימי</Label>
-                <Input value={draft.name || ''} onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))} />
+                <Input value={draft.name || ''} onChange={(event) => updateDraft((prev) => ({ ...prev, name: event.target.value }))} />
               </div>
               <div className="space-y-2">
                 <Label>סוג בלוק</Label>
                 <Select
                   value={draft.block_type}
                   disabled={Boolean(draft.id)}
-                  onValueChange={(value) => setDraft(createDraft(value))}
+                  onValueChange={handleDraftTypeChange}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -370,6 +431,11 @@ export default function FormBlocksPage() {
                     <SelectItem value={SHARED_BLOCK_TYPES.TEXT}>טקסט משותף</SelectItem>
                   </SelectContent>
                 </Select>
+                {!draft.id ? (
+                  <p className="text-xs text-slate-500">אפשר לשנות את סוג הבלוק עד השמירה הראשונה.</p>
+                ) : (
+                  <p className="text-xs text-slate-500">אחרי יצירה סוג הבלוק נשאר קבוע כדי לשמור על עקביות בכל הטפסים שמשתמשים בו.</p>
+                )}
               </div>
             </div>
 
