@@ -20,9 +20,23 @@ import { AlertTriangle, Loader2, Lock, ShieldAlert } from 'lucide-react'
 import { getParticipantDisplayName } from '../utils/participantDisplay.js'
 
 function getDisplayInstance(instance) {
-  return instance?.latest_correction?.effective_state?.instance
+  const resolved = instance?.latest_correction?.effective_state?.instance
     ? { ...instance, ...instance.latest_correction.effective_state.instance }
     : instance
+
+  if (!resolved || typeof resolved !== 'object') {
+    return resolved
+  }
+
+  const normalizedStatus = String(resolved.status || '').trim().toLowerCase()
+  const status = ['cancelled_student', 'cancelled_clinic', 'no_show'].includes(normalizedStatus)
+    ? 'cancelled'
+    : normalizedStatus
+
+  return {
+    ...resolved,
+    status: status || resolved.status,
+  }
 }
 
 function getDisplayParticipants(instance) {
@@ -37,26 +51,65 @@ function getDisplayParticipants(instance) {
   }))
 }
 
-function isCancellationStatus(status) {
-  return status === 'cancelled_student' || status === 'cancelled_clinic' || status === 'no_show'
-}
-
 function formatCurrencyDelta(amount) {
   const numericAmount = Number(amount || 0)
   const prefix = numericAmount > 0 ? '+' : ''
   return `${prefix}${numericAmount.toFixed(2)} ₪`
 }
 
+function resolveCorrectionErrorMessage(error, participantsById = new Map()) {
+  const code = error?.data?.message || error?.message || ''
+  const details = error?.data?.details || {}
+  const blockingNames = Array.isArray(details?.participant_ids)
+    ? details.participant_ids
+      .map((participantId) => participantsById.get(participantId))
+      .filter(Boolean)
+    : []
+
+  if (code === 'cancelled_instance_has_attended_participants') {
+    return blockingNames.length > 0
+      ? `לא ניתן לסמן את השיעור כמבוטל כל עוד יש משתתפים שסומנו כנוכחים: ${blockingNames.join(', ')}.`
+      : 'לא ניתן לסמן את השיעור כמבוטל כל עוד יש משתתפים שסומנו כנוכחים. יש לעדכן קודם את סטטוס המשתתפים הרלוונטיים.'
+  }
+
+  if (code === 'completed_instance_has_scheduled_participants') {
+    return blockingNames.length > 0
+      ? `לא ניתן לסמן את השיעור כהושלם כל עוד המשתתפים הבאים עדיין במצב מתוכנן: ${blockingNames.join(', ')}.`
+      : 'לא ניתן לסמן את השיעור כהושלם כל עוד יש משתתפים שעדיין במצב מתוכנן.'
+  }
+
+  if (code === 'invalid_participant_patch_status') {
+    return 'אחד מסטטוסי המשתתפים שנבחרו אינו תקין.'
+  }
+
+  if (code === 'failed_to_build_correction_preview') {
+    return 'יצירת תצוגת ההשפעה נכשלה. נסו לרענן את השיעור ולנסות שוב.'
+  }
+
+  if (blockingNames.length > 0) {
+    return `${code}: ${blockingNames.join(', ')}`
+  }
+
+  if (details?.participant_ids?.length) {
+    return `${code}: ${details.participant_ids.length} משתתפים דורשים טיפול.`
+  }
+
+  return error?.data?.message || error?.message || 'יצירת תצוגת מקדימה נכשלה.'
+}
+
 export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onApplied }) {
   const displayInstance = useMemo(() => getDisplayInstance(instance), [instance])
   const displayParticipants = useMemo(() => getDisplayParticipants(instance), [instance])
+  const participantNamesById = useMemo(
+    () => new Map(displayParticipants.map((participant) => [participant.id, getParticipantDisplayName(participant, 'לקוח/ה')])),
+    [displayParticipants],
+  )
 
   const [isOpen, setIsOpen] = useState(forceOpen)
   const [reasonCode, setReasonCode] = useState('status_fix')
   const [reasonText, setReasonText] = useState('')
   const [correctionMode, setCorrectionMode] = useState('participant_adjustment')
   const [status, setStatus] = useState(displayInstance?.status || 'scheduled')
-  const [closedReason, setClosedReason] = useState(displayInstance?.closed_reason || '')
   const [participantStatuses, setParticipantStatuses] = useState(() => (
     Object.fromEntries(displayParticipants.map((participant) => [participant.id, participant.participant_status || 'scheduled']))
   ))
@@ -78,7 +131,6 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
 
   useEffect(() => {
     setStatus(displayInstance?.status || 'scheduled')
-    setClosedReason(displayInstance?.closed_reason || '')
     setParticipantStatuses(Object.fromEntries(displayParticipants.map((participant) => [participant.id, participant.participant_status || 'scheduled'])))
     setPreview(null)
     setError(null)
@@ -88,9 +140,6 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
     const instancePatch = {}
     if (status !== displayInstance?.status) {
       instancePatch.status = status
-    }
-    if ((closedReason || null) !== (displayInstance?.closed_reason || null)) {
-      instancePatch.closed_reason = closedReason || null
     }
 
     const participantPatches = displayParticipants
@@ -111,7 +160,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
       instance_patch: instancePatch,
       participant_patches: participantPatches,
     }
-  }, [closedReason, correctionMode, displayInstance?.closed_reason, displayInstance?.status, displayParticipants, instance?.id, instance?.version, orgId, participantStatuses, reasonCode, reasonText, status])
+  }, [correctionMode, displayInstance?.status, displayParticipants, instance?.id, instance?.version, orgId, participantStatuses, reasonCode, reasonText, status])
 
   async function handlePreview() {
     setIsPreviewLoading(true)
@@ -123,7 +172,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
       })
       setPreview(payload)
     } catch (err) {
-      setError(err?.data?.message || err?.message || 'יצירת תצוגת מקדימה נכשלה.')
+      setError(resolveCorrectionErrorMessage(err, participantNamesById))
     } finally {
       setIsPreviewLoading(false)
     }
@@ -148,7 +197,7 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
       if (err?.status === 423 && err?.data?.preview) {
         setPreview(err.data.preview)
       }
-      setError(err?.data?.message || err?.message || 'החלת התיקון נכשלה.')
+      setError(resolveCorrectionErrorMessage(err, participantNamesById))
       setConfirmOpen(false)
     } finally {
       setIsApplyLoading(false)
@@ -253,31 +302,10 @@ export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onAp
                 <SelectContent>
                   <SelectItem value="scheduled">מתוכנן</SelectItem>
                   <SelectItem value="completed">הושלם</SelectItem>
-                  <SelectItem value="no_show">אי הגעה</SelectItem>
-                  <SelectItem value="cancelled_student">בוטל ע"י תלמיד</SelectItem>
-                  <SelectItem value="cancelled_clinic">בוטל ע"י המרפאה</SelectItem>
+                  <SelectItem value="cancelled">בוטל</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {isCancellationStatus(status) && (
-              <div className="space-y-2">
-                <Label>סיבת סגירה</Label>
-                <Select value={closedReason || 'none'} onValueChange={(value) => setClosedReason(value === 'none' ? '' : value)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">ללא</SelectItem>
-                    <SelectItem value="student_request">בקשת תלמיד</SelectItem>
-                    <SelectItem value="clinic_closure">סגירת מרפאה</SelectItem>
-                    <SelectItem value="instructor_unavailable">מדריך לא זמין</SelectItem>
-                    <SelectItem value="doctor_note">אישור רופא</SelectItem>
-                    <SelectItem value="no_show">אי הגעה</SelectItem>
-                    <SelectItem value="other">אחר</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
           </div>
 
           <div className="space-y-3">

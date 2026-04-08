@@ -192,6 +192,23 @@ export function getCurrentDateInTimezone(timeZone = DEFAULT_SCHEDULING_TIMEZONE)
   return `${year}-${month}-${day}`;
 }
 
+export function getDateKeyInTimezone(datetimeValue, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
+  const date = new Date(datetimeValue);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const partMap = getTimeZonePartMap(date, timeZone);
+  const year = partMap.year;
+  const month = partMap.month;
+  const day = partMap.day;
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
 export function buildUtcIsoForTimezoneDateTime(dateString, timeString, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
   const parsedDate = parseYmdDateString(dateString);
   const normalizedTime = normalizeClockTime(timeString);
@@ -215,13 +232,27 @@ export function buildUtcIsoForTimezoneDateTime(dateString, timeString, timeZone 
 
 export function buildUtcBoundsForTimezoneDateRange(startDateString, endDateString, timeZone = DEFAULT_SCHEDULING_TIMEZONE) {
   const rangeStartIso = buildUtcIsoForTimezoneDateTime(startDateString, '00:00', timeZone);
-  const rangeEndIso = buildUtcIsoForTimezoneDateTime(endDateString, '23:59', timeZone);
-  if (!rangeStartIso || !rangeEndIso) {
+  const parsedEndDate = parseYmdDateString(endDateString);
+  if (!rangeStartIso || !parsedEndDate) {
+    return null;
+  }
+
+  const nextDayUtc = new Date(Date.UTC(parsedEndDate.year, parsedEndDate.month - 1, parsedEndDate.day, 0, 0, 0, 0));
+  nextDayUtc.setUTCDate(nextDayUtc.getUTCDate() + 1);
+  const nextDayParts = getTimeZonePartMap(nextDayUtc, 'UTC');
+  const rangeEndExclusiveIso = buildUtcIsoForTimezoneDateTime(
+    `${nextDayParts.year}-${nextDayParts.month}-${nextDayParts.day}`,
+    '00:00',
+    timeZone,
+  );
+
+  if (!rangeEndExclusiveIso) {
     return null;
   }
 
   return {
     startIso: rangeStartIso,
-    endIso: rangeEndIso,
+    endIso: rangeEndExclusiveIso,
+    endExclusiveIso: rangeEndExclusiveIso,
   };
 }

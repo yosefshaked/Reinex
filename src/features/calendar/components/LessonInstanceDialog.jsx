@@ -34,6 +34,21 @@ const DEFAULT_BILLING_POLICY = {
   cancelled_clinic: false,
 };
 
+const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = {
+  attended: true,
+  no_show: true,
+  cancelled_student: false,
+  cancelled_clinic: false,
+};
+
+function normalizeInstanceStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'cancelled_student' || normalized === 'cancelled_clinic' || normalized === 'no_show') {
+    return 'cancelled';
+  }
+  return normalized;
+}
+
 function toLocalDateString(dateObj) {
   if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
   const year = dateObj.getFullYear();
@@ -131,20 +146,25 @@ function resolveLessonSchedulingAvailability({ capability, date, time, durationM
 }
 
 function isCancellationStatus(status) {
-  return status === 'cancelled_student' || status === 'cancelled_clinic';
+  return normalizeInstanceStatus(status) === 'cancelled';
 }
 
 function getCancellationStatusLabel(status) {
-  if (status === 'cancelled_student') return 'בוטל ע"י תלמיד';
-  if (status === 'cancelled_clinic') return 'בוטל ע"י המרפאה';
-  if (status === 'no_show') return 'אי הגעה';
+  if (normalizeInstanceStatus(status) === 'cancelled') return 'שיעור בוטל';
   return 'ביטול';
 }
 
 function getDisplayInstance(instance) {
-  return instance?.latest_correction?.effective_state?.instance
+  const resolved = instance?.latest_correction?.effective_state?.instance
     ? { ...instance, ...instance.latest_correction.effective_state.instance }
     : instance;
+  if (!resolved || typeof resolved !== 'object') {
+    return resolved;
+  }
+  return {
+    ...resolved,
+    status: normalizeInstanceStatus(resolved.status) || resolved.status,
+  };
 }
 
 function getDisplayParticipants(instance) {
@@ -184,14 +204,28 @@ function resolveMutationError(error) {
   if (error?.message === 'failed_to_build_status_change_preview') {
     return 'לא ניתן היה לבנות תצוגה מקדימה לשינוי הסטטוס.';
   }
+  const cancellationConflictMessage = error?.data?.message || error?.message;
+  if (cancellationConflictMessage === 'instance_cancelled_has_attended_participants') {
+    const names = Array.isArray(error?.data?.attended_participants)
+      ? error.data.attended_participants.map((participant) => participant?.name).filter(Boolean)
+      : (Array.isArray(error?.attended_participants)
+        ? error.attended_participants.map((participant) => participant?.name).filter(Boolean)
+        : []);
+    if (names.length > 0) {
+      return `לא ניתן לבטל שיעור שבו כבר סומנה נוכחות. יש להסדיר קודם את: ${names.join(', ')}.`;
+    }
+    return 'לא ניתן לבטל שיעור שבו כבר סומנה נוכחות לאחד המשתתפים.';
+  }
   return error?.message || 'הפעולה נכשלה.';
 }
 
 function getParticipantStatusLabel(status) {
   if (status === 'attended') return 'נכח';
   if (status === 'no_show') return 'לא הגיע';
+  if (status === 'cancelled') return 'בוטל';
   if (status === 'cancelled_student') return 'בוטל ע"י תלמיד';
   if (status === 'cancelled_clinic') return 'בוטל ע"י המכון';
+  if (status === 'completed') return 'הושלם';
   return 'מתוכנן';
 }
 
@@ -383,6 +417,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [restorePreviewError, setRestorePreviewError] = useState('');
   const [restorePreviewLoading, setRestorePreviewLoading] = useState(false);
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
+  const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
   const latestPreviewRequestIdRef = useRef(0);
   const latestStudentSearchRequestIdRef = useRef(0);
   
@@ -393,7 +428,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     time: '',
     duration_minutes: 60,
     status: 'scheduled',
-    closed_reason: '',
   });
   const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
   const [selectedOverrideReasonCode, setSelectedOverrideReasonCode] = useState('');
@@ -411,8 +445,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       date: toLocalDateString(dateTime),
       time: dateTime.toTimeString().slice(0, 5),
       duration_minutes: instanceValue.duration_minutes || 60,
-      status: instanceValue.status || 'scheduled',
-      closed_reason: instanceValue.closed_reason || '',
+      status: normalizeInstanceStatus(instanceValue.status) || 'scheduled',
     });
     const overrideState = resolveSchedulingOverrideFormState(instanceValue?.metadata?.scheduling_override);
     setUseSchedulingOverride(overrideState.enabled);
@@ -447,30 +480,46 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   useEffect(() => {
     if (!org?.id) {
       setBillingPolicy(DEFAULT_BILLING_POLICY);
+      setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
       return undefined;
     }
 
     let cancelled = false;
-    const loadBillingPolicy = async () => {
+    const loadPolicies = async () => {
       try {
         const response = await authenticatedFetch('settings', {
-          params: { org_id: org.id, key: 'billing_consumption_policy' },
+          params: {
+            org_id: org.id,
+            key: 'billing_consumption_policy,instructor_earnings_policy',
+          },
         });
+        const settings = response?.settings && typeof response.settings === 'object'
+          ? response.settings
+          : {};
         if (!cancelled) {
           setBillingPolicy({
             ...DEFAULT_BILLING_POLICY,
-            ...(response?.value && typeof response.value === 'object' ? response.value : {}),
+            ...(settings.billing_consumption_policy && typeof settings.billing_consumption_policy === 'object'
+              ? settings.billing_consumption_policy
+              : {}),
+          });
+          setInstructorEarningsPolicy({
+            ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
+            ...(settings.instructor_earnings_policy && typeof settings.instructor_earnings_policy === 'object'
+              ? settings.instructor_earnings_policy
+              : {}),
           });
         }
       } catch (loadError) {
-        console.error('Failed to load billing policy for attendance dialog:', loadError);
+        console.error('Failed to load finance policies for attendance dialog:', loadError);
         if (!cancelled) {
           setBillingPolicy(DEFAULT_BILLING_POLICY);
+          setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
         }
       }
     };
 
-    void loadBillingPolicy();
+    void loadPolicies();
     return () => {
       cancelled = true;
     };
@@ -661,9 +710,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             customReason: payload.customOverrideReason,
           }),
         };
-        if (isCancellationStatus(payload.formData.status) || payload.formData.status === 'no_show') {
-          body.closed_reason = payload.formData.closed_reason || null;
-        }
         await authenticatedFetch('calendar/instances', { method: 'PUT', body });
         setIsEditMode(false);
         onUpdate?.();
@@ -675,7 +721,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     return {
       buildConflictState: ({ latestValue }) => ({
         title: 'השיעור השתנה מאז שפתחתם אותו.',
-        actionLabel: 'עדכון סטטוס ביטול',
+        actionLabel: 'ביטול שיעור',
         diffLines: buildConflictLines(instance, latestValue),
       }),
       retry: async ({ latestValue, payload }) => {
@@ -685,7 +731,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             id: latestValue.id,
             org_id: org.id,
             status: payload.requestedStatus,
-            closed_reason: payload.closedReason || null,
             expected_version: latestValue.version,
           },
         });
@@ -772,10 +817,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           customReason: customOverrideReason,
         }),
       };
-
-      if (isCancellationStatus(formData.status) || formData.status === 'no_show') {
-        body.closed_reason = formData.closed_reason || null;
-      }
 
       await authenticatedFetch('calendar/instances', {
         method: 'PUT',
@@ -979,7 +1020,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
-  async function handleCancel(status, closedReason) {
+  async function handleCancel(status) {
     if (!org?.id) {
       setError('Organization not found');
       return;
@@ -994,7 +1035,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           id: instance.id,
           org_id: org.id,
           status,
-          closed_reason: closedReason || null,
           expected_version: instance.version,
         },
       });
@@ -1005,7 +1045,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       console.error('Error cancelling lesson:', err);
       const handled = await handleVersionConflict(err, createCancelConflictAdapter(), {
         requestedStatus: status,
-        closedReason: closedReason || null,
       });
       if (!handled) {
         setError(resolveMutationError(err));
@@ -1015,9 +1054,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
-  async function handleCancelSelection(status, closedReason) {
+  async function handleCancelSelection(status) {
     setCancelDialogOpen(false);
-    await handleCancel(status, closedReason);
+    await handleCancel(status);
   }
 
   async function handleReportStatus(status) {
@@ -1295,6 +1334,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const scheduledParticipantsCount = displayParticipants.filter(
     (p) => p.participant_status === 'scheduled'
   ).length;
+  const attendedParticipants = displayParticipants.filter((participant) => participant.participant_status === 'attended');
+  const resolvedParticipantsCount = displayParticipants.length - scheduledParticipantsCount;
+  const clinicCancellationChargesClients = Boolean(billingPolicy?.cancelled_clinic);
+  const clinicCancellationPaysInstructor = Boolean(instructorEarningsPolicy?.cancelled_clinic);
+  const attendedParticipantNames = attendedParticipants
+    .map((participant) => getParticipantDisplayName(participant, 'לקוח/ה'))
+    .filter(Boolean);
   // Block completing an instance when at least one participant still has no resolved attendance status.
   // An instance with zero participants is exempt (e.g. template-generated shells before enrolment).
   const hasUnsetParticipants =
@@ -1592,36 +1638,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="scheduled">מתוכנן</SelectItem>
-                  <SelectItem value="cancelled_student">בוטל ע"י תלמיד</SelectItem>
-                  <SelectItem value="cancelled_clinic">בוטל ע"י המרפאה</SelectItem>
+                  {formData.status === 'cancelled' ? <SelectItem value="cancelled">בוטל</SelectItem> : null}
                   <SelectItem value="completed">הושלם</SelectItem>
-                  {canManageAll && <SelectItem value="no_show">אי הגעה</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
-
-            {/* Closed Reason (if cancelled / no-show) */}
-            {(isCancellationStatus(formData.status) || formData.status === 'no_show') && (
-              <div>
-                <Label htmlFor="closed_reason">פירוט</Label>
-                <Select
-                  value={formData.closed_reason}
-                  onValueChange={(value) => setFormData({ ...formData, closed_reason: value })}
-                >
-                  <SelectTrigger id="closed_reason">
-                    <SelectValue placeholder="בחר סיבה" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="student_request">בקשת תלמיד</SelectItem>
-                    <SelectItem value="clinic_closure">סגירת מרפאה</SelectItem>
-                    <SelectItem value="instructor_unavailable">מדריך לא זמין</SelectItem>
-                    <SelectItem value="doctor_note">אישור רופא</SelectItem>
-                    <SelectItem value="no_show">אי הגעה</SelectItem>
-                    <SelectItem value="other">אחר</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
 
             <DialogFooter>
               <Button
@@ -1676,15 +1697,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   >
                     <Check className="h-4 w-4 ms-1" />
                     הושלם
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleReportStatus('no_show')}
-                    disabled={isSaving}
-                  >
-                    <XCircle className="h-4 w-4 ms-1" />
-                    אי הגעה
                   </Button>
                 </div>
               )}
@@ -2197,16 +2209,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               </div>
             )}
 
-            {/* Cancellation Reason */}
-            {displayInstance.closed_reason && (
-              <div>
-                <label className="text-sm font-medium text-gray-700">
-                  {getCancellationStatusLabel(displayInstance.status)}
-                </label>
-                <p className="mt-1 text-gray-900">{displayInstance.closed_reason}</p>
-              </div>
-            )}
-
             {/* Created Source */}
             {displayInstance.created_source && (
               <div className="text-sm text-gray-600">
@@ -2215,7 +2217,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             )}
 
             {/* Cancel Button */}
-            {canEdit && !isCancellationStatus(displayInstance.status) && displayInstance.status !== 'no_show' && (
+            {canEdit && !isCancellationStatus(displayInstance.status) && (
               <div className="pt-4 border-t">
                 <Button
                   variant="destructive"
@@ -2235,23 +2237,54 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           <DialogHeader>
             <DialogTitle>ביטול שיעור</DialogTitle>
             <DialogDescription>
-              בחר את הסטטוס שיירשם לשיעור.
+              הפעולה תסמן את השיעור כמבוטל ותעדכן את המשתתפים שעדיין מתוכננים לביטול ע"י המרפאה.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2">
-            <Button type="button" variant="outline" className="justify-start" onClick={() => handleCancelSelection('cancelled_student', 'student_request')} disabled={isSaving}>
-              בוטל ע"י תלמיד
-            </Button>
-            <Button type="button" variant="outline" className="justify-start" onClick={() => handleCancelSelection('cancelled_clinic', 'clinic_closure')} disabled={isSaving}>
-              בוטל ע"י המרפאה
-            </Button>
-            <Button type="button" variant="outline" className="justify-start" onClick={() => handleCancelSelection('no_show', 'no_show')} disabled={isSaving}>
-              אי הגעה
-            </Button>
+          <div className="space-y-4">
+            {attendedParticipants.length > 0 ? (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>
+                  לא ניתן לבטל שיעור שבו כבר סומנה נוכחות. יש להסדיר קודם את: {attendedParticipantNames.join(', ')}.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <Alert>
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>
+                  {scheduledParticipantsCount > 0
+                    ? `${scheduledParticipantsCount} משתתפים/ות שעדיין במצב מתוכנן יסומנו כ-"בוטל ע"י המרפאה". ${resolvedParticipantsCount > 0 ? `${resolvedParticipantsCount} משתתפים/ות שכבר הוכרעו יישארו ללא שינוי.` : ''}`
+                    : 'לשיעור הזה אין משתתפים במצב מתוכנן, ולכן הפעולה תעדכן רק את סטטוס השיעור עצמו.'}
+                </AlertDescription>
+              </Alert>
+            )}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              <div className="font-medium text-slate-900">השפעת מדיניות הארגון</div>
+              <ul className="mt-3 space-y-2">
+                <li>
+                  {clinicCancellationChargesClients
+                    ? 'חיוב לקוח/ה: לפי מדיניות הארגון, ביטול ע"י המרפאה עדיין מסומן כחיוב רלוונטי.'
+                    : 'חיוב לקוח/ה: לפי מדיניות הארגון, ביטול ע"י המרפאה לא יחייב את הלקוח/ה.'}
+                </li>
+                <li>
+                  {clinicCancellationPaysInstructor
+                    ? 'שכר מדריך/ה: לפי מדיניות הארגון, ביטול ע"י המרפאה עדיין מזכה את המדריך/ה.'
+                    : 'שכר מדריך/ה: לפי מדיניות הארגון, ביטול ע"י המרפאה לא מזכה את המדריך/ה.'}
+                </li>
+              </ul>
+            </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setCancelDialogOpen(false)} disabled={isSaving}>
-              ביטול
+              חזרה
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => handleCancelSelection('cancelled')}
+              disabled={isSaving || attendedParticipants.length > 0}
+            >
+              בטל שיעור
             </Button>
           </DialogFooter>
         </DialogContent>

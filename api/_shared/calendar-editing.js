@@ -64,7 +64,7 @@ export async function fetchLessonMutationState(tenantClient, options) {
   if (instanceId) {
     const { data: instance, error } = await tenantClient
       .from('lesson_instances')
-      .select('id, instructor_employee_id, service_id, status, is_closed, version, metadata')
+      .select('id, instructor_employee_id, service_id, status, documentation_status, is_closed, version, metadata')
       .eq('id', instanceId)
       .maybeSingle();
 

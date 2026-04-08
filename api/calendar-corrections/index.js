@@ -17,6 +17,7 @@ import { buildInstanceCorrectionPreview } from '../_shared/calendar-corrections.
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { ACTIVE_LESSON_INSTANCE_STATUSES, normalizeLessonInstanceStatus } from '../_shared/lesson-instance-status.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -180,7 +181,7 @@ async function createAppliedCorrectionArtifacts({ tenantClient, userId, preview,
 
   for (const participantImpact of preview.impact_snapshot?.billing?.affected_participants || []) {
     const delta = Number(participantImpact.delta_amount || 0);
-    if (delta === 0 || !participantImpact.commitment_id) {
+    if (delta === 0 || !participantImpact.client_profile_id) {
       continue;
     }
 
@@ -189,12 +190,13 @@ async function createAppliedCorrectionArtifacts({ tenantClient, userId, preview,
     const { data: ledgerAdjustment, error: ledgerError } = await tenantClient
       .from('ledger_transactions')
       .insert({
+        client_profile_id: participantImpact.client_profile_id,
         student_id: participantImpact.student_id,
-        commitment_id: participantImpact.commitment_id,
+        commitment_id: participantImpact.commitment_id || null,
         transaction_type: transactionType,
         usage_type: usageType,
         amount: Math.abs(delta),
-        source_ref: null,
+        source_ref: participantImpact.participant_id,
         notes: reasonText,
         metadata: {
           source_type: 'calendar_instance_correction',
@@ -293,6 +295,14 @@ export default async function calendarCorrections(context, req) {
   const instancePatch = normalizePatchObject(body?.instance_patch || body?.instancePatch);
   const participantPatches = normalizeParticipantPatches(body?.participant_patches || body?.participantPatches);
 
+  if (Object.prototype.hasOwnProperty.call(instancePatch, 'status')) {
+    const normalizedStatus = normalizeLessonInstanceStatus(instancePatch.status);
+    if (!ACTIVE_LESSON_INSTANCE_STATUSES.has(normalizedStatus)) {
+      return respond(context, 400, { message: 'invalid_instance_patch_status' });
+    }
+    instancePatch.status = normalizedStatus;
+  }
+
   if (action === 'apply' && !reasonText) {
     return respond(context, 400, { message: 'missing_reason_text' });
   }
@@ -306,6 +316,14 @@ export default async function calendarCorrections(context, req) {
       participantPatches,
     });
   } catch (error) {
+    if (error?.code === 'cancelled_instance_has_attended_participants'
+      || error?.code === 'completed_instance_has_scheduled_participants'
+      || error?.code === 'invalid_participant_patch_status') {
+      return respond(context, 422, {
+        message: error.code,
+        details: error.details || {},
+      });
+    }
     context.log?.error?.('calendar-corrections failed to build preview', { message: error?.message, originalInstanceId });
     return respond(context, 500, { message: 'failed_to_build_correction_preview' });
   }

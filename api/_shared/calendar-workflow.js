@@ -70,7 +70,7 @@ function resolvePersistedBillingRequirement(participant, policies, status) {
   if (pricingBreakdown?.policy_allowed === true) {
     return true;
   }
-  if (persistedLessonStatus === 'cancelled_clinic') {
+  if (persistedLessonStatus === 'cancelled_clinic' && status === 'cancelled_clinic') {
     return false;
   }
 

@@ -74,12 +74,8 @@ export function formatDateDisplay(dateString) {
  * Get status icon and color for instance
  */
 export function getInstanceStatusIcon(status, documentationStatus) {
-  if (status === 'cancelled_student') {
-    return { icon: '❌', color: 'text-red-600', label: 'בוטל ע"י תלמיד' };
-  }
-
-  if (status === 'cancelled_clinic') {
-    return { icon: '❌', color: 'text-red-600', label: 'בוטל ע"י המרפאה' };
+  if (status === 'cancelled' || status === 'cancelled_student' || status === 'cancelled_clinic' || status === 'no_show') {
+    return { icon: '❌', color: 'text-red-600', label: 'בוטל' };
   }
   
   if (status === 'completed') {
@@ -87,10 +83,6 @@ export function getInstanceStatusIcon(status, documentationStatus) {
       return { icon: '✅', color: 'text-green-600', label: 'תועד' };
     }
     return { icon: '✅', color: 'text-green-600', label: 'הושלם' };
-  }
-  
-  if (status === 'no_show') {
-    return { icon: '🔴', color: 'text-red-600', label: 'לא הגיע' };
   }
   
   if (status === 'requires_attention') {

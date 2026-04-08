@@ -7,9 +7,19 @@ import {
 } from './employee-finance.js';
 import { normalizeEntityVersion } from './calendar-editing.js';
 import { normalizeString } from './org-bff.js';
-import { buildBillingDecision, loadCommitmentsMap } from './student-billing.js';
+import { buildBillingDecision, buildDirectClientBillingDecision, loadCommitmentsMap } from './student-billing.js';
+import { normalizeLessonInstanceStatus } from './lesson-instance-status.js';
 
-const LESSON_BILLING_USAGE_TYPES = ['standard', 'double', 'cross_service'];
+const LESSON_BILLING_USAGE_TYPES = ['standard', 'double', 'cross_service', 'manual_adjustment', 'manual_topup'];
+const PARTICIPANT_STATUSES = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
+
+class CorrectionValidationError extends Error {
+  constructor(code, details = {}) {
+    super(code);
+    this.code = code;
+    this.details = details;
+  }
+}
 
 function roundCurrency(value) {
   return Number(Number(value || 0).toFixed(2));
@@ -86,6 +96,24 @@ function buildRateKey(employeeId, serviceId) {
   return `${employeeId || ''}:${serviceId || ''}`;
 }
 
+async function loadServicesMap(tenantClient, serviceIds = []) {
+  const ids = Array.from(new Set(asArray(serviceIds).map((value) => normalizeString(value)).filter(Boolean)));
+  if (ids.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await tenantClient
+    .from('Services')
+    .select('id, default_customer_charge_amount')
+    .in('id', ids);
+
+  if (error) {
+    throw error;
+  }
+
+  return new Map(asArray(data).map((service) => [service.id, service]));
+}
+
 function shouldInstructorEarn(instance, participants, policies) {
   void instance;
   return lessonHasInstructorCompensation(participants, policies);
@@ -97,26 +125,58 @@ function computeWorkedMinutes(instance, participants, policies) {
     : 0;
 }
 
-function computeParticipantCharge(instance, participant, commitmentMap, policies) {
+function computeParticipantChargeDecision(instance, participant, commitmentMap, serviceMap, policies) {
   const commitment = participant?.commitment_id ? commitmentMap.get(participant.commitment_id) || null : null;
-  const decision = buildBillingDecision({
-    participant,
-    instance,
-    commitment,
-    policies,
-  });
-
-  if (decision.shouldCharge) {
-    return roundCurrency(decision.chargeAmount);
+  if (participant?.student_id) {
+    return buildBillingDecision({
+      participant,
+      instance,
+      commitment,
+      policies,
+    });
   }
 
-  return 0;
+  return buildDirectClientBillingDecision({
+    participant,
+    instance,
+    service: serviceMap.get(instance?.service_id) || null,
+    policies,
+  });
+}
+
+function validateCorrectionEffectiveState(instance, participants) {
+  const normalizedInstanceStatus = normalizeLessonInstanceStatus(instance?.status);
+  const effectiveParticipants = asArray(participants);
+  const attendedParticipants = effectiveParticipants.filter((participant) => normalizeString(participant?.participant_status).toLowerCase() === 'attended');
+  const scheduledParticipants = effectiveParticipants.filter((participant) => normalizeString(participant?.participant_status).toLowerCase() === 'scheduled');
+
+  for (const participant of effectiveParticipants) {
+    const status = normalizeString(participant?.participant_status).toLowerCase();
+    if (status && !PARTICIPANT_STATUSES.has(status)) {
+      throw new CorrectionValidationError('invalid_participant_patch_status', {
+        participant_id: participant.id,
+        participant_status: participant?.participant_status || null,
+      });
+    }
+  }
+
+  if (normalizedInstanceStatus === 'cancelled' && attendedParticipants.length > 0) {
+    throw new CorrectionValidationError('cancelled_instance_has_attended_participants', {
+      participant_ids: attendedParticipants.map((participant) => participant.id),
+    });
+  }
+
+  if (normalizedInstanceStatus === 'completed' && scheduledParticipants.length > 0) {
+    throw new CorrectionValidationError('completed_instance_has_scheduled_participants', {
+      participant_ids: scheduledParticipants.map((participant) => participant.id),
+    });
+  }
 }
 
 async function loadCorrectionContext(tenantClient, originalInstanceId) {
   const { data: instance, error: instanceError } = await tenantClient
     .from('lesson_instances')
-    .select('id, template_id, datetime_start, duration_minutes, instructor_employee_id, service_id, status, documentation_status, closed_reason, version, metadata, created_at, updated_at')
+    .select('id, template_id, datetime_start, duration_minutes, instructor_employee_id, service_id, status, documentation_status, version, metadata, created_at, updated_at')
     .eq('id', originalInstanceId)
     .maybeSingle();
 
@@ -131,7 +191,7 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
 
   const { data: participants, error: participantsError } = await tenantClient
     .from('lesson_participants')
-    .select('id, lesson_instance_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id, reminder_sent, reminder_seen, attendance_confirmed_at, documented_at, version, metadata')
+    .select('id, lesson_instance_id, client_profile_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id, reminder_sent, reminder_seen, attendance_confirmed_at, documented_at, version, metadata')
     .eq('lesson_instance_id', originalInstanceId);
 
   if (participantsError) {
@@ -280,12 +340,13 @@ async function loadRateMap(tenantClient, pairs) {
 function buildChargeMap(ledgerRows) {
   const map = new Map();
   for (const row of asArray(ledgerRows)) {
-    if (!row?.source_ref) continue;
+    const participantRef = normalizeString(row?.source_ref || row?.metadata?.original_participant_id);
+    if (!participantRef) continue;
     const signedAmount = normalizeString(row.transaction_type).toUpperCase() === 'CREDIT'
       ? -Math.abs(Number(row.amount || 0))
       : Math.abs(Number(row.amount || 0));
-    const nextAmount = roundCurrency((map.get(row.source_ref) || 0) + signedAmount);
-    map.set(row.source_ref, nextAmount);
+    const nextAmount = roundCurrency((map.get(participantRef) || 0) + signedAmount);
+    map.set(participantRef, nextAmount);
   }
   return map;
 }
@@ -311,11 +372,18 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
     : context.participants;
   const effectiveInstance = applyInstancePatch(currentInstance, instancePatch);
   const effectiveParticipants = applyParticipantPatches(currentParticipants, participantPatches);
+  effectiveInstance.status = normalizeLessonInstanceStatus(effectiveInstance.status);
+  validateCorrectionEffectiveState(effectiveInstance, effectiveParticipants);
 
   const rateMap = await loadRateMap(tenantClient, [
     { employeeId: context.instance.instructor_employee_id, serviceId: context.instance.service_id },
     { employeeId: currentInstance.instructor_employee_id, serviceId: currentInstance.service_id },
     { employeeId: effectiveInstance.instructor_employee_id, serviceId: effectiveInstance.service_id },
+  ]);
+  const serviceMap = await loadServicesMap(tenantClient, [
+    context.instance.service_id,
+    currentInstance.service_id,
+    effectiveInstance.service_id,
   ]);
 
   const originalRate = rateMap.get(buildRateKey(context.instance.instructor_employee_id, context.instance.service_id)) || 0;
@@ -340,7 +408,14 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   const participantImpact = effectiveParticipants.map((participant) => {
     const originalParticipant = currentParticipants.find((row) => row.id === participant.id) || participant;
     const currentCharge = roundCurrency(currentChargeMap.get(participant.id) || 0);
-    const proposedCharge = computeParticipantCharge(effectiveInstance, participant, context.commitments, policies);
+    const proposedDecision = computeParticipantChargeDecision(
+      effectiveInstance,
+      participant,
+      context.commitments,
+      serviceMap,
+      policies,
+    );
+    const proposedCharge = proposedDecision.shouldCharge ? roundCurrency(proposedDecision.chargeAmount) : 0;
     const delta = roundCurrency(proposedCharge - currentCharge);
     const participantClaimLocks = context.participantLocks.filter((lock) => lock.lesson_participant_id === participant.id && lock.lock_source_type === 'claim_batch');
     const paidClaimBatchIds = participantClaimLocks
@@ -350,6 +425,7 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
 
     return {
       participant_id: participant.id,
+      client_profile_id: participant.client_profile_id || null,
       student_id: participant.student_id,
       commitment_id: participant.commitment_id || null,
       original_status: originalParticipant.participant_status,
@@ -357,6 +433,9 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
       current_charge: currentCharge,
       proposed_charge: proposedCharge,
       delta_amount: delta,
+      billing_mode: participant.student_id ? 'student_commitment' : 'direct_client',
+      billing_status: proposedDecision.billingStatus || null,
+      billing_reason: proposedDecision.billingReason || null,
       paid_claim_batch_ids: paidClaimBatchIds,
     };
   });

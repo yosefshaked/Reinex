@@ -14,6 +14,7 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { dayTokenForDate, normalizeDayToken } from '../_shared/day-of-week.js';
+import { buildUtcBoundsForTimezoneDateRange } from '../_shared/instructor-availability.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 const MAX_GENERATION_DAYS = 31;
@@ -364,6 +365,10 @@ export default async function calendarGenerate(context, req) {
   }
 
   const templateIds = templateRows.map((row) => row.id);
+  const instanceRangeBounds = buildUtcBoundsForTimezoneDateRange(startDate, endDate);
+  if (!instanceRangeBounds?.startIso || !instanceRangeBounds?.endExclusiveIso) {
+    return respond(context, 400, { message: 'invalid_generation_date_range' });
+  }
 
   const [{ data: overridesRows, error: overridesError }, { data: existingRows, error: existingError }, { data: capabilitiesRows, error: capabilitiesError }] = await Promise.all([
     tenantClient
@@ -375,8 +380,8 @@ export default async function calendarGenerate(context, req) {
     tenantClient
       .from('lesson_instances')
       .select('id, template_id, datetime_start, duration_minutes, instructor_employee_id, service_id, status, participants:lesson_participants(student_id)')
-      .gte('datetime_start', `${startDate}T00:00:00`)
-      .lte('datetime_start', `${endDate}T23:59:59`),
+      .gte('datetime_start', instanceRangeBounds.startIso)
+      .lt('datetime_start', instanceRangeBounds.endExclusiveIso),
     tenantClient
       .from('instructor_service_capabilities')
       .select('employee_id, service_id, max_students'),

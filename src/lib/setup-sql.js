@@ -1463,9 +1463,21 @@ END $$;
 
 DO $$
 BEGIN
+  UPDATE public.lesson_instances
+  SET status = 'cancelled'
+  WHERE status IN ('cancelled_student', 'cancelled_clinic', 'no_show');
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+ALTER TABLE public.lesson_instances
+  DROP CONSTRAINT IF EXISTS lesson_instances_status_check;
+
+DO $$
+BEGIN
   ALTER TABLE public.lesson_instances
     ADD CONSTRAINT lesson_instances_status_check
-    CHECK (status IN ('scheduled','completed','cancelled_student','cancelled_clinic','no_show'));
+    CHECK (status IN ('scheduled','completed','cancelled'));
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -3929,6 +3941,836 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.cancel_lesson_instance_with_participants(
+  p_instance_id uuid,
+  p_actor_user_id uuid,
+  p_expected_version integer DEFAULT NULL,
+  p_instance_metadata jsonb DEFAULT NULL,
+  p_documentation_status text DEFAULT NULL
+)
+RETURNS TABLE (
+  outcome text,
+  instance_version integer,
+  instance_metadata jsonb,
+  cancelled_participant_ids uuid[],
+  attended_participants jsonb,
+  cancelled_participant_audit_rows jsonb,
+  instance_before_state jsonb,
+  instance_after_state jsonb
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_instance public.lesson_instances%ROWTYPE;
+  v_now timestamptz := now();
+  v_base_metadata jsonb := '{}'::jsonb;
+  v_next_snapshots jsonb := '{}'::jsonb;
+  v_attended_participants jsonb := '[]'::jsonb;
+  v_cancelled_participant_ids uuid[] := ARRAY[]::uuid[];
+  v_cancelled_participant_audit_rows jsonb := '[]'::jsonb;
+  v_billing_policy jsonb := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  v_instructor_policy jsonb := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  v_instance_before_state jsonb := NULL;
+  v_instance_after_state jsonb := NULL;
+BEGIN
+  SELECT *
+  INTO v_instance
+  FROM public.lesson_instances
+  WHERE id = p_instance_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN QUERY
+    SELECT
+      'not_found'::text,
+      NULL::integer,
+      NULL::jsonb,
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      '[]'::jsonb,
+      NULL::jsonb,
+      NULL::jsonb;
+    RETURN;
+  END IF;
+
+  v_instance_before_state := to_jsonb(v_instance);
+
+  IF COALESCE(v_instance.is_closed, false) THEN
+    RETURN QUERY
+    SELECT
+      'closed'::text,
+      COALESCE(v_instance.version, 1)::integer,
+      COALESCE(v_instance.metadata, '{}'::jsonb),
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      '[]'::jsonb,
+      v_instance_before_state,
+      v_instance_before_state;
+    RETURN;
+  END IF;
+
+  IF p_expected_version IS NOT NULL
+    AND COALESCE(v_instance.version, 1) <> p_expected_version THEN
+    RETURN QUERY
+    SELECT
+      'version_conflict'::text,
+      COALESCE(v_instance.version, 1)::integer,
+      COALESCE(v_instance.metadata, '{}'::jsonb),
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      '[]'::jsonb,
+      v_instance_before_state,
+      v_instance_before_state;
+    RETURN;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.instance_locks
+    WHERE lesson_instance_id = p_instance_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM public.participant_locks lock_row
+    JOIN public.lesson_participants participant
+      ON participant.id = lock_row.lesson_participant_id
+    WHERE participant.lesson_instance_id = p_instance_id
+  ) THEN
+    RETURN QUERY
+    SELECT
+      'locked'::text,
+      COALESCE(v_instance.version, 1)::integer,
+      COALESCE(v_instance.metadata, '{}'::jsonb),
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      '[]'::jsonb,
+      v_instance_before_state,
+      v_instance_before_state;
+    RETURN;
+  END IF;
+
+  PERFORM 1
+  FROM public.lesson_participants
+  WHERE lesson_instance_id = p_instance_id
+  FOR UPDATE;
+
+  SELECT COALESCE(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', participant.id,
+        'name', COALESCE(
+          NULLIF(trim(concat_ws(' ',
+            cp.first_name,
+            cp.middle_name,
+            cp.last_name
+          )), ''),
+          NULLIF(trim(concat_ws(' ',
+            scp.first_name,
+            scp.middle_name,
+            scp.last_name
+          )), ''),
+          'לקוח/ה'
+        )
+      )
+    ),
+    '[]'::jsonb
+  )
+  INTO v_attended_participants
+  FROM public.lesson_participants participant
+  LEFT JOIN public.client_profiles cp
+    ON cp.id = participant.client_profile_id
+  LEFT JOIN public.students student
+    ON student.id = participant.student_id
+  LEFT JOIN public.client_profiles scp
+    ON scp.id = student.client_profile_id
+  WHERE participant.lesson_instance_id = p_instance_id
+    AND participant.participant_status = 'attended';
+
+  IF jsonb_array_length(v_attended_participants) > 0 THEN
+    RETURN QUERY
+    SELECT
+      'attended_conflict'::text,
+      COALESCE(v_instance.version, 1)::integer,
+      COALESCE(v_instance.metadata, '{}'::jsonb),
+      ARRAY[]::uuid[],
+      v_attended_participants,
+      '[]'::jsonb,
+      v_instance_before_state,
+      v_instance_before_state;
+    RETURN;
+  END IF;
+
+  v_base_metadata := COALESCE(v_instance.metadata, '{}'::jsonb);
+
+  SELECT settings_value
+  INTO v_billing_policy
+  FROM public."Settings"
+  WHERE key = 'billing_consumption_policy'
+  LIMIT 1;
+
+  IF v_billing_policy IS NULL THEN
+    v_billing_policy := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  END IF;
+
+  SELECT settings_value
+  INTO v_instructor_policy
+  FROM public."Settings"
+  WHERE key = 'instructor_earnings_policy'
+  LIMIT 1;
+
+  IF v_instructor_policy IS NULL THEN
+    v_instructor_policy := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  END IF;
+
+  WITH participants_before AS (
+    SELECT
+      participant.id,
+      to_jsonb(participant.*) AS before_state
+    FROM public.lesson_participants participant
+    WHERE participant.lesson_instance_id = p_instance_id
+      AND participant.participant_status = 'scheduled'
+    FOR UPDATE
+  ),
+  updated_participants AS (
+    UPDATE public.lesson_participants participant
+    SET
+      participant_status = 'cancelled_clinic',
+      attendance_confirmed_at = v_now,
+      attendance_confirmed_by = p_actor_user_id,
+      updated_by = p_actor_user_id,
+      metadata = COALESCE(participant.metadata, '{}'::jsonb)
+        || jsonb_build_object(
+          'workflow',
+          COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow', '{}'::jsonb)
+            || jsonb_build_object(
+              'student_billing',
+              COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'student_billing', '{}'::jsonb)
+                || jsonb_build_object(
+                  'decision', 'not_applicable',
+                  'decided_at', v_now,
+                  'decided_by', p_actor_user_id,
+                  'reason', 'instance_cancelled'
+                ),
+              'instructor_compensation',
+              COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'instructor_compensation', '{}'::jsonb)
+                || jsonb_build_object(
+                  'decision', 'not_compensated',
+                  'decided_at', v_now,
+                  'decided_by', p_actor_user_id,
+                  'reason', 'instance_cancelled'
+                ),
+              'hmo_claim',
+              COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'hmo_claim', '{}'::jsonb)
+                || jsonb_build_object(
+                  'decision', 'not_required',
+                  'decided_at', v_now,
+                  'decided_by', p_actor_user_id,
+                  'reason', 'instance_cancelled'
+                )
+            )
+        )
+    WHERE participant.id IN (SELECT id FROM participants_before)
+    RETURNING participant.id, to_jsonb(participant.*) AS after_state
+  )
+  SELECT
+    COALESCE(array_agg(id), ARRAY[]::uuid[]),
+    COALESCE(
+      jsonb_object_agg(
+        id::text,
+        jsonb_build_object(
+          'evaluated_at', v_now,
+          'participant_status', 'cancelled_clinic',
+          'billing_consumption_policy', v_billing_policy,
+          'instructor_earnings_policy', v_instructor_policy,
+          'instructor_compensation_decision', 'not_compensated'
+        )
+      ),
+      '{}'::jsonb
+    ),
+    COALESCE(
+      jsonb_agg(
+        jsonb_build_object(
+          'participant_id', updated_participants.id,
+          'before_state', participants_before.before_state,
+          'after_state', updated_participants.after_state
+        )
+      ),
+      '[]'::jsonb
+    )
+  INTO v_cancelled_participant_ids, v_next_snapshots, v_cancelled_participant_audit_rows
+  FROM updated_participants
+  JOIN participants_before
+    ON participants_before.id = updated_participants.id;
+
+  UPDATE public.lesson_instances instance
+  SET
+    status = 'cancelled',
+    documentation_status = COALESCE(NULLIF(trim(p_documentation_status), ''), instance.documentation_status),
+    metadata = v_base_metadata
+      || jsonb_build_object(
+        'attendance_resolution_snapshots',
+        COALESCE(v_base_metadata->'attendance_resolution_snapshots', '{}'::jsonb) || v_next_snapshots
+      ),
+    updated_by = p_actor_user_id
+  WHERE instance.id = p_instance_id
+  RETURNING instance.version, instance.metadata, to_jsonb(instance.*)
+  INTO instance_version, instance_metadata, v_instance_after_state;
+
+  outcome := 'cancelled';
+  cancelled_participant_ids := COALESCE(v_cancelled_participant_ids, ARRAY[]::uuid[]);
+  attended_participants := '[]'::jsonb;
+  cancelled_participant_audit_rows := COALESCE(v_cancelled_participant_audit_rows, '[]'::jsonb);
+  instance_before_state := v_instance_before_state;
+  instance_after_state := COALESCE(v_instance_after_state, v_instance_before_state);
+  RETURN NEXT;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.complete_lesson_instance_with_participants(
+  p_instance_id uuid,
+  p_actor_user_id uuid,
+  p_expected_version integer DEFAULT NULL,
+  p_documentation_status text DEFAULT NULL
+)
+RETURNS TABLE (
+  outcome text,
+  instance_version integer,
+  instance_metadata jsonb,
+  promoted_participant_ids uuid[],
+  promoted_participant_audit_rows jsonb,
+  instance_before_state jsonb,
+  instance_after_state jsonb
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_instance public.lesson_instances%ROWTYPE;
+  v_now timestamptz := now();
+  v_base_metadata jsonb := '{}'::jsonb;
+  v_next_snapshots jsonb := '{}'::jsonb;
+  v_promoted_participant_ids uuid[] := ARRAY[]::uuid[];
+  v_promoted_participant_audit_rows jsonb := '[]'::jsonb;
+  v_billing_policy jsonb := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  v_instructor_policy jsonb := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  v_instance_before_state jsonb := NULL;
+  v_instance_after_state jsonb := NULL;
+BEGIN
+  SELECT *
+  INTO v_instance
+  FROM public.lesson_instances
+  WHERE id = p_instance_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN QUERY
+    SELECT
+      'not_found'::text,
+      NULL::integer,
+      NULL::jsonb,
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      NULL::jsonb,
+      NULL::jsonb;
+    RETURN;
+  END IF;
+
+  v_instance_before_state := to_jsonb(v_instance);
+
+  IF COALESCE(v_instance.is_closed, false) THEN
+    RETURN QUERY
+    SELECT
+      'closed'::text,
+      COALESCE(v_instance.version, 1)::integer,
+      COALESCE(v_instance.metadata, '{}'::jsonb),
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      v_instance_before_state,
+      v_instance_before_state;
+    RETURN;
+  END IF;
+
+  IF p_expected_version IS NOT NULL
+    AND COALESCE(v_instance.version, 1) <> p_expected_version THEN
+    RETURN QUERY
+    SELECT
+      'version_conflict'::text,
+      COALESCE(v_instance.version, 1)::integer,
+      COALESCE(v_instance.metadata, '{}'::jsonb),
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      v_instance_before_state,
+      v_instance_before_state;
+    RETURN;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.instance_locks
+    WHERE lesson_instance_id = p_instance_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM public.participant_locks lock_row
+    JOIN public.lesson_participants participant
+      ON participant.id = lock_row.lesson_participant_id
+    WHERE participant.lesson_instance_id = p_instance_id
+  ) THEN
+    RETURN QUERY
+    SELECT
+      'locked'::text,
+      COALESCE(v_instance.version, 1)::integer,
+      COALESCE(v_instance.metadata, '{}'::jsonb),
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      v_instance_before_state,
+      v_instance_before_state;
+    RETURN;
+  END IF;
+
+  PERFORM 1
+  FROM public.lesson_participants
+  WHERE lesson_instance_id = p_instance_id
+  FOR UPDATE;
+
+  v_base_metadata := COALESCE(v_instance.metadata, '{}'::jsonb);
+
+  SELECT settings_value
+  INTO v_billing_policy
+  FROM public."Settings"
+  WHERE key = 'billing_consumption_policy'
+  LIMIT 1;
+
+  IF v_billing_policy IS NULL THEN
+    v_billing_policy := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  END IF;
+
+  SELECT settings_value
+  INTO v_instructor_policy
+  FROM public."Settings"
+  WHERE key = 'instructor_earnings_policy'
+  LIMIT 1;
+
+  IF v_instructor_policy IS NULL THEN
+    v_instructor_policy := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  END IF;
+
+  WITH participants_before AS (
+    SELECT
+      participant.id,
+      to_jsonb(participant.*) AS before_state
+    FROM public.lesson_participants participant
+    WHERE participant.lesson_instance_id = p_instance_id
+      AND participant.participant_status = 'scheduled'
+    FOR UPDATE
+  ),
+  updated_participants AS (
+    UPDATE public.lesson_participants participant
+    SET
+      participant_status = 'attended',
+      attendance_confirmed_at = COALESCE(participant.attendance_confirmed_at, v_now),
+      attendance_confirmed_by = COALESCE(participant.attendance_confirmed_by, p_actor_user_id),
+      updated_by = p_actor_user_id,
+      metadata = COALESCE(participant.metadata, '{}'::jsonb)
+        || jsonb_build_object(
+          'workflow',
+          COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow', '{}'::jsonb)
+            || jsonb_build_object(
+              'student_billing',
+              COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'student_billing', '{}'::jsonb)
+                || jsonb_build_object(
+                  'decision', 'pending',
+                  'decided_at', v_now,
+                  'decided_by', p_actor_user_id,
+                  'reason', 'attended'
+                ),
+              'instructor_compensation',
+              COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'instructor_compensation', '{}'::jsonb)
+                || jsonb_build_object(
+                  'decision', 'compensated',
+                  'decided_at', v_now,
+                  'decided_by', p_actor_user_id,
+                  'reason', 'attended'
+                ),
+              'hmo_claim',
+              COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'hmo_claim', '{}'::jsonb)
+                || jsonb_build_object(
+                  'decision', 'pending',
+                  'decided_at', v_now,
+                  'decided_by', p_actor_user_id,
+                  'reason', 'attended'
+                )
+            )
+        )
+    WHERE participant.id IN (SELECT id FROM participants_before)
+    RETURNING participant.id, to_jsonb(participant.*) AS after_state
+  )
+  SELECT
+    COALESCE(array_agg(id), ARRAY[]::uuid[]),
+    COALESCE(
+      jsonb_object_agg(
+        id::text,
+        jsonb_build_object(
+          'evaluated_at', v_now,
+          'participant_status', 'attended',
+          'billing_consumption_policy', v_billing_policy,
+          'instructor_earnings_policy', v_instructor_policy,
+          'instructor_compensation_decision', 'compensated'
+        )
+      ),
+      '{}'::jsonb
+    ),
+    COALESCE(
+      jsonb_agg(
+        jsonb_build_object(
+          'participant_id', updated_participants.id,
+          'before_state', participants_before.before_state,
+          'after_state', updated_participants.after_state
+        )
+      ),
+      '[]'::jsonb
+    )
+  INTO v_promoted_participant_ids, v_next_snapshots, v_promoted_participant_audit_rows
+  FROM updated_participants
+  JOIN participants_before
+    ON participants_before.id = updated_participants.id;
+
+  UPDATE public.lesson_instances instance
+  SET
+    status = 'completed',
+    documentation_status = COALESCE(NULLIF(trim(p_documentation_status), ''), instance.documentation_status),
+    metadata = v_base_metadata
+      || jsonb_build_object(
+        'attendance_resolution_snapshots',
+        COALESCE(v_base_metadata->'attendance_resolution_snapshots', '{}'::jsonb) || v_next_snapshots
+      ),
+    updated_by = p_actor_user_id
+  WHERE instance.id = p_instance_id
+  RETURNING instance.version, instance.metadata, to_jsonb(instance.*)
+  INTO instance_version, instance_metadata, v_instance_after_state;
+
+  outcome := 'completed';
+  promoted_participant_ids := COALESCE(v_promoted_participant_ids, ARRAY[]::uuid[]);
+  promoted_participant_audit_rows := COALESCE(v_promoted_participant_audit_rows, '[]'::jsonb);
+  instance_before_state := v_instance_before_state;
+  instance_after_state := COALESCE(v_instance_after_state, v_instance_before_state);
+  RETURN NEXT;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.cancel_selected_scheduled_participants_and_reconcile_instance(
+  p_instance_id uuid,
+  p_participant_ids uuid[],
+  p_actor_user_id uuid
+)
+RETURNS TABLE (
+  outcome text,
+  instance_version integer,
+  instance_status text,
+  instance_metadata jsonb,
+  cancelled_participant_ids uuid[],
+  cancelled_participant_audit_rows jsonb,
+  blocking_participants jsonb,
+  instance_before_state jsonb,
+  instance_after_state jsonb
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_instance public.lesson_instances%ROWTYPE;
+  v_now timestamptz := now();
+  v_base_metadata jsonb := '{}'::jsonb;
+  v_next_snapshots jsonb := '{}'::jsonb;
+  v_cancelled_participant_ids uuid[] := ARRAY[]::uuid[];
+  v_cancelled_participant_audit_rows jsonb := '[]'::jsonb;
+  v_blocking_participants jsonb := '[]'::jsonb;
+  v_billing_policy jsonb := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  v_instructor_policy jsonb := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  v_has_scheduled boolean := false;
+  v_has_attended boolean := false;
+  v_next_status text := 'scheduled';
+  v_instance_before_state jsonb := NULL;
+  v_instance_after_state jsonb := NULL;
+BEGIN
+  SELECT *
+  INTO v_instance
+  FROM public.lesson_instances
+  WHERE id = p_instance_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN QUERY
+    SELECT
+      'not_found'::text,
+      NULL::integer,
+      NULL::text,
+      NULL::jsonb,
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      '[]'::jsonb,
+      NULL::jsonb,
+      NULL::jsonb;
+    RETURN;
+  END IF;
+
+  v_instance_before_state := to_jsonb(v_instance);
+
+  IF COALESCE(v_instance.is_closed, false) THEN
+    RETURN QUERY
+    SELECT
+      'closed'::text,
+      COALESCE(v_instance.version, 1)::integer,
+      normalize_lesson_instance_status(v_instance.status)::text,
+      COALESCE(v_instance.metadata, '{}'::jsonb),
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      '[]'::jsonb,
+      v_instance_before_state,
+      v_instance_before_state;
+    RETURN;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.instance_locks
+    WHERE lesson_instance_id = p_instance_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM public.participant_locks lock_row
+    JOIN public.lesson_participants participant
+      ON participant.id = lock_row.lesson_participant_id
+    WHERE participant.lesson_instance_id = p_instance_id
+  ) THEN
+    RETURN QUERY
+    SELECT
+      'locked'::text,
+      COALESCE(v_instance.version, 1)::integer,
+      normalize_lesson_instance_status(v_instance.status)::text,
+      COALESCE(v_instance.metadata, '{}'::jsonb),
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      '[]'::jsonb,
+      v_instance_before_state,
+      v_instance_before_state;
+    RETURN;
+  END IF;
+
+  PERFORM 1
+  FROM public.lesson_participants
+  WHERE lesson_instance_id = p_instance_id
+  FOR UPDATE;
+
+  SELECT COALESCE(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', participant.id,
+        'participant_status', participant.participant_status,
+        'name', COALESCE(
+          NULLIF(trim(concat_ws(' ',
+            cp.first_name,
+            cp.middle_name,
+            cp.last_name
+          )), ''),
+          NULLIF(trim(concat_ws(' ',
+            scp.first_name,
+            scp.middle_name,
+            scp.last_name
+          )), ''),
+          'לקוח/ה'
+        )
+      )
+    ),
+    '[]'::jsonb
+  )
+  INTO v_blocking_participants
+  FROM public.lesson_participants participant
+  LEFT JOIN public.client_profiles cp
+    ON cp.id = participant.client_profile_id
+  LEFT JOIN public.students student
+    ON student.id = participant.student_id
+  LEFT JOIN public.client_profiles scp
+    ON scp.id = student.client_profile_id
+  WHERE participant.lesson_instance_id = p_instance_id
+    AND participant.id = ANY(COALESCE(p_participant_ids, ARRAY[]::uuid[]))
+    AND participant.participant_status <> 'scheduled';
+
+  IF jsonb_array_length(v_blocking_participants) > 0 THEN
+    RETURN QUERY
+    SELECT
+      'participant_status_conflict'::text,
+      COALESCE(v_instance.version, 1)::integer,
+      normalize_lesson_instance_status(v_instance.status)::text,
+      COALESCE(v_instance.metadata, '{}'::jsonb),
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      v_blocking_participants,
+      v_instance_before_state,
+      v_instance_before_state;
+    RETURN;
+  END IF;
+
+  v_base_metadata := COALESCE(v_instance.metadata, '{}'::jsonb);
+
+  SELECT settings_value
+  INTO v_billing_policy
+  FROM public."Settings"
+  WHERE key = 'billing_consumption_policy'
+  LIMIT 1;
+
+  IF v_billing_policy IS NULL THEN
+    v_billing_policy := '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  END IF;
+
+  SELECT settings_value
+  INTO v_instructor_policy
+  FROM public."Settings"
+  WHERE key = 'instructor_earnings_policy'
+  LIMIT 1;
+
+  IF v_instructor_policy IS NULL THEN
+    v_instructor_policy := '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb;
+  END IF;
+
+  WITH participants_before AS (
+    SELECT
+      participant.id,
+      to_jsonb(participant.*) AS before_state
+    FROM public.lesson_participants participant
+    WHERE participant.lesson_instance_id = p_instance_id
+      AND participant.id = ANY(COALESCE(p_participant_ids, ARRAY[]::uuid[]))
+      AND participant.participant_status = 'scheduled'
+    FOR UPDATE
+  ),
+  updated_participants AS (
+    UPDATE public.lesson_participants participant
+    SET
+      participant_status = 'cancelled_student',
+      attendance_confirmed_at = v_now,
+      attendance_confirmed_by = p_actor_user_id,
+      updated_by = p_actor_user_id,
+      metadata = COALESCE(participant.metadata, '{}'::jsonb)
+        || jsonb_build_object(
+          'workflow',
+          COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow', '{}'::jsonb)
+            || jsonb_build_object(
+              'student_billing',
+              COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'student_billing', '{}'::jsonb)
+                || jsonb_build_object(
+                  'decision', 'pending',
+                  'decided_at', v_now,
+                  'decided_by', p_actor_user_id,
+                  'reason', 'cancelled_student'
+                ),
+              'instructor_compensation',
+              COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'instructor_compensation', '{}'::jsonb)
+                || jsonb_build_object(
+                  'decision', 'not_compensated',
+                  'decided_at', v_now,
+                  'decided_by', p_actor_user_id,
+                  'reason', 'student_suspension_bulk_cancel'
+                ),
+              'hmo_claim',
+              COALESCE(COALESCE(participant.metadata, '{}'::jsonb)->'workflow'->'hmo_claim', '{}'::jsonb)
+                || jsonb_build_object(
+                  'decision', 'not_required',
+                  'decided_at', v_now,
+                  'decided_by', p_actor_user_id,
+                  'reason', 'cancelled_student'
+                )
+            )
+        )
+    WHERE participant.id IN (SELECT id FROM participants_before)
+    RETURNING participant.id, to_jsonb(participant.*) AS after_state
+  )
+  SELECT
+    COALESCE(array_agg(id), ARRAY[]::uuid[]),
+    COALESCE(
+      jsonb_object_agg(
+        id::text,
+        jsonb_build_object(
+          'evaluated_at', v_now,
+          'participant_status', 'cancelled_student',
+          'billing_consumption_policy', v_billing_policy,
+          'instructor_earnings_policy', v_instructor_policy,
+          'instructor_compensation_decision', 'not_compensated'
+        )
+      ),
+      '{}'::jsonb
+    ),
+    COALESCE(
+      jsonb_agg(
+        jsonb_build_object(
+          'participant_id', updated_participants.id,
+          'before_state', participants_before.before_state,
+          'after_state', updated_participants.after_state
+        )
+      ),
+      '[]'::jsonb
+    )
+  INTO v_cancelled_participant_ids, v_next_snapshots, v_cancelled_participant_audit_rows
+  FROM updated_participants
+  JOIN participants_before
+    ON participants_before.id = updated_participants.id;
+
+  IF cardinality(COALESCE(v_cancelled_participant_ids, ARRAY[]::uuid[])) = 0 THEN
+    RETURN QUERY
+    SELECT
+      'no_target_participants'::text,
+      COALESCE(v_instance.version, 1)::integer,
+      normalize_lesson_instance_status(v_instance.status)::text,
+      COALESCE(v_instance.metadata, '{}'::jsonb),
+      ARRAY[]::uuid[],
+      '[]'::jsonb,
+      '[]'::jsonb,
+      v_instance_before_state,
+      v_instance_before_state;
+    RETURN;
+  END IF;
+
+  SELECT
+    EXISTS (
+      SELECT 1
+      FROM public.lesson_participants
+      WHERE lesson_instance_id = p_instance_id
+        AND participant_status = 'scheduled'
+    ),
+    EXISTS (
+      SELECT 1
+      FROM public.lesson_participants
+      WHERE lesson_instance_id = p_instance_id
+        AND participant_status = 'attended'
+    )
+  INTO v_has_scheduled, v_has_attended;
+
+  IF v_has_scheduled THEN
+    v_next_status := 'scheduled';
+  ELSIF v_has_attended THEN
+    v_next_status := 'completed';
+  ELSE
+    v_next_status := 'cancelled';
+  END IF;
+
+  UPDATE public.lesson_instances instance
+  SET
+    status = v_next_status,
+    metadata = v_base_metadata
+      || jsonb_build_object(
+        'attendance_resolution_snapshots',
+        COALESCE(v_base_metadata->'attendance_resolution_snapshots', '{}'::jsonb) || v_next_snapshots
+      ),
+    updated_by = p_actor_user_id
+  WHERE instance.id = p_instance_id
+  RETURNING instance.version, instance.metadata, instance.status, to_jsonb(instance.*)
+  INTO instance_version, instance_metadata, instance_status, v_instance_after_state;
+
+  outcome := 'updated';
+  instance_status := normalize_lesson_instance_status(instance_status);
+  cancelled_participant_ids := COALESCE(v_cancelled_participant_ids, ARRAY[]::uuid[]);
+  cancelled_participant_audit_rows := COALESCE(v_cancelled_participant_audit_rows, '[]'::jsonb);
+  blocking_participants := '[]'::jsonb;
+  instance_before_state := v_instance_before_state;
+  instance_after_state := COALESCE(v_instance_after_state, v_instance_before_state);
+  RETURN NEXT;
+END;
+$$;
+
 DO $$
 DECLARE
   versioned_table text;
@@ -4263,6 +5105,12 @@ BEGIN
 END $$;
 
 GRANT USAGE ON SCHEMA public TO app_user;
+GRANT EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, integer, jsonb, text) TO app_user;
+GRANT EXECUTE ON FUNCTION public.complete_lesson_instance_with_participants(uuid, uuid, integer, text) TO app_user;
+GRANT EXECUTE ON FUNCTION public.cancel_selected_scheduled_participants_and_reconcile_instance(uuid, uuid[], uuid) TO app_user;
+REVOKE EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, integer, jsonb, text) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.complete_lesson_instance_with_participants(uuid, uuid, integer, text) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.cancel_selected_scheduled_participants_and_reconcile_instance(uuid, uuid[], uuid) FROM authenticated;
 
 GRANT ALL ON TABLE public.students TO app_user;
 GRANT ALL ON TABLE public.guardians TO app_user;

@@ -156,8 +156,6 @@ const DETAIL_LABELS_HE = {
   amount_after: 'סכום חדש',
   billing_amount_before: 'חיוב תלמיד קודם',
   billing_amount_after: 'חיוב תלמיד חדש',
-  billing_amount_added: 'סכום שחויב לתלמיד',
-  instructor_earning_added: 'סכום שהתווסף לשכר מדריך',
   hmo_task_id_to_resolve: 'משימת תביעה לטיפול',
   instructor_compensation_decision: 'החלטת פיצוי למדריך',
   settled_claim_batch_ids: 'אצוות תביעה שסגרו את השיעור',
@@ -206,6 +204,7 @@ const VALUE_LABELS_BY_KEY = {
   status: {
     scheduled: 'מתוכנן',
     completed: 'הושלם',
+    cancelled: 'בוטל',
     cancelled_student: 'בוטל על ידי תלמיד',
     cancelled_clinic: 'בוטל על ידי קליניקה',
     no_show: 'לא הגיע',

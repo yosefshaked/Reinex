@@ -18,6 +18,7 @@ import {
   computeCommitmentAttention,
   resolveCommitmentCoverage,
 } from './commitment-behavior.js';
+import { buildUtcBoundsForTimezoneDateRange } from './instructor-availability.js';
 
 const COMMITMENT_TYPES = new Set(['package', 'subscription', 'hmo', 'manual_credit']);
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -184,11 +185,16 @@ async function loadLessonInstancesForRange(tenantClient, { startDate = '', endDa
     .select('id, datetime_start, duration_minutes, instructor_employee_id, service_id, status')
     .order('datetime_start', { ascending: false });
 
-  if (startDate) {
-    query = query.gte('datetime_start', `${startDate}T00:00:00`);
+  const effectiveStartDate = startDate || endDate;
+  const effectiveEndDate = endDate || startDate;
+  const rangeBounds = effectiveStartDate && effectiveEndDate
+    ? buildUtcBoundsForTimezoneDateRange(effectiveStartDate, effectiveEndDate)
+    : null;
+  if (startDate && rangeBounds?.startIso) {
+    query = query.gte('datetime_start', rangeBounds.startIso);
   }
-  if (endDate) {
-    query = query.lte('datetime_start', `${endDate}T23:59:59`);
+  if (endDate && rangeBounds?.endExclusiveIso) {
+    query = query.lt('datetime_start', rangeBounds.endExclusiveIso);
   }
 
   const { data, error } = await query;
@@ -229,7 +235,7 @@ export function buildBillingDecision({ participant, instance, commitment, polici
   const lessonDate = toDateKey(instance?.datetime_start);
   const storedPricingBreakdown = isPlainObject(participant?.pricing_breakdown) ? participant.pricing_breakdown : null;
   const policyAllowsCharge = RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)
-    ? Boolean(lessonStatus !== 'cancelled_clinic' && policies?.billingConsumptionPolicy?.[participantStatus])
+    ? Boolean(policies?.billingConsumptionPolicy?.[participantStatus])
     : false;
 
   let billingStatus = 'pending_attendance';
@@ -279,7 +285,7 @@ export function buildBillingDecision({ participant, instance, commitment, polici
     billingReason = 'participant_not_resolved';
   } else if (!policyAllowsCharge) {
     billingStatus = 'not_chargeable';
-    billingReason = lessonStatus === 'cancelled_clinic'
+    billingReason = participantStatus === 'cancelled_clinic'
       ? 'lesson_cancelled_by_clinic'
       : 'policy_excluded_status';
   } else if (!commitment) {
@@ -370,7 +376,7 @@ export function buildDirectClientBillingDecision({
   const lessonDate = toDateKey(instance?.datetime_start);
   const storedPricingBreakdown = isPlainObject(participant?.pricing_breakdown) ? participant.pricing_breakdown : null;
   const policyAllowsCharge = RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)
-    ? Boolean(lessonStatus !== 'cancelled_clinic' && policies?.billingConsumptionPolicy?.[participantStatus])
+    ? Boolean(policies?.billingConsumptionPolicy?.[participantStatus])
     : false;
 
   const shouldPreserveStoredCharge = Boolean(
@@ -425,7 +431,7 @@ export function buildDirectClientBillingDecision({
     billingReason = 'participant_not_resolved';
   } else if (!policyAllowsCharge) {
     billingStatus = 'not_chargeable';
-    billingReason = lessonStatus === 'cancelled_clinic'
+    billingReason = participantStatus === 'cancelled_clinic'
       ? 'lesson_cancelled_by_clinic'
       : 'policy_excluded_status';
   } else if (Number.isFinite(Number(directClientChargeOverride))) {

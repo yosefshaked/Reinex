@@ -6,6 +6,7 @@ import {
 } from './commitment-behavior.js';
 import { attachHmoContextToCommitments } from './hmo.js';
 import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
+import { buildUtcBoundsForTimezoneDateRange } from './instructor-availability.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
   carryover_enabled: false,
@@ -512,12 +513,17 @@ export async function fetchLessonConflicts(tenantClient, { employeeId, startDate
     return [];
   }
 
+  const rangeBounds = buildUtcBoundsForTimezoneDateRange(startKey, endKey);
+  if (!rangeBounds?.startIso || !rangeBounds?.endExclusiveIso) {
+    return [];
+  }
+
   const { data, error } = await tenantClient
     .from('lesson_instances')
     .select('id, datetime_start, duration_minutes, status, service_id')
     .eq('instructor_employee_id', employeeId)
-    .gte('datetime_start', `${startKey}T00:00:00`)
-    .lte('datetime_start', `${endKey}T23:59:59`)
+    .gte('datetime_start', rangeBounds.startIso)
+    .lt('datetime_start', rangeBounds.endExclusiveIso)
     .order('datetime_start', { ascending: true });
 
   if (error) {
@@ -529,6 +535,7 @@ export async function fetchLessonConflicts(tenantClient, { employeeId, startDate
 
   return (data || []).filter((instance) => (
     instance.id !== excludeInstanceId
+    && instance.status !== 'cancelled'
     && instance.status !== 'cancelled_student'
     && instance.status !== 'cancelled_clinic'
   ));
@@ -1011,7 +1018,6 @@ export async function syncLessonFinancialArtifacts(tenantClient, lessonInstanceI
     const shouldCharge = Boolean(
       commitment
       && derivedCharge != null
-      && instance.status !== 'cancelled_clinic'
       && policies.billingConsumptionPolicy[statusKey]
     );
 
@@ -1112,14 +1118,16 @@ export async function syncInstructorAttendanceFromLessons(
   }
 
   // Sum worked minutes from all compensation-eligible lessons for this instructor on this date
-  const dayStart = `${lessonDate}T00:00:00`;
-  const dayEnd = `${lessonDate}T23:59:59`;
+  const dayBounds = buildUtcBoundsForTimezoneDateRange(lessonDate, lessonDate);
+  if (!dayBounds?.startIso || !dayBounds?.endExclusiveIso) {
+    throw new Error('invalid_lesson_date_bounds');
+  }
   const { data: dayLessons, error: dayLessonsError } = await tenantClient
     .from('lesson_instances')
     .select('id, duration_minutes, status')
     .eq('instructor_employee_id', instance.instructor_employee_id)
-    .gte('datetime_start', dayStart)
-    .lte('datetime_start', dayEnd);
+    .gte('datetime_start', dayBounds.startIso)
+    .lt('datetime_start', dayBounds.endExclusiveIso);
 
   if (dayLessonsError) {
     throw dayLessonsError;

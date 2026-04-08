@@ -21,11 +21,10 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { assertNoLeaveForLesson, loadFinancePolicies, syncInstructorAttendanceFromLessons, syncLessonInstructorEarnings, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
+import { assertNoLeaveForLesson, syncInstructorAttendanceFromLessons, syncLessonInstructorEarnings, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
 import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
-import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_shared/calendar-workflow.js';
-import { createDashboardTask } from '../_shared/dashboard-tasks.js';
+import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import {
   buildUtcBoundsForTimezoneDateRange,
   getCurrentDateInTimezone,
@@ -33,180 +32,31 @@ import {
   hasConfiguredAvailability,
   isWithinAvailabilityWindows,
 } from '../_shared/instructor-availability.js';
+import {
+  ACTIVE_LESSON_INSTANCE_STATUSES,
+  cancelLessonInstanceWithParticipants,
+  completeLessonInstanceWithParticipants,
+  normalizeLessonInstanceStatus,
+} from '../_shared/lesson-instance-status.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
-const INSTANCE_STATUSES = new Set(['scheduled', 'completed', 'cancelled_student', 'cancelled_clinic', 'no_show']);
 
-async function promoteScheduledParticipantsForCompletedLesson(tenantClient, {
-  instanceId,
-  userId,
-  instanceMetadata,
-  instanceDateTimeStart,
-}) {
-  const { data: scheduledParticipants, error: scheduledParticipantsError } = await tenantClient
-    .from('lesson_participants')
-    .select('id, student_id, commitment_id, metadata')
-    .eq('lesson_instance_id', instanceId)
-    .eq('participant_status', 'scheduled');
+function normalizeParticipantAuditRows(value) {
+  return Array.isArray(value)
+    ? value.filter((row) => row && typeof row === 'object' && row.participant_id)
+    : [];
+}
 
-  if (scheduledParticipantsError) {
-    throw scheduledParticipantsError;
+function normalizeLessonInstanceAuditState(value) {
+  if (!value || typeof value !== 'object') {
+    return value;
   }
 
-  const participantsToPromote = Array.isArray(scheduledParticipants) ? scheduledParticipants : [];
-  if (participantsToPromote.length === 0) {
-    return;
-  }
-
-  const nowIso = new Date().toISOString();
-  const { error: promoteError } = await tenantClient
-    .from('lesson_participants')
-    .update({
-      participant_status: 'attended',
-      attendance_confirmed_at: nowIso,
-      attendance_confirmed_by: userId,
-      updated_by: userId,
-    })
-    .eq('lesson_instance_id', instanceId)
-    .eq('participant_status', 'scheduled');
-
-  if (promoteError) {
-    throw promoteError;
-  }
-
-  const policies = await loadFinancePolicies(tenantClient);
-  const currentMetadata = instanceMetadata && typeof instanceMetadata === 'object' ? instanceMetadata : {};
-  const existingSnapshots = currentMetadata.attendance_resolution_snapshots && typeof currentMetadata.attendance_resolution_snapshots === 'object'
-    ? currentMetadata.attendance_resolution_snapshots
-    : {};
-  const nextSnapshots = { ...existingSnapshots };
-
-  for (const participant of participantsToPromote) {
-    const mergedWorkflowMetadata = mergeParticipantWorkflowMetadata(participant.metadata, {
-      student_billing: {
-        decision: 'pending',
-        decided_at: nowIso,
-        decided_by: userId,
-        reason: 'attended',
-      },
-      instructor_compensation: {
-        decision: 'compensated',
-        decided_at: nowIso,
-        decided_by: userId,
-        reason: 'attended',
-      },
-      hmo_claim: {
-        decision: 'pending',
-        decided_at: nowIso,
-        decided_by: userId,
-        reason: 'attended',
-      },
-    });
-
-    const { error: metadataUpdateError } = await tenantClient
-      .from('lesson_participants')
-      .update({ metadata: mergedWorkflowMetadata })
-      .eq('id', participant.id)
-      .eq('lesson_instance_id', instanceId);
-
-    if (metadataUpdateError) {
-      throw metadataUpdateError;
-    }
-
-    nextSnapshots[participant.id] = {
-      evaluated_at: nowIso,
-      participant_status: 'attended',
-      billing_consumption_policy: policies.billingConsumptionPolicy,
-      instructor_earnings_policy: policies.instructorEarningsPolicy,
-      instructor_compensation_decision: 'compensated',
-    };
-  }
-
-  const { error: snapshotUpdateError } = await tenantClient
-    .from('lesson_instances')
-    .update({
-      metadata: {
-        ...currentMetadata,
-        attendance_resolution_snapshots: nextSnapshots,
-      },
-    })
-    .eq('id', instanceId);
-
-  if (snapshotUpdateError) {
-    throw snapshotUpdateError;
-  }
-
-  const participantIdsWithCommitments = participantsToPromote
-    .filter((participant) => participant?.commitment_id)
-    .map((participant) => participant.id);
-
-  if (participantIdsWithCommitments.length === 0) {
-    return;
-  }
-
-  const commitmentIds = Array.from(new Set(
-    participantsToPromote.map((participant) => participant?.commitment_id).filter(Boolean),
-  ));
-  const studentIds = Array.from(new Set(
-    participantsToPromote.map((participant) => participant?.student_id).filter(Boolean),
-  ));
-
-  const [{ data: commitments, error: commitmentsError }, { data: students, error: studentsError }] = await Promise.all([
-    tenantClient
-      .from('commitments')
-      .select('id, commitment_type, hmo_provider_id, is_active')
-      .in('id', commitmentIds),
-    studentIds.length > 0
-      ? tenantClient
-        .from('students')
-        .select('id, client_profile:client_profiles(first_name, last_name)')
-        .in('id', studentIds)
-      : Promise.resolve({ data: [], error: null }),
-  ]);
-
-  if (commitmentsError) {
-    throw commitmentsError;
-  }
-  if (studentsError) {
-    throw studentsError;
-  }
-
-  const commitmentById = new Map((commitments || []).map((row) => [row.id, row]));
-  const studentById = new Map((students || []).map((row) => [row.id, row]));
-  const lessonDate = instanceDateTimeStart
-    ? new Date(instanceDateTimeStart).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    : '';
-
-  for (const participant of participantsToPromote) {
-    const commitment = participant?.commitment_id ? commitmentById.get(participant.commitment_id) || null : null;
-    const isHmo = commitment?.is_active !== false
-      && (commitment?.commitment_type === 'hmo' || Boolean(commitment?.hmo_provider_id));
-    if (!isHmo) {
-      continue;
-    }
-
-    const student = participant?.student_id ? studentById.get(participant.student_id) || null : null;
-    const studentProfile = student?.client_profile || null;
-    const studentName = [studentProfile?.first_name, studentProfile?.last_name].filter(Boolean).join(' ') || 'תלמיד';
-    const description = lessonDate
-      ? `שיעור של ${studentName} בתאריך ${lessonDate} דורש הגשת תביעה.`
-      : `שיעור של ${studentName} דורש הגשת תביעה.`;
-
-    await createDashboardTask(tenantClient, {
-      taskType: 'hmo_claim_submission',
-      title: 'הגשת תביעה לביטוח לאומי',
-      description,
-      priority: 'medium',
-      resourceType: 'lesson_participant',
-      resourceId: participant.id,
-      createdBy: userId,
-      metadata: {
-        lesson_instance_id: instanceId,
-        student_id: participant.student_id,
-        commitment_id: participant.commitment_id,
-      },
-    });
-  }
+  const normalizedStatus = normalizeLessonInstanceStatus(value.status);
+  return {
+    ...value,
+    status: normalizedStatus || value.status,
+  };
 }
 
 function normalizeSchedulingOverrideMetadata(metadata) {
@@ -448,7 +298,6 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
       service_id,
       status,
       documentation_status,
-      closed_reason,
       version,
       created_source,
       metadata,
@@ -507,7 +356,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
       )
     `)
     .gte('datetime_start', utcBounds.startIso)
-    .lte('datetime_start', utcBounds.endIso)
+    .lt('datetime_start', utcBounds.endExclusiveIso || utcBounds.endIso)
     .order('datetime_start', { ascending: true });
 
   // Filter by instructor if provided
@@ -697,9 +546,8 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
       duration_minutes: instance.duration_minutes,
       instructor_employee_id: instance.instructor_employee_id,
       service_id: instance.service_id,
-      status: instance.status,
+      status: normalizeLessonInstanceStatus(instance.status) || instance.status,
       documentation_status: instance.documentation_status,
-      closed_reason: instance.closed_reason || null,
       version: instance.version ?? 1,
       created_source: instance.created_source,
       metadata: instance.metadata,
@@ -752,9 +600,9 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     return respond(context, 400, { message: 'missing_or_invalid_participants' });
   }
 
-  const requestedStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : 'scheduled';
+  const requestedStatus = body.status === undefined ? 'scheduled' : normalizeLessonInstanceStatus(body.status);
   const normalizedSchedulingMetadata = normalizeSchedulingOverrideMetadata(body.metadata);
-  if (!INSTANCE_STATUSES.has(requestedStatus)) {
+  if (!ACTIVE_LESSON_INSTANCE_STATUSES.has(requestedStatus)) {
     return respond(context, 400, { message: 'invalid status' });
   }
 
@@ -1123,14 +971,13 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
       return respond(context, 403, { message: 'forbidden: can only update your own lessons' });
     }
 
-    const allowedStatusUpdates = new Set(['completed', 'no_show']);
-    const requestedStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
+    const allowedStatusUpdates = new Set(['completed']);
+    const requestedStatus = normalizeLessonInstanceStatus(body.status);
     const hasOtherUpdates = [
       'datetime_start',
       'duration_minutes',
       'instructor_employee_id',
       'service_id',
-      'closed_reason',
       'documentation_status',
       'metadata',
     ].some((field) => Object.prototype.hasOwnProperty.call(body, field));
@@ -1151,8 +998,8 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   }
 
   if (body.status !== undefined) {
-    const normalizedStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
-    if (!INSTANCE_STATUSES.has(normalizedStatus)) {
+  const normalizedStatus = normalizeLessonInstanceStatus(body.status);
+  if (!ACTIVE_LESSON_INSTANCE_STATUSES.has(normalizedStatus)) {
       return respond(context, 400, { message: 'invalid status' });
     }
     body.status = normalizedStatus;
@@ -1208,9 +1055,9 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
     }
   }
 
-  // Instructor rate pre-flight: block completion/no_show if no base_rate is configured.
-  // Other statuses (cancellations) do not trigger instructor earnings so no check needed.
-  const EARNING_STATUSES = new Set(['completed', 'no_show']);
+  // Instructor rate pre-flight: block completion if no base_rate is configured.
+  // Instance cancellation does not trigger instructor earnings; participant-level policies do.
+  const EARNING_STATUSES = new Set(['completed']);
   const newStatus = typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
   if (EARNING_STATUSES.has(newStatus)) {
     const rateError = await validateInstructorRateForLesson(tenantClient, {
@@ -1227,6 +1074,10 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
     }
   }
 
+  if (body.closed_reason !== undefined) {
+    return respond(context, 422, { message: 'instance_closed_reason_not_supported' });
+  }
+
   // Build update object (only update provided fields)
   const updateData = {};
   
@@ -1235,87 +1086,239 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
   if (body.instructor_employee_id !== undefined) updateData.instructor_employee_id = body.instructor_employee_id;
   if (body.service_id !== undefined) updateData.service_id = body.service_id;
   if (body.status !== undefined) updateData.status = body.status;
-  if (body.closed_reason !== undefined) updateData.closed_reason = body.closed_reason;
   if (body.documentation_status !== undefined) updateData.documentation_status = body.documentation_status;
   if (body.metadata !== undefined) updateData.metadata = targetMetadata;
   updateData.updated_by = userId;
   
   updateData.updated_at = new Date().toISOString();
+  const requestedCancellation = normalizeLessonInstanceStatus(updateData.status) === 'cancelled';
+  const hasNonCancellationFieldUpdates = requestedCancellation && (
+    body.datetime_start !== undefined
+    || body.duration_minutes !== undefined
+    || body.instructor_employee_id !== undefined
+    || body.service_id !== undefined
+    || body.metadata !== undefined
+  );
 
-  if ((updateData.status === 'cancelled_student' || updateData.status === 'cancelled_clinic' || updateData.status === 'no_show') &&
-      updateData.closed_reason === undefined &&
-      existingInstance.closed_reason) {
-    updateData.closed_reason = existingInstance.closed_reason;
+  if (hasNonCancellationFieldUpdates) {
+    return respond(context, 422, { message: 'cancel_instance_requires_dedicated_action' });
+  }
+
+  let postUpdateState = null;
+  let auditBeforeState = existingInstance;
+  let cancelledParticipantIds = [];
+  let cancelledParticipantAuditRows = [];
+  let completedParticipantAuditRows = [];
+
+  if (requestedCancellation) {
+    try {
+      const cancellationResult = await cancelLessonInstanceWithParticipants(tenantClient, {
+        instanceId: body.id,
+        userId,
+        expectedVersion,
+        instanceMetadata: null,
+        documentationStatus: updateData.documentation_status,
+      });
+
+      if (cancellationResult.outcome === 'attended_conflict') {
+        return respond(context, 409, {
+          message: 'instance_cancelled_has_attended_participants',
+          attended_participants: cancellationResult.attendedParticipants,
+        });
+      }
+
+      if (cancellationResult.outcome === 'version_conflict') {
+        return respondWithVersionConflict(context, {
+          resourceType: 'lesson_instance',
+          resourceId: body.id,
+          expectedVersion,
+          currentVersion: cancellationResult.instanceVersion,
+        });
+      }
+
+      if (cancellationResult.outcome === 'not_found') {
+        return respond(context, 404, { message: 'instance not found' });
+      }
+
+      if (cancellationResult.outcome === 'locked' || cancellationResult.outcome === 'closed') {
+        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+          instanceId: body.id,
+        });
+        if (refreshedError) {
+          context.log?.error?.('calendar/instances failed to refresh locked cancellation state', {
+            message: refreshedError.message,
+            instanceId: body.id,
+          });
+          return respond(context, 500, { message: 'failed_to_cancel_instance' });
+        }
+        return respondWithLockedMutation(context, {
+          instanceId: body.id,
+          instanceLocks: refreshedState.instanceLocks,
+          closed: refreshedState.instance?.is_closed || cancellationResult.outcome === 'closed',
+        });
+      }
+
+      if (cancellationResult.outcome !== 'cancelled') {
+        context.log?.error?.('calendar/instances received unexpected cancellation outcome', {
+          outcome: cancellationResult.outcome,
+          instanceId: body.id,
+        });
+        return respond(context, 500, { message: 'failed_to_cancel_instance' });
+      }
+
+      cancelledParticipantIds = cancellationResult.cancelledParticipantIds;
+      cancelledParticipantAuditRows = normalizeParticipantAuditRows(cancellationResult.cancelledParticipantAuditRows);
+      auditBeforeState = cancellationResult.instanceBeforeState
+        ? normalizeLessonInstanceAuditState(cancellationResult.instanceBeforeState)
+        : existingInstance;
+      postUpdateState = cancellationResult.instanceAfterState
+        ? normalizeLessonInstanceAuditState(cancellationResult.instanceAfterState)
+        : {
+            ...existingInstance,
+            ...updateData,
+            status: 'cancelled',
+            documentation_status: updateData.documentation_status || existingInstance.documentation_status,
+            metadata: cancellationResult.instanceMetadata,
+            version: cancellationResult.instanceVersion ?? existingInstance.version,
+          };
+    } catch (cancellationError) {
+      context.log?.error?.('calendar/instances failed to cancel lesson instance atomically', {
+        message: cancellationError?.message,
+        instanceId: body.id,
+      });
+      return respond(context, 500, { message: 'failed_to_cancel_instance' });
+    }
   }
 
   // Attendance status still drives the lesson instance itself, but downstream billing,
   // instructor compensation, and closure are handled by the shared workflow syncs below.
+  const requestedCompletion = normalizeLessonInstanceStatus(updateData.status) === 'completed';
 
-  // Update instance
-  let updateQuery = tenantClient
-    .from('lesson_instances')
-    .update(updateData)
-    .eq('id', body.id);
-
-  if (expectedVersion !== null) {
-    const shouldFilterByVersion = !(
-      existingInstance?.legacy_null_version
-      && expectedVersion === 1
-    );
-    if (shouldFilterByVersion) {
-      updateQuery = updateQuery.eq('version', expectedVersion);
-    }
-  }
-
-  const { data: updatedRow, error: updateError } = await updateQuery
-    .select('id, version')
-    .maybeSingle();
-
-  if (updateError) {
-    context.log?.error?.('calendar/instances failed to update instance', { 
-      message: updateError.message,
-      code: updateError.code,
-    });
-    return respond(context, 500, { message: 'failed_to_update_instance' });
-  }
-
-  if (!updatedRow) {
-    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
-      instanceId: body.id,
-    });
-    if (refreshedError) {
-      context.log?.error?.('calendar/instances failed to refresh instance after conflict', { message: refreshedError.message, instanceId: body.id });
-      return respond(context, 500, { message: 'failed_to_update_instance' });
-    }
-    return respondWithVersionConflict(context, {
-      resourceType: 'lesson_instance',
-      resourceId: body.id,
-      expectedVersion,
-      currentVersion: refreshedState.instance?.version ?? null,
-    });
-  }
-
-  const normalizedStatus = typeof updateData.status === 'string' ? updateData.status.trim().toLowerCase() : '';
-  const isCancellationUpdate = normalizedStatus.startsWith('cancelled');
-
-  // When the lesson is marked completed, promote any still-scheduled participants to
-  // 'attended' so that the billing sync can process them (billing gates on participant status).
-  if (normalizedStatus === 'completed') {
+  if (requestedCompletion) {
     try {
-      await promoteScheduledParticipantsForCompletedLesson(tenantClient, {
+      const completionResult = await completeLessonInstanceWithParticipants(tenantClient, {
         instanceId: body.id,
         userId,
-        instanceMetadata: updateData.metadata !== undefined ? updateData.metadata : existingInstance.metadata,
-        instanceDateTimeStart: updateData.datetime_start || existingInstance.datetime_start,
+        expectedVersion,
+        documentationStatus: updateData.documentation_status,
       });
-    } catch (promoteError) {
-      context.log?.error?.('calendar/instances failed to promote scheduled participants to attended', {
-        message: promoteError?.message,
+
+      if (completionResult.outcome === 'version_conflict') {
+        return respondWithVersionConflict(context, {
+          resourceType: 'lesson_instance',
+          resourceId: body.id,
+          expectedVersion,
+          currentVersion: completionResult.instanceVersion,
+        });
+      }
+
+      if (completionResult.outcome === 'not_found') {
+        return respond(context, 404, { message: 'instance not found' });
+      }
+
+      if (completionResult.outcome === 'locked' || completionResult.outcome === 'closed') {
+        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+          instanceId: body.id,
+        });
+        if (refreshedError) {
+          context.log?.error?.('calendar/instances failed to refresh locked completion state', {
+            message: refreshedError.message,
+            instanceId: body.id,
+          });
+          return respond(context, 500, { message: 'failed_to_complete_instance' });
+        }
+        return respondWithLockedMutation(context, {
+          instanceId: body.id,
+          instanceLocks: refreshedState.instanceLocks,
+          closed: refreshedState.instance?.is_closed || completionResult.outcome === 'closed',
+        });
+      }
+
+      if (completionResult.outcome !== 'completed') {
+        context.log?.error?.('calendar/instances received unexpected completion outcome', {
+          outcome: completionResult.outcome,
+          instanceId: body.id,
+        });
+        return respond(context, 500, { message: 'failed_to_complete_instance' });
+      }
+
+      completedParticipantAuditRows = normalizeParticipantAuditRows(completionResult.promotedParticipantAuditRows);
+      auditBeforeState = completionResult.instanceBeforeState
+        ? normalizeLessonInstanceAuditState(completionResult.instanceBeforeState)
+        : existingInstance;
+      postUpdateState = completionResult.instanceAfterState
+        ? normalizeLessonInstanceAuditState(completionResult.instanceAfterState)
+        : {
+            ...existingInstance,
+            ...updateData,
+            status: 'completed',
+            documentation_status: updateData.documentation_status || existingInstance.documentation_status,
+            metadata: completionResult.instanceMetadata,
+            version: completionResult.instanceVersion ?? existingInstance.version,
+          };
+    } catch (completionError) {
+      context.log?.error?.('calendar/instances failed to complete lesson instance atomically', {
+        message: completionError?.message,
         instanceId: body.id,
       });
-      // Non-fatal — continue; billing sync will just see pending_attendance for those participants
+      return respond(context, 500, { message: 'failed_to_complete_instance' });
     }
   }
+
+  if (!requestedCancellation && !requestedCompletion) {
+    let updateQuery = tenantClient
+      .from('lesson_instances')
+      .update(updateData)
+      .eq('id', body.id);
+
+    if (expectedVersion !== null) {
+      const shouldFilterByVersion = !(
+        existingInstance?.legacy_null_version
+        && expectedVersion === 1
+      );
+      if (shouldFilterByVersion) {
+        updateQuery = updateQuery.eq('version', expectedVersion);
+      }
+    }
+
+    const { data: updatedInstanceRow, error: updateError } = await updateQuery
+      .select('id, version')
+      .maybeSingle();
+
+    if (updateError) {
+      context.log?.error?.('calendar/instances failed to update instance', {
+        message: updateError.message,
+        code: updateError.code,
+      });
+      return respond(context, 500, { message: 'failed_to_update_instance' });
+    }
+
+    if (!updatedInstanceRow) {
+      const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+        instanceId: body.id,
+      });
+      if (refreshedError) {
+        context.log?.error?.('calendar/instances failed to refresh instance after conflict', { message: refreshedError.message, instanceId: body.id });
+        return respond(context, 500, { message: 'failed_to_update_instance' });
+      }
+      return respondWithVersionConflict(context, {
+        resourceType: 'lesson_instance',
+        resourceId: body.id,
+        expectedVersion,
+        currentVersion: refreshedState.instance?.version ?? null,
+      });
+    }
+
+    postUpdateState = {
+      ...existingInstance,
+      ...updateData,
+      version: updatedInstanceRow?.version ?? existingInstance.version,
+    };
+  }
+
+  const normalizedStatus = normalizeLessonInstanceStatus(updateData.status);
+  const isCancellationUpdate = normalizedStatus === 'cancelled';
+  const isCompletionUpdate = normalizedStatus === 'completed';
 
   try {
     await logAuditEvent(supabase, {
@@ -1331,14 +1334,13 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
       resourceId: body.id,
       details: {
         action_label_he: isCancellationUpdate ? 'בוטל שיעור' : 'עודכן שיעור',
-        previous_status: existingInstance.status,
+        previous_status: auditBeforeState?.status || existingInstance.status,
         updated_fields: Object.keys(updateData),
         datetime_start: updateData.datetime_start || null,
         duration_minutes: updateData.duration_minutes || null,
         instructor_employee_id: updateData.instructor_employee_id || null,
         service_id: updateData.service_id || null,
         status: updateData.status || null,
-        closed_reason: updateData.closed_reason || null,
         ...buildSchedulingOverrideAuditDetails(targetMetadata),
       },
     });
@@ -1356,12 +1358,8 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
       resourceType: 'lesson_instance',
       resourceId: body.id,
-      beforeState: existingInstance,
-      afterState: {
-        ...existingInstance,
-        ...updateData,
-        version: updatedRow?.version ?? existingInstance.version,
-      },
+      beforeState: auditBeforeState,
+      afterState: postUpdateState,
       details: {
         origin: 'api/calendar',
         updated_fields: Object.keys(updateData),
@@ -1373,6 +1371,58 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
       message: auditError?.message,
       instanceId: body?.id,
     });
+  }
+
+  if (isCancellationUpdate && cancelledParticipantIds.length > 0) {
+    try {
+      for (const row of cancelledParticipantAuditRows) {
+        await logTenantAuditEvent(tenantClient, {
+          actorUserId: userId,
+          eventType: 'calendar.lesson_participant.cancelled_by_instance',
+          retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+          resourceType: 'lesson_participant',
+          resourceId: row.participant_id,
+          beforeState: row.before_state || null,
+          afterState: row.after_state || null,
+          details: {
+            origin: 'api/calendar',
+            lesson_instance_id: body.id,
+            cancellation_source: 'instance_cancelled',
+          },
+        });
+      }
+    } catch (participantAuditError) {
+      context.log?.warn?.('calendar/instances failed to write participant cancellation audit events', {
+        message: participantAuditError?.message,
+        instanceId: body.id,
+      });
+    }
+  }
+
+  if (isCompletionUpdate && completedParticipantAuditRows.length > 0) {
+    try {
+      for (const row of completedParticipantAuditRows) {
+        await logTenantAuditEvent(tenantClient, {
+          actorUserId: userId,
+          eventType: 'calendar.lesson_participant.attended_by_instance_completion',
+          retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+          resourceType: 'lesson_participant',
+          resourceId: row.participant_id,
+          beforeState: row.before_state || null,
+          afterState: row.after_state || null,
+          details: {
+            origin: 'api/calendar',
+            lesson_instance_id: body.id,
+            completion_source: 'instance_completed',
+          },
+        });
+      }
+    } catch (participantAuditError) {
+      context.log?.warn?.('calendar/instances failed to write participant completion audit events', {
+        message: participantAuditError?.message,
+        instanceId: body.id,
+      });
+    }
   }
 
   let billingWarnings = [];
