@@ -58,7 +58,9 @@ jobs:
         shell: bash
         run: |
           deploy_status="${{ steps.builddeploy.outcome }}"
-          short_sha="$(printf '%s' "$GITHUB_SHA" | cut -c1-8)"
+          report_sha="${{ github.event.pull_request.head.sha }}"
+          report_branch="${{ github.event.pull_request.head.ref }}"
+          short_sha="$(printf '%s' "$report_sha" | cut -c1-8)"
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           updated_at="$(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           preview_url="${{ steps.builddeploy.outputs.static_web_app_url }}"
@@ -80,6 +82,7 @@ jobs:
             echo
             echo "${status_line}"
             echo
+            echo "- Branch: \`${report_branch}\`"
             echo "- Commit: \`${short_sha}\`"
             echo "- Updated: ${updated_at}"
             echo "- Workflow run: [Open run](${run_url})"

@@ -57,7 +57,9 @@ jobs:
         run: |
           api_status="${{ steps.lint_api.outcome }}"
           sql_status="${{ steps.lint_sql.outcome }}"
-          short_sha="$(printf '%s' "$GITHUB_SHA" | cut -c1-8)"
+          report_sha="${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+          report_branch="${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}"
+          short_sha="$(printf '%s' "$report_sha" | cut -c1-8)"
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           updated_at="$(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           if [ "$api_status" = "success" ] && [ "$sql_status" = "success" ]; then
@@ -79,7 +81,7 @@ jobs:
             echo
             echo "${status_line}"
             echo
-            echo "- Branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Branch: \`${report_branch}\`"
             echo "- Commit: \`${short_sha}\`"
             echo "- Updated: ${updated_at}"
             echo "- Workflow run: [Open run](${run_url})"
