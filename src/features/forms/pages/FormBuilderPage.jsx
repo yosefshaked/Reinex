@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useBlocker, useNavigate, useParams } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -390,6 +390,9 @@ export default function FormBuilderPage() {
   const [selectedSharedBlockDetail, setSelectedSharedBlockDetail] = useState(null);
   const [savedSnapshot, setSavedSnapshot] = useState('');
   const [navigationGuardOpen, setNavigationGuardOpen] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState(null);
+  const currentHashRef = useRef(typeof window !== 'undefined' ? window.location.hash : '');
+  const ignoreHashSyncRef = useRef(false);
 
   const canLoad = Boolean(session && activeOrgId && formId && isAdmin);
   const sharedBlockMap = useMemo(() => buildSharedBlockMap(sharedBlocks), [sharedBlocks]);
@@ -403,7 +406,6 @@ export default function FormBuilderPage() {
     alertRules,
   }), [alertRules, description, formName, formUsage, schema, visibilityRules]);
   const hasUnsavedChanges = Boolean(canLoad && !loading && savedSnapshot && currentSnapshot !== savedSnapshot);
-  const blocker = useBlocker(hasUnsavedChanges && !saving && !publishing);
 
   const updateSchema = (updater) => setSchema((prev) => normalizeFormSchema(typeof updater === 'function' ? updater(prev) : updater));
 
@@ -487,14 +489,9 @@ export default function FormBuilderPage() {
   }, [resolvedSchema]);
 
   useEffect(() => {
-    if (blocker.state === 'blocked') {
-      setNavigationGuardOpen(true);
-    }
-  }, [blocker.state]);
-
-  useEffect(() => {
     if (!hasUnsavedChanges) {
       setNavigationGuardOpen(false);
+      setPendingNavigation(null);
     }
   }, [hasUnsavedChanges]);
 
@@ -506,6 +503,37 @@ export default function FormBuilderPage() {
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    currentHashRef.current = window.location.hash;
+    const handleHashChange = () => {
+      const nextHash = window.location.hash;
+      if (ignoreHashSyncRef.current) {
+        ignoreHashSyncRef.current = false;
+        currentHashRef.current = nextHash;
+        return;
+      }
+      const previousHash = currentHashRef.current;
+      if (!hasUnsavedChanges || !previousHash || nextHash === previousHash) {
+        currentHashRef.current = nextHash;
+        return;
+      }
+
+      setPendingNavigation(() => () => {
+        ignoreHashSyncRef.current = true;
+        currentHashRef.current = nextHash;
+        window.location.hash = nextHash;
+        setNavigationGuardOpen(false);
+        setPendingNavigation(null);
+      });
+      ignoreHashSyncRef.current = true;
+      window.location.hash = previousHash;
+      setNavigationGuardOpen(true);
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
   }, [hasUnsavedChanges]);
 
   const previewEvaluationAnswers = useMemo(
@@ -639,15 +667,13 @@ export default function FormBuilderPage() {
   };
 
   const stayOnBuilder = () => {
-    if (blocker.state === 'blocked') {
-      blocker.reset();
-    }
     setNavigationGuardOpen(false);
+    setPendingNavigation(null);
   };
 
   const discardAndContinue = () => {
-    if (blocker.state === 'blocked') {
-      blocker.proceed();
+    if (pendingNavigation) {
+      pendingNavigation();
       return;
     }
     setNavigationGuardOpen(false);
@@ -656,12 +682,25 @@ export default function FormBuilderPage() {
   const saveDraftAndContinue = async () => {
     const didSave = await persistForm(false);
     if (!didSave) return;
-    if (blocker.state === 'blocked') {
-      blocker.proceed();
+    if (pendingNavigation) {
+      pendingNavigation();
     } else {
       setNavigationGuardOpen(false);
     }
   };
+
+  const guardedNavigate = useCallback((to) => {
+    if (!hasUnsavedChanges) {
+      navigate(to);
+      return;
+    }
+    setPendingNavigation(() => () => {
+      setNavigationGuardOpen(false);
+      setPendingNavigation(null);
+      navigate(to);
+    });
+    setNavigationGuardOpen(true);
+  }, [hasUnsavedChanges, navigate]);
 
   const handleDragEnd = ({ active, over }) => {
     if (!over || active.id === over.id) return;
@@ -723,7 +762,7 @@ export default function FormBuilderPage() {
     <PageLayout
       title="בונה הטפסים"
       description="עריכת סעיפים, שאלות, טקסטים, תנאי חשיפה, דגלים אדומים ופרסום טופס"
-      actions={<div className="flex items-center gap-2"><Button variant="outline" className="gap-2" onClick={() => navigate('/forms')}><ArrowRight className="h-4 w-4" />חזרה לרשימה</Button><Button variant="outline" className="gap-2" onClick={() => navigate(`/forms/${formId}/preview`)}><Eye className="h-4 w-4" />תצוגה מלאה</Button><Button className="gap-2" variant="outline" disabled={saving || publishing} onClick={() => void persistForm(false)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}שמור טיוטה</Button><Button className="gap-2" disabled={saving || publishing} onClick={() => void persistForm(true)}>{publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}פרסם</Button></div>}
+      actions={<div className="flex items-center gap-2"><Button variant="outline" className="gap-2" onClick={() => guardedNavigate('/forms')}><ArrowRight className="h-4 w-4" />חזרה לרשימה</Button><Button variant="outline" className="gap-2" onClick={() => guardedNavigate(`/forms/${formId}/preview`)}><Eye className="h-4 w-4" />תצוגה מלאה</Button><Button className="gap-2" variant="outline" disabled={saving || publishing} onClick={() => void persistForm(false)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}שמור טיוטה</Button><Button className="gap-2" disabled={saving || publishing} onClick={() => void persistForm(true)}>{publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}פרסם</Button></div>}
     >
       <Dialog open={navigationGuardOpen} onOpenChange={(open) => { if (!open) stayOnBuilder(); }}>
         <DialogContent
@@ -760,7 +799,7 @@ export default function FormBuilderPage() {
             <Separator />
             <div className="space-y-2"><Button className="w-full gap-2" variant="outline" onClick={addSection}><Layers3 className="h-4 w-4" />הוסף סעיף</Button><Button className="w-full gap-2" variant="outline" onClick={addText}><Plus className="h-4 w-4" />טקסט מקומי</Button><div className="grid grid-cols-1 gap-2">{QUESTION_TYPE_DEFINITIONS.map((definition) => <Button key={definition.type} variant="ghost" className="justify-start rounded-xl border border-slate-200" onClick={() => addQuestion(definition.type)}><Plus className="me-2 h-4 w-4" />{definition.label}</Button>)}</div></div>
             <Separator />
-            <div className="space-y-3"><div className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Blocks className="h-4 w-4" />בלוקים משותפים</div><Button variant="outline" className="w-full" onClick={() => navigate('/forms/shared-blocks')}>נהל ספריית בלוקים משותפים</Button><div className="space-y-2"><Label>הוסף שאלה משותפת</Label><Select value={selectedSharedQuestionId} onValueChange={setSelectedSharedQuestionId}><SelectTrigger><SelectValue placeholder="בחר/י שאלה משותפת" /></SelectTrigger><SelectContent>{sharedQuestionBlocks.map((block) => <SelectItem key={block.id} value={block.id}>{block.name}</SelectItem>)}</SelectContent></Select><Button className="w-full" variant="outline" disabled={!selectedSharedQuestionId} onClick={() => insertSharedBlock(selectedSharedQuestionId)}>הוסף לטופס</Button></div><div className="space-y-2"><Label>הוסף טקסט משותף</Label><Select value={selectedSharedTextId} onValueChange={setSelectedSharedTextId}><SelectTrigger><SelectValue placeholder="בחר/י טקסט משותף" /></SelectTrigger><SelectContent>{sharedTextBlocks.map((block) => <SelectItem key={block.id} value={block.id}>{block.name}</SelectItem>)}</SelectContent></Select><Button className="w-full" variant="outline" disabled={!selectedSharedTextId} onClick={() => insertSharedBlock(selectedSharedTextId)}>הוסף לטופס</Button></div></div>
+            <div className="space-y-3"><div className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Blocks className="h-4 w-4" />בלוקים משותפים</div><Button variant="outline" className="w-full" onClick={() => guardedNavigate('/forms/shared-blocks')}>נהל ספריית בלוקים משותפים</Button><div className="space-y-2"><Label>הוסף שאלה משותפת</Label><Select value={selectedSharedQuestionId} onValueChange={setSelectedSharedQuestionId}><SelectTrigger><SelectValue placeholder="בחר/י שאלה משותפת" /></SelectTrigger><SelectContent>{sharedQuestionBlocks.map((block) => <SelectItem key={block.id} value={block.id}>{block.name}</SelectItem>)}</SelectContent></Select><Button className="w-full" variant="outline" disabled={!selectedSharedQuestionId} onClick={() => insertSharedBlock(selectedSharedQuestionId)}>הוסף לטופס</Button></div><div className="space-y-2"><Label>הוסף טקסט משותף</Label><Select value={selectedSharedTextId} onValueChange={setSelectedSharedTextId}><SelectTrigger><SelectValue placeholder="בחר/י טקסט משותף" /></SelectTrigger><SelectContent>{sharedTextBlocks.map((block) => <SelectItem key={block.id} value={block.id}>{block.name}</SelectItem>)}</SelectContent></Select><Button className="w-full" variant="outline" disabled={!selectedSharedTextId} onClick={() => insertSharedBlock(selectedSharedTextId)}>הוסף לטופס</Button></div></div>
           </CardContent>
         </Card>
 
@@ -772,7 +811,7 @@ export default function FormBuilderPage() {
         <Card className="xl:sticky xl:top-4 xl:h-fit">
           <CardContent className="space-y-4 p-4">
             {selected.type === 'section' && selectedSection ? <><div className="space-y-2"><Label>שם הסעיף</Label><Input value={selectedSection.title} onChange={(event) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => section.id === selectedSection.id ? { ...section, title: event.target.value } : section) }))} /></div><div className="space-y-2"><Label>תיאור</Label><Textarea rows={3} value={selectedSection.description} onChange={(event) => updateSchema((prev) => ({ ...prev, sections: prev.sections.map((section) => section.id === selectedSection.id ? { ...section, description: event.target.value } : section) }))} /></div><Button variant="destructive" className="w-full gap-2" disabled={schema.sections.length === 1} onClick={() => updateSchema((prev) => ({ ...prev, sections: prev.sections.filter((section) => section.id !== selectedSection.id) }))}><Trash2 className="h-4 w-4" />מחק סעיף</Button></> : null}
-            {selected.type === 'item' && selectedItem ? <ItemEditor selectedItem={selectedItem} selectedQuestion={selectedQuestion} selectedSharedBlockDetail={selectedSharedBlockDetail} updateSelectedItem={updateSelectedItem} deleteSelectedItem={deleteSelectedItem} detachSharedItem={detachSharedItem} navigate={navigate} /> : null}
+            {selected.type === 'item' && selectedItem ? <ItemEditor selectedItem={selectedItem} selectedQuestion={selectedQuestion} selectedSharedBlockDetail={selectedSharedBlockDetail} updateSelectedItem={updateSelectedItem} deleteSelectedItem={deleteSelectedItem} detachSharedItem={detachSharedItem} navigate={guardedNavigate} /> : null}
             <Separator />
             {selected.id ? <VisibilityEditor selected={selected} selectedGroups={selectedGroups} setVisibilityRules={setVisibilityRules} updateVisibilityGroup={updateVisibilityGroup} availableSources={availableSources} /> : null}
             {selectedQuestion && ['single_select', 'multi_select', 'yes_no'].includes(selectedQuestion.question_type) ? <AlertRulesEditor selectedQuestion={selectedQuestion} alertRules={alertRules} updateAlertRule={updateAlertRule} /> : null}
