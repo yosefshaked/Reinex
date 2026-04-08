@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useBlocker, useNavigate, useParams } from 'react-router-dom';
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -17,6 +17,7 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -254,6 +255,24 @@ function cloneSharedItemAsLocal(item) {
   };
 }
 
+function buildFormDraftSnapshot({
+  formName,
+  description,
+  formUsage,
+  schema,
+  visibilityRules,
+  alertRules,
+}) {
+  return JSON.stringify({
+    formName: String(formName || ''),
+    description: String(description || ''),
+    formUsage: String(formUsage || 'general'),
+    schema,
+    visibilityRules,
+    alertRules,
+  });
+}
+
 function ItemEditor({
   selectedItem,
   selectedQuestion,
@@ -369,10 +388,22 @@ export default function FormBuilderPage() {
   const [selectedSharedQuestionId, setSelectedSharedQuestionId] = useState('');
   const [selectedSharedTextId, setSelectedSharedTextId] = useState('');
   const [selectedSharedBlockDetail, setSelectedSharedBlockDetail] = useState(null);
+  const [savedSnapshot, setSavedSnapshot] = useState('');
+  const [navigationGuardOpen, setNavigationGuardOpen] = useState(false);
 
   const canLoad = Boolean(session && activeOrgId && formId && isAdmin);
   const sharedBlockMap = useMemo(() => buildSharedBlockMap(sharedBlocks), [sharedBlocks]);
   const resolvedSchema = useMemo(() => resolveSchemaWithSharedBlocks(schema, sharedBlockMap), [schema, sharedBlockMap]);
+  const currentSnapshot = useMemo(() => buildFormDraftSnapshot({
+    formName,
+    description,
+    formUsage,
+    schema,
+    visibilityRules,
+    alertRules,
+  }), [alertRules, description, formName, formUsage, schema, visibilityRules]);
+  const hasUnsavedChanges = Boolean(canLoad && !loading && savedSnapshot && currentSnapshot !== savedSnapshot);
+  const blocker = useBlocker(hasUnsavedChanges && !saving && !publishing);
 
   const updateSchema = (updater) => setSchema((prev) => normalizeFormSchema(typeof updater === 'function' ? updater(prev) : updater));
 
@@ -430,6 +461,14 @@ export default function FormBuilderPage() {
       setPublishedAt(String(data?.metadata?.published_at || data?.published_at || ''));
       setPreviewAnswers(buildInitialAnswers(resolved));
       setSelected({ type: 'section', id: normalizedSchema.sections[0]?.id || '' });
+      setSavedSnapshot(buildFormDraftSnapshot({
+        formName: String(data?.name || ''),
+        description: String(data?.description || ''),
+        formUsage: String(data?.form_usage || 'general'),
+        schema: normalizedSchema,
+        visibilityRules: normalizeVisibilityRules(data?.visibility_rules),
+        alertRules: normalizeAlertRules(data?.alert_rules),
+      }));
     } catch (loadError) {
       console.error('Failed to load form', loadError);
       setError(loadError?.message || 'טעינת הטופס נכשלה');
@@ -446,6 +485,28 @@ export default function FormBuilderPage() {
   useEffect(() => {
     setPreviewAnswers((prev) => ({ ...buildInitialAnswers(resolvedSchema), ...prev }));
   }, [resolvedSchema]);
+
+  useEffect(() => {
+    if (blocker.state === 'blocked') {
+      setNavigationGuardOpen(true);
+    }
+  }, [blocker.state]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) {
+      setNavigationGuardOpen(false);
+    }
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return undefined;
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   const previewEvaluationAnswers = useMemo(
     () => (formUsage === 'waiting_list_intake' ? buildWaitingListEvaluationAnswers(previewAnswers) : previewAnswers),
@@ -540,7 +601,7 @@ export default function FormBuilderPage() {
     });
     if (schemaIssues.length) {
       toast.error(describeSchemaIssue(schemaIssues[0]));
-      return;
+      return false;
     }
 
     if (publish) setPublishing(true); else setSaving(true);
@@ -564,13 +625,41 @@ export default function FormBuilderPage() {
       setPublishedVersion(emptyPublishedVersion(payload?.metadata, Number(payload?.version || version)));
       setLastSavedAt(String(payload?.metadata?.draft_saved_at || payload?.updated_at || new Date().toISOString()));
       setPublishedAt(String(payload?.metadata?.published_at || payload?.published_at || publishedAt));
+      setSavedSnapshot(currentSnapshot);
       toast.success(publish ? 'הטופס פורסם' : 'טיוטת הטופס נשמרה');
       await loadSharedBlocks();
+      return true;
     } catch (saveError) {
       console.error('Failed to persist form', saveError);
       toast.error(saveError?.message || (publish ? 'פרסום הטופס נכשל' : 'שמירת הטיוטה נכשלה'));
+      return false;
     } finally {
       if (publish) setPublishing(false); else setSaving(false);
+    }
+  };
+
+  const stayOnBuilder = () => {
+    if (blocker.state === 'blocked') {
+      blocker.reset();
+    }
+    setNavigationGuardOpen(false);
+  };
+
+  const discardAndContinue = () => {
+    if (blocker.state === 'blocked') {
+      blocker.proceed();
+      return;
+    }
+    setNavigationGuardOpen(false);
+  };
+
+  const saveDraftAndContinue = async () => {
+    const didSave = await persistForm(false);
+    if (!didSave) return;
+    if (blocker.state === 'blocked') {
+      blocker.proceed();
+    } else {
+      setNavigationGuardOpen(false);
     }
   };
 
@@ -636,6 +725,31 @@ export default function FormBuilderPage() {
       description="עריכת סעיפים, שאלות, טקסטים, תנאי חשיפה, דגלים אדומים ופרסום טופס"
       actions={<div className="flex items-center gap-2"><Button variant="outline" className="gap-2" onClick={() => navigate('/forms')}><ArrowRight className="h-4 w-4" />חזרה לרשימה</Button><Button variant="outline" className="gap-2" onClick={() => navigate(`/forms/${formId}/preview`)}><Eye className="h-4 w-4" />תצוגה מלאה</Button><Button className="gap-2" variant="outline" disabled={saving || publishing} onClick={() => void persistForm(false)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}שמור טיוטה</Button><Button className="gap-2" disabled={saving || publishing} onClick={() => void persistForm(true)}>{publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}פרסם</Button></div>}
     >
+      <Dialog open={navigationGuardOpen} onOpenChange={(open) => { if (!open) stayOnBuilder(); }}>
+        <DialogContent
+          className="max-w-md text-end"
+          footer={(
+            <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-start">
+              <Button variant="outline" onClick={stayOnBuilder}>הישאר/י בעריכה</Button>
+              <Button variant="outline" disabled={saving || publishing} onClick={discardAndContinue}>צא/י בלי לשמור</Button>
+              <Button disabled={saving || publishing} onClick={() => void saveDraftAndContinue()}>
+                {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Save className="me-2 h-4 w-4" />}
+                שמור/י טיוטה והמשך
+              </Button>
+            </DialogFooter>
+          )}
+        >
+          <DialogHeader className="text-end">
+            <DialogTitle>יש שינויים שלא נשמרו</DialogTitle>
+            <DialogDescription className="text-end">
+              יש בטופס שינויים שעדיין לא נשמרו כטיוטה. אם תצא/י עכשיו, ההתקדמות האחרונה תאבד.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            מומלץ לשמור טיוטה לפני מעבר לעריכת בלוק משותף, לתצוגה המקדימה או לכל עמוד אחר.
+          </div>
+        </DialogContent>
+      </Dialog>
       {error ? <Alert className="mb-4"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert> : null}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[300px_minmax(0,1fr)_380px]">
         <Card className="xl:sticky xl:top-4 xl:h-fit">
