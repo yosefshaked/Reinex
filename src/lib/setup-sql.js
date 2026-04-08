@@ -1465,9 +1465,9 @@ DO $$
 BEGIN
   UPDATE public.lesson_instances
   SET status = CASE
-    WHEN lower(btrim(status)) IN ('cancelled_student', 'cancelled_clinic', 'no_show', 'cancelled') THEN 'cancelled'
-    WHEN lower(btrim(status)) = 'completed' THEN 'completed'
-    WHEN lower(btrim(status)) = 'scheduled' THEN 'scheduled'
+    WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') IN ('cancelled_student', 'cancelled_clinic', 'no_show', 'cancelled') THEN 'cancelled'
+    WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') = 'completed' THEN 'completed'
+    WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') = 'scheduled' THEN 'scheduled'
     ELSE status
   END
   WHERE status IS NOT NULL;
@@ -1483,7 +1483,7 @@ BEGIN
   INTO invalid_values
   FROM public.lesson_instances
   WHERE status IS NOT NULL
-    AND lower(btrim(status)) NOT IN ('scheduled', 'completed', 'cancelled', 'cancelled_student', 'cancelled_clinic', 'no_show');
+    AND regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') NOT IN ('scheduled', 'completed', 'cancelled', 'cancelled_student', 'cancelled_clinic', 'no_show');
 
   IF invalid_values IS NOT NULL THEN
     RAISE EXCEPTION 'Cannot apply lesson_instances_status_check; unsupported lesson_instances.status values remain: %', invalid_values;
@@ -1494,6 +1494,8 @@ ALTER TABLE public.lesson_instances
   DROP CONSTRAINT IF EXISTS lesson_instances_status_check;
 
 DO $$
+DECLARE
+  invalid_values text;
 BEGIN
   ALTER TABLE public.lesson_instances
     ADD CONSTRAINT lesson_instances_status_check
@@ -1501,12 +1503,19 @@ BEGIN
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
+  WHEN check_violation THEN
+    SELECT string_agg(DISTINCT quote_nullable(status), ', ' ORDER BY quote_nullable(status))
+    INTO invalid_values
+    FROM public.lesson_instances
+    WHERE status IS NOT NULL
+      AND status NOT IN ('scheduled','completed','cancelled');
+    RAISE EXCEPTION 'Cannot apply lesson_instances_status_check; violating lesson_instances.status values remain: %', COALESCE(invalid_values, '[unknown]');
 END $$;
 
 DO $$
 BEGIN
   UPDATE public.lesson_instances
-  SET documentation_status = lower(btrim(documentation_status))
+  SET documentation_status = regexp_replace(lower(coalesce(documentation_status, '')), '[[:space:]]+', '', 'g')
   WHERE documentation_status IS NOT NULL;
 EXCEPTION
   WHEN others THEN NULL;
@@ -1520,7 +1529,7 @@ BEGIN
   INTO invalid_values
   FROM public.lesson_instances
   WHERE documentation_status IS NOT NULL
-    AND lower(btrim(documentation_status)) NOT IN ('undocumented', 'documented');
+    AND regexp_replace(lower(coalesce(documentation_status, '')), '[[:space:]]+', '', 'g') NOT IN ('undocumented', 'documented');
 
   IF invalid_values IS NOT NULL THEN
     RAISE EXCEPTION 'Cannot apply lesson_instances_documentation_status_check; unsupported lesson_instances.documentation_status values remain: %', invalid_values;
@@ -1528,6 +1537,8 @@ BEGIN
 END $$;
 
 DO $$
+DECLARE
+  invalid_values text;
 BEGIN
   ALTER TABLE public.lesson_instances
     ADD CONSTRAINT lesson_instances_documentation_status_check
@@ -1535,15 +1546,22 @@ BEGIN
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
+  WHEN check_violation THEN
+    SELECT string_agg(DISTINCT quote_nullable(documentation_status), ', ' ORDER BY quote_nullable(documentation_status))
+    INTO invalid_values
+    FROM public.lesson_instances
+    WHERE documentation_status IS NOT NULL
+      AND documentation_status NOT IN ('undocumented','documented');
+    RAISE EXCEPTION 'Cannot apply lesson_instances_documentation_status_check; violating lesson_instances.documentation_status values remain: %', COALESCE(invalid_values, '[unknown]');
 END $$;
 
 DO $$
 BEGIN
   UPDATE public.lesson_instances
   SET created_source = CASE
-    WHEN lower(btrim(created_source)) IN ('weekly_generation', 'one_time', 'manual_reschedule', 'migration') THEN lower(btrim(created_source))
-    WHEN lower(btrim(created_source)) IN ('manual', 'manual_create', 'one-off', 'one_off') THEN 'one_time'
-    WHEN lower(btrim(created_source)) IN ('reschedule', 'manual-reschedule') THEN 'manual_reschedule'
+    WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('weekly_generation', 'one_time', 'manual_reschedule', 'migration') THEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g')
+    WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('manual', 'manual_create', 'one-off', 'one_off') THEN 'one_time'
+    WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('reschedule', 'manual-reschedule', 'manualreschedule') THEN 'manual_reschedule'
     ELSE created_source
   END
   WHERE created_source IS NOT NULL;
@@ -1559,7 +1577,7 @@ BEGIN
   INTO invalid_values
   FROM public.lesson_instances
   WHERE created_source IS NOT NULL
-    AND lower(btrim(created_source)) NOT IN ('weekly_generation', 'one_time', 'manual_reschedule', 'migration', 'manual', 'manual_create', 'one-off', 'one_off', 'reschedule', 'manual-reschedule');
+    AND regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') NOT IN ('weekly_generation', 'one_time', 'manual_reschedule', 'migration', 'manual', 'manual_create', 'one-off', 'one_off', 'reschedule', 'manual-reschedule', 'manualreschedule');
 
   IF invalid_values IS NOT NULL THEN
     RAISE EXCEPTION 'Cannot apply lesson_instances_created_source_check; unsupported lesson_instances.created_source values remain: %', invalid_values;
@@ -1567,6 +1585,8 @@ BEGIN
 END $$;
 
 DO $$
+DECLARE
+  invalid_values text;
 BEGIN
   ALTER TABLE public.lesson_instances
     ADD CONSTRAINT lesson_instances_created_source_check
@@ -1574,6 +1594,13 @@ BEGIN
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
+  WHEN check_violation THEN
+    SELECT string_agg(DISTINCT quote_nullable(created_source), ', ' ORDER BY quote_nullable(created_source))
+    INTO invalid_values
+    FROM public.lesson_instances
+    WHERE created_source IS NOT NULL
+      AND created_source NOT IN ('weekly_generation','one_time','manual_reschedule','migration');
+    RAISE EXCEPTION 'Cannot apply lesson_instances_created_source_check; violating lesson_instances.created_source values remain: %', COALESCE(invalid_values, '[unknown]');
 END $$;
 
 CREATE INDEX IF NOT EXISTS lesson_instances_datetime_start_idx ON public.lesson_instances (datetime_start);
@@ -1663,7 +1690,7 @@ END $$;
 DO $$
 BEGIN
   UPDATE public.lesson_participants
-  SET participant_status = lower(btrim(participant_status))
+  SET participant_status = regexp_replace(lower(coalesce(participant_status, '')), '[[:space:]]+', '', 'g')
   WHERE participant_status IS NOT NULL;
 EXCEPTION
   WHEN others THEN NULL;
@@ -1677,7 +1704,7 @@ BEGIN
   INTO invalid_values
   FROM public.lesson_participants
   WHERE participant_status IS NOT NULL
-    AND lower(btrim(participant_status)) NOT IN ('scheduled', 'attended', 'cancelled_student', 'cancelled_clinic', 'no_show');
+    AND regexp_replace(lower(coalesce(participant_status, '')), '[[:space:]]+', '', 'g') NOT IN ('scheduled', 'attended', 'cancelled_student', 'cancelled_clinic', 'no_show');
 
   IF invalid_values IS NOT NULL THEN
     RAISE EXCEPTION 'Cannot apply lesson_participants_participant_status_check; unsupported lesson_participants.participant_status values remain: %', invalid_values;
@@ -1685,6 +1712,8 @@ BEGIN
 END $$;
 
 DO $$
+DECLARE
+  invalid_values text;
 BEGIN
   ALTER TABLE public.lesson_participants
     ADD CONSTRAINT lesson_participants_participant_status_check
@@ -1692,6 +1721,13 @@ BEGIN
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
+  WHEN check_violation THEN
+    SELECT string_agg(DISTINCT quote_nullable(participant_status), ', ' ORDER BY quote_nullable(participant_status))
+    INTO invalid_values
+    FROM public.lesson_participants
+    WHERE participant_status IS NOT NULL
+      AND participant_status NOT IN ('scheduled','attended','cancelled_student','cancelled_clinic','no_show');
+    RAISE EXCEPTION 'Cannot apply lesson_participants_participant_status_check; violating lesson_participants.participant_status values remain: %', COALESCE(invalid_values, '[unknown]');
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS lesson_participants_instance_client_profile_uidx
