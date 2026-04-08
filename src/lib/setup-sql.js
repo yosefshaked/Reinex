@@ -602,22 +602,40 @@ ALTER TABLE public."RateHistory"
 -- Add unique constraint to prevent duplicates per employee/service/effective_date
 DO $$
 BEGIN
-  IF NOT EXISTS (
+  IF EXISTS (
     SELECT 1
     FROM pg_constraint
     WHERE conname = 'RateHistory_employee_service_effective_date_key'
       AND conrelid = 'public."RateHistory"'::regclass
-  ) AND NOT EXISTS (
+  ) THEN
+    NULL;
+  ELSIF EXISTS (
     SELECT 1
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relname = 'RateHistory_employee_service_effective_date_key'
       AND n.nspname = 'public'
+      AND c.relkind = 'i'
   ) THEN
+    BEGIN
+      ALTER TABLE public."RateHistory"
+        ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
+        UNIQUE USING INDEX "RateHistory_employee_service_effective_date_key";
+    EXCEPTION
+      WHEN object_not_in_prerequisite_state THEN
+        DROP INDEX IF EXISTS public."RateHistory_employee_service_effective_date_key";
+        ALTER TABLE public."RateHistory"
+          ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
+          UNIQUE (employee_id, service_id, effective_date);
+    END;
+  ELSE
     ALTER TABLE public."RateHistory"
       ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
       UNIQUE (employee_id, service_id, effective_date);
   END IF;
+EXCEPTION
+  WHEN duplicate_object OR duplicate_table THEN
+    NULL;
 END;
 $$;
 
@@ -2506,22 +2524,40 @@ END $$;
 -- NULL source_ref rows (manual adjustments, credits) are excluded by PostgreSQL semantics.
 DO $$
 BEGIN
-  IF NOT EXISTS (
+  IF EXISTS (
     SELECT 1
     FROM pg_constraint
     WHERE conname = 'ledger_transactions_source_usage_unique'
       AND conrelid = 'public.ledger_transactions'::regclass
-  ) AND NOT EXISTS (
+  ) THEN
+    NULL;
+  ELSIF EXISTS (
     SELECT 1
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relname = 'ledger_transactions_source_usage_unique'
       AND n.nspname = 'public'
+      AND c.relkind = 'i'
   ) THEN
+    BEGIN
+      ALTER TABLE public.ledger_transactions
+        ADD CONSTRAINT ledger_transactions_source_usage_unique
+        UNIQUE USING INDEX ledger_transactions_source_usage_unique;
+    EXCEPTION
+      WHEN object_not_in_prerequisite_state THEN
+        DROP INDEX IF EXISTS public.ledger_transactions_source_usage_unique;
+        ALTER TABLE public.ledger_transactions
+          ADD CONSTRAINT ledger_transactions_source_usage_unique
+          UNIQUE (source_ref, usage_type);
+    END;
+  ELSE
     ALTER TABLE public.ledger_transactions
       ADD CONSTRAINT ledger_transactions_source_usage_unique
       UNIQUE (source_ref, usage_type);
   END IF;
+EXCEPTION
+  WHEN duplicate_object OR duplicate_table THEN
+    NULL;
 END $$;
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_commitment_id_idx
@@ -2781,22 +2817,40 @@ CREATE INDEX IF NOT EXISTS lesson_earnings_lesson_instance_id_idx
 
 DO $$
 BEGIN
-  IF NOT EXISTS (
+  IF EXISTS (
     SELECT 1
     FROM pg_constraint
     WHERE conname = 'lesson_earnings_employee_lesson_unique'
       AND conrelid = 'public.lesson_earnings'::regclass
-  ) AND NOT EXISTS (
+  ) THEN
+    NULL;
+  ELSIF EXISTS (
     SELECT 1
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relname = 'lesson_earnings_employee_lesson_unique'
       AND n.nspname = 'public'
+      AND c.relkind = 'i'
   ) THEN
+    BEGIN
+      ALTER TABLE public.lesson_earnings
+        ADD CONSTRAINT lesson_earnings_employee_lesson_unique
+        UNIQUE USING INDEX lesson_earnings_employee_lesson_unique;
+    EXCEPTION
+      WHEN object_not_in_prerequisite_state THEN
+        DROP INDEX IF EXISTS public.lesson_earnings_employee_lesson_unique;
+        ALTER TABLE public.lesson_earnings
+          ADD CONSTRAINT lesson_earnings_employee_lesson_unique
+          UNIQUE (employee_id, lesson_instance_id);
+    END;
+  ELSE
     ALTER TABLE public.lesson_earnings
       ADD CONSTRAINT lesson_earnings_employee_lesson_unique
       UNIQUE (employee_id, lesson_instance_id);
   END IF;
+EXCEPTION
+  WHEN duplicate_object OR duplicate_table THEN
+    NULL;
 END $$;
 
 -- -----------------------------------------------------------------
