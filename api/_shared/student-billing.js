@@ -808,31 +808,6 @@ async function loadParticipantWithInstance(tenantClient, lessonParticipantId) {
   };
 }
 
-async function upsertLessonLedgerEntry(tenantClient, payload) {
-  const { data, error } = await tenantClient
-    .from('ledger_transactions')
-    .upsert(payload, { onConflict: 'source_ref,usage_type' })
-    .select('id')
-    .maybeSingle();
-
-  if (error) {
-    throw error;
-  }
-
-  return data?.id || null;
-}
-
-async function deleteLessonLedgerEntry(tenantClient, lessonParticipantId) {
-  const { error } = await tenantClient
-    .from('ledger_transactions')
-    .delete()
-    .eq('source_ref', lessonParticipantId)
-    .in('usage_type', ['standard', 'double', 'cross_service']);
-
-  if (error && error.code !== '42P01') {
-    throw error;
-  }
-}
 
 async function resolveParticipantCommitmentForSync(tenantClient, {
   participant,

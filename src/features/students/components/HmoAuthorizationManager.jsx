@@ -1,6 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -83,6 +93,7 @@ export default function HmoAuthorizationManager({
   const [authorizations, setAuthorizations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [cancelTargetId, setCancelTargetId] = useState('');
   const [form, setForm] = useState(() => buildEmptyAuthorizationForm());
 
   const availableTracks = useMemo(
@@ -207,6 +218,10 @@ export default function HmoAuthorizationManager({
       toast.error('יש להזין כמות מפגשים מאושרת.');
       return;
     }
+    if (form.validFrom && form.expiresAt && form.validFrom >= form.expiresAt) {
+      toast.error('תאריך התחילה חייב להיות לפני תאריך הסיום.');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -273,6 +288,23 @@ export default function HmoAuthorizationManager({
   }
 
   return (
+    <>
+    <AlertDialog open={Boolean(cancelTargetId)} onOpenChange={(open) => { if (!open) setCancelTargetId(''); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>ביטול אישור גורם מממן</AlertDialogTitle>
+          <AlertDialogDescription>
+            פעולה זו תבטל את האישור ותקפא את ההתחייבות המקושרת. לא ניתן לבטל פעולה זו. האם להמשיך?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>ביטול</AlertDialogCancel>
+          <AlertDialogAction onClick={() => { handleCancelAuthorization(cancelTargetId); setCancelTargetId(''); }}>
+            אשר ביטול
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <div className={embedded ? 'space-y-4' : 'grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]'}>
       {!embedded ? (
       <section className={`${embedded ? 'rounded-xl border border-border bg-slate-50/70' : 'rounded-xl border border-border bg-white shadow-sm overflow-hidden'}`}>
@@ -379,7 +411,7 @@ export default function HmoAuthorizationManager({
                       ערוך אישור
                     </Button>
                     {row.status === 'active' ? (
-                      <Button type="button" size="sm" variant="outline" onClick={() => handleCancelAuthorization(row.id)} disabled={saving}>
+                      <Button type="button" size="sm" variant="outline" onClick={() => setCancelTargetId(row.id)} disabled={saving}>
                         בטל אישור
                       </Button>
                     ) : null}
@@ -582,5 +614,6 @@ export default function HmoAuthorizationManager({
         </section>
       ) : null}
     </div>
+    </>
   );
 }

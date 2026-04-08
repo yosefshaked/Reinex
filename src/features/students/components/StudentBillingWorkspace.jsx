@@ -1,6 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CircleHelp, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,6 +31,7 @@ import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/feature
 import HmoAuthorizationManager from '@/features/students/components/HmoAuthorizationManager.jsx';
 import LedgerInvoiceDialog from '@/features/finance/components/LedgerInvoiceDialog.jsx';
 import { normalizeExternalHttpUrl } from '@/lib/external-links.js';
+import { toShekel } from '@/lib/currency.js';
 import {
   buildCommitmentMetadataPayload,
   buildInitialCommitmentForm,
@@ -196,8 +207,8 @@ function exportBillingCsv({ student, commitments, lessonHistory, entries, transf
       commitment.expires_at || '',
       commitment.service?.service_name || '',
       commitment.commitment_type || '',
-      commitment.total_amount ?? '',
-      commitment.remaining_amount ?? '',
+      toShekel(commitment.total_amount),
+      toShekel(commitment.remaining_amount),
       commitment.notes || '',
     ])),
     ...lessonHistory.map((row) => ([
@@ -206,8 +217,8 @@ function exportBillingCsv({ student, commitments, lessonHistory, entries, transf
       row.lesson_instance?.datetime_start || '',
       row.service?.service_name || '',
       row.billing_status || '',
-      row.resolved_charge_amount ?? row.price_charged ?? '',
-      row.commitment?.remaining_amount ?? '',
+      toShekel(row.resolved_charge_amount ?? row.price_charged ?? 0),
+      toShekel(row.commitment?.remaining_amount ?? 0),
       getBillingReasonLabel(row.billing_reason),
     ])),
     ...entries.map((entry) => ([
@@ -216,8 +227,8 @@ function exportBillingCsv({ student, commitments, lessonHistory, entries, transf
       entry.effective_date || entry.metadata?.effective_date || entry.created_at || '',
       entry.commitment?.service?.service_name || '',
       `${entry.transaction_type || ''} ${getEntryTypeLabel(entry)}`,
-      entry.transaction_type === 'CREDIT' ? entry.amount ?? '' : -(entry.amount ?? entry.amount_charged ?? 0),
-      entry.commitment?.remaining_amount ?? '',
+      entry.transaction_type === 'CREDIT' ? toShekel(entry.amount ?? 0) : -toShekel(entry.amount ?? entry.amount_charged ?? 0),
+      toShekel(entry.commitment?.remaining_amount ?? 0),
       entry.notes || '',
     ])),
     ...transfers.map((transfer) => ([
@@ -226,7 +237,7 @@ function exportBillingCsv({ student, commitments, lessonHistory, entries, transf
       transfer.created_at || '',
       transfer.target_commitments.map((commitment) => commitment.service?.service_name || '').join(', '),
       'transfer',
-      transfer.amount ?? '',
+      toShekel(transfer.amount ?? 0),
       '',
       transfer.source_entry?.notes || '',
     ])),
@@ -281,8 +292,14 @@ export default function StudentBillingWorkspace({
   const canMutateBilling = isAdminRole(membershipRole);
 
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [savingCommitment, setSavingCommitment] = useState(false);
+  const [savingEntry, setSavingEntry] = useState(false);
+  const [savingAssignment, setSavingAssignment] = useState(false);
+  const [savingTransfer, setSavingTransfer] = useState(false);
+  const [savingInvoice, setSavingInvoice] = useState(false);
   const [reconciling, setReconciling] = useState(false);
+  const [deleteCommitmentTargetId, setDeleteCommitmentTargetId] = useState('');
+  const [deleteEntryTargetId, setDeleteEntryTargetId] = useState('');
   const [summary, setSummary] = useState(null);
   const [commitments, setCommitments] = useState([]);
   const [billingQueue, setBillingQueue] = useState([]);
@@ -457,7 +474,7 @@ export default function StudentBillingWorkspace({
       return;
     }
 
-    setSaving(true);
+    setSavingCommitment(true);
     try {
       await authenticatedFetch('commitments', {
         session,
@@ -484,13 +501,13 @@ export default function StudentBillingWorkspace({
       console.error('Failed to save commitment', error);
       toast.error(error?.message || 'שמירת ההתחייבות נכשלה.');
     } finally {
-      setSaving(false);
+      setSavingCommitment(false);
     }
   }
 
   async function handleDeleteCommitment(commitmentId) {
     if (!activeOrgId || !commitmentId || !canMutateBilling) return;
-    setSaving(true);
+    setSavingCommitment(true);
     try {
       await authenticatedFetch('commitments', {
         session,
@@ -510,7 +527,7 @@ export default function StudentBillingWorkspace({
       console.error('Failed to delete commitment', error);
       toast.error(error?.message || 'מחיקת ההתחייבות נכשלה.');
     } finally {
-      setSaving(false);
+      setSavingCommitment(false);
     }
   }
 
@@ -534,7 +551,7 @@ export default function StudentBillingWorkspace({
   async function handleApplyAssignment(row) {
     if (!activeOrgId || !canMutateBilling) return;
     const selectedValue = resolveAssignmentValue(row);
-    setSaving(true);
+    setSavingAssignment(true);
     try {
       if (!selectedValue || selectedValue === '__none__') {
         await authenticatedFetch('billing', {
@@ -565,7 +582,7 @@ export default function StudentBillingWorkspace({
       console.error('Failed to update lesson commitment assignment', error);
       toast.error(error?.message || 'עדכון שיוך החיוב נכשל.');
     } finally {
-      setSaving(false);
+      setSavingAssignment(false);
     }
   }
 
@@ -607,7 +624,7 @@ export default function StudentBillingWorkspace({
       toast.error('לתנועה ידנית חייבת להיות הערה.');
       return;
     }
-    setSaving(true);
+    setSavingEntry(true);
     try {
       await authenticatedFetch('consumption-entries', {
         session,
@@ -635,13 +652,13 @@ export default function StudentBillingWorkspace({
       console.error('Failed to save manual billing entry', error);
       toast.error(error?.message || 'שמירת התאמת החיוב נכשלה.');
     } finally {
-      setSaving(false);
+      setSavingEntry(false);
     }
   }
 
   async function handleDeleteEntry(entryId) {
     if (!activeOrgId || !entryId || !canMutateBilling) return;
-    setSaving(true);
+    setSavingEntry(true);
     try {
       await authenticatedFetch('consumption-entries', {
         session,
@@ -662,13 +679,13 @@ export default function StudentBillingWorkspace({
       console.error('Failed to delete manual billing entry', error);
       toast.error(error?.message || 'מחיקת ההתאמה נכשלה.');
     } finally {
-      setSaving(false);
+      setSavingEntry(false);
     }
   }
 
   async function handleSaveInvoiceFields({ id, invoice_id, invoice_link }) {
     if (!activeOrgId || !id || !canMutateBilling) return;
-    setSaving(true);
+    setSavingInvoice(true);
     try {
       await authenticatedFetch('consumption-entries', {
         session,
@@ -689,13 +706,13 @@ export default function StudentBillingWorkspace({
       console.error('Failed to update invoice fields', error);
       toast.error(error?.message || 'עדכון פרטי החשבונית נכשל.');
     } finally {
-      setSaving(false);
+      setSavingInvoice(false);
     }
   }
 
   async function handleTransferBalance() {
     if (!activeOrgId || !canMutateBilling || !transferForm.sourceCommitmentId || transferForm.amount === '') return;
-    setSaving(true);
+    setSavingTransfer(true);
     try {
       await authenticatedFetch('billing', {
         session,
@@ -729,7 +746,7 @@ export default function StudentBillingWorkspace({
       console.error('Failed to transfer commitment balance', error);
       toast.error(error?.message || 'העברת היתרה נכשלה.');
     } finally {
-      setSaving(false);
+      setSavingTransfer(false);
     }
   }
 
@@ -920,7 +937,7 @@ export default function StudentBillingWorkspace({
                     {canMutateBilling ? (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {commitment.commitment_type !== 'hmo' ? (
-                          <Button type="button" size="sm" variant="outline" onClick={() => startEditingCommitment(commitment)} disabled={saving}>
+                          <Button type="button" size="sm" variant="outline" onClick={() => startEditingCommitment(commitment)} disabled={savingCommitment}>
                             ערוך
                           </Button>
                         ) : null}
@@ -933,13 +950,13 @@ export default function StudentBillingWorkspace({
                               setCommitmentForm({ ...buildInitialCommitmentForm(), commitmentType: 'hmo' });
                               setSelectedHmoAuthorizationId(commitment.hmo_authorization_id);
                             }}
-                            disabled={saving}
+                            disabled={savingCommitment}
                           >
                             ערוך אישור
                           </Button>
                         ) : null}
                         {Number(commitment.consumed_amount || 0) === 0 && !commitment.transfer_ref && commitment.commitment_type !== 'hmo' ? (
-                          <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteCommitment(commitment.id)} disabled={saving}>
+                          <Button type="button" size="sm" variant="outline" onClick={() => setDeleteCommitmentTargetId(commitment.id)} disabled={savingCommitment}>
                             מחק
                           </Button>
                         ) : null}
@@ -975,7 +992,7 @@ export default function StudentBillingWorkspace({
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="text-xs text-slate-600">סוג פעולה</Label>
-                  <Select value={commitmentForm.commitmentType} onValueChange={handleCommitmentTypeChange} disabled={saving}>
+                  <Select value={commitmentForm.commitmentType} onValueChange={handleCommitmentTypeChange} disabled={savingCommitment}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -1005,7 +1022,7 @@ export default function StudentBillingWorkspace({
                       <Select
                         value={entryForm.direction}
                         onValueChange={(value) => setEntryForm((current) => ({ ...current, direction: value }))}
-                        disabled={saving}
+                        disabled={savingEntry}
                       >
                         <SelectTrigger>
                           <SelectValue />
@@ -1025,7 +1042,7 @@ export default function StudentBillingWorkspace({
                         step="0.01"
                         value={entryForm.amountCharged}
                         onChange={(event) => setEntryForm((current) => ({ ...current, amountCharged: event.target.value }))}
-                        disabled={saving}
+                        disabled={savingEntry}
                       />
                     </div>
                   </div>
@@ -1041,7 +1058,7 @@ export default function StudentBillingWorkspace({
                     <Select
                       value={entryForm.commitmentId || '__none__'}
                       onValueChange={(value) => setEntryForm((current) => ({ ...current, commitmentId: value === '__none__' ? '' : value }))}
-                      disabled={saving}
+                      disabled={savingEntry}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -1068,7 +1085,7 @@ export default function StudentBillingWorkspace({
                         type="date"
                         value={entryForm.effectiveDate}
                         onChange={(event) => setEntryForm((current) => ({ ...current, effectiveDate: event.target.value }))}
-                        disabled={saving}
+                        disabled={savingEntry}
                       />
                     </div>
                     <div className="space-y-2">
@@ -1077,7 +1094,7 @@ export default function StudentBillingWorkspace({
                         id="manual-entry-notes-inline"
                         value={entryForm.notes}
                         onChange={(event) => setEntryForm((current) => ({ ...current, notes: event.target.value }))}
-                        disabled={saving}
+                        disabled={savingEntry}
                         placeholder="למשל: זיכוי עקב תקלה, החזר חלקי, תיקון יתרה"
                       />
                     </div>
@@ -1090,7 +1107,7 @@ export default function StudentBillingWorkspace({
                         id="manual-entry-invoice-id-inline"
                         value={entryForm.invoiceId}
                         onChange={(event) => setEntryForm((current) => ({ ...current, invoiceId: event.target.value }))}
-                        disabled={saving}
+                        disabled={savingEntry}
                         placeholder="אופציונלי"
                       />
                     </div>
@@ -1100,7 +1117,7 @@ export default function StudentBillingWorkspace({
                         id="manual-entry-invoice-link-inline"
                         value={entryForm.invoiceLink}
                         onChange={(event) => setEntryForm((current) => ({ ...current, invoiceLink: event.target.value }))}
-                        disabled={saving}
+                        disabled={savingEntry}
                         dir="ltr"
                         placeholder="https://..."
                       />
@@ -1108,8 +1125,8 @@ export default function StudentBillingWorkspace({
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <Button onClick={handleSaveManualEntry} disabled={saving || entryForm.amountCharged === '' || !entryForm.notes.trim()}>
-                      {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+                    <Button onClick={handleSaveManualEntry} disabled={savingEntry || entryForm.amountCharged === '' || !entryForm.notes.trim()}>
+                      {savingEntry ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
                       {entryForm.id ? 'עדכן תנועה ידנית' : 'שמור תנועה ידנית'}
                     </Button>
                     <Button
@@ -1120,7 +1137,7 @@ export default function StudentBillingWorkspace({
                         setSelectedHmoAuthorizationId('');
                         resetCommitmentForm();
                       }}
-                      disabled={saving}
+                      disabled={savingEntry}
                     >
                       נקה טופס
                     </Button>
@@ -1135,13 +1152,13 @@ export default function StudentBillingWorkspace({
                       <div className="text-sm font-semibold text-zinc-900">שורות חבילה</div>
                       <div className="text-xs text-muted-foreground">כל שורה מגדירה שירות, כמות מפגשים ומחיר חיוב לשיעור.</div>
                     </div>
-                    <Button type="button" size="sm" variant="outline" onClick={addPackageItem} disabled={saving}>הוסף שורה</Button>
+                    <Button type="button" size="sm" variant="outline" onClick={addPackageItem} disabled={savingCommitment}>הוסף שורה</Button>
                   </div>
                   {commitmentForm.packageItems.map((item) => (
                     <div key={item.id} className="grid gap-3 rounded-xl border border-border bg-white p-3 md:grid-cols-[minmax(0,1.4fr)_120px_140px_auto]">
                       <div className="space-y-2">
                         <Label className="text-xs text-slate-600">שירות</Label>
-                        <Select value={item.serviceId || '__none__'} onValueChange={(value) => updatePackageItem(item.id, 'serviceId', value === '__none__' ? '' : value)} disabled={saving}>
+                        <Select value={item.serviceId || '__none__'} onValueChange={(value) => updatePackageItem(item.id, 'serviceId', value === '__none__' ? '' : value)} disabled={savingCommitment}>
                           <SelectTrigger>
                             <SelectValue placeholder="בחר שירות" />
                           </SelectTrigger>
@@ -1155,14 +1172,14 @@ export default function StudentBillingWorkspace({
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs text-slate-600">מספר מפגשים</Label>
-                        <Input type="number" min="0" step="1" value={item.lessonsCount} onChange={(event) => updatePackageItem(item.id, 'lessonsCount', event.target.value)} disabled={saving} />
+                        <Input type="number" min="0" step="1" value={item.lessonsCount} onChange={(event) => updatePackageItem(item.id, 'lessonsCount', event.target.value)} disabled={savingCommitment} />
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs text-slate-600">מחיר לשיעור</Label>
-                        <Input type="number" min="0" step="0.01" value={item.chargeAmount} onChange={(event) => updatePackageItem(item.id, 'chargeAmount', event.target.value)} disabled={saving} />
+                        <Input type="number" min="0" step="0.01" value={item.chargeAmount} onChange={(event) => updatePackageItem(item.id, 'chargeAmount', event.target.value)} disabled={savingCommitment} />
                       </div>
                       <div className="flex items-end">
-                        <Button type="button" size="sm" variant="ghost" onClick={() => removePackageItem(item.id)} disabled={saving || commitmentForm.packageItems.length === 1}>
+                        <Button type="button" size="sm" variant="ghost" onClick={() => removePackageItem(item.id)} disabled={savingCommitment || commitmentForm.packageItems.length === 1}>
                           הסר
                         </Button>
                       </div>
@@ -1175,7 +1192,7 @@ export default function StudentBillingWorkspace({
                 <>
                   <div className="space-y-2">
                     <Label className="text-xs text-slate-600">שירות</Label>
-                    <Select value={commitmentForm.serviceId || '__none__'} onValueChange={(value) => setCommitmentForm((current) => ({ ...current, serviceId: value === '__none__' ? '' : value }))} disabled={saving}>
+                    <Select value={commitmentForm.serviceId || '__none__'} onValueChange={(value) => setCommitmentForm((current) => ({ ...current, serviceId: value === '__none__' ? '' : value }))} disabled={savingCommitment}>
                       <SelectTrigger>
                         <SelectValue placeholder="בחר שירות" />
                       </SelectTrigger>
@@ -1190,11 +1207,11 @@ export default function StudentBillingWorkspace({
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="subscription-lessons-count" className="text-xs text-slate-600">כמות שיעורים</Label>
-                      <Input id="subscription-lessons-count" type="number" min="0" step="1" value={commitmentForm.subscriptionLessonsCount} onChange={(event) => setCommitmentForm((current) => ({ ...current, subscriptionLessonsCount: event.target.value }))} disabled={saving} />
+                      <Input id="subscription-lessons-count" type="number" min="0" step="1" value={commitmentForm.subscriptionLessonsCount} onChange={(event) => setCommitmentForm((current) => ({ ...current, subscriptionLessonsCount: event.target.value }))} disabled={savingCommitment} />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="subscription-charge-amount" className="text-xs text-slate-600">מחיר לשיעור</Label>
-                      <Input id="subscription-charge-amount" type="number" min="0" step="0.01" value={commitmentForm.subscriptionChargeAmount} onChange={(event) => setCommitmentForm((current) => ({ ...current, subscriptionChargeAmount: event.target.value }))} disabled={saving} />
+                      <Input id="subscription-charge-amount" type="number" min="0" step="0.01" value={commitmentForm.subscriptionChargeAmount} onChange={(event) => setCommitmentForm((current) => ({ ...current, subscriptionChargeAmount: event.target.value }))} disabled={savingCommitment} />
                     </div>
                   </div>
                 </>
@@ -1204,7 +1221,7 @@ export default function StudentBillingWorkspace({
                 <>
                   <div className="space-y-2">
                     <Label className="text-xs text-slate-600">שירות</Label>
-                    <Select value={commitmentForm.serviceId || '__none__'} onValueChange={(value) => setCommitmentForm((current) => ({ ...current, serviceId: value === '__none__' ? '' : value }))} disabled={saving}>
+                    <Select value={commitmentForm.serviceId || '__none__'} onValueChange={(value) => setCommitmentForm((current) => ({ ...current, serviceId: value === '__none__' ? '' : value }))} disabled={savingCommitment}>
                       <SelectTrigger>
                         <SelectValue placeholder="בחר שירות" />
                       </SelectTrigger>
@@ -1219,11 +1236,11 @@ export default function StudentBillingWorkspace({
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="billing-total-amount" className="text-xs text-slate-600">סך יתרה</Label>
-                      <Input id="billing-total-amount" type="number" min="0" step="0.01" value={commitmentForm.totalAmount} onChange={(event) => setCommitmentForm((current) => ({ ...current, totalAmount: event.target.value }))} disabled={saving} />
+                      <Input id="billing-total-amount" type="number" min="0" step="0.01" value={commitmentForm.totalAmount} onChange={(event) => setCommitmentForm((current) => ({ ...current, totalAmount: event.target.value }))} disabled={savingCommitment} />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="billing-default-charge" className="text-xs text-slate-600">מחיר לשיעור</Label>
-                      <Input id="billing-default-charge" type="number" min="0" step="0.01" value={commitmentForm.defaultChargeAmount} onChange={(event) => setCommitmentForm((current) => ({ ...current, defaultChargeAmount: event.target.value }))} disabled={saving} />
+                      <Input id="billing-default-charge" type="number" min="0" step="0.01" value={commitmentForm.defaultChargeAmount} onChange={(event) => setCommitmentForm((current) => ({ ...current, defaultChargeAmount: event.target.value }))} disabled={savingCommitment} />
                     </div>
                   </div>
                 </>
@@ -1239,7 +1256,7 @@ export default function StudentBillingWorkspace({
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="billing-expires-at" className="text-xs text-slate-600">תוקף</Label>
-                  <Input id="billing-expires-at" type="date" value={commitmentForm.expiresAt} onChange={(event) => setCommitmentForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={saving} />
+                  <Input id="billing-expires-at" type="date" value={commitmentForm.expiresAt} onChange={(event) => setCommitmentForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={savingCommitment} />
                 </div>
               </div>
               ) : null}
@@ -1247,14 +1264,14 @@ export default function StudentBillingWorkspace({
               {commitmentForm.commitmentType !== 'hmo' && commitmentForm.commitmentType !== 'manual_adjustment' ? (
               <div className="space-y-2">
                 <Label htmlFor="billing-commitment-notes" className="text-xs text-slate-600">הערות</Label>
-                <Input id="billing-commitment-notes" value={commitmentForm.notes} onChange={(event) => setCommitmentForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
+                <Input id="billing-commitment-notes" value={commitmentForm.notes} onChange={(event) => setCommitmentForm((current) => ({ ...current, notes: event.target.value }))} disabled={savingCommitment} />
               </div>
               ) : null}
 
               {commitmentForm.commitmentType !== 'hmo' && commitmentForm.commitmentType !== 'manual_adjustment' ? (
               <div className="space-y-2">
                 <Label className="text-xs text-slate-600">סטטוס</Label>
-                <Select value={commitmentForm.isActive ? 'active' : 'inactive'} onValueChange={(value) => setCommitmentForm((current) => ({ ...current, isActive: value === 'active' }))} disabled={saving}>
+                <Select value={commitmentForm.isActive ? 'active' : 'inactive'} onValueChange={(value) => setCommitmentForm((current) => ({ ...current, isActive: value === 'active' }))} disabled={savingCommitment}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -1284,15 +1301,15 @@ export default function StudentBillingWorkspace({
 
               {commitmentForm.commitmentType !== 'hmo' && commitmentForm.commitmentType !== 'manual_adjustment' ? (
               <div className="flex flex-wrap gap-2">
-                <Button onClick={handleSaveCommitment} disabled={saving}>
-                  {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+                <Button onClick={handleSaveCommitment} disabled={savingCommitment}>
+                  {savingCommitment ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
                   {commitmentForm.id ? 'עדכן התחייבות' : 'צור התחייבות'}
                 </Button>
                 <Button type="button" variant="ghost" onClick={() => {
                   setSelectedHmoAuthorizationId('');
                   resetEntryForm();
                   resetCommitmentForm();
-                }} disabled={saving}>נקה טופס</Button>
+                }} disabled={savingCommitment}>נקה טופס</Button>
               </div>
               ) : null}
             </div>
@@ -1344,7 +1361,7 @@ export default function StudentBillingWorkspace({
                       <div className="mt-2 text-sm text-muted-foreground">{getBillingReasonLabel(row.billing_reason)}</div>
                       {canMutateBilling ? (
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <Select value={selectedValue} onValueChange={(value) => setAssignmentValues((current) => ({ ...current, [row.id]: value }))} disabled={saving}>
+                          <Select value={selectedValue} onValueChange={(value) => setAssignmentValues((current) => ({ ...current, [row.id]: value }))} disabled={savingAssignment}>
                             <SelectTrigger className="min-w-[240px]">
                               <SelectValue />
                             </SelectTrigger>
@@ -1357,7 +1374,7 @@ export default function StudentBillingWorkspace({
                               ))}
                             </SelectContent>
                           </Select>
-                          <Button onClick={() => handleApplyAssignment(row)} disabled={saving || (selectedValue === '__none__' && !row.commitment_id)}>
+                          <Button onClick={() => handleApplyAssignment(row)} disabled={savingAssignment || (selectedValue === '__none__' && !row.commitment_id)}>
                             {selectedValue === '__none__' ? 'נקה שיוך' : (row.commitment_id ? 'עדכן שיוך' : 'שייך')}
                           </Button>
                         </div>
@@ -1401,7 +1418,7 @@ export default function StudentBillingWorkspace({
                     expiresAt: current.expiresAt || (sourceCommitment?.expires_at ? `${sourceCommitment.expires_at}`.slice(0, 10) : ''),
                   }));
                 }}
-                disabled={saving}
+                disabled={savingTransfer}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -1420,11 +1437,11 @@ export default function StudentBillingWorkspace({
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="transfer-amount" className="text-xs text-slate-600">סכום להעברה</Label>
-                <Input id="transfer-amount" type="number" step="0.01" min="0" value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} disabled={saving} />
+                <Input id="transfer-amount" type="number" step="0.01" min="0" value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} disabled={savingTransfer} />
               </div>
               <div className="space-y-2">
                 <Label className="text-xs text-slate-600">שירות יעד</Label>
-                <Select value={transferForm.targetServiceId || '__none__'} onValueChange={(value) => setTransferForm((current) => ({ ...current, targetServiceId: value === '__none__' ? '' : value }))} disabled={saving}>
+                <Select value={transferForm.targetServiceId || '__none__'} onValueChange={(value) => setTransferForm((current) => ({ ...current, targetServiceId: value === '__none__' ? '' : value }))} disabled={savingTransfer}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -1441,7 +1458,7 @@ export default function StudentBillingWorkspace({
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
                 <Label className="text-xs text-slate-600">סוג התחייבות יעד</Label>
-                  <Select value={transferForm.targetCommitmentType} onValueChange={(value) => setTransferForm((current) => ({ ...current, targetCommitmentType: value }))} disabled={saving}>
+                  <Select value={transferForm.targetCommitmentType} onValueChange={(value) => setTransferForm((current) => ({ ...current, targetCommitmentType: value }))} disabled={savingTransfer}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -1454,24 +1471,24 @@ export default function StudentBillingWorkspace({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="transfer-default-charge" className="text-xs text-slate-600">מחיר ברירת מחדל ביעד</Label>
-                <Input id="transfer-default-charge" type="number" step="0.01" min="0" value={transferForm.targetDefaultChargeAmount} onChange={(event) => setTransferForm((current) => ({ ...current, targetDefaultChargeAmount: event.target.value }))} disabled={saving} />
+                <Input id="transfer-default-charge" type="number" step="0.01" min="0" value={transferForm.targetDefaultChargeAmount} onChange={(event) => setTransferForm((current) => ({ ...current, targetDefaultChargeAmount: event.target.value }))} disabled={savingTransfer} />
               </div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="transfer-expires-at" className="text-xs text-slate-600">תוקף התחייבות יעד</Label>
-                <Input id="transfer-expires-at" type="date" value={transferForm.expiresAt} onChange={(event) => setTransferForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={saving} />
+                <Input id="transfer-expires-at" type="date" value={transferForm.expiresAt} onChange={(event) => setTransferForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={savingTransfer} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="transfer-notes" className="text-xs text-slate-600">הערות</Label>
-                <Input id="transfer-notes" value={transferForm.notes} onChange={(event) => setTransferForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
+                <Input id="transfer-notes" value={transferForm.notes} onChange={(event) => setTransferForm((current) => ({ ...current, notes: event.target.value }))} disabled={savingTransfer} />
               </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button onClick={handleTransferBalance} disabled={saving || !transferForm.sourceCommitmentId || transferForm.amount === ''}>
-                {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+              <Button onClick={handleTransferBalance} disabled={savingTransfer || !transferForm.sourceCommitmentId || transferForm.amount === ''}>
+                {savingTransfer ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
                 צור העברה
               </Button>
             </div>
@@ -1524,17 +1541,17 @@ export default function StudentBillingWorkspace({
                         <Badge variant="outline" className={txBadge.className}>{txBadge.label}</Badge>
                         <Badge variant="outline">{entry.commitment_id ? 'משויך להתחייבות' : 'ללא התחייבות'}</Badge>
                         {canMutateBilling ? (
-                          <Button type="button" size="sm" variant="outline" onClick={() => setInvoiceDialogEntry(entry)} disabled={saving}>
+                          <Button type="button" size="sm" variant="outline" onClick={() => setInvoiceDialogEntry(entry)} disabled={savingInvoice}>
                             חשבונית
                           </Button>
                         ) : null}
                         {isManualEntry && canMutateBilling ? (
-                          <Button type="button" size="sm" variant="outline" onClick={() => startEditingEntry(entry)} disabled={saving}>
+                          <Button type="button" size="sm" variant="outline" onClick={() => startEditingEntry(entry)} disabled={savingEntry}>
                             ערוך
                           </Button>
                         ) : null}
                         {isManualEntry && canMutateBilling ? (
-                          <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteEntry(entry.id)} disabled={saving}>
+                          <Button type="button" size="sm" variant="outline" onClick={() => setDeleteEntryTargetId(entry.id)} disabled={savingEntry}>
                             מחק
                           </Button>
                         ) : null}
@@ -1591,7 +1608,7 @@ export default function StudentBillingWorkspace({
                     </div>
                     {canMutateBilling ? (
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <Select value={selectedValue} onValueChange={(value) => setAssignmentValues((current) => ({ ...current, [row.id]: value }))} disabled={saving}>
+                        <Select value={selectedValue} onValueChange={(value) => setAssignmentValues((current) => ({ ...current, [row.id]: value }))} disabled={savingAssignment}>
                           <SelectTrigger className="min-w-[240px]">
                             <SelectValue />
                           </SelectTrigger>
@@ -1604,7 +1621,7 @@ export default function StudentBillingWorkspace({
                             ))}
                           </SelectContent>
                         </Select>
-                        <Button onClick={() => handleApplyAssignment(row)} disabled={saving || (selectedValue === '__none__' && !row.commitment_id)}>
+                        <Button onClick={() => handleApplyAssignment(row)} disabled={savingAssignment || (selectedValue === '__none__' && !row.commitment_id)}>
                           {selectedValue === '__none__' ? 'נקה שיוך' : (row.commitment_id ? 'עדכן שיוך' : 'שייך')}
                         </Button>
                       </div>
@@ -1630,9 +1647,43 @@ export default function StudentBillingWorkspace({
           }
         }}
         entry={invoiceDialogEntry}
-        saving={saving}
+        saving={savingInvoice}
         onSave={handleSaveInvoiceFields}
       />
+
+      <AlertDialog open={Boolean(deleteCommitmentTargetId)} onOpenChange={(open) => { if (!open) setDeleteCommitmentTargetId(''); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>מחיקת התחייבות</AlertDialogTitle>
+            <AlertDialogDescription>
+              פעולה זו תמחק את ההתחייבות לצמיתות. לא ניתן לשחזר. האם להמשיך?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { handleDeleteCommitment(deleteCommitmentTargetId); setDeleteCommitmentTargetId(''); }}>
+              מחק
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={Boolean(deleteEntryTargetId)} onOpenChange={(open) => { if (!open) setDeleteEntryTargetId(''); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>מחיקת תנועה כספית</AlertDialogTitle>
+            <AlertDialogDescription>
+              פעולה זו תמחק את התנועה הכספית לצמיתות ותשפיע על יתרת ההתחייבות. לא ניתן לשחזר. האם להמשיך?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { handleDeleteEntry(deleteEntryTargetId); setDeleteEntryTargetId(''); }}>
+              מחק
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

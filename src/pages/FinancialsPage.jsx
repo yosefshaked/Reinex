@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { CircleHelp, Download, Loader2, Settings2 } from 'lucide-react';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import Card from '@/components/ui/CustomCard.jsx';
@@ -23,6 +23,7 @@ import StudentBillingWorkspace from '@/features/students/components/StudentBilli
 import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 import { toast } from 'sonner';
+import { toShekel } from '@/lib/currency.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -296,8 +297,8 @@ function buildHmoMonthEndExportRows(snapshot) {
                 ? 'בוטל על ידי המכון'
                 : row?.participant_status || '',
         payment_mode_label: paymentModeLabel,
-        customer_charge_amount: Number(row?.resolved_charge_amount ?? row?.price_charged ?? 0),
-        insurer_claim_amount: Number(row?.pricing_breakdown?.insurer_claim_amount ?? hmoRuntime.insurer_claim_amount ?? 0),
+        customer_charge_amount: toShekel(row?.resolved_charge_amount ?? row?.price_charged ?? 0),
+        insurer_claim_amount: toShekel(row?.pricing_breakdown?.insurer_claim_amount ?? hmoRuntime.insurer_claim_amount ?? 0),
         authorization_reference: hmoRuntime.authorization_reference || '',
         authorized_lessons: hmoRuntime.authorized_lessons ?? '',
         reminder_date: hmoRuntime.reminder_date ? formatDate(hmoRuntime.reminder_date) : '',
@@ -383,6 +384,7 @@ export default function FinancialsPage() {
   const [payroll, setPayroll] = useState(null);
   const [billingSnapshot, setBillingSnapshot] = useState(null);
   const [studentSearch, setStudentSearch] = useState('');
+  const deferredStudentSearch = useDeferredValue(studentSearch);
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
   const [savingPolicy, setSavingPolicy] = useState(false);
@@ -397,7 +399,7 @@ export default function FinancialsPage() {
     enabled: Boolean(activeOrgId && canViewFinancials),
     orgId: activeOrgId,
     session,
-    search: studentSearch,
+    search: deferredStudentSearch,
   });
 
   const loadPayroll = useCallback(async () => {

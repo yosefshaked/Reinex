@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog.jsx';
 import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
@@ -32,10 +33,23 @@ export default function LedgerInvoiceDialog({
     if (!entry?.id || !onSave) {
       return;
     }
+    const trimmedLink = invoiceLink.trim();
+    if (trimmedLink) {
+      try {
+        const candidate = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmedLink) ? trimmedLink : `https://${trimmedLink}`;
+        const parsed = new URL(candidate);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          throw new Error('invalid protocol');
+        }
+      } catch {
+        toast.error('קישור החשבונית אינו תקין. יש להזין כתובת URL בפורמט נכון.');
+        return;
+      }
+    }
     await onSave({
       id: entry.id,
       invoice_id: invoiceId.trim() || null,
-      invoice_link: invoiceLink.trim() || null,
+      invoice_link: trimmedLink || null,
     });
   };
 

@@ -1,6 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -71,6 +81,8 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
   const [providerForm, setProviderForm] = useState(() => buildEmptyProviderForm());
   const [trackForm, setTrackForm] = useState(() => buildEmptyTrackForm());
   const [saving, setSaving] = useState(false);
+  const [deleteProviderTargetId, setDeleteProviderTargetId] = useState('');
+  const [deleteTrackTargetId, setDeleteTrackTargetId] = useState('');
 
   useEffect(() => {
     void loadProviders();
@@ -259,6 +271,41 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
   );
 
   return (
+    <>
+    <AlertDialog open={Boolean(deleteProviderTargetId)} onOpenChange={(open) => { if (!open) setDeleteProviderTargetId(''); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>מחיקת גורם מממן</AlertDialogTitle>
+          <AlertDialogDescription>
+            פעולה זו תמחק את הגורם המממן לצמיתות. לא ניתן לשחזר. האם להמשיך?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>ביטול</AlertDialogCancel>
+          <AlertDialogAction onClick={() => { handleDeleteProvider(deleteProviderTargetId); setDeleteProviderTargetId(''); }}>
+            מחק
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog open={Boolean(deleteTrackTargetId)} onOpenChange={(open) => { if (!open) setDeleteTrackTargetId(''); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>מחיקת מסלול</AlertDialogTitle>
+          <AlertDialogDescription>
+            פעולה זו תמחק את המסלול לצמיתות. כל האישורים שמשתמשים במסלול זה יאבדו את ההגדרות שלו. האם להמשיך?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>ביטול</AlertDialogCancel>
+          <AlertDialogAction onClick={() => { handleDeleteTrack(deleteTrackTargetId); setDeleteTrackTargetId(''); }}>
+            מחק
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
     <div className="space-y-5">
       <div className="rounded-xl border border-border bg-slate-50 p-4">
         <h3 className="text-base font-semibold text-zinc-900">תשתית גורמים מממנים</h3>
@@ -306,7 +353,7 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                           מסלול חדש
                         </Button>
                         {provider.tracks.length === 0 ? (
-                          <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteProvider(provider.id)} disabled={saving}>
+                          <Button type="button" size="sm" variant="outline" onClick={() => setDeleteProviderTargetId(provider.id)} disabled={saving}>
                             מחק
                           </Button>
                         ) : null}
@@ -340,7 +387,7 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                                   השבת
                                 </Button>
                               ) : (
-                                <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteTrack(track.id)} disabled={saving}>
+                                <Button type="button" size="sm" variant="outline" onClick={() => setDeleteTrackTargetId(track.id)} disabled={saving}>
                                   מחק
                                 </Button>
                               )}
@@ -577,5 +624,6 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
         </div>
       </div>
     </div>
+    </>
   );
 }
