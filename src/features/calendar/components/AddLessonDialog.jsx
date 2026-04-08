@@ -161,6 +161,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   const [customOverrideReason, setCustomOverrideReason] = useState('');
   const [createClientOpen, setCreateClientOpen] = useState(false);
   const [createdClientProfiles, setCreatedClientProfiles] = useState([]);
+  const [directClientChargeAmount, setDirectClientChargeAmount] = useState('');
 
   const participantTokens = useMemo(() => ([
     ...(formData.student_ids || []).map((id) => `student:${id}`),
@@ -181,6 +182,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     setSelectedOverrideReasonCode('');
     setCustomOverrideReason('');
     setCreatedClientProfiles([]);
+    setDirectClientChargeAmount('');
   }, [open, defaultDate, defaultSelection]);
 
   useEffect(() => {
@@ -334,6 +336,15 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     && !useSchedulingOverride
     && selectedTimeOutsideAvailability,
   );
+  const hasDirectClientParticipants = formData.client_profile_ids.length > 0;
+  const requiresDirectClientChargeAmount = Boolean(
+    hasDirectClientParticipants
+    && selectedService
+    && (selectedService.default_customer_charge_amount == null || selectedService.default_customer_charge_amount === '')
+  );
+  const hasValidDirectClientChargeAmount = directClientChargeAmount !== ''
+    && Number.isFinite(Number(directClientChargeAmount))
+    && Number(directClientChargeAmount) >= 0;
   const showsRegularInstructorNotice = Boolean(
     formData.student_ids.length === 1
     && formData.client_profile_ids.length === 0
@@ -460,6 +471,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   }, [clientProfiles, createdClientProfiles, participantTokens, students]);
 
   // When first student is selected, auto-populate service and only fill instructor if the form does not already have one.
+  useEffect(() => {
+    if (!requiresDirectClientChargeAmount) {
+      setDirectClientChargeAmount('');
+    }
+  }, [requiresDirectClientChargeAmount]);
+
   useEffect(() => {
     if (participantTokens.length === 0) {
       setStudentDetails(null);
@@ -589,6 +606,10 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         setError('יש למלא סיבת חריגה לפני יצירת שיעור חד-פעמי מחוץ לזמינות.');
         return;
       }
+      if (requiresDirectClientChargeAmount && !hasValidDirectClientChargeAmount) {
+        setError('יש להזין מחיר לשיעור הזה לפני יצירת לקוח/ה חד-פעמי/ת ללא מחיר שירות ברירת מחדל.');
+        return;
+      }
       const datetime_start = toUtcIsoString(formData.date, formData.time);
       if (!datetime_start) {
         setError('תאריך או שעה אינם תקינים.');
@@ -607,6 +628,9 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
           service_id: formData.service_id,
           student_ids: formData.student_ids,
           client_profile_ids: formData.client_profile_ids,
+          ...(requiresDirectClientChargeAmount
+            ? { direct_client_charge_amount: Number(directClientChargeAmount) }
+            : {}),
           created_source: 'one_time',
           metadata: useSchedulingOverride
             ? {
@@ -628,11 +652,15 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       const apiError = err?.message || '';
       setError(
         apiError === 'missing_instructor_service_capability'
-          ? 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.'
+            ? 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.'
           : apiError === 'missing_instructor_service_availability'
             ? 'לשירות הזה אין זמינות מוגדרת אצל המדריך/ה שנבחר/ה.'
             : apiError === 'outside_instructor_service_availability'
               ? 'השעה שנבחרה נמצאת מחוץ לחלונות הזמינות שהוגדרו. כדי לשבץ חריג יש להפעיל שיבוץ חד-פעמי חריג ולציין סיבה.'
+              : apiError === 'missing_direct_client_charge_amount'
+                ? 'לשירות הזה אין מחיר ברירת מחדל ללקוח/ה חד-פעמי/ת, ולכן צריך להזין מחיר עבור השיעור הזה.'
+                : apiError === 'invalid_direct_client_charge_amount'
+                  ? 'המחיר שנבחר לשיעור אינו תקין.'
               : apiError === 'failed_to_validate_instructor_availability'
                 ? 'לא הצלחנו לבדוק את זמינות המדריך/ה כרגע. אפשר לנסות שוב.'
                 : err?.message || 'יצירת השיעור נכשלה.',
@@ -701,6 +729,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
               ) : null}
 
               <ComboBoxField
+                key={participantTokens[0] || 'no-primary-participant'}
                 id="primary-student"
                 name="primary-student"
                 options={participantOptions}
@@ -721,6 +750,23 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                     });
                   } else {
                     setFormData({ ...formData, ...nextState });
+                  }
+                }}
+                onOptionSelect={(participant) => {
+                  const nextState = { student_ids: [], client_profile_ids: [] };
+                  if (participant?.kind === 'student') {
+                    nextState.student_ids = [participant.id];
+                  } else if (participant?.kind === 'client') {
+                    nextState.client_profile_ids = [participant.id];
+                  }
+                  if (isGroupSession) {
+                    setFormData((prev) => ({
+                      ...prev,
+                      student_ids: [...nextState.student_ids, ...prev.student_ids.slice(1)],
+                      client_profile_ids: [...nextState.client_profile_ids, ...prev.client_profile_ids.slice(1)],
+                    }));
+                  } else {
+                    setFormData((prev) => ({ ...prev, ...nextState }));
                   }
                 }}
                 placeholder={studentsLoading || loadingClientProfiles ? "טוען..." : "בחר לקוח/ה"}
@@ -985,6 +1031,29 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             </Alert>
           ) : null}
 
+          {requiresDirectClientChargeAmount ? (
+            <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-blue-950">מחיר לשיעור זה</p>
+                <p className="text-xs text-blue-800">
+                  לשירות הזה אין מחיר ברירת מחדל ללקוח/ה חד-פעמי/ת. כדי לאפשר תמחור גמיש, יש להזין כאן את המחיר עבור השיעור הספציפי.
+                </p>
+              </div>
+              <div className="mt-3 max-w-xs space-y-2">
+                <Label htmlFor="direct-client-charge-amount">מחיר לשיעור *</Label>
+                <Input
+                  id="direct-client-charge-amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={directClientChargeAmount}
+                  onChange={(event) => setDirectClientChargeAmount(event.target.value)}
+                  placeholder="למשל 180"
+                />
+              </div>
+            </div>
+          ) : null}
+
           {(showSchedulingOverrideCta || useSchedulingOverride) ? (
             <div className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1091,6 +1160,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 || !formData.date
                 || !formData.time
                 || participantTokens.length === 0
+                || (requiresDirectClientChargeAmount && !hasValidDirectClientChargeAmount)
                 || (!useSchedulingOverride && selectedTimeOutsideAvailability)
                 || (useSchedulingOverride
                   ? !hasValidSchedulingOverrideReason(selectedOverrideReasonCode, customOverrideReason)
@@ -1133,6 +1203,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
             student_ids: [],
             client_profile_ids: profile?.id ? [profile.id] : [],
           }));
+          setCreateClientOpen(false);
         }}
       />
     </>

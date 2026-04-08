@@ -416,6 +416,9 @@ export function buildDirectClientBillingDecision({
   let billingReason = 'participant_not_resolved';
   let chargeAmount = null;
   let requiresAttention = false;
+  const directClientChargeOverride = Number.isFinite(Number(participant?.metadata?.direct_client_charge_amount_override))
+    ? roundCurrency(Number(participant.metadata.direct_client_charge_amount_override))
+    : null;
 
   if (!RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)) {
     billingStatus = 'pending_attendance';
@@ -425,6 +428,10 @@ export function buildDirectClientBillingDecision({
     billingReason = lessonStatus === 'cancelled_clinic'
       ? 'lesson_cancelled_by_clinic'
       : 'policy_excluded_status';
+  } else if (Number.isFinite(Number(directClientChargeOverride))) {
+    billingStatus = 'charged';
+    billingReason = 'direct_client_charge';
+    chargeAmount = directClientChargeOverride;
   } else if (!Number.isFinite(Number(service?.default_customer_charge_amount))) {
     billingStatus = 'pending_service_default_charge_amount';
     billingReason = 'missing_service_default_customer_charge_amount';
@@ -466,7 +473,8 @@ export function buildDirectClientBillingDecision({
       selected_commitment_service_id: null,
       selected_commitment_active: null,
       selected_commitment_expires_at: null,
-      default_charge_amount: service?.default_customer_charge_amount ?? null,
+      default_charge_amount: directClientChargeOverride ?? service?.default_customer_charge_amount ?? null,
+      direct_client_charge_amount_override: directClientChargeOverride,
       charge_amount: chargeAmount,
       covered_service_id: instance?.service_id || null,
       student_charge_amount: chargeAmount,
@@ -892,7 +900,7 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
 
   const { data: participants, error: participantsError } = await tenantClient
     .from('lesson_participants')
-    .select('id, lesson_instance_id, client_profile_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id, attendance_confirmed_at')
+    .select('id, lesson_instance_id, client_profile_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id, attendance_confirmed_at, metadata')
     .eq('lesson_instance_id', lessonInstanceId);
 
   if (participantsError) {

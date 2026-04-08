@@ -188,13 +188,6 @@ export default function CalendarWorkspaceDock({
                 <span>פתח פרטי שיעור</span>
                 <ExternalLink className="h-4 w-4" />
               </Button>
-              <Button variant="outline" className="justify-between" onClick={onOpenInstructorWhatsApp}>
-                <span className="flex items-center gap-2">
-                  <MessageCircle className="h-4 w-4" />
-                  שלח סיכום למדריך/ה
-                </span>
-                <ExternalLink className="h-4 w-4" />
-              </Button>
               <Button variant="ghost" onClick={onClearSelection}>
                 נקה בחירה
               </Button>

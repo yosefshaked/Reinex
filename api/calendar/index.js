@@ -786,13 +786,35 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
   // Verify service exists
   const { data: service, error: serviceError } = await tenantClient
     .from('Services')
-    .select('id')
+    .select('id, default_customer_charge_amount')
     .eq('id', body.service_id)
     .eq('is_active', true)
     .single();
 
   if (serviceError || !service) {
     return respond(context, 400, { message: 'invalid service_id' });
+  }
+
+  const hasDirectClientParticipants = clientProfileIds.length > 0;
+  const hasDirectClientChargeAmountField = Object.prototype.hasOwnProperty.call(body || {}, 'direct_client_charge_amount')
+    || Object.prototype.hasOwnProperty.call(body || {}, 'directClientChargeAmount');
+  const rawDirectClientChargeAmount = hasDirectClientChargeAmountField
+    ? body?.direct_client_charge_amount ?? body?.directClientChargeAmount
+    : undefined;
+  const directClientChargeAmount = rawDirectClientChargeAmount === undefined || rawDirectClientChargeAmount === null || rawDirectClientChargeAmount === ''
+    ? null
+    : Number(rawDirectClientChargeAmount);
+
+  if (directClientChargeAmount !== null && (!Number.isFinite(directClientChargeAmount) || directClientChargeAmount < 0)) {
+    return respond(context, 400, { message: 'invalid_direct_client_charge_amount' });
+  }
+
+  if (
+    hasDirectClientParticipants
+    && !Number.isFinite(Number(service.default_customer_charge_amount))
+    && directClientChargeAmount === null
+  ) {
+    return respond(context, 400, { message: 'missing_direct_client_charge_amount' });
   }
 
   const participantRows = [];
@@ -959,7 +981,9 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     pricing_breakdown: null,
     commitment_id: null,
     documentation_ref: null,
-    metadata: {},
+    metadata: (!participant.student_id && directClientChargeAmount !== null)
+      ? { direct_client_charge_amount_override: directClientChargeAmount }
+      : {},
   }));
 
   const { error: participantsError } = await tenantClient

@@ -221,7 +221,11 @@ export default function CalendarPage() {
   );
 
   const openInstructorWhatsApp = useCallback((instructorOverride = null) => {
-    const sourceInstructor = instructorOverride
+    const normalizedInstructorOverride = instructorOverride && typeof instructorOverride === 'object' && 'id' in instructorOverride
+      ? instructorOverride
+      : null;
+
+    const sourceInstructor = normalizedInstructorOverride
       || selectedInstance?.instructor
       || instructors.find((instructor) => String(instructor.id) === String(selectedInstance?.instructor_employee_id || ''))
       || null;
