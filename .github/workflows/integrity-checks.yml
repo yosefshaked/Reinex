@@ -23,7 +23,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 18
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -57,6 +57,9 @@ jobs:
         run: |
           api_status="${{ steps.lint_api.outcome }}"
           sql_status="${{ steps.lint_sql.outcome }}"
+          short_sha="$(printf '%s' "$GITHUB_SHA" | cut -c1-8)"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          updated_at="$(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           if [ "$api_status" = "success" ] && [ "$sql_status" = "success" ]; then
             overall_status="success"
             status_icon="✅"
@@ -68,10 +71,18 @@ jobs:
           fi
 
           {
-            echo "<!-- integrity-check-report -->"
+            echo "<!-- pr-health-integrity:start -->"
+            echo "<!-- integrity-meta api=${api_status} sql=${sql_status} overall=${overall_status} sha=${short_sha} -->"
             echo "## ${status_icon} Integrity Checks"
             echo
+            echo "> __CHANGE_SUMMARY__"
+            echo
             echo "${status_line}"
+            echo
+            echo "- Branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Commit: \`${short_sha}\`"
+            echo "- Updated: ${updated_at}"
+            echo "- Workflow run: [Open run](${run_url})"
             echo
             echo "| Check | Result |"
             echo "| --- | --- |"
@@ -93,6 +104,8 @@ jobs:
             echo '```'
             echo
             echo "</details>"
+            echo
+            echo "<!-- pr-health-integrity:end -->"
           } > integrity-report.md
 
           echo "overall_status=${overall_status}" >> "$GITHUB_OUTPUT"
@@ -115,10 +128,24 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            let sectionBody = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;
-            const marker = '<!-- integrity-check-report -->';
+            const rootMarker = '<!-- pr-health-report -->';
+            const legacyMarker = '<!-- integrity-check-report -->';
+            const sectionStart = '<!-- pr-health-integrity:start -->';
+            const sectionEnd = '<!-- pr-health-integrity:end -->';
+            const metaPattern = /<!-- integrity-meta api=(\w+) sql=(\w+) overall=(\w+) sha=([0-9a-f]+) -->/;
+
+            const upsertSection = (body, startMarker, endMarker, nextSection) => {
+              const startIndex = body.indexOf(startMarker);
+              const endIndex = body.indexOf(endMarker);
+              if (startIndex >= 0 && endIndex >= 0 && endIndex >= startIndex) {
+                return `${body.slice(0, startIndex)}${nextSection}${body.slice(endIndex + endMarker.length)}`.trim();
+              }
+              return `${body.trim()}\n\n${nextSection}`.trim();
+            };
+
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner,
               repo,
@@ -126,21 +153,69 @@ jobs:
               per_page: 100,
             });
             const existing = comments.find((comment) =>
-              comment.user?.type === 'Bot' && typeof comment.body === 'string' && comment.body.includes(marker),
+              comment.user?.type === 'Bot'
+                && typeof comment.body === 'string'
+                && (comment.body.includes(rootMarker) || comment.body.includes(legacyMarker)),
             );
+            const currentMetaMatch = sectionBody.match(metaPattern);
+            const currentMeta = currentMetaMatch ? {
+              api: currentMetaMatch[1],
+              sql: currentMetaMatch[2],
+              overall: currentMetaMatch[3],
+              sha: currentMetaMatch[4],
+            } : null;
+            const previousMetaMatch = existing?.body?.match(metaPattern);
+            const previousMeta = previousMetaMatch ? {
+              api: previousMetaMatch[1],
+              sql: previousMetaMatch[2],
+              overall: previousMetaMatch[3],
+              sha: previousMetaMatch[4],
+            } : null;
+
+            const humanizeCheck = (value) => {
+              if (value === 'success') return 'passed';
+              if (value === 'failure') return 'failed';
+              return value || 'unknown';
+            };
+
+            const changeLines = [];
+            if (!previousMeta || !currentMeta) {
+              changeLines.push('First integrity report for this pull request.');
+            } else {
+              if (previousMeta.api !== currentMeta.api) {
+                changeLines.push(`API lint changed from ${humanizeCheck(previousMeta.api)} to ${humanizeCheck(currentMeta.api)}.`);
+              }
+              if (previousMeta.sql !== currentMeta.sql) {
+                changeLines.push(`SQL lint changed from ${humanizeCheck(previousMeta.sql)} to ${humanizeCheck(currentMeta.sql)}.`);
+              }
+              if (!changeLines.length) {
+                changeLines.push(`No status change since commit \`${previousMeta.sha}\`.`);
+              }
+            }
+
+            sectionBody = sectionBody.replace('__CHANGE_SUMMARY__', changeLines.join(' '));
+            const baseBody = existing?.body?.includes(rootMarker)
+              ? existing.body
+              : [
+                rootMarker,
+                '## PR Health Report',
+                '',
+                '_This comment is updated automatically with the latest integrity and deployment status for this pull request._',
+              ].join('\n');
+            const nextBody = upsertSection(baseBody, sectionStart, sectionEnd, sectionBody);
             if (existing) {
               await github.rest.issues.updateComment({
                 owner,
                 repo,
                 comment_id: existing.id,
-                body,
+                body: nextBody,
               });
             } else {
               await github.rest.issues.createComment({
                 owner,
                 repo,
                 issue_number,
-                body,
+                body: nextBody,
               });
             }
 
