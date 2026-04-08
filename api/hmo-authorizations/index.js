@@ -5,6 +5,7 @@ import {
   ensureMembership,
   isAdminOrOffice,
   isAdminRole,
+  normalizeNullableId,
   normalizeString,
   readEnv,
   respond,
@@ -143,7 +144,7 @@ export default async function (context, req) {
   }
 
   if (method === 'POST' || method === 'PUT') {
-    const studentId = normalizeString(body?.student_id);
+    const studentId = normalizeNullableId(body?.student_id);
     const providerId = normalizeString(body?.provider_id);
     const providerTrackId = normalizeString(body?.provider_track_id);
     const status = normalizeStatus(body?.status) || 'active';

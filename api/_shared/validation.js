@@ -1,6 +1,6 @@
 /* eslint-env node */
 import { Buffer } from 'node:buffer';
-import { UUID_PATTERN, normalizeString } from './org-bff.js';
+import { UUID_PATTERN, normalizeNullableId, normalizeString } from './org-bff.js';
 
 // Utility: estimate bytes of a JS value by JSON stringification
 function estimateBytes(value) {
@@ -149,7 +149,7 @@ function coerceSessionTime(value) {
 }
 
 export function validateSessionWrite(body) {
-  const studentIdRaw = normalizeString(body?.student_id || body?.studentId);
+  const studentIdRaw = normalizeNullableId(body?.student_id || body?.studentId);
   const hasStudentId = Boolean(studentIdRaw);
   if (hasStudentId && !isUUID(studentIdRaw)) {
     return { error: 'invalid_student_id' };

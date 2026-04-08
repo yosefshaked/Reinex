@@ -5,6 +5,7 @@ import {
   ensureMembership,
   isAdminOrOffice,
   isAdminRole,
+  normalizeNullableId,
   normalizeString,
   readEnv,
   respond,
@@ -191,7 +192,7 @@ export default async function (context, req) {
 
   if (method === 'POST' && action === 'reconcile_student_billing') {
     const result = await reconcileStudentBilling(tenantClient, {
-      studentId: normalizeString(body?.student_id),
+      studentId: normalizeNullableId(body?.student_id),
       startDate: normalizeString(body?.start_date),
       endDate: normalizeString(body?.end_date),
       actorUserId: userId,

@@ -6,6 +6,7 @@ import {
   UUID_PATTERN,
   ensureMembership,
   isAdminOrOffice,
+  normalizeNullableId,
   normalizeString,
   parseRequestBody,
   readEnv,
@@ -992,8 +993,8 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
 
   const body = parseRequestBody(req);
   const formId = normalizeString(body?.form_id || body?.formId);
-  const requestedStudentId = normalizeString(body?.student_id || body?.studentId);
-  const requestedClientProfileId = normalizeString(body?.client_profile_id || body?.clientProfileId);
+  const requestedStudentId = normalizeNullableId(body?.student_id || body?.studentId);
+  const requestedClientProfileId = normalizeNullableId(body?.client_profile_id || body?.clientProfileId);
   const deliveryMethod = normalizeDeliveryMethod(body?.delivery_method || body?.deliveryMethod);
 
   const rawTtl = Number(body?.expires_in_minutes ?? body?.expiresInMinutes);

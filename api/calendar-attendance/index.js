@@ -12,7 +12,7 @@ import {
 import {
   ensureMembership,
   isAdminRole,
-  normalizeString,
+  normalizeNullableId,
   readEnv,
   respond,
   resolveOrgId,
@@ -36,14 +36,6 @@ import { mergeParticipantWorkflowMetadata, syncLessonClosureState } from '../_sh
 import { normalizeWorkflowDecision } from '../_shared/calendar-workflow-decisions.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
-
-function normalizeNullableId(value) {
-  const normalized = normalizeString(value);
-  if (!normalized || normalized.toLowerCase() === 'null') {
-    return null;
-  }
-  return normalized;
-}
 
 function roundCurrency(value) {
   return Number(Number(value || 0).toFixed(2));
@@ -673,13 +665,14 @@ async function buildParticipantStatusPreview(tenantClient, body, {
     resolvedProfile?.middle_name,
     resolvedProfile?.last_name,
   ].filter(Boolean).join(' ').trim() || 'הלקוח/ה';
+  const participantEntityLabel = normalizedParticipantStudentId ? 'התלמיד/ה' : 'הלקוח/ה';
   const monthLabel = lessonDate.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
 
   const impacts = [];
   if (targetParticipantBefore.participant_status !== resolvedTargetStatus) {
     impacts.push({
       type: 'participant_status',
-      message: `סטטוס התלמיד ישתנה מ-${targetParticipantBefore.participant_status} ל-${resolvedTargetStatus}.`,
+      message: `סטטוס ${participantEntityLabel} ישתנה מ-${targetParticipantBefore.participant_status} ל-${resolvedTargetStatus}.`,
     });
   }
   if (requestedInstructorCompensationDecision === 'compensated' || requestedInstructorCompensationDecision === 'not_compensated') {
@@ -714,7 +707,7 @@ async function buildParticipantStatusPreview(tenantClient, body, {
       type: 'billing_update',
       amount_before: ledgerAmount,
       amount_after: projectedChargeAmount,
-      message: `חיוב היתרה של ${studentName} יעודכן מ-₪${ledgerAmount} ל-₪${projectedChargeAmount}.`,
+      message: `החיוב של ${studentName} יעודכן מ-₪${ledgerAmount} ל-₪${projectedChargeAmount}.`,
     });
   }
   if (currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0) {

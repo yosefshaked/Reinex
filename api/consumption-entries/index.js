@@ -5,6 +5,7 @@ import {
   ensureMembership,
   isAdminOrOffice,
   isAdminRole,
+  normalizeNullableId,
   normalizeString,
   readEnv,
   respond,
@@ -23,6 +24,27 @@ const MAX_BODY_BYTES = 64 * 1024;
 const VALID_CREDIT_TYPES = new Set(['manual_topup', 'commitment_creation', 'transfer_received', 'hmo_authorization_added']);
 const VALID_DEBIT_TYPES = new Set(['standard', 'double', 'cross_service', 'manual_adjustment']);
 const MANUAL_ENTRY_TYPES = new Set(['manual_topup', 'manual_adjustment']);
+
+function normalizeInvoiceLink(value) {
+  const trimmedValue = normalizeString(value);
+  if (!trimmedValue) {
+    return { value: null, error: null };
+  }
+
+  const candidate = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmedValue)
+    ? trimmedValue
+    : `https://${trimmedValue}`;
+
+  try {
+    const parsed = new URL(candidate);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return { value: null, error: 'invalid_invoice_link' };
+    }
+    return { value: parsed.toString(), error: null };
+  } catch {
+    return { value: null, error: 'invalid_invoice_link' };
+  }
+}
 
 async function resolveLinkedStudentForClientProfile(tenantClient, clientProfileId) {
   const normalizedClientProfileId = normalizeString(clientProfileId);
@@ -209,7 +231,10 @@ export default async function (context, req) {
     }
 
     const invoiceId = normalizeString(body?.invoice_id ?? body?.invoiceId) || null;
-    const invoiceLink = normalizeString(body?.invoice_link ?? body?.invoiceLink) || null;
+    const { value: invoiceLink, error: invoiceLinkError } = normalizeInvoiceLink(body?.invoice_link ?? body?.invoiceLink);
+    if (invoiceLinkError) {
+      return respond(context, 400, { message: invoiceLinkError });
+    }
 
     const { data, error } = await tenantClient
       .from('ledger_transactions')
@@ -239,10 +264,13 @@ export default async function (context, req) {
     const effectiveDate = normalizeString(body?.effective_date);
     const notes = normalizeString(body?.notes);
     const commitmentId = normalizeString(body?.commitment_id);
-    let clientProfileId = normalizeString(body?.client_profile_id ?? body?.clientProfileId) || null;
-    let studentId = normalizeString(body?.student_id) || null;
+    let clientProfileId = normalizeNullableId(body?.client_profile_id ?? body?.clientProfileId) || null;
+    let studentId = normalizeNullableId(body?.student_id) || null;
     const invoiceId = normalizeString(body?.invoice_id ?? body?.invoiceId) || null;
-    const invoiceLink = normalizeString(body?.invoice_link ?? body?.invoiceLink) || null;
+    const { value: invoiceLink, error: invoiceLinkError } = normalizeInvoiceLink(body?.invoice_link ?? body?.invoiceLink);
+    if (invoiceLinkError) {
+      return respond(context, 400, { message: invoiceLinkError });
+    }
 
     if (!MANUAL_ENTRY_TYPES.has(txFields.usage_type)) {
       return respond(context, 400, { message: 'invalid_usage_type_for_manual_entry' });

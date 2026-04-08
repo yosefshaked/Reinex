@@ -5,6 +5,7 @@ import {
   ensureMembership,
   isAdminOrOffice,
   isAdminRole,
+  normalizeNullableId,
   normalizeString,
   readEnv,
   respond,
@@ -98,7 +99,7 @@ export default async function (context, req) {
   }
 
   if (method === 'POST' || method === 'PUT') {
-    const studentId = normalizeString(body?.student_id);
+    const studentId = normalizeNullableId(body?.student_id);
     const serviceId = normalizeString(body?.service_id);
     const commitmentType = normalizeCommitmentType(body?.commitment_type) || 'package';
     const totalAmount = Number(body?.total_amount);

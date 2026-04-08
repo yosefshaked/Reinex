@@ -5,7 +5,7 @@ import {
   UUID_PATTERN,
   ensureMembership,
   isAdminRole,
-  normalizeString,
+  normalizeNullableId,
   parseRequestBody,
   readEnv,
   respond,
@@ -574,7 +574,7 @@ export default async function (context, req) {
   }
 
   // Extract student_id from body
-  const studentId = normalizeString(body?.student_id);
+  const studentId = normalizeNullableId(body?.student_id);
   if (!studentId || !UUID_PATTERN.test(studentId)) {
     return respond(context, 400, { message: 'invalid_student_id' });
   }

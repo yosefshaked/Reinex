@@ -4,6 +4,7 @@ import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/s
 import {
   ensureMembership,
   isAdminRole,
+  normalizeNullableId,
   normalizeString,
   readEnv,
   respond,
@@ -256,7 +257,7 @@ export default async function (context, req) {
   }
 
   if (action === 'assign_existing') {
-    const studentId = normalizeString(body?.student_id || body?.studentId);
+    const studentId = normalizeNullableId(body?.student_id || body?.studentId);
     if (!isUUID(studentId)) {
       return respond(context, 400, { message: 'invalid_student_id' });
     }

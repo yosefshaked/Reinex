@@ -5,6 +5,7 @@ import {
   UUID_PATTERN,
   ensureMembership,
   isAdminOrOffice,
+  normalizeNullableId,
   normalizeString,
   parseRequestBody,
   readEnv,
@@ -192,9 +193,9 @@ function partitionStudentAndProfileUpdates(updates = {}) {
 
 function extractStudentId(context, req, body) {
   const candidate =
-    normalizeString(context?.bindingData?.studentId) ||
-    normalizeString(body?.student_id) ||
-    normalizeString(body?.studentId);
+    normalizeNullableId(context?.bindingData?.studentId) ||
+    normalizeNullableId(body?.student_id) ||
+    normalizeNullableId(body?.studentId);
 
   if (candidate && UUID_PATTERN.test(candidate)) {
     return candidate;

@@ -269,7 +269,7 @@ function deriveDisplayWorkflowDecisions(participant, billingPolicy) {
 
 function getWorkflowReasonLabel(reason) {
   if (reason === 'attendance_unresolved') return 'יש משתתפים שטרם קיבלו סטטוס סופי.';
-  if (reason === 'student_billing_unresolved') return 'יש חיוב תלמיד שעדיין לא הושלם.';
+  if (reason === 'student_billing_unresolved') return 'יש חיוב שעדיין לא הושלם.';
   if (reason === 'instructor_compensation_unresolved') return 'שכר המדריך עדיין לא נסגר דרך הרצת שכר.';
   if (reason === 'hmo_claim_unresolved') return 'יש תביעת גורם מממן שעדיין לא הושלמה.';
   if (reason === 'missing_instance') return 'פרטי השיעור אינם זמינים.';
@@ -278,7 +278,7 @@ function getWorkflowReasonLabel(reason) {
 
 function getImpactGroupMeta(type) {
   if (['billing_reversal', 'billing_charge', 'billing_update'].includes(type)) {
-    return { key: 'billing', label: 'חיוב תלמיד', borderClass: 'border-amber-200', bgClass: 'bg-amber-50/70' };
+    return { key: 'billing', label: 'חיוב כספי', borderClass: 'border-amber-200', bgClass: 'bg-amber-50/70' };
   }
   if (['instructor_earning_reversal', 'instructor_earning_add', 'instructor_earning_update'].includes(type)) {
     return { key: 'payroll', label: 'שכר מדריך', borderClass: 'border-emerald-200', bgClass: 'bg-emerald-50/70' };
@@ -833,9 +833,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       if (result?.billing_warnings?.length > 0) {
         setBillingWarnings(result.billing_warnings);
       }
+      setRestorePreview(null);
+      setRestorePreviewError('');
       if (status === 'scheduled') {
-        setRestorePreview(null);
-        setRestorePreviewError('');
         setLocalReminderState((prev) => ({
           ...prev,
           [participantId]: {
@@ -1377,10 +1377,21 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
         {billingWarnings.length > 0 && (() => {
           const participantMap = new Map(
-            displayParticipants.map((p) => [p.student_id, getParticipantDisplayName(p, 'לקוח/ה')])
+            displayParticipants.flatMap((participant) => {
+              const displayName = getParticipantDisplayName(participant, 'לקוח/ה');
+              return [
+                participant?.student_id ? [`student:${participant.student_id}`, displayName] : null,
+                participant?.client_profile_id ? [`client:${participant.client_profile_id}`, displayName] : null,
+                participant?.student?.client_profile_id ? [`client:${participant.student.client_profile_id}`, displayName] : null,
+              ].filter(Boolean);
+            })
           );
           const names = billingWarnings
-            .map((w) => participantMap.get(w.student_id) || 'לקוח/ה')
+            .map((warning) => (
+              participantMap.get(warning?.student_id ? `student:${warning.student_id}` : '')
+              || participantMap.get(warning?.client_profile_id ? `client:${warning.client_profile_id}` : '')
+              || 'לקוח/ה'
+            ))
             .filter((v, i, a) => a.indexOf(v) === i)
             .join(', ');
           return (
@@ -1389,7 +1400,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               <AlertDescription>
                 <strong>שיעור הושלם — אך ישנה בעיית חיוב</strong>
                 <br />
-                {`לא נמצאה התחייבות / אישור ביטוח עבור: ${names}. יש לסדר זאת בניהול הסטודנטים כדי שהחיוב יתבצע.`}
+                {`לא נמצאה מסגרת חיוב תקינה עבור: ${names}. יש לסדר זאת במסך הניהול המתאים כדי שהחיוב יתבצע.`}
               </AlertDescription>
             </Alert>
           );

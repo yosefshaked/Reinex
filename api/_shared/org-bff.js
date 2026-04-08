@@ -27,6 +27,14 @@ export function normalizeString(value) {
   return value.trim();
 }
 
+export function normalizeNullableId(value) {
+  const normalized = normalizeString(value);
+  if (!normalized || normalized.toLowerCase() === 'null') {
+    return '';
+  }
+  return normalized;
+}
+
 export function parseRequestBody(req) {
   if (req?.body && typeof req.body === 'object') {
     return req.body;

@@ -11,6 +11,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useServices } from '@/hooks/useOrgData.js';
 import LedgerInvoiceDialog from '@/features/finance/components/LedgerInvoiceDialog.jsx';
+import { normalizeExternalHttpUrl } from '@/lib/external-links.js';
 
 function formatCurrency(value) {
   if (value == null || Number.isNaN(Number(value))) return '—';
@@ -374,9 +375,9 @@ export default function ClientBillingWorkspace({ clientProfile }) {
                       {entry.invoice_id ? ` • חשבונית ${entry.invoice_id}` : ''}
                       {entry.notes ? ` • ${entry.notes}` : ''}
                     </div>
-                    {entry.invoice_link ? (
+                    {normalizeExternalHttpUrl(entry.invoice_link) ? (
                       <div className="mt-1 text-xs">
-                        <a href={entry.invoice_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                        <a href={normalizeExternalHttpUrl(entry.invoice_link)} target="_blank" rel="noreferrer" className="text-primary hover:underline">
                           פתח קישור לחשבונית
                         </a>
                       </div>

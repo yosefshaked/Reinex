@@ -20,6 +20,7 @@ import { useServices } from '@/hooks/useOrgData.js';
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 import HmoAuthorizationManager from '@/features/students/components/HmoAuthorizationManager.jsx';
 import LedgerInvoiceDialog from '@/features/finance/components/LedgerInvoiceDialog.jsx';
+import { normalizeExternalHttpUrl } from '@/lib/external-links.js';
 import {
   buildCommitmentMetadataPayload,
   buildInitialCommitmentForm,
@@ -1511,9 +1512,9 @@ export default function StudentBillingWorkspace({
                           {entry.invoice_id ? ` • חשבונית ${entry.invoice_id}` : ''}
                           {entry.notes ? ` • ${entry.notes}` : ''}
                         </div>
-                        {entry.invoice_link ? (
+                        {normalizeExternalHttpUrl(entry.invoice_link) ? (
                           <div className="mt-1 text-xs">
-                            <a href={entry.invoice_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                            <a href={normalizeExternalHttpUrl(entry.invoice_link)} target="_blank" rel="noreferrer" className="text-primary hover:underline">
                               פתח קישור לחשבונית
                             </a>
                           </div>
