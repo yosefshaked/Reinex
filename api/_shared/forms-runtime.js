@@ -2,9 +2,21 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { deriveEncryptionKey, normalizeString, resolveEncryptionSecret } from './org-bff.js';
 
-const FORM_SCHEMA_VERSION = 2;
+const FORM_SCHEMA_VERSION = 3;
 const SIGNATURE_PURPOSE = 'form-signature-v1';
 const SIGNATURE_ALGORITHM = 'aes-256-gcm';
+
+export const FORM_ITEM_TYPES = {
+  LOCAL_QUESTION: 'local_question',
+  SHARED_QUESTION: 'shared_question',
+  LOCAL_TEXT: 'local_text',
+  SHARED_TEXT: 'shared_text',
+};
+
+export const SHARED_BLOCK_TYPES = {
+  QUESTION: 'question',
+  TEXT: 'text',
+};
 
 function normalizeObject(value, fallback = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -74,17 +86,106 @@ function normalizeOptions(value, questionType = '') {
     .filter((option) => option.label);
 }
 
+function normalizeTextVariant(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (normalized === 'warning' || normalized === 'success') return normalized;
+  return 'info';
+}
+
+function normalizeSharedBlockType(value, fallback = SHARED_BLOCK_TYPES.QUESTION) {
+  return value === SHARED_BLOCK_TYPES.TEXT ? SHARED_BLOCK_TYPES.TEXT : fallback;
+}
+
 function normalizeLegacyQuestion(questionId, fieldDef = {}, requiredIds = []) {
   const questionType = normalizeQuestionType(fieldDef.type, fieldDef);
-  return {
+  return normalizeQuestionItem({
     id: questionId,
-    type: questionType,
+    type: FORM_ITEM_TYPES.LOCAL_QUESTION,
+    question_type: questionType,
     label: normalizeString(fieldDef.title) || normalizeString(fieldDef.label) || questionId,
     description: normalizeString(fieldDef.description),
     required: requiredIds.includes(questionId),
     placeholder: normalizeString(fieldDef['x-placeholder'] || fieldDef.placeholder),
     options: normalizeOptions(fieldDef.options || fieldDef.enum, questionType),
     ui: normalizeObject(fieldDef.ui, {}),
+  });
+}
+
+function normalizeQuestionItem(item = {}, { type = FORM_ITEM_TYPES.LOCAL_QUESTION } = {}) {
+  const normalized = normalizeObject(item, {});
+  const questionType = normalizeQuestionType(normalized.question_type || normalized.questionType || normalized.type, normalized);
+  return {
+    id: normalizeString(normalized.id),
+    type,
+    question_type: questionType,
+    label: normalizeString(normalized.label || normalized.title) || 'שאלה',
+    description: normalizeString(normalized.description),
+    required: Boolean(normalized.required),
+    placeholder: normalizeString(normalized.placeholder),
+    options: normalizeOptions(normalized.options, questionType),
+    ui: normalizeObject(normalized.ui, {}),
+    metadata: normalizeObject(normalized.metadata, {}),
+  };
+}
+
+function normalizeTextItem(item = {}, { type = FORM_ITEM_TYPES.LOCAL_TEXT } = {}) {
+  const normalized = normalizeObject(item, {});
+  return {
+    id: normalizeString(normalized.id),
+    type,
+    title: normalizeString(normalized.title),
+    content: normalizeString(normalized.content || normalized.body),
+    variant: normalizeTextVariant(normalized.variant),
+    metadata: normalizeObject(normalized.metadata, {}),
+  };
+}
+
+function normalizeSharedPlacement(item = {}, { blockType }) {
+  const normalized = normalizeObject(item, {});
+  return {
+    id: normalizeString(normalized.id),
+    type: blockType === SHARED_BLOCK_TYPES.TEXT ? FORM_ITEM_TYPES.SHARED_TEXT : FORM_ITEM_TYPES.SHARED_QUESTION,
+    shared_block_id: normalizeString(normalized.shared_block_id || normalized.sharedBlockId),
+    shared_block: normalized.shared_block ? normalizeSharedBlockReference(normalized.shared_block, blockType) : null,
+    metadata: normalizeObject(normalized.metadata, {}),
+  };
+}
+
+function normalizeSectionItems(section) {
+  const rawItems = Array.isArray(section.items)
+    ? section.items
+    : Array.isArray(section.questions)
+      ? section.questions.map((question) => ({ ...question, type: FORM_ITEM_TYPES.LOCAL_QUESTION }))
+      : [];
+
+  return rawItems
+    .map((item) => {
+      const normalized = normalizeObject(item, {});
+      const itemType = normalizeString(normalized.type).toLowerCase();
+      if (itemType === FORM_ITEM_TYPES.LOCAL_TEXT) {
+        return normalizeTextItem(normalized, { type: FORM_ITEM_TYPES.LOCAL_TEXT });
+      }
+      if (itemType === FORM_ITEM_TYPES.SHARED_TEXT) {
+        return normalizeSharedPlacement(normalized, { blockType: SHARED_BLOCK_TYPES.TEXT });
+      }
+      if (itemType === FORM_ITEM_TYPES.SHARED_QUESTION) {
+        return normalizeSharedPlacement(normalized, { blockType: SHARED_BLOCK_TYPES.QUESTION });
+      }
+      return normalizeQuestionItem(normalized, { type: FORM_ITEM_TYPES.LOCAL_QUESTION });
+    })
+    .filter(Boolean);
+}
+
+function attachCompatibilityQuestions(section) {
+  return {
+    ...section,
+    questions: section.items
+      .filter((item) => isQuestionItem(item))
+      .map((item) => ({
+        ...item,
+        type: item.question_type,
+        options: normalizeOptions(item.options, item.question_type),
+      })),
   };
 }
 
@@ -99,27 +200,14 @@ export function normalizeFormSchema(formSchema) {
         .map((section, sectionIndex) => {
           const normalizedSection = normalizeObject(section, {});
           const sectionId = normalizeString(normalizedSection.id) || `section_${sectionIndex + 1}`;
-          return {
+          return attachCompatibilityQuestions({
             id: sectionId,
             title: normalizeString(normalizedSection.title) || `סעיף ${sectionIndex + 1}`,
             description: normalizeString(normalizedSection.description),
-            questions: normalizeArray(normalizedSection.questions).map((question, questionIndex) => {
-              const normalizedQuestion = normalizeObject(question, {});
-              const questionType = normalizeQuestionType(normalizedQuestion.type, normalizedQuestion);
-              return {
-                id: normalizeString(normalizedQuestion.id) || `${sectionId}_question_${questionIndex + 1}`,
-                type: questionType,
-                label: normalizeString(normalizedQuestion.label) || normalizeString(normalizedQuestion.title) || `שאלה ${questionIndex + 1}`,
-                description: normalizeString(normalizedQuestion.description),
-                required: Boolean(normalizedQuestion.required),
-                placeholder: normalizeString(normalizedQuestion.placeholder),
-                options: normalizeOptions(normalizedQuestion.options, questionType),
-                ui: normalizeObject(normalizedQuestion.ui, {}),
-              };
-            }),
-          };
+            items: normalizeSectionItems(normalizedSection),
+          });
         })
-        .filter((section) => section.questions.length > 0 || section.title),
+        .filter((section) => section.items.length > 0 || section.title),
     };
   }
 
@@ -129,19 +217,160 @@ export function normalizeFormSchema(formSchema) {
     ? schema['x-field-order'].filter((key) => Object.prototype.hasOwnProperty.call(properties, key))
     : Object.keys(properties);
 
-  const questions = order.map((questionId) => normalizeLegacyQuestion(questionId, properties[questionId], requiredIds));
+  const items = order.map((questionId) => normalizeLegacyQuestion(questionId, properties[questionId], requiredIds));
 
   return {
     version: FORM_SCHEMA_VERSION,
     kind: 'sectioned_form',
-    sections: questions.length
-      ? [{
+    sections: items.length
+      ? [attachCompatibilityQuestions({
           id: 'section_1',
           title: 'שאלות כלליות',
           description: '',
-          questions,
-        }]
+          items,
+        })]
       : [],
+  };
+}
+
+export function normalizeSharedBlockContent(blockType, contentSchema) {
+  const normalized = normalizeObject(contentSchema, {});
+  if (normalizeSharedBlockType(blockType) === SHARED_BLOCK_TYPES.TEXT) {
+    return {
+      title: normalizeString(normalized.title),
+      content: normalizeString(normalized.content || normalized.body),
+      variant: normalizeTextVariant(normalized.variant),
+      metadata: normalizeObject(normalized.metadata, {}),
+    };
+  }
+
+  const questionType = normalizeQuestionType(normalized.question_type || normalized.questionType || normalized.type, normalized);
+  return {
+    question_type: questionType,
+    label: normalizeString(normalized.label || normalized.title) || 'שאלה משותפת',
+    description: normalizeString(normalized.description),
+    required: Boolean(normalized.required),
+    placeholder: normalizeString(normalized.placeholder),
+    options: normalizeOptions(normalized.options, questionType),
+    ui: normalizeObject(normalized.ui, {}),
+    metadata: normalizeObject(normalized.metadata, {}),
+  };
+}
+
+function normalizeSharedBlockReference(block = {}, fallbackType = SHARED_BLOCK_TYPES.QUESTION) {
+  const normalized = normalizeObject(block, {});
+  const blockType = normalizeSharedBlockType(normalized.block_type || normalized.blockType, fallbackType);
+  return {
+    id: normalizeString(normalized.id),
+    block_type: blockType,
+    name: normalizeString(normalized.name),
+    content_schema: normalizeSharedBlockContent(blockType, normalized.content_schema || normalized.contentSchema),
+    is_active: normalized.is_active !== false,
+    metadata: normalizeObject(normalized.metadata, {}),
+  };
+}
+
+export function buildSharedBlockMap(rows) {
+  const map = {};
+  normalizeArray(rows).forEach((row) => {
+    const normalized = normalizeSharedBlockReference(row, row?.block_type || row?.blockType);
+    if (!normalized.id) return;
+    map[normalized.id] = normalized;
+  });
+  return map;
+}
+
+export function collectSharedBlockIds(formSchema) {
+  const schema = normalizeFormSchema(formSchema);
+  return Array.from(new Set(
+    schema.sections.flatMap((section) => section.items
+      .filter((item) => isSharedItem(item))
+      .map((item) => normalizeString(item.shared_block_id || item.shared_block?.id))
+      .filter(Boolean)),
+  ));
+}
+
+export function isQuestionItem(item) {
+  return item?.type === FORM_ITEM_TYPES.LOCAL_QUESTION || item?.type === FORM_ITEM_TYPES.SHARED_QUESTION;
+}
+
+export function isSharedItem(item) {
+  return item?.type === FORM_ITEM_TYPES.SHARED_QUESTION || item?.type === FORM_ITEM_TYPES.SHARED_TEXT;
+}
+
+function resolveSharedItem(item, sharedBlocksById = {}) {
+  if (!isSharedItem(item)) return item;
+
+  const sharedBlockId = normalizeString(item.shared_block_id || item.shared_block?.id);
+  const sharedBlock = sharedBlocksById[sharedBlockId] || item.shared_block || null;
+  if (!sharedBlock || !sharedBlock.id) {
+    return {
+      ...item,
+      missing_shared_block: true,
+      shared_block_id: sharedBlockId,
+    };
+  }
+
+  const content = normalizeSharedBlockContent(sharedBlock.block_type, sharedBlock.content_schema);
+  if (sharedBlock.block_type === SHARED_BLOCK_TYPES.TEXT) {
+    return {
+      ...normalizeTextItem({
+        ...content,
+        id: item.id,
+        metadata: { ...content.metadata, ...normalizeObject(item.metadata, {}) },
+      }, { type: FORM_ITEM_TYPES.SHARED_TEXT }),
+      shared_block_id: sharedBlock.id,
+      shared_block: sharedBlock,
+      resolved_from_shared: true,
+    };
+  }
+
+  return {
+    ...normalizeQuestionItem({
+      ...content,
+      id: item.id,
+      metadata: { ...content.metadata, ...normalizeObject(item.metadata, {}) },
+    }, { type: FORM_ITEM_TYPES.SHARED_QUESTION }),
+    shared_block_id: sharedBlock.id,
+    shared_block: sharedBlock,
+    resolved_from_shared: true,
+  };
+}
+
+export function resolveSchemaWithSharedBlocks(formSchema, sharedBlocksById = {}) {
+  const schema = normalizeFormSchema(formSchema);
+  return {
+    ...schema,
+    sections: schema.sections.map((section) => attachCompatibilityQuestions({
+      ...section,
+      items: section.items.map((item) => resolveSharedItem(item, sharedBlocksById)),
+    })),
+  };
+}
+
+export function materializeSchemaForSnapshot(formSchema) {
+  const schema = resolveSchemaWithSharedBlocks(formSchema, {});
+  return {
+    ...schema,
+    sections: schema.sections.map((section) => attachCompatibilityQuestions({
+      ...section,
+      items: section.items.map((item) => {
+        if (item.type === FORM_ITEM_TYPES.SHARED_QUESTION) {
+          return normalizeQuestionItem({
+            ...item,
+            type: FORM_ITEM_TYPES.LOCAL_QUESTION,
+            question_type: item.question_type,
+          }, { type: FORM_ITEM_TYPES.LOCAL_QUESTION });
+        }
+        if (item.type === FORM_ITEM_TYPES.SHARED_TEXT) {
+          return normalizeTextItem({
+            ...item,
+            type: FORM_ITEM_TYPES.LOCAL_TEXT,
+          }, { type: FORM_ITEM_TYPES.LOCAL_TEXT });
+        }
+        return item;
+      }),
+    })),
   };
 }
 
@@ -149,9 +378,10 @@ export function normalizeVisibilityRules(value) {
   return normalizeArray(value)
     .map((group, groupIndex) => {
       const normalizedGroup = normalizeObject(group, {});
-      const targetType = normalizeString(normalizedGroup.target_type || normalizedGroup.targetType).toLowerCase();
+      const targetTypeRaw = normalizeString(normalizedGroup.target_type || normalizedGroup.targetType).toLowerCase();
+      const targetType = targetTypeRaw === 'question' ? 'item' : targetTypeRaw;
       const targetId = normalizeString(normalizedGroup.target_id || normalizedGroup.targetId);
-      if ((targetType !== 'section' && targetType !== 'question') || !targetId) return null;
+      if ((targetType !== 'section' && targetType !== 'item') || !targetId) return null;
       const mode = normalizeString(normalizedGroup.mode).toLowerCase() === 'any' ? 'any' : 'all';
       const rules = normalizeArray(normalizedGroup.rules)
         .map((rule, ruleIndex) => {
@@ -202,17 +432,27 @@ export function normalizeAlertRules(value) {
     .filter(Boolean);
 }
 
-export function getQuestionsInOrder(formSchema) {
-  const schema = normalizeFormSchema(formSchema);
-  return schema.sections.flatMap((section) => section.questions.map((question) => ({
-    ...question,
+export function getItemsInOrder(formSchema, sharedBlocksById = {}) {
+  const schema = resolveSchemaWithSharedBlocks(formSchema, sharedBlocksById);
+  return schema.sections.flatMap((section) => section.items.map((item) => ({
+    ...item,
     section_id: section.id,
     section_title: section.title,
   })));
 }
 
-export function findQuestionById(formSchema, questionId) {
-  return getQuestionsInOrder(formSchema).find((question) => question.id === questionId) || null;
+export function getQuestionsInOrder(formSchema, sharedBlocksById = {}) {
+  return getItemsInOrder(formSchema, sharedBlocksById)
+    .filter((item) => isQuestionItem(item))
+    .map((item) => ({
+      ...item,
+      type: item.question_type,
+      options: normalizeOptions(item.options, item.question_type),
+    }));
+}
+
+export function findQuestionById(formSchema, questionId, sharedBlocksById = {}) {
+  return getQuestionsInOrder(formSchema, sharedBlocksById).find((question) => question.id === questionId) || null;
 }
 
 function matchRuleValue(sourceValue, operator, expectedValue) {
@@ -239,7 +479,8 @@ function matchRuleValue(sourceValue, operator, expectedValue) {
 }
 
 export function evaluateVisibility({ visibilityRules, answers, targetType, targetId }) {
-  const matchingGroups = normalizeVisibilityRules(visibilityRules).filter((group) => group.target_type === targetType && group.target_id === targetId);
+  const normalizedTargetType = targetType === 'question' ? 'item' : targetType;
+  const matchingGroups = normalizeVisibilityRules(visibilityRules).filter((group) => group.target_type === normalizedTargetType && group.target_id === targetId);
   if (!matchingGroups.length) return true;
 
   return matchingGroups.every((group) => {
@@ -248,20 +489,20 @@ export function evaluateVisibility({ visibilityRules, answers, targetType, targe
   });
 }
 
-export function buildVisibleFormState({ formSchema, visibilityRules, answers }) {
-  const schema = normalizeFormSchema(formSchema);
+export function buildVisibleFormState({ formSchema, visibilityRules, answers, sharedBlocksById = {} }) {
+  const schema = resolveSchemaWithSharedBlocks(formSchema, sharedBlocksById);
   const sections = schema.sections
     .filter((section) => evaluateVisibility({ visibilityRules, answers, targetType: 'section', targetId: section.id }))
-    .map((section) => ({
+    .map((section) => attachCompatibilityQuestions({
       ...section,
-      questions: section.questions.filter((question) => evaluateVisibility({
+      items: section.items.filter((item) => evaluateVisibility({
         visibilityRules,
         answers,
-        targetType: 'question',
-        targetId: question.id,
+        targetType: 'item',
+        targetId: item.id,
       })),
     }))
-    .filter((section) => section.questions.length > 0);
+    .filter((section) => section.items.length > 0);
 
   return {
     ...schema,
@@ -269,7 +510,7 @@ export function buildVisibleFormState({ formSchema, visibilityRules, answers }) 
   };
 }
 
-export function resolvePublicFormState(formRecord, { allowDraftFallback = true } = {}) {
+export function resolvePublicFormState(formRecord, { allowDraftFallback = true, sharedBlocksById = {} } = {}) {
   const form = normalizeObject(formRecord, {});
   const metadata = normalizeObject(form.metadata, {});
 
@@ -277,14 +518,17 @@ export function resolvePublicFormState(formRecord, { allowDraftFallback = true }
   const publishedVisibilityRules = metadata.published_visibility_rules;
   const publishedAlertRules = metadata.published_alert_rules;
 
+  const rawSchema = normalizeFormSchema(
+    publishedSchema && typeof publishedSchema === 'object'
+      ? publishedSchema
+      : allowDraftFallback
+        ? form.form_schema
+        : {},
+  );
+
   return {
-    form_schema: normalizeFormSchema(
-      publishedSchema && typeof publishedSchema === 'object'
-        ? publishedSchema
-        : allowDraftFallback
-          ? form.form_schema
-          : {},
-    ),
+    raw_form_schema: rawSchema,
+    form_schema: resolveSchemaWithSharedBlocks(rawSchema, sharedBlocksById),
     visibility_rules: normalizeVisibilityRules(
       publishedVisibilityRules && Array.isArray(publishedVisibilityRules)
         ? publishedVisibilityRules
@@ -303,10 +547,10 @@ export function resolvePublicFormState(formRecord, { allowDraftFallback = true }
   };
 }
 
-export function evaluateAlertFlags({ formSchema, alertRules, answers }) {
+export function evaluateAlertFlags({ formSchema, alertRules, answers, sharedBlocksById = {} }) {
   const normalizedRules = normalizeAlertRules(alertRules);
   const hits = normalizedRules.flatMap((rule) => {
-    const question = findQuestionById(formSchema, rule.question_id);
+    const question = findQuestionById(formSchema, rule.question_id, sharedBlocksById);
     const answerValue = answers?.[rule.question_id];
     let matched = false;
 
@@ -382,63 +626,59 @@ function decryptSignaturePayload(payload, env) {
   return JSON.parse(decrypted.toString('utf8'));
 }
 
-export function prepareAnswersForStorage({ formSchema, answers, env }) {
-  const schema = normalizeFormSchema(formSchema);
+export function prepareAnswersForStorage({ formSchema, answers, env, sharedBlocksById = {} }) {
+  const questions = getQuestionsInOrder(formSchema, sharedBlocksById);
   const nextAnswers = { ...normalizeObject(answers, {}) };
 
-  schema.sections.forEach((section) => {
-    section.questions.forEach((question) => {
-      if (question.type !== 'signature') return;
-      const answer = normalizeObject(nextAnswers[question.id], null);
-      if (!answer || answer.encrypted_payload) return;
-      const strokes = normalizeArray(answer.strokes);
-      if (!strokes.length) return;
+  questions.forEach((question) => {
+    if (question.type !== 'signature') return;
+    const answer = normalizeObject(nextAnswers[question.id], null);
+    if (!answer || answer.encrypted_payload) return;
+    const strokes = normalizeArray(answer.strokes);
+    if (!strokes.length) return;
 
-      const signedAt = normalizeString(answer.signed_at) || new Date().toISOString();
-      nextAnswers[question.id] = {
-        _type: 'signature',
-        format: 'stroke_json',
+    const signedAt = normalizeString(answer.signed_at) || new Date().toISOString();
+    nextAnswers[question.id] = {
+      _type: 'signature',
+      format: 'stroke_json',
+      signed_at: signedAt,
+      encrypted_payload: encryptSignaturePayload({
+        strokes,
         signed_at: signedAt,
-        encrypted_payload: encryptSignaturePayload({
-          strokes,
-          signed_at: signedAt,
-          question_id: question.id,
-        }, env),
-      };
-    });
+        question_id: question.id,
+      }, env),
+    };
   });
 
   return nextAnswers;
 }
 
-export function hydrateAnswersForReview({ formSchema, answers, env }) {
-  const schema = normalizeFormSchema(formSchema);
+export function hydrateAnswersForReview({ formSchema, answers, env, sharedBlocksById = {} }) {
+  const questions = getQuestionsInOrder(formSchema, sharedBlocksById);
   const nextAnswers = { ...normalizeObject(answers, {}) };
 
-  schema.sections.forEach((section) => {
-    section.questions.forEach((question) => {
-      if (question.type !== 'signature') return;
-      const answer = normalizeObject(nextAnswers[question.id], null);
-      if (!answer?.encrypted_payload) return;
+  questions.forEach((question) => {
+    if (question.type !== 'signature') return;
+    const answer = normalizeObject(nextAnswers[question.id], null);
+    if (!answer?.encrypted_payload) return;
 
-      try {
-        const decrypted = decryptSignaturePayload(answer.encrypted_payload, env);
-        nextAnswers[question.id] = {
-          _type: 'signature',
-          format: 'stroke_json',
-          signed_at: answer.signed_at || decrypted.signed_at || null,
-          preview_strokes: normalizeArray(decrypted.strokes),
-        };
-      } catch {
-        nextAnswers[question.id] = {
-          _type: 'signature',
-          format: 'stroke_json',
-          signed_at: answer.signed_at || null,
-          preview_strokes: [],
-          preview_error: true,
-        };
-      }
-    });
+    try {
+      const decrypted = decryptSignaturePayload(answer.encrypted_payload, env);
+      nextAnswers[question.id] = {
+        _type: 'signature',
+        format: 'stroke_json',
+        signed_at: answer.signed_at || decrypted.signed_at || null,
+        preview_strokes: normalizeArray(decrypted.strokes),
+      };
+    } catch {
+      nextAnswers[question.id] = {
+        _type: 'signature',
+        format: 'stroke_json',
+        signed_at: answer.signed_at || null,
+        preview_strokes: [],
+        preview_error: true,
+      };
+    }
   });
 
   return nextAnswers;

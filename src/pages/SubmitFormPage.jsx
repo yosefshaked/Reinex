@@ -8,8 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import SectionedFormRenderer, { validateVisibleAnswers } from '@/features/forms/components/SectionedFormRenderer.jsx';
-import { buildInitialAnswers, getVisibleSections, normalizeFormSchema, normalizeVisibilityRules } from '@/features/forms/lib/form-schema.js';
+import SectionedFormRenderer from '@/features/forms/components/SectionedFormRenderer.jsx';
+import { buildInitialAnswers, getVisibleSections, normalizeFormSchema, normalizeVisibilityRules, validateVisibleAnswers } from '@/features/forms/lib/form-schema.js';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'ראשון', short: 'א' },
@@ -41,24 +41,6 @@ const HMO_APPROVAL_OPTIONS = [
   { value: 'no_approval_yet', label: 'אין אישור עדיין' },
   { value: 'send_separately', label: 'האישור יישלח בנפרד בוואטסאפ/אימייל' },
 ];
-
-function normalizePreferredTimesByDay(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {};
-  }
-  const result = {};
-  Object.entries(value).forEach(([dayKey, ranges]) => {
-    const day = Number(dayKey);
-    if (!Number.isInteger(day) || day < 0 || day > 6 || !Array.isArray(ranges)) return;
-    result[day] = ranges
-      .map((range) => ({
-        start: typeof range?.start === 'string' ? range.start : '',
-        end: typeof range?.end === 'string' ? range.end : '',
-      }))
-      .filter((range) => range.start || range.end);
-  });
-  return result;
-}
 
 function serializePreferredTimes(preferredTimesByDay) {
   if (!preferredTimesByDay || typeof preferredTimesByDay !== 'object') return [];

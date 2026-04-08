@@ -1,4 +1,4 @@
-const FORM_SCHEMA_VERSION = 2;
+const FORM_SCHEMA_VERSION = 3;
 
 const DEFAULT_OPTIONS_BY_TYPE = {
   yes_no: [
@@ -31,6 +31,24 @@ export const QUESTION_TYPE_DEFINITIONS = [
   { type: 'yes_no', label: 'שאלת כן / לא' },
   { type: 'approval', label: 'שאלת אישור' },
   { type: 'signature', label: 'חתימה' },
+];
+
+export const FORM_ITEM_TYPES = {
+  LOCAL_QUESTION: 'local_question',
+  SHARED_QUESTION: 'shared_question',
+  LOCAL_TEXT: 'local_text',
+  SHARED_TEXT: 'shared_text',
+};
+
+export const SHARED_BLOCK_TYPES = {
+  QUESTION: 'question',
+  TEXT: 'text',
+};
+
+export const TEXT_BLOCK_VARIANTS = [
+  { value: 'info', label: 'מידע' },
+  { value: 'warning', label: 'הדגשה' },
+  { value: 'success', label: 'אישור' },
 ];
 
 export const WAITING_LIST_BUILT_IN_QUESTIONS = [
@@ -92,46 +110,12 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function normalizeSharedBlockType(value, fallback = SHARED_BLOCK_TYPES.QUESTION) {
+  return value === SHARED_BLOCK_TYPES.TEXT ? SHARED_BLOCK_TYPES.TEXT : fallback;
+}
+
 export function generateBuilderId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-export function createEmptyFormSchema() {
-  return {
-    version: FORM_SCHEMA_VERSION,
-    kind: 'sectioned_form',
-    sections: [
-      {
-        id: generateBuilderId('section'),
-        title: 'סעיף חדש',
-        description: '',
-        questions: [],
-      },
-    ],
-  };
-}
-
-export function createSection() {
-  return {
-    id: generateBuilderId('section'),
-    title: 'סעיף חדש',
-    description: '',
-    questions: [],
-  };
-}
-
-export function createQuestion(type = 'short_text') {
-  const definition = QUESTION_TYPE_DEFINITIONS.find((item) => item.type === type);
-  return {
-    id: generateBuilderId('question'),
-    type,
-    label: definition?.label || 'שאלה חדשה',
-    description: '',
-    required: false,
-    placeholder: '',
-    options: DEFAULT_OPTIONS_BY_TYPE[type] ? DEFAULT_OPTIONS_BY_TYPE[type].map((option) => ({ ...option })) : [],
-    ui: {},
-  };
 }
 
 function normalizeQuestionType(type, fieldDef = {}) {
@@ -171,17 +155,296 @@ function normalizeOptions(value, questionType = '') {
   });
 }
 
-function legacyFieldToQuestion(key, fieldDef, requiredFields) {
-  const questionType = normalizeQuestionType(fieldDef.type, fieldDef);
+function normalizeTextVariant(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  return TEXT_BLOCK_VARIANTS.some((item) => item.value === normalized) ? normalized : 'info';
+}
+
+function normalizeSharedBlockReference(value, blockType) {
+  const normalized = normalizeObject(value, {});
   return {
+    id: normalizeText(normalized.id),
+    block_type: normalizeSharedBlockType(normalized.block_type || normalized.blockType, blockType),
+    name: normalizeText(normalized.name),
+    content_schema: normalizeObject(normalized.content_schema || normalized.contentSchema, {}),
+    is_active: normalized.is_active !== false,
+    metadata: normalizeObject(normalized.metadata, {}),
+  };
+}
+
+export function normalizeSharedBlockContent(blockType, contentSchema) {
+  const normalized = normalizeObject(contentSchema, {});
+
+  if (normalizeSharedBlockType(blockType) === SHARED_BLOCK_TYPES.TEXT) {
+    return {
+      title: normalizeText(normalized.title),
+      content: normalizeText(normalized.content || normalized.body),
+      variant: normalizeTextVariant(normalized.variant),
+      metadata: normalizeObject(normalized.metadata, {}),
+    };
+  }
+
+  const questionType = normalizeQuestionType(normalized.question_type || normalized.questionType || normalized.type, normalized);
+  return {
+    question_type: questionType,
+    label: normalizeText(normalized.label || normalized.title) || 'שאלה משותפת',
+    description: normalizeText(normalized.description),
+    required: Boolean(normalized.required),
+    placeholder: normalizeText(normalized.placeholder),
+    options: normalizeOptions(normalized.options, questionType),
+    ui: normalizeObject(normalized.ui, {}),
+    metadata: normalizeObject(normalized.metadata, {}),
+  };
+}
+
+function normalizeBaseItemId(value, prefix = 'item') {
+  return normalizeText(value) || generateBuilderId(prefix);
+}
+
+function normalizeTextItem(item, { type = FORM_ITEM_TYPES.LOCAL_TEXT, fallbackIdPrefix = 'text_item' } = {}) {
+  const normalized = normalizeObject(item, {});
+  return {
+    id: normalizeBaseItemId(normalized.id, fallbackIdPrefix),
+    type,
+    title: normalizeText(normalized.title),
+    content: normalizeText(normalized.content || normalized.body),
+    variant: normalizeTextVariant(normalized.variant),
+    metadata: normalizeObject(normalized.metadata, {}),
+  };
+}
+
+function normalizeQuestionItem(item, { type = FORM_ITEM_TYPES.LOCAL_QUESTION, fallbackIdPrefix = 'question_item' } = {}) {
+  const normalized = normalizeObject(item, {});
+  const questionType = normalizeQuestionType(normalized.question_type || normalized.questionType || normalized.type, normalized);
+  return {
+    id: normalizeBaseItemId(normalized.id, fallbackIdPrefix),
+    type,
+    question_type: questionType,
+    label: normalizeText(normalized.label || normalized.title) || 'שאלה חדשה',
+    description: normalizeText(normalized.description),
+    required: Boolean(normalized.required),
+    placeholder: normalizeText(normalized.placeholder),
+    options: normalizeOptions(normalized.options, questionType),
+    ui: normalizeObject(normalized.ui, {}),
+    metadata: normalizeObject(normalized.metadata, {}),
+  };
+}
+
+function normalizeLegacyQuestion(key, fieldDef, requiredFields) {
+  return normalizeQuestionItem({
     id: key,
-    type: questionType,
+    type: FORM_ITEM_TYPES.LOCAL_QUESTION,
+    question_type: normalizeQuestionType(fieldDef.type, fieldDef),
     label: normalizeText(fieldDef.title || fieldDef.label) || key,
     description: normalizeText(fieldDef.description),
     required: requiredFields.includes(key),
     placeholder: normalizeText(fieldDef['x-placeholder'] || fieldDef.placeholder),
-    options: normalizeOptions(fieldDef.options || fieldDef.enum, questionType),
+    options: normalizeOptions(fieldDef.options || fieldDef.enum, normalizeQuestionType(fieldDef.type, fieldDef)),
     ui: normalizeObject(fieldDef.ui, {}),
+  }, { type: FORM_ITEM_TYPES.LOCAL_QUESTION, fallbackIdPrefix: 'question_item' });
+}
+
+function normalizeSharedPlacement(item, { blockType, fallbackIdPrefix }) {
+  const normalized = normalizeObject(item, {});
+  return {
+    id: normalizeBaseItemId(normalized.id, fallbackIdPrefix),
+    type: blockType === SHARED_BLOCK_TYPES.TEXT ? FORM_ITEM_TYPES.SHARED_TEXT : FORM_ITEM_TYPES.SHARED_QUESTION,
+    shared_block_id: normalizeText(normalized.shared_block_id || normalized.sharedBlockId),
+    shared_block: normalized.shared_block ? normalizeSharedBlockReference(normalized.shared_block, blockType) : null,
+    metadata: normalizeObject(normalized.metadata, {}),
+  };
+}
+
+function normalizeSectionItems(section) {
+  const rawItems = Array.isArray(section.items)
+    ? section.items
+    : Array.isArray(section.questions)
+      ? section.questions.map((question) => ({ ...question, type: FORM_ITEM_TYPES.LOCAL_QUESTION }))
+      : [];
+
+  return rawItems
+    .map((item, itemIndex) => {
+      const normalized = normalizeObject(item, {});
+      const itemType = normalizeText(normalized.type).toLowerCase();
+      if (itemType === FORM_ITEM_TYPES.LOCAL_TEXT) {
+        return normalizeTextItem(normalized, { type: FORM_ITEM_TYPES.LOCAL_TEXT, fallbackIdPrefix: `text_item_${itemIndex + 1}` });
+      }
+      if (itemType === FORM_ITEM_TYPES.SHARED_TEXT) {
+        return normalizeSharedPlacement(normalized, { blockType: SHARED_BLOCK_TYPES.TEXT, fallbackIdPrefix: `shared_text_item_${itemIndex + 1}` });
+      }
+      if (itemType === FORM_ITEM_TYPES.SHARED_QUESTION) {
+        return normalizeSharedPlacement(normalized, { blockType: SHARED_BLOCK_TYPES.QUESTION, fallbackIdPrefix: `shared_question_item_${itemIndex + 1}` });
+      }
+      return normalizeQuestionItem(normalized, { type: FORM_ITEM_TYPES.LOCAL_QUESTION, fallbackIdPrefix: `question_item_${itemIndex + 1}` });
+    })
+    .filter(Boolean);
+}
+
+function attachCompatibilityQuestions(section) {
+  return {
+    ...section,
+    questions: section.items.filter((item) => isQuestionItem(item)).map((item) => ({
+      ...item,
+      id: item.id,
+      type: item.question_type,
+      label: item.label,
+      description: item.description,
+      required: item.required,
+      placeholder: item.placeholder,
+      options: normalizeOptions(item.options, item.question_type),
+      ui: normalizeObject(item.ui, {}),
+    })),
+  };
+}
+
+export function createEmptyFormSchema() {
+  return {
+    version: FORM_SCHEMA_VERSION,
+    kind: 'sectioned_form',
+    sections: [attachCompatibilityQuestions(createSection())],
+  };
+}
+
+export function createSection() {
+  return {
+    id: generateBuilderId('section'),
+    title: 'סעיף חדש',
+    description: '',
+    items: [],
+  };
+}
+
+export function createQuestion(type = 'short_text') {
+  const definition = QUESTION_TYPE_DEFINITIONS.find((item) => item.type === type);
+  return normalizeQuestionItem({
+    id: generateBuilderId('question'),
+    type: FORM_ITEM_TYPES.LOCAL_QUESTION,
+    question_type: type,
+    label: definition?.label || 'שאלה חדשה',
+    description: '',
+    required: false,
+    placeholder: '',
+    options: DEFAULT_OPTIONS_BY_TYPE[type] ? DEFAULT_OPTIONS_BY_TYPE[type].map((option) => ({ ...option })) : [],
+    ui: {},
+  }, { type: FORM_ITEM_TYPES.LOCAL_QUESTION, fallbackIdPrefix: 'question' });
+}
+
+export function createTextBlock() {
+  return normalizeTextItem({
+    id: generateBuilderId('text'),
+    type: FORM_ITEM_TYPES.LOCAL_TEXT,
+    title: 'כותרת טקסט',
+    content: 'הוסיפו כאן טקסט מידע ללקוח/ה.',
+    variant: 'info',
+  }, { type: FORM_ITEM_TYPES.LOCAL_TEXT, fallbackIdPrefix: 'text' });
+}
+
+export function createSharedPlacement(block, blockType) {
+  return normalizeSharedPlacement({
+    id: generateBuilderId(blockType === SHARED_BLOCK_TYPES.TEXT ? 'shared_text' : 'shared_question'),
+    type: blockType === SHARED_BLOCK_TYPES.TEXT ? FORM_ITEM_TYPES.SHARED_TEXT : FORM_ITEM_TYPES.SHARED_QUESTION,
+    shared_block_id: block?.id,
+    shared_block: block,
+  }, {
+    blockType,
+    fallbackIdPrefix: blockType === SHARED_BLOCK_TYPES.TEXT ? 'shared_text' : 'shared_question',
+  });
+}
+
+export function isQuestionItem(item) {
+  if (!item || typeof item !== 'object') return false;
+  return item.type === FORM_ITEM_TYPES.LOCAL_QUESTION || item.type === FORM_ITEM_TYPES.SHARED_QUESTION;
+}
+
+export function isTextItem(item) {
+  if (!item || typeof item !== 'object') return false;
+  return item.type === FORM_ITEM_TYPES.LOCAL_TEXT || item.type === FORM_ITEM_TYPES.SHARED_TEXT;
+}
+
+export function isSharedItem(item) {
+  if (!item || typeof item !== 'object') return false;
+  return item.type === FORM_ITEM_TYPES.SHARED_QUESTION || item.type === FORM_ITEM_TYPES.SHARED_TEXT;
+}
+
+export function collectSharedBlockIds(schema) {
+  const normalized = normalizeFormSchema(schema);
+  return Array.from(new Set(
+    normalized.sections.flatMap((section) =>
+      section.items
+        .filter((item) => isSharedItem(item))
+        .map((item) => normalizeText(item.shared_block_id || item.shared_block?.id))
+        .filter(Boolean),
+    ),
+  ));
+}
+
+export function buildSharedBlockMap(blocks) {
+  const map = {};
+  normalizeArray(blocks).forEach((block) => {
+    const normalized = normalizeObject(block, {});
+    const id = normalizeText(normalized.id);
+    if (!id) return;
+    const blockType = normalizeSharedBlockType(normalized.block_type || normalized.blockType);
+    map[id] = {
+      id,
+      block_type: blockType,
+      name: normalizeText(normalized.name),
+      content_schema: normalizeSharedBlockContent(blockType, normalized.content_schema || normalized.contentSchema),
+      is_active: normalized.is_active !== false,
+      metadata: normalizeObject(normalized.metadata, {}),
+    };
+  });
+  return map;
+}
+
+function resolveSharedItem(item, sharedBlockMap = {}) {
+  if (!isSharedItem(item)) return item;
+  const sharedBlockId = normalizeText(item.shared_block_id || item.shared_block?.id);
+  const sharedBlock = sharedBlockMap[sharedBlockId] || item.shared_block || null;
+  if (!sharedBlock || !sharedBlock.id) {
+    return {
+      ...item,
+      missing_shared_block: true,
+      shared_block_id: sharedBlockId,
+    };
+  }
+
+  const content = normalizeSharedBlockContent(sharedBlock.block_type, sharedBlock.content_schema);
+  if (sharedBlock.block_type === SHARED_BLOCK_TYPES.TEXT) {
+    return {
+      ...normalizeTextItem({
+        ...content,
+        id: item.id,
+        type: item.type,
+        metadata: { ...content.metadata, ...normalizeObject(item.metadata, {}) },
+      }, { type: FORM_ITEM_TYPES.SHARED_TEXT, fallbackIdPrefix: 'shared_text' }),
+      shared_block_id: sharedBlock.id,
+      shared_block: sharedBlock,
+      resolved_from_shared: true,
+    };
+  }
+
+  return {
+    ...normalizeQuestionItem({
+      ...content,
+      id: item.id,
+      type: item.type,
+      metadata: { ...content.metadata, ...normalizeObject(item.metadata, {}) },
+    }, { type: FORM_ITEM_TYPES.SHARED_QUESTION, fallbackIdPrefix: 'shared_question' }),
+    shared_block_id: sharedBlock.id,
+    shared_block: sharedBlock,
+    resolved_from_shared: true,
+  };
+}
+
+export function resolveSchemaWithSharedBlocks(schema, sharedBlockMap = {}) {
+  const normalized = normalizeFormSchema(schema);
+  return {
+    ...normalized,
+    sections: normalized.sections.map((section) => attachCompatibilityQuestions({
+      ...section,
+      items: section.items.map((item) => resolveSharedItem(item, sharedBlockMap)),
+    })),
   };
 }
 
@@ -189,32 +452,20 @@ export function normalizeFormSchema(schema) {
   const normalized = normalizeObject(schema, {});
 
   if (normalized.kind === 'sectioned_form' && Array.isArray(normalized.sections)) {
+    const sections = normalized.sections.map((section, sectionIndex) => {
+      const normalizedSection = normalizeObject(section, {});
+      const sectionId = normalizeText(normalizedSection.id) || `section_${sectionIndex + 1}`;
+      return attachCompatibilityQuestions({
+        id: sectionId,
+        title: normalizeText(normalizedSection.title) || `סעיף ${sectionIndex + 1}`,
+        description: normalizeText(normalizedSection.description),
+        items: normalizeSectionItems(normalizedSection),
+      });
+    });
     return {
       version: FORM_SCHEMA_VERSION,
       kind: 'sectioned_form',
-      sections: normalized.sections.map((section, sectionIndex) => {
-        const normalizedSection = normalizeObject(section, {});
-        const sectionId = normalizeText(normalizedSection.id) || `section_${sectionIndex + 1}`;
-        return {
-          id: sectionId,
-          title: normalizeText(normalizedSection.title) || `סעיף ${sectionIndex + 1}`,
-          description: normalizeText(normalizedSection.description),
-          questions: normalizeArray(normalizedSection.questions).map((question, questionIndex) => {
-            const normalizedQuestion = normalizeObject(question, {});
-            const questionType = normalizeQuestionType(normalizedQuestion.type, normalizedQuestion);
-            return {
-              id: normalizeText(normalizedQuestion.id) || `${sectionId}_question_${questionIndex + 1}`,
-              type: questionType,
-              label: normalizeText(normalizedQuestion.label || normalizedQuestion.title) || `שאלה ${questionIndex + 1}`,
-              description: normalizeText(normalizedQuestion.description),
-              required: Boolean(normalizedQuestion.required),
-              placeholder: normalizeText(normalizedQuestion.placeholder),
-              options: normalizeOptions(normalizedQuestion.options, questionType),
-              ui: normalizeObject(normalizedQuestion.ui, {}),
-            };
-          }),
-        };
-      }),
+      sections: sections.length ? sections : [attachCompatibilityQuestions(createSection())],
     };
   }
 
@@ -227,21 +478,26 @@ export function normalizeFormSchema(schema) {
   return {
     version: FORM_SCHEMA_VERSION,
     kind: 'sectioned_form',
-    sections: [{
+    sections: [attachCompatibilityQuestions({
       id: 'section_1',
       title: 'שאלות כלליות',
       description: '',
-      questions: order.map((key) => legacyFieldToQuestion(key, properties[key], requiredFields)),
-    }],
+      items: order.map((key) => normalizeLegacyQuestion(key, properties[key], requiredFields)),
+    })],
   };
+}
+
+function isIsraeliIdValid(value) {
+  return /^\d{5,12}$/.test(String(value || '').trim());
 }
 
 export function normalizeVisibilityRules(rules) {
   return normalizeArray(rules).map((group, groupIndex) => {
     const normalizedGroup = normalizeObject(group, {});
-    const targetType = normalizeText(normalizedGroup.target_type || normalizedGroup.targetType).toLowerCase();
+    const rawTargetType = normalizeText(normalizedGroup.target_type || normalizedGroup.targetType).toLowerCase();
+    const targetType = rawTargetType === 'question' ? 'item' : rawTargetType;
     const targetId = normalizeText(normalizedGroup.target_id || normalizedGroup.targetId);
-    if (!targetId || (targetType !== 'section' && targetType !== 'question')) return null;
+    if (!targetId || (targetType !== 'section' && targetType !== 'item')) return null;
     const mode = normalizeText(normalizedGroup.mode).toLowerCase() === 'any' ? 'any' : 'all';
     const normalizedRules = normalizeArray(normalizedGroup.rules).map((rule, ruleIndex) => {
       const normalizedRule = normalizeObject(rule, {});
@@ -284,13 +540,29 @@ export function normalizeAlertRules(rules) {
   }).filter(Boolean);
 }
 
-export function getQuestionsInOrder(schema) {
-  const normalized = normalizeFormSchema(schema);
-  return normalized.sections.flatMap((section) => section.questions.map((question) => ({
-    ...question,
+export function getItemsInOrder(schema, sharedBlockMap = {}) {
+  const normalized = resolveSchemaWithSharedBlocks(schema, sharedBlockMap);
+  return normalized.sections.flatMap((section) => section.items.map((item) => ({
+    ...item,
     section_id: section.id,
     section_title: section.title,
   })));
+}
+
+export function getQuestionsInOrder(schema, sharedBlockMap = {}) {
+  return getItemsInOrder(schema, sharedBlockMap)
+    .filter((item) => isQuestionItem(item))
+    .map((item) => ({
+      ...item,
+      id: item.id,
+      type: item.question_type,
+      label: item.label,
+      description: item.description,
+      required: item.required,
+      placeholder: item.placeholder,
+      options: normalizeOptions(item.options, item.question_type),
+      ui: normalizeObject(item.ui, {}),
+    }));
 }
 
 export function getWaitingListBuiltInQuestions() {
@@ -300,8 +572,8 @@ export function getWaitingListBuiltInQuestions() {
   }));
 }
 
-export function getAvailableSourceQuestions(schema, targetType, targetId, { formUsage = 'general' } = {}) {
-  const normalized = normalizeFormSchema(schema);
+export function getAvailableSourceQuestions(schema, targetType, targetId, { formUsage = 'general', sharedBlockMap = {} } = {}) {
+  const normalized = resolveSchemaWithSharedBlocks(schema, sharedBlockMap);
   const available = formUsage === 'waiting_list_intake' ? getWaitingListBuiltInQuestions() : [];
 
   for (const section of normalized.sections) {
@@ -309,11 +581,23 @@ export function getAvailableSourceQuestions(schema, targetType, targetId, { form
       break;
     }
 
-    for (const question of section.questions) {
-      if (targetType === 'question' && question.id === targetId) {
+    for (const item of section.items) {
+      if (targetType === 'item' && item.id === targetId) {
         return available;
       }
-      available.push(question);
+      if (isQuestionItem(item)) {
+        available.push({
+          ...item,
+          id: item.id,
+          type: item.question_type,
+          label: item.label,
+          description: item.description,
+          required: item.required,
+          placeholder: item.placeholder,
+          options: normalizeOptions(item.options, item.question_type),
+          ui: normalizeObject(item.ui, {}),
+        });
+      }
     }
   }
 
@@ -345,7 +629,8 @@ function evaluateRule(rule, answers) {
 }
 
 export function isTargetVisible(visibilityRules, answers, targetType, targetId) {
-  const groups = normalizeVisibilityRules(visibilityRules).filter((group) => group.target_type === targetType && group.target_id === targetId);
+  const normalizedTargetType = targetType === 'question' ? 'item' : targetType;
+  const groups = normalizeVisibilityRules(visibilityRules).filter((group) => group.target_type === normalizedTargetType && group.target_id === targetId);
   if (!groups.length) return true;
   return groups.every((group) => {
     const results = group.rules.map((rule) => evaluateRule(rule, answers));
@@ -353,26 +638,69 @@ export function isTargetVisible(visibilityRules, answers, targetType, targetId) 
   });
 }
 
-export function getVisibleSections(schema, visibilityRules, answers) {
-  const normalized = normalizeFormSchema(schema);
+export function getVisibleSections(schema, visibilityRules, answers, sharedBlockMap = {}) {
+  const normalized = resolveSchemaWithSharedBlocks(schema, sharedBlockMap);
   return normalized.sections
     .filter((section) => isTargetVisible(visibilityRules, answers, 'section', section.id))
-    .map((section) => ({
+    .map((section) => attachCompatibilityQuestions({
       ...section,
-      questions: section.questions.filter((question) => isTargetVisible(visibilityRules, answers, 'question', question.id)),
+      items: section.items.filter((item) => isTargetVisible(visibilityRules, answers, 'item', item.id)),
     }))
-    .filter((section) => section.questions.length > 0);
+    .filter((section) => section.items.length > 0);
 }
 
-export function findQuestionLabel(schema, questionId) {
-  return getQuestionsInOrder(schema).find((question) => question.id === questionId)?.label || questionId;
+export function findItemById(schema, itemId, sharedBlockMap = {}) {
+  return getItemsInOrder(schema, sharedBlockMap).find((item) => item.id === itemId) || null;
 }
 
-export function buildInitialAnswers(schema) {
+export function findQuestionLabel(schema, questionId, sharedBlockMap = {}) {
+  return getQuestionsInOrder(schema, sharedBlockMap).find((question) => question.id === questionId)?.label || questionId;
+}
+
+export function buildInitialAnswers(schema, sharedBlockMap = {}) {
   const answers = {};
-  getQuestionsInOrder(schema).forEach((question) => {
+  getQuestionsInOrder(schema, sharedBlockMap).forEach((question) => {
     if (question.type === 'multi_select') answers[question.id] = [];
     if (question.type === 'approval') answers[question.id] = false;
   });
   return answers;
+}
+
+export function validateVisibleAnswers(visibleSections, answers) {
+  const errors = {};
+
+  visibleSections.forEach((section) => {
+    section.items.filter((item) => isQuestionItem(item)).forEach((question) => {
+      const value = answers?.[question.id];
+      const questionType = question.question_type || question.type;
+
+      if (question.required) {
+        if (questionType === 'multi_select' && (!Array.isArray(value) || value.length === 0)) {
+          errors[question.id] = 'יש לבחור לפחות אפשרות אחת.';
+          return;
+        }
+        if (questionType === 'approval' && value !== true) {
+          errors[question.id] = 'יש לאשר כדי להמשיך.';
+          return;
+        }
+        if (questionType === 'signature' && (!value?.strokes || !value.strokes.length) && (!value?.preview_strokes || !value.preview_strokes.length)) {
+          errors[question.id] = 'יש לחתום לפני שליחת הטופס.';
+          return;
+        }
+        if ((value === undefined || value === null || value === '') && questionType !== 'approval') {
+          errors[question.id] = 'שדה חובה.';
+          return;
+        }
+      }
+
+      if (questionType === 'email' && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))) {
+        errors[question.id] = 'יש להזין כתובת אימייל תקינה.';
+      }
+      if (questionType === 'israeli_id' && value && !isIsraeliIdValid(value)) {
+        errors[question.id] = 'יש להזין מספר זהות תקין.';
+      }
+    });
+  });
+
+  return errors;
 }

@@ -35,6 +35,7 @@ import PendingReportsPage from './features/sessions/pages/PendingReportsPage.jsx
 import FormsListPage from './features/forms/pages/FormsListPage.jsx';
 import FormBuilderPage from './features/forms/pages/FormBuilderPage.jsx';
 import FormPreviewPage from './features/forms/pages/FormPreviewPage.jsx';
+import FormBlocksPage from './features/forms/pages/FormBlocksPage.jsx';
 import SubmitFormPage from './pages/SubmitFormPage.jsx';
 import { bootstrapSupabaseCallback } from './auth/bootstrapSupabaseCallback.js';
 
@@ -100,6 +101,8 @@ function App({ config = null }) {
                     <Route path="/instructors" element={<Navigate to="/employees" replace />} />
                     <Route path="/financials" element={<FinancialsPage />} />
                     <Route path="/forms" element={<FormsListPage />} />
+                    <Route path="/forms/shared-blocks" element={<FormBlocksPage />} />
+                    <Route path="/forms/shared-blocks/:blockId" element={<FormBlocksPage />} />
                     <Route path="/forms/:formId" element={<FormBuilderPage />} />
                     <Route path="/forms/:formId/preview" element={<FormPreviewPage />} />
                     <Route path="/pending-reports" element={<PendingReportsPage />} />

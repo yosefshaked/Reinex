@@ -17,9 +17,13 @@ import {
 } from '../_shared/org-bff.js';
 import { sendBrevoEmail } from '../_shared/brevo.js';
 import {
+  buildSharedBlockMap,
+  collectSharedBlockIds,
   evaluateAlertFlags,
+  materializeSchemaForSnapshot,
   prepareAnswersForStorage,
   resolvePublicFormState,
+  resolveSchemaWithSharedBlocks,
 } from '../_shared/forms-runtime.js';
 import {
   createOrReuseClientProfile,
@@ -82,6 +86,29 @@ function normalizeBoolean(value, defaultValue = false) {
     if (['false', '0', 'no', 'off'].includes(normalized)) return false;
   }
   return defaultValue;
+}
+
+async function resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, options = {}) {
+  const initialState = resolvePublicFormState(formRecord, { ...options, sharedBlocksById: {} });
+  const blockIds = collectSharedBlockIds(initialState.raw_form_schema || initialState.form_schema);
+  if (!blockIds.length) {
+    return initialState;
+  }
+
+  const { data, error } = await tenantClient
+    .from('shared_form_blocks')
+    .select('id, block_type, name, content_schema, is_active, metadata')
+    .in('id', blockIds);
+
+  if (error) {
+    throw error;
+  }
+
+  const sharedBlocksById = buildSharedBlockMap(data);
+  return {
+    ...initialState,
+    form_schema: resolveSchemaWithSharedBlocks(initialState.raw_form_schema || initialState.form_schema, sharedBlocksById),
+  };
 }
 
 function normalizeUuid(value) {
@@ -878,7 +905,7 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
-  const publicFormState = resolvePublicFormState(form, { allowDraftFallback: true });
+  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: true });
 
   const primaryServiceId = normalizeUuid(submissionMetadata.primary_service_id);
 
@@ -956,7 +983,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
-  const publicFormState = resolvePublicFormState(form, { allowDraftFallback: true });
+  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: true });
 
   const intake = body?.intake && typeof body.intake === 'object' && !Array.isArray(body.intake) ? body.intake : {};
   const customAnswers = normalizeCustomAnswers(body?.custom_answers ?? body?.customAnswers);
@@ -1192,7 +1219,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
         contact_relationship: contactRelationship,
         guardian_id: guardianId || null,
         hmo_provider_name: effectiveHmoProviderName,
-        schema_snapshot: publicFormState.form_schema,
+        schema_snapshot: materializeSchemaForSnapshot(publicFormState.form_schema),
         visibility_rules_snapshot: publicFormState.visibility_rules,
         alert_rules_snapshot: publicFormState.alert_rules,
       },

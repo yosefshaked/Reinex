@@ -119,7 +119,7 @@ export default function FormsListPage() {
 
     setIsSubmitting(true);
     try {
-      await authenticatedFetch('forms', {
+      const payload = await authenticatedFetch('forms', {
         session,
         method: 'POST',
         body: {
@@ -135,6 +135,9 @@ export default function FormsListPage() {
       setNewDescription(getDraftDefaultsByUsage('general').description);
       setNewUsage('general');
       void loadForms();
+      if (payload?.id) {
+        navigate(`/forms/${payload.id}`);
+      }
     } catch (err) {
       console.error('Failed to create form', err);
       toast.error(err?.message || 'שגיאה ביצירת הטופס');
@@ -206,19 +209,24 @@ export default function FormsListPage() {
       description="ניהול טפסים ושאלונים עבור תלמידי הארגון"
       actions={
         isAdmin ? (
-          <Button
-            className="gap-2"
-            onClick={() => {
-              const defaults = getDraftDefaultsByUsage('general');
-              setNewUsage('general');
-              setNewName(defaults.name);
-              setNewDescription(defaults.description);
-              setDialogOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            צור טופס חדש
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => navigate('/forms/shared-blocks')}>
+              ספריית בלוקים משותפים
+            </Button>
+            <Button
+              className="gap-2"
+              onClick={() => {
+                const defaults = getDraftDefaultsByUsage('general');
+                setNewUsage('general');
+                setNewName(defaults.name);
+                setNewDescription(defaults.description);
+                setDialogOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              צור טופס חדש
+            </Button>
+          </div>
         ) : null
       }
     >

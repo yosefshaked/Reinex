@@ -4,8 +4,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { getVisibleSections } from '@/features/forms/lib/form-schema.js';
+import { getVisibleSections, isQuestionItem } from '@/features/forms/lib/form-schema.js';
 
 function RequiredLabel({ htmlFor, children, required = false }) {
   return (
@@ -283,47 +284,6 @@ function ApprovalField({ question, value, onChange, readOnly, error }) {
   );
 }
 
-function isIsraeliIdValid(value) {
-  return /^\d{5,12}$/.test(String(value || '').trim());
-}
-
-export function validateVisibleAnswers(visibleSections, answers) {
-  const errors = {};
-
-  visibleSections.forEach((section) => {
-    section.questions.forEach((question) => {
-      const value = answers?.[question.id];
-      if (question.required) {
-        if (question.type === 'multi_select' && (!Array.isArray(value) || value.length === 0)) {
-          errors[question.id] = 'יש לבחור לפחות אפשרות אחת.';
-          return;
-        }
-        if (question.type === 'approval' && value !== true) {
-          errors[question.id] = 'יש לאשר כדי להמשיך.';
-          return;
-        }
-        if (question.type === 'signature' && (!value?.strokes || !value.strokes.length) && (!value?.preview_strokes || !value.preview_strokes.length)) {
-          errors[question.id] = 'יש לחתום לפני שליחת הטופס.';
-          return;
-        }
-        if ((value === undefined || value === null || value === '') && question.type !== 'approval') {
-          errors[question.id] = 'שדה חובה.';
-          return;
-        }
-      }
-
-      if (question.type === 'email' && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))) {
-        errors[question.id] = 'יש להזין כתובת אימייל תקינה.';
-      }
-      if (question.type === 'israeli_id' && value && !isIsraeliIdValid(value)) {
-        errors[question.id] = 'יש להזין מספר זהות תקין.';
-      }
-    });
-  });
-
-  return errors;
-}
-
 function QuestionField({ question, value, onChange, readOnly, error }) {
   switch (question.type) {
     case 'long_text':
@@ -397,20 +357,51 @@ function QuestionField({ question, value, onChange, readOnly, error }) {
   }
 }
 
+function SharedBadge({ item }) {
+  if (!item?.resolved_from_shared) return null;
+  return <Badge variant="outline">משותף</Badge>;
+}
+
+function TextBlock({ item, onSharedItemSelect }) {
+  const variantClass = item.variant === 'warning'
+    ? 'border-amber-200 bg-amber-50/80'
+    : item.variant === 'success'
+      ? 'border-emerald-200 bg-emerald-50/80'
+      : 'border-slate-200 bg-slate-50/80';
+
+  return (
+    <div className={cn('rounded-2xl border px-4 py-4 shadow-sm', variantClass)}>
+      <div className="mb-2 flex items-center gap-2">
+        <p className="text-sm font-semibold text-slate-900">{item.title || 'מידע חשוב'}</p>
+        <SharedBadge item={item} />
+        {item?.shared_block_id && onSharedItemSelect ? (
+          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onSharedItemSelect(item)}>
+            פרטי מקור
+          </Button>
+        ) : null}
+      </div>
+      {item.content ? <p className="text-sm leading-6 text-slate-700 whitespace-pre-wrap">{item.content}</p> : null}
+      {item.missing_shared_block ? <p className="text-xs text-red-600">הבלוק המשותף הזה כבר לא זמין.</p> : null}
+    </div>
+  );
+}
+
 export default function SectionedFormRenderer({
   schema,
   visibilityRules = [],
+  sharedBlockMap = {},
   answers = {},
   evaluationAnswers,
   onAnswersChange,
+  onSharedItemSelect,
   readOnly = false,
   validationErrors = {},
   className,
 }) {
   const effectiveAnswers = evaluationAnswers && typeof evaluationAnswers === 'object' ? evaluationAnswers : answers;
   const visibleSections = useMemo(
-    () => getVisibleSections(schema, visibilityRules, effectiveAnswers),
-    [schema, visibilityRules, effectiveAnswers],
+    () => getVisibleSections(schema, visibilityRules, effectiveAnswers, sharedBlockMap),
+    [schema, visibilityRules, effectiveAnswers, sharedBlockMap],
   );
 
   const updateAnswer = (questionId, nextValue) => {
@@ -430,21 +421,43 @@ export default function SectionedFormRenderer({
             {section.description ? <p className="text-xs text-slate-500">{section.description}</p> : null}
           </div>
           <div className="space-y-4">
-            {section.questions.map((question) => (
-              <div key={question.id} className="space-y-2">
-                <RequiredLabel htmlFor={question.id} required={question.required}>{question.label}</RequiredLabel>
-                {question.description && question.type !== 'approval' ? (
-                  <p className="text-xs text-slate-500">{question.description}</p>
-                ) : null}
-                <QuestionField
-                  question={question}
-                  value={answers?.[question.id]}
-                  onChange={(nextValue) => updateAnswer(question.id, nextValue)}
-                  readOnly={readOnly}
-                  error={validationErrors?.[question.id] || ''}
-                />
-              </div>
-            ))}
+            {section.items.map((item) => {
+              if (!isQuestionItem(item)) {
+                return <TextBlock key={item.id} item={item} onSharedItemSelect={onSharedItemSelect} />;
+              }
+
+              const question = {
+                ...item,
+                type: item.question_type,
+              };
+
+              return (
+                <div key={question.id} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <RequiredLabel htmlFor={question.id} required={question.required}>{question.label}</RequiredLabel>
+                    <SharedBadge item={item} />
+                    {item?.shared_block_id && onSharedItemSelect ? (
+                      <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onSharedItemSelect(item)}>
+                        פרטי מקור
+                      </Button>
+                    ) : null}
+                  </div>
+                  {question.description && question.type !== 'approval' ? (
+                    <p className="text-xs text-slate-500">{question.description}</p>
+                  ) : null}
+                  {item.missing_shared_block ? (
+                    <p className="text-xs text-red-600">השאלה המשותפת הזו כבר לא זמינה.</p>
+                  ) : null}
+                  <QuestionField
+                    question={question}
+                    value={answers?.[question.id]}
+                    onChange={(nextValue) => updateAnswer(question.id, nextValue)}
+                    readOnly={readOnly}
+                    error={validationErrors?.[question.id] || ''}
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
       ))}

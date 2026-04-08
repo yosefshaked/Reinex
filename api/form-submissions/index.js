@@ -18,11 +18,15 @@ import { sendBrevoEmail } from '../_shared/brevo.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import {
+  buildSharedBlockMap,
+  collectSharedBlockIds,
   evaluateAlertFlags,
   hydrateAnswersForReview,
+  materializeSchemaForSnapshot,
   normalizeFormSchema,
   prepareAnswersForStorage,
   resolvePublicFormState,
+  resolveSchemaWithSharedBlocks,
 } from '../_shared/forms-runtime.js';
 import {
   findClientProfileById,
@@ -310,6 +314,29 @@ async function resolveSubmissionSubject(tenantClient, { clientProfileId, student
     student,
     identityNumber: normalizeIdentityNumber(profile?.identity_number),
     error: null,
+  };
+}
+
+async function resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, options = {}) {
+  const initialState = resolvePublicFormState(formRecord, { ...options, sharedBlocksById: {} });
+  const blockIds = collectSharedBlockIds(initialState.raw_form_schema || initialState.form_schema);
+  if (!blockIds.length) {
+    return initialState;
+  }
+
+  const { data, error } = await tenantClient
+    .from('shared_form_blocks')
+    .select('id, block_type, name, content_schema, is_active, metadata')
+    .in('id', blockIds);
+
+  if (error) {
+    throw error;
+  }
+
+  const sharedBlocksById = buildSharedBlockMap(data);
+  return {
+    ...initialState,
+    form_schema: resolveSchemaWithSharedBlocks(initialState.raw_form_schema || initialState.form_schema, sharedBlocksById),
   };
 }
 
@@ -1674,7 +1701,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
-  const publicFormState = resolvePublicFormState(form, { allowDraftFallback: true });
+  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: true });
 
   return respond(context, 200, {
     submission_id: submission.id,
@@ -1764,7 +1791,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
       .eq('id', submission.form_id)
       .maybeSingle();
     if (formRecord) {
-      publicFormState = resolvePublicFormState(formRecord, { allowDraftFallback: true });
+      publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, { allowDraftFallback: true });
     }
   }
 
@@ -1796,7 +1823,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
         ...currentMetadata,
         workflow_status: 'submitted',
         submitted_at: nowIso,
-        schema_snapshot: publicFormState.form_schema,
+        schema_snapshot: materializeSchemaForSnapshot(publicFormState.form_schema),
         visibility_rules_snapshot: publicFormState.visibility_rules,
         alert_rules_snapshot: publicFormState.alert_rules,
         submit_ip: ipAddress || null,

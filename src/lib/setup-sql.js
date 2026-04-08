@@ -2873,6 +2873,143 @@ CREATE INDEX IF NOT EXISTS forms_is_active_idx ON public.forms (is_active);
 CREATE INDEX IF NOT EXISTS forms_form_usage_idx ON public.forms (form_usage);
 
 -- -----------------------------------------------------------------
+-- public.shared_form_blocks
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.shared_form_blocks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  block_type text NOT NULL,
+  name text NOT NULL,
+  content_schema jsonb NOT NULL DEFAULT '{}'::jsonb,
+  is_active boolean NOT NULL DEFAULT true,
+  created_by uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.shared_form_blocks
+  ADD COLUMN IF NOT EXISTS block_type text,
+  ADD COLUMN IF NOT EXISTS name text,
+  ADD COLUMN IF NOT EXISTS content_schema jsonb,
+  ADD COLUMN IF NOT EXISTS is_active boolean,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+DO $$
+BEGIN
+  ALTER TABLE public.shared_form_blocks
+    ALTER COLUMN content_schema SET DEFAULT '{}'::jsonb,
+    ALTER COLUMN is_active SET DEFAULT true;
+EXCEPTION
+  WHEN others THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.shared_form_blocks
+    ADD CONSTRAINT shared_form_blocks_block_type_check
+    CHECK (block_type IN ('question', 'text'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS shared_form_blocks_is_active_idx ON public.shared_form_blocks (is_active);
+CREATE INDEX IF NOT EXISTS shared_form_blocks_block_type_idx ON public.shared_form_blocks (block_type);
+
+-- -----------------------------------------------------------------
+-- public.form_shared_block_links
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.form_shared_block_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  form_id uuid NOT NULL,
+  shared_block_id uuid NOT NULL,
+  section_id text NOT NULL,
+  item_id text NOT NULL,
+  schema_scope text NOT NULL DEFAULT 'draft',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.form_shared_block_links
+  ADD COLUMN IF NOT EXISTS form_id uuid,
+  ADD COLUMN IF NOT EXISTS shared_block_id uuid,
+  ADD COLUMN IF NOT EXISTS section_id text,
+  ADD COLUMN IF NOT EXISTS item_id text,
+  ADD COLUMN IF NOT EXISTS schema_scope text,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz;
+
+UPDATE public.form_shared_block_links
+SET schema_scope = 'draft'
+WHERE schema_scope IS NULL;
+
+DO $$
+BEGIN
+  ALTER TABLE public.form_shared_block_links
+    ALTER COLUMN schema_scope SET DEFAULT 'draft';
+EXCEPTION
+  WHEN others THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.form_shared_block_links
+    DROP CONSTRAINT IF EXISTS form_shared_block_links_unique_form_item;
+EXCEPTION
+  WHEN undefined_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.form_shared_block_links
+    ADD CONSTRAINT form_shared_block_links_schema_scope_check
+    CHECK (schema_scope IN ('draft', 'published'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.form_shared_block_links
+    ADD CONSTRAINT form_shared_block_links_unique_form_item_scope
+    UNIQUE (form_id, item_id, schema_scope);
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.form_shared_block_links
+    ADD CONSTRAINT form_shared_block_links_form_id_fkey
+    FOREIGN KEY (form_id) REFERENCES public.forms(id) ON DELETE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.form_shared_block_links
+    ADD CONSTRAINT form_shared_block_links_shared_block_id_fkey
+    FOREIGN KEY (shared_block_id) REFERENCES public.shared_form_blocks(id) ON DELETE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS form_shared_block_links_form_idx ON public.form_shared_block_links (form_id);
+CREATE INDEX IF NOT EXISTS form_shared_block_links_shared_block_idx ON public.form_shared_block_links (shared_block_id);
+CREATE INDEX IF NOT EXISTS form_shared_block_links_scope_idx ON public.form_shared_block_links (schema_scope);
+
+-- -----------------------------------------------------------------
 -- public.form_submissions
 -- -----------------------------------------------------------------
 
