@@ -72,6 +72,19 @@ function formatTimeLabel(timeString) {
   return `${hours}:${minutes}`;
 }
 
+function buildPersonFullName(person, fallback = 'ללא שם') {
+  const fullName = [
+    person?.first_name,
+    person?.middle_name,
+    person?.last_name,
+  ]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(' ');
+
+  return fullName || fallback;
+}
+
 function buildParticipantToken(kind, id) {
   return `${kind}:${id}`;
 }
@@ -431,8 +444,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       value: buildParticipantToken('student', student.id),
       kind: 'student',
       id: student.id,
-      label: `${student.first_name || ''} ${student.middle_name || ''} ${student.last_name || ''}`.trim() || 'ללא שם',
-      searchText: `${student.first_name || ''} ${student.middle_name || ''} ${student.last_name || ''} ${student.identity_number || ''}`.toLowerCase(),
+      label: buildPersonFullName(student),
+      searchText: `${buildPersonFullName(student, '')} ${student.identity_number || ''}`.toLowerCase(),
       raw: student,
     }));
 
@@ -445,8 +458,8 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       value: buildParticipantToken('client', profile.id),
       kind: 'client',
       id: profile.id,
-      label: `${profile.first_name || ''} ${profile.middle_name || ''} ${profile.last_name || ''}`.trim() || 'ללא שם',
-      searchText: `${profile.first_name || ''} ${profile.middle_name || ''} ${profile.last_name || ''} ${profile.identity_number || ''}`.toLowerCase(),
+      label: buildPersonFullName(profile),
+      searchText: `${buildPersonFullName(profile, '')} ${profile.identity_number || ''}`.toLowerCase(),
       raw: profile,
     }));
 
@@ -753,11 +766,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                   }
                 }}
                 onOptionSelect={(participant) => {
+                  const resolvedParticipant = participant?.raw || participant;
                   const nextState = { student_ids: [], client_profile_ids: [] };
-                  if (participant?.kind === 'student') {
-                    nextState.student_ids = [participant.id];
-                  } else if (participant?.kind === 'client') {
-                    nextState.client_profile_ids = [participant.id];
+                  if (resolvedParticipant?.kind === 'student') {
+                    nextState.student_ids = [resolvedParticipant.id];
+                  } else if (resolvedParticipant?.kind === 'client') {
+                    nextState.client_profile_ids = [resolvedParticipant.id];
                   }
                   if (isGroupSession) {
                     setFormData((prev) => ({
@@ -849,7 +863,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
 
             {!isGroupSession && participantTokens.length > 0 && firstParticipant ? (
               <div className="mt-3 rounded-xl bg-blue-50 p-2 text-sm">
-                <p className="font-medium">{participantOptionByToken.get(participantTokens[0])?.label || `${firstParticipant.first_name || ''} ${firstParticipant.last_name || ''}`.trim()}</p>
+                <p className="font-medium">{participantOptionByToken.get(participantTokens[0])?.label || buildPersonFullName(firstParticipant)}</p>
               </div>
             ) : null}
 
