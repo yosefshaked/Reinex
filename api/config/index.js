@@ -1,14 +1,5 @@
-function jsonResponse(context, status, payload, extraHeaders = {}) {
-  context.res = {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-store',
-      ...extraHeaders,
-    },
-    body: JSON.stringify(payload),
-  };
-}
+import { respond, readEnv } from '../_shared/org-bff.js';
+import { readSupabasePublicConfig } from '../_shared/supabase-admin.js';
 
 function maskForLog(value) {
   if (!value) return '';
@@ -18,39 +9,59 @@ function maskForLog(value) {
 }
 
 export default async function (context) {
-  const env = context.env ?? globalThis.process?.env ?? {};
+  const env = readEnv(context);
 
   try {
-    const supabaseUrl = env.APP_SUPABASE_URL;
-    const anonKey = env.APP_SUPABASE_ANON_KEY;
+    const { supabaseUrl, anonKey } = readSupabasePublicConfig(env);
 
     if (!supabaseUrl) {
-      context.log.error('Supabase URL is missing.');
-      jsonResponse(context, 500, { error: 'server_misconfigured' });
-      return;
+      context.log?.error?.('Base runtime config is missing Supabase URL.', {
+        hasAppSupabaseUrl: Boolean(env.APP_SUPABASE_URL),
+        hasSupabaseUrl: Boolean(env.SUPABASE_URL),
+        hasAppControlDbUrl: Boolean(env.APP_CONTROL_DB_URL),
+        hasViteAppSupabaseUrl: Boolean(env.VITE_APP_SUPABASE_URL),
+        hasViteSupabaseUrl: Boolean(env.VITE_SUPABASE_URL),
+      });
+      return respond(context, 500, { error: 'server_misconfigured' }, { 'Cache-Control': 'no-store' });
     }
 
     if (!anonKey) {
-      context.log.error('Supabase anon key is missing for base config.');
-      jsonResponse(context, 500, { error: 'server_misconfigured' });
-      return;
+      context.log?.error?.('Base runtime config is missing Supabase anon key.', {
+        hasAppSupabaseAnonKey: Boolean(env.APP_SUPABASE_ANON_KEY),
+        hasSupabaseAnonKey: Boolean(env.SUPABASE_ANON_KEY),
+        hasAppControlDbAnonKey: Boolean(env.APP_CONTROL_DB_ANON_KEY),
+        hasViteAppSupabaseAnonKey: Boolean(env.VITE_APP_SUPABASE_ANON_KEY),
+        hasViteSupabaseAnonKey: Boolean(env.VITE_SUPABASE_ANON_KEY),
+      });
+      return respond(context, 500, { error: 'server_misconfigured' }, { 'Cache-Control': 'no-store' });
     }
 
-    context.log.info('Issued base app config.', {
+    context.log?.info?.('Issued base app config.', {
       supabaseUrl: maskForLog(supabaseUrl),
       anonKey: maskForLog(anonKey),
     });
 
-    jsonResponse(
+    return respond(
       context,
       200,
-      { supabase_url: supabaseUrl, anon_key: anonKey },
-      { 'X-Config-Scope': 'app' },
+      {
+        source: 'api',
+        supabaseUrl,
+        supabase_url: supabaseUrl,
+        supabaseAnonKey: anonKey,
+        supabase_anon_key: anonKey,
+        anonKey,
+        anon_key: anonKey,
+      },
+      {
+        'Cache-Control': 'no-store',
+        'X-Config-Scope': 'app',
+      },
     );
   } catch (error) {
-    context.log.error('Unhandled configuration error.', {
+    context.log?.error?.('Unhandled configuration error.', {
       message: error?.message,
     });
-    jsonResponse(context, 500, { error: 'server_error' });
+    return respond(context, 500, { error: 'server_error' }, { 'Cache-Control': 'no-store' });
   }
 }

@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { json, resolveBearerAuthorization } from '../_shared/http.js';
 import { readEnv } from '../_shared/org-bff.js';
+import { readSupabasePublicConfig } from '../_shared/supabase-admin.js';
 
 async function parseJsonResponse(response) {
   const contentType = response.headers?.get?.('content-type') ?? response.headers?.get?.('Content-Type') ?? '';
@@ -195,8 +196,7 @@ export default async function (context, req) {
     return respond(401, { message: 'missing bearer' });
   }
 
-  const supabaseUrl = env.APP_SUPABASE_URL;
-  const anonKey = env.APP_SUPABASE_ANON_KEY;
+  const { supabaseUrl, anonKey } = readSupabasePublicConfig(env);
 
   if (!supabaseUrl || !anonKey) {
     context.log?.error?.('org-keys missing Supabase environment values', { traceId: diagnostics.traceId });
