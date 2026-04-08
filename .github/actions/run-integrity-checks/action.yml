@@ -9,10 +9,17 @@ runs:
       with:
         node-version: 22
         cache: npm
+        cache-dependency-path: |
+          package-lock.json
+          api/package-lock.json
 
-    - name: Install dependencies
+    - name: Install app dependencies
       shell: bash
       run: npm ci
+
+    - name: Install API dependencies
+      shell: bash
+      run: npm ci --prefix api
 
     - name: Lint API
       shell: bash
