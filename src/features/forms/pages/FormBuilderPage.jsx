@@ -766,21 +766,21 @@ export default function FormBuilderPage() {
     >
       <Dialog open={navigationGuardOpen} onOpenChange={(open) => { if (!open) stayOnBuilder(); }}>
         <DialogContent
-          className="max-w-md text-end"
+          className="max-w-md"
           footer={(
-            <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-start">
-              <Button variant="outline" onClick={stayOnBuilder}>הישאר/י בעריכה</Button>
-              <Button variant="outline" disabled={saving || publishing} onClick={discardAndContinue}>צא/י בלי לשמור</Button>
-              <Button disabled={saving || publishing} onClick={() => void saveDraftAndContinue()}>
+            <div className="flex flex-col gap-2 sm:flex-row-reverse sm:flex-wrap sm:justify-start">
+              <Button variant="outline" className="w-full sm:w-auto" onClick={stayOnBuilder}>הישאר/י בעריכה</Button>
+              <Button variant="outline" className="w-full sm:w-auto" disabled={saving || publishing} onClick={discardAndContinue}>צא/י בלי לשמור</Button>
+              <Button className="w-full sm:w-auto" disabled={saving || publishing} onClick={() => void saveDraftAndContinue()}>
                 {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Save className="me-2 h-4 w-4" />}
                 שמור/י טיוטה והמשך
               </Button>
-            </DialogFooter>
+            </div>
           )}
         >
-          <DialogHeader className="text-end">
+          <DialogHeader>
             <DialogTitle>יש שינויים שלא נשמרו</DialogTitle>
-            <DialogDescription className="text-end">
+            <DialogDescription>
               יש בטופס שינויים שעדיין לא נשמרו כטיוטה. אם תצא/י עכשיו, ההתקדמות האחרונה תאבד.
             </DialogDescription>
           </DialogHeader>
