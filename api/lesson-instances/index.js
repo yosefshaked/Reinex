@@ -666,7 +666,6 @@ export default async function lessonInstances(context, req) {
             instanceId: lessonInstanceId,
             userId,
             expectedVersion,
-            instanceMetadata: null,
             documentationStatus: nextDocumentationStatus || null,
           });
 

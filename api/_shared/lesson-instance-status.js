@@ -92,14 +92,12 @@ export async function cancelLessonInstanceWithParticipants(tenantClient, {
   instanceId,
   userId,
   expectedVersion = null,
-  instanceMetadata = null,
   documentationStatus = null,
 }) {
   const { data, error } = await tenantClient.rpc('cancel_lesson_instance_with_participants', {
     p_instance_id: instanceId,
     p_actor_user_id: userId,
     p_expected_version: Number.isInteger(Number(expectedVersion)) ? Number(expectedVersion) : null,
-    p_instance_metadata: instanceMetadata && typeof instanceMetadata === 'object' ? instanceMetadata : null,
     p_documentation_status: normalizeString(documentationStatus) || null,
   });
 

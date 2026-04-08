@@ -1484,79 +1484,25 @@ END $$;
 
 DO $$
 BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_trigger
-    WHERE tgname = 'trg_lesson_instances_guard_locked'
-      AND tgrelid = 'public.lesson_instances'::regclass
-  ) THEN
-    EXECUTE 'ALTER TABLE public.lesson_instances DISABLE TRIGGER trg_lesson_instances_guard_locked';
-  END IF;
-
   UPDATE public.lesson_instances
-  SET
-    status = CASE
-      WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') IN ('cancelled_student', 'cancelled_clinic', 'no_show', 'cancelled') THEN 'cancelled'
-      WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') = 'completed' THEN 'completed'
-      WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') = 'scheduled' THEN 'scheduled'
-      ELSE status
-    END,
-    documentation_status = CASE
-      WHEN documentation_status IS NULL THEN documentation_status
-      ELSE regexp_replace(lower(coalesce(documentation_status, '')), '[[:space:]]+', '', 'g')
-    END,
-    created_source = CASE
-      WHEN created_source IS NULL THEN created_source
-      WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('weekly_generation', 'one_time', 'manual_reschedule', 'migration')
-        THEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g')
-      WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('manual', 'manual_create', 'one-off', 'one_off')
-        THEN 'one_time'
-      WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('reschedule', 'manual-reschedule', 'manualreschedule')
-        THEN 'manual_reschedule'
-      ELSE created_source
-    END
-  WHERE status IS NOT NULL
-     OR documentation_status IS NOT NULL
-     OR created_source IS NOT NULL;
-
-  IF EXISTS (
-    SELECT 1
-    FROM pg_trigger
-    WHERE tgname = 'trg_lesson_instances_guard_locked'
-      AND tgrelid = 'public.lesson_instances'::regclass
-  ) THEN
-    EXECUTE 'ALTER TABLE public.lesson_instances ENABLE TRIGGER trg_lesson_instances_guard_locked';
-  END IF;
+  SET status = CASE
+    WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') IN ('cancelled_student', 'cancelled_clinic', 'no_show', 'cancelled') THEN 'cancelled'
+    WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') = 'completed' THEN 'completed'
+    WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') = 'scheduled' THEN 'scheduled'
+    ELSE status
+  END
+  WHERE status IS NOT NULL;
 EXCEPTION
-  WHEN others THEN
-    BEGIN
-      IF EXISTS (
-        SELECT 1
-        FROM pg_trigger
-        WHERE tgname = 'trg_lesson_instances_guard_locked'
-          AND tgrelid = 'public.lesson_instances'::regclass
-      ) THEN
-        EXECUTE 'ALTER TABLE public.lesson_instances ENABLE TRIGGER trg_lesson_instances_guard_locked';
-      END IF;
-    EXCEPTION
-      WHEN others THEN NULL;
-    END;
-    RAISE;
+  WHEN others THEN NULL;
 END $$;
 
 DO $$
-DECLARE
-  invalid_values text;
 BEGIN
-  SELECT string_agg(DISTINCT quote_nullable(status), ', ' ORDER BY quote_nullable(status))
-  INTO invalid_values
-  FROM public.lesson_instances
-  WHERE status IS NOT NULL
-    AND regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') NOT IN ('scheduled', 'completed', 'cancelled', 'cancelled_student', 'cancelled_clinic', 'no_show');
-
-  IF invalid_values IS NOT NULL THEN
-    RAISE EXCEPTION 'Cannot apply lesson_instances_status_check; unsupported lesson_instances.status values remain: %', invalid_values;
-  END IF;
+  UPDATE public.lesson_instances
+  SET documentation_status = regexp_replace(lower(coalesce(documentation_status, '')), '[[:space:]]+', '', 'g')
+  WHERE documentation_status IS NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
 END $$;
 
 ALTER TABLE public.lesson_instances
@@ -1582,18 +1528,20 @@ EXCEPTION
 END $$;
 
 DO $$
-DECLARE
-  invalid_values text;
 BEGIN
-  SELECT string_agg(DISTINCT quote_nullable(documentation_status), ', ' ORDER BY quote_nullable(documentation_status))
-  INTO invalid_values
-  FROM public.lesson_instances
-  WHERE documentation_status IS NOT NULL
-    AND regexp_replace(lower(coalesce(documentation_status, '')), '[[:space:]]+', '', 'g') NOT IN ('undocumented', 'documented');
-
-  IF invalid_values IS NOT NULL THEN
-    RAISE EXCEPTION 'Cannot apply lesson_instances_documentation_status_check; unsupported lesson_instances.documentation_status values remain: %', invalid_values;
-  END IF;
+  UPDATE public.lesson_instances
+  SET created_source = CASE
+    WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('weekly_generation', 'one_time', 'manual_reschedule', 'migration')
+      THEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g')
+    WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('manual', 'manual_create', 'one-off', 'one_off')
+      THEN 'one_time'
+    WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('reschedule', 'manual-reschedule', 'manualreschedule')
+      THEN 'manual_reschedule'
+    ELSE created_source
+  END
+  WHERE created_source IS NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
 END $$;
 
 DO $$
@@ -1613,21 +1561,6 @@ EXCEPTION
     WHERE documentation_status IS NOT NULL
       AND documentation_status NOT IN ('undocumented','documented');
     RAISE EXCEPTION 'Cannot apply lesson_instances_documentation_status_check; violating lesson_instances.documentation_status values remain: %', COALESCE(invalid_values, '[unknown]');
-END $$;
-
-DO $$
-DECLARE
-  invalid_values text;
-BEGIN
-  SELECT string_agg(DISTINCT quote_nullable(created_source), ', ' ORDER BY quote_nullable(created_source))
-  INTO invalid_values
-  FROM public.lesson_instances
-  WHERE created_source IS NOT NULL
-    AND regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') NOT IN ('weekly_generation', 'one_time', 'manual_reschedule', 'migration', 'manual', 'manual_create', 'one-off', 'one_off', 'reschedule', 'manual-reschedule', 'manualreschedule');
-
-  IF invalid_values IS NOT NULL THEN
-    RAISE EXCEPTION 'Cannot apply lesson_instances_created_source_check; unsupported lesson_instances.created_source values remain: %', invalid_values;
-  END IF;
 END $$;
 
 DO $$
@@ -1735,57 +1668,11 @@ END $$;
 
 DO $$
 BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_trigger
-    WHERE tgname = 'trg_lesson_participants_guard_locked'
-      AND tgrelid = 'public.lesson_participants'::regclass
-  ) THEN
-    EXECUTE 'ALTER TABLE public.lesson_participants DISABLE TRIGGER trg_lesson_participants_guard_locked';
-  END IF;
-
   UPDATE public.lesson_participants
   SET participant_status = regexp_replace(lower(coalesce(participant_status, '')), '[[:space:]]+', '', 'g')
   WHERE participant_status IS NOT NULL;
-
-  IF EXISTS (
-    SELECT 1
-    FROM pg_trigger
-    WHERE tgname = 'trg_lesson_participants_guard_locked'
-      AND tgrelid = 'public.lesson_participants'::regclass
-  ) THEN
-    EXECUTE 'ALTER TABLE public.lesson_participants ENABLE TRIGGER trg_lesson_participants_guard_locked';
-  END IF;
 EXCEPTION
-  WHEN others THEN
-    BEGIN
-      IF EXISTS (
-        SELECT 1
-        FROM pg_trigger
-        WHERE tgname = 'trg_lesson_participants_guard_locked'
-          AND tgrelid = 'public.lesson_participants'::regclass
-      ) THEN
-        EXECUTE 'ALTER TABLE public.lesson_participants ENABLE TRIGGER trg_lesson_participants_guard_locked';
-      END IF;
-    EXCEPTION
-      WHEN others THEN NULL;
-    END;
-    RAISE;
-END $$;
-
-DO $$
-DECLARE
-  invalid_values text;
-BEGIN
-  SELECT string_agg(DISTINCT quote_nullable(participant_status), ', ' ORDER BY quote_nullable(participant_status))
-  INTO invalid_values
-  FROM public.lesson_participants
-  WHERE participant_status IS NOT NULL
-    AND regexp_replace(lower(coalesce(participant_status, '')), '[[:space:]]+', '', 'g') NOT IN ('scheduled', 'attended', 'cancelled_student', 'cancelled_clinic', 'no_show');
-
-  IF invalid_values IS NOT NULL THEN
-    RAISE EXCEPTION 'Cannot apply lesson_participants_participant_status_check; unsupported lesson_participants.participant_status values remain: %', invalid_values;
-  END IF;
+  WHEN others THEN NULL;
 END $$;
 
 DO $$
@@ -4159,7 +4046,6 @@ CREATE OR REPLACE FUNCTION public.cancel_lesson_instance_with_participants(
   p_instance_id uuid,
   p_actor_user_id uuid,
   p_expected_version integer DEFAULT NULL,
-  p_instance_metadata jsonb DEFAULT NULL,
   p_documentation_status text DEFAULT NULL
 )
 RETURNS TABLE (
@@ -5319,10 +5205,10 @@ BEGIN
 END $$;
 
 GRANT USAGE ON SCHEMA public TO app_user;
-GRANT EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, integer, jsonb, text) TO app_user;
+GRANT EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, integer, text) TO app_user;
 GRANT EXECUTE ON FUNCTION public.complete_lesson_instance_with_participants(uuid, uuid, integer, text) TO app_user;
 GRANT EXECUTE ON FUNCTION public.cancel_selected_scheduled_participants_and_reconcile_instance(uuid, uuid[], uuid) TO app_user;
-REVOKE EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, integer, jsonb, text) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, integer, text) FROM authenticated;
 REVOKE EXECUTE ON FUNCTION public.complete_lesson_instance_with_participants(uuid, uuid, integer, text) FROM authenticated;
 REVOKE EXECUTE ON FUNCTION public.cancel_selected_scheduled_participants_and_reconcile_instance(uuid, uuid[], uuid) FROM authenticated;
 
@@ -6157,4 +6043,3 @@ SELECT extensions.sign(
   'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE'
 ) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";
 `;
-

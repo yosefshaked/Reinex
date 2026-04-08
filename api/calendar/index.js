@@ -1134,7 +1134,6 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
         instanceId: body.id,
         userId,
         expectedVersion,
-        instanceMetadata: null,
         documentationStatus: updateData.documentation_status,
       });
 
