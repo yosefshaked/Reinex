@@ -1463,16 +1463,64 @@ END $$;
 
 DO $$
 BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_lesson_instances_guard_locked'
+      AND tgrelid = 'public.lesson_instances'::regclass
+  ) THEN
+    EXECUTE 'ALTER TABLE public.lesson_instances DISABLE TRIGGER trg_lesson_instances_guard_locked';
+  END IF;
+
   UPDATE public.lesson_instances
-  SET status = CASE
-    WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') IN ('cancelled_student', 'cancelled_clinic', 'no_show', 'cancelled') THEN 'cancelled'
-    WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') = 'completed' THEN 'completed'
-    WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') = 'scheduled' THEN 'scheduled'
-    ELSE status
-  END
-  WHERE status IS NOT NULL;
+  SET
+    status = CASE
+      WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') IN ('cancelled_student', 'cancelled_clinic', 'no_show', 'cancelled') THEN 'cancelled'
+      WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') = 'completed' THEN 'completed'
+      WHEN regexp_replace(lower(coalesce(status, '')), '[[:space:]]+', '', 'g') = 'scheduled' THEN 'scheduled'
+      ELSE status
+    END,
+    documentation_status = CASE
+      WHEN documentation_status IS NULL THEN documentation_status
+      ELSE regexp_replace(lower(coalesce(documentation_status, '')), '[[:space:]]+', '', 'g')
+    END,
+    created_source = CASE
+      WHEN created_source IS NULL THEN created_source
+      WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('weekly_generation', 'one_time', 'manual_reschedule', 'migration')
+        THEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g')
+      WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('manual', 'manual_create', 'one-off', 'one_off')
+        THEN 'one_time'
+      WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('reschedule', 'manual-reschedule', 'manualreschedule')
+        THEN 'manual_reschedule'
+      ELSE created_source
+    END
+  WHERE status IS NOT NULL
+     OR documentation_status IS NOT NULL
+     OR created_source IS NOT NULL;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_lesson_instances_guard_locked'
+      AND tgrelid = 'public.lesson_instances'::regclass
+  ) THEN
+    EXECUTE 'ALTER TABLE public.lesson_instances ENABLE TRIGGER trg_lesson_instances_guard_locked';
+  END IF;
 EXCEPTION
-  WHEN others THEN NULL;
+  WHEN others THEN
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgname = 'trg_lesson_instances_guard_locked'
+          AND tgrelid = 'public.lesson_instances'::regclass
+      ) THEN
+        EXECUTE 'ALTER TABLE public.lesson_instances ENABLE TRIGGER trg_lesson_instances_guard_locked';
+      END IF;
+    EXCEPTION
+      WHEN others THEN NULL;
+    END;
+    RAISE;
 END $$;
 
 DO $$
@@ -1513,15 +1561,6 @@ EXCEPTION
 END $$;
 
 DO $$
-BEGIN
-  UPDATE public.lesson_instances
-  SET documentation_status = regexp_replace(lower(coalesce(documentation_status, '')), '[[:space:]]+', '', 'g')
-  WHERE documentation_status IS NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-DO $$
 DECLARE
   invalid_values text;
 BEGIN
@@ -1553,20 +1592,6 @@ EXCEPTION
     WHERE documentation_status IS NOT NULL
       AND documentation_status NOT IN ('undocumented','documented');
     RAISE EXCEPTION 'Cannot apply lesson_instances_documentation_status_check; violating lesson_instances.documentation_status values remain: %', COALESCE(invalid_values, '[unknown]');
-END $$;
-
-DO $$
-BEGIN
-  UPDATE public.lesson_instances
-  SET created_source = CASE
-    WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('weekly_generation', 'one_time', 'manual_reschedule', 'migration') THEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g')
-    WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('manual', 'manual_create', 'one-off', 'one_off') THEN 'one_time'
-    WHEN regexp_replace(lower(coalesce(created_source, '')), '[[:space:]]+', '', 'g') IN ('reschedule', 'manual-reschedule', 'manualreschedule') THEN 'manual_reschedule'
-    ELSE created_source
-  END
-  WHERE created_source IS NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
 END $$;
 
 DO $$
@@ -1689,11 +1714,42 @@ END $$;
 
 DO $$
 BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_lesson_participants_guard_locked'
+      AND tgrelid = 'public.lesson_participants'::regclass
+  ) THEN
+    EXECUTE 'ALTER TABLE public.lesson_participants DISABLE TRIGGER trg_lesson_participants_guard_locked';
+  END IF;
+
   UPDATE public.lesson_participants
   SET participant_status = regexp_replace(lower(coalesce(participant_status, '')), '[[:space:]]+', '', 'g')
   WHERE participant_status IS NOT NULL;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_lesson_participants_guard_locked'
+      AND tgrelid = 'public.lesson_participants'::regclass
+  ) THEN
+    EXECUTE 'ALTER TABLE public.lesson_participants ENABLE TRIGGER trg_lesson_participants_guard_locked';
+  END IF;
 EXCEPTION
-  WHEN others THEN NULL;
+  WHEN others THEN
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgname = 'trg_lesson_participants_guard_locked'
+          AND tgrelid = 'public.lesson_participants'::regclass
+      ) THEN
+        EXECUTE 'ALTER TABLE public.lesson_participants ENABLE TRIGGER trg_lesson_participants_guard_locked';
+      END IF;
+    EXCEPTION
+      WHEN others THEN NULL;
+    END;
+    RAISE;
 END $$;
 
 DO $$
