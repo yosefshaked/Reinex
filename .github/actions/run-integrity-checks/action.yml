@@ -1,0 +1,23 @@
+name: Run Integrity Checks
+description: Install dependencies and run API and SQL integrity checks before deployment
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Lint API
+      shell: bash
+      run: npm run lint:api
+
+    - name: Validate setup SQL
+      shell: bash
+      run: npm run lint:sql

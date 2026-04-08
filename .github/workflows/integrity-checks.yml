@@ -1,0 +1,23 @@
+name: Integrity Checks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+
+jobs:
+  integrity_checks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    name: API And SQL Integrity
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run integrity checks
+        uses: ./.github/actions/run-integrity-checks
