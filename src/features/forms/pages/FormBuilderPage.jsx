@@ -37,6 +37,7 @@ import {
   isSharedItem,
   normalizeAlertRules,
   normalizeFormSchema,
+  validateNormalizedFormSchemaIntegrity,
   normalizeVisibilityRules,
   QUESTION_TYPE_DEFINITIONS,
   resolveSchemaWithSharedBlocks,
@@ -199,6 +200,32 @@ function usageScopeLabel(scope) {
   if (scope === 'draft_and_published') return 'טיוטה + פורסם';
   if (scope === 'published') return 'פורסם';
   return 'טיוטה';
+}
+
+function describeSchemaIssue(issue) {
+  const [code, suffix = ''] = String(issue || '').split(':', 2);
+  switch (code) {
+    case 'missing_section_id':
+      return 'יש סעיף בטופס ללא מזהה תקין.';
+    case 'duplicate_section_id':
+      return `יש שני סעיפים עם אותו מזהה: ${suffix}`;
+    case 'missing_item_id':
+      return 'יש פריט בטופס ללא מזהה תקין.';
+    case 'duplicate_item_id':
+      return `יש שני פריטים עם אותו מזהה: ${suffix}`;
+    case 'missing_shared_block_id':
+      return 'יש פריט משותף ללא קישור לבלוק המקור.';
+    case 'invalid_visibility_target_section':
+      return 'אחד מתנאי החשיפה מפנה לסעיף שלא קיים.';
+    case 'invalid_visibility_target_item':
+      return 'אחד מתנאי החשיפה מפנה לפריט שלא קיים.';
+    case 'invalid_visibility_source_question':
+      return 'אחד מתנאי החשיפה מפנה לשאלת מקור שלא קיימת.';
+    case 'invalid_alert_question':
+      return 'אחד מהדגלים האדומים מפנה לשאלה שלא קיימת.';
+    default:
+      return 'מבנה הטופס אינו תקין. יש לבדוק את הפריטים, תנאי החשיפה והדגלים האדומים.';
+  }
 }
 
 function cloneSharedItemAsLocal(item) {
@@ -506,6 +533,16 @@ export default function FormBuilderPage() {
   };
 
   const persistForm = async (publish = false) => {
+    const schemaIssues = validateNormalizedFormSchemaIntegrity({
+      formSchema: schema,
+      visibilityRules,
+      alertRules,
+    });
+    if (schemaIssues.length) {
+      toast.error(describeSchemaIssue(schemaIssues[0]));
+      return;
+    }
+
     if (publish) setPublishing(true); else setSaving(true);
     try {
       const payload = await authenticatedFetch(`forms/${formId}`, {

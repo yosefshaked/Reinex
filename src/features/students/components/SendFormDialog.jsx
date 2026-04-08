@@ -104,7 +104,7 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
     try {
       const data = await authenticatedFetch('forms', {
         session,
-        params: { org_id: activeOrgId },
+        params: { org_id: activeOrgId, selection_mode: 'delivery' },
       });
       const activeTemplates = (Array.isArray(data) ? data : []).filter((form) => form?.is_active !== false);
       setTemplates(activeTemplates);

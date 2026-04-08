@@ -16,9 +16,11 @@ import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-a
 import {
   buildSharedBlockMap,
   collectSharedBlockIds,
+  findMissingSharedBlockIds,
   normalizeAlertRules,
   normalizeFormSchema,
   resolveSchemaWithSharedBlocks,
+  validateNormalizedFormSchemaIntegrity,
   normalizeVisibilityRules,
 } from '../_shared/forms-runtime.js';
 
@@ -45,6 +47,18 @@ function normalizeFormUsage(value) {
   const normalized = normalizeString(value).toLowerCase();
   if (!normalized) return '';
   return normalized === 'waiting_list_intake' ? normalized : normalized === 'general' ? normalized : '';
+}
+
+function normalizeSelectionMode(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (normalized === 'delivery' || normalized === 'waiting_list_invite') {
+    return normalized;
+  }
+  return '';
+}
+
+function isPublishedMetadata(metadata) {
+  return Boolean(metadata && typeof metadata === 'object' && !Array.isArray(metadata) && metadata.published_form_schema && typeof metadata.published_form_schema === 'object');
 }
 
 function resolveUpdatedMetadata(existingMetadata, updates = {}) {
@@ -178,11 +192,14 @@ async function buildFormResponse(tenantClient, formRecord) {
   const publishedSchema = normalizeFormSchema(metadata?.published_form_schema || {});
   const sharedBlocks = await loadSharedBlocksForSchemas(tenantClient, [rawSchema, publishedSchema]);
   const sharedBlockMap = buildSharedBlockMap(sharedBlocks);
+  const missingSharedBlockIds = findMissingSharedBlockIds(rawSchema, sharedBlockMap);
 
   return {
     ...formRecord,
     shared_blocks: sharedBlocks,
     resolved_form_schema: resolveSchemaWithSharedBlocks(rawSchema, sharedBlockMap),
+    missing_shared_block_ids: missingSharedBlockIds,
+    is_published: isPublishedMetadata(metadata),
   };
 }
 
@@ -266,6 +283,7 @@ export default async function forms(context, req) {
   if (method === 'GET') {
     const formId = context?.bindingData?.formId;
     const usageFilter = normalizeFormUsage(req?.query?.usage ?? req?.query?.form_usage ?? body?.usage ?? body?.form_usage);
+    const selectionMode = normalizeSelectionMode(req?.query?.selection_mode ?? req?.query?.selectionMode ?? body?.selection_mode ?? body?.selectionMode);
 
     if (formId) {
       if (!isAdmin) {
@@ -303,13 +321,19 @@ export default async function forms(context, req) {
       }
     }
 
-    // List all — admins see all, non-admins see only active
+    if (!isAdmin && !selectionMode) {
+      return respond(context, 403, { message: 'forbidden' });
+    }
+
+    const selectFields = selectionMode
+      ? 'id, name, description, form_usage, is_active, metadata'
+      : SELECT_FIELDS;
     const query = tenantClient
       .from('forms')
-      .select(SELECT_FIELDS)
+      .select(selectFields)
       .order('created_at', { ascending: false });
 
-    if (!isAdmin) {
+    if (selectionMode || !isAdmin) {
       query.eq('is_active', true);
     }
     if (usageFilter) {
@@ -323,7 +347,15 @@ export default async function forms(context, req) {
       return respond(context, 500, { message: 'failed_to_load_forms' });
     }
 
-    return respond(context, 200, Array.isArray(data) ? data : []);
+    let rows = Array.isArray(data) ? data : [];
+    if (selectionMode) {
+      rows = rows.filter((row) => isPublishedMetadata(row?.metadata));
+      if (selectionMode === 'waiting_list_invite') {
+        rows = rows.filter((row) => row?.form_usage === 'waiting_list_intake');
+      }
+    }
+
+    return respond(context, 200, rows);
   }
 
   // All write operations require admin
@@ -343,6 +375,14 @@ export default async function forms(context, req) {
     const formSchema = normalizeFormSchema(normalizeOptionalJson(body?.form_schema ?? body?.formSchema) || {});
     const alertRules = normalizeAlertRules(body?.alert_rules ?? body?.alertRules);
     const visibilityRules = normalizeVisibilityRules(body?.visibility_rules ?? body?.visibilityRules);
+    const schemaIssues = validateNormalizedFormSchemaIntegrity({
+      formSchema,
+      visibilityRules,
+      alertRules,
+    });
+    if (schemaIssues.length) {
+      return respond(context, 400, { message: 'invalid_form_schema_structure', details: schemaIssues });
+    }
 
     const { data, error } = await tenantClient
       .from('forms')
@@ -500,6 +540,14 @@ export default async function forms(context, req) {
     const nextVisibilityRules = Object.prototype.hasOwnProperty.call(updates, 'visibility_rules')
       ? updates.visibility_rules
       : normalizeVisibilityRules(existing.visibility_rules);
+    const schemaIssues = validateNormalizedFormSchemaIntegrity({
+      formSchema: nextSchema,
+      visibilityRules: nextVisibilityRules,
+      alertRules: nextAlertRules,
+    });
+    if (schemaIssues.length) {
+      return respond(context, 400, { message: 'invalid_form_schema_structure', details: schemaIssues });
+    }
     const existingMetadata = existing.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata)
       ? existing.metadata
       : {};

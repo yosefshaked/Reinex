@@ -121,6 +121,9 @@ function mapInviteLoadErrorMessage(code) {
       return 'הטופס כבר נשלח דרך הקישור הזה. אם צריך לעדכן פרטים, אפשר לבקש קישור חדש מהארגון.';
     case 'form_not_found':
       return 'לא הצלחנו לטעון את הטופס כרגע. אפשר לנסות שוב בעוד כמה דקות.';
+    case 'form_not_published':
+    case 'form_unavailable':
+      return 'הטופס הזה אינו זמין כרגע למילוי. אפשר לבקש קישור חדש מהארגון.';
     case 'failed_to_load_invite':
       return 'לא הצלחנו לטעון את הקישור כרגע. אפשר לנסות שוב בעוד כמה דקות.';
     default:
@@ -150,6 +153,9 @@ function mapInviteSubmitErrorMessage(code) {
     case 'failed_to_link_guardian':
     case 'failed_to_create_waiting_list':
       return 'לא הצלחנו לשמור את הפרטים כרגע. אפשר לנסות שוב בעוד כמה דקות.';
+    case 'form_not_published':
+    case 'form_unavailable':
+      return 'הטופס הזה אינו זמין כרגע למילוי. אפשר לבקש קישור חדש מהארגון.';
     default:
       return 'שליחת הטופס נכשלה. אפשר לנסות שוב בעוד כמה דקות.';
   }
@@ -165,6 +171,9 @@ function mapPublicFormSubmitErrorMessage(code) {
     case 'failed_to_submit':
     case 'failed_to_save_answers':
       return 'לא הצלחנו לשמור את המענה כרגע. אפשר לנסות שוב בעוד כמה דקות.';
+    case 'form_not_published':
+    case 'form_unavailable':
+      return 'הטופס הזה אינו זמין כרגע למילוי. אפשר לבקש קישור חדש מהארגון.';
     default:
       return 'שליחת הטופס נכשלה. אפשר לנסות שוב בעוד כמה דקות.';
   }

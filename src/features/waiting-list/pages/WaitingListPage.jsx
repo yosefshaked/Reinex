@@ -450,7 +450,7 @@ export default function WaitingListPage() {
     try {
       const formsPayload = await authenticatedFetch('forms', {
         session,
-        params: { org_id: activeOrgId, usage: FORM_USAGE_WAITING_LIST },
+        params: { org_id: activeOrgId, usage: FORM_USAGE_WAITING_LIST, selection_mode: 'waiting_list_invite' },
       });
       setWaitingListForms(Array.isArray(formsPayload) ? formsPayload : []);
     } catch (err) {

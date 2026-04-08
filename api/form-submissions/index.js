@@ -21,6 +21,7 @@ import {
   buildSharedBlockMap,
   collectSharedBlockIds,
   evaluateAlertFlags,
+  findMissingSharedBlockIds,
   hydrateAnswersForReview,
   materializeSchemaForSnapshot,
   normalizeFormSchema,
@@ -335,10 +336,18 @@ async function resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, 
   }
 
   const sharedBlocksById = buildSharedBlockMap(data);
+  const missingSharedBlockIds = findMissingSharedBlockIds(initialState.raw_form_schema || initialState.form_schema, sharedBlocksById);
+  if (missingSharedBlockIds.length) {
+    throw new Error(`missing_shared_blocks:${missingSharedBlockIds.join(',')}`);
+  }
   return {
     ...initialState,
     form_schema: resolveSchemaWithSharedBlocks(initialState.raw_form_schema || initialState.form_schema, sharedBlocksById),
   };
+}
+
+function isPublishedFormRecord(form) {
+  return Boolean(form?.metadata && typeof form.metadata === 'object' && !Array.isArray(form.metadata) && form.metadata.published_form_schema && typeof form.metadata.published_form_schema === 'object');
 }
 
 async function resolveSubmissionDestination(tenantClient, clientProfileId, deliveryMethod) {
@@ -1054,6 +1063,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     return respond(context, 500, { message: 'failed_to_load_form' });
   }
   if (!form || !form.is_active) return respond(context, 404, { message: 'form_not_found' });
+  if (!isPublishedFormRecord(form)) return respond(context, 409, { message: 'form_not_published' });
   if (subject.error) {
     context.log?.error?.('form-submissions failed to load submission subject', {
       message: subject.error?.message,
@@ -1268,7 +1278,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   }
 
   const [{ data: form, error: formError }, subject] = await Promise.all([
-    tenantClient.from('forms').select('id, name').eq('id', submission.form_id).maybeSingle(),
+    tenantClient.from('forms').select('id, name, metadata').eq('id', submission.form_id).maybeSingle(),
     resolveSubmissionSubject(tenantClient, {
       clientProfileId: submission.client_profile_id,
       studentId: submission.student_id,
@@ -1284,6 +1294,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
     return respond(context, 500, { message: 'failed_to_load_form' });
   }
   if (!form) return respond(context, 404, { message: 'form_not_found' });
+  if (!isPublishedFormRecord(form)) return respond(context, 409, { message: 'form_not_published' });
   if (subject.error) {
     context.log?.error?.('form-submissions failed loading submission subject for resend', {
       message: subject.error?.message,
@@ -1702,7 +1713,15 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
-  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+  let publicFormState;
+  try {
+    publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+  } catch (error) {
+    if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
+      return respond(context, 409, { message: 'form_unavailable' });
+    }
+    throw error;
+  }
   if (!publicFormState.is_published) {
     return respond(context, 409, { message: 'form_not_published' });
   }
@@ -1795,7 +1814,14 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
       .eq('id', submission.form_id)
       .maybeSingle();
     if (formRecord) {
-      publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, { allowDraftFallback: false });
+      try {
+        publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, { allowDraftFallback: false });
+      } catch (error) {
+        if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
+          return respond(context, 409, { message: 'form_unavailable' });
+        }
+        throw error;
+      }
       if (!publicFormState.is_published) {
         return respond(context, 409, { message: 'form_not_published' });
       }

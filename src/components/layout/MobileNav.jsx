@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/sheet.jsx';
 import useKeyboardAwareBottomOffset from '@/hooks/useKeyboardAwareBottomOffset.js';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { normalizeMembershipRole, isAdminOrOffice } from '@/features/students/utils/endpoints.js';
+import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/features/students/utils/endpoints.js';
 
 const PRIMARY_ITEMS = [
   { key: 'dashboard', label: 'דשבורד', to: '/dashboard', icon: LayoutDashboard, end: true },
@@ -66,13 +66,15 @@ export default function MobileNav() {
   const { activeOrg } = useOrg();
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || '');
   const canManageClients = isAdminOrOffice(membershipRole);
+  const isAdmin = isAdminRole(membershipRole);
 
   const primaryItems = useMemo(() => PRIMARY_ITEMS, []);
   const drawerItems = useMemo(
     () => DRAWER_ITEMS.filter((item) => (
-      canManageClients || !['waiting-list', 'one-time-customers'].includes(item.key)
+      (canManageClients || !['waiting-list', 'one-time-customers'].includes(item.key))
+      && (isAdmin || item.key !== 'forms')
     )),
-    [canManageClients],
+    [canManageClients, isAdmin],
   );
 
   return (

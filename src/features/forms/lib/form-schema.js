@@ -255,6 +255,41 @@ function normalizeSharedPlacement(item, { blockType, fallbackIdPrefix }) {
   };
 }
 
+function buildMissingSharedPlaceholder(item, sharedBlockId, blockType) {
+  if (blockType === SHARED_BLOCK_TYPES.TEXT) {
+    return {
+      ...normalizeTextItem({
+        id: item.id,
+        title: item?.shared_block?.name || 'טקסט משותף לא זמין',
+        content: '',
+        variant: 'warning',
+        metadata: normalizeObject(item.metadata, {}),
+      }, { type: FORM_ITEM_TYPES.SHARED_TEXT, fallbackIdPrefix: 'shared_text_item' }),
+      shared_block_id: sharedBlockId,
+      shared_block: item?.shared_block || null,
+      missing_shared_block: true,
+      unavailable_shared_item: true,
+    };
+  }
+
+  return {
+    ...normalizeQuestionItem({
+      id: item.id,
+      question_type: 'short_text',
+      label: item?.shared_block?.name || 'שאלה משותפת לא זמינה',
+      description: '',
+      required: false,
+      placeholder: '',
+      options: [],
+      metadata: normalizeObject(item.metadata, {}),
+    }, { type: FORM_ITEM_TYPES.SHARED_QUESTION, fallbackIdPrefix: 'shared_question_item' }),
+    shared_block_id: sharedBlockId,
+    shared_block: item?.shared_block || null,
+    missing_shared_block: true,
+    unavailable_shared_item: true,
+  };
+}
+
 function normalizeSectionItems(section) {
   const rawItems = Array.isArray(section.items)
     ? section.items
@@ -378,6 +413,66 @@ export function collectSharedBlockIds(schema) {
   ));
 }
 
+export function validateNormalizedFormSchemaIntegrity({ formSchema, visibilityRules = [], alertRules = [] } = {}) {
+  const normalized = normalizeFormSchema(formSchema);
+  const issues = [];
+  const sectionIds = new Set();
+  const itemIds = new Set();
+  const questionIds = new Set();
+
+  normalized.sections.forEach((section, sectionIndex) => {
+    const sectionId = normalizeText(section?.id);
+    if (!sectionId) {
+      issues.push(`missing_section_id:${sectionIndex + 1}`);
+    } else if (sectionIds.has(sectionId)) {
+      issues.push(`duplicate_section_id:${sectionId}`);
+    } else {
+      sectionIds.add(sectionId);
+    }
+
+    normalizeArray(section?.items).forEach((item, itemIndex) => {
+      const itemId = normalizeText(item?.id);
+      if (!itemId) {
+        issues.push(`missing_item_id:${sectionId || sectionIndex + 1}:${itemIndex + 1}`);
+      } else if (itemIds.has(itemId)) {
+        issues.push(`duplicate_item_id:${itemId}`);
+      } else {
+        itemIds.add(itemId);
+      }
+
+      if (isQuestionItem(item) && itemId) {
+        questionIds.add(itemId);
+      }
+
+      if (isSharedItem(item) && !normalizeText(item?.shared_block_id || item?.shared_block?.id)) {
+        issues.push(`missing_shared_block_id:${itemId || `${sectionId || sectionIndex + 1}:${itemIndex + 1}`}`);
+      }
+    });
+  });
+
+  normalizeVisibilityRules(visibilityRules).forEach((group) => {
+    if (group.target_type === 'section' && !sectionIds.has(group.target_id)) {
+      issues.push(`invalid_visibility_target_section:${group.target_id}`);
+    }
+    if (group.target_type === 'item' && !itemIds.has(group.target_id)) {
+      issues.push(`invalid_visibility_target_item:${group.target_id}`);
+    }
+    normalizeArray(group.rules).forEach((rule) => {
+      if (!questionIds.has(rule.source_question_id)) {
+        issues.push(`invalid_visibility_source_question:${rule.source_question_id}`);
+      }
+    });
+  });
+
+  normalizeAlertRules(alertRules).forEach((rule) => {
+    if (!questionIds.has(rule.question_id)) {
+      issues.push(`invalid_alert_question:${rule.question_id}`);
+    }
+  });
+
+  return Array.from(new Set(issues));
+}
+
 export function buildSharedBlockMap(blocks) {
   const map = {};
   normalizeArray(blocks).forEach((block) => {
@@ -402,11 +497,7 @@ function resolveSharedItem(item, sharedBlockMap = {}) {
   const sharedBlockId = normalizeText(item.shared_block_id || item.shared_block?.id);
   const sharedBlock = sharedBlockMap[sharedBlockId] || item.shared_block || null;
   if (!sharedBlock || !sharedBlock.id) {
-    return {
-      ...item,
-      missing_shared_block: true,
-      shared_block_id: sharedBlockId,
-    };
+    return buildMissingSharedPlaceholder(item, sharedBlockId, item?.type === FORM_ITEM_TYPES.SHARED_TEXT ? SHARED_BLOCK_TYPES.TEXT : SHARED_BLOCK_TYPES.QUESTION);
   }
 
   const content = normalizeSharedBlockContent(sharedBlock.block_type, sharedBlock.content_schema);

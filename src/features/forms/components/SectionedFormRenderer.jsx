@@ -448,13 +448,15 @@ export default function SectionedFormRenderer({
                   {item.missing_shared_block ? (
                     <p className="text-xs text-red-600">השאלה המשותפת הזו כבר לא זמינה.</p>
                   ) : null}
-                  <QuestionField
-                    question={question}
-                    value={answers?.[question.id]}
-                    onChange={(nextValue) => updateAnswer(question.id, nextValue)}
-                    readOnly={readOnly}
-                    error={validationErrors?.[question.id] || ''}
-                  />
+                  {!item.unavailable_shared_item ? (
+                    <QuestionField
+                      question={question}
+                      value={answers?.[question.id]}
+                      onChange={(nextValue) => updateAnswer(question.id, nextValue)}
+                      readOnly={readOnly}
+                      error={validationErrors?.[question.id] || ''}
+                    />
+                  ) : null}
                 </div>
               );
             })}

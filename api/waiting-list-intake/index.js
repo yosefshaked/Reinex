@@ -20,6 +20,7 @@ import {
   buildSharedBlockMap,
   collectSharedBlockIds,
   evaluateAlertFlags,
+  findMissingSharedBlockIds,
   materializeSchemaForSnapshot,
   prepareAnswersForStorage,
   resolvePublicFormState,
@@ -106,6 +107,10 @@ async function resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, 
   }
 
   const sharedBlocksById = buildSharedBlockMap(data);
+  const missingSharedBlockIds = findMissingSharedBlockIds(initialState.raw_form_schema || initialState.form_schema, sharedBlocksById);
+  if (missingSharedBlockIds.length) {
+    throw new Error(`missing_shared_blocks:${missingSharedBlockIds.join(',')}`);
+  }
   return {
     ...initialState,
     form_schema: resolveSchemaWithSharedBlocks(initialState.raw_form_schema || initialState.form_schema, sharedBlocksById),
@@ -323,7 +328,8 @@ async function requireWaitingListIntakeForm(tenantClient, formId) {
     .eq('id', formId)
     .maybeSingle();
   if (error) throw new Error(`failed_to_load_form:${error.message}`);
-  if (!data || data.is_active === false || data.form_usage !== 'waiting_list_intake') return null;
+  const isPublished = Boolean(data?.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata) && data.metadata.published_form_schema && typeof data.metadata.published_form_schema === 'object');
+  if (!data || data.is_active === false || data.form_usage !== 'waiting_list_intake' || !isPublished) return null;
   return data;
 }
 
@@ -906,7 +912,15 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
-  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+  let publicFormState;
+  try {
+    publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+  } catch (error) {
+    if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
+      return respond(context, 409, { message: 'form_unavailable' });
+    }
+    throw error;
+  }
   if (!publicFormState.is_published) {
     return respond(context, 409, { message: 'form_not_published' });
   }
@@ -987,7 +1001,15 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
-  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+  let publicFormState;
+  try {
+    publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+  } catch (error) {
+    if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
+      return respond(context, 409, { message: 'form_unavailable' });
+    }
+    throw error;
+  }
   if (!publicFormState.is_published) {
     return respond(context, 409, { message: 'form_not_published' });
   }

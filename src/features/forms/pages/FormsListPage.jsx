@@ -61,7 +61,7 @@ export default function FormsListPage() {
   const [newDescription, setNewDescription] = useState('');
   const [newUsage, setNewUsage] = useState('general');
 
-  const canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection);
+  const canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection && isAdmin);
 
   const loadForms = useCallback(async () => {
     if (!canFetch) return;
@@ -197,6 +197,19 @@ export default function FormsListPage() {
             <Button variant="outline" size="sm" onClick={loadForms}>
               נסה שוב
             </Button>
+          </CardContent>
+        </Card>
+      </PageLayout>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <PageLayout title="טפסים" description="ניהול טפסים זמין למנהלים בלבד">
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center gap-3 p-12 text-center">
+            <AlertCircle className="h-8 w-8 text-amber-500" />
+            <p className="text-sm text-slate-700">הגישה לניהול טפסים וספריית הבלוקים המשותפים מותרת רק למנהלים בארגון.</p>
           </CardContent>
         </Card>
       </PageLayout>

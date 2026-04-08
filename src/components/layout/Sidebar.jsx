@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import HiddenUatAdminToolsDialog from '@/features/admin/components/HiddenUatAdminToolsDialog.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { normalizeMembershipRole, isAdminOrOffice } from '@/features/students/utils/endpoints.js';
+import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/features/students/utils/endpoints.js';
 import {
   LayoutDashboard,
   Calendar,
@@ -61,12 +61,14 @@ export default function Sidebar({ hidden = false, onToggleHidden }) {
   const { activeOrgId, activeOrg } = useOrg();
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || '');
   const canManageClients = isAdminOrOffice(membershipRole);
+  const isAdmin = isAdminRole(membershipRole);
 
   const items = useMemo(
     () => NAV_ITEMS.filter((item) => (
-      canManageClients || !['one-time-customers', 'waiting-list'].includes(item.key)
+      (canManageClients || !['one-time-customers', 'waiting-list'].includes(item.key))
+      && (isAdmin || item.key !== 'forms')
     )),
-    [canManageClients],
+    [canManageClients, isAdmin],
   );
 
   function resetSequence() {
