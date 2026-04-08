@@ -768,13 +768,15 @@ export default function FormBuilderPage() {
         <DialogContent
           className="max-w-md"
           footer={(
-            <div className="flex flex-col gap-2 sm:flex-row-reverse sm:flex-wrap sm:justify-start">
-              <Button variant="outline" className="w-full sm:w-auto" onClick={stayOnBuilder}>הישאר/י בעריכה</Button>
-              <Button variant="outline" className="w-full sm:w-auto" disabled={saving || publishing} onClick={discardAndContinue}>צא/י בלי לשמור</Button>
-              <Button className="w-full sm:w-auto" disabled={saving || publishing} onClick={() => void saveDraftAndContinue()}>
+            <div className="space-y-3">
+              <Button className="w-full" disabled={saving || publishing} onClick={() => void saveDraftAndContinue()}>
                 {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Save className="me-2 h-4 w-4" />}
                 שמור/י טיוטה והמשך
               </Button>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <Button variant="outline" className="w-full" onClick={stayOnBuilder}>הישאר/י בעריכה</Button>
+                <Button variant="outline" className="w-full" disabled={saving || publishing} onClick={discardAndContinue}>צא/י בלי לשמור</Button>
+              </div>
             </div>
           )}
         >
