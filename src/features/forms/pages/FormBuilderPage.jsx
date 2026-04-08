@@ -22,6 +22,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import SectionedFormRenderer from '@/features/forms/components/SectionedFormRenderer.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import {
   buildInitialAnswers,
   buildSharedBlockMap,
@@ -315,7 +316,9 @@ export default function FormBuilderPage() {
   const navigate = useNavigate();
   const { formId = '' } = useParams();
   const { session } = useSupabase();
-  const { activeOrgId } = useOrg();
+  const { activeOrg, activeOrgId } = useOrg();
+  const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || null);
+  const isAdmin = isAdminRole(membershipRole);
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
   const [loading, setLoading] = useState(true);
@@ -340,7 +343,7 @@ export default function FormBuilderPage() {
   const [selectedSharedTextId, setSelectedSharedTextId] = useState('');
   const [selectedSharedBlockDetail, setSelectedSharedBlockDetail] = useState(null);
 
-  const canLoad = Boolean(session && activeOrgId && formId);
+  const canLoad = Boolean(session && activeOrgId && formId && isAdmin);
   const sharedBlockMap = useMemo(() => buildSharedBlockMap(sharedBlocks), [sharedBlocks]);
   const resolvedSchema = useMemo(() => resolveSchemaWithSharedBlocks(schema, sharedBlockMap), [schema, sharedBlockMap]);
 
@@ -574,6 +577,20 @@ export default function FormBuilderPage() {
 
   if (loading) {
     return <PageLayout title="בונה הטפסים"><Card><CardContent className="flex items-center justify-center gap-2 p-16"><Loader2 className="h-5 w-5 animate-spin" /><span>טוען טופס...</span></CardContent></Card></PageLayout>;
+  }
+
+  if (!isAdmin) {
+    return (
+      <PageLayout
+        title="בונה הטפסים"
+        description="עריכת טפסים זמינה למנהלים בלבד"
+        actions={<Button variant="outline" onClick={() => navigate('/forms')}>חזרה לטפסים</Button>}
+      >
+        <Alert>
+          <AlertDescription>הגישה לעריכת טפסים מותרת רק למנהלים בארגון.</AlertDescription>
+        </Alert>
+      </PageLayout>
+    );
   }
 
   return (

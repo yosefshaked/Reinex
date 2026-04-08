@@ -15,6 +15,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { toast } from 'sonner';
 import { QUESTION_TYPE_DEFINITIONS, SHARED_BLOCK_TYPES, TEXT_BLOCK_VARIANTS } from '@/features/forms/lib/form-schema.js';
+import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 
 function createDraft(blockType = SHARED_BLOCK_TYPES.QUESTION) {
   if (blockType === SHARED_BLOCK_TYPES.TEXT) {
@@ -84,7 +85,9 @@ export default function FormBlocksPage() {
   const navigate = useNavigate();
   const { blockId = '' } = useParams();
   const { session } = useSupabase();
-  const { activeOrgId } = useOrg();
+  const { activeOrg, activeOrgId } = useOrg();
+  const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || null);
+  const isAdmin = isAdminRole(membershipRole);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -95,7 +98,7 @@ export default function FormBlocksPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
 
-  const canLoad = Boolean(session && activeOrgId);
+  const canLoad = Boolean(session && activeOrgId && isAdmin);
 
   const loadBlocks = useCallback(async () => {
     if (!canLoad) return;
@@ -228,13 +231,32 @@ export default function FormBlocksPage() {
       await loadBlocks();
     } catch (deleteError) {
       console.error('Failed to deactivate form block', deleteError);
-      toast.error(deleteError?.message || 'השבתת הבלוק נכשלה');
+      if (deleteError?.message === 'shared_block_in_use') {
+        toast.error('לא ניתן להשבית בלוק משותף שעדיין נמצא בשימוש בטפסים.');
+      } else {
+        toast.error(deleteError?.message || 'השבתת הבלוק נכשלה');
+      }
     } finally {
       setSaving(false);
     }
   };
 
   const questionOptions = Array.isArray(draft.content_schema?.options) ? draft.content_schema.options : [];
+  const blockIsInUse = Number(draft.usage_count || 0) > 0;
+
+  if (!isAdmin) {
+    return (
+      <PageLayout
+        title="ספריית בלוקים משותפים"
+        description="ניהול בלוקים משותפים זמין למנהלים בלבד"
+        actions={<Button variant="outline" onClick={() => navigate('/forms')}>חזרה לטפסים</Button>}
+      >
+        <Alert>
+          <AlertDescription>הגישה לספריית הבלוקים המשותפים מותרת רק למנהלים בארגון.</AlertDescription>
+        </Alert>
+      </PageLayout>
+    );
+  }
 
   return (
     <PageLayout
@@ -461,12 +483,18 @@ export default function FormBlocksPage() {
                 {draft.id ? 'שמור שינויים' : 'צור בלוק משותף'}
               </Button>
               {draft.id ? (
-                <Button variant="outline" className="gap-2" onClick={deactivateDraft} disabled={saving || !draft.is_active}>
+                <Button variant="outline" className="gap-2" onClick={deactivateDraft} disabled={saving || !draft.is_active || blockIsInUse}>
                   <Trash2 className="h-4 w-4" />
                   השבת בלוק
                 </Button>
               ) : null}
             </div>
+
+            {draft.id && blockIsInUse ? (
+              <Alert>
+                <AlertDescription>אי אפשר להשבית בלוק משותף כל עוד הוא עדיין בשימוש בטפסים. יש לנתק אותו מהטפסים או להפוך את המופעים למקומיים קודם.</AlertDescription>
+              </Alert>
+            ) : null}
 
             {draft.id ? (
               <div className="space-y-3 rounded-3xl border border-slate-200 bg-slate-50 p-4">

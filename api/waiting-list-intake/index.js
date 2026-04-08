@@ -98,6 +98,7 @@ async function resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, 
   const { data, error } = await tenantClient
     .from('shared_form_blocks')
     .select('id, block_type, name, content_schema, is_active, metadata')
+    .eq('is_active', true)
     .in('id', blockIds);
 
   if (error) {
@@ -905,7 +906,10 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
-  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: true });
+  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+  if (!publicFormState.is_published) {
+    return respond(context, 409, { message: 'form_not_published' });
+  }
 
   const primaryServiceId = normalizeUuid(submissionMetadata.primary_service_id);
 
@@ -983,7 +987,10 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
-  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: true });
+  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+  if (!publicFormState.is_published) {
+    return respond(context, 409, { message: 'form_not_published' });
+  }
 
   const intake = body?.intake && typeof body.intake === 'object' && !Array.isArray(body.intake) ? body.intake : {};
   const customAnswers = normalizeCustomAnswers(body?.custom_answers ?? body?.customAnswers);

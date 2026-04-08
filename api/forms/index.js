@@ -70,6 +70,7 @@ async function loadSharedBlocksForSchemas(tenantClient, schemas = []) {
   const { data, error } = await tenantClient
     .from('shared_form_blocks')
     .select('id, block_type, name, content_schema, is_active, metadata, created_at, updated_at')
+    .eq('is_active', true)
     .in('id', sharedBlockIds);
 
   if (error) {
@@ -151,6 +152,21 @@ async function revertFormAfterFailedLinkSync(tenantClient, context, formId, prev
       message: revertError?.message,
       formId,
     });
+  }
+}
+
+async function deleteCreatedFormAfterFailedLinkSync(tenantClient, context, formId) {
+  const { error } = await tenantClient
+    .from('forms')
+    .delete()
+    .eq('id', formId);
+
+  if (error) {
+    context.log?.error?.('forms failed to delete created form after shared block sync failure', {
+      message: error?.message,
+      formId,
+    });
+    throw error;
   }
 }
 
@@ -252,6 +268,10 @@ export default async function forms(context, req) {
     const usageFilter = normalizeFormUsage(req?.query?.usage ?? req?.query?.form_usage ?? body?.usage ?? body?.form_usage);
 
     if (formId) {
+      if (!isAdmin) {
+        return respond(context, 403, { message: 'forbidden' });
+      }
+
       if (!UUID_PATTERN.test(formId)) {
         return respond(context, 400, { message: 'invalid_form_id' });
       }
@@ -349,14 +369,21 @@ export default async function forms(context, req) {
     try {
       await syncFormSharedBlockLinks(tenantClient, data.id, {
         draftSchema: formSchema,
-        publishedSchema: formSchema,
+        publishedSchema: {},
       });
     } catch (linksError) {
       context.log?.error?.('forms failed to sync shared block links after create', {
         message: linksError?.message,
         formId: data.id,
       });
-      await tenantClient.from('forms').delete().eq('id', data.id);
+      try {
+        await deleteCreatedFormAfterFailedLinkSync(tenantClient, context, data.id);
+      } catch {
+        return respond(context, 500, {
+          message: 'failed_to_create_form',
+          details: 'form_created_but_cleanup_failed',
+        });
+      }
       return respond(context, 500, { message: 'failed_to_create_form' });
     }
 

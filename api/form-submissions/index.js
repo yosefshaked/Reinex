@@ -327,6 +327,7 @@ async function resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, 
   const { data, error } = await tenantClient
     .from('shared_form_blocks')
     .select('id, block_type, name, content_schema, is_active, metadata')
+    .eq('is_active', true)
     .in('id', blockIds);
 
   if (error) {
@@ -1701,7 +1702,10 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
-  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: true });
+  const publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+  if (!publicFormState.is_published) {
+    return respond(context, 409, { message: 'form_not_published' });
+  }
 
   return respond(context, 200, {
     submission_id: submission.id,
@@ -1791,7 +1795,10 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
       .eq('id', submission.form_id)
       .maybeSingle();
     if (formRecord) {
-      publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, { allowDraftFallback: true });
+      publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, { allowDraftFallback: false });
+      if (!publicFormState.is_published) {
+        return respond(context, 409, { message: 'form_not_published' });
+      }
     }
   }
 

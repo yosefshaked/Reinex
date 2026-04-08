@@ -517,9 +517,10 @@ export function resolvePublicFormState(formRecord, { allowDraftFallback = true, 
   const publishedSchema = metadata.published_form_schema;
   const publishedVisibilityRules = metadata.published_visibility_rules;
   const publishedAlertRules = metadata.published_alert_rules;
+  const hasPublishedContent = Boolean(publishedSchema && typeof publishedSchema === 'object');
 
   const rawSchema = normalizeFormSchema(
-    publishedSchema && typeof publishedSchema === 'object'
+    hasPublishedContent
       ? publishedSchema
       : allowDraftFallback
         ? form.form_schema
@@ -543,6 +544,7 @@ export function resolvePublicFormState(formRecord, { allowDraftFallback = true, 
           ? form.alert_rules
           : [],
     ),
+    is_published: hasPublishedContent,
     published_version: Number.isFinite(Number(metadata.published_version)) ? Number(metadata.published_version) : null,
   };
 }

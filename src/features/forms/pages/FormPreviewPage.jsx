@@ -10,6 +10,7 @@ import SectionedFormRenderer from '@/features/forms/components/SectionedFormRend
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import {
   buildInitialAnswers,
   collectSharedBlockIds,
@@ -23,7 +24,9 @@ export default function FormPreviewPage() {
   const navigate = useNavigate();
   const { formId = '' } = useParams();
   const { session } = useSupabase();
-  const { activeOrgId } = useOrg();
+  const { activeOrg, activeOrgId } = useOrg();
+  const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || null);
+  const isAdmin = isAdminRole(membershipRole);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [formName, setFormName] = useState('');
@@ -43,7 +46,7 @@ export default function FormPreviewPage() {
   }, [schema, sharedBlockMap]);
 
   const loadPreview = useCallback(async () => {
-    if (!session || !activeOrgId || !formId) return;
+    if (!session || !activeOrgId || !formId || !isAdmin) return;
     setLoading(true);
     setError('');
     try {
@@ -63,14 +66,14 @@ export default function FormPreviewPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeOrgId, formId, session]);
+  }, [activeOrgId, formId, isAdmin, session]);
 
   useEffect(() => {
     void loadPreview();
   }, [loadPreview]);
 
   useEffect(() => {
-    if (!selectedSharedBlockId || !session || !activeOrgId) {
+    if (!selectedSharedBlockId || !session || !activeOrgId || !isAdmin) {
       setSelectedSharedBlockDetail(null);
       return;
     }
@@ -97,7 +100,7 @@ export default function FormPreviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeOrgId, selectedSharedBlockId, session]);
+  }, [activeOrgId, isAdmin, selectedSharedBlockId, session]);
 
   return (
     <PageLayout
@@ -105,9 +108,14 @@ export default function FormPreviewPage() {
       description="תצוגת לקוח מלאה לטיוטה השמורה האחרונה"
       actions={<Button variant="outline" className="gap-2" onClick={() => navigate(`/forms/${formId}`)}><ArrowRight className="h-4 w-4" />חזרה לבונה</Button>}
     >
+      {!isAdmin ? (
+        <Alert>
+          <AlertDescription>הגישה לתצוגה המקדימה של טיוטות טופס מותרת רק למנהלים בארגון.</AlertDescription>
+        </Alert>
+      ) : null}
       {loading ? <Card><CardContent className="flex items-center justify-center gap-2 p-16"><Loader2 className="h-5 w-5 animate-spin" /><span>טוען תצוגה...</span></CardContent></Card> : null}
-      {!loading && error ? <Alert><AlertDescription>{error}</AlertDescription></Alert> : null}
-      {!loading && !error ? (
+      {!loading && isAdmin && error ? <Alert><AlertDescription>{error}</AlertDescription></Alert> : null}
+      {!loading && isAdmin && !error ? (
         <div className="mx-auto max-w-5xl space-y-4">
           <Card>
             <CardContent className="space-y-2 p-6">

@@ -154,6 +154,10 @@ async function loadUsage(tenantClient, blockId) {
   }));
 }
 
+function hasActiveUsage(usage = []) {
+  return Array.isArray(usage) && usage.some((entry) => Number(entry?.placement_count || 0) > 0);
+}
+
 export default async function formBlocks(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
   const env = readEnv(context);
@@ -405,6 +409,23 @@ export default async function formBlocks(context, req) {
       updates.is_active = body?.is_active !== false;
     }
 
+    let usage = [];
+    if (updates.is_active === false) {
+      try {
+        usage = await loadUsage(tenantClient, blockId);
+      } catch (usageError) {
+        context.log?.error?.('form-blocks failed to load usage before deactivate update', { message: usageError?.message, blockId });
+        return respond(context, 500, { message: 'failed_to_update_form_block' });
+      }
+
+      if (hasActiveUsage(usage)) {
+        return respond(context, 409, {
+          message: 'shared_block_in_use',
+          usage_count: usage.length,
+        });
+      }
+    }
+
     const { data, error } = await tenantClient
       .from('shared_form_blocks')
       .update(updates)
@@ -417,12 +438,13 @@ export default async function formBlocks(context, req) {
       return respond(context, 500, { message: 'failed_to_update_form_block' });
     }
 
-    let usage = [];
-    try {
-      usage = await loadUsage(tenantClient, blockId);
-    } catch (usageError) {
-      context.log?.error?.('form-blocks failed to load usage after update', { message: usageError?.message, blockId });
-      return respond(context, 500, { message: 'failed_to_update_form_block' });
+    if (!usage.length) {
+      try {
+        usage = await loadUsage(tenantClient, blockId);
+      } catch (usageError) {
+        context.log?.error?.('form-blocks failed to load usage after update', { message: usageError?.message, blockId });
+        return respond(context, 500, { message: 'failed_to_update_form_block' });
+      }
     }
 
     await logAuditEvent(supabase, {
@@ -475,6 +497,21 @@ export default async function formBlocks(context, req) {
       return respond(context, 400, { message: 'invalid_block_id' });
     }
 
+    let usage = [];
+    try {
+      usage = await loadUsage(tenantClient, blockId);
+    } catch (usageError) {
+      context.log?.error?.('form-blocks failed to load usage before deactivate', { message: usageError?.message, blockId });
+      return respond(context, 500, { message: 'failed_to_update_form_block' });
+    }
+
+    if (hasActiveUsage(usage)) {
+      return respond(context, 409, {
+        message: 'shared_block_in_use',
+        usage_count: usage.length,
+      });
+    }
+
     const { data, error } = await tenantClient
       .from('shared_form_blocks')
       .update({ is_active: false, updated_at: new Date().toISOString() })
@@ -489,14 +526,6 @@ export default async function formBlocks(context, req) {
 
     if (!data) {
       return respond(context, 404, { message: 'form_block_not_found' });
-    }
-
-    let usage = [];
-    try {
-      usage = await loadUsage(tenantClient, blockId);
-    } catch (usageError) {
-      context.log?.error?.('form-blocks failed to load usage after deactivate', { message: usageError?.message, blockId });
-      return respond(context, 500, { message: 'failed_to_update_form_block' });
     }
 
     await logAuditEvent(supabase, {
