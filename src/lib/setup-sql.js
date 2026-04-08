@@ -4098,6 +4098,8 @@ ALTER TABLE public.commitments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ledger_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_earnings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.shared_form_blocks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.form_shared_block_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.form_submissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.otp_challenges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.waiting_list_entries ENABLE ROW LEVEL SECURITY;
@@ -4142,6 +4144,8 @@ BEGIN
     'ledger_transactions',
     'lesson_earnings',
     'forms',
+    'shared_form_blocks',
+    'form_shared_block_links',
     'form_submissions',
     'otp_challenges',
     'waiting_list_entries',
@@ -4210,6 +4214,8 @@ GRANT ALL ON TABLE public.commitments TO app_user;
 GRANT ALL ON TABLE public.ledger_transactions TO app_user;
 GRANT ALL ON TABLE public.lesson_earnings TO app_user;
 GRANT ALL ON TABLE public.forms TO app_user;
+GRANT ALL ON TABLE public.shared_form_blocks TO app_user;
+GRANT ALL ON TABLE public.form_shared_block_links TO app_user;
 GRANT ALL ON TABLE public.form_submissions TO app_user;
 GRANT ALL ON TABLE public.otp_challenges TO app_user;
 GRANT ALL ON TABLE public.waiting_list_entries TO app_user;
