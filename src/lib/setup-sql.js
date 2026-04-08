@@ -2977,11 +2977,39 @@ END $$;
 
 DO $$
 BEGIN
-  ALTER TABLE public.form_shared_block_links
-    ADD CONSTRAINT form_shared_block_links_unique_form_item_scope
-    UNIQUE (form_id, item_id, schema_scope);
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.form_shared_block_links'::regclass
+      AND conname = 'form_shared_block_links_unique_form_item_scope'
+  ) THEN
+    NULL;
+  ELSIF EXISTS (
+    SELECT 1
+    FROM pg_class cls
+    JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace
+    WHERE nsp.nspname = 'public'
+      AND cls.relname = 'form_shared_block_links_unique_form_item_scope'
+      AND cls.relkind = 'i'
+  ) THEN
+    BEGIN
+      ALTER TABLE public.form_shared_block_links
+        ADD CONSTRAINT form_shared_block_links_unique_form_item_scope
+        UNIQUE USING INDEX form_shared_block_links_unique_form_item_scope;
+    EXCEPTION
+      WHEN object_not_in_prerequisite_state THEN
+        DROP INDEX IF EXISTS public.form_shared_block_links_unique_form_item_scope;
+        ALTER TABLE public.form_shared_block_links
+          ADD CONSTRAINT form_shared_block_links_unique_form_item_scope
+          UNIQUE (form_id, item_id, schema_scope);
+    END;
+  ELSE
+    ALTER TABLE public.form_shared_block_links
+      ADD CONSTRAINT form_shared_block_links_unique_form_item_scope
+      UNIQUE (form_id, item_id, schema_scope);
+  END IF;
 EXCEPTION
-  WHEN duplicate_object THEN
+  WHEN duplicate_object OR duplicate_table THEN
     NULL;
 END $$;
 
