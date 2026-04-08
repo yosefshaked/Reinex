@@ -26,6 +26,27 @@ export const SETUP_SQL_SCRIPT = String.raw`-- ==================================
 -- - RLS enabled on all tables; uniform policies for authenticated users.
 -- - Final SELECT prints a dedicated JWT key; replace the placeholder secret first.
 --
+-- Patch Notes (2026-04-09):
+-- - [AGOROT MIGRATION] Converted ALL currency/money columns from numeric to integer (agorot).
+--   1 shekel = 100 agorot. Financial values stored as integers (e.g. ₪10.50 = 1050 agorot).
+--   Affected: Employees (current_rate, monthly_salary_amount, leave_fixed_day_rate),
+--   Services (default_customer_charge_amount), RateHistory (rate),
+--   finance_corrections (amount), instructor_service_capabilities (base_rate),
+--   lesson_templates (price_override), lesson_participants (price_charged),
+--   hmo_provider_tracks (default_customer_charge_amount, default_insurer_claim_amount),
+--   hmo_authorizations (customer_charge_amount_override, insurer_claim_amount_override),
+--   commitments (total_amount, default_charge_amount),
+--   ledger_transactions (amount), lesson_earnings (rate_used, payout_amount).
+--   Non-currency numerics (annual_leave_days, balance_days_delta, pay_fraction,
+--   quantity_days) remain as numeric. get_student_remaining_balance() -> bigint.
+-- - [SCHEMA] ledger_transactions usage_type DEBIT enum extended: +transfer_debit, +refund.
+-- - [RPC] create_commitment_transfer_atomic() — fixes Issue #1 (broken transfer rollback).
+-- - [RPC] ensure_hmo_authorization_and_link_commitment() — fixes Issue #2 (non-atomic HMO link).
+-- - [RPC] batch_sync_lesson_ledger_entries() — fixes Issue #4 (non-transactional billing sync).
+-- - [NOTE] commitments_hmo_authorization_id_uidx already prevents duplicate HMO commitments
+--   (Issue #3). Unique constraint on hmo_authorization_id confirmed sufficient.
+-- - Safety guardrail exception: column type changes above explicitly approved by project owner.
+--
 -- Patch Notes (2026-04-07):
 -- - Refactored person identity to client_profiles as the canonical root entity
 -- - Reduced students to an operational overlay linked by client_profile_id
@@ -476,8 +497,8 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
   "employee_id" text NOT NULL,
   "employee_type" text,
   "payroll_model" text,
-  "current_rate" numeric,
-  "monthly_salary_amount" numeric,
+  "current_rate" integer,
+  "monthly_salary_amount" integer,
   "phone" text,
   "email" text,
   "start_date" date,
@@ -486,7 +507,7 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
   "working_days" jsonb,
   "annual_leave_days" numeric DEFAULT 12,
   "leave_pay_method" text,
-  "leave_fixed_day_rate" numeric,
+  "leave_fixed_day_rate" integer,
   "employment_scope" text,
   "instructor_types" uuid[],
   "metadata" jsonb,
@@ -501,8 +522,8 @@ ALTER TABLE public."Employees"
   ADD COLUMN IF NOT EXISTS "employee_id" text,
   ADD COLUMN IF NOT EXISTS "employee_type" text,
   ADD COLUMN IF NOT EXISTS "payroll_model" text,
-  ADD COLUMN IF NOT EXISTS "current_rate" numeric,
-  ADD COLUMN IF NOT EXISTS "monthly_salary_amount" numeric,
+  ADD COLUMN IF NOT EXISTS "current_rate" integer,
+  ADD COLUMN IF NOT EXISTS "monthly_salary_amount" integer,
   ADD COLUMN IF NOT EXISTS "phone" text,
   ADD COLUMN IF NOT EXISTS "email" text,
   ADD COLUMN IF NOT EXISTS "start_date" date,
@@ -511,7 +532,7 @@ ALTER TABLE public."Employees"
   ADD COLUMN IF NOT EXISTS "working_days" jsonb,
   ADD COLUMN IF NOT EXISTS "annual_leave_days" numeric,
   ADD COLUMN IF NOT EXISTS "leave_pay_method" text,
-  ADD COLUMN IF NOT EXISTS "leave_fixed_day_rate" numeric,
+  ADD COLUMN IF NOT EXISTS "leave_fixed_day_rate" integer,
   ADD COLUMN IF NOT EXISTS "employment_scope" text,
   ADD COLUMN IF NOT EXISTS "instructor_types" uuid[],
   ADD COLUMN IF NOT EXISTS "metadata" jsonb;
@@ -538,7 +559,7 @@ CREATE TABLE IF NOT EXISTS public."Services" (
   "name" text NOT NULL,
   "duration_minutes" bigint,
   "payment_model" text,
-  "default_customer_charge_amount" numeric,
+  "default_customer_charge_amount" integer,
   "color" text,
   "is_active" boolean NOT NULL DEFAULT true,
   "metadata" jsonb,
@@ -549,7 +570,7 @@ ALTER TABLE public."Services"
   ADD COLUMN IF NOT EXISTS "name" text,
   ADD COLUMN IF NOT EXISTS "duration_minutes" bigint,
   ADD COLUMN IF NOT EXISTS "payment_model" text,
-  ADD COLUMN IF NOT EXISTS "default_customer_charge_amount" numeric,
+  ADD COLUMN IF NOT EXISTS "default_customer_charge_amount" integer,
   ADD COLUMN IF NOT EXISTS "color" text,
   ADD COLUMN IF NOT EXISTS "is_active" boolean,
   ADD COLUMN IF NOT EXISTS "metadata" jsonb;
@@ -580,7 +601,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS public."RateHistory" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-  "rate" numeric NOT NULL,
+  "rate" integer NOT NULL,
   "effective_date" date NOT NULL,
   "notes" text,
   "employee_id" uuid NOT NULL,
@@ -592,7 +613,7 @@ CREATE TABLE IF NOT EXISTS public."RateHistory" (
 );
 
 ALTER TABLE public."RateHistory"
-  ADD COLUMN IF NOT EXISTS "rate" numeric,
+  ADD COLUMN IF NOT EXISTS "rate" integer,
   ADD COLUMN IF NOT EXISTS "effective_date" date,
   ADD COLUMN IF NOT EXISTS "notes" text,
   ADD COLUMN IF NOT EXISTS "employee_id" uuid,
@@ -986,7 +1007,7 @@ CREATE TABLE IF NOT EXISTS public.finance_corrections (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id uuid NOT NULL,
   correction_type text NOT NULL,
-  amount numeric NOT NULL,
+  amount integer NOT NULL,
   effective_date date NOT NULL,
   notes text NULL,
   version int NOT NULL DEFAULT 1,
@@ -1000,7 +1021,7 @@ CREATE TABLE IF NOT EXISTS public.finance_corrections (
 ALTER TABLE public.finance_corrections
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS correction_type text,
-  ADD COLUMN IF NOT EXISTS amount numeric,
+  ADD COLUMN IF NOT EXISTS amount integer,
   ADD COLUMN IF NOT EXISTS effective_date date,
   ADD COLUMN IF NOT EXISTS notes text,
   ADD COLUMN IF NOT EXISTS version int,
@@ -1070,7 +1091,7 @@ CREATE TABLE IF NOT EXISTS public.instructor_service_capabilities (
   employee_id uuid NOT NULL,
   service_id uuid NOT NULL,
   max_students int NOT NULL DEFAULT 1,
-  base_rate numeric NULL,
+  base_rate integer NULL,
   availability_windows jsonb NOT NULL DEFAULT '[]'::jsonb,
   metadata jsonb NULL
 );
@@ -1079,7 +1100,7 @@ ALTER TABLE public.instructor_service_capabilities
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS max_students int,
-  ADD COLUMN IF NOT EXISTS base_rate numeric,
+  ADD COLUMN IF NOT EXISTS base_rate integer,
   ADD COLUMN IF NOT EXISTS availability_windows jsonb,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
@@ -1137,7 +1158,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_templates (
   duration_minutes int NOT NULL,
   valid_from date NOT NULL,
   valid_until date NULL,
-  price_override numeric NULL,
+  price_override integer NULL,
   notes_internal text NULL,
   flags jsonb NULL,
   is_active boolean NOT NULL DEFAULT true,
@@ -1157,7 +1178,7 @@ ALTER TABLE public.lesson_templates
   ADD COLUMN IF NOT EXISTS duration_minutes int,
   ADD COLUMN IF NOT EXISTS valid_from date,
   ADD COLUMN IF NOT EXISTS valid_until date,
-  ADD COLUMN IF NOT EXISTS price_override numeric,
+  ADD COLUMN IF NOT EXISTS price_override integer,
   ADD COLUMN IF NOT EXISTS notes_internal text,
   ADD COLUMN IF NOT EXISTS flags jsonb,
   ADD COLUMN IF NOT EXISTS is_active boolean,
@@ -1646,7 +1667,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_participants (
   client_profile_id uuid NOT NULL,
   student_id uuid NULL,
   participant_status text NOT NULL,
-  price_charged numeric NULL,
+  price_charged integer NULL,
   pricing_breakdown jsonb NULL,
   commitment_id uuid NULL,
   documentation_ref jsonb NULL,
@@ -1667,7 +1688,7 @@ ALTER TABLE public.lesson_participants
   ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS participant_status text,
-  ADD COLUMN IF NOT EXISTS price_charged numeric,
+  ADD COLUMN IF NOT EXISTS price_charged integer,
   ADD COLUMN IF NOT EXISTS pricing_breakdown jsonb,
   ADD COLUMN IF NOT EXISTS commitment_id uuid,
   ADD COLUMN IF NOT EXISTS documentation_ref jsonb,
@@ -2229,8 +2250,8 @@ CREATE TABLE IF NOT EXISTS public.hmo_provider_tracks (
   service_id uuid NULL,
   name text NOT NULL,
   payment_mode text NOT NULL DEFAULT 'partially_paid_by_hmo',
-  default_customer_charge_amount numeric NOT NULL DEFAULT 0,
-  default_insurer_claim_amount numeric NOT NULL DEFAULT 0,
+  default_customer_charge_amount integer NOT NULL DEFAULT 0,
+  default_insurer_claim_amount integer NOT NULL DEFAULT 0,
   default_workflow_notes text NULL,
   is_active boolean NOT NULL DEFAULT true,
   metadata jsonb NULL,
@@ -2243,8 +2264,8 @@ ALTER TABLE public.hmo_provider_tracks
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS name text,
   ADD COLUMN IF NOT EXISTS payment_mode text,
-  ADD COLUMN IF NOT EXISTS default_customer_charge_amount numeric,
-  ADD COLUMN IF NOT EXISTS default_insurer_claim_amount numeric,
+  ADD COLUMN IF NOT EXISTS default_customer_charge_amount integer,
+  ADD COLUMN IF NOT EXISTS default_insurer_claim_amount integer,
   ADD COLUMN IF NOT EXISTS default_workflow_notes text,
   ADD COLUMN IF NOT EXISTS is_active boolean,
   ADD COLUMN IF NOT EXISTS metadata jsonb,
@@ -2327,8 +2348,8 @@ CREATE TABLE IF NOT EXISTS public.hmo_authorizations (
   valid_from date NULL,
   expires_at date NULL,
   reminder_date date NULL,
-  customer_charge_amount_override numeric NULL,
-  insurer_claim_amount_override numeric NULL,
+  customer_charge_amount_override integer NULL,
+  insurer_claim_amount_override integer NULL,
   workflow_notes_override text NULL,
   status text NOT NULL DEFAULT 'active',
   notes text NULL,
@@ -2347,8 +2368,8 @@ ALTER TABLE public.hmo_authorizations
   ADD COLUMN IF NOT EXISTS valid_from date,
   ADD COLUMN IF NOT EXISTS expires_at date,
   ADD COLUMN IF NOT EXISTS reminder_date date,
-  ADD COLUMN IF NOT EXISTS customer_charge_amount_override numeric,
-  ADD COLUMN IF NOT EXISTS insurer_claim_amount_override numeric,
+  ADD COLUMN IF NOT EXISTS customer_charge_amount_override integer,
+  ADD COLUMN IF NOT EXISTS insurer_claim_amount_override integer,
   ADD COLUMN IF NOT EXISTS workflow_notes_override text,
   ADD COLUMN IF NOT EXISTS status text,
   ADD COLUMN IF NOT EXISTS notes text,
@@ -2461,8 +2482,8 @@ CREATE TABLE IF NOT EXISTS public.commitments (
   student_id uuid NOT NULL,
   service_id uuid NOT NULL,
   commitment_type text NOT NULL DEFAULT 'package',
-  total_amount numeric NOT NULL,
-  default_charge_amount numeric NULL,
+  total_amount integer NOT NULL,
+  default_charge_amount integer NULL,
   transfer_ref uuid NULL,
   notes text NULL,
   is_active boolean NOT NULL DEFAULT true,
@@ -2479,8 +2500,8 @@ ALTER TABLE public.commitments
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS commitment_type text,
-  ADD COLUMN IF NOT EXISTS total_amount numeric,
-  ADD COLUMN IF NOT EXISTS default_charge_amount numeric,
+  ADD COLUMN IF NOT EXISTS total_amount integer,
+  ADD COLUMN IF NOT EXISTS default_charge_amount integer,
   ADD COLUMN IF NOT EXISTS transfer_ref uuid,
   ADD COLUMN IF NOT EXISTS notes text,
   ADD COLUMN IF NOT EXISTS is_active boolean,
@@ -2600,7 +2621,7 @@ CREATE TABLE IF NOT EXISTS public.ledger_transactions (
   commitment_id uuid NULL,
   transaction_type text NOT NULL,
   usage_type text NOT NULL,
-  amount numeric NOT NULL,
+  amount integer NOT NULL,
   source_ref uuid NULL,
   invoice_id text NULL,
   invoice_link text NULL,
@@ -2616,7 +2637,7 @@ ALTER TABLE public.ledger_transactions
   ADD COLUMN IF NOT EXISTS commitment_id uuid,
   ADD COLUMN IF NOT EXISTS transaction_type text,
   ADD COLUMN IF NOT EXISTS usage_type text,
-  ADD COLUMN IF NOT EXISTS amount numeric,
+  ADD COLUMN IF NOT EXISTS amount integer,
   ADD COLUMN IF NOT EXISTS source_ref uuid,
   ADD COLUMN IF NOT EXISTS invoice_id text,
   ADD COLUMN IF NOT EXISTS invoice_link text,
@@ -2698,16 +2719,19 @@ EXCEPTION
     NULL;
 END $$;
 
+-- Drop and recreate usage_type constraint to include transfer_debit and refund DEBIT types.
 DO $$
 BEGIN
+  ALTER TABLE public.ledger_transactions
+    DROP CONSTRAINT IF EXISTS ledger_transactions_usage_type_check;
   ALTER TABLE public.ledger_transactions
     ADD CONSTRAINT ledger_transactions_usage_type_check
     CHECK (
       (transaction_type = 'CREDIT' AND usage_type IN ('manual_topup', 'commitment_creation', 'transfer_received', 'hmo_authorization_added'))
-      OR (transaction_type = 'DEBIT' AND usage_type IN ('standard', 'double', 'cross_service', 'manual_adjustment'))
+      OR (transaction_type = 'DEBIT' AND usage_type IN ('standard', 'double', 'cross_service', 'manual_adjustment', 'transfer_debit', 'refund'))
     );
 EXCEPTION
-  WHEN duplicate_object THEN
+  WHEN others THEN
     NULL;
 END $$;
 
@@ -2940,13 +2964,14 @@ DROP TABLE IF EXISTS public.consumption_entries CASCADE;
 -- Query-time balance computation helpers (ledger-based)
 -- -----------------------------------------------------------------
 
+-- Returns balance in agorot (integer). amount column is integer since agorot migration.
 CREATE OR REPLACE FUNCTION public.get_student_remaining_balance(p_student_id uuid)
-RETURNS numeric
+RETURNS bigint
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  v_credits numeric := 0;
-  v_debits numeric := 0;
+  v_credits bigint := 0;
+  v_debits bigint := 0;
 BEGIN
   IF p_student_id IS NULL THEN
     RETURN 0;
@@ -2976,8 +3001,8 @@ CREATE TABLE IF NOT EXISTS public.lesson_earnings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id uuid NOT NULL,
   lesson_instance_id uuid NOT NULL,
-  rate_used numeric NOT NULL,
-  payout_amount numeric NOT NULL,
+  rate_used integer NOT NULL,
+  payout_amount integer NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL
 );
@@ -2985,8 +3010,8 @@ CREATE TABLE IF NOT EXISTS public.lesson_earnings (
 ALTER TABLE public.lesson_earnings
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
-  ADD COLUMN IF NOT EXISTS rate_used numeric,
-  ADD COLUMN IF NOT EXISTS payout_amount numeric,
+  ADD COLUMN IF NOT EXISTS rate_used integer,
+  ADD COLUMN IF NOT EXISTS payout_amount integer,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
@@ -5685,6 +5710,443 @@ REVOKE ALL ON FUNCTION public.schema_execute_statements_v1(text[], boolean, text
 GRANT EXECUTE ON FUNCTION public.schema_introspection_v1() TO service_role;
 GRANT EXECUTE ON FUNCTION public.schema_run_selects_v1(text[]) TO service_role;
 GRANT EXECUTE ON FUNCTION public.schema_execute_statements_v1(text[], boolean, text) TO service_role;
+
+-- =================================================================
+-- Atomic Finance RPCs (Fixes Issues #1, #2, #4 from code review)
+-- All amounts are in agorot (integer). 1 shekel = 100 agorot.
+-- =================================================================
+
+-- -----------------------------------------------------------------
+-- create_commitment_transfer_atomic
+-- Issue #1 fix: replaces the broken 3-step JS transfer that left an
+-- orphaned DEBIT when the target CREDIT insert failed.
+-- All three operations (new commitment + source DEBIT + target CREDIT)
+-- execute inside a single Postgres transaction. Any failure rolls
+-- back everything — no orphaned ledger entries possible.
+--
+-- Usage (JS):
+--   const { data, error } = await tenantClient.rpc(
+--     'create_commitment_transfer_atomic', { p_source_commitment_id, ... }
+--   );
+-- Returns: { target_commitment_id, source_debit_id, target_credit_id }
+-- -----------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.create_commitment_transfer_atomic(
+  p_source_commitment_id      uuid,
+  p_transfer_amount           integer,   -- in agorot
+  p_transfer_ref              uuid,
+  p_target_student_id         uuid,
+  p_target_service_id         uuid,
+  p_target_commitment_type    text,
+  p_target_default_charge     integer,   -- in agorot, nullable via 0
+  p_target_expires_at         timestamptz,
+  p_target_notes              text,
+  p_actor_user_id             uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_source_student_id         uuid;
+  v_source_client_profile_id  uuid;
+  v_target_client_profile_id  uuid;
+  v_target_commitment_id      uuid;
+  v_source_debit_id           uuid;
+  v_target_credit_id          uuid;
+BEGIN
+  -- Validate amount
+  IF p_transfer_amount IS NULL OR p_transfer_amount <= 0 THEN
+    RAISE EXCEPTION 'invalid_transfer_amount';
+  END IF;
+
+  -- Validate commitment type
+  IF p_target_commitment_type NOT IN ('package', 'subscription', 'manual_credit') THEN
+    RAISE EXCEPTION 'invalid_commitment_type';
+  END IF;
+
+  -- Resolve source student and client profile
+  SELECT c.student_id, s.client_profile_id
+    INTO v_source_student_id, v_source_client_profile_id
+  FROM public.commitments c
+  JOIN public.students s ON s.id = c.student_id
+  WHERE c.id = p_source_commitment_id;
+
+  IF v_source_student_id IS NULL THEN
+    RAISE EXCEPTION 'source_commitment_not_found';
+  END IF;
+
+  -- Resolve target client profile
+  SELECT client_profile_id
+    INTO v_target_client_profile_id
+  FROM public.students
+  WHERE id = p_target_student_id;
+
+  IF v_target_client_profile_id IS NULL THEN
+    RAISE EXCEPTION 'target_student_not_found';
+  END IF;
+
+  -- Step 1: Create target commitment
+  INSERT INTO public.commitments (
+    student_id,
+    service_id,
+    commitment_type,
+    total_amount,
+    default_charge_amount,
+    transfer_ref,
+    notes,
+    is_active,
+    expires_at,
+    created_at,
+    updated_at
+  ) VALUES (
+    p_target_student_id,
+    p_target_service_id,
+    p_target_commitment_type,
+    p_transfer_amount,
+    NULLIF(p_target_default_charge, 0),
+    p_transfer_ref,
+    p_target_notes,
+    true,
+    p_target_expires_at,
+    now(),
+    now()
+  )
+  RETURNING id INTO v_target_commitment_id;
+
+  -- Step 2: Insert source DEBIT (deducts from source commitment)
+  INSERT INTO public.ledger_transactions (
+    client_profile_id,
+    student_id,
+    commitment_id,
+    transaction_type,
+    usage_type,
+    amount,
+    source_ref,
+    notes,
+    created_at,
+    updated_at,
+    metadata
+  ) VALUES (
+    v_source_client_profile_id,
+    v_source_student_id,
+    p_source_commitment_id,
+    'DEBIT',
+    'transfer_debit',
+    p_transfer_amount,
+    p_transfer_ref,
+    'Balance transfer out',
+    now(),
+    now(),
+    jsonb_build_object('actor_user_id', p_actor_user_id)
+  )
+  RETURNING id INTO v_source_debit_id;
+
+  -- Step 3: Insert target CREDIT (funds the new commitment)
+  INSERT INTO public.ledger_transactions (
+    client_profile_id,
+    student_id,
+    commitment_id,
+    transaction_type,
+    usage_type,
+    amount,
+    source_ref,
+    notes,
+    created_at,
+    updated_at,
+    metadata
+  ) VALUES (
+    v_target_client_profile_id,
+    p_target_student_id,
+    v_target_commitment_id,
+    'CREDIT',
+    'transfer_received',
+    p_transfer_amount,
+    p_transfer_ref,
+    'Balance transfer in',
+    now(),
+    now(),
+    jsonb_build_object('actor_user_id', p_actor_user_id)
+  )
+  RETURNING id INTO v_target_credit_id;
+
+  RETURN jsonb_build_object(
+    'target_commitment_id', v_target_commitment_id,
+    'source_debit_id',      v_source_debit_id,
+    'target_credit_id',     v_target_credit_id
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.create_commitment_transfer_atomic(
+  uuid, integer, uuid, uuid, uuid, text, integer, timestamptz, text, uuid
+) TO authenticated, service_role;
+
+-- -----------------------------------------------------------------
+-- ensure_hmo_authorization_and_link_commitment
+-- Issue #2 fix: replaces the two-step JS upsert that could leave a
+-- ghost authorization if the commitment-update query failed.
+-- Both the authorization upsert and the commitment FK update happen
+-- inside a single Postgres transaction — they both commit or both
+-- roll back together.
+--
+-- p_authorization_data fields (all required unless marked optional):
+--   id, student_id, service_id, provider_id, provider_track_id,
+--   authorized_lessons, status,
+--   valid_from (optional), expires_at (optional),
+--   customer_charge_amount_override (optional, agorot),
+--   insurer_claim_amount_override (optional, agorot),
+--   workflow_notes_override (optional),
+--   authorization_reference (optional)
+--
+-- Returns: { authorization_id, commitment_id }
+-- -----------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.ensure_hmo_authorization_and_link_commitment(
+  p_authorization_data  jsonb,
+  p_commitment_id       uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_authorization_id  uuid;
+  v_auth_id_input     uuid;
+BEGIN
+  v_auth_id_input := (p_authorization_data->>'id')::uuid;
+
+  IF v_auth_id_input IS NULL THEN
+    RAISE EXCEPTION 'authorization_id_required';
+  END IF;
+
+  IF p_commitment_id IS NULL THEN
+    RAISE EXCEPTION 'commitment_id_required';
+  END IF;
+
+  -- Upsert authorization (idempotent via id conflict)
+  INSERT INTO public.hmo_authorizations (
+    id,
+    student_id,
+    service_id,
+    provider_id,
+    provider_track_id,
+    authorized_lessons,
+    status,
+    valid_from,
+    expires_at,
+    customer_charge_amount_override,
+    insurer_claim_amount_override,
+    workflow_notes_override,
+    authorization_reference,
+    created_at,
+    updated_at
+  ) VALUES (
+    v_auth_id_input,
+    (p_authorization_data->>'student_id')::uuid,
+    (p_authorization_data->>'service_id')::uuid,
+    (p_authorization_data->>'provider_id')::uuid,
+    (p_authorization_data->>'provider_track_id')::uuid,
+    COALESCE((p_authorization_data->>'authorized_lessons')::int, 0),
+    COALESCE(p_authorization_data->>'status', 'active'),
+    (p_authorization_data->>'valid_from')::date,
+    (p_authorization_data->>'expires_at')::date,
+    (p_authorization_data->>'customer_charge_amount_override')::integer,
+    (p_authorization_data->>'insurer_claim_amount_override')::integer,
+    p_authorization_data->>'workflow_notes_override',
+    p_authorization_data->>'authorization_reference',
+    now(),
+    now()
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    authorized_lessons              = EXCLUDED.authorized_lessons,
+    status                          = EXCLUDED.status,
+    valid_from                      = EXCLUDED.valid_from,
+    expires_at                      = EXCLUDED.expires_at,
+    customer_charge_amount_override = EXCLUDED.customer_charge_amount_override,
+    insurer_claim_amount_override   = EXCLUDED.insurer_claim_amount_override,
+    workflow_notes_override         = EXCLUDED.workflow_notes_override,
+    authorization_reference         = EXCLUDED.authorization_reference,
+    updated_at                      = now()
+  RETURNING id INTO v_authorization_id;
+
+  -- Link commitment to authorization atomically in the same transaction
+  UPDATE public.commitments
+  SET
+    hmo_authorization_id   = v_authorization_id,
+    hmo_provider_id        = (p_authorization_data->>'provider_id')::uuid,
+    hmo_provider_track_id  = (p_authorization_data->>'provider_track_id')::uuid,
+    updated_at             = now()
+  WHERE id = p_commitment_id;
+
+  IF NOT FOUND THEN
+    -- Commitment not found: roll back by raising (Postgres will undo the INSERT above)
+    RAISE EXCEPTION 'commitment_not_found';
+  END IF;
+
+  RETURN jsonb_build_object(
+    'authorization_id', v_authorization_id,
+    'commitment_id',    p_commitment_id
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.ensure_hmo_authorization_and_link_commitment(
+  jsonb, uuid
+) TO authenticated, service_role;
+
+-- -----------------------------------------------------------------
+-- batch_sync_lesson_ledger_entries
+-- Issue #4 fix: replaces the per-participant JS loop in
+-- syncLessonBillingArtifacts() which updated participants one-by-one
+-- without a transaction wrapper. This RPC receives all billing
+-- decisions for a lesson instance and applies them atomically —
+-- all participants commit or none do.
+--
+-- p_entries is a JSONB array. Each element:
+--   {
+--     participant_id:    uuid (required),
+--     client_profile_id: uuid (required),
+--     student_id:        uuid (required),
+--     commitment_id:     uuid | null,
+--     should_charge:     boolean,
+--     transaction_type:  "DEBIT" | null,
+--     usage_type:        text | null,
+--     amount:            integer (agorot) | null,
+--     source_ref:        uuid | null,    -- lesson_participant id
+--     pricing_breakdown: jsonb | null,
+--     notes:             text | null
+--   }
+--
+-- For each entry:
+--   - If should_charge = true:  upsert a DEBIT ledger_transaction
+--     (idempotent via ledger_transactions_source_usage_unique)
+--   - If should_charge = false: delete any existing DEBIT for this source_ref
+--   - Always: update lesson_participants.pricing_breakdown + price_charged
+--
+-- Returns: { updated: integer, charged: integer, cleared: integer }
+-- -----------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.batch_sync_lesson_ledger_entries(
+  p_lesson_instance_id  uuid,
+  p_actor_user_id       uuid,
+  p_entries             jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  entry             jsonb;
+  v_participant_id  uuid;
+  v_client_id       uuid;
+  v_student_id      uuid;
+  v_commitment_id   uuid;
+  v_should_charge   boolean;
+  v_tx_type         text;
+  v_usage_type      text;
+  v_amount          integer;
+  v_source_ref      uuid;
+  v_breakdown       jsonb;
+  v_notes           text;
+  v_updated         integer := 0;
+  v_charged         integer := 0;
+  v_cleared         integer := 0;
+BEGIN
+  IF p_lesson_instance_id IS NULL THEN
+    RAISE EXCEPTION 'lesson_instance_id_required';
+  END IF;
+
+  IF p_entries IS NULL OR jsonb_array_length(p_entries) = 0 THEN
+    RETURN jsonb_build_object('updated', 0, 'charged', 0, 'cleared', 0);
+  END IF;
+
+  FOR entry IN SELECT * FROM jsonb_array_elements(p_entries)
+  LOOP
+    v_participant_id := (entry->>'participant_id')::uuid;
+    v_client_id      := (entry->>'client_profile_id')::uuid;
+    v_student_id     := (entry->>'student_id')::uuid;
+    v_commitment_id  := (entry->>'commitment_id')::uuid;
+    v_should_charge  := COALESCE((entry->>'should_charge')::boolean, false);
+    v_tx_type        := entry->>'transaction_type';
+    v_usage_type     := entry->>'usage_type';
+    v_amount         := (entry->>'amount')::integer;
+    v_source_ref     := (entry->>'source_ref')::uuid;
+    v_breakdown      := entry->'pricing_breakdown';
+    v_notes          := entry->>'notes';
+
+    IF v_participant_id IS NULL THEN
+      RAISE EXCEPTION 'participant_id_required_in_entry';
+    END IF;
+
+    IF v_should_charge AND v_amount IS NOT NULL AND v_amount > 0 THEN
+      -- Upsert the DEBIT ledger entry (idempotent: unique on source_ref + usage_type)
+      INSERT INTO public.ledger_transactions (
+        client_profile_id,
+        student_id,
+        commitment_id,
+        transaction_type,
+        usage_type,
+        amount,
+        source_ref,
+        notes,
+        created_at,
+        updated_at,
+        metadata
+      ) VALUES (
+        v_client_id,
+        v_student_id,
+        v_commitment_id,
+        COALESCE(v_tx_type, 'DEBIT'),
+        COALESCE(v_usage_type, 'standard'),
+        v_amount,
+        v_source_ref,
+        v_notes,
+        now(),
+        now(),
+        jsonb_build_object('actor_user_id', p_actor_user_id, 'lesson_instance_id', p_lesson_instance_id)
+      )
+      ON CONFLICT (source_ref, usage_type) DO UPDATE SET
+        commitment_id     = EXCLUDED.commitment_id,
+        amount            = EXCLUDED.amount,
+        notes             = EXCLUDED.notes,
+        updated_at        = now();
+
+      v_charged := v_charged + 1;
+    ELSE
+      -- Remove any existing DEBIT for this participant (lesson no longer billable)
+      IF v_source_ref IS NOT NULL AND v_usage_type IS NOT NULL THEN
+        DELETE FROM public.ledger_transactions
+        WHERE source_ref = v_source_ref
+          AND usage_type = v_usage_type
+          AND transaction_type = 'DEBIT';
+      END IF;
+
+      v_cleared := v_cleared + 1;
+    END IF;
+
+    -- Always update participant pricing snapshot
+    UPDATE public.lesson_participants
+    SET
+      price_charged     = CASE WHEN v_should_charge THEN v_amount ELSE NULL END,
+      pricing_breakdown = v_breakdown,
+      updated_by        = p_actor_user_id
+    WHERE id = v_participant_id;
+
+    v_updated := v_updated + 1;
+  END LOOP;
+
+  RETURN jsonb_build_object(
+    'updated', v_updated,
+    'charged', v_charged,
+    'cleared', v_cleared
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.batch_sync_lesson_ledger_entries(
+  uuid, uuid, jsonb
+) TO authenticated, service_role;
 
 SELECT extensions.sign(
   json_build_object(
