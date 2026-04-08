@@ -1464,10 +1464,30 @@ END $$;
 DO $$
 BEGIN
   UPDATE public.lesson_instances
-  SET status = 'cancelled'
-  WHERE status IN ('cancelled_student', 'cancelled_clinic', 'no_show');
+  SET status = CASE
+    WHEN lower(btrim(status)) IN ('cancelled_student', 'cancelled_clinic', 'no_show', 'cancelled') THEN 'cancelled'
+    WHEN lower(btrim(status)) = 'completed' THEN 'completed'
+    WHEN lower(btrim(status)) = 'scheduled' THEN 'scheduled'
+    ELSE status
+  END
+  WHERE status IS NOT NULL;
 EXCEPTION
   WHEN others THEN NULL;
+END $$;
+
+DO $$
+DECLARE
+  invalid_values text;
+BEGIN
+  SELECT string_agg(DISTINCT quote_nullable(status), ', ' ORDER BY quote_nullable(status))
+  INTO invalid_values
+  FROM public.lesson_instances
+  WHERE status IS NOT NULL
+    AND lower(btrim(status)) NOT IN ('scheduled', 'completed', 'cancelled', 'cancelled_student', 'cancelled_clinic', 'no_show');
+
+  IF invalid_values IS NOT NULL THEN
+    RAISE EXCEPTION 'Cannot apply lesson_instances_status_check; unsupported lesson_instances.status values remain: %', invalid_values;
+  END IF;
 END $$;
 
 ALTER TABLE public.lesson_instances
@@ -1485,12 +1505,65 @@ END $$;
 
 DO $$
 BEGIN
+  UPDATE public.lesson_instances
+  SET documentation_status = lower(btrim(documentation_status))
+  WHERE documentation_status IS NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+DECLARE
+  invalid_values text;
+BEGIN
+  SELECT string_agg(DISTINCT quote_nullable(documentation_status), ', ' ORDER BY quote_nullable(documentation_status))
+  INTO invalid_values
+  FROM public.lesson_instances
+  WHERE documentation_status IS NOT NULL
+    AND lower(btrim(documentation_status)) NOT IN ('undocumented', 'documented');
+
+  IF invalid_values IS NOT NULL THEN
+    RAISE EXCEPTION 'Cannot apply lesson_instances_documentation_status_check; unsupported lesson_instances.documentation_status values remain: %', invalid_values;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
   ALTER TABLE public.lesson_instances
     ADD CONSTRAINT lesson_instances_documentation_status_check
     CHECK (documentation_status IN ('undocumented','documented'));
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
+END $$;
+
+DO $$
+BEGIN
+  UPDATE public.lesson_instances
+  SET created_source = CASE
+    WHEN lower(btrim(created_source)) IN ('weekly_generation', 'one_time', 'manual_reschedule', 'migration') THEN lower(btrim(created_source))
+    WHEN lower(btrim(created_source)) IN ('manual', 'manual_create', 'one-off', 'one_off') THEN 'one_time'
+    WHEN lower(btrim(created_source)) IN ('reschedule', 'manual-reschedule') THEN 'manual_reschedule'
+    ELSE created_source
+  END
+  WHERE created_source IS NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+DECLARE
+  invalid_values text;
+BEGIN
+  SELECT string_agg(DISTINCT quote_nullable(created_source), ', ' ORDER BY quote_nullable(created_source))
+  INTO invalid_values
+  FROM public.lesson_instances
+  WHERE created_source IS NOT NULL
+    AND lower(btrim(created_source)) NOT IN ('weekly_generation', 'one_time', 'manual_reschedule', 'migration', 'manual', 'manual_create', 'one-off', 'one_off', 'reschedule', 'manual-reschedule');
+
+  IF invalid_values IS NOT NULL THEN
+    RAISE EXCEPTION 'Cannot apply lesson_instances_created_source_check; unsupported lesson_instances.created_source values remain: %', invalid_values;
+  END IF;
 END $$;
 
 DO $$
@@ -1585,6 +1658,30 @@ BEGIN
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
+END $$;
+
+DO $$
+BEGIN
+  UPDATE public.lesson_participants
+  SET participant_status = lower(btrim(participant_status))
+  WHERE participant_status IS NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+DECLARE
+  invalid_values text;
+BEGIN
+  SELECT string_agg(DISTINCT quote_nullable(participant_status), ', ' ORDER BY quote_nullable(participant_status))
+  INTO invalid_values
+  FROM public.lesson_participants
+  WHERE participant_status IS NOT NULL
+    AND lower(btrim(participant_status)) NOT IN ('scheduled', 'attended', 'cancelled_student', 'cancelled_clinic', 'no_show');
+
+  IF invalid_values IS NOT NULL THEN
+    RAISE EXCEPTION 'Cannot apply lesson_participants_participant_status_check; unsupported lesson_participants.participant_status values remain: %', invalid_values;
+  END IF;
 END $$;
 
 DO $$

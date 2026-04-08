@@ -47,6 +47,20 @@ function normalizeParticipantAuditRows(value) {
     : [];
 }
 
+function normalizeCreatedSource(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (!normalized) {
+    return 'one_time';
+  }
+  if (['manual', 'manual_create', 'one-off', 'one_off'].includes(normalized)) {
+    return 'one_time';
+  }
+  if (['reschedule', 'manual-reschedule'].includes(normalized)) {
+    return 'manual_reschedule';
+  }
+  return normalized;
+}
+
 function normalizeLessonInstanceAuditState(value) {
   if (!value || typeof value !== 'object') {
     return value;
@@ -601,9 +615,13 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
   }
 
   const requestedStatus = body.status === undefined ? 'scheduled' : normalizeLessonInstanceStatus(body.status);
+  const createdSource = normalizeCreatedSource(body.created_source);
   const normalizedSchedulingMetadata = normalizeSchedulingOverrideMetadata(body.metadata);
   if (!ACTIVE_LESSON_INSTANCE_STATUSES.has(requestedStatus)) {
     return respond(context, 400, { message: 'invalid status' });
+  }
+  if (!['weekly_generation', 'one_time', 'manual_reschedule', 'migration'].includes(createdSource)) {
+    return respond(context, 400, { message: 'invalid_created_source' });
   }
 
   // Non-admin users can only create lessons for themselves
@@ -793,7 +811,7 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     service_id: body.service_id,
     status: requestedStatus,
     documentation_status: body.documentation_status || 'undocumented',
-    created_source: body.created_source || 'manual',
+    created_source: createdSource,
     metadata: normalizedSchedulingMetadata.metadata,
     created_by: userId,
     updated_by: userId,
