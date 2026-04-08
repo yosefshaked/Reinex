@@ -1,6 +1,8 @@
+// @ts-check
 /* eslint-env node */
 import { createHash, randomUUID } from 'node:crypto';
 import { normalizeString } from './org-bff.js';
+import { coerceAgorot, toShekel } from './currency.js';
 
 export const HMO_PAYMENT_MODES = new Set([
   'fully_paid_by_hmo',
@@ -19,13 +21,6 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function coerceNumber(value, fallback = 0) {
-  return Number.isFinite(Number(value)) ? Number(value) : fallback;
-}
-
-function roundCurrency(value) {
-  return Number(Number(value || 0).toFixed(2));
-}
 
 function toDateKey(value) {
   if (!value) return '';
@@ -65,7 +60,7 @@ function buildLegacyTrackName({ paymentMode, customerChargeAmount, insurerClaimA
     : paymentMode === 'fully_paid_by_customer'
       ? 'לקוח משלם'
       : 'מימון חלקי';
-  return `מסלול שהוסב • ${modeLabel} • לקוח ${roundCurrency(customerChargeAmount)} • קופה ${roundCurrency(insurerClaimAmount)}`;
+  return `מסלול שהוסב • ${modeLabel} • לקוח ${toShekel(customerChargeAmount)} • קופה ${toShekel(insurerClaimAmount)}`;
 }
 
 function buildLegacyTrackFingerprint({ providerId, serviceId, paymentMode, customerChargeAmount, insurerClaimAmount, workflowNotes }) {
@@ -73,8 +68,8 @@ function buildLegacyTrackFingerprint({ providerId, serviceId, paymentMode, custo
     normalizeString(providerId),
     normalizeString(serviceId),
     normalizePaymentMode(paymentMode),
-    roundCurrency(customerChargeAmount),
-    roundCurrency(insurerClaimAmount),
+    coerceAgorot(customerChargeAmount),
+    coerceAgorot(insurerClaimAmount),
     normalizeString(workflowNotes),
   ].join('|');
 }
@@ -84,8 +79,8 @@ function normalizeTrackRow(row) {
     ...row,
     service_id: normalizeString(row?.service_id) || '',
     payment_mode: normalizePaymentMode(row?.payment_mode),
-    default_customer_charge_amount: roundCurrency(coerceNumber(row?.default_customer_charge_amount, 0)),
-    default_insurer_claim_amount: roundCurrency(coerceNumber(row?.default_insurer_claim_amount, 0)),
+    default_customer_charge_amount: coerceAgorot(row?.default_customer_charge_amount),
+    default_insurer_claim_amount: coerceAgorot(row?.default_insurer_claim_amount),
     default_workflow_notes: normalizeString(row?.default_workflow_notes) || '',
     is_active: row?.is_active !== false,
     metadata: isPlainObject(row?.metadata) ? row.metadata : {},
@@ -184,11 +179,11 @@ export function resolveAuthorizationFinancials(authorization = null) {
   const track = authorization?.provider_track || authorization?.hmo_provider_track || null;
   return {
     payment_mode: normalizePaymentMode(authorization?.payment_mode_override || track?.payment_mode),
-    customer_charge_amount: roundCurrency(
-      authorization?.customer_charge_amount_override ?? track?.default_customer_charge_amount ?? 0,
+    customer_charge_amount: coerceAgorot(
+      authorization?.customer_charge_amount_override ?? track?.default_customer_charge_amount,
     ),
-    insurer_claim_amount: roundCurrency(
-      authorization?.insurer_claim_amount_override ?? track?.default_insurer_claim_amount ?? 0,
+    insurer_claim_amount: coerceAgorot(
+      authorization?.insurer_claim_amount_override ?? track?.default_insurer_claim_amount,
     ),
     workflow_notes: normalizeString(
       authorization?.workflow_notes_override ?? track?.default_workflow_notes ?? '',
@@ -301,10 +296,10 @@ export async function loadHmoAuthorizations(tenantClient, {
     });
     return {
       ...row,
-      authorized_lessons: Math.max(0, Math.round(coerceNumber(row.authorized_lessons, 0))),
+      authorized_lessons: Math.max(0, Math.round(Number(row.authorized_lessons) || 0)),
       status: normalizeAuthorizationStatus(row.status),
-      customer_charge_amount_override: row.customer_charge_amount_override == null ? null : roundCurrency(coerceNumber(row.customer_charge_amount_override, 0)),
-      insurer_claim_amount_override: row.insurer_claim_amount_override == null ? null : roundCurrency(coerceNumber(row.insurer_claim_amount_override, 0)),
+      customer_charge_amount_override: row.customer_charge_amount_override == null ? null : coerceAgorot(row.customer_charge_amount_override),
+      insurer_claim_amount_override: row.insurer_claim_amount_override == null ? null : coerceAgorot(row.insurer_claim_amount_override),
       provider,
       provider_track: providerTrack,
       resolved_payment_mode: resolved.payment_mode,
@@ -413,8 +408,8 @@ export async function ensureTrackFromLegacyConfig(tenantClient, {
   }
 
   const normalizedPaymentMode = normalizePaymentMode(paymentMode);
-  const resolvedCustomerCharge = roundCurrency(coerceNumber(customerChargeAmount, 0));
-  const resolvedInsurerClaim = roundCurrency(coerceNumber(insurerClaimAmount, 0));
+  const resolvedCustomerCharge = coerceAgorot(customerChargeAmount);
+  const resolvedInsurerClaim = coerceAgorot(insurerClaimAmount);
   const resolvedWorkflowNotes = normalizeString(workflowNotes);
   const fingerprint = buildLegacyTrackFingerprint({
     providerId: normalizedProviderId,
@@ -500,7 +495,7 @@ export async function ensureAuthorizationFromLegacyCommitment(tenantClient, comm
     provider_id: provider.id,
     provider_track_id: track?.id || null,
     authorization_reference: normalizeString(hmoMetadata.authorization_reference) || null,
-    authorized_lessons: Math.max(0, Math.round(coerceNumber(hmoMetadata.authorized_lessons, 0))),
+    authorized_lessons: Math.max(0, Math.round(Number(hmoMetadata.authorized_lessons) || 0)),
     valid_from: toDateKey(commitment.created_at) || null,
     expires_at: toDateKey(commitment.expires_at) || null,
     reminder_date: toDateKey(hmoMetadata.reminder_date) || null,
@@ -516,28 +511,38 @@ export async function ensureAuthorizationFromLegacyCommitment(tenantClient, comm
     },
   };
 
-  const { data, error } = await tenantClient
-    .from('hmo_authorizations')
-    .upsert(payload, { onConflict: 'id' })
-      .select('id, student_id, service_id, provider_id, provider_track_id, authorization_reference, authorized_lessons, valid_from, expires_at, reminder_date, customer_charge_amount_override, insurer_claim_amount_override, workflow_notes_override, status, notes, metadata, created_at, updated_at')
-    .maybeSingle();
+  // Override values are already in agorot (from DB). Pass null to preserve track defaults.
+  const authorizationData = {
+    id: authorizationId,
+    student_id: payload.student_id,
+    service_id: payload.service_id,
+    provider_id: payload.provider_id,
+    provider_track_id: payload.provider_track_id,
+    authorized_lessons: payload.authorized_lessons,
+    valid_from: payload.valid_from,
+    expires_at: payload.expires_at,
+    customer_charge_amount_override: coerceAgorot(payload.customer_charge_amount_override, null) ?? null,
+    insurer_claim_amount_override:   coerceAgorot(payload.insurer_claim_amount_override, null) ?? null,
+    workflow_notes_override: payload.workflow_notes_override,
+    authorization_reference: payload.authorization_reference,
+    status: payload.status,
+  };
 
-  if (error) {
-    throw error;
+  // Atomically upsert the authorization and link the commitment in one Postgres transaction.
+  const { error: rpcError } = await tenantClient.rpc(
+    'ensure_hmo_authorization_and_link_commitment',
+    {
+      p_authorization_data: authorizationData,
+      p_commitment_id:      commitment.id,
+    },
+  );
+
+  if (rpcError) {
+    throw rpcError;
   }
 
-  await tenantClient
-    .from('commitments')
-    .update({
-      hmo_provider_id: provider.id,
-      hmo_provider_track_id: track?.id || null,
-      hmo_authorization_id: data?.id || authorizationId,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', commitment.id);
-
   const [authorization] = await loadHmoAuthorizations(tenantClient, {
-    authorizationIds: [data?.id || authorizationId],
+    authorizationIds: [authorizationId],
   });
 
   return authorization || null;
@@ -598,7 +603,7 @@ export async function ensureSystemManagedHmoCommitment(tenantClient, authorizati
   }
 
   const financials = resolveAuthorizationFinancials(resolvedAuthorization);
-  const totalAmount = roundCurrency(Math.max(0, coerceNumber(resolvedAuthorization.authorized_lessons, 0)) * financials.customer_charge_amount);
+  const totalAmount = Math.max(0, Math.round(resolvedAuthorization.authorized_lessons || 0)) * coerceAgorot(financials.customer_charge_amount);
   const expiresAt = toTimestampOrNull(resolvedAuthorization.expires_at);
   const commitmentMetadata = {
     hmo: {
@@ -611,7 +616,7 @@ export async function ensureSystemManagedHmoCommitment(tenantClient, authorizati
       customer_charge_amount: financials.customer_charge_amount,
       insurer_claim_amount: financials.insurer_claim_amount,
       authorization_reference: normalizeString(resolvedAuthorization.authorization_reference) || '',
-      authorized_lessons: Math.max(0, Math.round(coerceNumber(resolvedAuthorization.authorized_lessons, 0))),
+      authorized_lessons: Math.max(0, Math.round(resolvedAuthorization.authorized_lessons || 0)),
       reminder_date: toDateKey(resolvedAuthorization.reminder_date) || '',
       workflow_notes: financials.workflow_notes,
       valid_from: toDateKey(resolvedAuthorization.valid_from) || '',

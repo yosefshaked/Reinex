@@ -1,3 +1,4 @@
+// @ts-check
 /* eslint-env node */
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
@@ -111,6 +112,9 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid_amount' });
     }
 
+    const idempotencyKey = normalizeString(body?.idempotency_key) || null;
+    const metadataBase = body?.metadata && typeof body.metadata === 'object' ? body.metadata : {};
+
     const payload = {
       employee_id: employeeId,
       correction_type: correctionType,
@@ -119,10 +123,23 @@ export default async function (context, req) {
       notes: normalizeString(body?.notes) || null,
       updated_by: userId,
       updated_at: new Date().toISOString(),
-      metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+      metadata: idempotencyKey ? { ...metadataBase, idempotency_key: idempotencyKey } : metadataBase,
     };
 
     if (method === 'POST') {
+      // Idempotency: return existing record if the same key was already processed
+      if (idempotencyKey) {
+        const { data: existing } = await tenantClient
+          .from('finance_corrections')
+          .select('id, employee_id, correction_type, amount, effective_date, notes, created_by, updated_by, created_at, updated_at, metadata')
+          .filter('metadata->>idempotency_key', 'eq', idempotencyKey)
+          .eq('employee_id', employeeId)
+          .maybeSingle();
+        if (existing) {
+          return respond(context, 200, existing);
+        }
+      }
+
       payload.created_by = userId;
       payload.created_at = new Date().toISOString();
       const { data, error } = await tenantClient

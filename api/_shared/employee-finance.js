@@ -1,5 +1,7 @@
+// @ts-check
 /* eslint-env node */
 import { isAdminOrOffice, normalizeString } from './org-bff.js';
+import { coerceAgorot } from './currency.js';
 import {
   buildCommitmentRuntime,
   computeCommitmentAttention,
@@ -281,20 +283,20 @@ function startOfLookbackRange(targetDate, months) {
   return target.toISOString().slice(0, 10);
 }
 
-function coerceNumber(value, fallback = 0) {
-  return Number.isFinite(Number(value)) ? Number(value) : fallback;
-}
 
-function roundCurrency(value) {
-  return Number(Number(value || 0).toFixed(2));
-}
 
 export function lessonHasInstructorCompensation(participants = [], policies = null) {
   return (participants || []).some((participant) => shouldParticipantTriggerInstructorCompensation(participant, policies));
 }
 
+/**
+ * Compute instructor payout for a single lesson in agorot.
+ * @param {object} instance - lesson instance with duration_minutes
+ * @param {number} rateUsed - hourly rate in agorot
+ * @returns {number} payout in agorot
+ */
 export function computeLessonInstructorPayoutAmount(instance, rateUsed) {
-  return roundCurrency(Number(rateUsed || 0) * (Number(instance?.duration_minutes || 0) / 60));
+  return Math.round(coerceAgorot(rateUsed) * (Number(instance?.duration_minutes || 0) / 60));
 }
 
 function groupRecordsByDate(records = []) {
@@ -306,8 +308,8 @@ function groupRecordsByDate(records = []) {
       grouped.set(dateKey, { amount: 0, hours: 0 });
     }
     const bucket = grouped.get(dateKey);
-    bucket.amount += coerceNumber(record?.amount, 0);
-    bucket.hours += coerceNumber(record?.hours, 0);
+    bucket.amount += coerceAgorot(record?.amount);
+    bucket.hours += (Number(record?.hours) || 0);
   }
   return grouped;
 }
@@ -365,7 +367,8 @@ export function resolveLeaveDayValue({
     const workingDays = countWorkingDaysInRange(resolveEmployeeWorkingDays(employee, profile), monthStart, monthEnd);
     const monthlySalary = Number(employee?.monthly_salary_amount);
     if (Number.isFinite(monthlySalary) && monthlySalary > 0 && workingDays > 0) {
-      return monthlySalary / workingDays;
+      // Both values are in agorot — round to nearest agora for per-day rate
+      return Math.round(monthlySalary / workingDays);
     }
     return 0;
   }
@@ -379,7 +382,7 @@ export function resolveLeaveDayValue({
     ...(attendanceRecords || []).map((row) => ({
       date: row.attendance_date,
       amount: row.worked_minutes && Number.isFinite(Number(employee?.current_rate))
-        ? (Number(row.worked_minutes) / 60) * Number(employee.current_rate)
+        ? Math.round((Number(row.worked_minutes) / 60) * coerceAgorot(employee.current_rate))
         : 0,
       hours: row.worked_minutes ? Number(row.worked_minutes) / 60 : 0,
     })),
@@ -387,11 +390,11 @@ export function resolveLeaveDayValue({
 
   const baseValue = computeAverageDayValue(historicalRecords, targetDate, leavePayPolicy.lookback_months || 3);
   if (method !== 'legal' || !leavePayPolicy.legal_allow_12m_if_better) {
-    return roundCurrency(baseValue);
+    return Math.round(baseValue);
   }
 
   const twelveMonth = computeAverageDayValue(historicalRecords, targetDate, 12);
-  return roundCurrency(Math.max(baseValue, twelveMonth));
+  return Math.round(Math.max(baseValue, twelveMonth));
 }
 
 export function buildLeaveDayRows({
@@ -776,7 +779,7 @@ export async function fetchCommitmentsWithBalances(tenantClient, filters = {}) {
       entriesByCommitment.set(row.commitment_id, []);
     }
     entriesByCommitment.get(row.commitment_id).push(row);
-    const amt = coerceNumber(row.amount, 0);
+    const amt = coerceAgorot(row.amount);
     if (row.transaction_type === 'CREDIT') {
       creditSums.set(row.commitment_id, (creditSums.get(row.commitment_id) || 0) + amt);
     } else {
@@ -787,10 +790,10 @@ export async function fetchCommitmentsWithBalances(tenantClient, filters = {}) {
   const enrichedCommitments = await attachHmoContextToCommitments(tenantClient, commitments || []);
 
   return enrichedCommitments.map((commitment) => {
-    const credits = roundCurrency(creditSums.get(commitment.id) || 0);
-    const debits = roundCurrency(debitSums.get(commitment.id) || 0);
+    const credits = coerceAgorot(creditSums.get(commitment.id));
+    const debits = coerceAgorot(debitSums.get(commitment.id));
     const consumedAmount = debits;
-    const remainingAmount = roundCurrency(credits - debits);
+    const remainingAmount = credits - debits;
     const runtime = buildCommitmentRuntime(commitment, entriesByCommitment.get(commitment.id) || []);
     return {
       ...commitment,

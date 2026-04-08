@@ -1,3 +1,4 @@
+// @ts-check
 /* eslint-env node */
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
@@ -311,6 +312,9 @@ export default async function (context, req) {
     }
     const resolvedClientProfileId = clientProfileId;
 
+    const idempotencyKey = normalizeString(body?.idempotency_key) || null;
+    const metadataBase = body?.metadata && typeof body.metadata === 'object' ? body.metadata : {};
+
     const payload = {
       client_profile_id: resolvedClientProfileId,
       student_id: studentId,
@@ -324,13 +328,26 @@ export default async function (context, req) {
       notes: notes || null,
       updated_at: new Date().toISOString(),
       metadata: {
-        ...(body?.metadata && typeof body.metadata === 'object' ? body.metadata : {}),
+        ...metadataBase,
         effective_date: effectiveDate || null,
         transfer_ref: normalizeString(body?.transfer_ref) || null,
+        ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
       },
     };
 
     if (method === 'POST') {
+      // Idempotency: return existing record if the same key was already processed
+      if (idempotencyKey) {
+        const { data: existing } = await tenantClient
+          .from('ledger_transactions')
+          .select('id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, invoice_id, invoice_link, notes, created_at, updated_at, metadata')
+          .filter('metadata->>idempotency_key', 'eq', idempotencyKey)
+          .maybeSingle();
+        if (existing) {
+          return respond(context, 200, existing);
+        }
+      }
+
       payload.created_at = new Date().toISOString();
       const { data, error } = await tenantClient
         .from('ledger_transactions')

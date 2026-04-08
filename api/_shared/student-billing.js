@@ -1,3 +1,4 @@
+// @ts-check
 /* eslint-env node */
 import { randomUUID } from 'node:crypto';
 import {
@@ -6,6 +7,7 @@ import {
   loadFinancePolicies,
   toDateKey,
 } from './employee-finance.js';
+import { toAgorot, coerceAgorot } from './currency.js';
 import {
   attachHmoContextToCommitments,
   ensureSystemManagedHmoCommitment,
@@ -34,13 +36,6 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function coerceNumber(value, fallback = 0) {
-  return Number.isFinite(Number(value)) ? Number(value) : fallback;
-}
-
-function roundCurrency(value) {
-  return Number(Number(value || 0).toFixed(2));
-}
 
 function buildFullName(row) {
   return [row?.first_name, row?.middle_name, row?.last_name].filter(Boolean).join(' ').trim();
@@ -126,7 +121,7 @@ async function loadServicesMap(tenantClient, serviceIds = []) {
       service_name: normalizeString(row?.name) || 'שירות',
       default_customer_charge_amount: row?.default_customer_charge_amount == null
         ? null
-        : roundCurrency(Number(row.default_customer_charge_amount)),
+        : coerceAgorot(row.default_customer_charge_amount),
     }]));
 }
 
@@ -253,7 +248,8 @@ export function buildBillingDecision({ participant, instance, commitment, polici
   );
 
   if (shouldPreserveStoredCharge) {
-    const preservedChargeAmount = roundCurrency(Number(participant.price_charged));
+    const preservedChargeAmount = coerceAgorot(participant.price_charged);
+    const preservedInsurerClaim = coerceAgorot(storedPricingBreakdown?.insurer_claim_amount);
     return {
       shouldCharge: true,
       chargeAmount: preservedChargeAmount,
@@ -261,7 +257,7 @@ export function buildBillingDecision({ participant, instance, commitment, polici
         eligible: true,
         covered_service_id: storedPricingBreakdown?.covered_service_id || instance?.service_id || null,
         student_charge_amount: preservedChargeAmount,
-        insurer_claim_amount: roundCurrency(storedPricingBreakdown?.insurer_claim_amount ?? 0),
+        insurer_claim_amount: preservedInsurerClaim,
         metadata: storedPricingBreakdown,
       },
       billingStatus: 'charged',
@@ -272,7 +268,7 @@ export function buildBillingDecision({ participant, instance, commitment, polici
         synced_at: syncedAt,
         charge_amount: preservedChargeAmount,
         student_charge_amount: preservedChargeAmount,
-        insurer_claim_amount: roundCurrency(storedPricingBreakdown?.insurer_claim_amount ?? 0),
+        insurer_claim_amount: preservedInsurerClaim,
         billing_status: 'charged',
         policy_allowed: true,
         requires_attention: false,
@@ -387,7 +383,7 @@ export function buildDirectClientBillingDecision({
   );
 
   if (shouldPreserveStoredCharge) {
-    const preservedChargeAmount = roundCurrency(Number(participant.price_charged));
+    const preservedChargeAmount = coerceAgorot(participant.price_charged);
     return {
       shouldCharge: true,
       chargeAmount: preservedChargeAmount,
@@ -423,7 +419,7 @@ export function buildDirectClientBillingDecision({
   let chargeAmount = null;
   let requiresAttention = false;
   const directClientChargeOverride = Number.isFinite(Number(participant?.metadata?.direct_client_charge_amount_override))
-    ? roundCurrency(Number(participant.metadata.direct_client_charge_amount_override))
+    ? coerceAgorot(participant.metadata.direct_client_charge_amount_override)
     : null;
 
   if (!RESOLVED_PARTICIPANT_STATUSES.has(participantStatus)) {
@@ -445,7 +441,7 @@ export function buildDirectClientBillingDecision({
   } else {
     billingStatus = 'charged';
     billingReason = 'direct_client_charge';
-    chargeAmount = roundCurrency(Number(service.default_customer_charge_amount));
+    chargeAmount = coerceAgorot(service.default_customer_charge_amount);
   }
 
   return {
@@ -717,7 +713,7 @@ function buildTransferGroups({ commitments = [], entries = [], studentId = '' } 
       source_entry: entry,
       target_commitments: [],
       created_at: entry.effective_date || entry.metadata?.effective_date || entry.created_at || null,
-      amount: roundCurrency(coerceNumber(entry.amount_charged ?? entry.amount, 0)),
+      amount: coerceAgorot(entry.amount_charged ?? entry.amount),
     });
   }
 
@@ -731,7 +727,7 @@ function buildTransferGroups({ commitments = [], entries = [], studentId = '' } 
       source_entry: null,
       target_commitments: [],
       created_at: commitment.created_at || null,
-      amount: roundCurrency(coerceNumber(commitment.total_amount, 0)),
+      amount: coerceAgorot(commitment.total_amount),
     };
 
     existing.target_commitments.push(commitment);
@@ -754,25 +750,25 @@ function buildTransferGroups({ commitments = [], entries = [], studentId = '' } 
 }
 
 function buildSnapshotSummary({ commitments = [], billingQueue = [], lessonHistory = [], entries = [], transfers = [] } = {}) {
-  const totalCommitted = roundCurrency(commitments.reduce((sum, row) => sum + coerceNumber(row.total_amount, 0), 0));
-  const totalConsumed = roundCurrency(commitments.reduce((sum, row) => sum + coerceNumber(row.consumed_amount, 0), 0));
-  const totalRemaining = roundCurrency(commitments.reduce((sum, row) => sum + coerceNumber(row.remaining_amount, 0), 0));
+  const totalCommitted = commitments.reduce((sum, row) => sum + coerceAgorot(row.total_amount), 0);
+  const totalConsumed  = commitments.reduce((sum, row) => sum + coerceAgorot(row.consumed_amount), 0);
+  const totalRemaining = commitments.reduce((sum, row) => sum + coerceAgorot(row.remaining_amount), 0);
   const activeCommitments = commitments.filter((row) => row.is_active !== false);
   const lowBalanceCount = commitments.filter((row) => row.attention?.low_balance).length;
   const expiringSoonCount = commitments.filter((row) => row.attention?.expiring_soon).length;
   const manualEntryCount = entries.filter((row) => row.usage_type === 'manual_adjustment' || row.usage_type === 'manual_topup' || row.source_type === 'adjustment').length;
-  const studentChargedAmount = roundCurrency(lessonHistory.reduce(
-    (sum, row) => sum + coerceNumber(row?.pricing_breakdown?.student_charge_amount ?? row?.resolved_charge_amount ?? row?.price_charged, 0),
+  const studentChargedAmount = lessonHistory.reduce(
+    (sum, row) => sum + coerceAgorot(row?.pricing_breakdown?.student_charge_amount ?? row?.resolved_charge_amount ?? row?.price_charged),
     0,
-  ));
-  const insurerClaimAmount = roundCurrency(lessonHistory.reduce(
-    (sum, row) => sum + coerceNumber(row?.pricing_breakdown?.insurer_claim_amount, 0),
+  );
+  const insurerClaimAmount = lessonHistory.reduce(
+    (sum, row) => sum + coerceAgorot(row?.pricing_breakdown?.insurer_claim_amount),
     0,
-  ));
-  const pendingInsurerClaimAmount = roundCurrency(commitments.reduce(
-    (sum, row) => sum + coerceNumber(row?.runtime?.hmo?.pending_claim_amount, 0),
+  );
+  const pendingInsurerClaimAmount = commitments.reduce(
+    (sum, row) => sum + coerceAgorot(row?.runtime?.hmo?.pending_claim_amount),
     0,
-  ));
+  );
 
   return {
     total_committed: totalCommitted,
@@ -921,7 +917,12 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
   const syncedAt = new Date().toISOString();
   let updatedParticipants = 0;
   const attentionRequired = [];
+  // batchEntries is sent in one RPC call for atomic ledger + price_charged + pricing_breakdown
+  const batchEntries = [];
+  // attendanceUpdates is a separate non-critical pass (idempotent, not part of billing atomicity)
+  const attendanceUpdates = [];
 
+  // Phase 1: resolve commitments and build billing decisions (read-only except commitment assignment)
   for (const participant of participants || []) {
     const commitment = await resolveParticipantCommitmentForSync(tenantClient, {
       participant,
@@ -945,83 +946,76 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
           syncedAt,
         });
 
-    let lessonEntryId = null;
-    if (decision.shouldCharge) {
-      lessonEntryId = await upsertLessonLedgerEntry(tenantClient, {
-        client_profile_id: participant.client_profile_id,
-        student_id: participant.student_id,
-        commitment_id: commitment?.id || null,
-        transaction_type: 'DEBIT',
-        usage_type: decision.usageType || 'standard',
-        amount: decision.chargeAmount,
-        source_ref: participant.id,
-        notes: null,
-        metadata: {
-          participant_status: normalizeString(participant.participant_status).toLowerCase(),
-          lesson_instance_id: lessonInstanceId,
-          lesson_service_id: instance.service_id,
-          effective_date: toDateKey(instance.datetime_start),
-          billing_status: decision.billingStatus,
-          billing_reason: decision.billingReason,
-          covered_service_id: decision.coverage?.covered_service_id || null,
-          student_charge_amount: decision.coverage?.student_charge_amount ?? null,
-          insurer_claim_amount: decision.coverage?.insurer_claim_amount ?? null,
-          ...(decision.coverage?.metadata || {}),
-        },
+    // Amount is already in agorot (read from DB). The RPC casts it to integer.
+    batchEntries.push({
+      participant_id:    participant.id,
+      client_profile_id: participant.client_profile_id || null,
+      student_id:        participant.student_id || null,
+      commitment_id:     commitment?.id || null,
+      should_charge:     decision.shouldCharge,
+      transaction_type:  'DEBIT',
+      usage_type:        decision.usageType || 'standard',
+      amount:            decision.chargeAmount ?? 0,
+      source_ref:        participant.id,
+      // lesson_entry_id is omitted; the ledger entry is always findable via source_ref = participant_id
+      pricing_breakdown: decision.pricingBreakdown || null,
+      notes:             null,
+    });
+
+    if (participant.participant_status !== 'scheduled') {
+      attendanceUpdates.push({
+        id:                     participant.id,
+        attendance_confirmed_at: participant.attendance_confirmed_at || syncedAt,
+        attendance_confirmed_by: actorUserId || null,
       });
-    } else {
-      await deleteLessonLedgerEntry(tenantClient, participant.id);
     }
 
-    const pricingBreakdown = {
-      ...decision.pricingBreakdown,
-      lesson_entry_id: lessonEntryId,
-    };
-
-    const participantPayload = {
-      commitment_id: commitment?.id || null,
-      price_charged: decision.chargeAmount,
-      pricing_breakdown: pricingBreakdown,
-      attendance_confirmed_at: participant.participant_status !== 'scheduled'
-        ? (participant.attendance_confirmed_at || syncedAt)
-        : participant.attendance_confirmed_at,
-      attendance_confirmed_by: participant.participant_status !== 'scheduled'
-        ? (actorUserId || null)
-        : null,
-    };
-
-    const { error: updateError } = await tenantClient
-      .from('lesson_participants')
-      .update(participantPayload)
-      .eq('id', participant.id);
-
-    if (updateError) {
-      throw updateError;
-    }
-
-    updatedParticipants += 1;
-
-    // Collect participants that need attention (e.g. no commitment / invalid commitment)
-    // but are in a resolved status that should normally be billed.
     if (decision.requiresAttention) {
       const pStatus = normalizeString(participant.participant_status).toLowerCase();
       if (RESOLVED_PARTICIPANT_STATUSES.has(pStatus)) {
         attentionRequired.push({
-          participant_id: participant.id,
+          participant_id:   participant.id,
           client_profile_id: participant.client_profile_id || null,
-          student_id: participant.student_id,
-          billing_status: decision.billingStatus,
-          billing_reason: decision.billingReason,
+          student_id:        participant.student_id,
+          billing_status:    decision.billingStatus,
+          billing_reason:    decision.billingReason,
         });
       }
     }
   }
 
+  // Phase 2: atomically write ledger entries + price_charged + pricing_breakdown via RPC
+  if (batchEntries.length > 0) {
+    const { data: rpcResult, error: rpcError } = await tenantClient.rpc(
+      'batch_sync_lesson_ledger_entries',
+      {
+        p_lesson_instance_id: lessonInstanceId,
+        p_actor_user_id:      actorUserId || null,
+        p_entries:            batchEntries,
+      },
+    );
+    if (rpcError) {
+      throw rpcError;
+    }
+    updatedParticipants = rpcResult?.updated ?? batchEntries.length;
+  }
+
+  // Phase 3: update attendance confirmation fields (non-atomic — idempotent and safe to retry)
+  for (const upd of attendanceUpdates) {
+    await tenantClient
+      .from('lesson_participants')
+      .update({
+        attendance_confirmed_at: upd.attendance_confirmed_at,
+        attendance_confirmed_by: upd.attendance_confirmed_by,
+      })
+      .eq('id', upd.id);
+  }
+
   return {
-    lesson_instance_id: lessonInstanceId,
-    billing_synced: true,
+    lesson_instance_id:  lessonInstanceId,
+    billing_synced:      true,
     updated_participants: updatedParticipants,
-    attention_required: attentionRequired,
+    attention_required:  attentionRequired,
   };
 }
 
@@ -1101,6 +1095,23 @@ export async function clearLessonParticipantCommitment(tenantClient, {
   return { participant: refreshed };
 }
 
+/**
+ * Transfer a balance from one commitment to a new target commitment.
+ * All three DB operations (new commitment + source DEBIT + target CREDIT)
+ * execute inside a single Postgres transaction via the atomic RPC.
+ *
+ * @param {object} tenantClient - Supabase client
+ * @param {object} params
+ * @param {string} params.sourceCommitmentId
+ * @param {number} params.amount - transfer amount in shekel (converted to agorot internally)
+ * @param {string} [params.targetStudentId]
+ * @param {string} [params.targetServiceId]
+ * @param {string} [params.targetCommitmentType]
+ * @param {number|null} [params.targetDefaultChargeAmount] - in shekel
+ * @param {string|null} [params.expiresAt]
+ * @param {string} [params.notes]
+ * @param {string|null} [params.actorUserId]
+ */
 export async function createCommitmentTransfer(tenantClient, {
   sourceCommitmentId,
   amount,
@@ -1126,11 +1137,13 @@ export async function createCommitmentTransfer(tenantClient, {
     return { error: 'source_commitment_not_found' };
   }
 
-  const transferAmount = roundCurrency(Number(amount));
-  if (!Number.isFinite(transferAmount) || transferAmount <= 0) {
+  // Convert shekel input to agorot for all comparisons and DB writes
+  const transferAmountAgorot = toAgorot(amount);
+  if (transferAmountAgorot <= 0) {
     return { error: 'invalid_transfer_amount' };
   }
-  if (transferAmount > roundCurrency(coerceNumber(sourceWithBalance.remaining_amount, 0))) {
+  const remainingAgorot = coerceAgorot(sourceWithBalance.remaining_amount, 0);
+  if (transferAmountAgorot > remainingAgorot) {
     return { error: 'transfer_amount_exceeds_remaining_balance' };
   }
 
@@ -1138,9 +1151,13 @@ export async function createCommitmentTransfer(tenantClient, {
   const targetStudent = normalizeString(targetStudentId) || sourceCommitment.student_id;
   const targetService = normalizeString(targetServiceId) || sourceCommitment.service_id;
   const normalizedCommitmentType = normalizeCommitmentType(targetCommitmentType) || 'manual_credit';
-  const resolvedDefaultChargeAmount = targetDefaultChargeAmount === null || targetDefaultChargeAmount === ''
-    ? (sourceCommitment.default_charge_amount ?? null)
-    : Number(targetDefaultChargeAmount);
+
+  // default_charge_amount: prefer explicit override (shekel → agorot), fall back to source
+  const resolvedDefaultChargeAgorot =
+    targetDefaultChargeAmount === null || targetDefaultChargeAmount === ''
+      ? (sourceCommitment.default_charge_amount ?? 0)  // already agorot in DB
+      : toAgorot(targetDefaultChargeAmount);
+
   const resolvedExpiresAt = normalizeString(expiresAt) || sourceCommitment.expires_at || null;
   const trimmedNotes = normalizeString(notes) || null;
 
@@ -1153,109 +1170,42 @@ export async function createCommitmentTransfer(tenantClient, {
   if (normalizedCommitmentType === 'hmo') {
     return { error: 'hmo_commitments_managed_via_authorizations' };
   }
-  if (resolvedDefaultChargeAmount !== null && (!Number.isFinite(Number(resolvedDefaultChargeAmount)) || Number(resolvedDefaultChargeAmount) < 0)) {
+  if (resolvedDefaultChargeAgorot < 0) {
     return { error: 'invalid_target_default_charge_amount' };
   }
 
-  const targetCommitmentPayload = {
-    student_id: targetStudent,
-    service_id: targetService,
-    commitment_type: normalizedCommitmentType,
-    total_amount: transferAmount,
-    default_charge_amount: resolvedDefaultChargeAmount === null ? null : roundCurrency(Number(resolvedDefaultChargeAmount)),
-    transfer_ref: transferRef,
-    notes: trimmedNotes,
-    is_active: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    expires_at: resolvedExpiresAt || null,
-    metadata: {
-      transfer: {
-        source_commitment_id: sourceCommitment.id,
-        created_by: actorUserId || null,
-      },
+  const { data: rpcResult, error: rpcError } = await tenantClient.rpc(
+    'create_commitment_transfer_atomic',
+    {
+      p_source_commitment_id:   normalizedSourceCommitmentId,
+      p_transfer_amount:        transferAmountAgorot,
+      p_transfer_ref:           transferRef,
+      p_target_student_id:      targetStudent,
+      p_target_service_id:      targetService,
+      p_target_commitment_type: normalizedCommitmentType,
+      p_target_default_charge:  resolvedDefaultChargeAgorot,
+      p_target_expires_at:      resolvedExpiresAt,
+      p_target_notes:           trimmedNotes,
+      p_actor_user_id:          actorUserId || null,
     },
-  };
+  );
 
-  const { data: targetCommitment, error: targetCommitmentError } = await tenantClient
-    .from('commitments')
-    .insert(targetCommitmentPayload)
-    .select('id, student_id, service_id, commitment_type, total_amount, default_charge_amount, transfer_ref, notes, is_active, created_at, updated_at, expires_at, metadata')
-    .single();
-
-  if (targetCommitmentError) {
-    throw targetCommitmentError;
-  }
-
-  const sourceDebitPayload = {
-    student_id: sourceCommitment.student_id,
-    commitment_id: sourceCommitment.id,
-    transaction_type: 'DEBIT',
-    usage_type: 'manual_adjustment',
-    amount: transferAmount,
-    source_ref: null,
-    notes: trimmedNotes,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    metadata: {
-      transfer_ref: transferRef,
-      effective_date: toDateKey(new Date()),
-      target_commitment_id: targetCommitment.id,
-      target_student_id: targetCommitment.student_id,
-      created_by: actorUserId || null,
-    },
-  };
-
-  const { data: sourceEntry, error: sourceEntryError } = await tenantClient
-    .from('ledger_transactions')
-    .insert(sourceDebitPayload)
-    .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, metadata')
-    .single();
-
-  if (sourceEntryError) {
-    await tenantClient
-      .from('commitments')
-      .delete()
-      .eq('id', targetCommitment.id);
-    throw sourceEntryError;
-  }
-
-  const targetCreditPayload = {
-    student_id: targetCommitment.student_id,
-    commitment_id: targetCommitment.id,
-    transaction_type: 'CREDIT',
-    usage_type: 'transfer_received',
-    amount: transferAmount,
-    source_ref: null,
-    notes: trimmedNotes,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    metadata: {
-      transfer_ref: transferRef,
-      effective_date: toDateKey(new Date()),
-      source_commitment_id: sourceCommitment.id,
-      source_student_id: sourceCommitment.student_id,
-      created_by: actorUserId || null,
-    },
-  };
-
-  const { error: targetCreditError } = await tenantClient
-    .from('ledger_transactions')
-    .insert(targetCreditPayload);
-
-  if (targetCreditError) {
-    throw targetCreditError;
+  if (rpcError) {
+    // Map Postgres RAISE EXCEPTION messages to structured error codes
+    const msg = rpcError.message || '';
+    if (msg.includes('source_commitment_not_found')) return { error: 'source_commitment_not_found' };
+    if (msg.includes('target_student_not_found'))    return { error: 'target_student_not_found' };
+    if (msg.includes('invalid_transfer_amount'))     return { error: 'invalid_transfer_amount' };
+    if (msg.includes('invalid_commitment_type'))     return { error: 'invalid_commitment_type' };
+    throw rpcError;
   }
 
   return {
-    transfer_ref: transferRef,
-    source_entry: {
-      ...sourceEntry,
-      transfer_ref: transferRef,
-      amount_charged: transferAmount,
-      effective_date: toDateKey(new Date()),
-    },
-    target_commitment: targetCommitment,
+    transfer_ref:           transferRef,
+    target_commitment_id:  rpcResult?.target_commitment_id || null,
+    source_debit_id:        rpcResult?.source_debit_id || null,
+    target_credit_id:       rpcResult?.target_credit_id || null,
+    effective_date:         toDateKey(new Date()),
   };
 }
 

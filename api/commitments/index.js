@@ -1,3 +1,4 @@
+// @ts-check
 /* eslint-env node */
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
@@ -120,6 +121,9 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid_default_charge_amount' });
     }
 
+    const idempotencyKey = normalizeString(body?.idempotency_key) || null;
+    const metadataBase = body?.metadata && typeof body.metadata === 'object' ? body.metadata : {};
+
     const payload = {
       student_id: studentId,
       service_id: serviceId,
@@ -131,10 +135,23 @@ export default async function (context, req) {
       is_active: body?.is_active !== undefined ? Boolean(body.is_active) : true,
       updated_at: new Date().toISOString(),
       expires_at: normalizeString(body?.expires_at) || null,
-      metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+      metadata: idempotencyKey ? { ...metadataBase, idempotency_key: idempotencyKey } : metadataBase,
     };
 
     if (method === 'POST') {
+      // Idempotency: return existing record if the same key was already processed
+      if (idempotencyKey) {
+        const { data: existing } = await tenantClient
+          .from('commitments')
+          .select('*')
+          .filter('metadata->>idempotency_key', 'eq', idempotencyKey)
+          .eq('student_id', studentId)
+          .maybeSingle();
+        if (existing) {
+          return respond(context, 200, existing);
+        }
+      }
+
       payload.created_at = new Date().toISOString();
       const { data, error } = await tenantClient
         .from('commitments')

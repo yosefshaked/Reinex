@@ -1,16 +1,15 @@
+// @ts-check
 /* eslint-env node */
 import { normalizeString } from './org-bff.js';
+import { coerceAgorot } from './currency.js';
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function coerceNumber(value, fallback = 0) {
+/** Coerce a non-money integer count (lessons, etc.) — not for currency values. */
+function coerceCount(value, fallback = 0) {
   return Number.isFinite(Number(value)) ? Number(value) : fallback;
-}
-
-function roundCurrency(value) {
-  return Number(Number(value || 0).toFixed(2));
 }
 
 function normalizeId(value) {
@@ -23,8 +22,8 @@ function normalizeMetadata(metadata) {
 
 function createPackageLine(rawLine, index) {
   const serviceId = normalizeId(rawLine?.service_id);
-  const lessonsCount = Math.max(0, Math.round(coerceNumber(rawLine?.lessons_count, 0)));
-  const chargeAmount = roundCurrency(coerceNumber(rawLine?.charge_amount, 0));
+  const lessonsCount = Math.max(0, Math.round(coerceCount(rawLine?.lessons_count, 0)));
+  const chargeAmount = coerceAgorot(rawLine?.charge_amount);
   if (!serviceId || lessonsCount <= 0 || chargeAmount < 0) {
     return null;
   }
@@ -56,10 +55,10 @@ export function normalizeCommitmentBehavior(commitment) {
   }
 
   if (commitmentType === 'subscription') {
-    const lessonsCount = Math.max(0, Math.round(coerceNumber(metadata?.subscription?.lessons_count, 0)));
+    const lessonsCount = Math.max(0, Math.round(coerceCount(metadata?.subscription?.lessons_count, 0)));
     const chargeAmount = Number.isFinite(Number(metadata?.subscription?.charge_amount))
-      ? roundCurrency(Number(metadata.subscription.charge_amount))
-      : (Number.isFinite(Number(commitment?.default_charge_amount)) ? roundCurrency(Number(commitment.default_charge_amount)) : 0);
+      ? coerceAgorot(metadata.subscription.charge_amount)
+      : coerceAgorot(commitment?.default_charge_amount);
 
     return {
       type: 'subscription',
@@ -91,36 +90,23 @@ export function normalizeCommitmentBehavior(commitment) {
       || providerTrack?.payment_mode
       || metadata?.hmo?.payment_mode,
     ).toLowerCase() || 'partially_paid_by_hmo';
-    const authorizedLessons = Math.max(0, Math.round(coerceNumber(
+    const authorizedLessons = Math.max(0, Math.round(coerceCount(
       authorization?.authorized_lessons ?? metadata?.hmo?.authorized_lessons,
       0,
     )));
-    const customerChargeAmount = Number.isFinite(Number(
+    const rawCustomerCharge =
       authorization?.resolved_customer_charge_amount
       ?? authorization?.customer_charge_amount_override
       ?? providerTrack?.default_customer_charge_amount
-      ?? metadata?.hmo?.customer_charge_amount,
-    ))
-      ? roundCurrency(Number(
-        authorization?.resolved_customer_charge_amount
-        ?? authorization?.customer_charge_amount_override
-        ?? providerTrack?.default_customer_charge_amount
-        ?? metadata?.hmo?.customer_charge_amount,
-      ))
-      : (Number.isFinite(Number(commitment?.default_charge_amount)) ? roundCurrency(Number(commitment.default_charge_amount)) : 0);
-    const insurerClaimAmount = Number.isFinite(Number(
+      ?? metadata?.hmo?.customer_charge_amount
+      ?? commitment?.default_charge_amount;
+    const customerChargeAmount = coerceAgorot(rawCustomerCharge);
+    const rawInsurerClaim =
       authorization?.resolved_insurer_claim_amount
       ?? authorization?.insurer_claim_amount_override
       ?? providerTrack?.default_insurer_claim_amount
-      ?? metadata?.hmo?.insurer_claim_amount,
-    ))
-      ? roundCurrency(Number(
-        authorization?.resolved_insurer_claim_amount
-        ?? authorization?.insurer_claim_amount_override
-        ?? providerTrack?.default_insurer_claim_amount
-        ?? metadata?.hmo?.insurer_claim_amount,
-      ))
-      : 0;
+      ?? metadata?.hmo?.insurer_claim_amount;
+    const insurerClaimAmount = coerceAgorot(rawInsurerClaim);
     const workflowNotes = normalizeString(
       authorization?.resolved_workflow_notes
       || authorization?.workflow_notes_override
@@ -173,7 +159,7 @@ function groupLessonUsage(entries = []) {
 
   for (const entry of entries) {
     const txType = normalizeString(entry?.transaction_type).toUpperCase();
-    const amount = coerceNumber(entry?.amount, coerceNumber(entry?.amount_charged, 0));
+    const amount = coerceAgorot(entry?.amount ?? entry?.amount_charged);
 
     if (txType === 'CREDIT') {
       totalCredits += amount;
@@ -201,9 +187,9 @@ function groupLessonUsage(entries = []) {
   }
 
   return {
-    total_credits: roundCurrency(totalCredits),
-    total_debits: roundCurrency(totalDebits),
-    consumed_amount: roundCurrency(totalDebits),
+    total_credits: Math.round(totalCredits),
+    total_debits: Math.round(totalDebits),
+    consumed_amount: Math.round(totalDebits),
     consumed_lessons: consumedLessons,
     usage_by_service: usageByService,
   };
@@ -212,9 +198,9 @@ function groupLessonUsage(entries = []) {
 export function buildCommitmentRuntime(commitment, entries = []) {
   const behavior = normalizeCommitmentBehavior(commitment);
   const usage = groupLessonUsage(entries);
-  const ledgerBalance = roundCurrency(usage.total_credits - usage.total_debits);
+  const ledgerBalance = Math.round(usage.total_credits - usage.total_debits);
   const defaultChargeAmount = Number.isFinite(Number(commitment?.default_charge_amount))
-    ? roundCurrency(Number(commitment.default_charge_amount))
+    ? coerceAgorot(commitment.default_charge_amount)
     : null;
 
   if (behavior.type === 'package') {
@@ -225,9 +211,9 @@ export function buildCommitmentRuntime(commitment, entries = []) {
         ...line,
         consumed_lessons: consumedLessons,
         remaining_lessons: remainingLessons,
-        total_amount: roundCurrency(line.lessons_count * line.charge_amount),
-        consumed_amount: roundCurrency(consumedLessons * line.charge_amount),
-        remaining_amount: roundCurrency(remainingLessons * line.charge_amount),
+        total_amount: line.lessons_count * coerceAgorot(line.charge_amount),
+        consumed_amount: consumedLessons * coerceAgorot(line.charge_amount),
+        remaining_amount: remainingLessons * coerceAgorot(line.charge_amount),
       };
     });
 
@@ -273,7 +259,7 @@ export function buildCommitmentRuntime(commitment, entries = []) {
     const totalLessons = Math.max(0, behavior.hmo?.authorized_lessons || 0);
     const consumedLessons = usage.consumed_lessons;
     const remainingLessons = Math.max(0, totalLessons - consumedLessons);
-    const pendingClaimAmount = roundCurrency(consumedLessons * coerceNumber(behavior.hmo?.insurer_claim_amount, 0));
+    const pendingClaimAmount = consumedLessons * coerceAgorot(behavior.hmo?.insurer_claim_amount);
 
     return {
       type: behavior.type,
@@ -350,7 +336,7 @@ export function resolveCommitmentCoverage(commitment, serviceId, runtime = null)
     return {
       eligible: true,
       covered_service_id: normalizedServiceId,
-      student_charge_amount: roundCurrency(resolvedRuntime.subscription?.charge_amount ?? resolvedRuntime.default_charge_amount ?? 0),
+      student_charge_amount: coerceAgorot(resolvedRuntime.subscription?.charge_amount ?? resolvedRuntime.default_charge_amount),
       insurer_claim_amount: 0,
       metadata: {
         coverage_type: 'subscription',
@@ -367,7 +353,7 @@ export function resolveCommitmentCoverage(commitment, serviceId, runtime = null)
     }
 
     const paymentMode = normalizeString(resolvedRuntime.hmo?.payment_mode).toLowerCase();
-    const baseStudentCharge = roundCurrency(resolvedRuntime.hmo?.customer_charge_amount ?? resolvedRuntime.default_charge_amount ?? 0);
+    const baseStudentCharge = coerceAgorot(resolvedRuntime.hmo?.customer_charge_amount ?? resolvedRuntime.default_charge_amount);
     const studentChargeAmount = paymentMode === 'fully_paid_by_hmo'
       ? 0
       : baseStudentCharge;
@@ -376,7 +362,7 @@ export function resolveCommitmentCoverage(commitment, serviceId, runtime = null)
       eligible: true,
       covered_service_id: normalizedServiceId,
       student_charge_amount: studentChargeAmount,
-      insurer_claim_amount: roundCurrency(resolvedRuntime.hmo?.insurer_claim_amount ?? 0),
+      insurer_claim_amount: coerceAgorot(resolvedRuntime.hmo?.insurer_claim_amount),
       metadata: {
         coverage_type: 'hmo',
         hmo_provider_name: resolvedRuntime.hmo?.provider_name || 'גורם מממן',
@@ -393,7 +379,7 @@ export function resolveCommitmentCoverage(commitment, serviceId, runtime = null)
   return {
     eligible: true,
     covered_service_id: normalizedServiceId || normalizeId(commitment?.service_id),
-    student_charge_amount: roundCurrency(resolvedRuntime.default_charge_amount ?? 0),
+    student_charge_amount: coerceAgorot(resolvedRuntime.default_charge_amount),
     insurer_claim_amount: 0,
     metadata: {
       coverage_type: 'manual_credit',
@@ -409,12 +395,15 @@ export function computeCommitmentAttention(commitment, runtime) {
     ? Math.ceil((expiryDate.getTime() - now.getTime()) / 86400000) <= 30 && expiryDate.getTime() >= now.getTime()
     : false;
   const remainingLessons = runtime?.remaining_lessons;
+  const remainingAmountAgorot = coerceAgorot(runtime?.remaining_amount);
+  const defaultChargeAgorot   = coerceAgorot(runtime?.default_charge_amount);
+  const totalAmountAgorot     = coerceAgorot(commitment?.total_amount);
   const lowBalance = Number.isFinite(Number(remainingLessons))
     ? Number(remainingLessons) < 2
-    : roundCurrency(runtime?.remaining_amount ?? 0) > 0 && roundCurrency(runtime?.remaining_amount ?? 0) < roundCurrency((runtime?.default_charge_amount ?? 0) * 2);
+    : remainingAmountAgorot > 0 && remainingAmountAgorot < defaultChargeAgorot * 2;
   const exhausted = Number.isFinite(Number(remainingLessons))
     ? Number(remainingLessons) <= 0 && Number(runtime?.total_authorized_lessons ?? 0) > 0
-    : roundCurrency(runtime?.remaining_amount ?? 0) <= 0 && roundCurrency(commitment?.total_amount ?? 0) > 0;
+    : remainingAmountAgorot <= 0 && totalAmountAgorot > 0;
 
   return {
     expired,
