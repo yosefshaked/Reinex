@@ -142,14 +142,19 @@ function WaitingListBuiltInPreview({ answers, onAnswersChange, readOnly = false 
   );
 }
 
-function SortableCard({ id, selected, onSelect, title, subtitle, badges, children }) {
+function SortableCard({ id, selected, onSelect, title, subtitle, badges, children, stopSelectionPropagation = false }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id });
   return (
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn('rounded-3xl border bg-white p-4 shadow-sm', selected ? 'border-primary/40 ring-2 ring-primary/10' : 'border-slate-200')}
-      onClick={onSelect}
+      onClick={(event) => {
+        if (stopSelectionPropagation) {
+          event.stopPropagation();
+        }
+        onSelect?.(event);
+      }}
     >
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="space-y-1">
@@ -384,6 +389,7 @@ export default function FormBuilderPage() {
                             id={`question:${question.id}`}
                             selected={selected.type === 'question' && selected.id === question.id}
                             onSelect={() => setSelected({ type: 'question', id: question.id })}
+                            stopSelectionPropagation
                             title={question.label}
                             subtitle={question.description}
                             badges={<div className="flex flex-wrap gap-1"><Badge variant="secondary">{QUESTION_TYPE_DEFINITIONS.find((item) => item.type === question.type)?.label || 'שאלה'}</Badge>{question.required ? <Badge variant="outline" className="text-red-600">חובה</Badge> : null}{visibilityRules.some((group) => group.target_type === 'question' && group.target_id === question.id) ? <Badge variant="outline">מותנה</Badge> : null}{alertRules.some((rule) => rule.question_id === question.id) ? <Badge variant="outline">דגלים</Badge> : null}</div>}
