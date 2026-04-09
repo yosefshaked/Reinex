@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 
 const CALENDAR_DATE_KEY = 'reinex_calendar_date';
 const CALENDAR_VIEW_KEY = 'reinex_calendar_view';
+const CALENDAR_LAST_DAY_KEY = 'reinex_calendar_last_day';
 
 export default function CalendarPage() {
   const calendarNavigationRef = useRef(null);
@@ -80,6 +81,30 @@ export default function CalendarPage() {
   const setViewMode = (mode) => {
     setViewModeState((current) => (current === mode ? current : mode));
   };
+
+  useEffect(() => {
+    if (viewMode === 'day' && typeof window !== 'undefined') {
+      sessionStorage.setItem(CALENDAR_LAST_DAY_KEY, currentDate);
+    }
+  }, [currentDate, viewMode]);
+
+  const handleSwitchToDay = useCallback(() => {
+    if (viewMode === 'week') {
+      const weekStart = toLocalDateString(getWeekStartDate(currentDate));
+      const weekEnd = toLocalDateString(addLocalDays(weekStart, 6));
+      const lastDay = typeof window !== 'undefined' ? sessionStorage.getItem(CALENDAR_LAST_DAY_KEY) : null;
+      if (lastDay && weekStart && weekEnd && lastDay >= weekStart && lastDay <= weekEnd) {
+        setCurrentDate(lastDay);
+      } else {
+        const today = getTodayLocalDateString();
+        if (weekStart && weekEnd && today >= weekStart && today <= weekEnd) {
+          setCurrentDate(today);
+        }
+        // else: keep currentDate as-is (week start = first day of week)
+      }
+    }
+    setViewMode('day');
+  }, [currentDate, viewMode]);
 
   const handleCalendarNavigate = useCallback((action) => {
     const calendarNavigation = calendarNavigationRef.current;
@@ -300,7 +325,7 @@ export default function CalendarPage() {
               <Button
                 variant={viewMode === 'day' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setViewMode('day')}
+                onClick={handleSwitchToDay}
               >
                 יום
               </Button>

@@ -884,7 +884,7 @@ export default function ReinexFullCalendar({
           plugins={[resourceTimeGridPlugin, timeGridPlugin, interactionPlugin]}
           initialView={initialCalendarViewRef.current}
           initialDate={initialCalendarDateRef.current}
-          schedulerLicenseKey={schedulerLicenseKey || 'GPL-v3'}
+          schedulerLicenseKey={schedulerLicenseKey || 'GPL-My-Project-Is-Open-Source'}
           locale={heLocale}
           direction="rtl"
           businessHours
