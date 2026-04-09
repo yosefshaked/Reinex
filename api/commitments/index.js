@@ -15,6 +15,7 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { fetchCommitmentsWithBalances, fetchLessonPendingBillingQueue, isYmdDate } from '../_shared/employee-finance.js';
+import { assertAgorot, assertAgorotNullable } from '../_shared/currency.js';
 
 const MAX_BODY_BYTES = 48 * 1024;
 const COMMITMENT_TYPES = new Set(['package', 'subscription', 'hmo', 'manual_credit']);
@@ -83,8 +84,10 @@ export default async function (context, req) {
     const serviceId = normalizeString(req?.query?.service_id);
     const startDate = normalizeString(req?.query?.start_date);
     const endDate = normalizeString(req?.query?.end_date);
+    const limit = Number(req?.query?.limit) || undefined;
+    const offset = Number(req?.query?.offset) || undefined;
     const [commitments, billingQueue] = await Promise.all([
-      fetchCommitmentsWithBalances(tenantClient, { studentId, serviceId }),
+      fetchCommitmentsWithBalances(tenantClient, { studentId, serviceId, limit, offset }),
       fetchLessonPendingBillingQueue(tenantClient, {
         studentId,
         startDate: isYmdDate(startDate) ? startDate : '',
@@ -103,22 +106,20 @@ export default async function (context, req) {
     const studentId = normalizeNullableId(body?.student_id);
     const serviceId = normalizeString(body?.service_id);
     const commitmentType = normalizeCommitmentType(body?.commitment_type) || 'package';
-    const totalAmount = Number(body?.total_amount);
-    const defaultChargeAmount = body?.default_charge_amount === null || body?.default_charge_amount === ''
-      ? null
-      : Number(body?.default_charge_amount);
+
+    let totalAmount, defaultChargeAmount;
+    try {
+      totalAmount = assertAgorot(body?.total_amount, 'total_amount');
+      defaultChargeAmount = assertAgorotNullable(body?.default_charge_amount, 'default_charge_amount');
+    } catch (err) {
+      return respond(context, 400, { message: err.message });
+    }
 
     if (!studentId) {
       return respond(context, 400, { message: 'missing_student_id' });
     }
     if (!serviceId) {
       return respond(context, 400, { message: 'missing_service_id' });
-    }
-    if (!Number.isFinite(totalAmount) || totalAmount < 0) {
-      return respond(context, 400, { message: 'invalid_total_amount' });
-    }
-    if (defaultChargeAmount !== null && (!Number.isFinite(defaultChargeAmount) || defaultChargeAmount < 0)) {
-      return respond(context, 400, { message: 'invalid_default_charge_amount' });
     }
 
     const idempotencyKey = normalizeString(body?.idempotency_key) || null;
@@ -202,86 +203,42 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'missing_commitment_id' });
     }
 
-    const { data: existingCommitment, error: existingCommitmentError } = await tenantClient
-      .from('commitments')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle();
+    const { error: rpcError } = await tenantClient.rpc(
+      'update_commitment_and_record_delta',
+      {
+        p_commitment_id: id,
+        p_student_id: studentId,
+        p_service_id: serviceId,
+        p_commitment_type: commitmentType,
+        p_total_amount: totalAmount,
+        p_default_charge_amount: defaultChargeAmount,
+        p_transfer_ref: normalizeString(body?.transfer_ref) || null,
+        p_notes: normalizeString(body?.notes) || null,
+        p_is_active: payload.is_active,
+        p_expires_at: payload.expires_at,
+        p_metadata: payload.metadata,
+      },
+    );
 
-    if (existingCommitmentError) {
-      context.log?.error?.('commitments failed to load record before update', { message: existingCommitmentError.message });
-      return respond(context, 500, { message: 'failed_to_load_commitment' });
-    }
-    if (!existingCommitment) {
-      return respond(context, 404, { message: 'commitment_not_found' });
-    }
-
-    const { data, error } = await tenantClient
-      .from('commitments')
-      .update(payload)
-      .eq('id', id)
-      .select('*')
-      .maybeSingle();
-
-    if (error) {
-      context.log?.error?.('commitments failed to update record', { message: error.message });
+    if (rpcError) {
+      const msg = rpcError.message || '';
+      if (msg.includes('commitment_not_found')) {
+        return respond(context, 404, { message: 'commitment_not_found' });
+      }
+      context.log?.error?.('commitments RPC update_commitment_and_record_delta failed', { message: msg });
       return respond(context, 500, { message: 'failed_to_update_commitment' });
     }
-    if (!data) {
-      return respond(context, 404, { message: 'commitment_not_found' });
-    }
 
-    if (existingCommitment && Number.isFinite(totalAmount)) {
-      const oldTotal = Number(existingCommitment.total_amount || 0);
-      const delta = totalAmount - oldTotal;
-      if (delta !== 0) {
-        const deltaPayload = {
-          student_id: data.student_id,
-          commitment_id: data.id,
-          transaction_type: delta > 0 ? 'CREDIT' : 'DEBIT',
-          usage_type: delta > 0 ? 'manual_topup' : 'manual_adjustment',
-          amount: Math.abs(delta),
-          source_ref: null,
-          notes: 'Commitment total_amount updated',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          metadata: { commitment_update: true, old_total: oldTotal, new_total: totalAmount },
-        };
-        const { error: deltaError } = await tenantClient
-          .from('ledger_transactions')
-          .insert(deltaPayload);
+    // Fetch the updated record to return to the client
+    const { data, error } = await tenantClient
+      .from('commitments')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-        if (deltaError) {
-          context.log?.error?.('commitments failed to record total_amount delta in ledger', { message: deltaError.message });
-          const rollbackPayload = {
-            student_id: existingCommitment.student_id,
-            service_id: existingCommitment.service_id,
-            commitment_type: existingCommitment.commitment_type,
-            total_amount: existingCommitment.total_amount,
-            default_charge_amount: existingCommitment.default_charge_amount,
-            transfer_ref: existingCommitment.transfer_ref,
-            notes: existingCommitment.notes,
-            is_active: existingCommitment.is_active,
-            updated_at: existingCommitment.updated_at,
-            expires_at: existingCommitment.expires_at,
-            metadata: existingCommitment.metadata ?? null,
-          };
-
-          const { error: rollbackError } = await tenantClient
-            .from('commitments')
-            .update(rollbackPayload)
-            .eq('id', id);
-
-          if (rollbackError) {
-            context.log?.error?.('commitments failed to rollback commitment after ledger delta failure', {
-              message: rollbackError.message,
-              commitmentId: id,
-            });
-          }
-
-          return respond(context, 500, { message: 'failed_to_record_ledger_delta' });
-        }
-      }
+    if (error) {
+      context.log?.error?.('commitments failed to fetch updated record', { message: error.message });
+      return respond(context, 500, { message: 'failed_to_fetch_updated_commitment' });
     }
 
     return respond(context, 200, data);

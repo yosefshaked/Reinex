@@ -9,6 +9,7 @@ import { normalizeEntityVersion } from './calendar-editing.js';
 import { normalizeString } from './org-bff.js';
 import { buildBillingDecision, buildDirectClientBillingDecision, loadCommitmentsMap } from './student-billing.js';
 import { normalizeLessonInstanceStatus } from './lesson-instance-status.js';
+import { coerceAgorot } from './currency.js';
 
 const LESSON_BILLING_USAGE_TYPES = ['standard', 'double', 'cross_service', 'manual_adjustment', 'manual_topup'];
 const PARTICIPANT_STATUSES = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -22,7 +23,7 @@ class CorrectionValidationError extends Error {
 }
 
 function roundCurrency(value) {
-  return Number(Number(value || 0).toFixed(2));
+  return coerceAgorot(value);
 }
 
 function isPlainObject(value) {
@@ -343,8 +344,8 @@ function buildChargeMap(ledgerRows) {
     const participantRef = normalizeString(row?.source_ref || row?.metadata?.original_participant_id);
     if (!participantRef) continue;
     const signedAmount = normalizeString(row.transaction_type).toUpperCase() === 'CREDIT'
-      ? -Math.abs(Number(row.amount || 0))
-      : Math.abs(Number(row.amount || 0));
+      ? -Math.abs(coerceAgorot(row.amount))
+      : Math.abs(coerceAgorot(row.amount));
     const nextAmount = roundCurrency((map.get(participantRef) || 0) + signedAmount);
     map.set(participantRef, nextAmount);
   }
@@ -393,7 +394,7 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
     ? computeLessonInstructorPayoutAmount(context.instance, originalRate)
     : 0;
   const correctionPayrollDelta = roundCurrency(
-    context.financeAdjustmentRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+    context.financeAdjustmentRows.reduce((sum, row) => sum + coerceAgorot(row.amount), 0),
   );
   const currentPayout = roundCurrency(baseCurrentPayout + correctionPayrollDelta);
   const proposedPayout = shouldInstructorEarn(effectiveInstance, effectiveParticipants, policies)
@@ -450,7 +451,7 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   ]));
 
   const billingDeltaTotal = roundCurrency(
-    participantImpact.reduce((sum, participant) => sum + Number(participant.delta_amount || 0), 0),
+    participantImpact.reduce((sum, participant) => sum + coerceAgorot(participant.delta_amount), 0),
   );
 
   return {

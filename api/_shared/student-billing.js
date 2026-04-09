@@ -30,7 +30,7 @@ const ACTIONABLE_BILLING_STATUSES = new Set([
   'invalid_commitment',
   'pending_service_default_charge_amount',
 ]);
-const BILLING_BREAKDOWN_VERSION = 1;
+export const BILLING_BREAKDOWN_VERSION = 1;
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

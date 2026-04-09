@@ -12,6 +12,11 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useServices } from '@/hooks/useOrgData.js';
 import LedgerInvoiceDialog from '@/features/finance/components/LedgerInvoiceDialog.jsx';
 import { normalizeExternalHttpUrl } from '@/lib/external-links.js';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog.jsx';
+import { coerceAgorot } from '@/lib/currency.js';
 
 function formatCurrency(value) {
   if (value == null || Number.isNaN(Number(value))) return '—';
@@ -104,12 +109,13 @@ export default function ClientBillingWorkspace({ clientProfile }) {
   const [entries, setEntries] = useState([]);
   const [instances, setInstances] = useState([]);
   const [invoiceDialogEntry, setInvoiceDialogEntry] = useState(null);
+  const [deleteEntryId, setDeleteEntryId] = useState(null);
   const [topupForm, setTopupForm] = useState(buildDefaultTopupForm);
 
   const clientProfileId = clientProfile?.id || '';
 
   const balance = useMemo(() => entries.reduce((sum, entry) => {
-    const amount = Number(entry?.amount || 0);
+    const amount = coerceAgorot(entry?.amount);
     return entry?.transaction_type === 'CREDIT' ? sum + amount : sum - amount;
   }, 0), [entries]);
 
@@ -391,7 +397,7 @@ export default function ClientBillingWorkspace({ clientProfile }) {
                       חשבונית
                     </Button>
                     {manualEntryIds.has(entry.id) ? (
-                      <Button type="button" size="sm" variant="outline" onClick={() => handleDeleteEntry(entry.id)} disabled={saving}>
+                      <Button type="button" size="sm" variant="outline" onClick={() => setDeleteEntryId(entry.id)} disabled={saving}>
                         מחק
                       </Button>
                     ) : null}
@@ -450,6 +456,21 @@ export default function ClientBillingWorkspace({ clientProfile }) {
         saving={saving}
         onSave={handleSaveInvoiceFields}
       />
+
+      <AlertDialog open={deleteEntryId != null} onOpenChange={(open) => { if (!open) setDeleteEntryId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>מחיקת תנועה כספית</AlertDialogTitle>
+            <AlertDialogDescription>האם למחוק את התנועה? לא ניתן לבטל פעולה זו.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { handleDeleteEntry(deleteEntryId); setDeleteEntryId(null); }}>
+              מחק
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -49,6 +49,12 @@ function normalizeAuthorizationStatus(value) {
   return HMO_AUTHORIZATION_STATUSES.has(normalized) ? normalized : 'active';
 }
 
+/**
+ * Generates a deterministic UUID from a seed string using MD5.
+ * ⚠️  Do NOT switch to SHA-256 — existing rows in hmo_providers and
+ *     hmo_tracks reference these IDs.  Changing the hash would create
+ *     orphaned duplicates on the next legacy-data upsert.
+ */
 function buildDeterministicUuid(seed) {
   const hex = createHash('md5').update(String(seed || '')).digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
@@ -91,9 +97,7 @@ async function selectHmoProviders(tenantClient, { ids = [], activeOnly = false }
   const normalizedIds = Array.from(new Set((ids || []).map((id) => normalizeString(id)).filter(Boolean)));
   const selectVariants = [
     'id, name, is_active, metadata, created_at, updated_at',
-    'id, name, is_active, metadata',
     'id, name, is_active',
-    'id, name',
   ];
 
   let lastError = null;
@@ -137,9 +141,7 @@ async function selectHmoTracks(tenantClient, { providerIds = [], trackIds = [], 
   const normalizedTrackIds = Array.from(new Set((trackIds || []).map((id) => normalizeString(id)).filter(Boolean)));
   const selectVariants = [
     'id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at',
-    'id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata',
     'id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active',
-    'id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes',
   ];
 
   let lastError = null;
@@ -549,21 +551,19 @@ export async function ensureAuthorizationFromLegacyCommitment(tenantClient, comm
 }
 
 export async function hydrateHmoCommitments(tenantClient, commitments = []) {
-  const hydrated = [];
-  for (const commitment of commitments || []) {
+  const input = commitments || [];
+  const hydrationTasks = input.map((commitment) => {
     if (commitment?.commitment_type === 'hmo' && !normalizeString(commitment?.hmo_authorization_id)) {
-      const authorization = await ensureAuthorizationFromLegacyCommitment(tenantClient, commitment);
-      hydrated.push({
+      return ensureAuthorizationFromLegacyCommitment(tenantClient, commitment).then((authorization) => ({
         ...commitment,
         hmo_provider_id: authorization?.provider_id || commitment.hmo_provider_id || null,
         hmo_provider_track_id: authorization?.provider_track_id || commitment.hmo_provider_track_id || null,
         hmo_authorization_id: authorization?.id || commitment.hmo_authorization_id || null,
-      });
-      continue;
+      }));
     }
-    hydrated.push(commitment);
-  }
-  return hydrated;
+    return Promise.resolve(commitment);
+  });
+  return Promise.all(hydrationTasks);
 }
 
 export async function attachHmoContextToCommitments(tenantClient, commitments = []) {

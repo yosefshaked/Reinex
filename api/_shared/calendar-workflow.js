@@ -4,6 +4,7 @@ import { listDashboardTasks } from './dashboard-tasks.js';
 import { normalizeString } from './org-bff.js';
 import { loadCommitmentsMap } from './student-billing.js';
 import { isPlainObject, readParticipantWorkflowMetadata, shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
+import { coerceAgorot } from './currency.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const LESSON_BILLING_USAGE_TYPES = ['standard', 'double', 'cross_service'];
@@ -15,7 +16,7 @@ function asArray(value) {
 }
 
 function roundCurrency(value) {
-  return Number(Number(value || 0).toFixed(2));
+  return coerceAgorot(value);
 }
 
 function normalizeParticipantWorkflowMetadata(metadata) {
@@ -46,8 +47,8 @@ export function mergeParticipantWorkflowMetadata(existingMetadata, patch = {}) {
 function getParticipantBillingArtifactAmount(ledgerRows) {
   return roundCurrency(asArray(ledgerRows).reduce((sum, row) => {
     const transactionType = normalizeString(row?.transaction_type).toUpperCase();
-    if (transactionType === 'DEBIT') return sum + Number(row?.amount || 0);
-    if (transactionType === 'CREDIT') return sum - Number(row?.amount || 0);
+    if (transactionType === 'DEBIT') return sum + coerceAgorot(row?.amount);
+    if (transactionType === 'CREDIT') return sum - coerceAgorot(row?.amount);
     return sum;
   }, 0));
 }

@@ -68,3 +68,16 @@ export function coerceAgorot(value, fallback = 0) {
   const n = Math.round(Number(value));
   return Number.isFinite(n) ? n : fallback;
 }
+
+/**
+ * Configurable ceilings for financial amounts (all in agorot).
+ * Guards against accidental or malicious extreme values.
+ */
+export const FINANCE_LIMITS = Object.freeze({
+  /** Maximum single payroll adjustment: 100,000 ₪ = 10,000,000 agorot */
+  MAX_ADJUSTMENT_AGOROT: 10_000_000,
+  /** Maximum hourly rate: 5,000 ₪ = 500,000 agorot */
+  MAX_HOURLY_RATE_AGOROT: 500_000,
+  /** Maximum charge amount per lesson: 10,000 ₪ = 1,000,000 agorot */
+  MAX_CHARGE_AMOUNT_AGOROT: 1_000_000,
+});

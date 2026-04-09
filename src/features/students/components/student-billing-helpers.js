@@ -1,3 +1,5 @@
+import { coerceAgorot } from '@/lib/currency.js';
+
 export const COMMITMENT_TYPE_OPTIONS = [
   {
     value: 'package',
@@ -67,7 +69,7 @@ function createId() {
 }
 
 function roundCurrency(value) {
-  return Number(Number(value || 0).toFixed(2));
+  return coerceAgorot(value);
 }
 
 export function createEmptyPackageItem() {
@@ -111,7 +113,7 @@ export function normalizePackageItems(items = []) {
       key: item.id || createId(),
       service_id: item.serviceId || '',
       lessons_count: Number(item.lessonsCount || 0),
-      charge_amount: Number(item.chargeAmount || 0),
+      charge_amount: coerceAgorot(item.chargeAmount),
     }))
     .filter((item) => item.service_id && Number.isFinite(item.lessons_count) && item.lessons_count > 0 && Number.isFinite(item.charge_amount) && item.charge_amount >= 0);
 }
@@ -128,7 +130,7 @@ export function computeCommitmentAmounts(form) {
 
   if (form.commitmentType === 'subscription') {
     const lessonsCount = Number(form.subscriptionLessonsCount || 0);
-    const chargeAmount = Number(form.subscriptionChargeAmount || 0);
+    const chargeAmount = coerceAgorot(form.subscriptionChargeAmount);
     return {
       totalAmount: lessonsCount > 0 && Number.isFinite(chargeAmount) ? roundCurrency(lessonsCount * chargeAmount) : 0,
       defaultChargeAmount: Number.isFinite(chargeAmount) ? roundCurrency(chargeAmount) : null,
@@ -137,7 +139,7 @@ export function computeCommitmentAmounts(form) {
 
   if (form.commitmentType === 'hmo') {
     const authorizedLessons = Number(form.hmoAuthorizedLessons || 0);
-    const customerCharge = Number(form.hmoCustomerChargeAmount || 0);
+    const customerCharge = coerceAgorot(form.hmoCustomerChargeAmount);
     return {
       totalAmount: authorizedLessons > 0 && Number.isFinite(customerCharge) ? roundCurrency(authorizedLessons * customerCharge) : 0,
       defaultChargeAmount: Number.isFinite(customerCharge) ? roundCurrency(customerCharge) : null,
@@ -145,7 +147,7 @@ export function computeCommitmentAmounts(form) {
   }
 
   return {
-    totalAmount: Number(form.totalAmount || 0),
+    totalAmount: coerceAgorot(form.totalAmount),
     defaultChargeAmount: form.defaultChargeAmount === '' ? null : roundCurrency(Number(form.defaultChargeAmount)),
   };
 }
@@ -161,7 +163,7 @@ export function buildCommitmentMetadataPayload(form) {
     return {
       subscription: {
         lessons_count: Number(form.subscriptionLessonsCount || 0),
-        charge_amount: roundCurrency(Number(form.subscriptionChargeAmount || 0)),
+        charge_amount: coerceAgorot(form.subscriptionChargeAmount),
       },
     };
   }
@@ -173,8 +175,8 @@ export function buildCommitmentMetadataPayload(form) {
         provider_name: form.hmoProviderName || '',
         payment_mode: form.hmoPaymentMode || 'partially_paid_by_hmo',
         authorized_lessons: Number(form.hmoAuthorizedLessons || 0),
-        customer_charge_amount: roundCurrency(Number(form.hmoCustomerChargeAmount || 0)),
-        insurer_claim_amount: roundCurrency(Number(form.hmoInsurerClaimAmount || 0)),
+        customer_charge_amount: coerceAgorot(form.hmoCustomerChargeAmount),
+        insurer_claim_amount: coerceAgorot(form.hmoInsurerClaimAmount),
         authorization_reference: form.hmoAuthorizationReference || '',
         reminder_date: form.hmoReminderDate || '',
         workflow_notes: form.hmoWorkflowNotes || '',

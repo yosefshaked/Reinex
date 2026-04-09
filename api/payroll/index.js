@@ -25,6 +25,7 @@ import {
   startOfMonthKey,
   toDateKey,
 } from '../_shared/employee-finance.js';
+import { coerceAgorot } from '../_shared/currency.js';
 
 function shiftMonths(dateKey, deltaMonths) {
   const date = new Date(`${dateKey}T00:00:00Z`);
@@ -33,7 +34,7 @@ function shiftMonths(dateKey, deltaMonths) {
 }
 
 function roundCurrency(value) {
-  return Number(Number(value || 0).toFixed(2));
+  return coerceAgorot(value);
 }
 
 function getPayrollModel(employee) {
@@ -139,7 +140,7 @@ async function buildEmployeePayrollPreview(tenantClient, employee, profile, star
   }
 
   const paidLeaveTotal = roundCurrency(leaveAmounts.reduce((sum, row) => sum + row.amount, 0));
-  const correctionTotal = roundCurrency((corrections || []).reduce((sum, row) => sum + Number(row.amount || 0), 0));
+  const correctionTotal = roundCurrency((corrections || []).reduce((sum, row) => sum + coerceAgorot(row.amount), 0));
 
   let baseAmount = 0;
   let attendanceAmount = 0;
@@ -147,11 +148,11 @@ async function buildEmployeePayrollPreview(tenantClient, employee, profile, star
   let monthlySalaryAmount = 0;
 
   if (payrollModel === 'lesson_based') {
-    lessonAmount = roundCurrency((lessonEarningsInPeriod || []).reduce((sum, row) => sum + Number(row.payout_amount || 0), 0));
+    lessonAmount = roundCurrency((lessonEarningsInPeriod || []).reduce((sum, row) => sum + coerceAgorot(row.payout_amount), 0));
     baseAmount = lessonAmount;
   } else if (payrollModel === 'hourly') {
     attendanceAmount = roundCurrency((attendanceInPeriod || []).reduce((sum, row) => {
-      const rate = Number(employee?.current_rate || 0);
+      const rate = coerceAgorot(employee?.current_rate);
       if (!Number.isFinite(rate) || rate <= 0) {
         return sum;
       }
@@ -166,7 +167,7 @@ async function buildEmployeePayrollPreview(tenantClient, employee, profile, star
       const monthStart = startOfMonthKey(dateKey);
       const monthEnd = endOfMonthKey(dateKey);
       const monthWorkingDays = Math.max(1, countWorkingDaysInRange(resolveEmployeeWorkingDays(employee, profile), monthStart, monthEnd));
-      const dailyRate = Number(employee?.monthly_salary_amount || 0) / monthWorkingDays;
+      const dailyRate = coerceAgorot(employee?.monthly_salary_amount) / monthWorkingDays;
       const leaveDay = leaveMap.get(dateKey);
       if (leaveDay) {
         return sum + (dailyRate * Number(leaveDay.pay_fraction || 0));

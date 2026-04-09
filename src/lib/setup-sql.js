@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS public.students (
   client_profile_id uuid,
   notes_internal text NULL,
   medical_provider text NULL,
-  special_rate numeric NULL,
+  special_rate integer NULL,
   medical_flags jsonb NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -119,7 +119,7 @@ ALTER TABLE public.students
   ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS notes_internal text,
   ADD COLUMN IF NOT EXISTS medical_provider text,
-  ADD COLUMN IF NOT EXISTS special_rate numeric,
+  ADD COLUMN IF NOT EXISTS special_rate integer,
   ADD COLUMN IF NOT EXISTS medical_flags jsonb,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS updated_at timestamptz,
@@ -2302,7 +2302,7 @@ DO $$
 BEGIN
   ALTER TABLE public.hmo_authorizations
     ADD CONSTRAINT hmo_authorizations_provider_track_id_fkey
-    FOREIGN KEY (provider_track_id) REFERENCES public.hmo_provider_tracks(id);
+    FOREIGN KEY (provider_track_id) REFERENCES public.hmo_provider_tracks(id) ON DELETE RESTRICT;
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -2440,7 +2440,7 @@ DO $$
 BEGIN
   ALTER TABLE public.commitments
     ADD CONSTRAINT commitments_hmo_provider_track_id_fkey
-    FOREIGN KEY (hmo_provider_track_id) REFERENCES public.hmo_provider_tracks(id);
+    FOREIGN KEY (hmo_provider_track_id) REFERENCES public.hmo_provider_tracks(id) ON DELETE RESTRICT;
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -2491,7 +2491,6 @@ CREATE INDEX IF NOT EXISTS commitments_transfer_ref_idx ON public.commitments (t
 CREATE INDEX IF NOT EXISTS commitments_hmo_provider_id_idx ON public.commitments (hmo_provider_id) WHERE hmo_provider_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS commitments_hmo_provider_track_id_idx ON public.commitments (hmo_provider_track_id) WHERE hmo_provider_track_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS commitments_hmo_authorization_id_uidx ON public.commitments (hmo_authorization_id) WHERE hmo_authorization_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS commitments_student_hmo_auth_uidx ON public.commitments (student_id, hmo_authorization_id) WHERE hmo_authorization_id IS NOT NULL;
 
 DO $$
 BEGIN
@@ -6032,6 +6031,127 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.create_commitment_and_ledger_entry(
   uuid, uuid, text, integer, integer, uuid, text, boolean, timestamptz, jsonb, uuid, uuid, uuid
+) TO authenticated, service_role;
+
+-- -----------------------------------------------------------------
+-- update_commitment_and_record_delta
+-- Atomically updates an existing commitment and, if the total_amount
+-- changed, records a CREDIT or DEBIT delta in ledger_transactions.
+-- This replaces the non-atomic JS two-step approach which could leave
+-- a commitment updated without a matching ledger entry (or vice versa).
+--
+-- Returns: { commitment_id, delta, ledger_entry_id }
+-- -----------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.update_commitment_and_record_delta(
+  p_commitment_id           uuid,
+  p_student_id              uuid,
+  p_service_id              uuid,
+  p_commitment_type         text,
+  p_total_amount            integer,   -- agorot
+  p_default_charge_amount   integer,   -- agorot, nullable via NULL
+  p_transfer_ref            uuid,
+  p_notes                   text,
+  p_is_active               boolean,
+  p_expires_at              timestamptz,
+  p_metadata                jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_old_total               integer;
+  v_client_profile_id       uuid;
+  v_delta                   integer;
+  v_ledger_entry_id         uuid;
+  v_now                     timestamptz := now();
+BEGIN
+  IF p_commitment_id IS NULL THEN
+    RAISE EXCEPTION 'missing_commitment_id';
+  END IF;
+  IF p_total_amount IS NULL OR p_total_amount < 0 THEN
+    RAISE EXCEPTION 'invalid_total_amount';
+  END IF;
+
+  -- Lock the row and read old total
+  SELECT total_amount
+    INTO v_old_total
+  FROM public.commitments
+  WHERE id = p_commitment_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'commitment_not_found';
+  END IF;
+
+  -- Update the commitment
+  UPDATE public.commitments SET
+    student_id            = p_student_id,
+    service_id            = p_service_id,
+    commitment_type       = p_commitment_type,
+    total_amount          = p_total_amount,
+    default_charge_amount = p_default_charge_amount,
+    transfer_ref          = p_transfer_ref,
+    notes                 = p_notes,
+    is_active             = COALESCE(p_is_active, true),
+    expires_at            = p_expires_at,
+    metadata              = COALESCE(p_metadata, '{}'::jsonb),
+    updated_at            = v_now
+  WHERE id = p_commitment_id;
+
+  -- Record a ledger delta if total_amount changed
+  v_delta := p_total_amount - COALESCE(v_old_total, 0);
+
+  IF v_delta <> 0 THEN
+    -- Resolve client_profile_id for ledger entry
+    SELECT client_profile_id
+      INTO v_client_profile_id
+    FROM public.students
+    WHERE id = p_student_id;
+
+    IF v_client_profile_id IS NULL THEN
+      RAISE EXCEPTION 'student_not_found_or_missing_client_profile';
+    END IF;
+
+    INSERT INTO public.ledger_transactions (
+      client_profile_id,
+      student_id,
+      commitment_id,
+      transaction_type,
+      usage_type,
+      amount,
+      source_ref,
+      notes,
+      created_at,
+      updated_at,
+      metadata
+    ) VALUES (
+      v_client_profile_id,
+      p_student_id,
+      p_commitment_id,
+      CASE WHEN v_delta > 0 THEN 'CREDIT' ELSE 'DEBIT' END,
+      CASE WHEN v_delta > 0 THEN 'manual_topup' ELSE 'manual_adjustment' END,
+      ABS(v_delta),
+      NULL,
+      'Commitment total_amount updated',
+      v_now,
+      v_now,
+      jsonb_build_object('commitment_update', true, 'old_total', COALESCE(v_old_total, 0), 'new_total', p_total_amount)
+    )
+    RETURNING id INTO v_ledger_entry_id;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'commitment_id',   p_commitment_id,
+    'delta',           COALESCE(v_delta, 0),
+    'ledger_entry_id', v_ledger_entry_id
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.update_commitment_and_record_delta(
+  uuid, uuid, uuid, text, integer, integer, uuid, text, boolean, timestamptz, jsonb
 ) TO authenticated, service_role;
 
 -- -----------------------------------------------------------------

@@ -15,6 +15,7 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { isYmdDate } from '../_shared/employee-finance.js';
+import { assertAgorot, FINANCE_LIMITS } from '../_shared/currency.js';
 import {
   assignLessonParticipantCommitment,
   clearLessonParticipantCommitment,
@@ -261,7 +262,15 @@ export default async function (context, req) {
 
   if (method === 'POST' || method === 'PUT') {
     const txFields = resolveTransactionFields(body);
-    const amount = Math.abs(Number(body?.amount ?? body?.amount_charged ?? 0));
+    let amount;
+    try {
+      amount = assertAgorot(Math.abs(Number(body?.amount ?? body?.amount_charged)), 'amount');
+    } catch (err) {
+      return respond(context, 400, { message: err.message });
+    }
+    if (amount > FINANCE_LIMITS.MAX_CHARGE_AMOUNT_AGOROT) {
+      return respond(context, 400, { message: 'amount_exceeds_maximum' });
+    }
     const effectiveDate = normalizeString(body?.effective_date);
     const notes = normalizeString(body?.notes);
     const commitmentId = normalizeString(body?.commitment_id);
@@ -276,7 +285,7 @@ export default async function (context, req) {
     if (!MANUAL_ENTRY_TYPES.has(txFields.usage_type)) {
       return respond(context, 400, { message: 'invalid_usage_type_for_manual_entry' });
     }
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (amount <= 0) {
       return respond(context, 400, { message: 'invalid_amount' });
     }
     if (effectiveDate && !isYmdDate(effectiveDate)) {

@@ -19,6 +19,7 @@ import {
   loadHmoAuthorizations,
   loadHmoTrackMap,
 } from '../_shared/hmo.js';
+import { assertAgorotNullable, FINANCE_LIMITS } from '../_shared/currency.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -175,6 +176,17 @@ export default async function (context, req) {
       return respond(context, 409, { message: 'provider_track_missing_service' });
     }
 
+    let customerChargeOverride, insurerClaimOverride;
+    try {
+      customerChargeOverride = assertAgorotNullable(body?.customer_charge_amount_override, 'customer_charge_amount_override');
+      insurerClaimOverride = assertAgorotNullable(body?.insurer_claim_amount_override, 'insurer_claim_amount_override');
+    } catch (err) {
+      return respond(context, 400, { message: err.message });
+    }
+    if ((customerChargeOverride ?? 0) > FINANCE_LIMITS.MAX_CHARGE_AMOUNT_AGOROT || (insurerClaimOverride ?? 0) > FINANCE_LIMITS.MAX_CHARGE_AMOUNT_AGOROT) {
+      return respond(context, 400, { message: 'amount_exceeds_maximum' });
+    }
+
     const payload = {
       student_id: studentId,
       service_id: providerTrack.service_id,
@@ -185,25 +197,14 @@ export default async function (context, req) {
       valid_from: normalizeOptionalDate(body?.valid_from),
       expires_at: normalizeOptionalDate(body?.expires_at),
       reminder_date: normalizeOptionalDate(body?.reminder_date),
-      customer_charge_amount_override: body?.customer_charge_amount_override === '' || body?.customer_charge_amount_override == null
-        ? null
-        : Number(body.customer_charge_amount_override),
-      insurer_claim_amount_override: body?.insurer_claim_amount_override === '' || body?.insurer_claim_amount_override == null
-        ? null
-        : Number(body.insurer_claim_amount_override),
+      customer_charge_amount_override: customerChargeOverride,
+      insurer_claim_amount_override: insurerClaimOverride,
       workflow_notes_override: normalizeString(body?.workflow_notes_override) || null,
       status,
       notes: normalizeString(body?.notes) || null,
       metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
       updated_at: new Date().toISOString(),
     };
-
-    if (payload.customer_charge_amount_override != null && (!Number.isFinite(payload.customer_charge_amount_override) || payload.customer_charge_amount_override < 0)) {
-      return respond(context, 400, { message: 'invalid_customer_charge_amount_override' });
-    }
-    if (payload.insurer_claim_amount_override != null && (!Number.isFinite(payload.insurer_claim_amount_override) || payload.insurer_claim_amount_override < 0)) {
-      return respond(context, 400, { message: 'invalid_insurer_claim_amount_override' });
-    }
 
     try {
       let data;

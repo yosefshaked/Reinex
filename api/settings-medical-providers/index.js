@@ -13,6 +13,7 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { HMO_PAYMENT_MODES, loadHmoProviders } from '../_shared/hmo.js';
+import { coerceAgorot } from '../_shared/currency.js';
 
 const MAX_BODY_BYTES = 48 * 1024;
 
@@ -23,12 +24,8 @@ function normalizeTrackPayload(body = {}) {
     service_id: normalizeString(body?.service_id),
     name: normalizeString(body?.name),
     payment_mode: HMO_PAYMENT_MODES.has(paymentMode) ? paymentMode : '',
-    default_customer_charge_amount: body?.default_customer_charge_amount === '' || body?.default_customer_charge_amount == null
-      ? 0
-      : Number(body.default_customer_charge_amount),
-    default_insurer_claim_amount: body?.default_insurer_claim_amount === '' || body?.default_insurer_claim_amount == null
-      ? 0
-      : Number(body.default_insurer_claim_amount),
+    default_customer_charge_amount: coerceAgorot(body?.default_customer_charge_amount),
+    default_insurer_claim_amount: coerceAgorot(body?.default_insurer_claim_amount),
     default_workflow_notes: normalizeString(body?.default_workflow_notes) || '',
     is_active: body?.is_active !== false,
     metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},

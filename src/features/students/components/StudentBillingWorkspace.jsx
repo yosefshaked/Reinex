@@ -31,7 +31,7 @@ import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/feature
 import HmoAuthorizationManager from '@/features/students/components/HmoAuthorizationManager.jsx';
 import LedgerInvoiceDialog from '@/features/finance/components/LedgerInvoiceDialog.jsx';
 import { normalizeExternalHttpUrl } from '@/lib/external-links.js';
-import { toShekel } from '@/lib/currency.js';
+import { toShekel, coerceAgorot } from '@/lib/currency.js';
 import {
   buildCommitmentMetadataPayload,
   buildInitialCommitmentForm,
@@ -640,6 +640,7 @@ export default function StudentBillingWorkspace({
     } catch (error) {
       console.error('Failed to save all assignments', error);
       toast.error(error?.message || 'שמירת השיוכים נכשלה.');
+      await loadData();
     } finally {
       setSavingAssignment(false);
     }
@@ -669,7 +670,7 @@ export default function StudentBillingWorkspace({
       sourceType: 'adjustment',
       commitmentId: entry.commitment_id || '',
       direction: entry.transaction_type === 'CREDIT' ? 'credit' : 'debit',
-      amountCharged: Number(entry.amount || Math.abs(entry.amount_charged) || 0) || '',
+      amountCharged: coerceAgorot(entry.amount || Math.abs(entry.amount_charged)) || '',
       effectiveDate: entry.effective_date || entry.metadata?.effective_date || '',
       notes: entry.notes || '',
       invoiceId: entry.invoice_id || '',
@@ -1015,7 +1016,7 @@ export default function StudentBillingWorkspace({
                             ערוך אישור
                           </Button>
                         ) : null}
-                        {Number(commitment.consumed_amount || 0) === 0 && !commitment.transfer_ref && commitment.commitment_type !== 'hmo' ? (
+                        {coerceAgorot(commitment.consumed_amount) === 0 && !commitment.transfer_ref && commitment.commitment_type !== 'hmo' ? (
                           <Button type="button" size="sm" variant="outline" onClick={() => setDeleteCommitmentTargetId(commitment.id)} disabled={savingCommitment}>
                             מחק
                           </Button>
@@ -1110,7 +1111,7 @@ export default function StudentBillingWorkspace({
                   <div className="rounded-xl border border-border bg-slate-50 px-3 py-3 text-sm text-zinc-800">
                     {entryForm.amountCharged === ''
                       ? 'בחרו האם להוסיף או להפחית כסף, ואז הזינו סכום.'
-                      : `${entryForm.direction === 'debit' ? 'תופחת' : 'תתווסף'} ${formatCurrency(Number(entryForm.amountCharged || 0))} ${entryForm.commitmentId ? 'מההתחייבות שנבחרה' : 'ברמת התלמיד'}.`}
+                      : `${entryForm.direction === 'debit' ? 'תופחת' : 'תתווסף'} ${formatCurrency(coerceAgorot(entryForm.amountCharged))} ${entryForm.commitmentId ? 'מההתחייבות שנבחרה' : 'ברמת התלמיד'}.`}
                   </div>
 
                   <div className="space-y-2">
@@ -1497,7 +1498,7 @@ export default function StudentBillingWorkspace({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">בחר התחייבות</SelectItem>
-                  {commitments.filter((commitment) => Number(commitment.remaining_amount || 0) > 0).map((commitment) => (
+                  {commitments.filter((commitment) => coerceAgorot(commitment.remaining_amount) > 0).map((commitment) => (
                     <SelectItem key={commitment.id} value={commitment.id}>
                       {getCommitmentLabel(commitment, services)}
                     </SelectItem>
@@ -1762,7 +1763,7 @@ export default function StudentBillingWorkspace({
           <AlertDialogHeader>
             <AlertDialogTitle>חישוב חיובים מחדש</AlertDialogTitle>
             <AlertDialogDescription>
-              פעולה זו תחשב מחדש את החיובים עבור {lessonHistory.length} שיעורים
+              פעולה זו תחשב מחדש את החיובים עבור עד {lessonHistory.length} שיעורים
               {startDate ? ` מתאריך ${startDate}` : ''}
               {endDate ? ` עד ${endDate}` : ''}
               {!startDate && !endDate ? ' בכל הטווח' : ''}.

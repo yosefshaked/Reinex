@@ -17,6 +17,7 @@ import {
   isYmdDate,
   listFinanceCorrections,
 } from '../_shared/employee-finance.js';
+import { assertAgorot, FINANCE_LIMITS } from '../_shared/currency.js';
 
 const MAX_BODY_BYTES = 48 * 1024;
 
@@ -97,7 +98,17 @@ export default async function (context, req) {
     const employeeId = normalizeString(body?.employee_id);
     const correctionType = normalizeCorrectionType(body?.correction_type);
     const effectiveDate = normalizeString(body?.effective_date);
-    const amount = Number(body?.amount);
+    let amount;
+    try {
+      amount = assertAgorot(Math.abs(Number(body?.amount)), 'amount');
+    } catch (err) {
+      return respond(context, 400, { message: err.message });
+    }
+    if (amount > FINANCE_LIMITS.MAX_ADJUSTMENT_AGOROT) {
+      return respond(context, 400, { message: 'adjustment_exceeds_maximum' });
+    }
+    // Restore sign — payroll adjustments can be negative
+    if (Number(body?.amount) < 0) amount = -amount;
 
     if (!employeeId) {
       return respond(context, 400, { message: 'missing_employee_id' });
@@ -107,9 +118,6 @@ export default async function (context, req) {
     }
     if (!isYmdDate(effectiveDate)) {
       return respond(context, 400, { message: 'invalid_effective_date' });
-    }
-    if (!Number.isFinite(amount)) {
-      return respond(context, 400, { message: 'invalid_amount' });
     }
 
     const idempotencyKey = normalizeString(body?.idempotency_key) || null;

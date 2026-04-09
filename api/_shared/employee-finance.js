@@ -358,7 +358,7 @@ export function resolveLeaveDayValue({
     if (Number.isFinite(employeeRate) && employeeRate >= 0) {
       return employeeRate;
     }
-    return Number(leavePayPolicy.fixed_rate_default || 0);
+    return coerceAgorot(leavePayPolicy.fixed_rate_default);
   }
 
   if (payrollModel === 'monthly_salary') {
@@ -747,6 +747,12 @@ export async function fetchCommitmentsWithBalances(tenantClient, filters = {}) {
   }
   if (filters.serviceId) {
     query = query.eq('service_id', filters.serviceId);
+  }
+
+  const limit = Number.isFinite(filters.limit) && filters.limit > 0 ? Math.min(filters.limit, 500) : null;
+  const offset = Number.isFinite(filters.offset) && filters.offset >= 0 ? filters.offset : 0;
+  if (limit) {
+    query = query.range(offset, offset + limit - 1);
   }
 
   const { data: commitments, error } = await query;

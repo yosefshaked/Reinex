@@ -14,6 +14,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -390,6 +394,7 @@ export default function FinancialsPage() {
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [isBillingPolicyOpen, setIsBillingPolicyOpen] = useState(false);
   const [isConsumedLessonsOpen, setIsConsumedLessonsOpen] = useState(false);
+  const [confirmPolicySave, setConfirmPolicySave] = useState(false);
 
   const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
   const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
@@ -858,7 +863,7 @@ export default function FinancialsPage() {
               canMutateBillingPolicy={canMutateBillingPolicy}
               savingPolicy={savingPolicy}
               loadingPolicy={loadingBilling}
-              onSaveBillingPolicy={handleSaveBillingPolicy}
+              onSaveBillingPolicy={() => setConfirmPolicySave(true)}
               onChanged={loadBillingOverview}
             />
           </div>
@@ -904,6 +909,19 @@ export default function FinancialsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={confirmPolicySave} onOpenChange={setConfirmPolicySave}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>שמירת מדיניות חיוב</AlertDialogTitle>
+            <AlertDialogDescription>שינוי מדיניות החיוב עשוי להשפיע על חישובי חיוב עתידיים. להמשיך?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={handleSaveBillingPolicy}>שמור</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageLayout>
   );
 }

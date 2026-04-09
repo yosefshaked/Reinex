@@ -30,6 +30,7 @@ import {
   HMO_PAYMENT_MODE_OPTIONS,
   HMO_SUGGESTION_OPTIONS,
 } from '@/features/students/components/student-billing-helpers.js';
+import { coerceAgorot } from '@/lib/currency.js';
 
 function buildEmptyProviderForm() {
   return {
@@ -197,8 +198,8 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
         service_id: trackForm.serviceId,
         name: trackForm.name.trim(),
         payment_mode: trackForm.paymentMode,
-        default_customer_charge_amount: Number(trackForm.defaultCustomerChargeAmount || 0),
-        default_insurer_claim_amount: Number(trackForm.defaultInsurerClaimAmount || 0),
+        default_customer_charge_amount: coerceAgorot(trackForm.defaultCustomerChargeAmount),
+        default_insurer_claim_amount: coerceAgorot(trackForm.defaultInsurerClaimAmount),
         default_workflow_notes: trackForm.defaultWorkflowNotes || '',
         is_active: trackForm.is_active,
         metadata: {
