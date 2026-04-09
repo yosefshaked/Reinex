@@ -62,22 +62,46 @@ export function DateNavigator({ currentDate, onDateChange, onNavigate, viewMode 
     : formatDate(currentDate);
 
   return (
-    <div className="flex items-center gap-2">
-      <Button variant="outline" size="sm" onClick={handleToday}>
-        <Calendar className="w-4 h-4 ms-1" />
-        היום
-      </Button>
-      
-      <div className="flex items-center gap-1">
-        <Button variant="ghost" size="icon" onClick={handleNext}>
-          <ChevronLeft className="w-4 h-4" />
+    <div className="flex w-full flex-wrap items-center justify-center gap-2 sm:gap-3">
+      <div className="inline-flex items-center rounded-2xl border border-slate-200 bg-slate-50 p-1 shadow-sm">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 rounded-xl border border-transparent text-slate-700 hover:border-slate-200 hover:bg-white hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-blue-500/40"
+          onClick={handlePrev}
+          aria-label="לתאריך קודם"
+          title="לתאריך קודם"
+        >
+          <ChevronRight className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" onClick={handlePrev}>
-          <ChevronRight className="w-4 h-4" />
+
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          onClick={handleToday}
+          aria-label="חזרה להיום"
+          title="חזרה להיום"
+        >
+          <Calendar className="me-1 h-4 w-4" />
+          היום
+        </Button>
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 rounded-xl border border-transparent text-slate-700 hover:border-slate-200 hover:bg-white hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-blue-500/40"
+          onClick={handleNext}
+          aria-label="לתאריך הבא"
+          title="לתאריך הבא"
+        >
+          <ChevronLeft className="h-4 w-4" />
         </Button>
       </div>
 
-      <span className="text-lg font-medium min-w-[250px] text-center">
+      <span className="order-last w-full truncate text-center text-base font-semibold text-slate-900 sm:order-none sm:w-auto sm:min-w-[18rem] sm:text-lg">
         {displayText}
       </span>
     </div>

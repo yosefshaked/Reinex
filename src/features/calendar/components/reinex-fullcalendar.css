@@ -9,7 +9,19 @@
   --fc-neutral-bg-color: rgb(249 250 251);
   --fc-list-event-hover-bg-color: rgb(243 244 246);
   --fc-today-bg-color: rgb(239 246 255);
-  --reinex-calendar-sticky-offset: 5.25rem;
+  --reinex-calendar-sticky-offset: 7.4rem;
+}
+
+@media (min-width: 640px) {
+  .reinex-fullcalendar {
+    --reinex-calendar-sticky-offset: 6.8rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .reinex-fullcalendar {
+    --reinex-calendar-sticky-offset: 5.9rem;
+  }
 }
 
 .reinex-fullcalendar--collapsed {
@@ -77,12 +89,17 @@
   background-color: rgb(249 250 251);
 }
 
+.reinex-fullcalendar .fc .fc-scrollgrid-section-header {
+  background: rgb(249 250 251);
+}
+
 .reinex-fullcalendar .fc .fc-scrollgrid-section-header > th,
 .reinex-fullcalendar .fc .fc-scrollgrid-section-header > td {
   position: sticky;
   top: var(--reinex-calendar-sticky-offset);
-  z-index: 12;
+  z-index: 18;
   background: rgb(249 250 251);
+  box-shadow: 0 1px 0 rgb(226 232 240), 0 8px 16px -16px rgb(15 23 42 / 0.45);
 }
 
 .reinex-fullcalendar .fc .fc-scrollgrid-section-header .fc-scroller-harness,
