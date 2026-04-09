@@ -393,8 +393,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const org = currentOrg ?? activeOrg;
   const role = typeof org?.membership?.role === 'string' ? org.membership.role.trim().toLowerCase() : 'member';
   const canManageAll = role === 'admin' || role === 'owner' || role === 'office';
-  const displayInstance = getDisplayInstance(instance);
-  const displayParticipants = getDisplayParticipants(instance);
+  const displayInstance = useMemo(() => getDisplayInstance(instance), [instance]);
+  const displayParticipants = useMemo(() => getDisplayParticipants(instance), [instance]);
   const dialogScopeKey = `${instance?.id || ''}:${instance?.latest_correction?.id || ''}`;
   
   const [isEditMode, setIsEditMode] = useState(false);
