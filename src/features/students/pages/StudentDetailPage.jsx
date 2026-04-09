@@ -16,6 +16,7 @@ import StudentHistoryTab from '@/features/students/components/StudentHistoryTab.
 import StudentDocumentsTab from '@/features/students/components/StudentDocumentsTab.jsx';
 import StudentFinancialTab from '@/features/students/components/StudentFinancialTab.jsx';
 import StudentFormsTab from '@/features/students/components/StudentFormsTab.jsx';
+import { toAgorot } from '@/lib/currency.js';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -146,7 +147,7 @@ export default function StudentDetailPage() {
         email: payload.email,
         medicalProvider: payload.medicalProvider,
         notificationMethod: payload.notificationMethod,
-        specialRate: payload.specialRate,
+        specialRate: payload.specialRate === '' ? null : toAgorot(payload.specialRate),
         notesInternal: payload.notesInternal,
         tags: payload.tags,
         isActive: payload.isActive,

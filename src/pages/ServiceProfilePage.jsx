@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { formatCurrency } from '@/lib/currency.js';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',
@@ -137,7 +138,7 @@ export default function ServiceProfilePage() {
                 </div>
                 <div>משך: {service.duration_minutes ? `${service.duration_minutes} דק׳` : 'לא הוגדר'}</div>
                 <div>מודל תשלום: {getPaymentModelLabel(service.payment_model)}</div>
-                <div>מחיר לקוח חד-פעמי: {service.default_customer_charge_amount == null ? 'לא הוגדר' : `${service.default_customer_charge_amount} ₪`}</div>
+                <div>מחיר לקוח חד-פעמי: {service.default_customer_charge_amount == null ? 'לא הוגדר' : formatCurrency(service.default_customer_charge_amount)}</div>
                 <div className="flex items-center gap-2">
                   <span>צבע:</span>
                   {service.color ? (

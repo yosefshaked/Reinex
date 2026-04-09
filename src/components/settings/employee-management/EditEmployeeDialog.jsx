@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Briefcase, Calendar, Mail, Trash2, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client';
+import { toShekel, toAgorot } from '@/lib/currency.js';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'ראשון', short: 'א' },
@@ -50,11 +51,11 @@ function buildInitialState(employee) {
     email: employee?.email || '',
     phone: employee?.phone || '',
     startDate: employee?.start_date || '',
-    currentRate: employee?.current_rate ?? '',
-    monthlySalaryAmount: employee?.monthly_salary_amount ?? '',
+    currentRate: employee?.current_rate != null ? toShekel(employee.current_rate) : '',
+    monthlySalaryAmount: employee?.monthly_salary_amount != null ? toShekel(employee.monthly_salary_amount) : '',
     annualLeaveDays: employee?.annual_leave_days ?? '',
     leavePayMethod: employee?.leave_pay_method || '',
-    leaveFixedDayRate: employee?.leave_fixed_day_rate ?? '',
+    leaveFixedDayRate: employee?.leave_fixed_day_rate != null ? toShekel(employee.leave_fixed_day_rate) : '',
     employmentScope: employee?.employment_scope || '',
     notes: employee?.notes || '',
     officeWorkingDays: employeeType === 'office' && Array.isArray(employee?.working_days) ? employee.working_days : [],
@@ -63,7 +64,7 @@ function buildInitialState(employee) {
       ? employee.service_capabilities.map((capability) => ({
           service_id: capability.service_id,
           max_students: capability.max_students ?? 1,
-          base_rate: capability.base_rate ?? 0,
+          base_rate: capability.base_rate != null ? toShekel(capability.base_rate) : '',
           availability_windows: Array.isArray(capability?.availability_windows) ? capability.availability_windows : [],
           metadata: capability.metadata || {},
         }))
@@ -255,11 +256,11 @@ export default function EditEmployeeDialog({
         email: form.email || null,
         phone: form.phone || null,
         start_date: form.startDate || null,
-        current_rate: form.currentRate === '' ? null : Number(form.currentRate),
-        monthly_salary_amount: form.monthlySalaryAmount === '' ? null : Number(form.monthlySalaryAmount),
+        current_rate: form.currentRate === '' ? null : toAgorot(form.currentRate),
+        monthly_salary_amount: form.monthlySalaryAmount === '' ? null : toAgorot(form.monthlySalaryAmount),
         annual_leave_days: form.annualLeaveDays === '' ? null : Number(form.annualLeaveDays),
         leave_pay_method: form.leavePayMethod || null,
-        leave_fixed_day_rate: form.leaveFixedDayRate === '' ? null : Number(form.leaveFixedDayRate),
+        leave_fixed_day_rate: form.leaveFixedDayRate === '' ? null : toAgorot(form.leaveFixedDayRate),
         employment_scope: form.employmentScope || null,
         notes: form.notes || null,
       };
@@ -273,7 +274,7 @@ export default function EditEmployeeDialog({
         payload.service_capabilities = form.conversionCapabilities.map((capability) => ({
           service_id: capability.service_id,
           max_students: capability.max_students === '' ? 1 : Number(capability.max_students),
-          base_rate: capability.base_rate === '' ? 0 : Number(capability.base_rate),
+          base_rate: capability.base_rate === '' ? 0 : toAgorot(capability.base_rate),
           availability_windows: Array.isArray(capability.availability_windows) ? capability.availability_windows : [],
           metadata: capability.metadata || {},
         }));

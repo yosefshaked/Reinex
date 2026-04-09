@@ -37,6 +37,7 @@ import EmployeeFinancePanel from './EmployeeFinancePanel.jsx';
 import EmployeeLeavePanel from './EmployeeLeavePanel.jsx';
 import LinkEmployeeMemberDialog from './LinkEmployeeMemberDialog.jsx';
 import { getAvailabilitySummary } from '@/lib/instructor-availability.js';
+import { formatCurrency } from '@/lib/currency.js';
 
 const REQUEST = { idle: 'idle', loading: 'loading' };
 const TAB_KEYS = {
@@ -959,7 +960,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                             <div key={capability.service_id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-3">
                               <div className="text-sm font-bold text-slate-900">{capability.name}</div>
                               <div className="mt-1 text-xs text-slate-500">
-                                קיבולת {capability.max_students || 1} • תעריף בסיס {capability.base_rate != null ? `₪${capability.base_rate}` : 'לא הוגדר'} • {capability.setup_incomplete ? 'זמינות חסרה' : `ימי זמינות ${capability.availabilitySummary || '—'}`}
+                                קיבולת {capability.max_students || 1} • תעריף בסיס {capability.base_rate != null ? formatCurrency(capability.base_rate) : 'לא הוגדר'} • {capability.setup_incomplete ? 'זמינות חסרה' : `ימי זמינות ${capability.availabilitySummary || '—'}`}
                               </div>
                             </div>
                           ))}

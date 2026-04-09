@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { formatCurrency } from '@/lib/currency.js';
 
 const DAY_NAMES_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 const DAY_NAME_TO_INDEX = {
@@ -419,7 +420,7 @@ export default function StudentOverviewTab({ student }) {
             </div>
             <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-center">
               <p className="text-xl font-bold text-zinc-700">
-                {student?.special_rate ? `₪${student.special_rate}` : '—'}
+                {Number.isFinite(Number(student?.special_rate)) ? formatCurrency(student.special_rate) : '—'}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">תעריף לשיעור</p>
             </div>

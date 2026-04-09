@@ -29,6 +29,7 @@ import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/features/students/utils/endpoints.js';
 import AddStudentForm, { AddStudentFormFooter } from '@/features/admin/components/AddStudentForm.jsx';
 import { toast } from 'sonner';
+import { toAgorot } from '@/lib/currency.js';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'ראשון', labelShort: 'א' },
@@ -840,7 +841,7 @@ export default function WaitingListPage() {
       email: formData.email,
       medical_provider: formData.medicalProvider,
       default_notification_method: formData.notificationMethod,
-      special_rate: formData.specialRate,
+      special_rate: formData.specialRate === '' ? null : toAgorot(formData.specialRate),
       medical_flags: formData.medicalFlags,
       onboarding_status: formData.onboardingStatus,
       notes_internal: formData.notesInternal,

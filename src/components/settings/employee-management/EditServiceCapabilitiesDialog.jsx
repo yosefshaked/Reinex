@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client';
 import { DAY_OPTIONS } from '@/lib/day-of-week.js';
 import { getAvailabilitySummary, normalizeAvailabilityWindows } from '@/lib/instructor-availability.js';
+import { toShekel, toAgorot } from '@/lib/currency.js';
 
 function createEmptyWindow() {
   return { day: '', start: '', end: '' };
@@ -64,6 +65,7 @@ export default function EditServiceCapabilitiesDialog({
       const baseCapabilities = Array.isArray(instructor.service_capabilities)
         ? instructor.service_capabilities.map((capability) => ({
             ...capability,
+            base_rate: capability.base_rate != null ? toShekel(capability.base_rate) : '',
             availability_windows: Array.isArray(capability.availability_windows) ? capability.availability_windows : [],
             metadata: capability.metadata || {},
           }))
@@ -204,7 +206,7 @@ export default function EditServiceCapabilitiesDialog({
           service_capabilities: capabilities.map((capability, index) => ({
             service_id: capability.service_id,
             max_students: capability.max_students || 1,
-            base_rate: capability.base_rate || 0,
+            base_rate: capability.base_rate === '' ? 0 : toAgorot(capability.base_rate),
             availability_windows: validationByCapability[index].value,
             metadata: capability.metadata || {},
           })),

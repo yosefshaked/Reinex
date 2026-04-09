@@ -30,6 +30,7 @@ import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/
 import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
 import MyPendingReportsCard from '@/features/sessions/components/MyPendingReportsCard.jsx';
 import { formatStudentName } from '@/features/students/utils/name-utils.js';
+import { toAgorot } from '@/lib/currency.js';
 
 export default function StudentsPage() {
   const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
@@ -405,7 +406,7 @@ export default function StudentsPage() {
       email: formData.email,
       medical_provider: formData.medicalProvider,
       default_notification_method: formData.notificationMethod,
-      special_rate: formData.specialRate,
+      special_rate: formData.specialRate === '' ? null : toAgorot(formData.specialRate),
       medical_flags: formData.medicalFlags,
       onboarding_status: formData.onboardingStatus,
       notes_internal: formData.notesInternal,
@@ -500,7 +501,7 @@ export default function StudentsPage() {
       email: payload.email,
       medicalProvider: payload.medicalProvider,
       notificationMethod: payload.notificationMethod,
-      specialRate: payload.specialRate,
+      specialRate: payload.specialRate === '' ? null : toAgorot(payload.specialRate),
       notesInternal: payload.notesInternal,
       tags: normalizeTagIdsForWrite(payload.tags),
       isActive: payload.isActive,

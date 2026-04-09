@@ -6,6 +6,8 @@
  * @param {Object|null|undefined} student - Optional student object to populate the form
  * @returns {Object} Complete form state with all required fields
  */
+import { toShekel } from '@/lib/currency.js';
+
 export function createStudentFormState(student) {
   return {
     // Basic identity
@@ -29,7 +31,7 @@ export function createStudentFormState(student) {
     
     // Reinex-specific fields
     notificationMethod: student?.default_notification_method || 'whatsapp',
-    specialRate: student?.special_rate || '',
+    specialRate: student?.special_rate != null ? toShekel(student.special_rate) : '',
     medicalFlags: student?.medical_flags || null,
     onboardingStatus: student?.onboarding_status || 'not_started',
     notesInternal: student?.notes_internal || '',
