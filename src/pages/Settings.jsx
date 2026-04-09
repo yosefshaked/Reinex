@@ -5,11 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EnhancedDialogHeader } from '@/components/ui/DialogHeader';
-import { PlugZap, Sparkles, Users, ListChecks, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History } from 'lucide-react';
+import { PlugZap, Sparkles, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History } from 'lucide-react';
 import SetupAssistant from '@/components/settings/SetupAssistant.jsx';
-import OrgMembersCard from '@/components/settings/OrgMembersCard.jsx';
-import SessionFormManager from '@/components/settings/SessionFormManager.jsx';
-import ServiceManager from '@/components/settings/ServiceManager.jsx';
 import BackupManager from '@/components/settings/BackupManager.jsx';
 import LogoManager from '@/components/settings/LogoManager.jsx';
 import TagsManager from '@/components/settings/TagsManager.jsx';
@@ -35,7 +32,7 @@ const DEFAULT_BILLING_POLICY = {
 };
 
 export default function Settings() {
-  const { activeOrg, activeOrgHasConnection, tenantClientReady, activeOrgId, enableDirectory, disableDirectory, refreshOrganizations } = useOrg();
+  const { activeOrg, activeOrgHasConnection, tenantClientReady, activeOrgId, refreshOrganizations } = useOrg();
   const { authClient, user, loading, session } = useSupabase();
   const membershipRole = activeOrg?.membership?.role ?? null;
   const normalizedRole = typeof membershipRole === 'string' ? membershipRole.trim().toLowerCase() : '';
@@ -43,7 +40,7 @@ export default function Settings() {
   const setupDialogAutoOpenRef = useRef(!activeOrgHasConnection);
   const orgIdSyncCompletedRef = useRef(new Set());
   const orgIdSyncInFlightRef = useRef(new Set());
-  const [selectedModule, setSelectedModule] = useState(null); // 'setup' | 'orgMembers' | 'sessionForm' | 'services' | 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
+  const [selectedModule, setSelectedModule] = useState(null); // 'setup' | 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
   const [backupEnabled, setBackupEnabled] = useState(false);
   const [logoEnabled, setLogoEnabled] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
@@ -434,18 +431,6 @@ export default function Settings() {
     }
   };
 
-  // Wake control DB directory fetch only while Team Members dialog is open
-  useEffect(() => {
-    if (selectedModule === 'orgMembers') {
-      enableDirectory?.();
-    } else {
-      disableDirectory?.();
-    }
-    return () => {
-      disableDirectory?.();
-    };
-  }, [selectedModule, enableDirectory, disableDirectory]);
-
   if (loading || !authClient) {
     return (
       <div className="p-6 text-center text-slate-500">
@@ -559,90 +544,6 @@ export default function Settings() {
                 onClick={() => { setSelectedModule('setup'); }}
               >
                 <PlugZap className="h-4 w-4" /> פתיחת אשף הגדרה
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Team Members Card */}
-          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
-            <CardHeader className="space-y-2 pb-3 flex-1">
-              <div className="flex items-start gap-2">
-                <div className="rounded-lg bg-purple-100 p-2 text-purple-600 transition-colors group-hover:bg-purple-600 group-hover:text-white">
-                  <Users className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <CardTitle className="text-lg font-bold text-slate-900">
-                  ניהול חברי צוות
-                </CardTitle>
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                הזמנת משתמשים חדשים, ניהול הרשאות, והסרת חברי צוות מהארגון
-              </p>
-            </CardHeader>
-            <CardContent className="pt-0 mt-auto">
-              <Button 
-                size="sm" 
-                className="w-full gap-2" 
-                onClick={() => setSelectedModule('orgMembers')} 
-                disabled={!canManageSessionForm}
-                variant={!canManageSessionForm ? 'secondary' : 'default'}
-              >
-                <Users className="h-4 w-4" /> ניהול חברי צוות
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Session Form Card */}
-          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
-            <CardHeader className="space-y-2 pb-3 flex-1">
-              <div className="flex items-start gap-2">
-                <div className="rounded-lg bg-emerald-100 p-2 text-emerald-600 transition-colors group-hover:bg-emerald-600 group-hover:text-white">
-                  <ClipboardList className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <CardTitle className="text-lg font-bold text-slate-900">
-                  טופס שאלות מפגש
-                </CardTitle>
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                הגדרת שאלות מותאמות אישית לתיעוד מפגשים ומעקב אחר התקדמות תלמידים
-              </p>
-            </CardHeader>
-            <CardContent className="pt-0 mt-auto">
-              <Button 
-                size="sm" 
-                className="w-full gap-2" 
-                onClick={() => setSelectedModule('sessionForm')} 
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
-              >
-                <ClipboardList className="h-4 w-4" /> ניהול שאלות
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Services Card */}
-          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
-            <CardHeader className="space-y-2 pb-3 flex-1">
-              <div className="flex items-start gap-2">
-                <div className="rounded-lg bg-orange-100 p-2 text-orange-600 transition-colors group-hover:bg-orange-600 group-hover:text-white">
-                  <ListChecks className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <CardTitle className="text-lg font-bold text-slate-900">
-                  ניהול שירותים
-                </CardTitle>
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                הוספת וניהול רשימת השירותים הזמינים למשתמשי הארגון
-              </p>
-            </CardHeader>
-            <CardContent className="pt-0 mt-auto">
-              <Button 
-                size="sm" 
-                className="w-full gap-2" 
-                onClick={() => setSelectedModule('services')} 
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
-              >
-                <ListChecks className="h-4 w-4" /> ניהול שירותים
               </Button>
             </CardContent>
           </Card>
@@ -926,6 +827,37 @@ export default function Settings() {
             </CardContent>
           </Card>
           )}
+
+          {/* Session Form Card (Future Feature) */}
+          <Card className="group relative w-full overflow-hidden border-0 bg-slate-50 shadow-md transition-all duration-200 flex flex-col opacity-85">
+            <CardHeader className="space-y-2 pb-3 flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2">
+                  <div className="rounded-lg bg-emerald-100 p-2 text-emerald-600">
+                    <ClipboardList className="h-5 w-5" aria-hidden="true" />
+                  </div>
+                  <CardTitle className="text-lg font-bold text-slate-900">
+                    טופס שאלות מפגש
+                  </CardTitle>
+                </div>
+                <Badge className="bg-amber-100 text-amber-800 border-0">פיצ׳ר עתידי</Badge>
+              </div>
+              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
+                יתווסף מחדש בעתיד כחלק ממודל דוחות/מפגשים של Reinex או אינטגרציה עם TutTiud.
+              </p>
+            </CardHeader>
+            <CardContent className="pt-0 mt-auto">
+              <Button
+                size="sm"
+                className="w-full gap-2"
+                disabled
+                variant="secondary"
+                title="פיצ׳ר עתידי"
+              >
+                <ClipboardList className="h-4 w-4" /> יתווסף בהמשך
+              </Button>
+            </CardContent>
+          </Card>
         </div>
         )}
 
@@ -974,9 +906,6 @@ export default function Settings() {
             <EnhancedDialogHeader
               icon={
                 selectedModule === 'setup' ? <PlugZap /> :
-                selectedModule === 'orgMembers' ? <Users /> :
-                selectedModule === 'sessionForm' ? <ClipboardList /> :
-                selectedModule === 'services' ? <ListChecks /> :
                 selectedModule === 'backup' ? <ShieldCheck /> :
                 selectedModule === 'logo' ? <Sparkles /> :
                 selectedModule === 'tags' ? <Tag /> :
@@ -991,9 +920,6 @@ export default function Settings() {
               }
               title={
                 selectedModule === 'setup' ? 'חיבור Supabase' :
-                selectedModule === 'orgMembers' ? 'ניהול חברי צוות' :
-                selectedModule === 'sessionForm' ? 'טופס שאלות מפגש' :
-                selectedModule === 'services' ? 'ניהול שירותים' :
                 selectedModule === 'backup' ? 'גיבוי ושחזור' :
                 selectedModule === 'logo' ? 'לוגו מותאם אישית' :
                 selectedModule === 'tags' ? 'ניהול תגיות וסיווגים' :
@@ -1019,25 +945,6 @@ export default function Settings() {
               <div className="mx-auto max-w-4xl">
                 {selectedModule === 'setup' && (
                   <SetupAssistant />
-                )}
-                {selectedModule === 'orgMembers' && (
-                  <OrgMembersCard />
-                )}
-                {selectedModule === 'sessionForm' && (
-                  <SessionFormManager
-                    session={session}
-                    orgId={activeOrgId}
-                    activeOrgHasConnection={activeOrgHasConnection}
-                    tenantClientReady={tenantClientReady}
-                  />
-                )}
-                {selectedModule === 'services' && (
-                  <ServiceManager
-                    session={session}
-                    orgId={activeOrgId}
-                    activeOrgHasConnection={activeOrgHasConnection}
-                    tenantClientReady={tenantClientReady}
-                  />
                 )}
                 {selectedModule === 'backup' && (
                   <BackupManager session={session} orgId={activeOrgId} />
