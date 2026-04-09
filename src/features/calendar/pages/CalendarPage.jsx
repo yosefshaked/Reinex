@@ -300,7 +300,7 @@ export default function CalendarPage() {
   return (
     <PageLayout title="לוח זמנים">
       <div className="space-y-4">
-        <div className="sticky top-3 z-30 rounded-3xl border border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/85">
+        <div data-calendar-topbar="v2" className="sticky top-2 z-40 isolate overflow-hidden rounded-3xl border border-slate-200 bg-white px-3 py-3 shadow-[0_14px_36px_-28px_rgba(15,23,42,0.5)] sm:px-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-wrap items-center gap-2">
               <Button onClick={handleOpenBlankCreateLesson} className="gap-2">
@@ -317,7 +317,7 @@ export default function CalendarPage() {
               </Button>
             </div>
 
-            <div className="flex justify-center xl:flex-1">
+            <div className="flex min-w-0 justify-center xl:flex-1">
               <DateNavigator currentDate={currentDate} onDateChange={setCurrentDate} onNavigate={handleCalendarNavigate} viewMode={viewMode} />
             </div>
 
