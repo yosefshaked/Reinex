@@ -907,7 +907,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                   <div className="text-sm text-red-600">{servicesError}</div>
                 ) : null}
                 <Select
-                  value={formData.service_id}
+                  value={formData.service_id || ''}
                   onValueChange={(value) => {
                     const nextSelectedService = activeServices.find((service) => String(service.id) === String(value));
                     setFormData((prev) => ({
@@ -953,7 +953,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                   </div>
                 ) : null}
                 <Select
-                  value={formData.instructor_employee_id}
+                  value={formData.instructor_employee_id || ''}
                   onValueChange={(value) => setFormData({ ...formData, instructor_employee_id: String(value) })}
                   disabled={instructorsLoading || instructorOptions.length === 0}
                 >
@@ -995,7 +995,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                   </div>
                 ) : !useSchedulingOverride ? (
                   <Select
-                    value={formData.time || undefined}
+                    value={formData.time || ''}
                     onValueChange={(value) => setFormData((prev) => ({ ...prev, time: value }))}
                   >
                     <SelectTrigger id="time">
@@ -1095,7 +1095,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="override-reason-code">סיבת החריגה *</Label>
-                    <Select value={selectedOverrideReasonCode} onValueChange={setSelectedOverrideReasonCode}>
+                    <Select value={selectedOverrideReasonCode || ''} onValueChange={setSelectedOverrideReasonCode}>
                       <SelectTrigger id="override-reason-code">
                         <SelectValue placeholder="בחרו סיבה" />
                       </SelectTrigger>

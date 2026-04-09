@@ -1488,7 +1488,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             <div>
               <Label htmlFor="service">שירות *</Label>
               <Select
-                value={formData.service_id}
+                value={formData.service_id || ''}
                 onValueChange={(value) => setFormData({ ...formData, service_id: value })}
                 disabled={servicesLoading}
               >
@@ -1509,7 +1509,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             <div>
               <Label htmlFor="instructor">מדריך *</Label>
               <Select
-                value={formData.instructor_employee_id}
+                value={formData.instructor_employee_id || ''}
                 onValueChange={(value) => setFormData({ ...formData, instructor_employee_id: value })}
                 disabled={instructorsLoading}
               >
@@ -1601,7 +1601,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               {useSchedulingOverride && (
                 <div className="space-y-2">
                   <Label htmlFor="lesson-override-reason-code">סיבת החריגה *</Label>
-                  <Select value={selectedOverrideReasonCode} onValueChange={setSelectedOverrideReasonCode}>
+                  <Select value={selectedOverrideReasonCode || ''} onValueChange={setSelectedOverrideReasonCode}>
                     <SelectTrigger id="lesson-override-reason-code">
                       <SelectValue placeholder="בחרו סיבה" />
                     </SelectTrigger>
@@ -1630,15 +1630,15 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             <div>
               <Label htmlFor="status">סטטוס</Label>
               <Select
-                value={formData.status}
+                value={formData.status || 'scheduled'}
                 onValueChange={(value) => setFormData({ ...formData, status: value })}
               >
                 <SelectTrigger id="status">
-                  <SelectValue />
+                  <SelectValue placeholder="בחר סטטוס" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="scheduled">מתוכנן</SelectItem>
-                  {formData.status === 'cancelled' ? <SelectItem value="cancelled">בוטל</SelectItem> : null}
+                  <SelectItem value="cancelled">בוטל</SelectItem>
                   <SelectItem value="completed">הושלם</SelectItem>
                 </SelectContent>
               </Select>
