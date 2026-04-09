@@ -152,51 +152,46 @@ export default async function (context, req) {
         }
       }
 
-      payload.created_at = new Date().toISOString();
-      const { data, error } = await tenantClient
-        .from('commitments')
-        .insert(payload)
-        .select('*')
-        .single();
+      const { data: rpcResult, error: rpcError } = await tenantClient.rpc(
+        'create_commitment_and_ledger_entry',
+        {
+          p_student_id: studentId,
+          p_service_id: serviceId,
+          p_commitment_type: commitmentType,
+          p_total_amount: totalAmount,
+          p_default_charge_amount: defaultChargeAmount,
+          p_transfer_ref: normalizeString(body?.transfer_ref) || null,
+          p_notes: normalizeString(body?.notes) || null,
+          p_is_active: payload.is_active,
+          p_expires_at: payload.expires_at,
+          p_metadata: payload.metadata,
+          p_hmo_provider_id: null,
+          p_hmo_provider_track_id: null,
+          p_hmo_authorization_id: null,
+        },
+      );
 
-      if (error) {
-        context.log?.error?.('commitments failed to create record', { message: error.message });
+      if (rpcError) {
+        context.log?.error?.('commitments RPC create_commitment_and_ledger_entry failed', { message: rpcError.message });
         return respond(context, 500, { message: 'failed_to_create_commitment' });
       }
 
-      if (data && totalAmount > 0) {
-        const creditPayload = {
-          student_id: data.student_id,
-          commitment_id: data.id,
-          transaction_type: 'CREDIT',
-          usage_type: data.commitment_type === 'hmo' ? 'hmo_authorization_added' : 'commitment_creation',
-          amount: totalAmount,
-          source_ref: null,
-          notes: null,
-          created_at: data.created_at,
-          updated_at: data.created_at,
-          metadata: { commitment_type: data.commitment_type },
-        };
-        const { error: creditError } = await tenantClient
-          .from('ledger_transactions')
-          .insert(creditPayload);
+      const commitmentId = rpcResult?.commitment_id;
+      if (!commitmentId) {
+        context.log?.error?.('commitments RPC returned no commitment_id');
+        return respond(context, 500, { message: 'failed_to_create_commitment' });
+      }
 
-        if (creditError) {
-          context.log?.error?.('commitments failed to create initial CREDIT ledger entry', { message: creditError.message });
-          const { error: rollbackError } = await tenantClient
-            .from('commitments')
-            .delete()
-            .eq('id', data.id);
+      // Fetch the full commitment record to return to the client
+      const { data, error } = await tenantClient
+        .from('commitments')
+        .select('*')
+        .eq('id', commitmentId)
+        .single();
 
-          if (rollbackError) {
-            context.log?.error?.('commitments failed to rollback commitment after initial CREDIT ledger failure', {
-              message: rollbackError.message,
-              commitmentId: data.id,
-            });
-          }
-
-          return respond(context, 500, { message: 'failed_to_create_ledger_entry' });
-        }
+      if (error) {
+        context.log?.error?.('commitments failed to fetch created record', { message: error.message });
+        return respond(context, 500, { message: 'failed_to_fetch_created_commitment' });
       }
 
       return respond(context, 201, data);

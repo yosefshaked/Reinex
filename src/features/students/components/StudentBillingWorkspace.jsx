@@ -300,6 +300,7 @@ export default function StudentBillingWorkspace({
   const [reconciling, setReconciling] = useState(false);
   const [deleteCommitmentTargetId, setDeleteCommitmentTargetId] = useState('');
   const [deleteEntryTargetId, setDeleteEntryTargetId] = useState('');
+  const [reconcileDialogOpen, setReconcileDialogOpen] = useState(false);
   const [summary, setSummary] = useState(null);
   const [commitments, setCommitments] = useState([]);
   const [billingQueue, setBillingQueue] = useState([]);
@@ -348,6 +349,18 @@ export default function StudentBillingWorkspace({
     () => computeCommitmentAmounts(commitmentForm),
     [commitmentForm],
   );
+
+  const unsavedAssignmentRows = useMemo(() => {
+    const allRows = [...actionableHistory, ...lessonHistory];
+    return allRows.filter((row) => {
+      const override = assignmentValues[row.id];
+      if (override === undefined) return false;
+      const persisted = row.commitment_id ?? '__none__';
+      return override !== persisted;
+    });
+  }, [actionableHistory, lessonHistory, assignmentValues]);
+
+  const hasUnsavedAssignments = unsavedAssignmentRows.length > 0;
 
   const loadData = useCallback(async () => {
     if (!studentId || !activeOrgId || !canViewBilling) return;
@@ -577,10 +590,56 @@ export default function StudentBillingWorkspace({
       }
       await loadData();
       await notifyDataChanged();
+      setAssignmentValues((current) => {
+        const next = { ...current };
+        delete next[row.id];
+        return next;
+      });
       toast.success('שיוך החיוב עודכן.');
     } catch (error) {
       console.error('Failed to update lesson commitment assignment', error);
       toast.error(error?.message || 'עדכון שיוך החיוב נכשל.');
+    } finally {
+      setSavingAssignment(false);
+    }
+  }
+
+  async function handleSaveAllAssignments() {
+    if (!activeOrgId || !canMutateBilling || unsavedAssignmentRows.length === 0) return;
+    setSavingAssignment(true);
+    try {
+      for (const row of unsavedAssignmentRows) {
+        const selectedValue = resolveAssignmentValue(row);
+        if (!selectedValue || selectedValue === '__none__') {
+          await authenticatedFetch('billing', {
+            session,
+            method: 'POST',
+            body: {
+              org_id: activeOrgId,
+              action: 'clear_lesson_commitment',
+              lesson_participant_id: row.id,
+            },
+          });
+        } else {
+          await authenticatedFetch('billing', {
+            session,
+            method: 'POST',
+            body: {
+              org_id: activeOrgId,
+              action: 'assign_lesson_commitment',
+              lesson_participant_id: row.id,
+              commitment_id: selectedValue,
+            },
+          });
+        }
+      }
+      await loadData();
+      await notifyDataChanged();
+      setAssignmentValues({});
+      toast.success(`${unsavedAssignmentRows.length} שיוכים נשמרו.`);
+    } catch (error) {
+      console.error('Failed to save all assignments', error);
+      toast.error(error?.message || 'שמירת השיוכים נכשלה.');
     } finally {
       setSavingAssignment(false);
     }
@@ -752,6 +811,7 @@ export default function StudentBillingWorkspace({
 
   async function handleReconcileBilling() {
     if (!activeOrgId || !studentId || !canMutateBilling) return;
+    setReconcileDialogOpen(false);
     setReconciling(true);
     try {
       await authenticatedFetch('billing', {
@@ -810,7 +870,7 @@ export default function StudentBillingWorkspace({
                 </Badge>
               ) : null}
               {canMutateBilling ? (
-                <Button type="button" variant="outline" onClick={handleReconcileBilling} disabled={reconciling || loading}>
+                <Button type="button" variant="outline" onClick={() => setReconcileDialogOpen(true)} disabled={reconciling || loading}>
                   {reconciling ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
                   חשב מחדש
                 </Button>
@@ -1336,6 +1396,18 @@ export default function StudentBillingWorkspace({
               <p className="text-sm text-muted-foreground">שיעורים שמחכים לשיוך התחייבות תקינה או להגדרת מחיר.</p>
             </div>
 
+            {hasUnsavedAssignments ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2">
+                <span className="text-sm font-medium text-amber-900">
+                  {unsavedAssignmentRows.length} שיוכים לא נשמרו
+                </span>
+                <Button size="sm" onClick={handleSaveAllAssignments} disabled={savingAssignment}>
+                  {savingAssignment ? <Loader2 className="me-2 h-3.5 w-3.5 animate-spin" /> : null}
+                  שמור הכול
+                </Button>
+              </div>
+            ) : null}
+
             {actionableHistory.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
                 אין שיעורים שממתינים לטיפול.
@@ -1680,6 +1752,27 @@ export default function StudentBillingWorkspace({
             <AlertDialogCancel>ביטול</AlertDialogCancel>
             <AlertDialogAction onClick={() => { handleDeleteEntry(deleteEntryTargetId); setDeleteEntryTargetId(''); }}>
               מחק
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={reconcileDialogOpen} onOpenChange={setReconcileDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>חישוב חיובים מחדש</AlertDialogTitle>
+            <AlertDialogDescription>
+              פעולה זו תחשב מחדש את החיובים עבור {lessonHistory.length} שיעורים
+              {startDate ? ` מתאריך ${startDate}` : ''}
+              {endDate ? ` עד ${endDate}` : ''}
+              {!startDate && !endDate ? ' בכל הטווח' : ''}.
+              {' '}שיעורים נעולים ידולגו. האם להמשיך?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={handleReconcileBilling}>
+              חשב מחדש
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

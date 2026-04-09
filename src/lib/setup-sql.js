@@ -2162,8 +2162,10 @@ ALTER TABLE public.hmo_provider_tracks
 DO $$
 BEGIN
   ALTER TABLE public.hmo_provider_tracks
+    DROP CONSTRAINT IF EXISTS hmo_provider_tracks_provider_id_fkey;
+  ALTER TABLE public.hmo_provider_tracks
     ADD CONSTRAINT hmo_provider_tracks_provider_id_fkey
-    FOREIGN KEY (provider_id) REFERENCES public.hmo_providers(id);
+    FOREIGN KEY (provider_id) REFERENCES public.hmo_providers(id) ON DELETE RESTRICT;
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -2287,8 +2289,10 @@ END $$;
 DO $$
 BEGIN
   ALTER TABLE public.hmo_authorizations
+    DROP CONSTRAINT IF EXISTS hmo_authorizations_provider_id_fkey;
+  ALTER TABLE public.hmo_authorizations
     ADD CONSTRAINT hmo_authorizations_provider_id_fkey
-    FOREIGN KEY (provider_id) REFERENCES public.hmo_providers(id);
+    FOREIGN KEY (provider_id) REFERENCES public.hmo_providers(id) ON DELETE RESTRICT;
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -2423,8 +2427,10 @@ END $$;
 DO $$
 BEGIN
   ALTER TABLE public.commitments
+    DROP CONSTRAINT IF EXISTS commitments_hmo_provider_id_fkey;
+  ALTER TABLE public.commitments
     ADD CONSTRAINT commitments_hmo_provider_id_fkey
-    FOREIGN KEY (hmo_provider_id) REFERENCES public.hmo_providers(id);
+    FOREIGN KEY (hmo_provider_id) REFERENCES public.hmo_providers(id) ON DELETE RESTRICT;
 EXCEPTION
   WHEN duplicate_object THEN
     NULL;
@@ -2485,6 +2491,7 @@ CREATE INDEX IF NOT EXISTS commitments_transfer_ref_idx ON public.commitments (t
 CREATE INDEX IF NOT EXISTS commitments_hmo_provider_id_idx ON public.commitments (hmo_provider_id) WHERE hmo_provider_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS commitments_hmo_provider_track_id_idx ON public.commitments (hmo_provider_track_id) WHERE hmo_provider_track_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS commitments_hmo_authorization_id_uidx ON public.commitments (hmo_authorization_id) WHERE hmo_authorization_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS commitments_student_hmo_auth_uidx ON public.commitments (student_id, hmo_authorization_id) WHERE hmo_authorization_id IS NOT NULL;
 
 DO $$
 BEGIN
@@ -5879,6 +5886,152 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.ensure_hmo_authorization_and_link_commitment(
   jsonb, uuid
+) TO authenticated, service_role;
+
+-- -----------------------------------------------------------------
+-- create_commitment_and_ledger_entry
+-- Issue #7 fix: replaces the two-step JS flow that first inserts a
+-- commitment then inserts a CREDIT ledger entry. If the second step
+-- failed the commitment could exist without a ledger entry, breaking
+-- financial integrity. This RPC performs both writes atomically.
+--
+-- Usage (JS):
+--   const { data, error } = await tenantClient.rpc(
+--     'create_commitment_and_ledger_entry', { p_student_id, ... }
+--   );
+-- Returns: { commitment_id, ledger_entry_id }
+-- -----------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.create_commitment_and_ledger_entry(
+  p_student_id              uuid,
+  p_service_id              uuid,
+  p_commitment_type         text,
+  p_total_amount            integer,   -- agorot
+  p_default_charge_amount   integer,   -- agorot, nullable via NULL
+  p_transfer_ref            uuid,
+  p_notes                   text,
+  p_is_active               boolean,
+  p_expires_at              timestamptz,
+  p_metadata                jsonb,
+  p_hmo_provider_id         uuid,
+  p_hmo_provider_track_id   uuid,
+  p_hmo_authorization_id    uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_commitment_id           uuid;
+  v_client_profile_id       uuid;
+  v_ledger_entry_id         uuid;
+  v_usage_type              text;
+  v_now                     timestamptz := now();
+BEGIN
+  -- Validate required fields
+  IF p_student_id IS NULL THEN
+    RAISE EXCEPTION 'missing_student_id';
+  END IF;
+  IF p_service_id IS NULL THEN
+    RAISE EXCEPTION 'missing_service_id';
+  END IF;
+  IF p_total_amount IS NULL OR p_total_amount < 0 THEN
+    RAISE EXCEPTION 'invalid_total_amount';
+  END IF;
+  IF p_commitment_type NOT IN ('package', 'subscription', 'hmo', 'manual_credit') THEN
+    RAISE EXCEPTION 'invalid_commitment_type';
+  END IF;
+
+  -- Resolve client_profile_id for ledger entry
+  SELECT client_profile_id
+    INTO v_client_profile_id
+  FROM public.students
+  WHERE id = p_student_id;
+
+  IF v_client_profile_id IS NULL THEN
+    RAISE EXCEPTION 'student_not_found_or_missing_client_profile';
+  END IF;
+
+  -- Step 1: Insert commitment
+  INSERT INTO public.commitments (
+    student_id,
+    service_id,
+    commitment_type,
+    total_amount,
+    default_charge_amount,
+    transfer_ref,
+    notes,
+    is_active,
+    expires_at,
+    metadata,
+    hmo_provider_id,
+    hmo_provider_track_id,
+    hmo_authorization_id,
+    created_at,
+    updated_at
+  ) VALUES (
+    p_student_id,
+    p_service_id,
+    p_commitment_type,
+    p_total_amount,
+    p_default_charge_amount,
+    p_transfer_ref,
+    p_notes,
+    COALESCE(p_is_active, true),
+    p_expires_at,
+    COALESCE(p_metadata, '{}'::jsonb),
+    p_hmo_provider_id,
+    p_hmo_provider_track_id,
+    p_hmo_authorization_id,
+    v_now,
+    v_now
+  )
+  RETURNING id INTO v_commitment_id;
+
+  -- Step 2: Insert initial CREDIT ledger entry (only when amount > 0)
+  IF p_total_amount > 0 THEN
+    v_usage_type := CASE
+      WHEN p_commitment_type = 'hmo' THEN 'hmo_authorization_added'
+      ELSE 'commitment_creation'
+    END;
+
+    INSERT INTO public.ledger_transactions (
+      client_profile_id,
+      student_id,
+      commitment_id,
+      transaction_type,
+      usage_type,
+      amount,
+      source_ref,
+      notes,
+      created_at,
+      updated_at,
+      metadata
+    ) VALUES (
+      v_client_profile_id,
+      p_student_id,
+      v_commitment_id,
+      'CREDIT',
+      v_usage_type,
+      p_total_amount,
+      NULL,
+      NULL,
+      v_now,
+      v_now,
+      jsonb_build_object('commitment_type', p_commitment_type)
+    )
+    RETURNING id INTO v_ledger_entry_id;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'commitment_id',   v_commitment_id,
+    'ledger_entry_id', v_ledger_entry_id
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.create_commitment_and_ledger_entry(
+  uuid, uuid, text, integer, integer, uuid, text, boolean, timestamptz, jsonb, uuid, uuid, uuid
 ) TO authenticated, service_role;
 
 -- -----------------------------------------------------------------
