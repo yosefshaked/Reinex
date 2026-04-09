@@ -30,7 +30,7 @@ import {
   HMO_PAYMENT_MODE_OPTIONS,
   HMO_SUGGESTION_OPTIONS,
 } from '@/features/students/components/student-billing-helpers.js';
-import { coerceAgorot } from '@/lib/currency.js';
+import { toShekel, toAgorot, formatCurrency } from '@/lib/currency.js';
 
 function buildEmptyProviderForm() {
   return {
@@ -55,10 +55,7 @@ function buildEmptyTrackForm(providerId = '') {
   };
 }
 
-function formatCurrency(value) {
-  if (value == null || Number.isNaN(Number(value))) return '—';
-  return `₪${Number(value).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+
 
 export default function HmoSetupWorkspace({ onChanged = null }) {
   const { session } = useAuth();
@@ -111,8 +108,8 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
       serviceId: track.service_id || '',
       name: track.name || '',
       paymentMode: track.payment_mode || 'partially_paid_by_hmo',
-      defaultCustomerChargeAmount: track.default_customer_charge_amount ?? '',
-      defaultInsurerClaimAmount: track.default_insurer_claim_amount ?? '',
+      defaultCustomerChargeAmount: track.default_customer_charge_amount != null ? toShekel(track.default_customer_charge_amount) : '',
+      defaultInsurerClaimAmount: track.default_insurer_claim_amount != null ? toShekel(track.default_insurer_claim_amount) : '',
       defaultWorkflowNotes: track.default_workflow_notes || '',
       is_active: track.is_active !== false,
       suggestionId: 'custom',
@@ -198,8 +195,8 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
         service_id: trackForm.serviceId,
         name: trackForm.name.trim(),
         payment_mode: trackForm.paymentMode,
-        default_customer_charge_amount: coerceAgorot(trackForm.defaultCustomerChargeAmount),
-        default_insurer_claim_amount: coerceAgorot(trackForm.defaultInsurerClaimAmount),
+        default_customer_charge_amount: toAgorot(trackForm.defaultCustomerChargeAmount),
+        default_insurer_claim_amount: toAgorot(trackForm.defaultInsurerClaimAmount),
         default_workflow_notes: trackForm.defaultWorkflowNotes || '',
         is_active: trackForm.is_active,
         metadata: {

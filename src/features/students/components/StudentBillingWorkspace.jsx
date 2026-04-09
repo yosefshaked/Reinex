@@ -31,7 +31,7 @@ import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/feature
 import HmoAuthorizationManager from '@/features/students/components/HmoAuthorizationManager.jsx';
 import LedgerInvoiceDialog from '@/features/finance/components/LedgerInvoiceDialog.jsx';
 import { normalizeExternalHttpUrl } from '@/lib/external-links.js';
-import { toShekel, coerceAgorot } from '@/lib/currency.js';
+import { toShekel, toAgorot, coerceAgorot, formatCurrency } from '@/lib/currency.js';
 import {
   buildCommitmentMetadataPayload,
   buildInitialCommitmentForm,
@@ -54,10 +54,7 @@ const CREATION_ACTION_OPTIONS = [
   },
 ];
 
-function formatCurrency(value) {
-  if (value == null || Number.isNaN(Number(value))) return '—';
-  return `₪${Number(value).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+
 
 function formatDate(dateString) {
   if (!dateString) return '—';
@@ -670,7 +667,7 @@ export default function StudentBillingWorkspace({
       sourceType: 'adjustment',
       commitmentId: entry.commitment_id || '',
       direction: entry.transaction_type === 'CREDIT' ? 'credit' : 'debit',
-      amountCharged: coerceAgorot(entry.amount || Math.abs(entry.amount_charged)) || '',
+      amountCharged: entry.amount != null ? toShekel(Math.abs(entry.amount || entry.amount_charged)) : '',
       effectiveDate: entry.effective_date || entry.metadata?.effective_date || '',
       notes: entry.notes || '',
       invoiceId: entry.invoice_id || '',
@@ -696,7 +693,7 @@ export default function StudentBillingWorkspace({
           direction: entryForm.direction,
           usage_type: entryForm.direction === 'credit' ? 'manual_topup' : 'manual_adjustment',
           commitment_id: entryForm.commitmentId || null,
-          amount: Math.abs(Number(entryForm.amountCharged)),
+          amount: toAgorot(Math.abs(Number(entryForm.amountCharged))),
           effective_date: entryForm.effectiveDate || null,
           notes: entryForm.notes || null,
           invoice_id: entryForm.invoiceId || null,
@@ -1111,7 +1108,7 @@ export default function StudentBillingWorkspace({
                   <div className="rounded-xl border border-border bg-slate-50 px-3 py-3 text-sm text-zinc-800">
                     {entryForm.amountCharged === ''
                       ? 'בחרו האם להוסיף או להפחית כסף, ואז הזינו סכום.'
-                      : `${entryForm.direction === 'debit' ? 'תופחת' : 'תתווסף'} ${formatCurrency(coerceAgorot(entryForm.amountCharged))} ${entryForm.commitmentId ? 'מההתחייבות שנבחרה' : 'ברמת התלמיד'}.`}
+                      : `${entryForm.direction === 'debit' ? 'תופחת' : 'תתווסף'} ${formatCurrency(toAgorot(entryForm.amountCharged))} ${entryForm.commitmentId ? 'מההתחייבות שנבחרה' : 'ברמת התלמיד'}.`}
                   </div>
 
                   <div className="space-y-2">

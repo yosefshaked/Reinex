@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { coerceAgorot } from '@/lib/currency.js';
+import { toShekel, toAgorot, formatCurrency } from '@/lib/currency.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useMedicalProviders } from '@/features/students/hooks/useMedicalProviders.js';
@@ -47,10 +47,7 @@ function buildEmptyAuthorizationForm() {
   };
 }
 
-function formatCurrency(value) {
-  if (value == null || Number.isNaN(Number(value))) return '—';
-  return `₪${Number(value).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+
 
 function formatDate(value) {
   if (!value) return '—';
@@ -191,8 +188,8 @@ export default function HmoAuthorizationManager({
       validFrom: row.valid_from || '',
       expiresAt: row.expires_at || '',
       reminderDate: row.reminder_date || '',
-      customerChargeAmountOverride: row.customer_charge_amount_override ?? '',
-      insurerClaimAmountOverride: row.insurer_claim_amount_override ?? '',
+      customerChargeAmountOverride: row.customer_charge_amount_override != null ? toShekel(row.customer_charge_amount_override) : '',
+      insurerClaimAmountOverride: row.insurer_claim_amount_override != null ? toShekel(row.insurer_claim_amount_override) : '',
       workflowNotesOverride: row.workflow_notes_override || '',
       status: row.status || 'active',
       notes: row.notes || '',
@@ -241,8 +238,8 @@ export default function HmoAuthorizationManager({
           valid_from: form.validFrom || null,
           expires_at: form.expiresAt || null,
           reminder_date: form.reminderDate || null,
-          customer_charge_amount_override: form.customerChargeAmountOverride === '' ? null : coerceAgorot(form.customerChargeAmountOverride),
-          insurer_claim_amount_override: form.insurerClaimAmountOverride === '' ? null : coerceAgorot(form.insurerClaimAmountOverride),
+          customer_charge_amount_override: form.customerChargeAmountOverride === '' ? null : toAgorot(form.customerChargeAmountOverride),
+          insurer_claim_amount_override: form.insurerClaimAmountOverride === '' ? null : toAgorot(form.insurerClaimAmountOverride),
           workflow_notes_override: form.workflowNotesOverride || null,
           status: form.status,
           notes: form.notes || null,

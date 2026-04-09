@@ -16,12 +16,9 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog.jsx';
-import { coerceAgorot } from '@/lib/currency.js';
+import { toAgorot, coerceAgorot, formatCurrency } from '@/lib/currency.js';
 
-function formatCurrency(value) {
-  if (value == null || Number.isNaN(Number(value))) return '—';
-  return `₪${Number(value).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -184,7 +181,7 @@ export default function ClientBillingWorkspace({ clientProfile }) {
 
   async function handleSaveTopup() {
     if (!activeOrgId || !clientProfileId) return;
-    const amount = Number(topupForm.amount);
+    const amount = toAgorot(topupForm.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       toast.error('יש להזין סכום תקין.');
       return;

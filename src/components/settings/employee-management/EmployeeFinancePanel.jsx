@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { toAgorot, formatCurrency } from '@/lib/currency.js';
 
 function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -34,10 +35,7 @@ function formatMonth(date) {
   return new Intl.DateTimeFormat('he-IL', { month: 'long', year: 'numeric' }).format(date);
 }
 
-function formatCurrency(value) {
-  if (value == null || Number.isNaN(Number(value))) return '—';
-  return `₪${Number(value).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+
 
 function getPayrollModelLabel(value) {
   if (value === 'lesson_based') return 'מבוסס שיעורים';
@@ -104,7 +102,7 @@ export default function EmployeeFinancePanel({ employee, orgId, session, onEditE
     if (!employee?.id || !orgId) return;
     setSaving(true);
     try {
-      const rawAmount = Number(form.amount);
+      const rawAmount = toAgorot(form.amount);
       const normalizedAmount = form.correctionType === 'deduction'
         ? -Math.abs(rawAmount)
         : rawAmount;

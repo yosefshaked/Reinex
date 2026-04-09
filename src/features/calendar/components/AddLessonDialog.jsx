@@ -27,6 +27,7 @@ import {
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
 } from '../utils/schedulingOverride.js';
 import { parseLocalDateString } from '../utils/localDate.js';
+import { toAgorot } from '@/lib/currency.js';
 
 function toLocalDateString(dateObj) {
   if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
@@ -642,7 +643,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
           student_ids: formData.student_ids,
           client_profile_ids: formData.client_profile_ids,
           ...(requiresDirectClientChargeAmount
-            ? { direct_client_charge_amount: Number(directClientChargeAmount) }
+            ? { direct_client_charge_amount: toAgorot(directClientChargeAmount) }
             : {}),
           created_source: 'one_time',
           metadata: useSchedulingOverride

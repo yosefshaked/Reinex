@@ -26,6 +26,7 @@ import {
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
 } from '../utils/schedulingOverride.js';
 import { getParticipantDisplayName, resolveParticipantReminderContact } from '../utils/participantDisplay.js';
+import { toShekel } from '@/lib/currency.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -1830,7 +1831,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                           </div>
                         </div>
                         {participant.price_charged && (
-                          <Badge variant="outline" className="ms-2">₪{participant.price_charged}</Badge>
+                          <Badge variant="outline" className="ms-2">₪{toShekel(participant.price_charged).toFixed(2)}</Badge>
                         )}
                         {canMarkAttendance && !isAbsenceFormOpen && (
                           <div className="flex gap-1 ms-2">

@@ -27,7 +27,7 @@ import StudentBillingWorkspace from '@/features/students/components/StudentBilli
 import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 import { toast } from 'sonner';
-import { toShekel, coerceAgorot } from '@/lib/currency.js';
+import { toShekel, coerceAgorot, formatCurrency } from '@/lib/currency.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -85,10 +85,7 @@ function escapeCsvCell(value) {
   return `"${stringValue}"`;
 }
 
-function formatCurrency(value) {
-  if (value == null || Number.isNaN(Number(value))) return '—';
-  return `₪${Number(value).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+
 
 function HelpTooltip({ text }) {
   return (

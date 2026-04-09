@@ -38,3 +38,14 @@ export function coerceAgorot(value, fallback = 0) {
   const n = Math.round(Number(value));
   return Number.isFinite(n) ? n : fallback;
 }
+
+/**
+ * Format an agorot integer as a Hebrew-locale shekel string.
+ * Divides by 100 internally — always pass raw agorot from the API/DB.
+ * @param {number|null|undefined} agorot
+ * @returns {string}
+ */
+export function formatCurrency(agorot) {
+  if (agorot == null || Number.isNaN(Number(agorot))) return '—';
+  return `₪${toShekel(agorot).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
