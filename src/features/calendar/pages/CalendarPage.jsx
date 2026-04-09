@@ -298,7 +298,7 @@ export default function CalendarPage() {
   }, [refetchInstructors]);
 
   return (
-    <PageLayout title="לוח זמנים">
+    <PageLayout title="לוח זמנים" contentClassName="pb-sm xl:pb-md">
       <div className="space-y-4">
         <div data-calendar-topbar="v2" className="sticky top-2 z-40 isolate overflow-hidden rounded-3xl border border-slate-200 bg-white px-3 py-3 shadow-[0_14px_36px_-28px_rgba(15,23,42,0.5)] sm:px-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -350,7 +350,7 @@ export default function CalendarPage() {
         ) : null}
 
         {!instructorsError && !instancesError ? (
-          <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+          <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)] xl:items-start">
             <CalendarWorkspaceDock
               currentDate={currentDate}
               viewMode={viewMode}
