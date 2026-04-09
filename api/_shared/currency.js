@@ -81,3 +81,14 @@ export const FINANCE_LIMITS = Object.freeze({
   /** Maximum charge amount per lesson: 10,000 ₪ = 1,000,000 agorot */
   MAX_CHARGE_AMOUNT_AGOROT: 1_000_000,
 });
+
+/**
+ * Billing attention thresholds — extracted so they are easy to locate
+ * and eventually move into org-level settings.
+ */
+export const BILLING_THRESHOLDS = Object.freeze({
+  /** Days before expiry to flag "expiring soon" */
+  EXPIRING_SOON_DAYS: 30,
+  /** Remaining-lessons count below which a commitment is flagged "low balance" */
+  LOW_BALANCE_LESSONS: 2,
+});

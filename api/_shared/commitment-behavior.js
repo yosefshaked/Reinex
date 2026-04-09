@@ -1,7 +1,7 @@
 // @ts-check
 /* eslint-env node */
 import { normalizeString } from './org-bff.js';
-import { coerceAgorot } from './currency.js';
+import { coerceAgorot, BILLING_THRESHOLDS } from './currency.js';
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -392,15 +392,15 @@ export function computeCommitmentAttention(commitment, runtime) {
   const now = new Date();
   const expired = expiryDate ? expiryDate.getTime() < now.getTime() : false;
   const expiringSoon = expiryDate
-    ? Math.ceil((expiryDate.getTime() - now.getTime()) / 86400000) <= 30 && expiryDate.getTime() >= now.getTime()
+    ? Math.ceil((expiryDate.getTime() - now.getTime()) / 86400000) <= BILLING_THRESHOLDS.EXPIRING_SOON_DAYS && expiryDate.getTime() >= now.getTime()
     : false;
   const remainingLessons = runtime?.remaining_lessons;
   const remainingAmountAgorot = coerceAgorot(runtime?.remaining_amount);
   const defaultChargeAgorot   = coerceAgorot(runtime?.default_charge_amount);
   const totalAmountAgorot     = coerceAgorot(commitment?.total_amount);
   const lowBalance = Number.isFinite(Number(remainingLessons))
-    ? Number(remainingLessons) < 2
-    : remainingAmountAgorot > 0 && remainingAmountAgorot < defaultChargeAgorot * 2;
+    ? Number(remainingLessons) < BILLING_THRESHOLDS.LOW_BALANCE_LESSONS
+    : remainingAmountAgorot > 0 && remainingAmountAgorot < defaultChargeAgorot * BILLING_THRESHOLDS.LOW_BALANCE_LESSONS;
   const exhausted = Number.isFinite(Number(remainingLessons))
     ? Number(remainingLessons) <= 0 && Number(runtime?.total_authorized_lessons ?? 0) > 0
     : remainingAmountAgorot <= 0 && totalAmountAgorot > 0;

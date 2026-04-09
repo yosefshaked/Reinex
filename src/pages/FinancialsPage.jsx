@@ -27,7 +27,7 @@ import StudentBillingWorkspace from '@/features/students/components/StudentBilli
 import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 import { toast } from 'sonner';
-import { toShekel } from '@/lib/currency.js';
+import { toShekel, coerceAgorot } from '@/lib/currency.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -216,12 +216,12 @@ function buildBillingOverview(snapshot) {
   const chargedLessons = lessonHistory.filter((row) => row.billing_status === 'charged');
   const pendingQueueCount = snapshot?.summary?.pending_queue_count ?? 0;
   const expiredOrExhaustedCount = commitments.filter((row) => row?.attention?.expired || row?.attention?.exhausted).length;
-  const monthRevenue = chargedLessons.reduce((sum, row) => sum + Number(row?.pricing_breakdown?.student_charge_amount ?? row?.resolved_charge_amount ?? row?.price_charged ?? 0), 0)
+  const monthRevenue = chargedLessons.reduce((sum, row) => sum + coerceAgorot(row?.pricing_breakdown?.student_charge_amount ?? row?.resolved_charge_amount ?? row?.price_charged), 0)
     + manualEntries
       .filter((row) => row.source_type === 'adjustment')
-      .reduce((sum, row) => sum + Number(row?.amount_charged ?? 0), 0);
-  const monthHmoAmount = chargedLessons.reduce((sum, row) => sum + Number(row?.pricing_breakdown?.insurer_claim_amount ?? 0), 0);
-  const pendingHmoAmount = commitments.reduce((sum, row) => sum + Number(row?.runtime?.hmo?.pending_claim_amount ?? 0), 0);
+      .reduce((sum, row) => sum + coerceAgorot(row?.amount_charged), 0);
+  const monthHmoAmount = chargedLessons.reduce((sum, row) => sum + coerceAgorot(row?.pricing_breakdown?.insurer_claim_amount), 0);
+  const pendingHmoAmount = commitments.reduce((sum, row) => sum + coerceAgorot(row?.runtime?.hmo?.pending_claim_amount), 0);
 
   return {
     charged_lessons_count: chargedLessons.length,

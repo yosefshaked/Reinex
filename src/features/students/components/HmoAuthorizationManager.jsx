@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { coerceAgorot } from '@/lib/currency.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useMedicalProviders } from '@/features/students/hooks/useMedicalProviders.js';
@@ -240,8 +241,8 @@ export default function HmoAuthorizationManager({
           valid_from: form.validFrom || null,
           expires_at: form.expiresAt || null,
           reminder_date: form.reminderDate || null,
-          customer_charge_amount_override: form.customerChargeAmountOverride === '' ? null : Number(form.customerChargeAmountOverride),
-          insurer_claim_amount_override: form.insurerClaimAmountOverride === '' ? null : Number(form.insurerClaimAmountOverride),
+          customer_charge_amount_override: form.customerChargeAmountOverride === '' ? null : coerceAgorot(form.customerChargeAmountOverride),
+          insurer_claim_amount_override: form.insurerClaimAmountOverride === '' ? null : coerceAgorot(form.insurerClaimAmountOverride),
           workflow_notes_override: form.workflowNotesOverride || null,
           status: form.status,
           notes: form.notes || null,

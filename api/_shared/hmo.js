@@ -554,12 +554,14 @@ export async function hydrateHmoCommitments(tenantClient, commitments = []) {
   const input = commitments || [];
   const hydrationTasks = input.map((commitment) => {
     if (commitment?.commitment_type === 'hmo' && !normalizeString(commitment?.hmo_authorization_id)) {
-      return ensureAuthorizationFromLegacyCommitment(tenantClient, commitment).then((authorization) => ({
-        ...commitment,
-        hmo_provider_id: authorization?.provider_id || commitment.hmo_provider_id || null,
-        hmo_provider_track_id: authorization?.provider_track_id || commitment.hmo_provider_track_id || null,
-        hmo_authorization_id: authorization?.id || commitment.hmo_authorization_id || null,
-      }));
+      return ensureAuthorizationFromLegacyCommitment(tenantClient, commitment)
+        .then((authorization) => ({
+          ...commitment,
+          hmo_provider_id: authorization?.provider_id || commitment.hmo_provider_id || null,
+          hmo_provider_track_id: authorization?.provider_track_id || commitment.hmo_provider_track_id || null,
+          hmo_authorization_id: authorization?.id || commitment.hmo_authorization_id || null,
+        }))
+        .catch(() => commitment);
     }
     return Promise.resolve(commitment);
   });
