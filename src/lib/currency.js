@@ -16,6 +16,18 @@ export function toShekel(agorot) {
 }
 
 /**
+ * Convert a shekel value (from user input or display) to an agorot integer.
+ * Mirrors toAgorot from api/_shared/currency.js.
+ * @param {unknown} value
+ * @returns {number}
+ */
+export function toAgorot(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * AGOROT_PER_SHEKEL);
+}
+
+/**
  * Coerce a value to an integer agorot amount.
  * Safe for read-path display — returns 0 on bad input.
  * @param {unknown} value

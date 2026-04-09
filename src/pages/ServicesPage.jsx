@@ -12,6 +12,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
+import { toShekel, toAgorot } from '@/lib/currency.js';
 
 const PAYMENT_MODEL_OPTIONS = [
   { value: 'fixed_rate', label: 'תעריף קבוע' },
@@ -33,7 +34,7 @@ function buildInitialForm(service) {
     name: service?.name || '',
     durationMinutes: service?.duration_minutes ?? '',
     paymentModel: normalizePaymentModel(service?.payment_model || ''),
-    defaultCustomerChargeAmount: service?.default_customer_charge_amount ?? '',
+    defaultCustomerChargeAmount: service?.default_customer_charge_amount != null ? toShekel(service.default_customer_charge_amount) : '',
     color: service?.color || '#3b82f6',
     isActive: service?.is_active ?? true,
   };
@@ -123,7 +124,7 @@ export default function ServicesPage() {
     if (formValues.durationMinutes !== '' && (!Number.isFinite(durationNumber) || durationNumber <= 0)) {
       return;
     }
-    const defaultCustomerChargeAmount = formValues.defaultCustomerChargeAmount === '' ? null : Number(formValues.defaultCustomerChargeAmount);
+    const defaultCustomerChargeAmount = formValues.defaultCustomerChargeAmount === '' ? null : toAgorot(formValues.defaultCustomerChargeAmount);
     if (formValues.defaultCustomerChargeAmount !== '' && (!Number.isFinite(defaultCustomerChargeAmount) || defaultCustomerChargeAmount < 0)) {
       return;
     }
@@ -278,7 +279,7 @@ export default function ServicesPage() {
                       </TableCell>
                       <TableCell>{getPaymentModelLabel(service.payment_model)}</TableCell>
                       <TableCell>
-                        {service.default_customer_charge_amount == null ? '—' : `${service.default_customer_charge_amount} ₪`}
+                        {service.default_customer_charge_amount == null ? '—' : `${toShekel(service.default_customer_charge_amount).toLocaleString('he-IL', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₪`}
                       </TableCell>
                       <TableCell>
                         {service.color ? (
