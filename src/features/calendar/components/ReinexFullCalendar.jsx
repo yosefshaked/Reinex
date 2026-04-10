@@ -909,7 +909,7 @@ export default function ReinexFullCalendar({
           nowIndicator
           slotMinTime={availabilityPresentation.slotMinTime}
           slotMaxTime={availabilityPresentation.slotMaxTime}
-          height="auto"
+          height="100%"
           resourceOrder="title"
           eventClick={handleEventClick}
           eventDrop={handleEventDrop}

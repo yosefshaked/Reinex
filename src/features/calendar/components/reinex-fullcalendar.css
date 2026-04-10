@@ -1,6 +1,6 @@
 .reinex-fullcalendar-shell {
   position: relative;
-  min-height: 36rem;
+  height: 36rem;
 }
 
 .reinex-fullcalendar {
@@ -20,7 +20,14 @@
 
 @media (min-width: 1280px) {
   .reinex-fullcalendar {
-    --reinex-calendar-sticky-offset: 5.9rem;
+    --reinex-calendar-sticky-offset: 0;
+    height: 100%;
+  }
+
+  .reinex-fullcalendar-shell {
+    flex: 1;
+    height: 100%;
+    min-height: 0;
   }
 }
 
