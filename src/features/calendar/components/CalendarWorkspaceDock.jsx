@@ -75,48 +75,73 @@ export default function CalendarWorkspaceDock({
     : null;
   const hasAttentionContent = summary.attentionLessons.length > 0
     || summary.availabilityIssues.length > 0;
+  const showInstructorSummaries = !selectedInstance
+    && !selectedSlot
+    && viewMode === 'week'
+    && summary.visibleInstructors.length > 0;
 
   return (
     <aside className="space-y-4 xl:pe-1">
-      <div className="xl:sticky xl:top-[8.25rem] xl:z-20">
-      <Card className="border-slate-200 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">מרכז תפעול</CardTitle>
-          <p className="text-sm text-slate-500">{dateRangeLabel || '—'}</p>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <SummaryMetric label="מתוכננים" value={summary.scheduledCount} />
-            <SummaryMetric label="חריגות" value={summary.exceptionLessons.length} tone={summary.exceptionLessons.length ? 'warn' : 'default'} />
-            <SummaryMetric label="לא תועדו" value={summary.undocumentedCompleted.length} tone={summary.undocumentedCompleted.length ? 'warn' : 'default'} />
-            <SummaryMetric label="דורש תשומת לב" value={summary.attentionCount} tone={summary.attentionCount ? 'warn' : 'default'} />
-          </div>
+      <div className="space-y-4 xl:sticky xl:top-[5.9rem] xl:z-20">
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">מרכז תפעול</CardTitle>
+            <p className="text-sm text-slate-500">{dateRangeLabel || '—'}</p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <SummaryMetric label="מתוכננים" value={summary.scheduledCount} />
+              <SummaryMetric label="חריגות" value={summary.exceptionLessons.length} tone={summary.exceptionLessons.length ? 'warn' : 'default'} />
+              <SummaryMetric label="לא תועדו" value={summary.undocumentedCompleted.length} tone={summary.undocumentedCompleted.length ? 'warn' : 'default'} />
+              <SummaryMetric label="דורש תשומת לב" value={summary.attentionCount} tone={summary.attentionCount ? 'warn' : 'default'} />
+            </div>
 
-          <div className="grid gap-2">
-            <Button className="justify-between" onClick={onOpenCreateLesson}>
-              <span className="flex items-center gap-2">
-                <Plus className="h-4 w-4" />
-                שיעור חדש
-              </span>
-              <ExternalLink className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" className="justify-between" onClick={onOpenManualGeneration}>
-              <span className="flex items-center gap-2">
-                <Wand2 className="h-4 w-4" />
-                יצירה מתבניות
-              </span>
-              <ExternalLink className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" className="justify-between" onClick={onOpenTemplates}>
-              <span className="flex items-center gap-2">
-                <CalendarDays className="h-4 w-4" />
-                תבניות
-              </span>
-              <ExternalLink className="h-4 w-4" />
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+            <div className="grid gap-2">
+              <Button className="justify-between" onClick={onOpenCreateLesson}>
+                <span className="flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  שיעור חדש
+                </span>
+                <ExternalLink className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" className="justify-between" onClick={onOpenManualGeneration}>
+                <span className="flex items-center gap-2">
+                  <Wand2 className="h-4 w-4" />
+                  יצירה מתבניות
+                </span>
+                <ExternalLink className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" className="justify-between" onClick={onOpenTemplates}>
+                <span className="flex items-center gap-2">
+                  <CalendarDays className="h-4 w-4" />
+                  תבניות
+                </span>
+                <ExternalLink className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {showInstructorSummaries ? (
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">סיכומי מדריכים</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {summary.visibleInstructors.slice(0, 5).map((instructor) => (
+                <Button
+                  key={instructor.id}
+                  variant="outline"
+                  className="w-full justify-between"
+                  onClick={() => onOpenInstructorWhatsApp(instructor)}
+                >
+                  <span>{instructor.full_name}</span>
+                  <MessageCircle className="h-4 w-4" />
+                </Button>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       {selectedSlot ? (
@@ -238,26 +263,6 @@ export default function CalendarWorkspaceDock({
         </Card>
       ) : null}
 
-      {!selectedInstance && !selectedSlot && viewMode === 'week' && summary.visibleInstructors.length > 0 ? (
-        <Card className="border-slate-200 shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">סיכומי מדריכים</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {summary.visibleInstructors.slice(0, 5).map((instructor) => (
-              <Button
-                key={instructor.id}
-                variant="outline"
-                className="w-full justify-between"
-                onClick={() => onOpenInstructorWhatsApp(instructor)}
-              >
-                <span>{instructor.full_name}</span>
-                <MessageCircle className="h-4 w-4" />
-              </Button>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
     </aside>
   );
 }
