@@ -217,7 +217,7 @@ export default function AppShell({ children }) {
               <PageLayout
                 fullHeight={false}
                 className="min-h-full pb-0"
-                contentClassName="pb-xl"
+                contentClassName="pb-md"
                 headerClassName="pb-sm"
               >
                 {content}
