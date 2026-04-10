@@ -368,7 +368,7 @@ export default function CalendarPage() {
               onFixAvailabilityIssue={handleFixAvailabilityIssue}
             />
 
-            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-[5.9rem] xl:flex xl:h-[calc(100vh-9.4rem)] xl:flex-col">
+            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-[5.9rem]">
               <ReinexFullCalendar
                 currentDate={currentDate}
                 viewMode={viewMode}
