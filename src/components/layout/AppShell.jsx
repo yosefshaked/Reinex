@@ -160,7 +160,7 @@ export default function AppShell({ children }) {
         <div className="relative flex min-h-screen flex-1 flex-col pb-[88px] md:h-screen md:pb-0">
           <header
             ref={headerRef}
-            className="sticky top-0 z-20 border-b border-border bg-surface px-sm py-sm backdrop-blur md:border-none md:bg-surface md:px-md md:py-sm"
+            className="sticky top-0 z-20 border-b border-border bg-surface/80 px-sm py-sm backdrop-blur md:border-none md:bg-transparent md:px-md md:py-sm"
           >
             <div className="flex items-center justify-between gap-xs">
               <div className="flex items-center gap-xs sm:gap-sm">

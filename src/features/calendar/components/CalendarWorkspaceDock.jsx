@@ -77,7 +77,7 @@ export default function CalendarWorkspaceDock({
     || summary.availabilityIssues.length > 0;
 
   return (
-    <aside data-workspace-dock="v2" className="space-y-4 xl:relative xl:self-start xl:pe-1">
+    <aside data-workspace-dock="v2" className="space-y-4 xl:relative xl:pe-1">
       <div className="space-y-4 xl:sticky xl:top-[8.25rem] xl:max-h-[calc(100dvh-9rem)] xl:overflow-y-auto xl:overscroll-contain">
       <Card className="border-slate-200 shadow-sm">
         <CardHeader className="pb-3">
