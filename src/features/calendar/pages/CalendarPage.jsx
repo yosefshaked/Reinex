@@ -300,7 +300,8 @@ export default function CalendarPage() {
   return (
     <PageLayout title="לוח זמנים">
       <div className="space-y-4">
-        <div className="sticky top-3 z-30 rounded-3xl border border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/85">
+        <div className="sticky top-0 z-30 bg-background pt-3">
+        <div className="rounded-3xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-wrap items-center gap-2">
               <Button onClick={handleOpenBlankCreateLesson} className="gap-2">
@@ -341,6 +342,7 @@ export default function CalendarPage() {
               </Badge>
             </div>
           </div>
+        </div>
         </div>
 
         {(instructorsError || instancesError) ? (
