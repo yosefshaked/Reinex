@@ -1,0 +1,39 @@
+# 50 Employees And Instructors
+
+## When to read
+- Employees page work.
+- Instructor roster/profile/capability changes.
+- Employee attendance, leave, activity, payroll, or user-linking work.
+
+## Load these files first
+- [`../src/pages/EmployeesPage.jsx`](../src/pages/EmployeesPage.jsx)
+- [`../src/components/settings/employee-management/InstructorManagementHub.jsx`](../src/components/settings/employee-management/InstructorManagementHub.jsx)
+- [`../src/components/settings/employee-management/UnifiedEmployeeList.jsx`](../src/components/settings/employee-management/UnifiedEmployeeList.jsx)
+- [`../src/components/settings/employee-management/`](../src/components/settings/employee-management/)
+- [`../api/instructors/index.js`](../api/instructors/index.js)
+- [`../api/instructors-link-user/index.js`](../api/instructors-link-user/index.js)
+- [`../api/employee-attendance/index.js`](../api/employee-attendance/index.js)
+- [`../api/employee-leave/index.js`](../api/employee-leave/index.js)
+- [`../api/employee-activity/index.js`](../api/employee-activity/index.js)
+- [`../api/payroll/index.js`](../api/payroll/index.js)
+- [`../api/payroll-adjustments/index.js`](../api/payroll-adjustments/index.js)
+- [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js)
+- [`../api/_shared/instructor-availability.js`](../api/_shared/instructor-availability.js)
+- [`../src/lib/instructor-availability.js`](../src/lib/instructor-availability.js)
+
+## Shared helpers to reuse
+- `useInstructors`, `useServices`
+- `normalizeAvailabilityWindows`, `hasConfiguredAvailability`, `getAvailabilitySummary`, `buildAvailabilityTimeSlots`
+- `ensureInstructorColors`
+- Finance/policy helpers in [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js)
+
+## Known patterns / do not reinvent
+- Employees/instructors use an overlay model:
+  - `Employees` is the base record
+  - `instructor_profiles` adds profile-only fields
+  - `instructor_service_capabilities` stores per-service capability rows
+- `GET /api/instructors` manually loads and merges those tables; keep that response shape stable.
+- `working_days` currently lives on `Employees`; UI already documents that source.
+- Service capabilities include `availability_windows`; scheduling rules depend on them.
+- User linking and invitations are handled inside employee management, not a separate team-management system.
+- Leave, attendance, and payroll rules live in [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js); do not recode them in UI panels.

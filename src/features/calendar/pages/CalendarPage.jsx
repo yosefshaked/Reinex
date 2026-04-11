@@ -107,12 +107,6 @@ export default function CalendarPage() {
   }, [currentDate, viewMode, setCurrentDate, setViewMode]);
 
   const handleCalendarNavigate = useCallback((action) => {
-    const calendarNavigation = calendarNavigationRef.current;
-    if (calendarNavigation && typeof calendarNavigation[action] === 'function') {
-      calendarNavigation[action]();
-      return;
-    }
-
     if (action === 'today') {
       setCurrentDate(getTodayLocalDateString());
       return;
@@ -387,7 +381,6 @@ export default function CalendarPage() {
                   calendarNavigationRef={calendarNavigationRef}
                   selectedSlot={pendingSlotSelection}
                   onDateChange={setCurrentDate}
-                  onViewModeChange={setViewMode}
                   onSlotSelect={handleSlotSelect}
                   onEventClick={handleInstanceClick}
                   onEventRescheduled={handleRescheduleSuccess}

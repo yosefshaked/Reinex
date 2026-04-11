@@ -450,7 +450,6 @@ export default function ReinexFullCalendar({
   onSlotSelect,
   onEventClick,
   onDateChange,
-  onViewModeChange,
   onEventRescheduled,
   onOpenInstructorWhatsApp,
 }) {
@@ -665,14 +664,15 @@ export default function ReinexFullCalendar({
       return;
     }
 
+    // Keep view mode controlled by the parent to avoid day/week ping-pong loops.
     if (nextViewMode !== viewMode) {
-      onViewModeChange?.(nextViewMode);
+      return;
     }
 
     if (nextDate && nextDate !== currentDate) {
       onDateChange?.(nextDate);
     }
-  }, [currentDate, onDateChange, onViewModeChange, viewMode]);
+  }, [currentDate, onDateChange, viewMode]);
 
   const handleEventClick = useCallback((info) => {
     const instance = info.event.extendedProps?.instance;
