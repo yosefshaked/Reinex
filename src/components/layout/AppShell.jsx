@@ -1,5 +1,6 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Outlet } from "react-router-dom"
+import { Outlet, useLocation } from "react-router-dom"
+import { cn } from "@/lib/utils"
 import { Megaphone, LogOut, PanelRightOpen, PanelRightClose } from "lucide-react"
 import { Toaster, toast } from "sonner"
 
@@ -147,9 +148,12 @@ export default function AppShell({ children }) {
     }
   }, [])
 
+  const location = useLocation()
+  const isCalendarPage = location.pathname === '/calendar'
+
   const content = children ?? <Outlet />
   const pageLayoutMode = React.isValidElement(content) ? content.props?.["data-page-layout"] : null
-  const useCustomLayout = pageLayoutMode === "dashboard"
+  const useCustomLayout = pageLayoutMode === "dashboard" || isCalendarPage
 
   return (
     <SessionModalContext.Provider value={sessionModalContextValue}>
@@ -210,7 +214,7 @@ export default function AppShell({ children }) {
           <OrgSelectionBanner />
           <OrgConfigBanner />
 
-          <main id="main-content" role="main" className="flex-1 overflow-y-auto">
+          <main id="main-content" role="main" className={cn("flex-1", isCalendarPage ? "overflow-hidden flex flex-col" : "overflow-y-auto")}>
             {useCustomLayout ? (
               content
             ) : (

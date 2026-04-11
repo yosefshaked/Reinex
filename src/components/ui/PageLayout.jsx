@@ -20,7 +20,7 @@ function PageLayout({
     >
       <div
         className={cn(
-          "mx-auto flex w-full max-w-5xl flex-col px-sm pt-md pb-sm sm:px-md sm:pt-lg sm:pb-md lg:px-xl",
+          "mx-auto flex w-full max-w-5xl flex-col px-sm pt-sm pb-sm sm:px-md sm:pt-md sm:pb-md lg:px-xl",
           fullHeight ? "min-h-screen" : "min-h-full",
           className,
         )}

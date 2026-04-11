@@ -82,7 +82,7 @@ export default function CalendarWorkspaceDock({
 
   return (
     <aside className="space-y-4 xl:pe-1">
-      <div className="space-y-4 xl:sticky xl:top-[5.9rem] xl:z-20">
+      <div className="space-y-4 xl:sticky xl:top-0 xl:z-20">
         <Card className="border-slate-200 shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">מרכז תפעול</CardTitle>

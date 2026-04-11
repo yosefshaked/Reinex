@@ -9,13 +9,7 @@
   --fc-neutral-bg-color: rgb(249 250 251);
   --fc-list-event-hover-bg-color: rgb(243 244 246);
   --fc-today-bg-color: rgb(239 246 255);
-  --reinex-calendar-sticky-offset: 7.4rem;
-}
-
-@media (min-width: 640px) {
-  .reinex-fullcalendar {
-    --reinex-calendar-sticky-offset: 6.8rem;
-  }
+  --reinex-calendar-sticky-offset: 0;
 }
 
 @media (min-width: 1280px) {

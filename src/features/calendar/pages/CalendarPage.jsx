@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import PageLayout from '@/components/ui/PageLayout';
+
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge.jsx';
 import { Plus, LayoutTemplate, Wand2 } from 'lucide-react';
@@ -298,12 +298,13 @@ export default function CalendarPage() {
   }, [refetchInstructors]);
 
   return (
-    <PageLayout title="לוח זמנים">
-      <div className="space-y-4">
-        <div className="sticky top-0 z-30 relative before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-3 before:bg-background">
-        <div className="mt-3 rounded-3xl border border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/85">
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Compact top bar: page title + action buttons + date navigator + view toggle */}
+      <div className="flex-shrink-0 border-b border-slate-100 bg-background px-4 py-3">
+        <div className="mx-auto" style={{ maxWidth: "min(1680px, calc(100vw - 1.5rem))" }}>
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="shrink-0 text-lg font-semibold text-neutral-900">לוח זמנים</h1>
               <Button onClick={handleOpenBlankCreateLesson} className="gap-2">
                 <Plus className="h-4 w-4" />
                 שיעור חדש
@@ -343,51 +344,60 @@ export default function CalendarPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Error banner (rare) */}
+      {(instructorsError || instancesError) ? (
+        <div className="mx-4 mt-3 flex-shrink-0 rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
+          שגיאה בטעינת הנתונים: {instructorsError || instancesError}
         </div>
+      ) : null}
 
-        {(instructorsError || instancesError) ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
-            שגיאה בטעינת הנתונים: {instructorsError || instancesError}
-          </div>
-        ) : null}
+      {/* Calendar workspace — fills remaining viewport height */}
+      {!instructorsError && !instancesError ? (
+        <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4 pt-3">
+          <div className="mx-auto h-full" style={{ maxWidth: "min(1680px, calc(100vw - 1.5rem))" }}>
+            <div className="grid h-full gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+              {/* Dock — independently scrollable */}
+              <div className="min-h-0 overflow-y-auto xl:pe-1">
+                <CalendarWorkspaceDock
+                  currentDate={currentDate}
+                  viewMode={viewMode}
+                  summary={workspaceSummary}
+                  selectedInstance={selectedInstance}
+                  selectedSlot={selectedSlotSummary}
+                  onClearSelection={clearSelections}
+                  onOpenCreateLesson={handleOpenCreateLesson}
+                  onOpenManualGeneration={() => setShowGenerationDialog(true)}
+                  onOpenTemplates={() => navigate('/calendar/templates')}
+                  onOpenSelectedLesson={handleOpenSelectedLesson}
+                  onOpenInstructorWhatsApp={openInstructorWhatsApp}
+                  onFixAvailabilityIssue={handleFixAvailabilityIssue}
+                />
+              </div>
 
-        {!instructorsError && !instancesError ? (
-          <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
-            <CalendarWorkspaceDock
-              currentDate={currentDate}
-              viewMode={viewMode}
-              summary={workspaceSummary}
-              selectedInstance={selectedInstance}
-              selectedSlot={selectedSlotSummary}
-              onClearSelection={clearSelections}
-              onOpenCreateLesson={handleOpenCreateLesson}
-              onOpenManualGeneration={() => setShowGenerationDialog(true)}
-              onOpenTemplates={() => navigate('/calendar/templates')}
-              onOpenSelectedLesson={handleOpenSelectedLesson}
-              onOpenInstructorWhatsApp={openInstructorWhatsApp}
-              onFixAvailabilityIssue={handleFixAvailabilityIssue}
-            />
-
-            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-[5.9rem] xl:flex xl:h-[calc(100vh-9.4rem)] xl:flex-col">
-              <ReinexFullCalendar
-                currentDate={currentDate}
-                viewMode={viewMode}
-                instances={instances}
-                instructors={instructors}
-                isLoading={isCalendarLoading}
-                calendarNavigationRef={calendarNavigationRef}
-                selectedSlot={pendingSlotSelection}
-                onDateChange={setCurrentDate}
-                onViewModeChange={setViewMode}
-                onSlotSelect={handleSlotSelect}
-                onEventClick={handleInstanceClick}
-                onEventRescheduled={handleRescheduleSuccess}
-                onOpenInstructorWhatsApp={openInstructorWhatsApp}
-              />
+              {/* Calendar card — fills remaining height */}
+              <div className="flex min-h-0 flex-col rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+                <ReinexFullCalendar
+                  currentDate={currentDate}
+                  viewMode={viewMode}
+                  instances={instances}
+                  instructors={instructors}
+                  isLoading={isCalendarLoading}
+                  calendarNavigationRef={calendarNavigationRef}
+                  selectedSlot={pendingSlotSelection}
+                  onDateChange={setCurrentDate}
+                  onViewModeChange={setViewMode}
+                  onSlotSelect={handleSlotSelect}
+                  onEventClick={handleInstanceClick}
+                  onEventRescheduled={handleRescheduleSuccess}
+                  onOpenInstructorWhatsApp={openInstructorWhatsApp}
+                />
+              </div>
             </div>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       <LessonInstanceDialog
         instance={selectedInstance}
@@ -443,6 +453,6 @@ export default function CalendarPage() {
           ? 'למדריך/ה אין חלונות זמינות מוגדרים לשירות זה, ולכן הוא/היא לא מופיעים כרגע בלוח.'
           : 'לשירות זה חסרה זמינות מוגדרת. אפשר לעדכן כאן ולהמשיך לעבוד בלוח.'}
       />
-    </PageLayout>
+    </div>
   );
 }
