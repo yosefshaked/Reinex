@@ -12,6 +12,13 @@ Read this first. Detailed task docs live in [`./agents-docs`](agents-docs/).
 - `supabase.auth.getUser(token)` returns `{ data, error }`; user is `result.data.user`.
 - Services are enabled/disabled with `is_active`; do not model disablement as deletion.
 
+## ⚠️ AI Rules of Engagement & The Escape Hatch
+1. **Context Economy:** Read the specific `agents-docs/XX-domain.md` file for your task. Load ONLY the source files listed there to save tokens.
+2. **Do Not Reinvent:** Strictly use the shared helpers, hooks, and utilities documented in the hub.
+3. **Respect Coupling:** Never bypass side-effects (e.g., calendar triggering billing) documented in the domain files.
+4. **💡 The Escape Hatch (Think Outside the Box):** If you believe the existing architecture/helpers are inadequate for a new feature, or if you see a significantly better, modern approach: DO NOT silently hack around the rules. Instead, stop and output `🚨 NEW PATTERN PROPOSAL:`. Briefly explain your idea and wait for human approval before coding.
+5. **🔄 Keep the Hub Alive (Doc Updates):** The documentation must evolve with the code. If you create a new shared helper, establish a new architectural pattern, or introduce a new cross-domain side-effect (coupling), you MUST surgically update the relevant `agents-docs/XX-domain.md` file before considering your task complete. If you are unsure where the new rule belongs, output `📝 DOC UPDATE REQUIRED:` at the end of your response to flag it for human review.
+
 ## Read By Task
 - Repo-wide rules and invariants: [`agents-docs/00-core-rules.md`](agents-docs/00-core-rules.md)
 - Runtime config, auth, org switching: [`agents-docs/10-runtime-auth-org.md`](agents-docs/10-runtime-auth-org.md)
