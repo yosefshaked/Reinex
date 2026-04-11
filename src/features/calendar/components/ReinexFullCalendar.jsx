@@ -662,6 +662,7 @@ export default function ReinexFullCalendar({
 
     if (isControlledSync) {
       pendingCalendarSyncRef.current = null;
+      return;
     }
 
     if (nextViewMode !== viewMode) {

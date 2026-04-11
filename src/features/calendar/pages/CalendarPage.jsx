@@ -69,18 +69,18 @@ export default function CalendarPage() {
     }
   }, [viewMode]);
 
-  const setCurrentDate = (newDate) => {
+  const setCurrentDate = useCallback((newDate) => {
     const normalizedDate = typeof newDate === 'string'
       ? newDate
       : toLocalDateString(newDate);
     if (parseLocalDateString(normalizedDate || '')) {
       setCurrentDateState((current) => (current === normalizedDate ? current : normalizedDate));
     }
-  };
+  }, []);
 
-  const setViewMode = (mode) => {
+  const setViewMode = useCallback((mode) => {
     setViewModeState((current) => (current === mode ? current : mode));
-  };
+  }, []);
 
   useEffect(() => {
     if (viewMode === 'day' && typeof window !== 'undefined') {
@@ -104,7 +104,7 @@ export default function CalendarPage() {
       }
     }
     setViewMode('day');
-  }, [currentDate, viewMode]);
+  }, [currentDate, viewMode, setCurrentDate, setViewMode]);
 
   const handleCalendarNavigate = useCallback((action) => {
     const calendarNavigation = calendarNavigationRef.current;
@@ -133,7 +133,7 @@ export default function CalendarPage() {
         setCurrentDate(prevDate);
       }
     }
-  }, [currentDate, viewMode]);
+  }, [currentDate, viewMode, setCurrentDate]);
 
   const dateForQuery = viewMode === 'week'
     ? toLocalDateString(getWeekStartDate(currentDate))
