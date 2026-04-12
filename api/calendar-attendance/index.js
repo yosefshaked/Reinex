@@ -1069,6 +1069,10 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
   let transitionAuditPreview = null;
   let requestedInstructorCompensationDecision = 'unknown';
   let statusRequirements = null;
+  const requestedGraceExcuse = body?.is_excused === true || body?.isExcused === true;
+  const graceReason = typeof body?.reason === 'string'
+    ? body.reason.trim()
+    : (typeof body?.grace_reason === 'string' ? body.grace_reason.trim() : '');
 
   if (hasAttendedFlag || hasParticipantStatus) {
     const allowedParticipantStatuses = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
@@ -1078,6 +1082,13 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
 
     if (!allowedParticipantStatuses.has(participantStatus)) {
       return respond(context, 400, { message: 'invalid participant_status' });
+    }
+
+    if (requestedGraceExcuse && participantStatus !== 'cancelled_student') {
+      return respond(context, 400, {
+        message: 'invalid_grace_excuse_status',
+        code: 'invalid_grace_excuse_status',
+      });
     }
 
     participantUpdate.participant_status = participantStatus;
@@ -1162,6 +1173,22 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       : currentParticipantMetadata;
     participantUpdate.metadata = mergeParticipantWorkflowMetadata(metadataBase, workflowPatch);
 
+    if (requestedGraceExcuse) {
+      participantUpdate.metadata = mergeParticipantWorkflowMetadata(participantUpdate.metadata, {
+        student_billing: {
+          decision: 'not_applicable',
+          reason: 'grace_excused',
+        },
+      });
+      participantUpdate.metadata.workflow = {
+        ...(participantUpdate.metadata.workflow || {}),
+        is_excused: true,
+        grace_reason: graceReason || null,
+        grace_decided_at: new Date().toISOString(),
+        grace_decided_by: userId,
+      };
+    }
+
     const { data: participantRowsForRate, error: participantRowsForRateError } = await tenantClient
       .from('lesson_participants')
       .select('id, participant_status, metadata')
@@ -1188,6 +1215,26 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
         instructor_employee_id: rateError.instructor_employee_id,
         service_id: rateError.service_id,
       });
+    }
+  }
+
+  if (requestedGraceExcuse) {
+    const { error: graceUpsertError } = await tenantClient
+      .from('grace_cancellation_requests')
+      .upsert({
+        lesson_participant_id: body.participant_id,
+        created_by: userId,
+        reason: graceReason || null,
+        status: 'manually_excused',
+      }, { onConflict: 'lesson_participant_id' });
+
+    if (graceUpsertError) {
+      context.log?.error?.('calendar/attendance failed to upsert grace cancellation request', {
+        message: graceUpsertError.message,
+        participantId: body.participant_id,
+        instanceId: body.instance_id,
+      });
+      return respond(context, 500, { message: 'failed_to_record_grace_cancellation' });
     }
   }
 

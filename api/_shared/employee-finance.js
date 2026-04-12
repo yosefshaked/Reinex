@@ -9,6 +9,7 @@ import {
 import { attachHmoContextToCommitments } from './hmo.js';
 import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import { buildUtcBoundsForTimezoneDateRange } from './instructor-availability.js';
+import { fetchLessonMutationState, isLockedState } from './calendar-editing.js';
 
 export const DEFAULT_LEAVE_POLICY = Object.freeze({
   carryover_enabled: false,
@@ -897,10 +898,60 @@ export async function syncLessonInstructorEarnings(
     resolvedParticipants = participantRows || [];
   }
 
+  const participantIds = (resolvedParticipants || [])
+    .map((participant) => normalizeString(participant?.id))
+    .filter(Boolean);
+  const { data: graceRows, error: graceRowsError } = participantIds.length > 0
+    ? await tenantClient
+      .from('grace_cancellation_requests')
+      .select('lesson_participant_id')
+      .in('lesson_participant_id', participantIds)
+    : { data: [], error: null };
+
+  if (graceRowsError && graceRowsError.code !== '42P01') {
+    throw graceRowsError;
+  }
+
+  const graceParticipantIds = new Set((graceRows || [])
+    .map((row) => normalizeString(row?.lesson_participant_id))
+    .filter(Boolean));
+  const compensationParticipants = (resolvedParticipants || [])
+    .filter((participant) => !graceParticipantIds.has(normalizeString(participant?.id)));
+
+  const { error: lockStateError, result: lockState } = await fetchLessonMutationState(tenantClient, {
+    instanceId: lessonInstanceId,
+  });
+  if (lockStateError) {
+    throw lockStateError;
+  }
+
+  const { data: participantLockRows, error: participantLocksError } = participantIds.length > 0
+    ? await tenantClient
+      .from('participant_locks')
+      .select('id')
+      .in('lesson_participant_id', participantIds)
+      .limit(1)
+    : { data: [], error: null };
+
+  if (participantLocksError && participantLocksError.code !== '42P01') {
+    throw participantLocksError;
+  }
+
+  const hasLockedParticipants = Array.isArray(participantLockRows) && participantLockRows.length > 0;
+  const lessonLocked = isLockedState(lockState) || hasLockedParticipants;
+
   const resolvedPolicies = policies || await loadFinancePolicies(tenantClient);
-  const shouldInstructorEarn = lessonHasInstructorCompensation(resolvedParticipants, resolvedPolicies);
+  const shouldInstructorEarn = lessonHasInstructorCompensation(compensationParticipants, resolvedPolicies);
 
   if (!shouldInstructorEarn || !resolvedInstance.instructor_employee_id) {
+    if (lessonLocked) {
+      return {
+        lesson_instance_id: lessonInstanceId,
+        instructor_earned: false,
+        skipped_locked: true,
+      };
+    }
+
     const { error: deleteError } = await tenantClient
       .from('lesson_earnings')
       .delete()
@@ -913,6 +964,14 @@ export async function syncLessonInstructorEarnings(
     return {
       lesson_instance_id: lessonInstanceId,
       instructor_earned: false,
+    };
+  }
+
+  if (lessonLocked) {
+    return {
+      lesson_instance_id: lessonInstanceId,
+      instructor_earned: false,
+      skipped_locked: true,
     };
   }
 
@@ -940,7 +999,7 @@ export async function syncLessonInstructorEarnings(
         service_id: resolvedInstance.service_id,
         lesson_date: toDateKey(resolvedInstance.datetime_start),
         lesson_status_at_sync: resolvedInstance.status || null,
-        participant_statuses: (resolvedParticipants || []).map((participant) => ({
+        participant_statuses: compensationParticipants.map((participant) => ({
           participant_id: participant?.id || null,
           participant_status: participant?.participant_status || null,
         })),

@@ -414,6 +414,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [absenceFormError, setAbsenceFormError] = useState('');
   const [absenceRequirements, setAbsenceRequirements] = useState(null);
   const [absenceRequirementsLoading, setAbsenceRequirementsLoading] = useState(false);
+  const [feeWaiverConfirmOpen, setFeeWaiverConfirmOpen] = useState(false);
   const [restorePreview, setRestorePreview] = useState(null);
   const [restorePreviewError, setRestorePreviewError] = useState('');
   const [restorePreviewLoading, setRestorePreviewLoading] = useState(false);
@@ -672,6 +673,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         if (payload.instructorCompensationDecision) {
           body.instructor_compensation_decision = payload.instructorCompensationDecision;
         }
+        if (payload.isExcused === true) {
+          body.is_excused = true;
+          body.reason = payload.notes || null;
+        }
         const result = await authenticatedFetch('calendar/attendance', {
           method: 'POST',
           body,
@@ -867,6 +872,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       if (options.instructorCompensationDecision) {
         body.instructor_compensation_decision = options.instructorCompensationDecision;
       }
+      if (options.isExcused === true) {
+        body.is_excused = true;
+        body.reason = typeof notes === 'string' ? notes.trim() : null;
+      }
       const result = await authenticatedFetch('calendar/attendance', {
         method: 'POST',
         body,
@@ -903,6 +912,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         requestedStatus: status,
         notes: typeof notes === 'string' ? notes : '',
         instructorCompensationDecision: options.instructorCompensationDecision || null,
+        isExcused: options.isExcused === true,
       });
       if (!handled) {
         const resolvedError = resolveMutationError(err) || 'עדכון הסטטוס נכשל.';
@@ -932,6 +942,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       participantId,
       status: nextStatus,
       notes: existingNotes,
+      waiveFee: false,
       instructorCompensationDecision:
         existingCompensationDecision === 'compensated' || existingCompensationDecision === 'not_compensated'
           ? existingCompensationDecision
@@ -950,6 +961,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       return {
         ...prev,
         status: nextStatus,
+        waiveFee: nextStatus === 'cancelled_student' ? prev.waiveFee : false,
         instructorCompensationDecision: '',
       };
     });
@@ -962,10 +974,21 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setAbsenceFormError('');
     setAbsenceRequirements(null);
     setAbsenceRequirementsLoading(false);
+    setFeeWaiverConfirmOpen(false);
   }
 
-  async function confirmAbsenceForm() {
+  async function confirmAbsenceForm({ feeWaiverConfirmed = false } = {}) {
     if (!absenceForm) return;
+    if (
+      absenceForm.status === 'cancelled_student'
+      && absenceForm.waiveFee
+      && !feeWaiverConfirmed
+    ) {
+      setFeeWaiverConfirmOpen(true);
+      return;
+    }
+
+    setFeeWaiverConfirmOpen(false);
     setAbsenceFormError('');
     const requiresCompensationDecision = Boolean(absenceRequirements?.requires_instructor_compensation_decision);
     const selectedCompensationDecision = absenceForm.instructorCompensationDecision || null;
@@ -1002,6 +1025,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       await openAttendancePreview(currentParticipant, absenceForm.status, {
         notes: absenceForm.notes,
         instructorCompensationDecision: selectedCompensationDecision,
+        isExcused: absenceForm.status === 'cancelled_student' && absenceForm.waiveFee === true,
       });
       return;
     }
@@ -1011,6 +1035,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       absenceForm.notes,
       {
         instructorCompensationDecision: selectedCompensationDecision,
+        isExcused: absenceForm.status === 'cancelled_student' && absenceForm.waiveFee === true,
       },
     );
     if (attendanceResult?.ok) {
@@ -1152,6 +1177,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           ...(options.instructorCompensationDecision
             ? { instructor_compensation_decision: options.instructorCompensationDecision }
             : {}),
+          ...(options.isExcused === true ? { is_excused: true } : {}),
         },
       });
       if (requestId !== latestPreviewRequestIdRef.current) {
@@ -1163,6 +1189,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
         targetStatus,
         notes: options.notes || '',
         instructorCompensationDecision: options.instructorCompensationDecision || null,
+        isExcused: options.isExcused === true,
         preview,
       });
       if (targetStatus !== 'scheduled') {
@@ -1805,6 +1832,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                     && !absenceRequirementsLoading
                     && Boolean(absenceRequirements?.requires_instructor_compensation_decision)
                     && ['no_show', 'cancelled_student', 'cancelled_clinic'].includes(absenceForm.status);
+                  const waiveFeeDisabled = !isOperationallyOpen;
                   const previewImpactGroups = isRestorePreviewOpen
                     ? groupPreviewImpacts(restorePreview.preview?.impacts || [])
                     : [];
@@ -1898,6 +1926,25 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               onChange={(e) => setAbsenceForm((prev) => ({ ...prev, notes: e.target.value }))}
                             />
                           </div>
+                          {absenceForm.status === 'cancelled_student' && (
+                            <div
+                              className={`flex items-center gap-2 rounded-md border px-2 py-2 ${waiveFeeDisabled ? 'bg-slate-100 border-slate-200 text-slate-500' : 'bg-emerald-50 border-emerald-200'}`}
+                              title={waiveFeeDisabled ? 'Cannot waive fee for a locked/closed session.' : ''}
+                            >
+                              <Checkbox
+                                id={`waive-fee-${participant.id}`}
+                                checked={absenceForm.waiveFee === true}
+                                onCheckedChange={(checked) => setAbsenceForm((prev) => ({
+                                  ...prev,
+                                  waiveFee: checked === true,
+                                }))}
+                                disabled={waiveFeeDisabled}
+                              />
+                              <Label htmlFor={`waive-fee-${participant.id}`} className="text-xs font-medium">
+                                ויתור חיוב (Grace)
+                              </Label>
+                            </div>
+                          )}
                           {absenceRequirementsLoading && (
                             <div className="flex items-center gap-2 text-xs text-gray-500">
                               <Loader2 className="h-3 w-3 animate-spin" />
@@ -2025,6 +2072,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                                   restorePreview?.notes || '',
                                   {
                                     instructorCompensationDecision: restorePreview?.instructorCompensationDecision || null,
+                                    isExcused: restorePreview?.isExcused === true,
                                   },
                                 );
                                 if (!attendanceResult?.ok) {
@@ -2286,6 +2334,29 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               disabled={isSaving || attendedParticipants.length > 0}
             >
               בטל שיעור
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={feeWaiverConfirmOpen} onOpenChange={setFeeWaiverConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>אישור ויתור חיוב</DialogTitle>
+            <DialogDescription>
+              אישור הפעולה יסמן את ביטול התלמיד כ-Grace ויבצע ויתור חיוב עבור המשתתף.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setFeeWaiverConfirmOpen(false)} disabled={isMarkingAttendance}>
+              חזרה
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => { void confirmAbsenceForm({ feeWaiverConfirmed: true }); }}
+              disabled={isMarkingAttendance}
+            >
+              אשר ויתור חיוב
             </Button>
           </DialogFooter>
         </DialogContent>

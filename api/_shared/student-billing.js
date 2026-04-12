@@ -864,6 +864,29 @@ async function resolveParticipantCommitmentForSync(tenantClient, {
   return resolvedCommitment;
 }
 
+async function loadGraceCancellationParticipantIds(tenantClient, participantIds = []) {
+  const ids = Array.from(new Set((participantIds || []).map((id) => normalizeString(id)).filter(Boolean)));
+  if (ids.length === 0) {
+    return new Set();
+  }
+
+  const { data, error } = await tenantClient
+    .from('grace_cancellation_requests')
+    .select('lesson_participant_id')
+    .in('lesson_participant_id', ids);
+
+  if (error) {
+    if (error.code === '42P01') {
+      return new Set();
+    }
+    throw error;
+  }
+
+  return new Set((data || [])
+    .map((row) => normalizeString(row?.lesson_participant_id))
+    .filter(Boolean));
+}
+
 export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId, actorUserId = null) {
   if (!lessonInstanceId) {
     return null;
@@ -888,6 +911,10 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
   const commitmentIds = Array.from(new Set((participants || []).map((row) => row.commitment_id).filter(Boolean)));
   const commitmentMap = await loadCommitmentsMap(tenantClient, commitmentIds);
   const serviceMap = await loadServicesMap(tenantClient, [instance.service_id]);
+  const graceParticipantIds = await loadGraceCancellationParticipantIds(
+    tenantClient,
+    (participants || []).map((row) => row.id),
+  );
   const instanceService = serviceMap.get(instance.service_id) || null;
   const syncedAt = new Date().toISOString();
   let updatedParticipants = 0;
@@ -899,6 +926,7 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
 
   // Phase 1: resolve commitments and build billing decisions (read-only except commitment assignment)
   for (const participant of participants || []) {
+    const isGraceExcused = graceParticipantIds.has(normalizeString(participant?.id));
     const commitment = await resolveParticipantCommitmentForSync(tenantClient, {
       participant,
       instance,
@@ -920,6 +948,24 @@ export async function syncLessonBillingArtifacts(tenantClient, lessonInstanceId,
           policies,
           syncedAt,
         });
+
+    if (isGraceExcused) {
+      decision.shouldCharge = false;
+      decision.chargeAmount = null;
+      decision.billingStatus = 'not_chargeable';
+      decision.billingReason = 'grace_excused';
+      decision.requiresAttention = false;
+      decision.pricingBreakdown = {
+        ...(decision.pricingBreakdown || {}),
+        charge_amount: null,
+        student_charge_amount: null,
+        insurer_claim_amount: null,
+        billing_status: 'not_chargeable',
+        billing_reason: 'grace_excused',
+        requires_attention: false,
+        grace_excused: true,
+      };
+    }
 
     // Amount is already in agorot (read from DB). The RPC casts it to integer.
     batchEntries.push({

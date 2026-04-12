@@ -1732,6 +1732,61 @@ CREATE INDEX IF NOT EXISTS lesson_participants_locked_at_idx
   ON public.lesson_participants (locked_at) WHERE locked_at IS NOT NULL;
 
 -- -----------------------------------------------------------------
+-- public.grace_cancellation_requests
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.grace_cancellation_requests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lesson_participant_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by uuid NULL,
+  reason text NULL,
+  status text NOT NULL DEFAULT 'manually_excused'
+);
+
+ALTER TABLE public.grace_cancellation_requests
+  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS reason text,
+  ADD COLUMN IF NOT EXISTS status text;
+
+DO $$
+BEGIN
+  ALTER TABLE public.grace_cancellation_requests
+    ADD CONSTRAINT grace_cancellation_requests_lesson_participant_id_fkey
+    FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id);
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.grace_cancellation_requests
+    ADD CONSTRAINT grace_cancellation_requests_created_by_fkey
+    FOREIGN KEY (created_by) REFERENCES auth.users(id);
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+  WHEN undefined_table THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.grace_cancellation_requests
+    ADD CONSTRAINT grace_cancellation_requests_status_check
+    CHECK (status IN ('manually_excused'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS grace_cancellation_requests_participant_uidx
+  ON public.grace_cancellation_requests (lesson_participant_id);
+
+CREATE INDEX IF NOT EXISTS grace_cancellation_requests_created_at_idx
+  ON public.grace_cancellation_requests (created_at DESC);
+
+-- -----------------------------------------------------------------
 -- public.payroll_runs
 -- -----------------------------------------------------------------
 
@@ -5124,6 +5179,7 @@ ALTER TABLE public.lesson_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_template_overrides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_participants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.grace_cancellation_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.commitments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ledger_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_earnings ENABLE ROW LEVEL SECURITY;
@@ -5170,6 +5226,7 @@ BEGIN
     'lesson_template_overrides',
     'lesson_instances',
     'lesson_participants',
+    'grace_cancellation_requests',
     'commitments',
     'ledger_transactions',
     'lesson_earnings',
@@ -5246,6 +5303,7 @@ GRANT ALL ON TABLE public.lesson_templates TO app_user;
 GRANT ALL ON TABLE public.lesson_template_overrides TO app_user;
 GRANT ALL ON TABLE public.lesson_instances TO app_user;
 GRANT ALL ON TABLE public.lesson_participants TO app_user;
+GRANT ALL ON TABLE public.grace_cancellation_requests TO app_user;
 GRANT ALL ON TABLE public.commitments TO app_user;
 GRANT ALL ON TABLE public.ledger_transactions TO app_user;
 GRANT ALL ON TABLE public.lesson_earnings TO app_user;
@@ -5284,6 +5342,7 @@ DECLARE
     'lesson_template_overrides',
     'lesson_instances',
     'lesson_participants',
+    'grace_cancellation_requests',
     'commitments',
     'ledger_transactions',
     'lesson_earnings',
