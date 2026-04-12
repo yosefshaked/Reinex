@@ -71,6 +71,84 @@ function roundCurrency(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+async function recordGraceCancellationRequest(tenantClient, {
+  participantId,
+  userId,
+  reason,
+} = {}) {
+  const payload = {
+    lesson_participant_id: participantId,
+    created_by: userId,
+    reason: reason || null,
+    status: 'manually_excused',
+  };
+
+  const { error: upsertError } = await tenantClient
+    .from('grace_cancellation_requests')
+    .upsert(payload, { onConflict: 'lesson_participant_id' });
+
+  if (!upsertError) {
+    return null;
+  }
+
+  // Some tenant databases may be missing the unique index required by ON CONFLICT.
+  // Fallback to a manual select/update-or-insert flow in that case.
+  if (upsertError.code !== '42P10') {
+    return upsertError;
+  }
+
+  const { data: existingRows, error: existingError } = await tenantClient
+    .from('grace_cancellation_requests')
+    .select('id')
+    .eq('lesson_participant_id', participantId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (existingError) {
+    return existingError;
+  }
+
+  const existingRequestId = Array.isArray(existingRows) && existingRows.length > 0
+    ? existingRows[0]?.id
+    : null;
+
+  if (existingRequestId) {
+    const { error: updateError } = await tenantClient
+      .from('grace_cancellation_requests')
+      .update({
+        created_by: userId,
+        reason: reason || null,
+        status: 'manually_excused',
+      })
+      .eq('id', existingRequestId);
+
+    return updateError || null;
+  }
+
+  const { error: insertError } = await tenantClient
+    .from('grace_cancellation_requests')
+    .insert(payload);
+
+  if (!insertError) {
+    return null;
+  }
+
+  if (insertError.code === '23505') {
+    const { error: retryUpdateError } = await tenantClient
+      .from('grace_cancellation_requests')
+      .update({
+        created_by: userId,
+        reason: reason || null,
+        status: 'manually_excused',
+      })
+      .eq('lesson_participant_id', participantId);
+
+    return retryUpdateError || null;
+  }
+
+  return insertError;
+}
+
 function buildParticipantWorkflowDecisionState(
   participantStatus,
   requestedInstructorCompensationDecision,
@@ -1219,18 +1297,16 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
   }
 
   if (requestedGraceExcuse) {
-    const { error: graceUpsertError } = await tenantClient
-      .from('grace_cancellation_requests')
-      .upsert({
-        lesson_participant_id: body.participant_id,
-        created_by: userId,
-        reason: graceReason || null,
-        status: 'manually_excused',
-      }, { onConflict: 'lesson_participant_id' });
+    const graceUpsertError = await recordGraceCancellationRequest(tenantClient, {
+      participantId: body.participant_id,
+      userId,
+      reason: graceReason,
+    });
 
     if (graceUpsertError) {
       context.log?.error?.('calendar/attendance failed to upsert grace cancellation request', {
         message: graceUpsertError.message,
+        code: graceUpsertError.code,
         participantId: body.participant_id,
         instanceId: body.instance_id,
       });
