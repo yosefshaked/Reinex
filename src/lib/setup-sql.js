@@ -6429,6 +6429,12 @@ CREATE TABLE public.ledger_accounts (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  -- Real UNIQUE constraints (not partial indexes) are required for PostgREST
+  -- upsert on_conflict resolution (ON CONFLICT column). PostgreSQL allows
+  -- multiple NULLs in a UNIQUE column so this is safe for nullable FK columns.
+  CONSTRAINT ledger_accounts_student_id_key UNIQUE (student_id),
+  CONSTRAINT ledger_accounts_client_profile_id_key UNIQUE (client_profile_id),
+  CONSTRAINT ledger_accounts_hmo_provider_id_key UNIQUE (hmo_provider_id),
   CONSTRAINT ledger_accounts_exactly_one_owner_chk CHECK (
     (
       CASE WHEN student_id IS NOT NULL THEN 1 ELSE 0 END +
@@ -6442,18 +6448,6 @@ CREATE TABLE public.ledger_accounts (
     (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL AND client_profile_id IS NULL)
   )
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_student_id_uidx
-  ON public.ledger_accounts (student_id)
-  WHERE student_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_client_profile_id_uidx
-  ON public.ledger_accounts (client_profile_id)
-  WHERE client_profile_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_hmo_provider_id_uidx
-  ON public.ledger_accounts (hmo_provider_id)
-  WHERE hmo_provider_id IS NOT NULL;
 
 CREATE TABLE public.ledger_transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
