@@ -6443,15 +6443,15 @@ CREATE TABLE public.ledger_accounts (
   )
 );
 
-CREATE UNIQUE INDEX ledger_accounts_student_id_uidx
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_student_id_uidx
   ON public.ledger_accounts (student_id)
   WHERE student_id IS NOT NULL;
 
-CREATE UNIQUE INDEX ledger_accounts_client_profile_id_uidx
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_client_profile_id_uidx
   ON public.ledger_accounts (client_profile_id)
   WHERE client_profile_id IS NOT NULL;
 
-CREATE UNIQUE INDEX ledger_accounts_hmo_provider_id_uidx
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_hmo_provider_id_uidx
   ON public.ledger_accounts (hmo_provider_id)
   WHERE hmo_provider_id IS NOT NULL;
 
@@ -6490,28 +6490,28 @@ CREATE TABLE public.ledger_transactions (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX ledger_transactions_account_effective_idx
+CREATE INDEX IF NOT EXISTS ledger_transactions_account_effective_idx
   ON public.ledger_transactions (ledger_account_id, effective_at);
 
-CREATE INDEX ledger_transactions_source_idx
+CREATE INDEX IF NOT EXISTS ledger_transactions_source_idx
   ON public.ledger_transactions (source_type, source_id);
 
-CREATE INDEX ledger_transactions_lesson_participant_idx
+CREATE INDEX IF NOT EXISTS ledger_transactions_lesson_participant_idx
   ON public.ledger_transactions (lesson_participant_id);
 
-CREATE INDEX ledger_transactions_student_effective_idx
+CREATE INDEX IF NOT EXISTS ledger_transactions_student_effective_idx
   ON public.ledger_transactions (student_id, effective_at);
 
-CREATE INDEX ledger_transactions_client_effective_idx
+CREATE INDEX IF NOT EXISTS ledger_transactions_client_effective_idx
   ON public.ledger_transactions (client_profile_id, effective_at);
 
-CREATE INDEX ledger_transactions_hmo_provider_effective_idx
+CREATE INDEX IF NOT EXISTS ledger_transactions_hmo_provider_effective_idx
   ON public.ledger_transactions (hmo_provider_id, effective_at);
 
-CREATE INDEX ledger_transactions_hmo_authorization_idx
+CREATE INDEX IF NOT EXISTS ledger_transactions_hmo_authorization_idx
   ON public.ledger_transactions (hmo_authorization_id);
 
-CREATE INDEX ledger_transactions_reverses_idx
+CREATE INDEX IF NOT EXISTS ledger_transactions_reverses_idx
   ON public.ledger_transactions (reverses_transaction_id);
 
 CREATE OR REPLACE FUNCTION public.prevent_ledger_transaction_mutation()
@@ -6547,7 +6547,7 @@ CREATE TABLE public.hmo_invoice_batches (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX hmo_invoice_batches_provider_idx
+CREATE INDEX IF NOT EXISTS hmo_invoice_batches_provider_idx
   ON public.hmo_invoice_batches (hmo_provider_id, created_at DESC);
 
 CREATE TABLE public.hmo_invoice_batch_items (
@@ -6559,7 +6559,7 @@ CREATE TABLE public.hmo_invoice_batch_items (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX hmo_invoice_batch_items_batch_idx
+CREATE INDEX IF NOT EXISTS hmo_invoice_batch_items_batch_idx
   ON public.hmo_invoice_batch_items (batch_id);
 
 SELECT extensions.sign(
