@@ -414,6 +414,10 @@ export default function Settings() {
       return;
     }
 
+    const syncedInstructorPolicy = {
+      ...billingPolicy,
+    };
+
     setSavingBillingPolicy(true);
     try {
       await upsertSetting({
@@ -421,6 +425,12 @@ export default function Settings() {
         orgId: activeOrgId,
         key: 'billing_consumption_policy',
         value: billingPolicy,
+      });
+      await upsertSetting({
+        session,
+        orgId: activeOrgId,
+        key: 'instructor_earnings_policy',
+        value: syncedInstructorPolicy,
       });
       toast.success('מדיניות החיוב נשמרה.');
     } catch (error) {

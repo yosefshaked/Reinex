@@ -150,6 +150,15 @@ function isCancellationStatus(status) {
   return normalizeInstanceStatus(status) === 'cancelled';
 }
 
+function isGraceEligibleStatus(status) {
+  return ['no_show', 'cancelled_student', 'cancelled_clinic'].includes(String(status || '').trim().toLowerCase());
+}
+
+function shouldShowGraceWaiver(policy, status) {
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+  return isGraceEligibleStatus(normalizedStatus) && Boolean(policy?.[normalizedStatus]);
+}
+
 function getCancellationStatusLabel(status) {
   if (normalizeInstanceStatus(status) === 'cancelled') return 'שיעור בוטל';
   return 'ביטול';
@@ -961,7 +970,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       return {
         ...prev,
         status: nextStatus,
-        waiveFee: nextStatus === 'cancelled_student' ? prev.waiveFee : false,
+        waiveFee: shouldShowGraceWaiver(billingPolicy, nextStatus) ? prev.waiveFee : false,
         instructorCompensationDecision: '',
       };
     });
@@ -979,9 +988,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   async function confirmAbsenceForm({ feeWaiverConfirmed = false } = {}) {
     if (!absenceForm) return;
+    const graceWaiverEligible = shouldShowGraceWaiver(billingPolicy, absenceForm.status);
+    const shouldApplyGraceWaiver = graceWaiverEligible && absenceForm.waiveFee === true;
     if (
-      absenceForm.status === 'cancelled_student'
-      && absenceForm.waiveFee
+      shouldApplyGraceWaiver
       && !feeWaiverConfirmed
     ) {
       setFeeWaiverConfirmOpen(true);
@@ -1025,7 +1035,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       await openAttendancePreview(currentParticipant, absenceForm.status, {
         notes: absenceForm.notes,
         instructorCompensationDecision: selectedCompensationDecision,
-        isExcused: absenceForm.status === 'cancelled_student' && absenceForm.waiveFee === true,
+        isExcused: shouldApplyGraceWaiver,
       });
       return;
     }
@@ -1035,7 +1045,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       absenceForm.notes,
       {
         instructorCompensationDecision: selectedCompensationDecision,
-        isExcused: absenceForm.status === 'cancelled_student' && absenceForm.waiveFee === true,
+        isExcused: shouldApplyGraceWaiver,
       },
     );
     if (attendanceResult?.ok) {
@@ -1832,6 +1842,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                     && !absenceRequirementsLoading
                     && Boolean(absenceRequirements?.requires_instructor_compensation_decision)
                     && ['no_show', 'cancelled_student', 'cancelled_clinic'].includes(absenceForm.status);
+                  const graceWaiverEligible = shouldShowGraceWaiver(billingPolicy, absenceForm.status);
                   const waiveFeeDisabled = !isOperationallyOpen;
                   const previewImpactGroups = isRestorePreviewOpen
                     ? groupPreviewImpacts(restorePreview.preview?.impacts || [])
@@ -1926,7 +1937,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                               onChange={(e) => setAbsenceForm((prev) => ({ ...prev, notes: e.target.value }))}
                             />
                           </div>
-                          {absenceForm.status === 'cancelled_student' && (
+                          {graceWaiverEligible && (
                             <div
                               className={`flex items-center gap-2 rounded-md border px-2 py-2 ${waiveFeeDisabled ? 'bg-slate-100 border-slate-200 text-slate-500' : 'bg-emerald-50 border-emerald-200'}`}
                               title={waiveFeeDisabled ? 'Cannot waive fee for a locked/closed session.' : ''}

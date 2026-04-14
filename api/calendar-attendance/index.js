@@ -1162,7 +1162,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       return respond(context, 400, { message: 'invalid participant_status' });
     }
 
-    if (requestedGraceExcuse && participantStatus !== 'cancelled_student') {
+    if (requestedGraceExcuse && !['no_show', 'cancelled_student', 'cancelled_clinic'].includes(participantStatus)) {
       return respond(context, 400, {
         message: 'invalid_grace_excuse_status',
         code: 'invalid_grace_excuse_status',

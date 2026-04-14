@@ -554,6 +554,10 @@ export default function FinancialsPage() {
       return;
     }
 
+    const syncedInstructorPolicy = {
+      ...billingPolicy,
+    };
+
     setSavingPolicy(true);
     try {
       await upsertSetting({
@@ -561,6 +565,12 @@ export default function FinancialsPage() {
         orgId: activeOrgId,
         key: 'billing_consumption_policy',
         value: billingPolicy,
+      });
+      await upsertSetting({
+        session,
+        orgId: activeOrgId,
+        key: 'instructor_earnings_policy',
+        value: syncedInstructorPolicy,
       });
       await loadBillingOverview();
       toast.success('מדיניות החיוב נשמרה.');
