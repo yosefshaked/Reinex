@@ -27,7 +27,9 @@ import {
   syncInstructorAttendanceFromLessons,
   validateInstructorRateForLesson,
 } from '../_shared/employee-finance.js';
-import { buildBillingDecision, buildDirectClientBillingDecision, loadCommitmentsMap, syncLessonBillingArtifacts } from '../_shared/student-billing.js';
+import BillingLedgerService from '../_shared/BillingLedgerService.js';
+import { buildBillingDecision, buildDirectClientBillingDecision } from '../_shared/student-billing.js';
+import { resolveActiveAuthorizationForStudentService } from '../_shared/hmo.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
@@ -368,12 +370,14 @@ export default async function (context, req) {
   if (tenantError) {
     return respond(context, tenantError.status, tenantError.body);
   }
+  const billingService = new BillingLedgerService({ tenantClient });
 
   return await handleMarkAttendance(context, body, tenantClient, userId, isAdmin, {
     supabase,
     orgId,
     userEmail: authResult.data.user.email || null,
     role,
+    billingService,
   });
 }
 
@@ -546,7 +550,7 @@ async function buildParticipantStatusPreview(tenantClient, body, {
       .maybeSingle(),
     tenantClient
       .from('lesson_participants')
-      .select('id, student_id, participant_status, lesson_instance_id, commitment_id, price_charged, pricing_breakdown, metadata')
+      .select('id, student_id, client_profile_id, participant_status, lesson_instance_id, metadata')
       .eq('lesson_instance_id', body.instance_id),
     tenantClient
       .from('lesson_earnings')
@@ -554,9 +558,9 @@ async function buildParticipantStatusPreview(tenantClient, body, {
       .eq('lesson_instance_id', body.instance_id),
     tenantClient
       .from('ledger_transactions')
-      .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, metadata')
-      .eq('source_ref', body.participant_id)
-      .in('usage_type', ['standard', 'double', 'cross_service']),
+      .select('id, student_id, client_profile_id, hmo_provider_id, direction, amount, lesson_participant_id, reverses_transaction_id, source_type, metadata')
+      .eq('lesson_participant_id', body.participant_id)
+      .in('source_type', ['lesson_charge', 'reversal']),
     listDashboardTasks(tenantClient, {
       status: 'open',
       resourceType: 'lesson_participant',
@@ -603,27 +607,7 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   const targetParticipantAfter = projectedParticipants.find((row) => row.id === body.participant_id) || targetParticipantBefore;
   const normalizedParticipantStudentId = normalizeNullableId(participant?.student_id);
   const normalizedParticipantClientProfileId = normalizeNullableId(participant?.client_profile_id);
-  const targetPricingBreakdown = targetParticipantBefore?.pricing_breakdown && typeof targetParticipantBefore.pricing_breakdown === 'object'
-    ? targetParticipantBefore.pricing_breakdown
-    : null;
-  const participantLedgerArtifactId = typeof targetPricingBreakdown?.lesson_entry_id === 'string'
-    ? targetPricingBreakdown.lesson_entry_id
-    : '';
-
   let billingArtifactRows = Array.isArray(participantLedgerRows) ? [...participantLedgerRows] : [];
-  if (billingArtifactRows.length === 0 && participantLedgerArtifactId) {
-    const { data: participantLedgerArtifactRow, error: participantLedgerArtifactError } = await tenantClient
-      .from('ledger_transactions')
-      .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, metadata')
-      .eq('id', participantLedgerArtifactId)
-      .maybeSingle();
-    if (participantLedgerArtifactError && participantLedgerArtifactError.code !== 'PGRST116' && participantLedgerArtifactError.code !== '42P01') {
-      throw participantLedgerArtifactError;
-    }
-    if (participantLedgerArtifactRow) {
-      billingArtifactRows = [participantLedgerArtifactRow];
-    }
-  }
 
   const lessonDateKey = getDateKeyInTimezone(instanceDetail.datetime_start || Date.now());
   const lessonDayBounds = lessonDateKey
@@ -684,14 +668,6 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   if (clientProfileError && clientProfileError.code !== 'PGRST116') throw clientProfileError;
   if (serviceError && serviceError.code !== 'PGRST116') throw serviceError;
   if (capabilityError && capabilityError.code !== 'PGRST116' && capabilityError.code !== '42P01') throw capabilityError;
-  const commitmentMap = await loadCommitmentsMap(
-    tenantClient,
-    targetParticipantBefore?.commitment_id ? [targetParticipantBefore.commitment_id] : [],
-  );
-  const commitmentRow = targetParticipantBefore?.commitment_id
-    ? (commitmentMap.get(targetParticipantBefore.commitment_id) || null)
-    : null;
-
   const currentShouldInstructorEarn = Array.isArray(lessonEarningRows) && lessonEarningRows.length > 0;
   const projectedShouldInstructorEarn = lessonHasInstructorCompensation(projectedParticipants, policies);
 
@@ -733,22 +709,30 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   const inferredLessonEarningAmount = computeLessonInstructorPayoutAmount(instanceDetail, capabilityRow?.base_rate || 0);
   const lessonEarningAmount = storedLessonEarningAmount;
   const ledgerAmount = roundCurrency((billingArtifactRows || []).reduce((sum, row) => {
-    if (row.transaction_type === 'DEBIT') return sum + Number(row.amount || 0);
-    if (row.transaction_type === 'CREDIT') return sum - Number(row.amount || 0);
+    if (row.direction === 'DEBIT') return sum + Number(row.amount || 0);
+    if (row.direction === 'CREDIT') return sum - Number(row.amount || 0);
     return sum;
   }, 0));
+  const projectedAuthorization = targetParticipantAfter?.student_id
+    ? await resolveActiveAuthorizationForStudentService(tenantClient, {
+      studentId: targetParticipantAfter.student_id,
+      serviceId: instanceDetail?.service_id,
+      lessonDate: instanceDetail?.datetime_start,
+    })
+    : null;
   const projectedBillingDecision = targetParticipantAfter?.student_id
     && normalizeNullableId(targetParticipantAfter.student_id)
-    ? buildBillingDecision({
+    ? await buildBillingDecision({
         participant: targetParticipantAfter,
         instance: {
           ...instanceDetail,
           status: projectedInstanceStatus,
         },
-        commitment: commitmentRow || null,
+        service: serviceRow || null,
+        authorization: projectedAuthorization || null,
         policies,
       })
-    : buildDirectClientBillingDecision({
+    : await buildDirectClientBillingDecision({
         participant: targetParticipantAfter,
         instance: {
           ...instanceDetail,
@@ -1458,10 +1442,20 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
 
   let billingWarnings = [];
   try {
-    const billingResult = await syncLessonBillingArtifacts(tenantClient, body.instance_id, userId);
+    const billingResult = await auditContext?.billingService?.syncLessonInstanceCharges({
+      lessonInstanceId: body.instance_id,
+      actorUserId: userId,
+      reasonCode: 'attendance_changed',
+    });
     await syncLessonInstructorEarnings(tenantClient, body.instance_id, userId);
     await syncInstructorAttendanceFromLessons(tenantClient, body.instance_id, userId);
-    billingWarnings = billingResult?.attention_required || [];
+    billingWarnings = (billingResult?.participantResults || [])
+      .filter((row) => row.status === 'blocked')
+      .map((row) => ({
+        participant_id: row.lessonParticipantId,
+        billing_status: 'blocked',
+        billing_reason: row.warnings?.[0] || 'blocked',
+      }));
   } catch (syncError) {
     context.log?.error?.('calendar/attendance failed to sync financial artifacts', {
       message: syncError?.message,
@@ -1477,27 +1471,24 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
       const [{ data: participantDetail }, { data: instanceDetail }] = await Promise.all([
         tenantClient
           .from('lesson_participants')
-          .select('student_id, commitment_id')
+          .select('student_id')
           .eq('id', body.participant_id)
           .maybeSingle(),
         tenantClient
           .from('lesson_instances')
-          .select('datetime_start')
+          .select('datetime_start, service_id')
           .eq('id', body.instance_id)
           .maybeSingle(),
       ]);
 
-      if (participantDetail?.commitment_id) {
-        const { data: commitment } = await tenantClient
-          .from('commitments')
-          .select('commitment_type, hmo_provider_id, is_active')
-          .eq('id', participantDetail.commitment_id)
-          .maybeSingle();
+      if (participantDetail?.student_id && instanceDetail?.service_id) {
+        const activeAuthorization = await resolveActiveAuthorizationForStudentService(tenantClient, {
+          studentId: participantDetail.student_id,
+          serviceId: instanceDetail.service_id,
+          lessonDate: instanceDetail.datetime_start,
+        });
 
-        const isHmo = commitment?.is_active !== false
-          && (commitment?.commitment_type === 'hmo' || Boolean(commitment?.hmo_provider_id));
-
-        if (isHmo) {
+        if (activeAuthorization?.id) {
           const normalizedParticipantDetailStudentId = normalizeNullableId(participantDetail.student_id);
           const { data: student } = normalizedParticipantDetailStudentId
             ? await tenantClient
@@ -1526,7 +1517,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
             metadata: {
               lesson_instance_id: body.instance_id,
               student_id: normalizedParticipantDetailStudentId,
-              commitment_id: participantDetail.commitment_id,
+              hmo_authorization_id: activeAuthorization.id,
             },
           });
         }

@@ -262,16 +262,14 @@ export default async function (context, req) {
         return respond(context, 400, { message: 'missing_provider_id' });
       }
 
-      const [{ data: trackRows, error: trackError }, { data: authRows, error: authError }, { data: commitmentRows, error: commitmentError }] = await Promise.all([
+      const [{ data: trackRows, error: trackError }, { data: authRows, error: authError }] = await Promise.all([
         tenantClient.from('hmo_provider_tracks').select('id').eq('provider_id', id).limit(1),
         tenantClient.from('hmo_authorizations').select('id').eq('provider_id', id).limit(1),
-        tenantClient.from('commitments').select('id').eq('hmo_provider_id', id).limit(1),
       ]);
 
       if (trackError && trackError.code !== '42P01') throw trackError;
       if (authError && authError.code !== '42P01') throw authError;
-      if (commitmentError && commitmentError.code !== '42P01') throw commitmentError;
-      if ((trackRows || []).length > 0 || (authRows || []).length > 0 || (commitmentRows || []).length > 0) {
+      if ((trackRows || []).length > 0 || (authRows || []).length > 0) {
         return respond(context, 409, { message: 'provider_in_use' });
       }
 
@@ -297,14 +295,12 @@ export default async function (context, req) {
         return respond(context, 400, { message: 'missing_track_id' });
       }
 
-      const [{ data: authRows, error: authError }, { data: commitmentRows, error: commitmentError }] = await Promise.all([
+      const [{ data: authRows, error: authError }] = await Promise.all([
         tenantClient.from('hmo_authorizations').select('id').eq('provider_track_id', id).limit(1),
-        tenantClient.from('commitments').select('id').eq('hmo_provider_track_id', id).limit(1),
       ]);
 
       if (authError && authError.code !== '42P01') throw authError;
-      if (commitmentError && commitmentError.code !== '42P01') throw commitmentError;
-      if ((authRows || []).length > 0 || (commitmentRows || []).length > 0) {
+      if ((authRows || []).length > 0) {
         return respond(context, 409, { message: 'track_in_use' });
       }
 

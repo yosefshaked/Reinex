@@ -24,7 +24,7 @@ import {
   resolveOrgId,
   resolveTenantClient,
 } from '../_shared/org-bff.js';
-import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
+import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons } from '../_shared/employee-finance.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { buildUtcBoundsForTimezoneDateRange } from '../_shared/instructor-availability.js';
@@ -234,6 +234,7 @@ export default async function lessonInstances(context, req) {
   if (tenantError) {
     return respond(context, tenantError.status, tenantError.body);
   }
+  const billingService = new BillingLedgerService({ tenantClient });
 
   if (!isAdmin) {
     const { instructorId, error: instructorError } = await resolveActorInstructorId(tenantClient, userId);
@@ -873,7 +874,11 @@ export default async function lessonInstances(context, req) {
     // Sync financial artifacts and instructor attendance when status changes
     if (nextStatus) {
       try {
-        await syncLessonBillingArtifacts(tenantClient, lessonInstanceId, userId);
+        await billingService.syncLessonInstanceCharges({
+          lessonInstanceId,
+          actorUserId: userId,
+          reasonCode: 'lesson_updated',
+        });
         await syncLessonInstructorEarnings(tenantClient, lessonInstanceId, userId);
         await syncInstructorAttendanceFromLessons(tenantClient, lessonInstanceId, userId);
         await syncLessonClosureState(tenantClient, lessonInstanceId, userId);
@@ -1254,7 +1259,11 @@ export default async function lessonInstances(context, req) {
         }
 
         try {
-          await syncLessonBillingArtifacts(tenantClient, instId, userId);
+          await billingService.syncLessonInstanceCharges({
+            lessonInstanceId: instId,
+            actorUserId: userId,
+            reasonCode: 'lesson_updated',
+          });
           await syncLessonInstructorEarnings(tenantClient, instId, userId);
           await syncInstructorAttendanceFromLessons(tenantClient, instId, userId);
           await syncLessonClosureState(tenantClient, instId, userId);

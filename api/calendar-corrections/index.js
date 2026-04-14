@@ -18,6 +18,7 @@ import { createDashboardTask } from '../_shared/dashboard-tasks.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { ACTIVE_LESSON_INSTANCE_STATUSES, normalizeLessonInstanceStatus } from '../_shared/lesson-instance-status.js';
+import BillingLedgerService from '../_shared/BillingLedgerService.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -90,7 +91,7 @@ async function createBlockedCorrectionArtifacts({ tenantClient, userId, preview,
   return { correction, task };
 }
 
-async function createAppliedCorrectionArtifacts({ tenantClient, userId, preview, reasonCode, reasonText }) {
+async function createAppliedCorrectionArtifacts({ tenantClient, billingService, userId, preview, reasonCode, reasonText }) {
   const { data: correction, error: correctionError } = await tenantClient
     .from('calendar_instance_corrections')
     .insert({
@@ -185,32 +186,31 @@ async function createAppliedCorrectionArtifacts({ tenantClient, userId, preview,
       continue;
     }
 
-    const transactionType = delta > 0 ? 'DEBIT' : 'CREDIT';
-    const usageType = delta > 0 ? 'manual_adjustment' : 'manual_topup';
-    const { data: ledgerAdjustment, error: ledgerError } = await tenantClient
-      .from('ledger_transactions')
-      .insert({
-        client_profile_id: participantImpact.client_profile_id,
-        student_id: participantImpact.student_id,
-        commitment_id: participantImpact.commitment_id || null,
-        transaction_type: transactionType,
-        usage_type: usageType,
-        amount: Math.abs(delta),
-        source_ref: participantImpact.participant_id,
-        notes: reasonText,
-        metadata: {
-          source_type: 'calendar_instance_correction',
-          source_id: correction.id,
-          original_instance_id: preview.original_instance_id,
-          original_participant_id: participantImpact.participant_id,
-        },
-      })
-      .select('*')
-      .single();
+    const accountType = participantImpact.student_id ? 'student' : 'client_profile';
+    const accountRefId = participantImpact.student_id || participantImpact.client_profile_id;
+    const sharedPayload = {
+      accountType,
+      accountRefId,
+      amount: Math.abs(delta),
+      effectiveAt: preview.impact_snapshot?.operational?.attendance_date || null,
+      actorUserId: userId,
+      sourceType: 'manual_adjustment',
+      sourceId: correction.id,
+      notes: reasonText,
+      metadata: {
+        correction_reason_code: reasonCode,
+        correction_mode: preview.correction_mode,
+        source_type: 'calendar_instance_correction',
+        source_id: correction.id,
+        original_instance_id: preview.original_instance_id,
+        original_participant_id: participantImpact.participant_id,
+      },
+    };
 
-    if (ledgerError) {
-      throw ledgerError;
-    }
+    const ledgerAdjustment = delta > 0
+      ? await billingService.appendManualDebit(sharedPayload)
+      : await billingService.appendManualCredit(sharedPayload);
+
     createdArtifacts.ledger_adjustments.push(ledgerAdjustment);
   }
 
@@ -273,6 +273,7 @@ export default async function calendarCorrections(context, req) {
   if (tenantError) {
     return respond(context, tenantError.status, tenantError.body);
   }
+  const billingService = new BillingLedgerService({ tenantClient });
 
   if (method !== 'POST') {
     return respond(context, 405, { message: 'method not allowed' });
@@ -461,6 +462,7 @@ export default async function calendarCorrections(context, req) {
 
     const result = await createAppliedCorrectionArtifacts({
       tenantClient,
+      billingService,
       userId,
       preview,
       reasonCode,
@@ -489,7 +491,7 @@ export default async function calendarCorrections(context, req) {
         correction_id: result.correction.id,
         finance_correction_ids: result.finance_corrections.map((entry) => entry.id),
         attendance_correction_ids: result.attendance_corrections.map((entry) => entry.id),
-        ledger_adjustment_ids: result.ledger_adjustments.map((entry) => entry.id),
+        ledger_adjustment_ids: result.ledger_adjustments.map((entry) => entry.transactionId || entry.id),
       },
     });
 
@@ -503,7 +505,7 @@ export default async function calendarCorrections(context, req) {
       details: {
         finance_correction_ids: result.finance_corrections.map((entry) => entry.id),
         attendance_correction_ids: result.attendance_corrections.map((entry) => entry.id),
-        ledger_adjustment_ids: result.ledger_adjustments.map((entry) => entry.id),
+        ledger_adjustment_ids: result.ledger_adjustments.map((entry) => entry.transactionId || entry.id),
       },
     });
 

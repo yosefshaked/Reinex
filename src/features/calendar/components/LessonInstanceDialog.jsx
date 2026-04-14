@@ -26,7 +26,6 @@ import {
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
 } from '../utils/schedulingOverride.js';
 import { getParticipantDisplayName, resolveParticipantReminderContact } from '../utils/participantDisplay.js';
-import { toShekel } from '@/lib/currency.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -280,15 +279,8 @@ function deriveDisplayWorkflowDecisions(participant, billingPolicy) {
   const compensationDecision = workflow.instructor_compensation?.decision || 'unknown';
   const hmoDecision = workflow.hmo_claim?.decision || 'unknown';
   const hasResolvedStatus = ['attended', 'no_show', 'cancelled_student', 'cancelled_clinic'].includes(status);
-  const hasChargeArtifact = Number(participant?.price_charged || 0) > 0
-    || participant?.pricing_breakdown?.billing_status === 'charged';
-  const persistedBillingStatus = String(participant?.pricing_breakdown?.billing_status || '').trim().toLowerCase();
   let resolvedStudentBillingDecision = studentBillingDecision;
-  if (persistedBillingStatus === 'charged') {
-    resolvedStudentBillingDecision = 'resolved';
-  } else if (persistedBillingStatus === 'not_chargeable') {
-    resolvedStudentBillingDecision = 'not_applicable';
-  } else if (studentBillingDecision === 'pending' && !billingPolicy?.[status]) {
+  if (studentBillingDecision === 'pending' && !billingPolicy?.[status]) {
     resolvedStudentBillingDecision = 'not_applicable';
   }
 
@@ -297,9 +289,7 @@ function deriveDisplayWorkflowDecisions(participant, billingPolicy) {
       ? resolvedStudentBillingDecision
       : (!hasResolvedStatus
         ? 'unknown'
-        : (hasChargeArtifact
-          ? 'resolved'
-          : (billingPolicy?.[status] ? 'pending' : 'not_applicable'))),
+        : (billingPolicy?.[status] ? 'pending' : 'not_applicable')),
     compensationDecision: compensationDecision !== 'unknown'
       ? compensationDecision
       : (status === 'attended'
@@ -1991,9 +1981,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                             <Badge variant="outline">{getWorkflowDecisionLabel(hmoDecision, 'hmo_claim')}</Badge>
                           </div>
                         </div>
-                        {participant.price_charged && (
-                          <Badge variant="outline" className="ms-2">₪{toShekel(participant.price_charged).toFixed(2)}</Badge>
-                        )}
                         {canMarkAttendance && !isAbsenceFormOpen && (
                           <div className="flex gap-1 ms-2">
                             {isScheduled && (

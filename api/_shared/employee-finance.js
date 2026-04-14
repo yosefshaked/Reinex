@@ -2,11 +2,6 @@
 /* eslint-env node */
 import { isAdminOrOffice, normalizeString } from './org-bff.js';
 import { coerceAgorot } from './currency.js';
-import {
-  buildCommitmentRuntime,
-  computeCommitmentAttention,
-} from './commitment-behavior.js';
-import { attachHmoContextToCommitments } from './hmo.js';
 import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import { buildUtcBoundsForTimezoneDateRange } from './instructor-availability.js';
 import { fetchLessonMutationState, isLockedState } from './calendar-editing.js';
@@ -737,130 +732,6 @@ export async function listFinanceCorrections(tenantClient, { employeeId = '', st
   return data || [];
 }
 
-export async function fetchCommitmentsWithBalances(tenantClient, filters = {}) {
-  let query = tenantClient
-    .from('commitments')
-    .select('*')
-    .order('created_at', { ascending: false });
-
-  if (filters.studentId) {
-    query = query.eq('student_id', filters.studentId);
-  }
-  if (filters.serviceId) {
-    query = query.eq('service_id', filters.serviceId);
-  }
-
-  const limit = Number.isFinite(filters.limit) && filters.limit > 0 ? Math.min(filters.limit, 500) : null;
-  const offset = Number.isFinite(filters.offset) && filters.offset >= 0 ? filters.offset : 0;
-  if (limit) {
-    query = query.range(offset, offset + limit - 1);
-  }
-
-  const { data: commitments, error } = await query;
-  if (error) {
-    if (error.code === '42P01') {
-      return [];
-    }
-    throw error;
-  }
-
-  const commitmentIds = (commitments || []).map((row) => row.id);
-  if (commitmentIds.length === 0) {
-    return [];
-  }
-
-  const { data: ledgerRows, error: ledgerError } = await tenantClient
-    .from('ledger_transactions')
-    .select('id, commitment_id, transaction_type, usage_type, amount, source_ref, metadata')
-    .in('commitment_id', commitmentIds);
-
-  if (ledgerError && ledgerError.code !== '42P01') {
-    throw ledgerError;
-  }
-
-  const creditSums = new Map();
-  const debitSums = new Map();
-  const entriesByCommitment = new Map();
-  for (const row of ledgerRows || []) {
-    if (!entriesByCommitment.has(row.commitment_id)) {
-      entriesByCommitment.set(row.commitment_id, []);
-    }
-    entriesByCommitment.get(row.commitment_id).push(row);
-    const amt = coerceAgorot(row.amount);
-    if (row.transaction_type === 'CREDIT') {
-      creditSums.set(row.commitment_id, (creditSums.get(row.commitment_id) || 0) + amt);
-    } else {
-      debitSums.set(row.commitment_id, (debitSums.get(row.commitment_id) || 0) + amt);
-    }
-  }
-
-  const enrichedCommitments = await attachHmoContextToCommitments(tenantClient, commitments || []);
-
-  return enrichedCommitments.map((commitment) => {
-    const credits = coerceAgorot(creditSums.get(commitment.id));
-    const debits = coerceAgorot(debitSums.get(commitment.id));
-    const consumedAmount = debits;
-    const remainingAmount = credits - debits;
-    const runtime = buildCommitmentRuntime(commitment, entriesByCommitment.get(commitment.id) || []);
-    return {
-      ...commitment,
-      consumed_amount: consumedAmount,
-      remaining_amount: remainingAmount,
-      runtime: {
-        ...runtime,
-        attention: computeCommitmentAttention(commitment, runtime),
-      },
-    };
-  });
-}
-
-export async function fetchLessonPendingBillingQueue(tenantClient, { startDate = '', endDate = '', studentId = '' } = {}) {
-  let query = tenantClient
-    .from('lesson_participants')
-    .select('id, lesson_instance_id, student_id, participant_status, commitment_id, price_charged')
-    .is('commitment_id', null)
-    .order('id', { ascending: false });
-
-  if (studentId) {
-    query = query.eq('student_id', studentId);
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    if (error.code === '42P01') {
-      return [];
-    }
-    throw error;
-  }
-
-  const instanceIds = (data || []).map((row) => row.lesson_instance_id).filter(Boolean);
-  if (instanceIds.length === 0) {
-    return [];
-  }
-
-  const { data: instances, error: instancesError } = await tenantClient
-    .from('lesson_instances')
-    .select('id, datetime_start, service_id, status')
-    .in('id', instanceIds);
-
-  if (instancesError) {
-    throw instancesError;
-  }
-
-  const instanceMap = new Map((instances || []).map((row) => [row.id, row]));
-  return (data || []).filter((row) => {
-    const instance = instanceMap.get(row.lesson_instance_id);
-    if (!instance) return false;
-    const dateKey = toDateKey(instance.datetime_start);
-    if (startDate && dateKey < startDate) return false;
-    if (endDate && dateKey > endDate) return false;
-    return true;
-  }).map((row) => ({
-    ...row,
-    lesson_instance: instanceMap.get(row.lesson_instance_id) || null,
-  }));
-}
-
 export async function syncLessonInstructorEarnings(
   tenantClient,
   lessonInstanceId,
@@ -889,7 +760,7 @@ export async function syncLessonInstructorEarnings(
   if (!resolvedParticipants) {
     const { data: participantRows, error: participantsError } = await tenantClient
       .from('lesson_participants')
-      .select('id, student_id, participant_status, commitment_id, price_charged, attendance_confirmed_at, metadata')
+      .select('id, student_id, participant_status, attendance_confirmed_at, metadata')
       .eq('lesson_instance_id', lessonInstanceId);
 
     if (participantsError) {
@@ -1019,117 +890,6 @@ export async function syncLessonInstructorEarnings(
     instructor_earned: true,
     payout_amount: payoutAmount,
   };
-}
-
-export async function syncLessonFinancialArtifacts(tenantClient, lessonInstanceId, actorUserId = null) {
-  if (!lessonInstanceId) {
-    return null;
-  }
-
-  const { data: instance, error: instanceError } = await tenantClient
-    .from('lesson_instances')
-    .select('id, instructor_employee_id, service_id, duration_minutes, status, datetime_start')
-    .eq('id', lessonInstanceId)
-    .maybeSingle();
-
-  if (instanceError) {
-    throw instanceError;
-  }
-  if (!instance) {
-    return null;
-  }
-
-  const { data: participants, error: participantsError } = await tenantClient
-    .from('lesson_participants')
-    .select('id, student_id, participant_status, commitment_id, price_charged, attendance_confirmed_at, metadata')
-    .eq('lesson_instance_id', lessonInstanceId);
-
-  if (participantsError) {
-    throw participantsError;
-  }
-
-  const policies = await loadFinancePolicies(tenantClient);
-  const commitmentIds = Array.from(new Set((participants || []).map((row) => row.commitment_id).filter(Boolean)));
-  const { data: commitments, error: commitmentsError } = commitmentIds.length > 0
-    ? await tenantClient
-      .from('commitments')
-      .select('id, student_id, service_id, default_charge_amount')
-      .in('id', commitmentIds)
-    : { data: [], error: null };
-
-  if (commitmentsError) {
-    throw commitmentsError;
-  }
-
-  const commitmentMap = new Map((commitments || []).map((row) => [row.id, row]));
-
-  for (const participant of participants || []) {
-    const commitment = participant.commitment_id ? commitmentMap.get(participant.commitment_id) || null : null;
-    const derivedCharge = commitment
-      ? (Number.isFinite(Number(commitment.default_charge_amount)) ? Number(commitment.default_charge_amount) : null)
-      : null;
-
-    if (derivedCharge !== participant.price_charged) {
-      await tenantClient
-        .from('lesson_participants')
-        .update({
-          price_charged: derivedCharge,
-          attendance_confirmed_at: participant.participant_status !== 'scheduled'
-            ? (participant.attendance_confirmed_at || new Date().toISOString())
-            : participant.attendance_confirmed_at,
-          attendance_confirmed_by: actorUserId || null,
-        })
-        .eq('id', participant.id);
-    }
-
-    const statusKey = normalizeString(participant.participant_status).toLowerCase();
-    const shouldCharge = Boolean(
-      commitment
-      && derivedCharge != null
-      && policies.billingConsumptionPolicy[statusKey]
-    );
-
-    if (shouldCharge) {
-      const payload = {
-        student_id: participant.student_id,
-        commitment_id: commitment.id,
-        transaction_type: 'DEBIT',
-        usage_type: 'standard',
-        amount: derivedCharge,
-        source_ref: participant.id,
-        notes: null,
-        metadata: {
-          participant_status: statusKey,
-          lesson_instance_id: lessonInstanceId,
-          effective_date: toDateKey(instance.datetime_start),
-        },
-      };
-
-      const { error: upsertError } = await tenantClient
-        .from('ledger_transactions')
-        .upsert(payload, { onConflict: 'source_ref,usage_type' });
-
-      if (upsertError) {
-        throw upsertError;
-      }
-    } else {
-      const { error: deleteError } = await tenantClient
-        .from('ledger_transactions')
-        .delete()
-        .eq('source_ref', participant.id)
-        .in('usage_type', ['standard', 'double', 'cross_service']);
-
-      if (deleteError && deleteError.code !== '42P01') {
-        throw deleteError;
-      }
-    }
-  }
-
-  return syncLessonInstructorEarnings(tenantClient, lessonInstanceId, actorUserId, {
-    instance,
-    participants,
-    policies,
-  });
 }
 
 /**

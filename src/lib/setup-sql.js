@@ -6366,6 +6366,202 @@ GRANT EXECUTE ON FUNCTION public.batch_sync_lesson_ledger_entries(
   uuid, uuid, jsonb
 ) TO authenticated, service_role;
 
+-- -----------------------------------------------------------------
+-- Append-only billing ledger cutover
+-- Final destructive section for MVP finance reset:
+--   - drops commitment-era tables and RPCs
+--   - recreates ledger_accounts + immutable ledger_transactions
+--   - removes cached lesson billing columns
+--   - adds HMO invoice metadata tables
+-- -----------------------------------------------------------------
+
+ALTER TABLE public.hmo_authorizations
+  ADD COLUMN IF NOT EXISTS contracted_rate_amount integer;
+
+UPDATE public.hmo_authorizations AS auth
+SET contracted_rate_amount = COALESCE(
+  auth.contracted_rate_amount,
+  auth.insurer_claim_amount_override,
+  track.default_insurer_claim_amount,
+  0
+)
+FROM public.hmo_provider_tracks AS track
+WHERE track.id = auth.provider_track_id
+  AND auth.contracted_rate_amount IS NULL;
+
+UPDATE public.hmo_authorizations
+SET contracted_rate_amount = 0
+WHERE contracted_rate_amount IS NULL;
+
+ALTER TABLE public.hmo_authorizations
+  ALTER COLUMN contracted_rate_amount SET NOT NULL;
+
+ALTER TABLE public.hmo_authorizations
+  DROP COLUMN IF EXISTS customer_charge_amount_override,
+  DROP COLUMN IF EXISTS insurer_claim_amount_override,
+  DROP COLUMN IF EXISTS payment_mode;
+
+DROP FUNCTION IF EXISTS public.get_student_remaining_balance(uuid) CASCADE;
+DROP FUNCTION IF EXISTS public.create_commitment_transfer_atomic(uuid, integer, uuid, uuid, uuid, text, integer, timestamptz, text, uuid) CASCADE;
+DROP FUNCTION IF EXISTS public.ensure_hmo_authorization_and_link_commitment(jsonb, uuid) CASCADE;
+DROP FUNCTION IF EXISTS public.create_commitment_and_ledger_entry(uuid, uuid, text, integer, integer, uuid, text, boolean, timestamptz, jsonb, uuid, uuid, uuid) CASCADE;
+DROP FUNCTION IF EXISTS public.update_commitment_and_record_delta(uuid, uuid, uuid, text, integer, integer, uuid, text, boolean, timestamptz, jsonb) CASCADE;
+DROP FUNCTION IF EXISTS public.batch_sync_lesson_ledger_entries(uuid, uuid, jsonb) CASCADE;
+
+DROP TABLE IF EXISTS public.hmo_invoice_batch_items CASCADE;
+DROP TABLE IF EXISTS public.hmo_invoice_batches CASCADE;
+DROP TABLE IF EXISTS public.ledger_transactions CASCADE;
+DROP TABLE IF EXISTS public.ledger_accounts CASCADE;
+DROP TABLE IF EXISTS public.commitments CASCADE;
+
+ALTER TABLE public.lesson_participants
+  DROP COLUMN IF EXISTS commitment_id,
+  DROP COLUMN IF EXISTS price_charged,
+  DROP COLUMN IF EXISTS pricing_breakdown;
+
+CREATE TABLE public.ledger_accounts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_type text NOT NULL CHECK (account_type IN ('student', 'client_profile', 'hmo_provider')),
+  student_id uuid NULL REFERENCES public.students(id) ON DELETE CASCADE,
+  client_profile_id uuid NULL REFERENCES public.client_profiles(id) ON DELETE CASCADE,
+  hmo_provider_id uuid NULL REFERENCES public.hmo_providers(id) ON DELETE CASCADE,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT ledger_accounts_exactly_one_owner_chk CHECK (
+    (
+      CASE WHEN student_id IS NOT NULL THEN 1 ELSE 0 END +
+      CASE WHEN client_profile_id IS NOT NULL THEN 1 ELSE 0 END +
+      CASE WHEN hmo_provider_id IS NOT NULL THEN 1 ELSE 0 END
+    ) = 1
+  ),
+  CONSTRAINT ledger_accounts_type_match_chk CHECK (
+    (account_type = 'student' AND student_id IS NOT NULL AND client_profile_id IS NULL AND hmo_provider_id IS NULL) OR
+    (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL) OR
+    (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL AND client_profile_id IS NULL)
+  )
+);
+
+CREATE UNIQUE INDEX ledger_accounts_student_id_uidx
+  ON public.ledger_accounts (student_id)
+  WHERE student_id IS NOT NULL;
+
+CREATE UNIQUE INDEX ledger_accounts_client_profile_id_uidx
+  ON public.ledger_accounts (client_profile_id)
+  WHERE client_profile_id IS NOT NULL;
+
+CREATE UNIQUE INDEX ledger_accounts_hmo_provider_id_uidx
+  ON public.ledger_accounts (hmo_provider_id)
+  WHERE hmo_provider_id IS NOT NULL;
+
+CREATE TABLE public.ledger_transactions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ledger_account_id uuid NOT NULL REFERENCES public.ledger_accounts(id) ON DELETE RESTRICT,
+  direction text NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')),
+  amount integer NOT NULL CHECK (amount > 0),
+  effective_at timestamptz NOT NULL,
+  posted_at timestamptz NOT NULL DEFAULT now(),
+  source_type text NOT NULL CHECK (
+    source_type IN (
+      'lesson_charge',
+      'manual_payment',
+      'manual_adjustment',
+      'hmo_invoice_payment',
+      'opening_balance',
+      'reversal',
+      'migration'
+    )
+  ),
+  source_id uuid NULL,
+  lesson_instance_id uuid NULL REFERENCES public.lesson_instances(id) ON DELETE SET NULL,
+  lesson_participant_id uuid NULL REFERENCES public.lesson_participants(id) ON DELETE SET NULL,
+  student_id uuid NULL REFERENCES public.students(id) ON DELETE SET NULL,
+  client_profile_id uuid NULL REFERENCES public.client_profiles(id) ON DELETE SET NULL,
+  hmo_provider_id uuid NULL REFERENCES public.hmo_providers(id) ON DELETE SET NULL,
+  hmo_authorization_id uuid NULL REFERENCES public.hmo_authorizations(id) ON DELETE SET NULL,
+  service_id uuid NULL REFERENCES public."Services"(id) ON DELETE SET NULL,
+  rate_source text NULL CHECK (
+    rate_source IN ('hmo_authorization', 'service_rate', 'manual', 'opening_balance', 'migration')
+  ),
+  reverses_transaction_id uuid NULL UNIQUE REFERENCES public.ledger_transactions(id) ON DELETE RESTRICT,
+  external_reference text NULL,
+  notes text NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX ledger_transactions_account_effective_idx
+  ON public.ledger_transactions (ledger_account_id, effective_at);
+
+CREATE INDEX ledger_transactions_source_idx
+  ON public.ledger_transactions (source_type, source_id);
+
+CREATE INDEX ledger_transactions_lesson_participant_idx
+  ON public.ledger_transactions (lesson_participant_id);
+
+CREATE INDEX ledger_transactions_student_effective_idx
+  ON public.ledger_transactions (student_id, effective_at);
+
+CREATE INDEX ledger_transactions_client_effective_idx
+  ON public.ledger_transactions (client_profile_id, effective_at);
+
+CREATE INDEX ledger_transactions_hmo_provider_effective_idx
+  ON public.ledger_transactions (hmo_provider_id, effective_at);
+
+CREATE INDEX ledger_transactions_hmo_authorization_idx
+  ON public.ledger_transactions (hmo_authorization_id);
+
+CREATE INDEX ledger_transactions_reverses_idx
+  ON public.ledger_transactions (reverses_transaction_id);
+
+CREATE OR REPLACE FUNCTION public.prevent_ledger_transaction_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'ledger_transactions_is_append_only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS ledger_transactions_append_only_trigger ON public.ledger_transactions;
+CREATE TRIGGER ledger_transactions_append_only_trigger
+BEFORE UPDATE OR DELETE ON public.ledger_transactions
+FOR EACH ROW
+EXECUTE FUNCTION public.prevent_ledger_transaction_mutation();
+
+CREATE TABLE public.hmo_invoice_batches (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hmo_provider_id uuid NOT NULL REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
+  period_start date NULL,
+  period_end date NULL,
+  status text NOT NULL DEFAULT 'issued' CHECK (status IN ('draft', 'issued', 'partially_paid', 'paid', 'cancelled')),
+  total_amount integer NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
+  paid_amount integer NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
+  external_reference text NULL,
+  external_link text NULL,
+  notes text NULL,
+  issued_at timestamptz NOT NULL DEFAULT now(),
+  paid_at timestamptz NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX hmo_invoice_batches_provider_idx
+  ON public.hmo_invoice_batches (hmo_provider_id, created_at DESC);
+
+CREATE TABLE public.hmo_invoice_batch_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id uuid NOT NULL REFERENCES public.hmo_invoice_batches(id) ON DELETE CASCADE,
+  ledger_transaction_id uuid NOT NULL UNIQUE REFERENCES public.ledger_transactions(id) ON DELETE RESTRICT,
+  amount integer NOT NULL CHECK (amount > 0),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX hmo_invoice_batch_items_batch_idx
+  ON public.hmo_invoice_batch_items (batch_id);
+
 SELECT extensions.sign(
   json_build_object(
     'role', 'app_user',

@@ -7,11 +7,12 @@ import {
 } from './employee-finance.js';
 import { normalizeEntityVersion } from './calendar-editing.js';
 import { normalizeString } from './org-bff.js';
-import { buildBillingDecision, buildDirectClientBillingDecision, loadCommitmentsMap } from './student-billing.js';
+import { resolveActiveAuthorizationForStudentService } from './hmo.js';
+import { buildBillingDecision, buildDirectClientBillingDecision } from './student-billing.js';
 import { normalizeLessonInstanceStatus } from './lesson-instance-status.js';
 import { coerceAgorot } from './currency.js';
 
-const LESSON_BILLING_USAGE_TYPES = ['standard', 'double', 'cross_service', 'manual_adjustment', 'manual_topup'];
+const LESSON_BILLING_USAGE_TYPES = ['lesson_charge', 'reversal', 'manual_adjustment', 'manual_payment'];
 const PARTICIPANT_STATUSES = new Set(['scheduled', 'attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 
 class CorrectionValidationError extends Error {
@@ -126,13 +127,18 @@ function computeWorkedMinutes(instance, participants, policies) {
     : 0;
 }
 
-function computeParticipantChargeDecision(instance, participant, commitmentMap, serviceMap, policies) {
-  const commitment = participant?.commitment_id ? commitmentMap.get(participant.commitment_id) || null : null;
+async function computeParticipantChargeDecision(tenantClient, instance, participant, serviceMap, policies) {
   if (participant?.student_id) {
+    const authorization = await resolveActiveAuthorizationForStudentService(tenantClient, {
+      studentId: participant.student_id,
+      serviceId: instance?.service_id,
+      lessonDate: instance?.datetime_start,
+    });
     return buildBillingDecision({
       participant,
       instance,
-      commitment,
+      service: serviceMap.get(instance?.service_id) || null,
+      authorization,
       policies,
     });
   }
@@ -192,7 +198,7 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
 
   const { data: participants, error: participantsError } = await tenantClient
     .from('lesson_participants')
-    .select('id, lesson_instance_id, client_profile_id, student_id, participant_status, price_charged, pricing_breakdown, commitment_id, reminder_sent, reminder_seen, attendance_confirmed_at, documented_at, version, metadata')
+    .select('id, lesson_instance_id, client_profile_id, student_id, participant_status, reminder_sent, reminder_seen, attendance_confirmed_at, documented_at, version, metadata')
     .eq('lesson_instance_id', originalInstanceId);
 
   if (participantsError) {
@@ -204,21 +210,19 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
     version: normalizeEntityVersion(participant.version),
   }));
   const participantIds = participantRows.map((participant) => participant.id);
-  const commitmentIds = Array.from(new Set(participantRows.map((participant) => participant.commitment_id).filter(Boolean)));
 
-  const [{ data: earnings, error: earningsError }, commitmentsMap, { data: ledgerRows, error: ledgerError }, { data: instanceLocks, error: instanceLocksError }, { data: participantLocks, error: participantLocksError }, { data: latestCorrectionRows, error: latestCorrectionError }, { data: financeAdjustmentRows, error: financeAdjustmentError }, { data: attendanceCorrectionRows, error: attendanceCorrectionError }, { data: correctionLedgerRows, error: correctionLedgerError }] = await Promise.all([
+  const [{ data: earnings, error: earningsError }, { data: ledgerRows, error: ledgerError }, { data: instanceLocks, error: instanceLocksError }, { data: participantLocks, error: participantLocksError }, { data: latestCorrectionRows, error: latestCorrectionError }, { data: financeAdjustmentRows, error: financeAdjustmentError }, { data: attendanceCorrectionRows, error: attendanceCorrectionError }, { data: correctionLedgerRows, error: correctionLedgerError }] = await Promise.all([
     tenantClient
       .from('lesson_earnings')
       .select('employee_id, lesson_instance_id, rate_used, payout_amount, metadata')
       .eq('lesson_instance_id', originalInstanceId)
       .maybeSingle(),
-    loadCommitmentsMap(tenantClient, commitmentIds),
     participantIds.length > 0
       ? tenantClient
         .from('ledger_transactions')
-        .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, metadata')
-        .in('source_ref', participantIds)
-        .in('usage_type', LESSON_BILLING_USAGE_TYPES)
+        .select('id, student_id, client_profile_id, hmo_provider_id, direction, source_type, amount, lesson_participant_id, reverses_transaction_id, metadata')
+        .in('lesson_participant_id', participantIds)
+        .in('source_type', LESSON_BILLING_USAGE_TYPES)
       : Promise.resolve({ data: [], error: null }),
     tenantClient
       .from('instance_locks')
@@ -247,7 +251,7 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
       .contains('metadata', { source_type: 'calendar_instance_correction', original_instance_id: originalInstanceId }),
     tenantClient
       .from('ledger_transactions')
-      .select('id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, metadata')
+      .select('id, student_id, client_profile_id, hmo_provider_id, direction, source_type, amount, lesson_participant_id, reverses_transaction_id, metadata')
       .contains('metadata', { source_type: 'calendar_instance_correction', original_instance_id: originalInstanceId }),
   ]);
 
@@ -297,7 +301,6 @@ async function loadCorrectionContext(tenantClient, originalInstanceId) {
     participants: participantRows,
     earning: earnings || null,
     latestCorrection: asArray(latestCorrectionRows)[0] || null,
-    commitments: commitmentsMap,
     ledgerRows: asArray(ledgerRows),
     financeAdjustmentRows: asArray(financeAdjustmentRows),
     attendanceCorrectionRows: asArray(attendanceCorrectionRows),
@@ -341,9 +344,9 @@ async function loadRateMap(tenantClient, pairs) {
 function buildChargeMap(ledgerRows) {
   const map = new Map();
   for (const row of asArray(ledgerRows)) {
-    const participantRef = normalizeString(row?.source_ref || row?.metadata?.original_participant_id);
+    const participantRef = normalizeString(row?.lesson_participant_id || row?.metadata?.original_participant_id);
     if (!participantRef) continue;
-    const signedAmount = normalizeString(row.transaction_type).toUpperCase() === 'CREDIT'
+    const signedAmount = normalizeString(row.direction).toUpperCase() === 'CREDIT'
       ? -Math.abs(coerceAgorot(row.amount))
       : Math.abs(coerceAgorot(row.amount));
     const nextAmount = roundCurrency((map.get(participantRef) || 0) + signedAmount);
@@ -406,13 +409,13 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   const proposedWorkedMinutes = computeWorkedMinutes(effectiveInstance, effectiveParticipants, policies);
   const currentChargeMap = buildChargeMap([...context.ledgerRows, ...context.correctionLedgerRows]);
 
-  const participantImpact = effectiveParticipants.map((participant) => {
+  const participantImpact = await Promise.all(effectiveParticipants.map(async (participant) => {
     const originalParticipant = currentParticipants.find((row) => row.id === participant.id) || participant;
     const currentCharge = roundCurrency(currentChargeMap.get(participant.id) || 0);
-    const proposedDecision = computeParticipantChargeDecision(
+    const proposedDecision = await computeParticipantChargeDecision(
+      tenantClient,
       effectiveInstance,
       participant,
-      context.commitments,
       serviceMap,
       policies,
     );
@@ -428,7 +431,6 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
       participant_id: participant.id,
       client_profile_id: participant.client_profile_id || null,
       student_id: participant.student_id,
-      commitment_id: participant.commitment_id || null,
       original_status: originalParticipant.participant_status,
       proposed_status: participant.participant_status,
       current_charge: currentCharge,
@@ -439,7 +441,7 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
       billing_reason: proposedDecision.billingReason || null,
       paid_claim_batch_ids: paidClaimBatchIds,
     };
-  });
+  }));
 
   const paidClaimBatchIds = Array.from(new Set([
     ...context.instanceLocks

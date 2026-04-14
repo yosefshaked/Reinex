@@ -13,10 +13,8 @@ import {
   resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
+import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import {
-  assignLessonParticipantCommitment,
-  clearLessonParticipantCommitment,
-  createCommitmentTransfer,
   fetchBillingSnapshot,
   reconcileStudentBilling,
 } from '../_shared/student-billing.js';
@@ -36,25 +34,12 @@ function currentMonthRange() {
 
 function mapBillingActionError(errorCode) {
   switch (errorCode) {
-    case 'lesson_participant_not_found':
-    case 'commitment_not_found':
-    case 'source_commitment_not_found':
+    case 'invoice_batch_not_found':
       return { status: 404, body: { message: errorCode } };
     case 'missing_student_id':
-    case 'missing_target_student_id':
-    case 'missing_target_service_id':
-    case 'invalid_transfer_amount':
-    case 'invalid_target_default_charge_amount':
+    case 'invalid_manual_credit_source_type':
+    case 'invalid_manual_debit_source_type':
       return { status: 400, body: { message: errorCode } };
-    case 'commitment_belongs_to_different_student':
-    case 'commitment_service_mismatch':
-    case 'commitment_inactive':
-    case 'commitment_expired':
-    case 'commitment_service_exhausted':
-    case 'authorization_exhausted':
-    case 'transfer_amount_exceeds_remaining_balance':
-    case 'hmo_commitments_managed_via_authorizations':
-      return { status: 409, body: { message: errorCode } };
     default:
       return { status: 400, body: { message: errorCode || 'invalid_billing_action' } };
   }
@@ -114,22 +99,33 @@ export default async function (context, req) {
     return respond(context, tenantError.status, tenantError.body);
   }
 
+  const billingService = new BillingLedgerService({ tenantClient });
+
   if (method === 'GET') {
     const studentId = normalizeString(req?.query?.student_id);
+    const clientProfileId = normalizeString(req?.query?.client_profile_id || req?.query?.clientProfileId);
+    const hmoProviderId = normalizeString(req?.query?.hmo_provider_id || req?.query?.hmoProviderId);
     let startDate = normalizeString(req?.query?.start_date);
     let endDate = normalizeString(req?.query?.end_date);
 
-    if (!studentId && !startDate && !endDate) {
+    if (!studentId && !clientProfileId && !hmoProviderId && !startDate && !endDate) {
       const currentRange = currentMonthRange();
       startDate = currentRange.startDate;
       endDate = currentRange.endDate;
     }
 
-    const snapshot = await fetchBillingSnapshot(tenantClient, {
-      studentId,
-      startDate,
-      endDate,
-    });
+    const snapshot = hmoProviderId
+      ? await billingService.getHmoProviderReceivablesSnapshot({
+        hmoProviderId,
+        periodStart: startDate || null,
+        periodEnd: endDate || null,
+      })
+      : await fetchBillingSnapshot(tenantClient, {
+        studentId,
+        clientProfileId,
+        startDate,
+        endDate,
+      });
 
     return respond(context, 200, snapshot);
   }
@@ -139,56 +135,6 @@ export default async function (context, req) {
   }
 
   const action = normalizeString(body?.action).toLowerCase();
-
-  if (method === 'POST' && action === 'assign_lesson_commitment') {
-    const result = await assignLessonParticipantCommitment(tenantClient, {
-      lessonParticipantId: normalizeString(body?.lesson_participant_id),
-      commitmentId: normalizeString(body?.commitment_id),
-      actorUserId: userId,
-    });
-
-    if (result?.error) {
-      const mapped = mapBillingActionError(result.error);
-      return respond(context, mapped.status, mapped.body);
-    }
-
-    return respond(context, 200, result);
-  }
-
-  if (method === 'POST' && action === 'clear_lesson_commitment') {
-    const result = await clearLessonParticipantCommitment(tenantClient, {
-      lessonParticipantId: normalizeString(body?.lesson_participant_id),
-      actorUserId: userId,
-    });
-
-    if (result?.error) {
-      const mapped = mapBillingActionError(result.error);
-      return respond(context, mapped.status, mapped.body);
-    }
-
-    return respond(context, 200, result);
-  }
-
-  if (method === 'POST' && action === 'transfer_commitment_balance') {
-    const result = await createCommitmentTransfer(tenantClient, {
-      sourceCommitmentId: normalizeString(body?.source_commitment_id),
-      amount: body?.amount,
-      targetStudentId: normalizeString(body?.target_student_id),
-      targetServiceId: normalizeString(body?.target_service_id),
-      targetCommitmentType: normalizeString(body?.target_commitment_type),
-      targetDefaultChargeAmount: body?.target_default_charge_amount,
-      expiresAt: normalizeString(body?.expires_at),
-      notes: normalizeString(body?.notes),
-      actorUserId: userId,
-    });
-
-    if (result?.error) {
-      const mapped = mapBillingActionError(result.error);
-      return respond(context, mapped.status, mapped.body);
-    }
-
-    return respond(context, 201, result);
-  }
 
   if (method === 'POST' && action === 'reconcile_student_billing') {
     const result = await reconcileStudentBilling(tenantClient, {
@@ -204,6 +150,82 @@ export default async function (context, req) {
     }
 
     return respond(context, 200, result);
+  }
+
+  try {
+    if (method === 'POST' && action === 'append_manual_credit') {
+      const result = await billingService.appendManualCredit({
+        accountType: normalizeString(body?.account_type),
+        accountRefId: normalizeString(body?.account_ref_id),
+        amount: body?.amount,
+        effectiveAt: normalizeString(body?.effective_at),
+        actorUserId: userId,
+        sourceType: normalizeString(body?.source_type),
+        sourceId: normalizeString(body?.source_id) || null,
+        externalReference: normalizeString(body?.external_reference) || null,
+        notes: normalizeString(body?.notes) || null,
+        metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+      });
+      return respond(context, 201, result);
+    }
+
+    if (method === 'POST' && action === 'append_manual_debit') {
+      const result = await billingService.appendManualDebit({
+        accountType: normalizeString(body?.account_type),
+        accountRefId: normalizeString(body?.account_ref_id),
+        amount: body?.amount,
+        effectiveAt: normalizeString(body?.effective_at),
+        actorUserId: userId,
+        sourceType: normalizeString(body?.source_type),
+        sourceId: normalizeString(body?.source_id) || null,
+        externalReference: normalizeString(body?.external_reference) || null,
+        notes: normalizeString(body?.notes) || null,
+        metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+      });
+      return respond(context, 201, result);
+    }
+
+    if (method === 'POST' && action === 'reverse_transaction') {
+      const result = await billingService.reverseTransaction({
+        transactionId: normalizeString(body?.transaction_id),
+        actorUserId: userId,
+        reasonCode: normalizeString(body?.reason_code) || 'manual_reversal',
+        effectiveAt: normalizeString(body?.effective_at) || null,
+        notes: normalizeString(body?.notes) || null,
+        sourceId: normalizeString(body?.source_id) || null,
+        metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+      });
+      return respond(context, 201, result);
+    }
+
+    if (method === 'POST' && action === 'create_hmo_invoice_batch') {
+      const result = await billingService.createHmoInvoiceBatch({
+        hmoProviderId: normalizeString(body?.hmo_provider_id),
+        periodStart: normalizeString(body?.period_start) || null,
+        periodEnd: normalizeString(body?.period_end) || null,
+        actorUserId: userId,
+        externalReference: normalizeString(body?.external_reference) || null,
+        externalLink: normalizeString(body?.external_link) || null,
+        notes: normalizeString(body?.notes) || null,
+      });
+      return respond(context, 201, result);
+    }
+
+    if (method === 'POST' && action === 'record_hmo_invoice_batch_payment') {
+      const result = await billingService.recordHmoInvoiceBatchPayment({
+        batchId: normalizeString(body?.batch_id),
+        amount: body?.amount,
+        effectiveAt: normalizeString(body?.effective_at) || null,
+        actorUserId: userId,
+        externalReference: normalizeString(body?.external_reference) || null,
+        notes: normalizeString(body?.notes) || null,
+        metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+      });
+      return respond(context, 201, result);
+    }
+  } catch (error) {
+    const mapped = mapBillingActionError(error?.message || error?.code);
+    return respond(context, mapped.status, mapped.body);
   }
 
   return respond(context, 405, { message: 'method not allowed' });

@@ -2,12 +2,11 @@
 import { loadFinancePolicies } from './employee-finance.js';
 import { listDashboardTasks } from './dashboard-tasks.js';
 import { normalizeString } from './org-bff.js';
-import { loadCommitmentsMap } from './student-billing.js';
 import { isPlainObject, readParticipantWorkflowMetadata, shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import { coerceAgorot } from './currency.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
-const LESSON_BILLING_USAGE_TYPES = ['standard', 'double', 'cross_service'];
+const LESSON_BILLING_USAGE_TYPES = ['lesson_charge', 'reversal'];
 const PAYROLL_SETTLED_STATUSES = new Set(['finalized']);
 const CLAIM_SETTLED_STATUSES = new Set(['submitted', 'paid']);
 
@@ -46,7 +45,7 @@ export function mergeParticipantWorkflowMetadata(existingMetadata, patch = {}) {
 
 function getParticipantBillingArtifactAmount(ledgerRows) {
   return roundCurrency(asArray(ledgerRows).reduce((sum, row) => {
-    const transactionType = normalizeString(row?.transaction_type).toUpperCase();
+    const transactionType = normalizeString(row?.direction).toUpperCase();
     if (transactionType === 'DEBIT') return sum + coerceAgorot(row?.amount);
     if (transactionType === 'CREDIT') return sum - coerceAgorot(row?.amount);
     return sum;
@@ -54,31 +53,6 @@ function getParticipantBillingArtifactAmount(ledgerRows) {
 }
 
 function resolvePersistedBillingRequirement(participant, policies, status) {
-  const pricingBreakdown = isPlainObject(participant?.pricing_breakdown) ? participant.pricing_breakdown : null;
-  const policySnapshot = isPlainObject(pricingBreakdown?.policy_snapshot) ? pricingBreakdown.policy_snapshot : null;
-  const billingPolicySnapshot = isPlainObject(policySnapshot?.billing_consumption_policy)
-    ? policySnapshot.billing_consumption_policy
-    : null;
-  const persistedBillingStatus = normalizeString(pricingBreakdown?.billing_status).toLowerCase();
-  const persistedLessonStatus = normalizeString(pricingBreakdown?.lesson_status).toLowerCase();
-
-  if (persistedBillingStatus === 'not_chargeable') {
-    return false;
-  }
-  if (pricingBreakdown?.policy_allowed === false) {
-    return false;
-  }
-  if (pricingBreakdown?.policy_allowed === true) {
-    return true;
-  }
-  if (persistedLessonStatus === 'cancelled_clinic' && status === 'cancelled_clinic') {
-    return false;
-  }
-
-  if (billingPolicySnapshot && Object.prototype.hasOwnProperty.call(billingPolicySnapshot, status)) {
-    return Boolean(billingPolicySnapshot[status]);
-  }
-
   return Boolean(policies?.billingConsumptionPolicy?.[status]);
 }
 
@@ -90,18 +64,13 @@ function evaluateParticipantSettlement(participant, context) {
     && resolvePersistedBillingRequirement(participant, context?.policies, status);
   const ledgerRows = context?.ledgerRowsByParticipant?.get(participant.id) || [];
   const billedAmount = getParticipantBillingArtifactAmount(ledgerRows);
-  const pricingBreakdown = isPlainObject(participant?.pricing_breakdown) ? participant.pricing_breakdown : null;
-  const persistedBillingResolved = normalizeString(pricingBreakdown?.billing_status).toLowerCase() === 'charged';
-  const billingResolved = attendanceResolved && (!billingRequired || billedAmount > 0 || persistedBillingResolved);
+  const billingResolved = attendanceResolved && (!billingRequired || billedAmount > 0);
 
   const instructorCompensationRequired = shouldParticipantTriggerInstructorCompensation(participant, context?.policies);
 
   const openHmoTask = context?.openHmoTaskByParticipant?.get(participant.id) || null;
-  const commitment = participant?.commitment_id ? (context?.commitmentById?.get(participant.commitment_id) || null) : null;
   const hmoCommitmentApplies = status === 'attended'
-    && commitment
-    && commitment.is_active !== false
-    && (normalizeString(commitment?.commitment_type) === 'hmo' || Boolean(commitment?.hmo_provider_id));
+    && asArray(ledgerRows).some((row) => Boolean(row?.hmo_provider_id));
   const participantLocks = context?.participantLocksByParticipant?.get(participant.id) || [];
   const submittedClaimLock = [
     ...asArray(context?.instanceLocks),
@@ -148,7 +117,7 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
 
   const { data: participants, error: participantsError } = await tenantClient
     .from('lesson_participants')
-    .select('id, lesson_instance_id, student_id, participant_status, commitment_id, price_charged, pricing_breakdown, metadata')
+    .select('id, lesson_instance_id, student_id, participant_status, metadata')
     .eq('lesson_instance_id', normalizedLessonInstanceId);
 
   if (participantsError) {
@@ -157,7 +126,6 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
 
   const participantRows = asArray(participants);
   const participantIds = participantRows.map((row) => row.id).filter(Boolean);
-  const commitmentIds = Array.from(new Set(participantRows.map((row) => row.commitment_id).filter(Boolean)));
 
   const [
     policies,
@@ -185,9 +153,9 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     participantIds.length > 0
       ? tenantClient
         .from('ledger_transactions')
-        .select('id, source_ref, transaction_type, usage_type, amount, metadata')
-        .in('source_ref', participantIds)
-        .in('usage_type', LESSON_BILLING_USAGE_TYPES)
+        .select('id, lesson_participant_id, direction, source_type, amount, hmo_provider_id, metadata')
+        .in('lesson_participant_id', participantIds)
+        .in('source_type', LESSON_BILLING_USAGE_TYPES)
       : Promise.resolve({ data: [], error: null }),
     participantIds.length > 0
       ? Promise.all(participantIds.map((participantId) => listDashboardTasks(tenantClient, {
@@ -234,7 +202,7 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
 
   const ledgerRowsByParticipant = new Map();
   for (const row of asArray(ledgerRows)) {
-    const participantId = normalizeString(row?.source_ref);
+    const participantId = normalizeString(row?.lesson_participant_id);
     if (!participantId) continue;
     if (!ledgerRowsByParticipant.has(participantId)) {
       ledgerRowsByParticipant.set(participantId, []);
@@ -261,8 +229,6 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     participantLocksByParticipant.get(participantId).push(lock);
   }
 
-  const commitmentById = await loadCommitmentsMap(tenantClient, commitmentIds);
-
   return {
     instance,
     participants: participantRows,
@@ -273,7 +239,6 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     lessonEarnings: asArray(lessonEarnings),
     ledgerRowsByParticipant,
     openHmoTaskByParticipant,
-    commitmentById,
     payrollRunById: new Map(asArray(payrollRuns).map((row) => [row.id, row])),
     claimBatchById: new Map(asArray(claimBatches).map((row) => [row.id, row])),
   };

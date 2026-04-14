@@ -22,7 +22,7 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { assertNoLeaveForLesson, syncInstructorAttendanceFromLessons, syncLessonInstructorEarnings, toDateKey, validateInstructorRateForLesson } from '../_shared/employee-finance.js';
-import { syncLessonBillingArtifacts } from '../_shared/student-billing.js';
+import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import {
@@ -230,6 +230,7 @@ export default async function (context, req) {
   if (tenantError) {
     return respond(context, tenantError.status, tenantError.body);
   }
+  const billingService = new BillingLedgerService({ tenantClient });
 
   if (method === 'GET') {
     return await handleGetInstances(context, req, tenantClient, userId, canManageAll);
@@ -323,9 +324,6 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
         student_id,
         participant_status,
         version,
-        price_charged,
-        pricing_breakdown,
-        commitment_id,
         documentation_ref,
         reminder_sent,
         reminder_seen,
@@ -496,9 +494,6 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
             student_id: p.student_id,
             participant_status: p.participant_status,
             version: p.version ?? 1,
-            price_charged: p.price_charged,
-            pricing_breakdown: p.pricing_breakdown,
-            commitment_id: p.commitment_id,
             documentation_ref: p.documentation_ref,
             reminder_sent: p.reminder_sent,
             reminder_seen: p.reminder_seen,
@@ -843,13 +838,8 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
     client_profile_id: participant.client_profile_id || null,
     student_id: participant.student_id || null,
     participant_status: 'scheduled',
-    price_charged: null,
-    pricing_breakdown: null,
-    commitment_id: null,
     documentation_ref: null,
-    metadata: (!participant.student_id && directClientChargeAmount !== null)
-      ? { direct_client_charge_amount_override: directClientChargeAmount }
-      : {},
+    metadata: {},
   }));
 
   const { error: participantsError } = await tenantClient
@@ -924,7 +914,11 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
   }
 
   try {
-    await syncLessonBillingArtifacts(tenantClient, instance.id, userId);
+    await billingService.syncLessonInstanceCharges({
+      lessonInstanceId: instance.id,
+      actorUserId: userId,
+      reasonCode: 'lesson_updated',
+    });
     await syncLessonInstructorEarnings(tenantClient, instance.id, userId);
     await syncLessonClosureState(tenantClient, instance.id, userId);
   } catch (syncError) {
@@ -1444,11 +1438,21 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
 
   let billingWarnings = [];
   try {
-    const billingResult = await syncLessonBillingArtifacts(tenantClient, body.id, userId);
+    const billingResult = await billingService.syncLessonInstanceCharges({
+      lessonInstanceId: body.id,
+      actorUserId: userId,
+      reasonCode: 'lesson_updated',
+    });
     await syncLessonInstructorEarnings(tenantClient, body.id, userId);
     await syncInstructorAttendanceFromLessons(tenantClient, body.id, userId);
     await syncLessonClosureState(tenantClient, body.id, userId);
-    billingWarnings = billingResult?.attention_required || [];
+    billingWarnings = (billingResult?.participantResults || [])
+      .filter((row) => row.status === 'blocked')
+      .map((row) => ({
+        participant_id: row.lessonParticipantId,
+        billing_status: 'blocked',
+        billing_reason: row.warnings?.[0] || 'blocked',
+      }));
   } catch (syncError) {
     context.log?.error?.('calendar/instances failed to sync financial artifacts after update', {
       message: syncError?.message,
