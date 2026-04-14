@@ -6562,6 +6562,35 @@ CREATE TABLE public.hmo_invoice_batch_items (
 CREATE INDEX IF NOT EXISTS hmo_invoice_batch_items_batch_idx
   ON public.hmo_invoice_batch_items (batch_id);
 
+-- RLS for billing ledger tables (must run after the cutover DROP/CREATE above)
+ALTER TABLE public.ledger_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ledger_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.hmo_invoice_batches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.hmo_invoice_batch_items ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE
+  tbl text;
+  policy_name text;
+BEGIN
+  FOREACH tbl IN ARRAY ARRAY[
+    'ledger_accounts',
+    'ledger_transactions',
+    'hmo_invoice_batches',
+    'hmo_invoice_batch_items'
+  ]
+  LOOP
+    policy_name := left('Allow full access to authenticated users on ' || tbl, 63);
+    EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl);
+    EXECUTE 'CREATE POLICY ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl) || ' FOR ALL TO authenticated, app_user USING (true) WITH CHECK (true)';
+  END LOOP;
+END $$;
+
+GRANT ALL ON TABLE public.ledger_accounts TO app_user;
+GRANT ALL ON TABLE public.ledger_transactions TO app_user;
+GRANT ALL ON TABLE public.hmo_invoice_batches TO app_user;
+GRANT ALL ON TABLE public.hmo_invoice_batch_items TO app_user;
+
 SELECT extensions.sign(
   json_build_object(
     'role', 'app_user',
