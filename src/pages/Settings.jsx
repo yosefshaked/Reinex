@@ -31,6 +31,13 @@ const DEFAULT_BILLING_POLICY = {
   cancelled_clinic: false,
 };
 
+const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = {
+  attended: true,
+  no_show: true,
+  cancelled_student: false,
+  cancelled_clinic: false,
+};
+
 export default function Settings() {
   const { activeOrg, activeOrgHasConnection, tenantClientReady, activeOrgId, refreshOrganizations } = useOrg();
   const { authClient, user, loading, session } = useSupabase();
@@ -48,6 +55,7 @@ export default function Settings() {
   const [refreshingPermissions, setRefreshingPermissions] = useState(false);
   const [isInstructor, setIsInstructor] = useState(false);
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
+  const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
   const [savingBillingPolicy, setSavingBillingPolicy] = useState(false);
 
   // Fetch backup permissions and initialize if empty using the proper RPC function
@@ -281,27 +289,42 @@ export default function Settings() {
   useEffect(() => {
     if (!session || !activeOrgId || !activeOrgHasConnection || !canManageSessionForm) {
       setBillingPolicy(DEFAULT_BILLING_POLICY);
+      setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
       return;
     }
 
     let cancelled = false;
     const loadBillingPolicy = async () => {
       try {
-        const response = await fetchSettingsValue({
-          session,
-          orgId: activeOrgId,
-          key: 'billing_consumption_policy',
-        });
+        const [billingResponse, instructorResponse] = await Promise.all([
+          fetchSettingsValue({
+            session,
+            orgId: activeOrgId,
+            key: 'billing_consumption_policy',
+          }),
+          fetchSettingsValue({
+            session,
+            orgId: activeOrgId,
+            key: 'instructor_earnings_policy',
+          }),
+        ]);
         if (!cancelled) {
           setBillingPolicy({
             ...DEFAULT_BILLING_POLICY,
-            ...(response?.value && typeof response.value === 'object' ? response.value : {}),
+            ...(billingResponse?.value && typeof billingResponse.value === 'object' ? billingResponse.value : {}),
+          });
+          setInstructorEarningsPolicy({
+            ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
+            ...(instructorResponse?.value && typeof instructorResponse.value === 'object'
+              ? instructorResponse.value
+              : {}),
           });
         }
       } catch (error) {
         console.error('Failed to load billing policy in settings', error);
         if (!cancelled) {
           setBillingPolicy(DEFAULT_BILLING_POLICY);
+          setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
         }
       }
     };
@@ -414,10 +437,6 @@ export default function Settings() {
       return;
     }
 
-    const syncedInstructorPolicy = {
-      ...billingPolicy,
-    };
-
     setSavingBillingPolicy(true);
     try {
       await upsertSetting({
@@ -430,7 +449,7 @@ export default function Settings() {
         session,
         orgId: activeOrgId,
         key: 'instructor_earnings_policy',
-        value: syncedInstructorPolicy,
+        value: instructorEarningsPolicy,
       });
       toast.success('מדיניות החיוב נשמרה.');
     } catch (error) {
@@ -979,6 +998,8 @@ export default function Settings() {
                   <BillingSettingsWorkspace
                     billingPolicy={billingPolicy}
                     setBillingPolicy={setBillingPolicy}
+                    instructorPolicy={instructorEarningsPolicy}
+                    setInstructorPolicy={setInstructorEarningsPolicy}
                     canMutateBillingPolicy={canManageSessionForm}
                     savingPolicy={savingBillingPolicy}
                     onSaveBillingPolicy={handleSaveBillingPolicy}

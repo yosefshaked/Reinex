@@ -35,6 +35,13 @@ const DEFAULT_BILLING_POLICY = {
   cancelled_student: false,
   cancelled_clinic: false,
 };
+
+const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = {
+  attended: true,
+  no_show: true,
+  cancelled_student: false,
+  cancelled_clinic: false,
+};
 const ISRAEL_TIME_ZONE = 'Asia/Jerusalem';
 
 function startOfMonth(date) {
@@ -388,6 +395,7 @@ export default function FinancialsPage() {
   const deferredStudentSearch = useDeferredValue(studentSearch);
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
+  const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [isBillingPolicyOpen, setIsBillingPolicyOpen] = useState(false);
   const [isConsumedLessonsOpen, setIsConsumedLessonsOpen] = useState(false);
@@ -430,6 +438,7 @@ export default function FinancialsPage() {
     if (!activeOrgId || !canViewFinancials) {
       setBillingSnapshot(null);
       setBillingPolicy(DEFAULT_BILLING_POLICY);
+      setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
       return;
     }
 
@@ -444,11 +453,16 @@ export default function FinancialsPage() {
         ...DEFAULT_BILLING_POLICY,
         ...(payload?.policies?.billing_consumption_policy || {}),
       });
+      setInstructorEarningsPolicy({
+        ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
+        ...(payload?.policies?.instructor_earnings_policy || {}),
+      });
     } catch (error) {
       console.error('Failed to load billing overview', error);
       toast.error(error?.message || 'טעינת נתוני החיובים נכשלה.');
       setBillingSnapshot(null);
       setBillingPolicy(DEFAULT_BILLING_POLICY);
+      setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
     } finally {
       setLoadingBilling(false);
     }
@@ -554,10 +568,6 @@ export default function FinancialsPage() {
       return;
     }
 
-    const syncedInstructorPolicy = {
-      ...billingPolicy,
-    };
-
     setSavingPolicy(true);
     try {
       await upsertSetting({
@@ -570,7 +580,7 @@ export default function FinancialsPage() {
         session,
         orgId: activeOrgId,
         key: 'instructor_earnings_policy',
-        value: syncedInstructorPolicy,
+        value: instructorEarningsPolicy,
       });
       await loadBillingOverview();
       toast.success('מדיניות החיוב נשמרה.');
@@ -867,6 +877,8 @@ export default function FinancialsPage() {
             <BillingSettingsWorkspace
               billingPolicy={billingPolicy}
               setBillingPolicy={setBillingPolicy}
+              instructorPolicy={instructorEarningsPolicy}
+              setInstructorPolicy={setInstructorEarningsPolicy}
               canMutateBillingPolicy={canMutateBillingPolicy}
               savingPolicy={savingPolicy}
               loadingPolicy={loadingBilling}

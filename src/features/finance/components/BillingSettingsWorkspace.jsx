@@ -9,34 +9,46 @@ const BILLING_POLICY_FIELDS = [
   {
     key: 'attended',
     label: 'נכח',
-    description: 'השיעור יחויב כאשר התלמיד הגיע בפועל.',
+    description: 'האם לחייב את התלמיד כשהוא הגיע לשיעור.',
   },
   {
     key: 'no_show',
     label: 'לא הגיע',
-    description: 'השיעור יחויב כאשר התלמיד לא הגיע ללא ביטול תקין. המדריך יקבל תשלום במידה ומדיניות זו פעילה.',
+    description: 'האם לחייב את התלמיד כשהוא לא הגיע.',
   },
   {
     key: 'cancelled_student',
     label: 'בוטל על ידי תלמיד',
-    description: 'השיעור יחויב רק אם מדיניות הארגון דורשת זאת. המדריך יקבל תשלום במידה ומדיניות זו פעילה.',
+    description: 'האם לחייב את התלמיד כשביטל את השיעור.',
   },
   {
     key: 'cancelled_clinic',
     label: 'בוטל על ידי המכון',
-    description: 'בדרך כלל לא מחייבים, אך אפשר להגדיר אחרת. המדריך יקבל תשלום במידה ומדיניות זו פעילה.',
+    description: 'האם לחייב את התלמיד כשהמכון ביטל את השיעור.',
   },
 ];
 
 export default function BillingSettingsWorkspace({
   billingPolicy,
   setBillingPolicy,
+  instructorPolicy,
+  setInstructorPolicy,
   canMutateBillingPolicy,
   savingPolicy = false,
   loadingPolicy = false,
   onSaveBillingPolicy = null,
   onChanged = null,
 }) {
+  const handleBillingPolicyToggle = (key, checked) => {
+    setBillingPolicy?.((current) => ({ ...current, [key]: checked }));
+    // Auto-fill instructor policy from billing by default; user can still override before save.
+    setInstructorPolicy?.((current) => ({ ...current, [key]: checked }));
+  };
+
+  const handleInstructorPolicyToggle = (key, checked) => {
+    setInstructorPolicy?.((current) => ({ ...current, [key]: checked }));
+  };
+
   return (
     <div className="space-y-5">
       <section className="rounded-xl border border-border bg-white p-5 shadow-sm">
@@ -44,7 +56,10 @@ export default function BillingSettingsWorkspace({
           <div>
             <h3 className="text-lg font-semibold text-zinc-900">מדיניות חיוב שיעורים</h3>
             <p className="text-sm text-muted-foreground">
-              המדיניות כאן קובעת מתי שיעור יצרוך התחייבות או חיוב. היא נפרדת מהגדרת הגורמים המממנים.
+              בוחרים כאן באילו מצבים לחייב את התלמיד ובאילו מצבים לשלם למדריך.
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              שינוי בחיוב התלמיד יעדכן אוטומטית גם את שכר המדריך כברירת מחדל, וניתן לשנות ידנית לפני השמירה.
             </p>
           </div>
           {typeof onSaveBillingPolicy === 'function' && canMutateBillingPolicy ? (
@@ -62,13 +77,23 @@ export default function BillingSettingsWorkspace({
                 <div className="text-sm font-semibold text-zinc-900">{field.label}</div>
                 <div className="mt-1 text-sm text-muted-foreground">{field.description}</div>
               </div>
-              <div className="flex items-center gap-3">
-                <Label className="text-xs text-slate-600">{billingPolicy?.[field.key] ? 'מחויב' : 'לא מחויב'}</Label>
-                <Switch
-                  checked={Boolean(billingPolicy?.[field.key])}
-                  onCheckedChange={(checked) => setBillingPolicy?.((current) => ({ ...current, [field.key]: checked }))}
-                  disabled={!canMutateBillingPolicy || savingPolicy || loadingPolicy}
-                />
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-3">
+                  <Label className="text-xs text-slate-600">חיוב תלמיד: {billingPolicy?.[field.key] ? 'מחויב' : 'לא מחויב'}</Label>
+                  <Switch
+                    checked={Boolean(billingPolicy?.[field.key])}
+                    onCheckedChange={(checked) => handleBillingPolicyToggle(field.key, checked)}
+                    disabled={!canMutateBillingPolicy || savingPolicy || loadingPolicy}
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Label className="text-xs text-slate-600">שכר מדריך: {instructorPolicy?.[field.key] ? 'משולם' : 'לא משולם'}</Label>
+                  <Switch
+                    checked={Boolean(instructorPolicy?.[field.key])}
+                    onCheckedChange={(checked) => handleInstructorPolicyToggle(field.key, checked)}
+                    disabled={!canMutateBillingPolicy || savingPolicy || loadingPolicy}
+                  />
+                </div>
               </div>
             </div>
           ))}
