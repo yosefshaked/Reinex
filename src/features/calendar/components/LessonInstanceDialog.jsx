@@ -320,6 +320,47 @@ function getWorkflowReasonLabel(reason) {
   return reason || 'קיים שלב פתוח בתהליך הסגירה.';
 }
 
+function parseIsoDateSafe(value) {
+  if (typeof value !== 'string' || !value.trim()) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function resolveLatestWorkflowState(preferredState, fallbackState) {
+  const hasPreferred = preferredState && typeof preferredState === 'object';
+  const hasFallback = fallbackState && typeof fallbackState === 'object';
+
+  if (!hasPreferred && !hasFallback) {
+    return {};
+  }
+  if (!hasPreferred) {
+    return fallbackState;
+  }
+  if (!hasFallback) {
+    return preferredState;
+  }
+
+  const preferredTs = parseIsoDateSafe(preferredState.evaluated_at);
+  const fallbackTs = parseIsoDateSafe(fallbackState.evaluated_at);
+  return fallbackTs > preferredTs ? fallbackState : preferredState;
+}
+
+function resolveClosureStepState(summary, key, isClosed) {
+  if (summary && typeof summary[key] === 'boolean') {
+    return summary[key];
+  }
+  if (isClosed === true) {
+    return true;
+  }
+  return null;
+}
+
+function getClosureStepLabel(value, { done, pending, unknown = 'לא ידוע' }) {
+  if (value === true) return done;
+  if (value === false) return pending;
+  return unknown;
+}
+
 function getImpactGroupMeta(type) {
   if (['billing_reversal', 'billing_charge', 'billing_update'].includes(type)) {
     return { key: 'billing', label: 'חיוב כספי', borderClass: 'border-amber-200', bgClass: 'bg-amber-50/70' };
@@ -1347,13 +1388,38 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const activeServices = services?.filter(s => s.is_active) || [];
   const isReportable = displayInstance?.status === 'scheduled';
   const isOperationallyOpen = !instance?.is_locked && !displayInstance?.is_closed;
-  const workflowState = displayInstance?.metadata?.workflow_state && typeof displayInstance.metadata.workflow_state === 'object'
+  const displayWorkflowState = displayInstance?.metadata?.workflow_state && typeof displayInstance.metadata.workflow_state === 'object'
     ? displayInstance.metadata.workflow_state
-    : {};
+    : null;
+  const rawWorkflowState = instance?.metadata?.workflow_state && typeof instance.metadata.workflow_state === 'object'
+    ? instance.metadata.workflow_state
+    : null;
+  const workflowState = resolveLatestWorkflowState(displayWorkflowState, rawWorkflowState);
   const workflowSummary = workflowState.summary && typeof workflowState.summary === 'object'
     ? workflowState.summary
     : {};
   const workflowReasonsOpen = Array.isArray(workflowState.reasons_open) ? workflowState.reasons_open : [];
+  const closureAttendanceResolved = resolveClosureStepState(workflowSummary, 'all_attendance_resolved', displayInstance?.is_closed === true);
+  const closureBillingResolved = resolveClosureStepState(workflowSummary, 'all_student_billing_resolved', displayInstance?.is_closed === true);
+  const closureCompensationResolved = resolveClosureStepState(workflowSummary, 'instructor_compensation_resolved', displayInstance?.is_closed === true);
+  const closureHmoResolved = resolveClosureStepState(workflowSummary, 'all_hmo_resolved', displayInstance?.is_closed === true);
+  const closureSteps = [
+    closureAttendanceResolved,
+    closureBillingResolved,
+    closureCompensationResolved,
+    closureHmoResolved,
+  ];
+  const closureKnownCount = closureSteps.filter((value) => value !== null).length;
+  const closureDoneCount = closureSteps.filter((value) => value === true).length;
+  const workflowEvaluatedAt = parseIsoDateSafe(workflowState?.evaluated_at) > 0
+    ? new Intl.DateTimeFormat('he-IL', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(workflowState.evaluated_at))
+    : '';
   const lockRows = [
     ...(Array.isArray(instance?.locks?.instance) ? instance.locks.instance : []),
     ...(Array.isArray(instance?.locks?.participants) ? instance.locks.participants : []),
@@ -1783,16 +1849,24 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                       ? 'כל החיובים, השכר וההתחייבויות התפעוליות סגורים.'
                       : 'השיעור עדיין פתוח עד להשלמת כל ההתחייבויות.'}
                   </div>
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    {workflowEvaluatedAt
+                      ? `נבדק לאחרונה: ${workflowEvaluatedAt}`
+                      : 'עדיין אין נתוני סגירה מלאים להצגה.'}
+                  </div>
                 </div>
                 <Badge variant={displayInstance.is_closed ? 'default' : 'outline'}>
                   {displayInstance.is_closed ? 'סגור' : 'פתוח'}
                 </Badge>
               </div>
+              <div className="text-xs text-slate-700">
+                התקדמות סגירה: {closureKnownCount > 0 ? `${closureDoneCount}/${closureKnownCount}` : 'טרם חושב'}
+              </div>
               <div className="grid grid-cols-1 gap-1 text-xs text-slate-700 sm:grid-cols-2">
-                <div>נוכחות הוכרעה: {workflowSummary.all_attendance_resolved ? 'כן' : 'לא'}</div>
-                <div>חיובי תלמידים: {workflowSummary.all_student_billing_resolved ? 'סגורים' : 'עדיין פתוחים'}</div>
-                <div>שכר מדריך: {workflowSummary.instructor_compensation_resolved ? 'נסגר' : 'טרם נסגר'}</div>
-                <div>תביעות גורם מממן: {workflowSummary.all_hmo_resolved ? 'סגורות' : 'עדיין פתוחות'}</div>
+                <div>נוכחות הוכרעה: {getClosureStepLabel(closureAttendanceResolved, { done: 'כן', pending: 'לא' })}</div>
+                <div>חיובי תלמידים: {getClosureStepLabel(closureBillingResolved, { done: 'סגורים', pending: 'עדיין פתוחים' })}</div>
+                <div>שכר מדריך: {getClosureStepLabel(closureCompensationResolved, { done: 'נסגר', pending: 'טרם נסגר' })}</div>
+                <div>תביעות גורם מממן: {getClosureStepLabel(closureHmoResolved, { done: 'סגורות', pending: 'עדיין פתוחות' })}</div>
               </div>
               {!displayInstance.is_closed && workflowReasonsOpen.length > 0 && (
                 <div className="pt-1">
@@ -1802,6 +1876,11 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                       <li key={reason}>{getWorkflowReasonLabel(reason)}</li>
                     ))}
                   </ul>
+                </div>
+              )}
+              {!displayInstance.is_closed && workflowReasonsOpen.length === 0 && closureKnownCount === 0 && (
+                <div className="pt-1 text-xs text-slate-600">
+                  לאחר סימון נוכחות או שינוי סטטוס, המערכת תעדכן כאן מה בדיוק חסר לסגירה.
                 </div>
               )}
             </div>
