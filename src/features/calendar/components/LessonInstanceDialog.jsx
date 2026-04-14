@@ -1842,7 +1842,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                     && !absenceRequirementsLoading
                     && Boolean(absenceRequirements?.requires_instructor_compensation_decision)
                     && ['no_show', 'cancelled_student', 'cancelled_clinic'].includes(absenceForm.status);
-                  const graceWaiverEligible = shouldShowGraceWaiver(billingPolicy, absenceForm.status);
+                  const graceWaiverEligible = isAbsenceFormOpen
+                    && shouldShowGraceWaiver(billingPolicy, absenceForm?.status);
                   const waiveFeeDisabled = !isOperationallyOpen;
                   const previewImpactGroups = isRestorePreviewOpen
                     ? groupPreviewImpacts(restorePreview.preview?.impacts || [])
