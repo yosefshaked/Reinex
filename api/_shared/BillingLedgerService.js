@@ -203,7 +203,7 @@ async function loadInstanceParticipants(tenantClient, lessonInstanceId) {
     .from('lesson_participants')
     .select('id')
     .eq('lesson_instance_id', lessonInstanceId)
-    .order('created_at', { ascending: true });
+    .order('id', { ascending: true });
 
   if (error) {
     throw error;
