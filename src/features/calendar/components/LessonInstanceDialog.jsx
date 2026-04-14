@@ -361,6 +361,10 @@ function getClosureStepLabel(value, { done, pending, unknown = 'לא ידוע' }
   return unknown;
 }
 
+function isResolvedParticipantStatus(status) {
+  return ['attended', 'no_show', 'cancelled_student', 'cancelled_clinic'].includes(String(status || '').trim().toLowerCase());
+}
+
 function getImpactGroupMeta(type) {
   if (['billing_reversal', 'billing_charge', 'billing_update'].includes(type)) {
     return { key: 'billing', label: 'חיוב כספי', borderClass: 'border-amber-200', bgClass: 'bg-amber-50/70' };
@@ -1399,18 +1403,32 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     ? workflowState.summary
     : {};
   const workflowReasonsOpen = Array.isArray(workflowState.reasons_open) ? workflowState.reasons_open : [];
-  const closureAttendanceResolved = resolveClosureStepState(workflowSummary, 'all_attendance_resolved', displayInstance?.is_closed === true);
-  const closureBillingResolved = resolveClosureStepState(workflowSummary, 'all_student_billing_resolved', displayInstance?.is_closed === true);
-  const closureCompensationResolved = resolveClosureStepState(workflowSummary, 'instructor_compensation_resolved', displayInstance?.is_closed === true);
-  const closureHmoResolved = resolveClosureStepState(workflowSummary, 'all_hmo_resolved', displayInstance?.is_closed === true);
-  const closureSteps = [
-    closureAttendanceResolved,
-    closureBillingResolved,
-    closureCompensationResolved,
-    closureHmoResolved,
-  ];
-  const closureKnownCount = closureSteps.filter((value) => value !== null).length;
-  const closureDoneCount = closureSteps.filter((value) => value === true).length;
+  const computedAttendanceResolved = displayParticipants.length > 0
+    ? displayParticipants.every((participant) => isResolvedParticipantStatus(participant?.participant_status))
+    : null;
+  const closureAttendanceResolved = computedAttendanceResolved !== null
+    ? computedAttendanceResolved
+    : resolveClosureStepState(workflowSummary, 'all_attendance_resolved', displayInstance?.is_closed === true);
+  const studentBillingRequired = workflowSummary?.student_billing_required === true;
+  const instructorCompensationRequired = workflowSummary?.instructor_compensation_required === true;
+  const hmoClaimRequired = workflowSummary?.hmo_claim_required === true;
+  const closureBillingResolved = closureAttendanceResolved === true
+    ? resolveClosureStepState(workflowSummary, 'all_student_billing_resolved', displayInstance?.is_closed === true)
+    : null;
+  const closureCompensationResolved = closureAttendanceResolved === true
+    ? resolveClosureStepState(workflowSummary, 'instructor_compensation_resolved', displayInstance?.is_closed === true)
+    : null;
+  const closureHmoResolved = closureAttendanceResolved === true
+    ? resolveClosureStepState(workflowSummary, 'all_hmo_resolved', displayInstance?.is_closed === true)
+    : null;
+  const closureTotalCount = 1
+    + (closureAttendanceResolved === true && studentBillingRequired ? 1 : 0)
+    + (closureAttendanceResolved === true && instructorCompensationRequired ? 1 : 0)
+    + (closureAttendanceResolved === true && hmoClaimRequired ? 1 : 0);
+  const closureDoneCount = (closureAttendanceResolved === true ? 1 : 0)
+    + (closureAttendanceResolved === true && studentBillingRequired && closureBillingResolved === true ? 1 : 0)
+    + (closureAttendanceResolved === true && instructorCompensationRequired && closureCompensationResolved === true ? 1 : 0)
+    + (closureAttendanceResolved === true && hmoClaimRequired && closureHmoResolved === true ? 1 : 0);
   const workflowEvaluatedAt = parseIsoDateSafe(workflowState?.evaluated_at) > 0
     ? new Intl.DateTimeFormat('he-IL', {
       day: '2-digit',
@@ -1860,13 +1878,37 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                 </Badge>
               </div>
               <div className="text-xs text-slate-700">
-                התקדמות סגירה: {closureKnownCount > 0 ? `${closureDoneCount}/${closureKnownCount}` : 'טרם חושב'}
+                התקדמות סגירה: {`${closureDoneCount}/${closureTotalCount}`}
               </div>
               <div className="grid grid-cols-1 gap-1 text-xs text-slate-700 sm:grid-cols-2">
                 <div>נוכחות הוכרעה: {getClosureStepLabel(closureAttendanceResolved, { done: 'כן', pending: 'לא' })}</div>
-                <div>חיובי תלמידים: {getClosureStepLabel(closureBillingResolved, { done: 'סגורים', pending: 'עדיין פתוחים' })}</div>
-                <div>שכר מדריך: {getClosureStepLabel(closureCompensationResolved, { done: 'נסגר', pending: 'טרם נסגר' })}</div>
-                <div>תביעות גורם מממן: {getClosureStepLabel(closureHmoResolved, { done: 'סגורות', pending: 'עדיין פתוחות' })}</div>
+                <div>
+                  חיובי תלמידים: {
+                    closureAttendanceResolved !== true
+                      ? 'ממתין להכרעת נוכחות'
+                      : (studentBillingRequired
+                        ? getClosureStepLabel(closureBillingResolved, { done: 'סגורים', pending: 'עדיין פתוחים' })
+                        : 'לא רלוונטי')
+                  }
+                </div>
+                <div>
+                  שכר מדריך: {
+                    closureAttendanceResolved !== true
+                      ? 'ממתין להכרעת נוכחות'
+                      : (instructorCompensationRequired
+                        ? getClosureStepLabel(closureCompensationResolved, { done: 'נסגר', pending: 'טרם נסגר' })
+                        : 'לא רלוונטי')
+                  }
+                </div>
+                <div>
+                  תביעות גורם מממן: {
+                    closureAttendanceResolved !== true && hmoClaimRequired
+                      ? 'ממתין להכרעת נוכחות'
+                      : (hmoClaimRequired
+                        ? getClosureStepLabel(closureHmoResolved, { done: 'סגורות', pending: 'עדיין פתוחות' })
+                        : 'לא רלוונטי')
+                  }
+                </div>
               </div>
               {!displayInstance.is_closed && workflowReasonsOpen.length > 0 && (
                 <div className="pt-1">
@@ -1878,7 +1920,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   </ul>
                 </div>
               )}
-              {!displayInstance.is_closed && workflowReasonsOpen.length === 0 && closureKnownCount === 0 && (
+              {!displayInstance.is_closed && workflowReasonsOpen.length === 0 && closureAttendanceResolved !== true && (
                 <div className="pt-1 text-xs text-slate-600">
                   לאחר סימון נוכחות או שינוי סטטוס, המערכת תעדכן כאן מה בדיוק חסר לסגירה.
                 </div>

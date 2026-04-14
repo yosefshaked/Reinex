@@ -291,8 +291,14 @@ export function evaluateLessonClosureState(state) {
 
   const participantEvaluations = asArray(state.participants).map((participant) => evaluateParticipantSettlement(participant, state));
   const allAttendanceResolved = participantEvaluations.every((entry) => entry.attendance_resolved);
-  const allStudentBillingResolved = participantEvaluations.every((entry) => entry.student_billing_resolved);
-  const allHmoResolved = participantEvaluations.every((entry) => entry.hmo_claim_resolved);
+  const studentBillingRequired = participantEvaluations.some((entry) => entry.student_billing_required);
+  const allStudentBillingResolved = participantEvaluations.every((entry) => (
+    !entry.student_billing_required || entry.student_billing_resolved
+  ));
+  const hmoClaimRequired = participantEvaluations.some((entry) => entry.hmo_claim_required);
+  const allHmoResolved = participantEvaluations.every((entry) => (
+    !entry.hmo_claim_required || entry.hmo_claim_resolved
+  ));
   const finalizedPayrollRunIds = Array.from(new Set([
     ...asArray(state.instanceLocks)
       .filter((lock) => normalizeString(lock?.lock_source_type) === 'payroll_run')
@@ -323,9 +329,9 @@ export function evaluateLessonClosureState(state) {
 
   const reasonsOpen = [];
   if (!allAttendanceResolved) reasonsOpen.push('attendance_unresolved');
-  if (!allStudentBillingResolved) reasonsOpen.push('student_billing_unresolved');
-  if (!instructorCompensationResolved) reasonsOpen.push('instructor_compensation_unresolved');
-  if (!allHmoResolved) reasonsOpen.push('hmo_claim_unresolved');
+  if (allAttendanceResolved && studentBillingRequired && !allStudentBillingResolved) reasonsOpen.push('student_billing_unresolved');
+  if (allAttendanceResolved && instructorCompensationRequired && !instructorCompensationResolved) reasonsOpen.push('instructor_compensation_unresolved');
+  if (allAttendanceResolved && hmoClaimRequired && !allHmoResolved) reasonsOpen.push('hmo_claim_unresolved');
 
   return {
     should_close: reasonsOpen.length === 0,
@@ -333,9 +339,11 @@ export function evaluateLessonClosureState(state) {
     participants: participantEvaluations,
     summary: {
       all_attendance_resolved: allAttendanceResolved,
+      student_billing_required: studentBillingRequired,
       all_student_billing_resolved: allStudentBillingResolved,
       instructor_compensation_required: instructorCompensationRequired,
       instructor_compensation_resolved: instructorCompensationResolved,
+      hmo_claim_required: hmoClaimRequired,
       all_hmo_resolved: allHmoResolved,
       has_payroll_lock: finalizedPayrollRunIds.length > 0,
       lesson_earning_exists: lessonEarningExists,
