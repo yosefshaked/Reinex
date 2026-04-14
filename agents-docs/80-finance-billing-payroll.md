@@ -32,7 +32,18 @@
 - `fetchBillingSnapshot`, `buildBillingDecision`, `buildDirectClientBillingDecision`, `reconcileStudentBilling` in [`../api/_shared/student-billing.js`](../api/_shared/student-billing.js) are compatibility/read helpers over the ledger service.
 - Finance policy helpers in [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js)
 - HMO authorization loaders in [`../api/_shared/hmo.js`](../api/_shared/hmo.js)
-- Currency helpers in [`../src/lib/currency.js`](../src/lib/currency.js)
+- Currency helpers (frontend): [`../src/lib/currency.js`](../src/lib/currency.js) — `formatCurrency`, `toShekel`, `toAgorot`, `coerceAgorot`
+- Currency helpers (backend): [`../api/_shared/currency.js`](../api/_shared/currency.js) — `coerceAgorot`, `toShekel`, `assertAgorot`, `assertAgorotNullable`, `FINANCE_LIMITS`, `BILLING_THRESHOLDS`
+
+## Currency helpers — mandatory usage
+- **All monetary values in the DB and API layer are integers (agorot). 1 ₪ = 100 agorot.**
+- Backend: import `coerceAgorot`, `toShekel`, `assertAgorot`, `assertAgorotNullable` from [`../api/_shared/currency.js`](../api/_shared/currency.js).
+- Frontend: import `formatCurrency`, `toShekel`, `toAgorot`, `coerceAgorot` from [`../src/lib/currency.js`](../src/lib/currency.js).
+- Use `coerceAgorot(value)` when reading any monetary value from the DB or an API response.
+- Use `assertAgorot(value, fieldName)` when validating monetary input from a request body.
+- Use `toShekel(agorot)` to convert to shekels for display. **Never interpolate a raw agorot integer into a user-facing string.** Build display strings like: `` `₪${toShekel(coerceAgorot(amount)).toFixed(2)}` `` (backend) or `formatCurrency(amount)` (frontend).
+- Do **not** write local currency helpers (`roundCurrency`, `formatAmount`, etc.). Use the shared helpers above.
+- The `FINANCE_LIMITS` and `BILLING_THRESHOLDS` constants in `api/_shared/currency.js` are the canonical financial guard rails — use them instead of hardcoding limits.
 
 ## Known patterns / do not reinvent
 - Money is stored and passed as agorot integers.

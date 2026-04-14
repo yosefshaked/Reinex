@@ -28,6 +28,7 @@ import {
   validateInstructorRateForLesson,
 } from '../_shared/employee-finance.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
+import { coerceAgorot, toShekel } from '../_shared/currency.js';
 import { buildBillingDecision, buildDirectClientBillingDecision } from '../_shared/student-billing.js';
 import { resolveActiveAuthorizationForStudentService } from '../_shared/hmo.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
@@ -69,8 +70,9 @@ function deriveAggregateInstanceStatus(participants, fallbackStatus = 'scheduled
   return normalizeLessonInstanceStatus(fallbackStatus || 'scheduled') || 'scheduled';
 }
 
-function roundCurrency(value) {
-  return Number(Number(value || 0).toFixed(2));
+/** Format an agorot integer as a display string for Hebrew impact messages (e.g. 18000 → "180.00"). */
+function fmtILS(agorot) {
+  return toShekel(coerceAgorot(agorot)).toFixed(2);
 }
 
 async function recordGraceCancellationRequest(tenantClient, {
@@ -705,12 +707,12 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   const effectiveProjectedWorkedMinutes = projectedWorkedMinutes;
 
   const openHmoTask = (dashboardTasks || []).find((task) => task.task_type === 'hmo_claim_submission' && task.status === 'open') || null;
-  const storedLessonEarningAmount = roundCurrency((lessonEarningRows || []).reduce((sum, row) => sum + Number(row?.payout_amount || 0), 0));
+  const storedLessonEarningAmount = coerceAgorot((lessonEarningRows || []).reduce((sum, row) => sum + coerceAgorot(row?.payout_amount), 0));
   const inferredLessonEarningAmount = computeLessonInstructorPayoutAmount(instanceDetail, capabilityRow?.base_rate || 0);
   const lessonEarningAmount = storedLessonEarningAmount;
-  const ledgerAmount = roundCurrency((billingArtifactRows || []).reduce((sum, row) => {
-    if (row.direction === 'DEBIT') return sum + Number(row.amount || 0);
-    if (row.direction === 'CREDIT') return sum - Number(row.amount || 0);
+  const ledgerAmount = coerceAgorot((billingArtifactRows || []).reduce((sum, row) => {
+    if (row.direction === 'DEBIT') return sum + coerceAgorot(row.amount);
+    if (row.direction === 'CREDIT') return sum - coerceAgorot(row.amount);
     return sum;
   }, 0));
   const projectedAuthorization = targetParticipantAfter?.student_id
@@ -741,7 +743,7 @@ async function buildParticipantStatusPreview(tenantClient, body, {
         service: serviceRow || null,
         policies,
       });
-  const projectedChargeAmount = roundCurrency(Number(projectedBillingDecision?.chargeAmount || 0));
+  const projectedChargeAmount = coerceAgorot(projectedBillingDecision?.chargeAmount);
 
   const instructorName = [employeeRow?.first_name, employeeRow?.middle_name, employeeRow?.last_name].filter(Boolean).join(' ').trim() || 'המדריך';
   const resolvedProfile = studentRow?.client_profile || clientProfileRow || null;
@@ -781,40 +783,40 @@ async function buildParticipantStatusPreview(tenantClient, body, {
     impacts.push({
       type: 'billing_reversal',
       amount: ledgerAmount,
-      message: `₪${ledgerAmount} יוחזרו ליתרה של ${studentName}.`,
+      message: `₪${fmtILS(ledgerAmount)} יוחזרו ליתרה של ${studentName}.`,
     });
   } else if (ledgerAmount <= 0 && projectedChargeAmount > 0) {
     impacts.push({
       type: 'billing_charge',
       amount: projectedChargeAmount,
-      message: `₪${projectedChargeAmount} יחויבו ליתרה של ${studentName}.`,
+      message: `₪${fmtILS(projectedChargeAmount)} יחויבו ליתרה של ${studentName}.`,
     });
   } else if (ledgerAmount > 0 && projectedChargeAmount > 0 && ledgerAmount !== projectedChargeAmount) {
     impacts.push({
       type: 'billing_update',
       amount_before: ledgerAmount,
       amount_after: projectedChargeAmount,
-      message: `החיוב של ${studentName} יעודכן מ-₪${ledgerAmount} ל-₪${projectedChargeAmount}.`,
+      message: `החיוב של ${studentName} יעודכן מ-₪${fmtILS(ledgerAmount)} ל-₪${fmtILS(projectedChargeAmount)}.`,
     });
   }
   if (currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0) {
     impacts.push({
       type: 'instructor_earning_reversal',
       amount: lessonEarningAmount,
-      message: `₪${lessonEarningAmount} יוסרו מהשכר של ${instructorName} עבור ${monthLabel}.`,
+      message: `₪${fmtILS(lessonEarningAmount)} יוסרו מהשכר של ${instructorName} עבור ${monthLabel}.`,
     });
   } else if (!currentShouldInstructorEarn && projectedShouldInstructorEarn && inferredLessonEarningAmount !== 0) {
     impacts.push({
       type: 'instructor_earning_add',
       amount: inferredLessonEarningAmount,
-      message: `₪${inferredLessonEarningAmount} יתווספו לשכר של ${instructorName} עבור ${monthLabel}.`,
+      message: `₪${fmtILS(inferredLessonEarningAmount)} יתווספו לשכר של ${instructorName} עבור ${monthLabel}.`,
     });
   } else if (currentShouldInstructorEarn && projectedShouldInstructorEarn && lessonEarningAmount !== inferredLessonEarningAmount) {
     impacts.push({
       type: 'instructor_earning_update',
       amount_before: lessonEarningAmount,
       amount_after: inferredLessonEarningAmount,
-      message: `שכר השיעור של ${instructorName} עבור ${monthLabel} יעודכן מ-₪${lessonEarningAmount} ל-₪${inferredLessonEarningAmount}.`,
+      message: `שכר השיעור של ${instructorName} עבור ${monthLabel} יעודכן מ-₪${fmtILS(lessonEarningAmount)} ל-₪${fmtILS(inferredLessonEarningAmount)}.`,
     });
   }
   if (systemAttendanceRecord?.source_type === 'system') {
@@ -893,31 +895,31 @@ async function buildAttendanceTransitionAuditChanges(preview) {
     changes.push({
       field: 'billing_amount_reversed',
       before: 0,
-      after: roundCurrency(preview.projected.billing_amount_reversed),
+      after: coerceAgorot(preview.projected.billing_amount_reversed),
     });
   }
   if (Number(preview.projected?.billing_amount_added || 0) > 0) {
     changes.push({
       field: 'billing_amount_added',
       before: 0,
-      after: roundCurrency(preview.projected.billing_amount_added),
+      after: coerceAgorot(preview.projected.billing_amount_added),
     });
   }
 
-  const instructorEarningBefore = roundCurrency(preview.projected?.instructor_earning_before || 0);
-  const instructorEarningAfter = roundCurrency(preview.projected?.instructor_earning_after || 0);
-  if (Number(preview.projected?.instructor_earning_removed || 0) > 0) {
+  const instructorEarningBefore = coerceAgorot(preview.projected?.instructor_earning_before);
+  const instructorEarningAfter = coerceAgorot(preview.projected?.instructor_earning_after);
+  if (coerceAgorot(preview.projected?.instructor_earning_removed) > 0) {
     changes.push({
       field: 'instructor_earning_removed',
       before: 0,
-      after: roundCurrency(preview.projected.instructor_earning_removed),
+      after: coerceAgorot(preview.projected.instructor_earning_removed),
     });
   }
-  if (Number(preview.projected?.instructor_earning_added || 0) > 0) {
+  if (coerceAgorot(preview.projected?.instructor_earning_added) > 0) {
     changes.push({
       field: 'instructor_earning_added',
       before: 0,
-      after: roundCurrency(preview.projected.instructor_earning_added),
+      after: coerceAgorot(preview.projected.instructor_earning_added),
     });
   }
   if (
