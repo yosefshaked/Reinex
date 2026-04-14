@@ -1,6 +1,6 @@
 // @ts-check
 /* eslint-env node */
-import BillingLedgerService, { buildLessonBillingResult } from './BillingLedgerService.js';
+import BillingLedgerService, { buildDesiredChargeDescriptors } from './BillingLedgerService.js';
 import { loadFinancePolicies } from './employee-finance.js';
 import { normalizeString } from './org-bff.js';
 import { loadHmoAuthorizations, resolveActiveAuthorizationForStudentService } from './hmo.js';
@@ -64,7 +64,7 @@ export async function buildBillingDecision({ participant, instance, policies, te
       lessonDate: instance?.datetime_start,
     })
     : null;
-  const detail = buildLessonBillingResult({
+  const detail = buildDesiredChargeDescriptors({
     participant,
     instance,
     service,
@@ -90,7 +90,7 @@ export async function buildDirectClientBillingDecision({
   service,
   policies,
 }) {
-  const detail = buildLessonBillingResult({
+  const detail = buildDesiredChargeDescriptors({
     participant,
     instance,
     service,

@@ -14,7 +14,7 @@ const ACCOUNT_COLUMN_BY_TYPE = {
   client_profile: 'client_profile_id',
   hmo_provider: 'hmo_provider_id',
 };
-const MANUAL_CREDIT_SOURCE_TYPES = new Set(['manual_payment', 'manual_adjustment', 'hmo_invoice_payment', 'opening_balance', 'migration']);
+const MANUAL_CREDIT_SOURCE_TYPES = new Set(['manual_payment', 'hmo_invoice_payment', 'opening_balance', 'migration']);
 const MANUAL_DEBIT_SOURCE_TYPES = new Set(['manual_adjustment', 'opening_balance', 'migration']);
 const REVERSIBLE_SOURCE_TYPES = new Set(['lesson_charge', 'manual_payment', 'manual_adjustment', 'hmo_invoice_payment', 'opening_balance', 'migration']);
 
@@ -258,19 +258,6 @@ async function resolveLedgerAccount(tenantClient, accountType, accountRefId) {
   }
 
   const column = ACCOUNT_COLUMN_BY_TYPE[normalizedType];
-  const { data: existing, error: existingError } = await tenantClient
-    .from('ledger_accounts')
-    .select('id, account_type, student_id, client_profile_id, hmo_provider_id, is_active, metadata')
-    .eq(column, normalizedRefId)
-    .maybeSingle();
-
-  if (existingError) {
-    throw existingError;
-  }
-  if (existing?.id) {
-    return existing;
-  }
-
   const payload = {
     account_type: normalizedType,
     student_id: normalizedType === STUDENT_ACCOUNT_TYPE ? normalizedRefId : null,
@@ -282,7 +269,7 @@ async function resolveLedgerAccount(tenantClient, accountType, accountRefId) {
 
   const { data, error } = await tenantClient
     .from('ledger_accounts')
-    .insert(payload)
+    .upsert(payload, { onConflict: column })
     .select('id, account_type, student_id, client_profile_id, hmo_provider_id, is_active, metadata')
     .single();
 
@@ -355,9 +342,8 @@ function buildLessonChargeMetadata({
   };
 }
 
-function buildDesiredChargeDescriptors({
+export function buildDesiredChargeDescriptors({
   participant,
-  instance,
   service,
   authorization,
   policies,
@@ -375,7 +361,7 @@ function buildDesiredChargeDescriptors({
   }
 
   const serviceRate = service?.default_customer_charge_amount;
-  if (!Number.isFinite(Number(serviceRate))) {
+  if (serviceRate == null || !Number.isFinite(Number(serviceRate))) {
     return {
       status: 'blocked',
       billingStatus: 'blocked',
@@ -429,6 +415,15 @@ function buildDesiredChargeDescriptors({
     };
   }
 
+  if (authorization.contracted_rate_amount == null) {
+    return {
+      status: 'blocked',
+      billingStatus: 'blocked',
+      billingReason: 'missing_contracted_rate_amount',
+      warnings: ['missing_contracted_rate_amount'],
+      entries: [],
+    };
+  }
   const contractedRateAmount = coerceAgorot(authorization.contracted_rate_amount);
   const studentCopay = Math.max(coerceAgorot(serviceRate) - contractedRateAmount, 0);
   const entries = [];
@@ -461,22 +456,6 @@ function buildDesiredChargeDescriptors({
     warnings: [],
     entries,
   };
-}
-
-export function buildLessonBillingResult({
-  participant,
-  instance,
-  service,
-  authorization,
-  policies,
-}) {
-  return buildDesiredChargeDescriptors({
-    participant,
-    instance,
-    service,
-    authorization,
-    policies,
-  });
 }
 
 export function extractActiveLedgerAmounts(ledgerRows = []) {
@@ -535,7 +514,6 @@ export default class BillingLedgerService {
       : null;
     const desiredResult = buildDesiredChargeDescriptors({
       participant,
-      instance,
       service,
       authorization,
       policies,
@@ -592,69 +570,87 @@ export default class BillingLedgerService {
     }
 
     const effectiveTimestamp = toIsoOrNow(effectiveAt || instance.datetime_start, this.clock);
-    const reversedTransactionIds = [];
-    for (const original of existingOpenCharges) {
-      const reversal = await appendLedgerTransaction(this.tenantClient, {
-        ledger_account_id: original.ledger_account_id,
-        direction: normalizeDirection(original.direction) === 'DEBIT' ? 'CREDIT' : 'DEBIT',
-        amount: coerceAgorot(original.amount),
-        effective_at: effectiveTimestamp,
-        source_type: 'reversal',
-        source_id: null,
-        lesson_instance_id: instance.id,
-        lesson_participant_id: lessonParticipantId,
-        student_id: original.student_id || null,
-        client_profile_id: original.client_profile_id || participant.client_profile_id || null,
-        hmo_provider_id: original.hmo_provider_id || null,
-        hmo_authorization_id: original.hmo_authorization_id || null,
-        service_id: original.service_id || instance.service_id || null,
-        rate_source: original.rate_source || 'manual',
-        reverses_transaction_id: original.id,
-        external_reference: null,
-        notes: `Reversal: ${normalizeReasonCode(reasonCode)}`,
-        metadata: {
-          reason_code: normalizeReasonCode(reasonCode),
-          actor_user_id: actorUserId || null,
-          reversed_source_type: original.source_type || null,
-        },
-      });
-      reversedTransactionIds.push(reversal.id);
+    const lessonChargeMetadata = buildLessonChargeMetadata({
+      participant,
+      instance,
+      service,
+      authorization,
+      actorUserId,
+      reasonCode,
+      detail: desiredResult,
+      warnings: desiredResult.warnings,
+    });
+
+    const reversalRows = existingOpenCharges.map((original) => ({
+      ledger_account_id: original.ledger_account_id,
+      direction: normalizeDirection(original.direction) === 'DEBIT' ? 'CREDIT' : 'DEBIT',
+      amount: coerceAgorot(original.amount),
+      effective_at: effectiveTimestamp,
+      source_type: 'reversal',
+      source_id: null,
+      lesson_instance_id: instance.id,
+      lesson_participant_id: lessonParticipantId,
+      student_id: original.student_id || null,
+      client_profile_id: original.client_profile_id || participant.client_profile_id || null,
+      hmo_provider_id: original.hmo_provider_id || null,
+      hmo_authorization_id: original.hmo_authorization_id || null,
+      service_id: original.service_id || instance.service_id || null,
+      rate_source: original.rate_source || 'manual',
+      reverses_transaction_id: original.id,
+      external_reference: null,
+      notes: `Reversal: ${normalizeReasonCode(reasonCode)}`,
+      metadata: {
+        reason_code: normalizeReasonCode(reasonCode),
+        actor_user_id: actorUserId || null,
+        reversed_source_type: original.source_type || null,
+      },
+    }));
+
+    const debitRows = desiredEntries.map((entry) => ({
+      ...entry,
+      effective_at: effectiveTimestamp,
+      source_type: 'lesson_charge',
+      source_id: instance.id,
+      lesson_instance_id: instance.id,
+      lesson_participant_id: lessonParticipantId,
+      external_reference: null,
+      notes: null,
+      metadata: lessonChargeMetadata,
+    }));
+
+    const allRows = [...reversalRows, ...debitRows];
+    const { data: inserted, error: insertError } = await this.tenantClient
+      .from('ledger_transactions')
+      .insert(allRows)
+      .select(`
+        id,
+        ledger_account_id,
+        direction,
+        amount,
+        rate_source,
+        student_id,
+        client_profile_id,
+        hmo_provider_id,
+        hmo_authorization_id
+      `);
+
+    if (insertError) {
+      throw insertError;
     }
 
-    const createdTransactionIds = [];
-    const accountImpacts = [];
-    for (const entry of desiredEntries) {
-      const created = await appendLedgerTransaction(this.tenantClient, {
-        ...entry,
-        effective_at: effectiveTimestamp,
-        source_type: 'lesson_charge',
-        source_id: instance.id,
-        lesson_instance_id: instance.id,
-        lesson_participant_id: lessonParticipantId,
-        external_reference: null,
-        notes: null,
-        metadata: buildLessonChargeMetadata({
-          participant,
-          instance,
-          service,
-          authorization,
-          actorUserId,
-          reasonCode,
-          detail: desiredResult,
-          warnings: desiredResult.warnings,
-        }),
-      });
-      createdTransactionIds.push(created.id);
-      accountImpacts.push({
-        ledgerAccountId: created.ledger_account_id,
-        accountType: created.hmo_provider_id ? HMO_ACCOUNT_TYPE : (created.student_id ? STUDENT_ACCOUNT_TYPE : CLIENT_ACCOUNT_TYPE),
-        accountRefId: created.hmo_provider_id || created.student_id || created.client_profile_id,
-        direction: created.direction,
-        amount: created.amount,
-        rateSource: created.rate_source,
-        hmoAuthorizationId: created.hmo_authorization_id || null,
-      });
-    }
+    const insertedRows = inserted || [];
+    const reversedTransactionIds = insertedRows.slice(0, reversalRows.length).map((r) => r.id);
+    const createdRows = insertedRows.slice(reversalRows.length);
+    const createdTransactionIds = createdRows.map((r) => r.id);
+    const accountImpacts = createdRows.map((r) => ({
+      ledgerAccountId: r.ledger_account_id,
+      accountType: r.hmo_provider_id ? HMO_ACCOUNT_TYPE : (r.student_id ? STUDENT_ACCOUNT_TYPE : CLIENT_ACCOUNT_TYPE),
+      accountRefId: r.hmo_provider_id || r.student_id || r.client_profile_id,
+      direction: r.direction,
+      amount: r.amount,
+      rateSource: r.rate_source,
+      hmoAuthorizationId: r.hmo_authorization_id || null,
+    }));
 
     let status = 'noop';
     if (reversedTransactionIds.length > 0 && createdTransactionIds.length > 0) {
@@ -715,17 +711,27 @@ export default class BillingLedgerService {
       };
     }
 
-    const { data: participants, error } = await this.tenantClient
+    let participantsQuery = this.tenantClient
       .from('lesson_participants')
       .select(`
         id,
         lesson_instance:lesson_instances!inner(
           id,
-          service_id
+          service_id,
+          datetime_start
         )
       `)
       .eq('student_id', authorization.student_id)
       .eq('lesson_instance.service_id', authorization.service_id);
+
+    if (normalizeString(authorization.valid_from)) {
+      participantsQuery = participantsQuery.gte('lesson_instance.datetime_start', `${authorization.valid_from}T00:00:00.000Z`);
+    }
+    if (normalizeString(authorization.expires_at)) {
+      participantsQuery = participantsQuery.lte('lesson_instance.datetime_start', `${authorization.expires_at}T23:59:59.999Z`);
+    }
+
+    const { data: participants, error } = await participantsQuery;
 
     if (error) {
       throw error;
@@ -765,12 +771,16 @@ export default class BillingLedgerService {
     if (!MANUAL_CREDIT_SOURCE_TYPES.has(normalizeString(sourceType))) {
       throw new Error('invalid_manual_credit_source_type');
     }
+    const coercedAmount = coerceAgorot(amount);
+    if (!Number.isFinite(coercedAmount) || coercedAmount <= 0) {
+      throw new Error('amount_must_be_positive_integer');
+    }
 
     const ledgerAccount = await resolveLedgerAccount(this.tenantClient, accountType, accountRefId);
     const transaction = await appendLedgerTransaction(this.tenantClient, {
       ledger_account_id: ledgerAccount.id,
       direction: 'CREDIT',
-      amount: coerceAgorot(amount),
+      amount: coercedAmount,
       effective_at: toIsoOrNow(effectiveAt, this.clock),
       source_type: normalizeString(sourceType),
       source_id: sourceId,
@@ -810,12 +820,16 @@ export default class BillingLedgerService {
     if (!MANUAL_DEBIT_SOURCE_TYPES.has(normalizeString(sourceType))) {
       throw new Error('invalid_manual_debit_source_type');
     }
+    const coercedAmount = coerceAgorot(amount);
+    if (!Number.isFinite(coercedAmount) || coercedAmount <= 0) {
+      throw new Error('amount_must_be_positive_integer');
+    }
 
     const ledgerAccount = await resolveLedgerAccount(this.tenantClient, accountType, accountRefId);
     const transaction = await appendLedgerTransaction(this.tenantClient, {
       ledger_account_id: ledgerAccount.id,
       direction: 'DEBIT',
-      amount: coerceAgorot(amount),
+      amount: coercedAmount,
       effective_at: toIsoOrNow(effectiveAt, this.clock),
       source_type: normalizeString(sourceType),
       source_id: sourceId,
@@ -993,6 +1007,8 @@ export default class BillingLedgerService {
         })));
 
       if (insertItemsError) {
+        // Best-effort cleanup of the orphaned batch header before re-throwing.
+        await this.tenantClient.from('hmo_invoice_batches').delete().eq('id', batch.id);
         throw insertItemsError;
       }
     }
@@ -1073,7 +1089,11 @@ export default class BillingLedgerService {
       .eq('ledger_account_id', ledgerAccount.id);
 
     if (normalizeString(asOf)) {
-      query = query.lte('effective_at', toIsoOrNow(asOf, this.clock));
+      const parsed = new Date(asOf);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new Error('invalid_asOf_date');
+      }
+      query = query.lte('effective_at', parsed.toISOString());
     }
 
     const { data, error } = await query;
@@ -1089,6 +1109,7 @@ export default class BillingLedgerService {
     studentId,
     startDate = null,
     endDate = null,
+    limit = 500,
   }) {
     const normalizedStudentId = normalizeString(studentId);
     if (!normalizedStudentId) {
@@ -1105,12 +1126,15 @@ export default class BillingLedgerService {
     const balance = await this.getAccountBalance({ accountType: STUDENT_ACCOUNT_TYPE, accountRefId: normalizedStudentId });
     const authorizations = await loadHmoAuthorizations(this.tenantClient, { studentId: normalizedStudentId });
 
+    const pageLimit = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Number(limit) : 500;
+
     let ledgerQuery = this.tenantClient
       .from('ledger_transactions')
       .select('*')
       .eq('student_id', normalizedStudentId)
       .order('effective_at', { ascending: false })
-      .order('posted_at', { ascending: false });
+      .order('posted_at', { ascending: false })
+      .limit(pageLimit);
 
     if (normalizeString(startDate)) {
       ledgerQuery = ledgerQuery.gte('effective_at', `${startDate}T00:00:00.000Z`);
@@ -1139,7 +1163,8 @@ export default class BillingLedgerService {
         )
       `)
       .eq('student_id', normalizedStudentId)
-      .order('lesson_instance(datetime_start)', { ascending: false });
+      .order('lesson_instance(datetime_start)', { ascending: false })
+      .limit(pageLimit);
 
     if (participantsError) {
       throw participantsError;
@@ -1152,6 +1177,7 @@ export default class BillingLedgerService {
         .select('*')
         .in('lesson_participant_id', participantIds)
         .in('source_type', ['lesson_charge', 'reversal'])
+        .limit(pageLimit * 4)
       : { data: [], error: null };
 
     if (lessonLedgerError) {

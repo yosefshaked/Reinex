@@ -243,6 +243,7 @@ export default async function (context, req) {
       userEmail: authResult.data.user.email || '',
       role,
       canManageAll,
+      billingService,
     });
   }
 
@@ -253,6 +254,7 @@ export default async function (context, req) {
       userEmail: authResult.data.user.email || '',
       role,
       canManageAll,
+      billingService,
     });
   }
 
@@ -587,7 +589,7 @@ async function handleGetInstances(context, req, tenantClient, userId, canManageA
 }
 
 async function handleCreateInstance(context, body, tenantClient, supabase, authContext) {
-  const { orgId, userId, userEmail, role, canManageAll: isAdmin } = authContext;
+  const { orgId, userId, userEmail, role, canManageAll: isAdmin, billingService } = authContext;
   // Validate required fields
   if (!body.datetime_start) {
     return respond(context, 400, { message: 'missing datetime_start' });
@@ -932,7 +934,7 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
 }
 
 async function handleUpdateInstance(context, body, tenantClient, supabase, authContext) {
-  const { orgId, userId, userEmail, role, canManageAll } = authContext;
+  const { orgId, userId, userEmail, role, canManageAll, billingService } = authContext;
   if (!body.id) {
     return respond(context, 400, { message: 'missing instance id' });
   }
