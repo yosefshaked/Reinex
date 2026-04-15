@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDesiredChargeDescriptors } from '../api/_shared/BillingLedgerService.js';
-import { buildAttendanceTransitionAuditChanges } from '../api/calendar-attendance/index.js';
+import { buildAttendanceTransitionAuditChanges } from '../api/_shared/attendance-audit.js';
 
 const BASE_POLICIES = {
   billingConsumptionPolicy: {

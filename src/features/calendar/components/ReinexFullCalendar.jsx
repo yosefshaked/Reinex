@@ -245,16 +245,16 @@ function resolveCalendarView(viewMode) {
 }
 
 function resolveVisibleCalendarDate(info, nextViewMode) {
-  if (nextViewMode === 'week') {
-    return info.start instanceof Date ? info.start : (info.view?.currentStart instanceof Date ? info.view.currentStart : null);
+  const rangeStart = info.start instanceof Date ? info.start : null;
+  if (rangeStart && !Number.isNaN(rangeStart.getTime())) {
+    return rangeStart;
   }
 
-  const activeMarker = info.view?.calendar?.getDate?.();
-  if (activeMarker instanceof Date && !Number.isNaN(activeMarker.getTime())) {
-    return activeMarker;
+  if (nextViewMode === 'week' && info.view?.currentStart instanceof Date && !Number.isNaN(info.view.currentStart.getTime())) {
+    return info.view.currentStart;
   }
 
-  return info.start instanceof Date ? info.start : null;
+  return null;
 }
 
 function resolveSchedulerLicenseKey(runtimeConfig) {
