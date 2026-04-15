@@ -144,20 +144,78 @@ function SignaturePreview({ value }) {
     const canvas = canvasRef.current;
     const strokes = Array.isArray(value?.preview_strokes) ? value.preview_strokes : [];
     if (!canvas || !strokes.length) return;
+
     const context = canvas.getContext('2d');
     if (!context) return;
+
+    const points = [];
+    strokes.forEach((stroke) => {
+      if (!Array.isArray(stroke)) return;
+      stroke.forEach((point) => {
+        const x = Number(point?.x);
+        const y = Number(point?.y);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          points.push({ x, y });
+        }
+      });
+    });
+
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = '#ffffff';
     context.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (!points.length) return;
+
+    let minX = points[0].x;
+    let maxX = points[0].x;
+    let minY = points[0].y;
+    let maxY = points[0].y;
+    points.forEach((point) => {
+      minX = Math.min(minX, point.x);
+      maxX = Math.max(maxX, point.x);
+      minY = Math.min(minY, point.y);
+      maxY = Math.max(maxY, point.y);
+    });
+
+    const sourceWidth = Math.max(1, maxX - minX);
+    const sourceHeight = Math.max(1, maxY - minY);
+    const padding = 12;
+    const availableWidth = Math.max(1, canvas.width - (padding * 2));
+    const availableHeight = Math.max(1, canvas.height - (padding * 2));
+    const scale = Math.min(availableWidth / sourceWidth, availableHeight / sourceHeight);
+    const drawWidth = sourceWidth * scale;
+    const drawHeight = sourceHeight * scale;
+    const offsetX = (canvas.width - drawWidth) / 2;
+    const offsetY = (canvas.height - drawHeight) / 2;
+
+    const mapPoint = (point) => ({
+      x: ((Number(point?.x || minX) - minX) * scale) + offsetX,
+      y: ((Number(point?.y || minY) - minY) * scale) + offsetY,
+    });
+
     context.strokeStyle = '#0f172a';
-    context.lineWidth = 2;
+    context.fillStyle = '#0f172a';
+    context.lineWidth = Math.max(1.6, Math.min(3, scale * 2));
     context.lineCap = 'round';
     context.lineJoin = 'round';
+
     strokes.forEach((stroke) => {
       if (!Array.isArray(stroke) || stroke.length === 0) return;
+
+      const firstPoint = mapPoint(stroke[0]);
+      if (stroke.length === 1) {
+        context.beginPath();
+        context.arc(firstPoint.x, firstPoint.y, context.lineWidth / 2, 0, Math.PI * 2);
+        context.fill();
+        return;
+      }
+
       context.beginPath();
-      context.moveTo(Number(stroke[0]?.x || 0), Number(stroke[0]?.y || 0));
-      stroke.slice(1).forEach((point) => context.lineTo(Number(point?.x || 0), Number(point?.y || 0)));
+      context.moveTo(firstPoint.x, firstPoint.y);
+      stroke.slice(1).forEach((point) => {
+        const mapped = mapPoint(point);
+        context.lineTo(mapped.x, mapped.y);
+      });
       context.stroke();
     });
   }, [value]);
@@ -166,7 +224,7 @@ function SignaturePreview({ value }) {
     return <p className="text-zinc-800 break-words whitespace-pre-wrap">{JSON.stringify(value)}</p>;
   }
 
-  return <canvas ref={canvasRef} width={320} height={110} className="h-[110px] w-full rounded-lg border border-slate-200 bg-white" />;
+  return <canvas ref={canvasRef} width={480} height={160} className="h-32 w-full rounded-lg border border-slate-200 bg-white" />;
 }
 
 function renderAnswerValue(value) {
