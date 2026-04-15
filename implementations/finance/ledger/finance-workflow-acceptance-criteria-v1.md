@@ -372,6 +372,83 @@ Each criterion must be expressed with this structure:
   - UI renders provider, track, authorization id, student copay, insurer claim amount, contracted rate from server fields
   - UI does not recompute billing split values from service rate on client
 
+### HMO setup and authorization UI criteria
+
+#### AC-UI-SETUP-001
+- scope: frontend-preview
+- level: ui-integration
+- given:
+  - admin opens HmoSetupWorkspace to create or edit an HMO provider track
+  - track.payment_mode = fully_paid_by_hmo
+- when:
+  - form renders with payment mode selected
+- then:
+  - customer charge field is disabled and locked to value ₪0.00
+  - helper text reads: "ננעל על ₪0.00 כי במסלול זה הלקוח לא מחויב."
+  - default_customer_charge_amount submitted as 0 regardless of previous value
+  - billing ledger will charge student ₪0
+
+#### AC-UI-SETUP-002
+- scope: frontend-preview
+- level: ui-integration
+- given:
+  - admin opens HmoSetupWorkspace to create or edit an HMO provider track
+  - track.payment_mode = partially_paid_by_hmo
+- when:
+  - form renders with payment mode selected
+- then:
+  - customer charge field is enabled and allows empty/zero value
+  - helper text reads: "השאירו ריק כדי לחשב אוטומטית: תעריף השירות פחות התעריף החוזי שבאישור. הזינו סכום רק אם ההשתתפות העצמית קבועה."
+  - when saved with blank customer charge: buildDesiredChargeDescriptors will derive copay as max(service_rate - contracted_rate, 0)
+  - when saved with positive customer charge: that fixed amount is used instead of derived formula
+  - track summary shows "מחושב אוטומטית לפי תעריף השירות פחות התעריף החוזי" when customer charge is zero/blank
+
+#### AC-UI-SETUP-003
+- scope: frontend-preview
+- level: ui-integration
+- given:
+  - admin opens HmoSetupWorkspace to create or edit an HMO provider track
+  - track.payment_mode = fully_paid_by_customer
+- when:
+  - form renders with payment mode selected
+- then:
+  - insurer claim field is disabled and locked to value ₪0.00
+  - helper text reads: "ננעל על ₪0.00 כי במסלול זה אין חיוב לגורם מממן."
+  - customer charge field is enabled and allows empty/zero value to fallback to service_rate
+  - default_insurer_claim_amount submitted as 0 regardless of previous value
+  - billing ledger will charge hmo_provider ₪0
+
+#### AC-UI-AUTH-001
+- scope: frontend-preview
+- level: ui-integration
+- given:
+  - admin opens HmoAuthorizationManager to create or edit student authorization
+  - form.providerTrackId is selected
+  - selectedService is resolved from track.service_id and services list
+  - form.contractedRateAmount is a valid positive number
+  - selectedTrack.payment_mode is one of (fully_paid_by_hmo, partially_paid_by_hmo, fully_paid_by_customer)
+- when:
+  - form renders split preview section
+- then:
+  - UI displays split preview with columns: service_rate, student_copay, insurer_claim
+  - service_rate is coerceAgorot(selectedService.default_customer_charge_amount)
+  - split calculation respects selectedTrack.payment_mode:
+    - fully_paid_by_hmo: student 0, insurer contracted_rate, helper "במסלול זה הלקוח לא מחויב..."
+    - partially_paid_by_hmo: student is fixed track amount if positive, else max(serviceRate - contractedRate, 0), insurer contracted_rate, helper "השתתפות הלקוח תחושב אוטומטית..."
+    - fully_paid_by_customer: student is fixed track amount or service_rate, insurer 0, helper "במסלול זה אין חיוב לגורם מממן..."
+  - UI warns if contracted_rate > service_rate only for partially_paid_by_hmo mode
+
+#### AC-UI-AUTH-002
+- scope: frontend-preview
+- level: ui-integration
+- given:
+  - split preview is rendered with contractedRateAmount = 0 or empty
+- when:
+  - form is incomplete
+- then:
+  - split preview is hidden (returns null) when hmoShare or serviceRate is missing for the payment mode
+  - form validation prevents save until contracted_rate_amount is valid positive number
+
 ### Generation preview criteria
 
 #### AC-GEN-001

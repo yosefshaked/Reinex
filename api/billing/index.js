@@ -26,6 +26,23 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isUuidLike(value) {
+  const normalized = normalizeString(value);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized);
+}
+
+function normalizeDateKey(value) {
+  const normalized = normalizeString(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return '';
+  }
+  const parsed = new Date(`${normalized}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return '';
+  }
+  return normalized;
+}
+
 function buildPersonName(profile) {
   if (!profile || !isPlainObject(profile)) return 'לקוח/ה';
   return [profile.first_name, profile.middle_name, profile.last_name].filter(Boolean).join(' ').trim() || 'לקוח/ה';
@@ -37,17 +54,21 @@ async function buildHmoClaimsReadModel({
   startDate = '',
   endDate = '',
 } = {}) {
+  const notices = [];
+  const normalizedStartDate = normalizeDateKey(startDate);
+  const normalizedEndDate = normalizeDateKey(endDate);
+
   let taskQuery = tenantClient
     .from('dashboard_tasks')
     .select('id, task_type, title, description, status, priority, resource_type, resource_id, metadata, created_at, resolved_at')
     .eq('task_type', 'hmo_claim_submission')
     .order('created_at', { ascending: false });
 
-  if (normalizeString(startDate)) {
-    taskQuery = taskQuery.gte('created_at', `${startDate}T00:00:00.000Z`);
+  if (normalizedStartDate) {
+    taskQuery = taskQuery.gte('created_at', `${normalizedStartDate}T00:00:00.000Z`);
   }
-  if (normalizeString(endDate)) {
-    taskQuery = taskQuery.lte('created_at', `${endDate}T23:59:59.999Z`);
+  if (normalizedEndDate) {
+    taskQuery = taskQuery.lte('created_at', `${normalizedEndDate}T23:59:59.999Z`);
   }
 
   const { data: tasks, error: tasksError } = await taskQuery;
@@ -72,10 +93,10 @@ async function buildHmoClaimsReadModel({
   const taskRows = Array.isArray(tasks) ? tasks : [];
   const participantIds = Array.from(new Set(taskRows
     .map((task) => normalizeString(task?.resource_id))
-    .filter(Boolean)));
+    .filter((value) => isUuidLike(value))));
   const authorizationIds = Array.from(new Set(taskRows
     .map((task) => normalizeString(task?.metadata?.hmo_authorization_id))
-    .filter(Boolean)));
+    .filter((value) => isUuidLike(value))));
 
   const [{ data: participants, error: participantsError }, { data: authorizations, error: authorizationsError }] = await Promise.all([
     participantIds.length > 0
@@ -89,6 +110,7 @@ async function buildHmoClaimsReadModel({
           lesson_instance:lesson_instances(
             id,
             datetime_start,
+            duration_minutes,
             service_id
           ),
           student:students(
@@ -174,6 +196,7 @@ async function buildHmoClaimsReadModel({
       lesson_participant_id: participantId || null,
       lesson_instance_id: participant?.lesson_instance_id || null,
       lesson_date: participant?.lesson_instance?.datetime_start || null,
+      lesson_duration_minutes: Number(participant?.lesson_instance?.duration_minutes) || 0,
       student_id: participant?.student_id || null,
       student_name: studentName,
       participant_status: participant?.participant_status || null,
@@ -194,39 +217,59 @@ async function buildHmoClaimsReadModel({
     .filter(Boolean)));
 
   const providerReceivables = await Promise.all(receivableProviderIds.map(async (hmoProviderId) => {
-    const snapshot = await billingService.getHmoProviderReceivablesSnapshot({
-      hmoProviderId,
-      periodStart: normalizeString(startDate) || null,
-      periodEnd: normalizeString(endDate) || null,
-    });
-    const provider = providerMap.get(hmoProviderId) || null;
-    return {
-      hmo_provider_id: hmoProviderId,
-      hmo_provider_name: normalizeString(provider?.name) || null,
-      is_active: provider?.is_active !== false,
-      summary: snapshot?.summary || { balance: 0, receivable_total: 0, payment_total: 0 },
-      invoice_batch_count: Array.isArray(snapshot?.invoice_batches) ? snapshot.invoice_batches.length : 0,
-      open_invoice_batch_count: Array.isArray(snapshot?.invoice_batches)
-        ? snapshot.invoice_batches.filter((batch) => normalizeString(batch?.status) === 'open').length
-        : 0,
-    };
+    try {
+      const snapshot = await billingService.getHmoProviderReceivablesSnapshot({
+        hmoProviderId,
+        periodStart: normalizedStartDate || null,
+        periodEnd: normalizedEndDate || null,
+      });
+      const provider = providerMap.get(hmoProviderId) || null;
+      return {
+        hmo_provider_id: hmoProviderId,
+        hmo_provider_name: normalizeString(provider?.name) || null,
+        is_active: provider?.is_active !== false,
+        summary: snapshot?.summary || { balance: 0, receivable_total: 0, payment_total: 0 },
+        invoice_batch_count: Array.isArray(snapshot?.invoice_batches) ? snapshot.invoice_batches.length : 0,
+        open_invoice_batch_count: Array.isArray(snapshot?.invoice_batches)
+          ? snapshot.invoice_batches.filter((batch) => normalizeString(batch?.status) === 'open').length
+          : 0,
+      };
+    } catch {
+      notices.push(`provider_receivables_failed:${hmoProviderId}`);
+      return {
+        hmo_provider_id: hmoProviderId,
+        hmo_provider_name: normalizeString((providerMap.get(hmoProviderId) || null)?.name) || null,
+        is_active: (providerMap.get(hmoProviderId) || null)?.is_active !== false,
+        summary: { balance: 0, receivable_total: 0, payment_total: 0 },
+        invoice_batch_count: 0,
+        open_invoice_batch_count: 0,
+      };
+    }
   }));
 
   const uniqueStudents = new Set(claims.map((row) => normalizeString(row?.student_id)).filter(Boolean));
-  const openClaimTasks = claims.filter((row) => normalizeString(row?.status) === 'open').length;
-  const resolvedClaimTasks = claims.filter((row) => normalizeString(row?.status) === 'resolved').length;
+  const cancelledClaimTasks = claims.filter((row) => normalizeString(row?.participant_status) === 'scheduled').length;
+  const openClaimTasks = claims.filter((row) => (
+    normalizeString(row?.status) === 'open'
+    && normalizeString(row?.participant_status) !== 'scheduled'
+  )).length;
+  const resolvedClaimTasks = claims.filter((row) => (
+    normalizeString(row?.status) === 'resolved'
+    || normalizeString(row?.participant_status) === 'scheduled'
+  )).length;
 
   return {
     summary: {
       total_claim_tasks: claims.length,
       open_claim_tasks: openClaimTasks,
       resolved_claim_tasks: resolvedClaimTasks,
+      cancelled_claim_tasks: cancelledClaimTasks,
       unique_students: uniqueStudents.size,
       provider_count: providerReceivables.length,
     },
     claims,
     provider_receivables: providerReceivables,
-    notices: [],
+    notices,
     generated_at: new Date().toISOString(),
   };
 }
@@ -380,17 +423,37 @@ export default async function (context, req) {
     const studentId = normalizeString(req?.query?.student_id);
     const clientProfileId = normalizeString(req?.query?.client_profile_id || req?.query?.clientProfileId);
     const hmoProviderId = normalizeString(req?.query?.hmo_provider_id || req?.query?.hmoProviderId);
-    let startDate = normalizeString(req?.query?.start_date);
-    let endDate = normalizeString(req?.query?.end_date);
+    let startDate = normalizeDateKey(req?.query?.start_date);
+    let endDate = normalizeDateKey(req?.query?.end_date);
 
     if (view === 'hmo_claims') {
-      const readModel = await buildHmoClaimsReadModel({
-        tenantClient,
-        billingService,
-        startDate,
-        endDate,
-      });
-      return respond(context, 200, readModel);
+      try {
+        const readModel = await buildHmoClaimsReadModel({
+          tenantClient,
+          billingService,
+          startDate,
+          endDate,
+        });
+        return respond(context, 200, readModel);
+      } catch (claimsError) {
+        context.log?.error?.('billing/hmo_claims failed to build read model', {
+          message: claimsError?.message,
+          code: claimsError?.code,
+        });
+        return respond(context, 200, {
+          summary: {
+            total_claim_tasks: 0,
+            open_claim_tasks: 0,
+            resolved_claim_tasks: 0,
+            unique_students: 0,
+            provider_count: 0,
+          },
+          claims: [],
+          provider_receivables: [],
+          notices: ['hmo_claims_read_model_failed'],
+          generated_at: new Date().toISOString(),
+        });
+      }
     }
 
     if (!studentId && !clientProfileId && !hmoProviderId && !startDate && !endDate) {

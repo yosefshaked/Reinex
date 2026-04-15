@@ -67,6 +67,77 @@ function formatMonth(date) {
   return new Intl.DateTimeFormat('he-IL', { month: 'long', year: 'numeric' }).format(date);
 }
 
+function formatHour(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function formatClaimDate(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'ללא תאריך';
+  return parsed.toLocaleDateString('he-IL');
+}
+
+function formatClaimTimeRange(claim) {
+  if (!claim?.lesson_date) return 'ללא שעה';
+  const start = new Date(claim.lesson_date);
+  if (Number.isNaN(start.getTime())) return 'ללא שעה';
+  const durationMinutes = Number(claim.lesson_duration_minutes) || 0;
+  const end = new Date(start.getTime() + durationMinutes * 60000);
+  const startLabel = formatHour(start.toISOString());
+  const endLabel = formatHour(end.toISOString());
+  if (!startLabel || !endLabel) return 'ללא שעה';
+  return `${startLabel} - ${endLabel}`;
+}
+
+function resolveClaimWorkflowState(claim) {
+  const participantStatus = `${claim?.participant_status || ''}`.toLowerCase();
+  const claimStatus = `${claim?.status || ''}`.toLowerCase();
+  if (participantStatus === 'scheduled') {
+    return {
+      key: 'cancelled',
+      label: 'בוטל',
+      className: 'bg-slate-200 text-slate-800',
+    };
+  }
+  if (claimStatus === 'resolved') {
+    return {
+      key: 'resolved',
+      label: 'טופל',
+      className: 'bg-emerald-100 text-emerald-900',
+    };
+  }
+  return {
+    key: 'open',
+    label: 'פתוח',
+    className: 'bg-amber-100 text-amber-900',
+  };
+}
+
+function groupClaimsByStudent(claims = []) {
+  const grouped = new Map();
+  for (const claim of Array.isArray(claims) ? claims : []) {
+    const studentId = claim?.student_id || claim?.lesson_participant_id || claim?.id;
+    const studentName = claim?.student_name || 'לקוח/ה';
+    if (!grouped.has(studentId)) {
+      grouped.set(studentId, {
+        studentId,
+        studentName,
+        claims: [],
+      });
+    }
+    grouped.get(studentId).claims.push(claim);
+  }
+
+  return Array.from(grouped.values())
+    .map((group) => ({
+      ...group,
+      claims: group.claims.slice().sort((left, right) => new Date(left?.lesson_date || 0).getTime() - new Date(right?.lesson_date || 0).getTime()),
+    }))
+    .sort((left, right) => left.studentName.localeCompare(right.studentName, 'he'));
+}
+
 function buildStudentName(student) {
   const explicitName = typeof student?.full_name === 'string' ? student.full_name.trim() : '';
   if (explicitName) return explicitName;
@@ -244,6 +315,11 @@ export default function FinancialsPage() {
   }, [claimPaymentForm.hmoProviderId, claimsReadModel]);
 
   const overview = useMemo(() => buildOverview(billingSnapshot), [billingSnapshot]);
+
+  const groupedClaims = useMemo(
+    () => groupClaimsByStudent(claimsReadModel?.claims || []),
+    [claimsReadModel],
+  );
 
   const studentOptions = useMemo(() => {
     const normalizedSearch = deferredStudentSearch.trim().toLowerCase();
@@ -679,26 +755,39 @@ export default function FinancialsPage() {
               <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
                 <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
                   <h3 className="text-lg font-semibold text-zinc-900">משימות תביעות HMO</h3>
-                  <p className="text-sm text-muted-foreground">מבט ריכוזי על תביעות פתוחות/שטופלו לפי תלמיד ושירות.</p>
+                  <p className="text-sm text-muted-foreground">מבט ריכוזי על תביעות פתוחות/שטופלו, מקובצות לפי תלמיד עם טווח שעות לכל מפגש.</p>
                   <div className="mt-3 max-h-[420px] overflow-y-auto space-y-2">
-                    {(claimsReadModel?.claims || []).map((claim) => (
-                      <div key={claim.id} className="rounded-xl border border-border bg-slate-50 p-3">
+                    {groupedClaims.map((group) => (
+                      <div key={group.studentId} className="rounded-xl border border-border bg-slate-50 p-3">
                         <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-semibold text-zinc-900">{claim.student_name || 'לקוח/ה'}</div>
-                          <div className={`rounded-full px-2 py-0.5 text-xs ${claim.status === 'open' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
-                            {claim.status === 'open' ? 'פתוח' : 'טופל'}
-                          </div>
+                          <div className="text-sm font-semibold text-zinc-900">{group.studentName}</div>
+                          <div className="text-xs text-muted-foreground">{group.claims.length} מופעים</div>
                         </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {claim.service_name || 'שירות'} • {claim.lesson_date ? new Date(claim.lesson_date).toLocaleDateString('he-IL') : 'ללא תאריך'}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-700">
-                          גורם מממן: {claim.hmo_provider_name || 'לא משויך'}
-                          {claim.hmo_authorization_reference ? ` • אסמכתא: ${claim.hmo_authorization_reference}` : ''}
+                        <div className="mt-2 space-y-2">
+                          {group.claims.map((claim) => {
+                            const workflowState = resolveClaimWorkflowState(claim);
+                            return (
+                              <div key={claim.id} className="rounded-lg border border-border bg-white p-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="text-xs font-medium text-zinc-900">{claim.service_name || 'שירות'}</div>
+                                  <div className={`rounded-full px-2 py-0.5 text-xs ${workflowState.className}`}>
+                                    {workflowState.label}
+                                  </div>
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {formatClaimDate(claim.lesson_date)} • {formatClaimTimeRange(claim)}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-700">
+                                  גורם מממן: {claim.hmo_provider_name || 'לא משויך'}
+                                  {claim.hmo_authorization_reference ? ` • אסמכתא: ${claim.hmo_authorization_reference}` : ''}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     ))}
-                    {(claimsReadModel?.claims || []).length === 0 && (
+                    {groupedClaims.length === 0 && (
                       <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
                         אין משימות תביעת HMO להצגה בטווח הנבחר.
                       </div>
