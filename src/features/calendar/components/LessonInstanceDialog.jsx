@@ -351,6 +351,16 @@ function getClosureStepLabel(value, { done, pending, unknown = 'לא ידוע' }
   return unknown;
 }
 
+function formatAgorotPreview(value) {
+  const amount = Number(value || 0);
+  return new Intl.NumberFormat('he-IL', {
+    style: 'currency',
+    currency: 'ILS',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount / 100);
+}
+
 function isResolvedParticipantStatus(status) {
   return ['attended', 'no_show', 'cancelled_student', 'cancelled_clinic'].includes(String(status || '').trim().toLowerCase());
 }
@@ -365,7 +375,7 @@ function getImpactGroupMeta(type) {
   if (['instructor_attendance_remove', 'instructor_attendance_update', 'instructor_attendance_add'].includes(type)) {
     return { key: 'attendance', label: 'נוכחות מדריך', borderClass: 'border-sky-200', bgClass: 'bg-sky-50/70' };
   }
-  if (type === 'hmo_task_resolve') {
+  if (['hmo_task_resolve', 'hmo_split_detail'].includes(type)) {
     return { key: 'hmo', label: 'גורם מממן', borderClass: 'border-fuchsia-200', bgClass: 'bg-fuchsia-50/70' };
   }
   return { key: 'workflow', label: 'זרימת שיעור', borderClass: 'border-slate-200', bgClass: 'bg-slate-50/70' };
@@ -1959,6 +1969,8 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   const previewImpactGroups = isRestorePreviewOpen
                     ? groupPreviewImpacts(restorePreview.preview?.impacts || [])
                     : [];
+                  const previewProjected = restorePreview?.preview?.projected || null;
+                  const showProjectedHmoSplit = previewProjected?.hmo_split_applied === true;
                   return (
                     <div key={participant.id} className="p-3 bg-gray-50 rounded-lg space-y-2">
                       {/* Main info + attendance buttons */}
@@ -2147,7 +2159,25 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                                   <div className="text-xs font-medium text-slate-800">{group.label}</div>
                                   <ul className="mt-1 list-disc pe-5 text-sm text-slate-700 space-y-1">
                                     {group.impacts.map((impact, index) => (
-                                      <li key={`${impact.type || group.key}-${index}`}>{impact.message}</li>
+                                      <li key={`${impact.type || group.key}-${index}`}>
+                                        {impact.message}
+                                        {impact.type === 'hmo_split_detail' && (
+                                          <div className="mt-1 text-xs text-slate-700 space-y-0.5">
+                                            {impact.hmo_authorization_id && (
+                                              <div>אישור: #{shortId(impact.hmo_authorization_id)}</div>
+                                            )}
+                                            {impact.hmo_provider_name && (
+                                              <div>גורם מממן: {impact.hmo_provider_name}</div>
+                                            )}
+                                            {impact.hmo_provider_track_name && (
+                                              <div>מסלול: {impact.hmo_provider_track_name}</div>
+                                            )}
+                                            <div>השתתפות לקוח/ה: {formatAgorotPreview(impact.hmo_student_copay_amount)}</div>
+                                            <div>סכום תביעה לגורם מממן: {formatAgorotPreview(impact.hmo_insurer_claim_amount)}</div>
+                                            <div>תעריף גורם מממן: {formatAgorotPreview(impact.hmo_contracted_rate_amount)}</div>
+                                          </div>
+                                        )}
+                                      </li>
                                     ))}
                                   </ul>
                                 </div>
@@ -2161,6 +2191,19 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                                   : 'לא זוהו השפעות נוספות מעבר לעדכון הסטטוס המבוקש.'}
                               </li>
                             </ul>
+                          )}
+                          {showProjectedHmoSplit && (
+                            <div className="rounded-md border border-fuchsia-200 bg-fuchsia-50/70 p-2">
+                              <div className="text-xs font-medium text-slate-800">פירוט פיצול גורם מממן</div>
+                              <div className="mt-1 grid grid-cols-1 gap-1 text-xs text-slate-700 sm:grid-cols-2">
+                                <div>אישור: #{shortId(previewProjected?.hmo_authorization_id)}</div>
+                                <div>גורם מממן: {previewProjected?.hmo_provider_name || 'לא ידוע'}</div>
+                                <div>מסלול: {previewProjected?.hmo_provider_track_name || 'לא ידוע'}</div>
+                                <div>השתתפות לקוח/ה: {formatAgorotPreview(previewProjected?.hmo_student_copay_amount)}</div>
+                                <div>סכום תביעה לגורם מממן: {formatAgorotPreview(previewProjected?.hmo_insurer_claim_amount)}</div>
+                                <div>תעריף גורם מממן: {formatAgorotPreview(previewProjected?.hmo_contracted_rate_amount)}</div>
+                              </div>
+                            </div>
                           )}
                           {restorePreviewError && (
                             <Alert className="border-red-300 bg-red-50 text-red-950">

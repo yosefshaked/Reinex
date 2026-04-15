@@ -29,6 +29,30 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied }
   }, [open, defaultDate]);
 
   const canPreview = useMemo(() => Boolean(activeOrgId && startDate && endDate && startDate <= endDate), [activeOrgId, startDate, endDate]);
+  const generationWarnings = useMemo(() => (
+    Array.isArray(result?.warnings) ? result.warnings : []
+  ), [result]);
+  const warningReasonCounts = useMemo(() => {
+    const counts = new Map();
+    for (const warning of generationWarnings) {
+      const reason = String(warning?.reason || 'other');
+      counts.set(reason, (counts.get(reason) || 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([reason, count]) => ({ reason, count }));
+  }, [generationWarnings]);
+
+  function getWarningReasonLabel(reason) {
+    switch (reason) {
+      case 'no_authorization_found':
+        return 'אין הרשאת גורם מממן לשירות';
+      case 'no_active_authorization':
+        return 'קיימת הרשאה אך אינה פעילה';
+      case 'no_active_authorization_for_date':
+        return 'הרשאה פעילה אך טווח תאריכים לא מכסה את המועד';
+      default:
+        return 'פער הרשאה לא מסווג';
+    }
+  }
 
   async function runGeneration(dryRun) {
     if (!activeOrgId) {
@@ -128,6 +152,55 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied }
                 <div className="p-2 bg-white rounded border">להוספה: <span className="font-medium">{result.summary?.to_insert_instances ?? 0}</span></div>
                 <div className="p-2 bg-white rounded border">קונפליקטים: <span className="font-medium">{result.summary?.conflicts ?? 0}</span></div>
               </div>
+
+              {(result.summary?.hmo_coverage_warnings ?? 0) > 0 && (
+                <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+                  <AlertTriangle className="h-4 w-4 text-amber-700" />
+                  <AlertDescription className="space-y-2">
+                    <div>
+                      זוהו <span className="font-semibold">{result.summary?.hmo_coverage_warnings ?? 0}</span> אזהרות כיסוי גורם מממן.
+                      {' '}היצירה אינה נחסמת, אך כדאי לטפל באזהרות לפני החלה מלאה.
+                    </div>
+                    {warningReasonCounts.length > 0 && (
+                      <div className="text-xs text-amber-900 flex flex-wrap gap-2">
+                        {warningReasonCounts.map((item) => (
+                          <span key={item.reason} className="rounded border border-amber-300 bg-white px-2 py-0.5">
+                            {getWarningReasonLabel(item.reason)}: {item.count}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {result.warnings_notice === 'hmo_authorization_schema_missing' && (
+                <Alert className="border-slate-300 bg-slate-50 text-slate-900">
+                  <AlertTriangle className="h-4 w-4 text-slate-700" />
+                  <AlertDescription>
+                    לא ניתן להציג אזהרות כיסוי גורם מממן כי טבלאות ההרשאות אינן זמינות בסביבה זו.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {generationWarnings.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium mb-1">אזהרות כיסוי גורם מממן</p>
+                  <div className="max-h-40 overflow-y-auto space-y-1">
+                    {generationWarnings.slice(0, 30).map((warning, index) => (
+                      <div key={`${warning.student_id || 'student'}-${warning.service_id || 'service'}-${warning.target_date || index}`} className="text-xs bg-white border rounded px-2 py-1">
+                        <span className="font-medium">סיבה:</span> {getWarningReasonLabel(warning.reason)}
+                        {' • '}
+                        <span className="font-medium">תלמיד:</span> {warning.student_id || '—'}
+                        {' • '}
+                        <span className="font-medium">שירות:</span> {warning.service_id || '—'}
+                        {' • '}
+                        <span className="font-medium">תאריך:</span> {warning.target_date || '—'}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {Array.isArray(result.conflicts) && result.conflicts.length > 0 && (
                 <div>

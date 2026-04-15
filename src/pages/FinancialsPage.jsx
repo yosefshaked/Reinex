@@ -100,19 +100,31 @@ export default function FinancialsPage() {
   const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()));
   const [loadingPayroll, setLoadingPayroll] = useState(false);
   const [loadingBilling, setLoadingBilling] = useState(false);
+  const [loadingClaims, setLoadingClaims] = useState(false);
   const [payroll, setPayroll] = useState(null);
   const [billingSnapshot, setBillingSnapshot] = useState(null);
+  const [claimsReadModel, setClaimsReadModel] = useState(null);
   const [studentSearch, setStudentSearch] = useState('');
   const deferredStudentSearch = useDeferredValue(studentSearch);
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
   const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
   const [savingPolicy, setSavingPolicy] = useState(false);
+  const [recordingClaimPayment, setRecordingClaimPayment] = useState(false);
+  const [claimPaymentForm, setClaimPaymentForm] = useState({
+    hmoProviderId: '',
+    amount: '',
+    effectiveAt: '',
+    notes: '',
+    resolveOpenTasks: true,
+  });
   const [isBillingPolicyOpen, setIsBillingPolicyOpen] = useState(false);
   const [confirmPolicySave, setConfirmPolicySave] = useState(false);
 
   const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
   const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
+
+  const canMutateClaims = canMutateBillingPolicy;
 
   const { students } = useStudents({
     enabled: Boolean(activeOrgId && canViewFinancials),
@@ -177,14 +189,59 @@ export default function FinancialsPage() {
     }
   }, [activeOrgId, canViewFinancials, monthEnd, monthStart, session]);
 
+  const loadHmoClaimsOverview = useCallback(async () => {
+    if (!activeOrgId || !canViewFinancials) {
+      setClaimsReadModel(null);
+      return;
+    }
+
+    setLoadingClaims(true);
+    try {
+      const payload = await authenticatedFetch('billing', {
+        session,
+        params: {
+          org_id: activeOrgId,
+          view: 'hmo_claims',
+          start_date: monthStart,
+          end_date: monthEnd,
+        },
+      });
+      setClaimsReadModel(payload || null);
+    } catch (error) {
+      console.error('Failed to load HMO claims overview', error);
+      toast.error(error?.message || 'טעינת נתוני תביעות HMO נכשלה.');
+      setClaimsReadModel(null);
+    } finally {
+      setLoadingClaims(false);
+    }
+  }, [activeOrgId, canViewFinancials, monthEnd, monthStart, session]);
+
   useEffect(() => {
     if (!canViewFinancials) {
       return undefined;
     }
     void loadPayroll();
     void loadBillingOverview();
+    void loadHmoClaimsOverview();
     return undefined;
-  }, [canViewFinancials, loadBillingOverview, loadPayroll]);
+  }, [canViewFinancials, loadBillingOverview, loadHmoClaimsOverview, loadPayroll]);
+
+  useEffect(() => {
+    if (!Array.isArray(claimsReadModel?.provider_receivables) || claimsReadModel.provider_receivables.length === 0) {
+      setClaimPaymentForm((prev) => ({
+        ...prev,
+        hmoProviderId: '',
+      }));
+      return;
+    }
+    if (claimPaymentForm.hmoProviderId && claimsReadModel.provider_receivables.some((row) => row.hmo_provider_id === claimPaymentForm.hmoProviderId)) {
+      return;
+    }
+    setClaimPaymentForm((prev) => ({
+      ...prev,
+      hmoProviderId: claimsReadModel.provider_receivables[0]?.hmo_provider_id || '',
+    }));
+  }, [claimPaymentForm.hmoProviderId, claimsReadModel]);
 
   const overview = useMemo(() => buildOverview(billingSnapshot), [billingSnapshot]);
 
@@ -259,6 +316,52 @@ export default function FinancialsPage() {
     }
   }
 
+  async function handleRecordClaimPayment() {
+    if (!activeOrgId || !canMutateClaims) {
+      return;
+    }
+
+    const amount = Number(claimPaymentForm.amount || 0);
+    if (!claimPaymentForm.hmoProviderId) {
+      toast.error('יש לבחור גורם מממן.');
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('יש להזין סכום חיובי תקין.');
+      return;
+    }
+
+    setRecordingClaimPayment(true);
+    try {
+      await authenticatedFetch('billing', {
+        session,
+        method: 'POST',
+        body: {
+          org_id: activeOrgId,
+          action: 'record_hmo_claim_payment',
+          hmo_provider_id: claimPaymentForm.hmoProviderId,
+          amount: Math.round(amount * 100),
+          effective_at: claimPaymentForm.effectiveAt || null,
+          notes: claimPaymentForm.notes || null,
+          resolve_open_claim_tasks: claimPaymentForm.resolveOpenTasks === true,
+        },
+      });
+
+      toast.success('תשלום גורם מממן נרשם בהצלחה.');
+      setClaimPaymentForm((prev) => ({
+        ...prev,
+        amount: '',
+        notes: '',
+      }));
+      await loadHmoClaimsOverview();
+    } catch (error) {
+      console.error('Failed to record HMO claim payment', error);
+      toast.error(error?.message || 'רישום תשלום גורם מממן נכשל.');
+    } finally {
+      setRecordingClaimPayment(false);
+    }
+  }
+
   if (!canViewFinancials) {
     return (
       <PageLayout title="כספים" description="שכר עובדים וחיובי תלמידים">
@@ -290,6 +393,7 @@ export default function FinancialsPage() {
         <TabsList className="h-auto rounded-2xl bg-slate-100 p-1">
           <TabsTrigger value="payroll" className="rounded-xl px-4 py-2">שכר</TabsTrigger>
           <TabsTrigger value="billing" className="rounded-xl px-4 py-2">חיובי תלמידים</TabsTrigger>
+          <TabsTrigger value="claims" className="rounded-xl px-4 py-2">תביעות HMO</TabsTrigger>
         </TabsList>
 
         <TabsContent value="payroll">
@@ -463,6 +567,173 @@ export default function FinancialsPage() {
               )}
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="claims" className="space-y-4">
+          {loadingClaims ? (
+            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                טוען נתוני תביעות HMO...
+              </div>
+            </Card>
+          ) : (
+            <>
+              <div className="grid gap-3 md:grid-cols-5">
+                <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+                  <div className="text-xs text-slate-600">סה״כ משימות תביעה</div>
+                  <div className="mt-1 text-2xl font-bold text-zinc-900">{claimsReadModel?.summary?.total_claim_tasks ?? 0}</div>
+                </Card>
+                <Card className="rounded-2xl border border-amber-200 bg-amber-50 p-lg shadow-sm">
+                  <div className="text-xs text-amber-700">משימות פתוחות</div>
+                  <div className="mt-1 text-2xl font-bold text-amber-950">{claimsReadModel?.summary?.open_claim_tasks ?? 0}</div>
+                </Card>
+                <Card className="rounded-2xl border border-emerald-200 bg-emerald-50 p-lg shadow-sm">
+                  <div className="text-xs text-emerald-700">משימות שטופלו</div>
+                  <div className="mt-1 text-2xl font-bold text-emerald-950">{claimsReadModel?.summary?.resolved_claim_tasks ?? 0}</div>
+                </Card>
+                <Card className="rounded-2xl border border-indigo-200 bg-indigo-50 p-lg shadow-sm">
+                  <div className="text-xs text-indigo-700">תלמידים עם תביעות</div>
+                  <div className="mt-1 text-2xl font-bold text-indigo-950">{claimsReadModel?.summary?.unique_students ?? 0}</div>
+                </Card>
+                <Card className="rounded-2xl border border-blue-200 bg-blue-50 p-lg shadow-sm">
+                  <div className="text-xs text-blue-700">גורמים מממנים בתצוגה</div>
+                  <div className="mt-1 text-2xl font-bold text-blue-950">{claimsReadModel?.summary?.provider_count ?? 0}</div>
+                </Card>
+              </div>
+
+              {Array.isArray(claimsReadModel?.notices) && claimsReadModel.notices.length > 0 && (
+                <Card className="rounded-2xl border border-amber-300 bg-amber-50 p-lg shadow-sm">
+                  <p className="text-sm font-semibold text-amber-900">הערות מערכת</p>
+                  <ul className="mt-2 list-disc pe-5 text-xs text-amber-800 space-y-1">
+                    {claimsReadModel.notices.map((notice) => (
+                      <li key={notice}>{notice}</li>
+                    ))}
+                  </ul>
+                </Card>
+              )}
+
+              {canMutateClaims && (
+                <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+                  <h3 className="text-lg font-semibold text-zinc-900">רישום תשלום גורם מממן</h3>
+                  <p className="text-sm text-muted-foreground">פעולה מבוקרת: זיכוי לדר לגורם מממן וסגירת תביעות פתוחות משויכות.</p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-4">
+                    <div>
+                      <label className="text-xs text-muted-foreground">גורם מממן</label>
+                      <select
+                        className="mt-1 w-full rounded-md border border-border bg-white px-3 py-2 text-sm"
+                        value={claimPaymentForm.hmoProviderId}
+                        onChange={(event) => setClaimPaymentForm((prev) => ({ ...prev, hmoProviderId: event.target.value }))}
+                      >
+                        {(claimsReadModel?.provider_receivables || []).map((provider) => (
+                          <option key={provider.hmo_provider_id} value={provider.hmo_provider_id}>
+                            {provider.hmo_provider_name || provider.hmo_provider_id}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">סכום (₪)</label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={claimPaymentForm.amount}
+                        onChange={(event) => setClaimPaymentForm((prev) => ({ ...prev, amount: event.target.value }))}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">תאריך אפקטיבי</label>
+                      <Input
+                        type="date"
+                        value={claimPaymentForm.effectiveAt}
+                        onChange={(event) => setClaimPaymentForm((prev) => ({ ...prev, effectiveAt: event.target.value }))}
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button type="button" onClick={handleRecordClaimPayment} disabled={recordingClaimPayment}>
+                        {recordingClaimPayment && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
+                        רשום תשלום
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto]">
+                    <Input
+                      value={claimPaymentForm.notes}
+                      onChange={(event) => setClaimPaymentForm((prev) => ({ ...prev, notes: event.target.value }))}
+                      placeholder="הערת תשלום (אופציונלי)"
+                    />
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={claimPaymentForm.resolveOpenTasks === true}
+                        onChange={(event) => setClaimPaymentForm((prev) => ({ ...prev, resolveOpenTasks: event.target.checked }))}
+                      />
+                      סגור תביעות פתוחות משויכות
+                    </label>
+                  </div>
+                </Card>
+              )}
+
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+                  <h3 className="text-lg font-semibold text-zinc-900">משימות תביעות HMO</h3>
+                  <p className="text-sm text-muted-foreground">מבט ריכוזי על תביעות פתוחות/שטופלו לפי תלמיד ושירות.</p>
+                  <div className="mt-3 max-h-[420px] overflow-y-auto space-y-2">
+                    {(claimsReadModel?.claims || []).map((claim) => (
+                      <div key={claim.id} className="rounded-xl border border-border bg-slate-50 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-semibold text-zinc-900">{claim.student_name || 'לקוח/ה'}</div>
+                          <div className={`rounded-full px-2 py-0.5 text-xs ${claim.status === 'open' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
+                            {claim.status === 'open' ? 'פתוח' : 'טופל'}
+                          </div>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {claim.service_name || 'שירות'} • {claim.lesson_date ? new Date(claim.lesson_date).toLocaleDateString('he-IL') : 'ללא תאריך'}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-700">
+                          גורם מממן: {claim.hmo_provider_name || 'לא משויך'}
+                          {claim.hmo_authorization_reference ? ` • אסמכתא: ${claim.hmo_authorization_reference}` : ''}
+                        </div>
+                      </div>
+                    ))}
+                    {(claimsReadModel?.claims || []).length === 0 && (
+                      <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
+                        אין משימות תביעת HMO להצגה בטווח הנבחר.
+                      </div>
+                    )}
+                  </div>
+                </Card>
+
+                <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+                  <h3 className="text-lg font-semibold text-zinc-900">יתרות גורמים מממנים</h3>
+                  <p className="text-sm text-muted-foreground">לקריאה בלבד: מבוסס לדר וחשבוניות שנוצרו.</p>
+                  <div className="mt-3 space-y-2 max-h-[420px] overflow-y-auto">
+                    {(claimsReadModel?.provider_receivables || []).map((provider) => (
+                      <div key={provider.hmo_provider_id} className="rounded-xl border border-border bg-slate-50 p-3">
+                        <div className="text-sm font-semibold text-zinc-900">{provider.hmo_provider_name || 'גורם מממן'}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          יתרה: {formatCurrency(provider?.summary?.balance)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          חיובים: {formatCurrency(provider?.summary?.receivable_total)} • תשלומים: {formatCurrency(provider?.summary?.payment_total)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          חשבוניות פתוחות: {provider.open_invoice_batch_count || 0}
+                        </div>
+                      </div>
+                    ))}
+                    {(claimsReadModel?.provider_receivables || []).length === 0 && (
+                      <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
+                        אין נתוני יתרות גורמים מממנים בטווח הנבחר.
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              </div>
+            </>
+          )}
         </TabsContent>
       </Tabs>
 

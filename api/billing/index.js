@@ -18,8 +18,218 @@ import {
   fetchBillingSnapshot,
   reconcileStudentBilling,
 } from '../_shared/student-billing.js';
+import { resolveDashboardTask } from '../_shared/dashboard-tasks.js';
 
 const MAX_BODY_BYTES = 96 * 1024;
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function buildPersonName(profile) {
+  if (!profile || !isPlainObject(profile)) return 'לקוח/ה';
+  return [profile.first_name, profile.middle_name, profile.last_name].filter(Boolean).join(' ').trim() || 'לקוח/ה';
+}
+
+async function buildHmoClaimsReadModel({
+  tenantClient,
+  billingService,
+  startDate = '',
+  endDate = '',
+} = {}) {
+  let taskQuery = tenantClient
+    .from('dashboard_tasks')
+    .select('id, task_type, title, description, status, priority, resource_type, resource_id, metadata, created_at, resolved_at')
+    .eq('task_type', 'hmo_claim_submission')
+    .order('created_at', { ascending: false });
+
+  if (normalizeString(startDate)) {
+    taskQuery = taskQuery.gte('created_at', `${startDate}T00:00:00.000Z`);
+  }
+  if (normalizeString(endDate)) {
+    taskQuery = taskQuery.lte('created_at', `${endDate}T23:59:59.999Z`);
+  }
+
+  const { data: tasks, error: tasksError } = await taskQuery;
+  if (tasksError) {
+    if (tasksError.code === '42P01') {
+      return {
+        summary: {
+          total_claim_tasks: 0,
+          open_claim_tasks: 0,
+          resolved_claim_tasks: 0,
+          unique_students: 0,
+          provider_count: 0,
+        },
+        claims: [],
+        provider_receivables: [],
+        notices: ['dashboard_tasks_schema_missing'],
+      };
+    }
+    throw tasksError;
+  }
+
+  const taskRows = Array.isArray(tasks) ? tasks : [];
+  const participantIds = Array.from(new Set(taskRows
+    .map((task) => normalizeString(task?.resource_id))
+    .filter(Boolean)));
+  const authorizationIds = Array.from(new Set(taskRows
+    .map((task) => normalizeString(task?.metadata?.hmo_authorization_id))
+    .filter(Boolean)));
+
+  const [{ data: participants, error: participantsError }, { data: authorizations, error: authorizationsError }] = await Promise.all([
+    participantIds.length > 0
+      ? tenantClient
+        .from('lesson_participants')
+        .select(`
+          id,
+          student_id,
+          participant_status,
+          lesson_instance_id,
+          lesson_instance:lesson_instances(
+            id,
+            datetime_start,
+            service_id
+          ),
+          student:students(
+            id,
+            client_profile:client_profiles(
+              first_name,
+              middle_name,
+              last_name
+            )
+          )
+        `)
+        .in('id', participantIds)
+      : Promise.resolve({ data: [], error: null }),
+    authorizationIds.length > 0
+      ? tenantClient
+        .from('hmo_authorizations')
+        .select('id, provider_id, authorization_reference, status, contracted_rate_amount')
+        .in('id', authorizationIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (participantsError && participantsError.code !== '42P01') {
+    throw participantsError;
+  }
+  if (authorizationsError && authorizationsError.code !== '42P01') {
+    throw authorizationsError;
+  }
+
+  const participantRows = Array.isArray(participants) ? participants : [];
+  const participantMap = new Map(participantRows.map((row) => [row.id, row]));
+  const authorizationRows = Array.isArray(authorizations) ? authorizations : [];
+  const authorizationMap = new Map(authorizationRows.map((row) => [row.id, row]));
+
+  const serviceIds = Array.from(new Set(participantRows
+    .map((row) => normalizeString(row?.lesson_instance?.service_id))
+    .filter(Boolean)));
+  const providerIds = Array.from(new Set(authorizationRows
+    .map((row) => normalizeString(row?.provider_id))
+    .filter(Boolean)));
+
+  const [{ data: services, error: servicesError }, { data: providers, error: providersError }] = await Promise.all([
+    serviceIds.length > 0
+      ? tenantClient
+        .from('Services')
+        .select('id, name')
+        .in('id', serviceIds)
+      : Promise.resolve({ data: [], error: null }),
+    providerIds.length > 0
+      ? tenantClient
+        .from('hmo_providers')
+        .select('id, name, is_active')
+        .in('id', providerIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (servicesError && servicesError.code !== '42P01') {
+    throw servicesError;
+  }
+  if (providersError && providersError.code !== '42P01') {
+    throw providersError;
+  }
+
+  const serviceMap = new Map((services || []).map((row) => [row.id, row]));
+  const providerMap = new Map((providers || []).map((row) => [row.id, row]));
+
+  const claims = taskRows.map((task) => {
+    const participantId = normalizeString(task?.resource_id);
+    const participant = participantMap.get(participantId) || null;
+    const authorizationId = normalizeString(task?.metadata?.hmo_authorization_id);
+    const authorization = authorizationMap.get(authorizationId) || null;
+    const provider = providerMap.get(authorization?.provider_id || '') || null;
+    const service = serviceMap.get(participant?.lesson_instance?.service_id || '') || null;
+    const studentName = buildPersonName(participant?.student?.client_profile);
+
+    return {
+      id: task.id,
+      status: normalizeString(task.status),
+      priority: normalizeString(task.priority) || 'medium',
+      title: normalizeString(task.title) || 'תביעת גורם מממן',
+      description: normalizeString(task.description) || '',
+      created_at: task.created_at || null,
+      resolved_at: task.resolved_at || null,
+      lesson_participant_id: participantId || null,
+      lesson_instance_id: participant?.lesson_instance_id || null,
+      lesson_date: participant?.lesson_instance?.datetime_start || null,
+      student_id: participant?.student_id || null,
+      student_name: studentName,
+      participant_status: participant?.participant_status || null,
+      service_id: participant?.lesson_instance?.service_id || null,
+      service_name: normalizeString(service?.name) || 'שירות',
+      hmo_authorization_id: authorizationId || null,
+      hmo_authorization_status: normalizeString(authorization?.status) || null,
+      hmo_authorization_reference: normalizeString(authorization?.authorization_reference) || null,
+      hmo_contracted_rate_amount: authorization?.contracted_rate_amount ?? null,
+      hmo_provider_id: authorization?.provider_id || null,
+      hmo_provider_name: normalizeString(provider?.name) || null,
+      metadata: isPlainObject(task?.metadata) ? task.metadata : {},
+    };
+  });
+
+  const receivableProviderIds = Array.from(new Set(claims
+    .map((row) => normalizeString(row?.hmo_provider_id))
+    .filter(Boolean)));
+
+  const providerReceivables = await Promise.all(receivableProviderIds.map(async (hmoProviderId) => {
+    const snapshot = await billingService.getHmoProviderReceivablesSnapshot({
+      hmoProviderId,
+      periodStart: normalizeString(startDate) || null,
+      periodEnd: normalizeString(endDate) || null,
+    });
+    const provider = providerMap.get(hmoProviderId) || null;
+    return {
+      hmo_provider_id: hmoProviderId,
+      hmo_provider_name: normalizeString(provider?.name) || null,
+      is_active: provider?.is_active !== false,
+      summary: snapshot?.summary || { balance: 0, receivable_total: 0, payment_total: 0 },
+      invoice_batch_count: Array.isArray(snapshot?.invoice_batches) ? snapshot.invoice_batches.length : 0,
+      open_invoice_batch_count: Array.isArray(snapshot?.invoice_batches)
+        ? snapshot.invoice_batches.filter((batch) => normalizeString(batch?.status) === 'open').length
+        : 0,
+    };
+  }));
+
+  const uniqueStudents = new Set(claims.map((row) => normalizeString(row?.student_id)).filter(Boolean));
+  const openClaimTasks = claims.filter((row) => normalizeString(row?.status) === 'open').length;
+  const resolvedClaimTasks = claims.filter((row) => normalizeString(row?.status) === 'resolved').length;
+
+  return {
+    summary: {
+      total_claim_tasks: claims.length,
+      open_claim_tasks: openClaimTasks,
+      resolved_claim_tasks: resolvedClaimTasks,
+      unique_students: uniqueStudents.size,
+      provider_count: providerReceivables.length,
+    },
+    claims,
+    provider_receivables: providerReceivables,
+    notices: [],
+    generated_at: new Date().toISOString(),
+  };
+}
 
 function currentMonthRange() {
   const now = new Date();
@@ -36,6 +246,10 @@ function mapBillingActionError(errorCode) {
   switch (errorCode) {
     case 'invoice_batch_not_found':
       return { status: 404, body: { message: errorCode } };
+    case 'missing_hmo_provider_id':
+    case 'amount_must_be_positive_integer':
+    case 'invalid_task_ids':
+      return { status: 400, body: { message: errorCode } };
     case 'missing_student_id':
     case 'invalid_manual_credit_source_type':
     case 'invalid_manual_debit_source_type':
@@ -43,6 +257,66 @@ function mapBillingActionError(errorCode) {
     default:
       return { status: 400, body: { message: errorCode || 'invalid_billing_action' } };
   }
+}
+
+async function resolveProviderClaimTaskIds(tenantClient, {
+  hmoProviderId,
+  taskIds = [],
+} = {}) {
+  const normalizedProviderId = normalizeString(hmoProviderId);
+  if (!normalizedProviderId) {
+    throw new Error('missing_hmo_provider_id');
+  }
+
+  let taskQuery = tenantClient
+    .from('dashboard_tasks')
+    .select('id, metadata')
+    .eq('task_type', 'hmo_claim_submission')
+    .eq('status', 'open');
+
+  const normalizedTaskIds = Array.from(new Set((taskIds || []).map((value) => normalizeString(value)).filter(Boolean)));
+  if (normalizedTaskIds.length > 0) {
+    taskQuery = taskQuery.in('id', normalizedTaskIds);
+  }
+
+  const { data: openTasks, error: taskError } = await taskQuery;
+  if (taskError) {
+    if (taskError.code === '42P01') {
+      return [];
+    }
+    throw taskError;
+  }
+
+  const taskRows = Array.isArray(openTasks) ? openTasks : [];
+  const authorizationIds = Array.from(new Set(taskRows
+    .map((task) => normalizeString(task?.metadata?.hmo_authorization_id))
+    .filter(Boolean)));
+
+  if (authorizationIds.length === 0) {
+    return [];
+  }
+
+  const { data: authorizationRows, error: authorizationError } = await tenantClient
+    .from('hmo_authorizations')
+    .select('id, provider_id')
+    .in('id', authorizationIds);
+
+  if (authorizationError) {
+    if (authorizationError.code === '42P01') {
+      return [];
+    }
+    throw authorizationError;
+  }
+
+  const authorizationMap = new Map((authorizationRows || []).map((row) => [row.id, row]));
+  return taskRows
+    .filter((task) => {
+      const authorizationId = normalizeString(task?.metadata?.hmo_authorization_id);
+      const authorization = authorizationMap.get(authorizationId);
+      return normalizeString(authorization?.provider_id) === normalizedProviderId;
+    })
+    .map((task) => task.id)
+    .filter(Boolean);
 }
 
 export default async function (context, req) {
@@ -102,11 +376,22 @@ export default async function (context, req) {
   const billingService = new BillingLedgerService({ tenantClient });
 
   if (method === 'GET') {
+    const view = normalizeString(req?.query?.view).toLowerCase();
     const studentId = normalizeString(req?.query?.student_id);
     const clientProfileId = normalizeString(req?.query?.client_profile_id || req?.query?.clientProfileId);
     const hmoProviderId = normalizeString(req?.query?.hmo_provider_id || req?.query?.hmoProviderId);
     let startDate = normalizeString(req?.query?.start_date);
     let endDate = normalizeString(req?.query?.end_date);
+
+    if (view === 'hmo_claims') {
+      const readModel = await buildHmoClaimsReadModel({
+        tenantClient,
+        billingService,
+        startDate,
+        endDate,
+      });
+      return respond(context, 200, readModel);
+    }
 
     if (!studentId && !clientProfileId && !hmoProviderId && !startDate && !endDate) {
       const currentRange = currentMonthRange();
@@ -222,6 +507,64 @@ export default async function (context, req) {
         metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
       });
       return respond(context, 201, result);
+    }
+
+    if (method === 'POST' && action === 'record_hmo_claim_payment') {
+      const hmoProviderId = normalizeString(body?.hmo_provider_id || body?.hmoProviderId);
+      if (!hmoProviderId) {
+        throw new Error('missing_hmo_provider_id');
+      }
+
+      const transaction = await billingService.appendManualCredit({
+        accountType: 'hmo_provider',
+        accountRefId: hmoProviderId,
+        amount: body?.amount,
+        effectiveAt: normalizeString(body?.effective_at || body?.effectiveAt) || null,
+        actorUserId: userId,
+        sourceType: 'hmo_invoice_payment',
+        sourceId: normalizeString(body?.source_id || body?.sourceId) || null,
+        externalReference: normalizeString(body?.external_reference || body?.externalReference) || null,
+        notes: normalizeString(body?.notes) || null,
+        metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+      });
+
+      const shouldResolveOpenClaims = body?.resolve_open_claim_tasks !== false
+        && body?.resolveOpenClaimTasks !== false;
+      let resolvedTaskCount = 0;
+      let resolvedTaskIds = [];
+
+      if (shouldResolveOpenClaims) {
+        const requestedTaskIds = Array.isArray(body?.task_ids)
+          ? body.task_ids
+          : (Array.isArray(body?.taskIds) ? body.taskIds : []);
+        const taskIds = await resolveProviderClaimTaskIds(tenantClient, {
+          hmoProviderId,
+          taskIds: requestedTaskIds,
+        });
+
+        for (const taskId of taskIds) {
+          const resolved = await resolveDashboardTask(tenantClient, {
+            taskId,
+            resolvedBy: userId,
+            metadata: {
+              resolved_by_hmo_claim_payment: true,
+              hmo_provider_id: hmoProviderId,
+              ledger_transaction_id: transaction.transactionId,
+            },
+          });
+          if (resolved?.id) {
+            resolvedTaskIds.push(resolved.id);
+          }
+        }
+        resolvedTaskCount = resolvedTaskIds.length;
+      }
+
+      return respond(context, 201, {
+        transaction_id: transaction.transactionId,
+        hmo_provider_id: hmoProviderId,
+        resolved_task_count: resolvedTaskCount,
+        resolved_task_ids: resolvedTaskIds,
+      });
     }
   } catch (error) {
     const mapped = mapBillingActionError(error?.message || error?.code);

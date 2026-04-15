@@ -29,6 +29,8 @@ Read this first. Detailed task docs live in [`./agents-docs`](agents-docs/).
 - Calendar, templates, attendance, sessions: [`agents-docs/60-calendar-and-sessions.md`](agents-docs/60-calendar-and-sessions.md)
 - Forms, shared blocks, waiting list: [`agents-docs/70-forms-and-waiting-list.md`](agents-docs/70-forms-and-waiting-list.md)
 - Billing, HMO, commitments, payroll: [`agents-docs/80-finance-billing-payroll.md`](agents-docs/80-finance-billing-payroll.md)
+- Finance workflow baseline contract (must read before finance behavior changes): [`implementations/finance/ledger/finance-workflow-contract-v1.md`](implementations/finance/ledger/finance-workflow-contract-v1.md)
+- Finance workflow release hardening protocol (must read before finance rollout): [`implementations/finance/ledger/finance-workflow-release-hardening-v1.md`](implementations/finance/ledger/finance-workflow-release-hardening-v1.md)
 - Settings, documents, storage, backup, audit: [`agents-docs/90-settings-documents-storage.md`](agents-docs/90-settings-documents-storage.md)
 
 ## Before Writing Code

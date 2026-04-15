@@ -97,6 +97,72 @@ function templateRangeContainsDate(template, dateString) {
   return validFrom <= dateString && dateString <= validUntil;
 }
 
+function isAuthorizationDateCovered(row, dateString) {
+  const validFrom = normalizeString(row?.valid_from) || '0001-01-01';
+  const expiresAt = normalizeString(row?.expires_at) || '9999-12-31';
+  return validFrom <= dateString && dateString <= expiresAt;
+}
+
+export function buildHmoCoverageWarning(candidate, authorizationRows = []) {
+  const studentId = normalizeString(candidate?.student_id);
+  const serviceId = normalizeString(candidate?.service_id);
+  const targetDate = normalizeString(candidate?.target_date) || extractDatePart(candidate?.datetime_start);
+  if (!studentId || !serviceId || !targetDate) {
+    return null;
+  }
+
+  const matchingRows = (authorizationRows || []).filter((row) => (
+    normalizeString(row?.student_id) === studentId
+    && normalizeString(row?.service_id) === serviceId
+  ));
+
+  if (matchingRows.length === 0) {
+    return {
+      type: 'hmo_authorization_gap',
+      severity: 'warning',
+      reason: 'no_authorization_found',
+      student_id: studentId,
+      service_id: serviceId,
+      template_id: candidate.template_id || null,
+      target_date: targetDate,
+      datetime_start: candidate.datetime_start,
+      message: 'לא נמצאה הרשאת גורם מממן לתלמיד/ה עבור השירות במועד זה. החיוב עלול להתבצע כחיוב רגיל.',
+    };
+  }
+
+  const activeRows = matchingRows.filter((row) => normalizeString(row?.status).toLowerCase() === 'active');
+  if (activeRows.length === 0) {
+    return {
+      type: 'hmo_authorization_gap',
+      severity: 'warning',
+      reason: 'no_active_authorization',
+      student_id: studentId,
+      service_id: serviceId,
+      template_id: candidate.template_id || null,
+      target_date: targetDate,
+      datetime_start: candidate.datetime_start,
+      message: 'קיימת הרשאת גורם מממן לשירות אך אינה פעילה במועד זה. החיוב עלול להתבצע כחיוב רגיל.',
+    };
+  }
+
+  const activeInRangeRows = activeRows.filter((row) => isAuthorizationDateCovered(row, targetDate));
+  if (activeInRangeRows.length > 0) {
+    return null;
+  }
+
+  return {
+    type: 'hmo_authorization_gap',
+    severity: 'warning',
+    reason: 'no_active_authorization_for_date',
+    student_id: studentId,
+    service_id: serviceId,
+    template_id: candidate.template_id || null,
+    target_date: targetDate,
+    datetime_start: candidate.datetime_start,
+    message: 'קיימת הרשאה פעילה לשירות אך טווח התאריכים אינו מכסה את המועד שנוצר. החיוב עלול להתבצע כחיוב רגיל.',
+  };
+}
+
 function buildInstanceInterval(instanceRow) {
   const start = new Date(instanceRow.datetime_start);
   const durationMinutes = Number(instanceRow.duration_minutes || 0);
@@ -221,6 +287,8 @@ function buildDiffResponse({
   candidateSlots,
   proposals,
   conflicts,
+  warnings,
+  warningsNotice,
   skippedExisting,
   skippedOverrides,
   applied,
@@ -237,12 +305,15 @@ function buildDiffResponse({
       skipped_existing: skippedExisting.length,
       skipped_overrides: skippedOverrides.length,
       conflicts: conflicts.length,
+      hmo_coverage_warnings: Array.isArray(warnings) ? warnings.length : 0,
       applied_instances: applied ? applied.createdInstances.length : 0,
       applied_participants: applied ? applied.createdParticipants.length : 0,
       apply_errors: applied ? applied.errors.length : 0,
     },
     to_insert_instances: proposals,
     conflicts,
+    warnings: warnings || [],
+    warnings_notice: warningsNotice || null,
     skipped_existing: skippedExisting,
     skipped_overrides: skippedOverrides,
     applied: applied || null,
@@ -358,10 +429,37 @@ export default async function calendarGenerate(context, req) {
       candidateSlots: 0,
       proposals: [],
       conflicts: [],
+      warnings: [],
+      warningsNotice: null,
       skippedExisting: [],
       skippedOverrides: [],
       applied: dryRun ? null : { createdInstances: [], createdParticipants: [], errors: [] },
     }));
+  }
+
+  const templateStudentIds = Array.from(new Set(templateRows.map((row) => normalizeString(row?.student_id)).filter(Boolean)));
+  const templateServiceIds = Array.from(new Set(templateRows.map((row) => normalizeString(row?.service_id)).filter(Boolean)));
+  let hmoAuthorizationRows = [];
+  let hmoWarningsNotice = null;
+  if (templateStudentIds.length > 0 && templateServiceIds.length > 0) {
+    const { data: authorizationRows, error: authorizationError } = await tenantClient
+      .from('hmo_authorizations')
+      .select('id, student_id, service_id, status, valid_from, expires_at, provider_id, provider_track_id')
+      .in('student_id', templateStudentIds)
+      .in('service_id', templateServiceIds);
+
+    if (authorizationError) {
+      if (authorizationError.code === '42P01') {
+        hmoWarningsNotice = 'hmo_authorization_schema_missing';
+      } else {
+        context.log?.warn?.('calendar/generate failed to load hmo authorization coverage; proceeding without warnings', {
+          message: authorizationError?.message,
+          code: authorizationError?.code,
+        });
+      }
+    } else {
+      hmoAuthorizationRows = Array.isArray(authorizationRows) ? authorizationRows : [];
+    }
   }
 
   const templateIds = templateRows.map((row) => row.id);
@@ -425,6 +523,7 @@ export default async function calendarGenerate(context, req) {
   const dates = enumerateDates(startDate, endDate);
   const proposals = [];
   const conflicts = [];
+  const warnings = [];
   const skippedExisting = [];
   const skippedOverrides = [];
   let candidateSlots = 0;
@@ -526,6 +625,10 @@ export default async function calendarGenerate(context, req) {
       }
 
       proposals.push(candidate);
+      const hmoWarning = buildHmoCoverageWarning(candidate, hmoAuthorizationRows);
+      if (hmoWarning) {
+        warnings.push(hmoWarning);
+      }
       planningIntervals.push(interval);
     }
   }
@@ -620,6 +723,8 @@ export default async function calendarGenerate(context, req) {
     candidateSlots,
     proposals,
     conflicts,
+    warnings,
+    warningsNotice: hmoWarningsNotice,
     skippedExisting,
     skippedOverrides,
     applied: dryRun ? null : applied,

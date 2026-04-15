@@ -1,5 +1,15 @@
 # 80 Finance Billing Payroll
 
+## Contract baseline (must read first for behavior-changing finance work)
+- [`../implementations/finance/ledger/finance-workflow-contract-v1.md`](../implementations/finance/ledger/finance-workflow-contract-v1.md)
+- This contract is the frozen baseline for finance flow behavior across ledger, attendance, HMO authorization coupling, and calendar preview consumption.
+- If a change intentionally diverges from this contract, update the contract and acceptance criteria in the same implementation batch.
+
+## Release hardening baseline (must read before finance rollout)
+- [`../implementations/finance/ledger/finance-workflow-release-hardening-v1.md`](../implementations/finance/ledger/finance-workflow-release-hardening-v1.md)
+- This protocol defines dual-review gates, AC-to-test evidence mapping, and staged rollout checks for finance changes.
+- For any finance release involving behavior or contract changes, attach completed protocol evidence to the rollout PR.
+
 ## When to read
 - Billing, ledger, HMO receivables, manual payments, invoice batching, payroll, or financial settings work.
 - Student or one-time-customer billing UI work.

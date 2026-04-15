@@ -744,6 +744,19 @@ async function buildParticipantStatusPreview(tenantClient, body, {
         policies,
       });
   const projectedChargeAmount = coerceAgorot(projectedBillingDecision?.chargeAmount);
+  const projectedHasHmoSplit = Boolean(projectedAuthorization?.id);
+  const projectedHmoProvider = projectedAuthorization?.provider || null;
+  const projectedHmoTrack = projectedAuthorization?.provider_track || null;
+  const projectedServiceRate = coerceAgorot(serviceRow?.default_customer_charge_amount);
+  const projectedContractedRateAmount = projectedHasHmoSplit
+    ? coerceAgorot(projectedAuthorization?.contracted_rate_amount)
+    : 0;
+  const projectedStudentCopayAmount = projectedHasHmoSplit
+    ? Math.max(projectedServiceRate - projectedContractedRateAmount, 0)
+    : 0;
+  const projectedInsurerClaimAmount = projectedHasHmoSplit
+    ? projectedContractedRateAmount
+    : 0;
 
   const instructorName = [employeeRow?.first_name, employeeRow?.middle_name, employeeRow?.last_name].filter(Boolean).join(' ').trim() || 'המדריך';
   const resolvedProfile = studentRow?.client_profile || clientProfileRow || null;
@@ -797,6 +810,21 @@ async function buildParticipantStatusPreview(tenantClient, body, {
       amount_before: ledgerAmount,
       amount_after: projectedChargeAmount,
       message: `החיוב של ${studentName} יעודכן מ-₪${fmtILS(ledgerAmount)} ל-₪${fmtILS(projectedChargeAmount)}.`,
+    });
+  }
+  if (projectedHasHmoSplit) {
+    const providerSummary = [projectedHmoProvider?.name, projectedHmoTrack?.name].filter(Boolean).join(' - ') || 'גורם מממן';
+    impacts.push({
+      type: 'hmo_split_detail',
+      hmo_authorization_id: projectedAuthorization.id,
+      hmo_provider_id: projectedHmoProvider?.id || null,
+      hmo_provider_name: projectedHmoProvider?.name || null,
+      hmo_provider_track_id: projectedHmoTrack?.id || null,
+      hmo_provider_track_name: projectedHmoTrack?.name || null,
+      hmo_contracted_rate_amount: projectedContractedRateAmount,
+      hmo_student_copay_amount: projectedStudentCopayAmount,
+      hmo_insurer_claim_amount: projectedInsurerClaimAmount,
+      message: `פיצול גורם מממן: לקוח/ה ₪${fmtILS(projectedStudentCopayAmount)}, תביעה לגורם מממן ₪${fmtILS(projectedInsurerClaimAmount)} (${providerSummary}).`,
     });
   }
   if (currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0) {
@@ -858,6 +886,15 @@ async function buildParticipantStatusPreview(tenantClient, body, {
       billing_amount_after: projectedChargeAmount,
       billing_amount_reversed: ledgerAmount > 0 && projectedChargeAmount <= 0 ? ledgerAmount : 0,
       billing_amount_added: ledgerAmount <= 0 && projectedChargeAmount > 0 ? projectedChargeAmount : 0,
+      hmo_split_applied: projectedHasHmoSplit,
+      hmo_authorization_id: projectedHasHmoSplit ? projectedAuthorization.id : null,
+      hmo_provider_id: projectedHasHmoSplit ? (projectedHmoProvider?.id || null) : null,
+      hmo_provider_name: projectedHasHmoSplit ? (projectedHmoProvider?.name || null) : null,
+      hmo_provider_track_id: projectedHasHmoSplit ? (projectedHmoTrack?.id || null) : null,
+      hmo_provider_track_name: projectedHasHmoSplit ? (projectedHmoTrack?.name || null) : null,
+      hmo_contracted_rate_amount: projectedHasHmoSplit ? projectedContractedRateAmount : 0,
+      hmo_student_copay_amount: projectedHasHmoSplit ? projectedStudentCopayAmount : 0,
+      hmo_insurer_claim_amount: projectedHasHmoSplit ? projectedInsurerClaimAmount : 0,
       instructor_earning_before: lessonEarningAmount,
       instructor_earning_after: projectedShouldInstructorEarn ? inferredLessonEarningAmount : 0,
       instructor_earning_removed: currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0 ? lessonEarningAmount : 0,
@@ -870,7 +907,7 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   };
 }
 
-async function buildAttendanceTransitionAuditChanges(preview) {
+export async function buildAttendanceTransitionAuditChanges(preview) {
   if (!preview) {
     return [];
   }
