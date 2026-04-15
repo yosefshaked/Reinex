@@ -361,6 +361,10 @@ function formatAgorotPreview(value) {
   }).format(amount / 100);
 }
 
+function shortId(value) {
+  return value ? String(value).slice(-8) : '';
+}
+
 function isResolvedParticipantStatus(status) {
   return ['attended', 'no_show', 'cancelled_student', 'cancelled_clinic'].includes(String(status || '').trim().toLowerCase());
 }

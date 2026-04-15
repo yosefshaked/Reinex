@@ -14,6 +14,9 @@ function normalizeUuid(raw) {
 export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, password }) {
   const [payrollInstanceId, setPayrollInstanceId] = useState('');
   const [paidClaimInstanceId, setPaidClaimInstanceId] = useState('');
+  const [inspectInstanceId, setInspectInstanceId] = useState('');
+  const [inspectParticipantId, setInspectParticipantId] = useState('');
+  const [inspectResult, setInspectResult] = useState(null);
   const [isSubmittingKind, setIsSubmittingKind] = useState('');
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -34,6 +37,7 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
 
     setError('');
     setSuccessMessage('');
+    setInspectResult(null);
     setIsSubmittingKind(kind);
 
     try {
@@ -58,6 +62,46 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
       }
     } catch (requestError) {
       setError(requestError?.data?.message || requestError?.message || 'יצירת הנעילה נכשלה.');
+    } finally {
+      setIsSubmittingKind('');
+    }
+  }
+
+  async function handleInspectHmoChargeContext() {
+    const lessonInstanceId = normalizeUuid(inspectInstanceId);
+    const lessonParticipantId = normalizeUuid(inspectParticipantId);
+
+    if (!lessonInstanceId) {
+      setError('יש להזין lesson_instance_id תקין לפני בדיקה.');
+      return;
+    }
+
+    if (!canSubmit) {
+      setError('הכלי אינו מוכן. נסו לבצע אימות מחדש.');
+      return;
+    }
+
+    setError('');
+    setSuccessMessage('');
+    setInspectResult(null);
+    setIsSubmittingKind('inspect_hmo');
+
+    try {
+      const payload = await authenticatedFetch('debug/uat-tools', {
+        method: 'POST',
+        body: {
+          action: 'inspect_hmo_charge_context',
+          org_id: orgId,
+          password,
+          lesson_instance_id: lessonInstanceId,
+          ...(lessonParticipantId ? { lesson_participant_id: lessonParticipantId } : {}),
+        },
+      });
+
+      setInspectResult(payload?.inspection || null);
+      setSuccessMessage('נטענו נתוני אבחון חיוב HMO.');
+    } catch (requestError) {
+      setError(requestError?.data?.message || requestError?.message || 'טעינת נתוני האבחון נכשלה.');
     } finally {
       setIsSubmittingKind('');
     }
@@ -148,6 +192,57 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
                 {isSubmittingKind === 'paid_claim' ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Lock Lesson (Paid Claim)'}
               </Button>
             </div>
+          </div>
+
+          <div className="rounded-lg border border-border p-4 space-y-3">
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold">Inspect HMO Charge Context</h3>
+              <p className="text-xs text-muted-foreground">טוען את כל ההקשר הנדרש לאבחון שימוש במסלול HMO: משתתף, שירות, אישורים, החלטת חיוב ורשומות לדר.</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="debug-inspect-hmo-instance-id">lesson_instance_id</Label>
+                <Input
+                  id="debug-inspect-hmo-instance-id"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  value={inspectInstanceId}
+                  onChange={(event) => setInspectInstanceId(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="debug-inspect-hmo-participant-id">lesson_participant_id (optional)</Label>
+                <Input
+                  id="debug-inspect-hmo-participant-id"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  value={inspectParticipantId}
+                  onChange={(event) => setInspectParticipantId(event.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleInspectHmoChargeContext}
+                disabled={isSubmittingKind === 'inspect_hmo'}
+              >
+                {isSubmittingKind === 'inspect_hmo' ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Inspect HMO Context'}
+              </Button>
+            </div>
+
+            {inspectResult ? (
+              <div className="rounded-md border border-border bg-slate-50 p-3 space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  selected_participant: {inspectResult?.selected_participant?.id || 'none'}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  active_authorization: {inspectResult?.authorization_resolution?.active_authorization_id || 'none'}
+                </div>
+                <pre className="max-h-80 overflow-auto rounded bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-100">
+                  {JSON.stringify(inspectResult, null, 2)}
+                </pre>
+              </div>
+            ) : null}
           </div>
         </div>
 

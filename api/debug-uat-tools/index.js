@@ -15,6 +15,9 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { loadFinancePolicies } from '../_shared/employee-finance.js';
+import { buildDesiredChargeDescriptors, resolveHmoSplitAmounts } from '../_shared/BillingLedgerService.js';
+import { loadHmoAuthorizations, resolveActiveAuthorizationForStudentService } from '../_shared/hmo.js';
 
 const MAX_BODY_BYTES = 48 * 1024;
 
@@ -136,6 +139,129 @@ async function lockLessonForPaidClaim({ tenantClient, lessonInstanceId, userId }
   };
 }
 
+async function inspectHmoChargeContext({
+  tenantClient,
+  lessonInstanceId,
+  lessonParticipantId = '',
+}) {
+  const normalizedParticipantId = normalizeString(lessonParticipantId);
+
+  const { data: instance, error: instanceError } = await tenantClient
+    .from('lesson_instances')
+    .select('id, datetime_start, service_id, status')
+    .eq('id', lessonInstanceId)
+    .maybeSingle();
+
+  if (instanceError) {
+    throw instanceError;
+  }
+  if (!instance?.id) {
+    return { error: 'lesson_instance_not_found' };
+  }
+
+  const { data: participants, error: participantsError } = await tenantClient
+    .from('lesson_participants')
+    .select('id, client_profile_id, student_id, participant_status, metadata')
+    .eq('lesson_instance_id', lessonInstanceId)
+    .order('id', { ascending: true });
+
+  if (participantsError) {
+    throw participantsError;
+  }
+
+  const participantRows = Array.isArray(participants) ? participants : [];
+  const selectedParticipant = normalizedParticipantId
+    ? participantRows.find((row) => row.id === normalizedParticipantId) || null
+    : participantRows.find((row) => row.student_id) || participantRows[0] || null;
+
+  if (!selectedParticipant?.id) {
+    return {
+      instance,
+      participants: participantRows,
+      selected_participant: null,
+      error: 'lesson_participant_not_found',
+    };
+  }
+
+  const { data: service, error: serviceError } = await tenantClient
+    .from('Services')
+    .select('id, name, default_customer_charge_amount, is_active')
+    .eq('id', instance.service_id)
+    .maybeSingle();
+
+  if (serviceError) {
+    throw serviceError;
+  }
+
+  const studentId = normalizeString(selectedParticipant.student_id);
+  const activeAuthorization = studentId
+    ? await resolveActiveAuthorizationForStudentService(tenantClient, {
+      studentId,
+      serviceId: instance.service_id,
+      lessonDate: instance.datetime_start,
+    })
+    : null;
+
+  const allActiveAuthorizationsForStudent = studentId
+    ? await loadHmoAuthorizations(tenantClient, {
+      studentId,
+      activeOnly: true,
+    })
+    : [];
+
+  const serviceMatchedActiveAuthorizations = (allActiveAuthorizationsForStudent || [])
+    .filter((row) => row.service_id === instance.service_id);
+
+  const policies = await loadFinancePolicies(tenantClient);
+  const chargeDecision = buildDesiredChargeDescriptors({
+    participant: selectedParticipant,
+    service,
+    authorization: activeAuthorization,
+    policies,
+  });
+  const splitAmounts = activeAuthorization
+    ? resolveHmoSplitAmounts({ service, authorization: activeAuthorization })
+    : null;
+
+  const { data: ledgerRows, error: ledgerError } = await tenantClient
+    .from('ledger_transactions')
+    .select('id, source_type, direction, amount, posted_at, effective_at, student_id, client_profile_id, hmo_provider_id, hmo_authorization_id, service_id, rate_source, reverses_transaction_id, metadata')
+    .eq('lesson_participant_id', selectedParticipant.id)
+    .order('posted_at', { ascending: true });
+
+  if (ledgerError) {
+    throw ledgerError;
+  }
+
+  return {
+    instance,
+    service,
+    selected_participant: selectedParticipant,
+    authorization_resolution: {
+      has_student_id: Boolean(studentId),
+      all_active_count_for_student: (allActiveAuthorizationsForStudent || []).length,
+      service_matched_active_count: serviceMatchedActiveAuthorizations.length,
+      active_authorization_id: activeAuthorization?.id || null,
+      active_authorization_service_id: activeAuthorization?.service_id || null,
+      active_authorization_provider_track_id: activeAuthorization?.provider_track_id || null,
+      active_authorization_expires_at: activeAuthorization?.expires_at || null,
+      possible_service_mismatch: Boolean(
+        studentId
+        && !activeAuthorization
+        && (allActiveAuthorizationsForStudent || []).length > 0
+        && serviceMatchedActiveAuthorizations.length === 0
+      ),
+    },
+    policies: {
+      billing_consumption_policy: policies?.billingConsumptionPolicy || null,
+    },
+    charge_decision: chargeDecision,
+    split_amounts: splitAmounts,
+    expected_entries: Array.isArray(chargeDecision?.entries) ? chargeDecision.entries : [],
+    lesson_participant_ledger_rows: Array.isArray(ledgerRows) ? ledgerRows : [],
+  };
+}
+
 export default async function debugUatTools(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
   const env = readEnv(context);
@@ -211,18 +337,19 @@ export default async function debugUatTools(context, req) {
     return respond(context, 200, { authenticated: true });
   }
 
-  if (action !== 'lock_lesson') {
+  if (!['lock_lesson', 'inspect_hmo_charge_context'].includes(action)) {
     return respond(context, 400, { message: 'invalid_action' });
   }
 
   const lessonInstanceId = normalizeString(body?.lesson_instance_id || body?.lessonInstanceId || body?.instance_id || body?.instanceId);
   const lockKind = normalizeString(body?.lock_kind || body?.lockKind).toLowerCase();
+  const lessonParticipantId = normalizeString(body?.lesson_participant_id || body?.lessonParticipantId || body?.participant_id || body?.participantId);
 
   if (!lessonInstanceId) {
     return respond(context, 400, { message: 'missing_lesson_instance_id' });
   }
 
-  if (!['payroll', 'paid_claim'].includes(lockKind)) {
+  if (action === 'lock_lesson' && !['payroll', 'paid_claim'].includes(lockKind)) {
     return respond(context, 400, { message: 'invalid_lock_kind' });
   }
 
@@ -247,6 +374,37 @@ export default async function debugUatTools(context, req) {
   }
 
   try {
+    if (action === 'inspect_hmo_charge_context') {
+      const inspection = await inspectHmoChargeContext({
+        tenantClient,
+        lessonInstanceId,
+        lessonParticipantId,
+      });
+
+      await logAuditEvent(supabase, {
+        orgId,
+        userId,
+        userEmail: authResult.data.user.email || '',
+        userRole: role,
+        actionType: 'debug_uat.inspect_hmo_charge_context',
+        actionCategory: AUDIT_CATEGORIES.CALENDAR,
+        resourceType: 'lesson_instance',
+        resourceId: lessonInstanceId,
+        details: {
+          lesson_participant_id: lessonParticipantId || null,
+          selected_participant_id: inspection?.selected_participant?.id || null,
+          active_authorization_id: inspection?.authorization_resolution?.active_authorization_id || null,
+        },
+      });
+
+      return respond(context, 200, {
+        message: 'hmo_charge_context_loaded',
+        lesson_instance_id: lessonInstanceId,
+        lesson_participant_id: lessonParticipantId || null,
+        inspection,
+      });
+    }
+
     const result = lockKind === 'payroll'
       ? await lockLessonForPayroll({ tenantClient, lessonInstanceId, userId })
       : await lockLessonForPaidClaim({ tenantClient, lessonInstanceId, userId });
