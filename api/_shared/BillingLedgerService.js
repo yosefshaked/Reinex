@@ -495,7 +495,6 @@ export function buildDesiredChargeDescriptors({
     };
   }
   const splitAmounts = resolveHmoSplitAmounts({ service, authorization });
-  const contractedRateAmount = coerceAgorot(splitAmounts.contractedRateAmount);
   const studentCopay = coerceAgorot(splitAmounts.studentCopayAmount);
   const insurerClaimAmount = coerceAgorot(splitAmounts.insurerClaimAmount);
   const entries = [];
