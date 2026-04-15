@@ -744,6 +744,16 @@ export function findItemById(schema, itemId, sharedBlockMap = {}) {
   return getItemsInOrder(schema, sharedBlockMap).find((item) => item.id === itemId) || null;
 }
 
+// Find item from raw schema without normalizing (important for form editing to preserve trailing spaces)
+export function findItemByIdRaw(schema, itemId) {
+  for (const section of schema.sections || []) {
+    for (const item of section.items || []) {
+      if (item.id === itemId) return item;
+    }
+  }
+  return null;
+}
+
 export function findQuestionLabel(schema, questionId, sharedBlockMap = {}) {
   return getQuestionsInOrder(schema, sharedBlockMap).find((question) => question.id === questionId)?.label || questionId;
 }

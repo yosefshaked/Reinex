@@ -31,7 +31,7 @@ import {
   createSection,
   createSharedPlacement,
   createTextBlock,
-  findItemById,
+  findItemByIdRaw,
   getAvailableSourceQuestions,
   getWaitingListBuiltInQuestions,
   isQuestionItem,
@@ -411,7 +411,7 @@ export default function FormBuilderPage() {
   const updateSchema = (updater) => setSchema((prev) => (typeof updater === 'function' ? updater(prev) : updater));
 
   const selectedSection = useMemo(() => schema.sections.find((section) => section.id === selected.id) || null, [schema.sections, selected.id]);
-  const selectedItem = useMemo(() => findItemById(schema, selected.id, sharedBlockMap), [schema, selected.id, sharedBlockMap]);
+  const selectedItem = useMemo(() => findItemByIdRaw(schema, selected.id), [schema, selected.id]);
   const selectedQuestion = useMemo(() => (selectedItem && isQuestionItem(selectedItem) ? selectedItem : null), [selectedItem]);
   const availableSources = useMemo(() => getAvailableSourceQuestions(schema, selected.type, selected.id, { formUsage, sharedBlockMap }), [formUsage, schema, selected, sharedBlockMap]);
   const selectedGroups = useMemo(() => visibilityRules.filter((group) => group.target_type === selected.type && group.target_id === selected.id), [selected, visibilityRules]);
