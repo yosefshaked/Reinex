@@ -456,10 +456,6 @@ export default function ReinexFullCalendar({
   const calendarRef = useRef(null);
   const pendingCalendarSyncRef = useRef(null);
   const initialCalendarDateRef = useRef(currentDate);
-  const lastReportedCalendarStateRef = useRef({
-    date: currentDate,
-    view: viewMode,
-  });
   const runtimeConfig = useRuntimeConfig();
   const { activeOrgId } = useOrg();
   const [updatingEventId, setUpdatingEventId] = useState(null);
@@ -552,36 +548,16 @@ export default function ReinexFullCalendar({
 
     calendarNavigationRef.current = {
       next() {
-        const api = calendarRef.current?.getApi?.();
-        if (api) {
-          api.next();
-          return;
-        }
         navigateCalendarWithoutApi('next');
       },
       prev() {
-        const api = calendarRef.current?.getApi?.();
-        if (api) {
-          api.prev();
-          return;
-        }
         navigateCalendarWithoutApi('prev');
       },
       today() {
-        const api = calendarRef.current?.getApi?.();
-        if (api) {
-          api.today();
-          return;
-        }
         navigateCalendarWithoutApi('today');
       },
       gotoDate(date) {
         if (!date) return;
-        const api = calendarRef.current?.getApi?.();
-        if (api) {
-          api.gotoDate(date);
-          return;
-        }
         navigateCalendarWithoutApi(date);
       },
     };
@@ -602,16 +578,6 @@ export default function ReinexFullCalendar({
   useEffect(() => {
     const api = calendarRef.current?.getApi?.();
     if (!api) {
-      return;
-    }
-
-    const lastReportedCalendarState = lastReportedCalendarStateRef.current;
-    if (
-      lastReportedCalendarState
-      && lastReportedCalendarState.date === currentDate
-      && lastReportedCalendarState.view === viewMode
-    ) {
-      pendingCalendarSyncRef.current = null;
       return;
     }
 
@@ -654,25 +620,17 @@ export default function ReinexFullCalendar({
       && pendingSync.date === nextDate,
     );
 
-    lastReportedCalendarStateRef.current = {
-      date: nextDate || currentDate,
-      view: nextViewMode,
-    };
-
     if (isControlledSync) {
       pendingCalendarSyncRef.current = null;
       return;
     }
 
-    // Keep view mode controlled by the parent to avoid day/week ping-pong loops.
-    if (nextViewMode !== viewMode) {
-      return;
+    // The parent owns calendar date/view state. FullCalendar can emit datesSet
+    // while settling internal renders; do not let that stale signal drive fetches.
+    if (nextViewMode === viewMode && nextDate === currentDate) {
+      pendingCalendarSyncRef.current = null;
     }
-
-    if (nextDate && nextDate !== currentDate) {
-      onDateChange?.(nextDate);
-    }
-  }, [currentDate, onDateChange, viewMode]);
+  }, [currentDate, viewMode]);
 
   const handleEventClick = useCallback((info) => {
     const instance = info.event.extendedProps?.instance;
