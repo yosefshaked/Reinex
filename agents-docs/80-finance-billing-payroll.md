@@ -63,7 +63,11 @@
 - Calendar, attendance, HMO authorization, and manual billing endpoints must stay thin. They orchestrate domain changes and then call `BillingLedgerService`; they do not contain billing math or direct ledger SQL.
 - Student billing uses a `student` ledger account. One-time customers use a `client_profile` ledger account. HMO receivables use an `hmo_provider` ledger account.
 - HMO split billing for MVP is fixed:
-  student debit = `max(service.default_customer_charge_amount - hmo_authorizations.contracted_rate_amount, 0)`
-  HMO provider debit = `hmo_authorizations.contracted_rate_amount`
+  student debit = `provider_track.default_customer_charge_amount` when the assigned track sets a positive fixed copay
+  student debit = `max(service.default_customer_charge_amount - hmo_authorizations.contracted_rate_amount, 0)` when the assigned track is partial-HMO and leaves copay blank or `0`
+  student debit = `0` when `provider_track.payment_mode = fully_paid_by_hmo`
+  student debit = `provider_track.default_customer_charge_amount || service.default_customer_charge_amount` when `provider_track.payment_mode = fully_paid_by_customer`
+  HMO provider debit = `hmo_authorizations.contracted_rate_amount` except when `provider_track.payment_mode = fully_paid_by_customer`, where it is `0`
+- `hmo_provider_tracks.default_insurer_claim_amount` is descriptive/defaulting data for setup and authorization UX. The live ledger charge for the insurer is driven by `hmo_authorizations.contracted_rate_amount`.
 - HMO invoice batches are workflow metadata only. Balance changes happen only when explicit ledger credits or debits are appended.
 - Payroll, leave, attendance, and instructor earnings rules are still driven from `Settings` through [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js).

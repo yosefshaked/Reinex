@@ -35,6 +35,7 @@ type FinanceWorkflowContractV1 = {
 			appliesWhen: string;
 			studentCopayFormula: string;
 			hmoClaimFormula: string;
+			trackDefaultsMeaning: string[];
 			rateSource: "hmo_authorization";
 		};
 	};
@@ -75,11 +76,13 @@ Source: `api/_shared/BillingLedgerService.js`
 - Student with active authorization uses split billing:
 	- if `authorization.provider_track` exists, track pricing is authoritative:
 		- `payment_mode = authorization.provider_track.payment_mode`
-		- `studentCopay = authorization.provider_track.default_customer_charge_amount` for `partially_paid_by_hmo`
+		- `studentCopay = authorization.provider_track.default_customer_charge_amount` for `partially_paid_by_hmo` only when that value is greater than zero
+		- if `partially_paid_by_hmo` track customer charge is blank or `0`, fallback is `max(service.default_customer_charge_amount - authorization.contracted_rate_amount, 0)`
 		- `studentCopay = 0` for `fully_paid_by_hmo`
 		- `studentCopay = authorization.provider_track.default_customer_charge_amount || service.default_customer_charge_amount` for `fully_paid_by_customer`
 		- `insurerClaim = authorization.contracted_rate_amount` for `partially_paid_by_hmo` and `fully_paid_by_hmo`
 		- `insurerClaim = 0` for `fully_paid_by_customer`
+		- `default_insurer_claim_amount` on the track is setup guidance and authorization seeding only; live billing still uses `authorization.contracted_rate_amount`
 	- if no provider track is present, fallback remains `max(service.default_customer_charge_amount - authorization.contracted_rate_amount, 0)` for student copay
 	- student DEBIT entry on `student` only if `studentCopay > 0`
 	- insurer DEBIT entry on `hmo_provider` only if `insurerClaim > 0`

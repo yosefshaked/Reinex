@@ -56,6 +56,42 @@ function buildEmptyTrackForm(providerId = '') {
   };
 }
 
+function formatTrackAmountForForm(amount, { blankWhenZero = false } = {}) {
+  if (amount == null) return '';
+  if (blankWhenZero && Number(amount) === 0) return '';
+  return String(toShekel(amount));
+}
+
+function withTrackPaymentMode(trackForm, paymentMode) {
+  const next = {
+    ...trackForm,
+    paymentMode,
+  };
+
+  if (paymentMode === 'fully_paid_by_hmo') {
+    next.defaultCustomerChargeAmount = '0';
+  } else if (trackForm.paymentMode === 'fully_paid_by_hmo' && trackForm.defaultCustomerChargeAmount === '0') {
+    next.defaultCustomerChargeAmount = '';
+  }
+
+  if (paymentMode === 'fully_paid_by_customer') {
+    next.defaultInsurerClaimAmount = '0';
+  } else if (trackForm.paymentMode === 'fully_paid_by_customer' && trackForm.defaultInsurerClaimAmount === '0') {
+    next.defaultInsurerClaimAmount = '';
+  }
+
+  return next;
+}
+
+function getServiceLabel(services, serviceId) {
+  const service = services.find((entry) => entry.id === serviceId);
+  return service?.service_name || service?.name || 'שירות';
+}
+
+function usesDerivedCustomerCharge(track) {
+  return track?.payment_mode === 'partially_paid_by_hmo' && Number(track?.default_customer_charge_amount || 0) <= 0;
+}
+
 
 
 export default function HmoSetupWorkspace({ onChanged = null }) {
@@ -109,8 +145,12 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
       serviceId: track.service_id || '',
       name: track.name || '',
       paymentMode: track.payment_mode || 'partially_paid_by_hmo',
-      defaultCustomerChargeAmount: track.default_customer_charge_amount != null ? toShekel(track.default_customer_charge_amount) : '',
-      defaultInsurerClaimAmount: track.default_insurer_claim_amount != null ? toShekel(track.default_insurer_claim_amount) : '',
+      defaultCustomerChargeAmount: formatTrackAmountForForm(track.default_customer_charge_amount, {
+        blankWhenZero: track.payment_mode === 'partially_paid_by_hmo',
+      }),
+      defaultInsurerClaimAmount: formatTrackAmountForForm(track.default_insurer_claim_amount, {
+        blankWhenZero: track.payment_mode === 'fully_paid_by_customer',
+      }),
       defaultWorkflowNotes: track.default_workflow_notes || '',
       is_active: track.is_active !== false,
       suggestionId: 'custom',
@@ -123,13 +163,15 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
 
   function applySuggestion(suggestionId) {
     const suggestion = HMO_SUGGESTION_OPTIONS.find((option) => option.value === suggestionId);
-    setTrackForm((current) => ({
-      ...current,
-      suggestionId,
-      name: current.name || (suggestion ? `מסלול ${suggestion.label}` : current.name),
-      paymentMode: suggestion?.paymentMode || current.paymentMode,
-      defaultWorkflowNotes: suggestion?.workflowNotes || current.defaultWorkflowNotes,
-    }));
+    setTrackForm((current) => {
+      const next = withTrackPaymentMode(current, suggestion?.paymentMode || current.paymentMode);
+      return {
+        ...next,
+        suggestionId,
+        name: current.name || (suggestion ? `מסלול ${suggestion.label}` : current.name),
+        defaultWorkflowNotes: suggestion?.workflowNotes || current.defaultWorkflowNotes,
+      };
+    });
   }
 
   async function handleSaveProvider() {
@@ -190,14 +232,21 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
 
     setSaving(true);
     try {
+      const defaultCustomerChargeAmount = trackForm.paymentMode === 'fully_paid_by_hmo'
+        ? 0
+        : toAgorot(trackForm.defaultCustomerChargeAmount);
+      const defaultInsurerClaimAmount = trackForm.paymentMode === 'fully_paid_by_customer'
+        ? 0
+        : toAgorot(trackForm.defaultInsurerClaimAmount);
+
       const payload = {
         id: trackForm.id || undefined,
         provider_id: trackForm.providerId,
         service_id: trackForm.serviceId,
         name: trackForm.name.trim(),
         payment_mode: trackForm.paymentMode,
-        default_customer_charge_amount: toAgorot(trackForm.defaultCustomerChargeAmount),
-        default_insurer_claim_amount: toAgorot(trackForm.defaultInsurerClaimAmount),
+        default_customer_charge_amount: defaultCustomerChargeAmount,
+        default_insurer_claim_amount: defaultInsurerClaimAmount,
         default_workflow_notes: trackForm.defaultWorkflowNotes || '',
         is_active: trackForm.is_active,
         metadata: {
@@ -369,7 +418,7 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                           <div className="text-sm font-medium text-zinc-900">{track.name}</div>
                           <div className="mt-1 text-xs text-muted-foreground">
                             {HMO_PAYMENT_MODE_OPTIONS.find((option) => option.value === track.payment_mode)?.label || track.payment_mode}
-                            {track.service_id ? ` • ${(services.find((service) => service.id === track.service_id)?.service_name || services.find((service) => service.id === track.service_id)?.name || 'שירות')}` : ''}
+                            {track.service_id ? ` • ${getServiceLabel(services, track.service_id)}` : ''}
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -397,7 +446,11 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                       <div className="mt-3 grid gap-2 md:grid-cols-3 text-sm">
                         <div className="rounded-lg bg-slate-50 p-3">
                           <div className="text-[11px] text-muted-foreground">חיוב לקוח ברירת מחדל</div>
-                          <div className="mt-1 font-semibold">{formatCurrency(track.default_customer_charge_amount)}</div>
+                          <div className="mt-1 font-semibold text-zinc-900">
+                            {usesDerivedCustomerCharge(track)
+                              ? 'מחושב אוטומטית לפי תעריף השירות פחות התעריף החוזי'
+                              : formatCurrency(track.default_customer_charge_amount)}
+                          </div>
                         </div>
                         <div className="rounded-lg bg-slate-50 p-3">
                           <div className="text-[11px] text-muted-foreground">תביעה ברירת מחדל</div>
@@ -539,7 +592,7 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                 <Label className="text-xs text-slate-600">מודל תשלום</Label>
                 <Select
                   value={trackForm.paymentMode}
-                  onValueChange={(value) => setTrackForm((current) => ({ ...current, paymentMode: value }))}
+                  onValueChange={(value) => setTrackForm((current) => withTrackPaymentMode(current, value))}
                   disabled={!canManageProviders || saving}
                 >
                   <SelectTrigger>
@@ -560,8 +613,16 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                     id="track-customer-charge"
                     value={trackForm.defaultCustomerChargeAmount}
                     onChange={(value) => setTrackForm((current) => ({ ...current, defaultCustomerChargeAmount: value }))}
-                    disabled={!canManageProviders || saving}
+                    disabled={!canManageProviders || saving || trackForm.paymentMode === 'fully_paid_by_hmo'}
+                    allowZero
                   />
+                  <p className="text-xs text-muted-foreground">
+                    {trackForm.paymentMode === 'fully_paid_by_hmo'
+                      ? 'ננעל על ₪0.00 כי במסלול זה הלקוח לא מחויב.'
+                      : trackForm.paymentMode === 'partially_paid_by_hmo'
+                        ? 'השאירו ריק כדי לחשב אוטומטית: תעריף השירות פחות התעריף החוזי שבאישור. הזינו סכום רק אם ההשתתפות העצמית קבועה.'
+                        : 'השאירו ריק כדי לחייב את הלקוח לפי תעריף השירות המלא. הזינו סכום רק אם למסלול יש מחיר קבוע אחר.'}
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="track-insurer-claim">תביעה ברירת מחדל</Label>
@@ -569,8 +630,14 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                     id="track-insurer-claim"
                     value={trackForm.defaultInsurerClaimAmount}
                     onChange={(value) => setTrackForm((current) => ({ ...current, defaultInsurerClaimAmount: value }))}
-                    disabled={!canManageProviders || saving}
+                    disabled={!canManageProviders || saving || trackForm.paymentMode === 'fully_paid_by_customer'}
+                    allowZero
                   />
+                  <p className="text-xs text-muted-foreground">
+                    {trackForm.paymentMode === 'fully_paid_by_customer'
+                      ? 'ננעל על ₪0.00 כי במסלול זה אין חיוב לגורם מממן.'
+                      : 'זהו ערך ברירת מחדל והקשר תפעולי. החיוב בפועל לגורם המממן נקבע לפי התעריף החוזי באישור התלמיד.'}
+                  </p>
                 </div>
               </div>
 

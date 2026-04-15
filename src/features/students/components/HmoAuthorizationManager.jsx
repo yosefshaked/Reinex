@@ -54,6 +54,48 @@ function getStatusLabel(status) {
   }
 }
 
+function resolveSelectedService(services, selectedTrack) {
+  if (!selectedTrack?.service_id) return null;
+  return services.find((service) => service.id === selectedTrack.service_id) || null;
+}
+
+function buildAuthorizationSplitPreview({ selectedTrack, selectedService, contractedRateAmount }) {
+  const paymentMode = selectedTrack?.payment_mode || 'partially_paid_by_hmo';
+  const serviceRate = coerceAgorot(selectedService?.default_customer_charge_amount);
+  const hmoShare = isValidCurrencyInput(contractedRateAmount) ? toAgorot(contractedRateAmount) : 0;
+
+  if (!serviceRate && paymentMode !== 'fully_paid_by_hmo') {
+    return null;
+  }
+  if (!hmoShare && paymentMode !== 'fully_paid_by_customer') {
+    return null;
+  }
+
+  let studentCopay = 0;
+  let insurerClaim = 0;
+
+  if (paymentMode === 'fully_paid_by_hmo') {
+    studentCopay = 0;
+    insurerClaim = hmoShare;
+  } else if (paymentMode === 'fully_paid_by_customer') {
+    studentCopay = coerceAgorot(selectedTrack?.default_customer_charge_amount) || serviceRate;
+    insurerClaim = 0;
+  } else {
+    const configuredCopay = coerceAgorot(selectedTrack?.default_customer_charge_amount);
+    studentCopay = configuredCopay > 0 ? configuredCopay : Math.max(serviceRate - hmoShare, 0);
+    insurerClaim = hmoShare;
+  }
+
+  return {
+    paymentMode,
+    serviceRate,
+    studentCopay,
+    insurerClaim,
+    hmoExceedsRate: paymentMode === 'partially_paid_by_hmo' && hmoShare > serviceRate,
+    usesDerivedCopay: paymentMode === 'partially_paid_by_hmo' && coerceAgorot(selectedTrack?.default_customer_charge_amount) <= 0,
+  };
+}
+
 export default function HmoAuthorizationManager({
   studentId,
   services,
@@ -93,6 +135,20 @@ export default function HmoAuthorizationManager({
   const selectedTrack = useMemo(
     () => availableTracks.find((track) => track.id === form.providerTrackId) || null,
     [availableTracks, form.providerTrackId],
+  );
+
+  const selectedService = useMemo(
+    () => resolveSelectedService(services, selectedTrack),
+    [services, selectedTrack],
+  );
+
+  const splitPreview = useMemo(
+    () => buildAuthorizationSplitPreview({
+      selectedTrack,
+      selectedService,
+      contractedRateAmount: form.contractedRateAmount,
+    }),
+    [form.contractedRateAmount, selectedService, selectedTrack],
   );
 
   const loadAuthorizations = useCallback(async () => {
@@ -385,26 +441,28 @@ export default function HmoAuthorizationManager({
               </div>
             </div>
 
-            {/* Split preview — shown when we have a valid contracted rate and a service rate from the track */}
-            {(() => {
-              const serviceRate = coerceAgorot(selectedTrack?.default_customer_charge_amount);
-              const hmoShare = isValidCurrencyInput(form.contractedRateAmount) ? toAgorot(form.contractedRateAmount) : 0;
-              if (!serviceRate || !hmoShare) return null;
-              const studentCopay = Math.max(serviceRate - hmoShare, 0);
-              const hmoExceedsRate = hmoShare > serviceRate;
-              return (
-                <div className={`rounded-lg border px-3 py-2 text-sm ${hmoExceedsRate ? 'border-amber-200 bg-amber-50' : 'border-blue-100 bg-blue-50'}`}>
-                  <div className="text-xs font-medium text-zinc-700">תצוגה מקדימה לחיוב לכל שיעור</div>
-                  <div className="mt-1 flex flex-wrap gap-3 text-xs">
-                    <span>תלמיד: <strong className="text-zinc-900">{formatCurrency(studentCopay)}</strong></span>
-                    <span>גורם מממן: <strong className="text-zinc-900">{formatCurrency(hmoShare)}</strong></span>
-                  </div>
-                  {hmoExceedsRate ? (
-                    <p className="mt-1 text-xs text-amber-700">⚠️ התעריף החוזי עולה על תעריף השירות — ההשתתפות העצמית של התלמיד תהיה ₪0.00.</p>
-                  ) : null}
+            {splitPreview ? (
+              <div className={`rounded-lg border px-3 py-2 text-sm ${splitPreview.hmoExceedsRate ? 'border-amber-200 bg-amber-50' : 'border-blue-100 bg-blue-50'}`}>
+                <div className="text-xs font-medium text-zinc-700">תצוגה מקדימה לחיוב לכל שיעור</div>
+                <div className="mt-1 flex flex-wrap gap-3 text-xs">
+                  <span>שירות: <strong className="text-zinc-900">{selectedService ? formatCurrency(splitPreview.serviceRate) : 'לא נמצא תעריף שירות'}</strong></span>
+                  <span>תלמיד: <strong className="text-zinc-900">{formatCurrency(splitPreview.studentCopay)}</strong></span>
+                  <span>גורם מממן: <strong className="text-zinc-900">{formatCurrency(splitPreview.insurerClaim)}</strong></span>
                 </div>
-              );
-            })()}
+                {splitPreview.usesDerivedCopay ? (
+                  <p className="mt-1 text-xs text-blue-700">השתתפות הלקוח תחושב אוטומטית: תעריף השירות פחות התעריף החוזי.</p>
+                ) : null}
+                {splitPreview.paymentMode === 'fully_paid_by_hmo' ? (
+                  <p className="mt-1 text-xs text-blue-700">במסלול זה הלקוח לא מחויב. הגורם המממן מחויב לפי התעריף החוזי באישור.</p>
+                ) : null}
+                {splitPreview.paymentMode === 'fully_paid_by_customer' ? (
+                  <p className="mt-1 text-xs text-blue-700">במסלול זה אין חיוב לגורם מממן. הלקוח יחויב לפי מחיר המסלול או תעריף השירות.</p>
+                ) : null}
+                {splitPreview.hmoExceedsRate ? (
+                  <p className="mt-1 text-xs text-amber-700">התעריף החוזי עולה על תעריף השירות. ההשתתפות העצמית של התלמיד תהיה ₪0.00.</p>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="grid gap-3 md:grid-cols-3">
               <div className="space-y-2">

@@ -16,6 +16,7 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
   const [paidClaimInstanceId, setPaidClaimInstanceId] = useState('');
   const [inspectInstanceId, setInspectInstanceId] = useState('');
   const [inspectParticipantId, setInspectParticipantId] = useState('');
+  const [inspectTargetStatus, setInspectTargetStatus] = useState('attended');
   const [inspectResult, setInspectResult] = useState(null);
   const [isSubmittingKind, setIsSubmittingKind] = useState('');
   const [error, setError] = useState('');
@@ -95,6 +96,7 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
           password,
           lesson_instance_id: lessonInstanceId,
           ...(lessonParticipantId ? { lesson_participant_id: lessonParticipantId } : {}),
+          ...(inspectTargetStatus ? { target_participant_status: inspectTargetStatus } : {}),
         },
       });
 
@@ -199,7 +201,7 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
               <h3 className="text-sm font-semibold">Inspect HMO Charge Context</h3>
               <p className="text-xs text-muted-foreground">טוען את כל ההקשר הנדרש לאבחון שימוש במסלול HMO: משתתף, שירות, אישורים, החלטת חיוב ורשומות לדר.</p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="debug-inspect-hmo-instance-id">lesson_instance_id</Label>
                 <Input
@@ -216,6 +218,15 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                   value={inspectParticipantId}
                   onChange={(event) => setInspectParticipantId(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="debug-inspect-hmo-target-status">simulate participant_status</Label>
+                <Input
+                  id="debug-inspect-hmo-target-status"
+                  placeholder="attended"
+                  value={inspectTargetStatus}
+                  onChange={(event) => setInspectTargetStatus(event.target.value)}
                 />
               </div>
             </div>
@@ -237,6 +248,9 @@ export default function HiddenUatAdminToolsDialog({ open, onOpenChange, orgId, p
                 </div>
                 <div className="text-xs text-muted-foreground">
                   active_authorization: {inspectResult?.authorization_resolution?.active_authorization_id || 'none'}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  simulated_target_participant_status: {inspectResult?.simulated_target_participant_status || 'none'}
                 </div>
                 <pre className="max-h-80 overflow-auto rounded bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-100">
                   {JSON.stringify(inspectResult, null, 2)}

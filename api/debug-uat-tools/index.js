@@ -143,8 +143,10 @@ async function inspectHmoChargeContext({
   tenantClient,
   lessonInstanceId,
   lessonParticipantId = '',
+  targetParticipantStatus = '',
 }) {
   const normalizedParticipantId = normalizeString(lessonParticipantId);
+  const normalizedTargetParticipantStatus = normalizeString(targetParticipantStatus).toLowerCase();
 
   const { data: instance, error: instanceError } = await tenantClient
     .from('lesson_instances')
@@ -212,9 +214,16 @@ async function inspectHmoChargeContext({
   const serviceMatchedActiveAuthorizations = (allActiveAuthorizationsForStudent || [])
     .filter((row) => row.service_id === instance.service_id);
 
+  const effectiveParticipant = normalizedTargetParticipantStatus
+    ? {
+      ...selectedParticipant,
+      participant_status: normalizedTargetParticipantStatus,
+    }
+    : selectedParticipant;
+
   const policies = await loadFinancePolicies(tenantClient);
   const chargeDecision = buildDesiredChargeDescriptors({
-    participant: selectedParticipant,
+    participant: effectiveParticipant,
     service,
     authorization: activeAuthorization,
     policies,
@@ -237,6 +246,8 @@ async function inspectHmoChargeContext({
     instance,
     service,
     selected_participant: selectedParticipant,
+    effective_participant: effectiveParticipant,
+    simulated_target_participant_status: normalizedTargetParticipantStatus || null,
     authorization_resolution: {
       has_student_id: Boolean(studentId),
       all_active_count_for_student: (allActiveAuthorizationsForStudent || []).length,
@@ -344,6 +355,7 @@ export default async function debugUatTools(context, req) {
   const lessonInstanceId = normalizeString(body?.lesson_instance_id || body?.lessonInstanceId || body?.instance_id || body?.instanceId);
   const lockKind = normalizeString(body?.lock_kind || body?.lockKind).toLowerCase();
   const lessonParticipantId = normalizeString(body?.lesson_participant_id || body?.lessonParticipantId || body?.participant_id || body?.participantId);
+  const targetParticipantStatus = normalizeString(body?.target_participant_status || body?.targetParticipantStatus);
 
   if (!lessonInstanceId) {
     return respond(context, 400, { message: 'missing_lesson_instance_id' });
@@ -379,6 +391,7 @@ export default async function debugUatTools(context, req) {
         tenantClient,
         lessonInstanceId,
         lessonParticipantId,
+        targetParticipantStatus,
       });
 
       await logAuditEvent(supabase, {
@@ -392,6 +405,7 @@ export default async function debugUatTools(context, req) {
         resourceId: lessonInstanceId,
         details: {
           lesson_participant_id: lessonParticipantId || null,
+          simulated_target_participant_status: targetParticipantStatus || null,
           selected_participant_id: inspection?.selected_participant?.id || null,
           active_authorization_id: inspection?.authorization_resolution?.active_authorization_id || null,
         },
@@ -401,6 +415,7 @@ export default async function debugUatTools(context, req) {
         message: 'hmo_charge_context_loaded',
         lesson_instance_id: lessonInstanceId,
         lesson_participant_id: lessonParticipantId || null,
+        simulated_target_participant_status: targetParticipantStatus || null,
         inspection,
       });
     }

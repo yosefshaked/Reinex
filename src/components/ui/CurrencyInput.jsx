@@ -19,12 +19,14 @@ export default function CurrencyInput({
   onChange,
   disabled = false,
   max = MAX_AGOROT_DEFAULT,
+  allowZero = false,
   id,
   className = '',
 }) {
   const hasValue = value !== '' && value !== undefined && value !== null;
   const agorot = toAgorot(value);
-  const tooLow = hasValue && agorot <= 0;
+  const min = allowZero ? 0 : 0.01;
+  const tooLow = hasValue && (allowZero ? agorot < 0 : agorot <= 0);
   const tooHigh = hasValue && agorot > max;
   const isError = tooLow || tooHigh;
   const isValid = hasValue && !isError;
@@ -35,7 +37,7 @@ export default function CurrencyInput({
         <Input
           id={id}
           type="number"
-          min="0.01"
+          min={String(min)}
           step="0.01"
           dir="ltr"
           value={value}
@@ -55,7 +57,7 @@ export default function CurrencyInput({
         <p className="text-xs text-muted-foreground">{formatCurrency(agorot)}</p>
       ) : null}
       {tooLow ? (
-        <p className="text-xs text-destructive">הסכום חייב להיות גדול מאפס</p>
+        <p className="text-xs text-destructive">{allowZero ? 'הסכום לא יכול להיות שלילי' : 'הסכום חייב להיות גדול מאפס'}</p>
       ) : null}
       {tooHigh ? (
         <p className="text-xs text-destructive">
