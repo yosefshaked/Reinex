@@ -12,8 +12,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import CurrencyInput from '@/components/ui/CurrencyInput.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { formatCurrency, toAgorot, toShekel } from '@/lib/currency.js';
+import { coerceAgorot, formatCurrency, isValidCurrencyInput, toAgorot, toShekel } from '@/lib/currency.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useMedicalProviders } from '@/features/students/hooks/useMedicalProviders.js';
@@ -161,6 +162,10 @@ export default function HmoAuthorizationManager({
     }
     if (Number(form.authorizedLessons || 0) <= 0) {
       toast.error('יש להזין כמות מפגשים מאושרת.');
+      return;
+    }
+    if (!isValidCurrencyInput(form.contractedRateAmount)) {
+      toast.error('התעריף החוזי חובה ויחייב להיות גדול מאפס. ללא ערך זה, כל חיובי השיעורים ייחסמו לאישור זה.');
       return;
     }
 
@@ -363,14 +368,43 @@ export default function HmoAuthorizationManager({
 
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="contracted-rate-amount">תעריף חוזי</Label>
-                <Input id="contracted-rate-amount" type="number" min="0" step="0.01" value={form.contractedRateAmount} onChange={(event) => setForm((current) => ({ ...current, contractedRateAmount: event.target.value }))} disabled={saving} />
+                <Label htmlFor="contracted-rate-amount">
+                  תעריף חוזי (גורם מממן משלם לשיעור)
+                  <span className="ms-1 text-destructive">*</span>
+                </Label>
+                <CurrencyInput
+                  id="contracted-rate-amount"
+                  value={form.contractedRateAmount}
+                  onChange={(value) => setForm((current) => ({ ...current, contractedRateAmount: value }))}
+                  disabled={saving}
+                />
               </div>
               <div className="rounded-lg border border-border bg-white p-3 text-sm">
                 <div className="text-[11px] text-muted-foreground">ברירת מחדל מהמסלול</div>
                 <div className="mt-1 font-semibold">{formatCurrency(selectedTrack?.default_insurer_claim_amount)}</div>
               </div>
             </div>
+
+            {/* Split preview — shown when we have a valid contracted rate and a service rate from the track */}
+            {(() => {
+              const serviceRate = coerceAgorot(selectedTrack?.default_customer_charge_amount);
+              const hmoShare = isValidCurrencyInput(form.contractedRateAmount) ? toAgorot(form.contractedRateAmount) : 0;
+              if (!serviceRate || !hmoShare) return null;
+              const studentCopay = Math.max(serviceRate - hmoShare, 0);
+              const hmoExceedsRate = hmoShare > serviceRate;
+              return (
+                <div className={`rounded-lg border px-3 py-2 text-sm ${hmoExceedsRate ? 'border-amber-200 bg-amber-50' : 'border-blue-100 bg-blue-50'}`}>
+                  <div className="text-xs font-medium text-zinc-700">תצוגה מקדימה לחיוב לכל שיעור</div>
+                  <div className="mt-1 flex flex-wrap gap-3 text-xs">
+                    <span>תלמיד: <strong className="text-zinc-900">{formatCurrency(studentCopay)}</strong></span>
+                    <span>גורם מממן: <strong className="text-zinc-900">{formatCurrency(hmoShare)}</strong></span>
+                  </div>
+                  {hmoExceedsRate ? (
+                    <p className="mt-1 text-xs text-amber-700">⚠️ התעריף החוזי עולה על תעריף השירות — ההשתתפות העצמית של התלמיד תהיה ₪0.00.</p>
+                  ) : null}
+                </div>
+              );
+            })()}
 
             <div className="grid gap-3 md:grid-cols-3">
               <div className="space-y-2">

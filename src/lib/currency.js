@@ -40,6 +40,20 @@ export function coerceAgorot(value, fallback = 0) {
 }
 
 /**
+ * Validate a shekel string from user input before converting to agorot.
+ * Returns true if the value is a finite positive number within the given max (agorot).
+ * Gate API submissions with this — call toAgorot(value) on the same input before sending.
+ *
+ * @param {string|number} shekelString — raw user input (shekel units, e.g. "120")
+ * @param {number} [maxAgorot] — default ₪100,000
+ * @returns {boolean}
+ */
+export function isValidCurrencyInput(shekelString, maxAgorot = 10000000) {
+  const agorot = toAgorot(shekelString);
+  return Number.isFinite(agorot) && agorot > 0 && agorot <= maxAgorot;
+}
+
+/**
  * Format an agorot integer as a Hebrew-locale shekel string.
  * Divides by 100 internally — always pass raw agorot from the API/DB.
  * @param {number|null|undefined} agorot

@@ -29,7 +29,8 @@ import { useMedicalProviders } from '@/features/students/hooks/useMedicalProvide
 import {
   HMO_PAYMENT_MODE_OPTIONS,
   HMO_SUGGESTION_OPTIONS,
-} from '@/features/students/components/student-billing-helpers.js';
+} from '@/features/finance/constants/hmoOptions.js';
+import CurrencyInput from '@/components/ui/CurrencyInput.jsx';
 import { toShekel, toAgorot, formatCurrency } from '@/lib/currency.js';
 
 function buildEmptyProviderForm() {
@@ -555,25 +556,19 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="track-customer-charge">חיוב לקוח ברירת מחדל</Label>
-                  <Input
+                  <CurrencyInput
                     id="track-customer-charge"
-                    type="number"
-                    min="0"
-                    step="0.01"
                     value={trackForm.defaultCustomerChargeAmount}
-                    onChange={(event) => setTrackForm((current) => ({ ...current, defaultCustomerChargeAmount: event.target.value }))}
+                    onChange={(value) => setTrackForm((current) => ({ ...current, defaultCustomerChargeAmount: value }))}
                     disabled={!canManageProviders || saving}
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="track-insurer-claim">תביעה ברירת מחדל</Label>
-                  <Input
+                  <CurrencyInput
                     id="track-insurer-claim"
-                    type="number"
-                    min="0"
-                    step="0.01"
                     value={trackForm.defaultInsurerClaimAmount}
-                    onChange={(event) => setTrackForm((current) => ({ ...current, defaultInsurerClaimAmount: event.target.value }))}
+                    onChange={(value) => setTrackForm((current) => ({ ...current, defaultInsurerClaimAmount: value }))}
                     disabled={!canManageProviders || saving}
                   />
                 </div>
