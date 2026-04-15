@@ -893,7 +893,7 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   if (openHmoTask && resolvedTargetStatus === 'scheduled') {
     impacts.push({
       type: 'hmo_task_resolve',
-      message: `משימת הגשת התביעה עבור ${studentName} תסומן כטופלה.`,
+      message: `משימת הגשת התביעה עבור ${studentName} תבוטל ותיסגר (לא נדרשת עוד לאחר שחזור לתוכנן).`,
       task_id: openHmoTask.id,
     });
   }

@@ -48,6 +48,24 @@ function buildPersonName(profile) {
   return [profile.first_name, profile.middle_name, profile.last_name].filter(Boolean).join(' ').trim() || 'לקוח/ה';
 }
 
+function dedupeHmoClaimTasks(tasks = []) {
+  const latestByFlow = new Map();
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    const resourceType = normalizeString(task?.resource_type) || 'lesson_participant';
+    const resourceId = normalizeString(task?.resource_id);
+    const authorizationId = normalizeString(task?.metadata?.hmo_authorization_id);
+    const fallbackTaskId = normalizeString(task?.id);
+    const key = resourceId
+      ? `${resourceType}:${resourceId}:${authorizationId || '_'}`
+      : `task:${fallbackTaskId || Math.random().toString(36).slice(2)}`;
+
+    if (!latestByFlow.has(key)) {
+      latestByFlow.set(key, task);
+    }
+  }
+  return Array.from(latestByFlow.values());
+}
+
 async function buildHmoClaimsReadModel({
   tenantClient,
   billingService,
@@ -90,7 +108,8 @@ async function buildHmoClaimsReadModel({
     throw tasksError;
   }
 
-  const taskRows = Array.isArray(tasks) ? tasks : [];
+  const rawTaskRows = Array.isArray(tasks) ? tasks : [];
+  const taskRows = dedupeHmoClaimTasks(rawTaskRows);
   const participantIds = Array.from(new Set(taskRows
     .map((task) => normalizeString(task?.resource_id))
     .filter((value) => isUuidLike(value))));
