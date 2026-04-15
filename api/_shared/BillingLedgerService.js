@@ -47,6 +47,29 @@ function toIsoOrNow(value, clock) {
   return clock();
 }
 
+/**
+ * Filter ledger entries down to only "effective" entries — i.e. those that are
+ * neither a reversal entry nor an entry that has been reversed.
+ *
+ * Why: summary totals (payment_total, manual_adjustment_total, receivable_total)
+ * should reflect net activity only.  A reversal pair (original + its reversal)
+ * nets to zero and must not inflate either direction's total.
+ *
+ * @param {Array<{id: string, reverses_transaction_id?: string|null}>} entries
+ * @returns {Array}
+ */
+function effectiveLedgerEntries(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  // IDs of entries that were subsequently reversed by another entry.
+  const reversedIds = new Set(
+    list
+      .filter((e) => e.reverses_transaction_id)
+      .map((e) => e.reverses_transaction_id),
+  );
+  // Keep only entries that are neither the reversal itself nor the reversed original.
+  return list.filter((e) => !e.reverses_transaction_id && !reversedIds.has(e.id));
+}
+
 function toDateKey(value) {
   const normalized = normalizeString(value);
   if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
@@ -1232,10 +1255,10 @@ export default class BillingLedgerService {
         balance: balance.balance,
         lesson_charge_total: lessonHistory.reduce((sum, row) => sum + coerceAgorot(row.student_charge_amount), 0),
         hmo_charge_total: lessonHistory.reduce((sum, row) => sum + coerceAgorot(row.hmo_charge_amount), 0),
-        payment_total: (ledgerEntries || [])
+        payment_total: effectiveLedgerEntries(ledgerEntries)
           .filter((row) => normalizeDirection(row.direction) === 'CREDIT')
           .reduce((sum, row) => sum + coerceAgorot(row.amount), 0),
-        manual_adjustment_total: (ledgerEntries || [])
+        manual_adjustment_total: effectiveLedgerEntries(ledgerEntries)
           .filter((row) => normalizeString(row.source_type) === 'manual_adjustment')
           .reduce((sum, row) => sum + coerceAgorot(row.amount), 0),
       },
@@ -1356,7 +1379,7 @@ export default class BillingLedgerService {
       summary: {
         balance: balance.balance,
         lesson_charge_total: lessonHistory.reduce((sum, row) => sum + coerceAgorot(row.billed_amount), 0),
-        payment_total: (ledgerEntries || [])
+        payment_total: effectiveLedgerEntries(ledgerEntries)
           .filter((row) => normalizeDirection(row.direction) === 'CREDIT')
           .reduce((sum, row) => sum + coerceAgorot(row.amount), 0),
       },
@@ -1413,10 +1436,10 @@ export default class BillingLedgerService {
     return {
       summary: {
         balance: balance.balance,
-        receivable_total: (ledgerEntries || [])
+        receivable_total: effectiveLedgerEntries(ledgerEntries)
           .filter((row) => normalizeDirection(row.direction) === 'DEBIT')
           .reduce((sum, row) => sum + coerceAgorot(row.amount), 0),
-        payment_total: (ledgerEntries || [])
+        payment_total: effectiveLedgerEntries(ledgerEntries)
           .filter((row) => normalizeDirection(row.direction) === 'CREDIT')
           .reduce((sum, row) => sum + coerceAgorot(row.amount), 0),
       },
