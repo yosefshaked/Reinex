@@ -407,7 +407,8 @@ export default function FormBuilderPage() {
   }), [alertRules, description, formName, formUsage, schema, visibilityRules]);
   const hasUnsavedChanges = Boolean(canLoad && !loading && savedSnapshot && currentSnapshot !== savedSnapshot);
 
-  const updateSchema = (updater) => setSchema((prev) => normalizeFormSchema(typeof updater === 'function' ? updater(prev) : updater));
+  // Keep in-progress editor text intact (including temporary trailing spaces) while typing.
+  const updateSchema = (updater) => setSchema((prev) => (typeof updater === 'function' ? updater(prev) : updater));
 
   const selectedSection = useMemo(() => schema.sections.find((section) => section.id === selected.id) || null, [schema.sections, selected.id]);
   const selectedItem = useMemo(() => findItemById(schema, selected.id, sharedBlockMap), [schema, selected.id, sharedBlockMap]);
@@ -622,8 +623,9 @@ export default function FormBuilderPage() {
   };
 
   const persistForm = async (publish = false) => {
+    const normalizedSchemaForSave = normalizeFormSchema(schema);
     const schemaIssues = validateNormalizedFormSchemaIntegrity({
-      formSchema: schema,
+      formSchema: normalizedSchemaForSave,
       visibilityRules,
       alertRules,
     });
@@ -642,7 +644,7 @@ export default function FormBuilderPage() {
           name: formName,
           description,
           form_usage: formUsage,
-          form_schema: schema,
+          form_schema: normalizedSchemaForSave,
           visibility_rules: visibilityRules,
           alert_rules: alertRules,
           action: publish ? 'publish' : 'save_draft',
