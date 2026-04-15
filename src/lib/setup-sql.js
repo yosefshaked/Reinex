@@ -399,18 +399,6 @@ DROP INDEX IF EXISTS public.students_identity_number_unique_idx;
 DROP INDEX IF EXISTS public.students_is_active_idx;
 DROP INDEX IF EXISTS public.students_name_idx;
 
-ALTER TABLE public.students
-  DROP COLUMN IF EXISTS first_name,
-  DROP COLUMN IF EXISTS middle_name,
-  DROP COLUMN IF EXISTS last_name,
-  DROP COLUMN IF EXISTS identity_number,
-  DROP COLUMN IF EXISTS phone,
-  DROP COLUMN IF EXISTS email,
-  DROP COLUMN IF EXISTS date_of_birth,
-  DROP COLUMN IF EXISTS default_notification_method,
-  DROP COLUMN IF EXISTS tags,
-  DROP COLUMN IF EXISTS onboarding_status,
-  DROP COLUMN IF EXISTS is_active;
 
 -- -----------------------------------------------------------------
 -- public.client_guardians
@@ -481,8 +469,6 @@ BEGIN
 EXCEPTION
   WHEN others THEN NULL;
 END $$;
-
-DROP TABLE IF EXISTS public.student_guardians;
 
 -- -----------------------------------------------------------------
 -- public.Employees (complete table with payroll fields)
@@ -660,23 +646,6 @@ EXCEPTION
 END;
 $$;
 
--- -----------------------------------------------------------------
--- Legacy cleanup: public.WorkSessions / public.LeaveBalances
--- -----------------------------------------------------------------
-
-DROP INDEX IF EXISTS "WorkSessions_employee_date_idx";
-DROP INDEX IF EXISTS "WorkSessions_service_idx";
-DROP INDEX IF EXISTS "WorkSessions_deleted_idx";
-DROP INDEX IF EXISTS "LeaveBalances_employee_date_idx";
-
-ALTER TABLE IF EXISTS public.lesson_earnings
-  DROP CONSTRAINT IF EXISTS lesson_earnings_work_session_id_fkey;
-
-ALTER TABLE IF EXISTS public.lesson_earnings
-  DROP COLUMN IF EXISTS work_session_id;
-
-DROP TABLE IF EXISTS public."LeaveBalances";
-DROP TABLE IF EXISTS public."WorkSessions";
 
 -- -----------------------------------------------------------------
 -- public.employee_attendance_records
@@ -1069,8 +1038,6 @@ ALTER TABLE public.instructor_profiles
   ADD COLUMN IF NOT EXISTS break_time_minutes int,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
-ALTER TABLE public.instructor_profiles
-  DROP COLUMN IF EXISTS working_days;
 
 DO $$
 BEGIN
@@ -2892,21 +2859,6 @@ DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_consumption_
 DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_transfers();
 DROP FUNCTION IF EXISTS public.recalculate_student_balance_account_by_commitment(uuid);
 DROP FUNCTION IF EXISTS public.recalculate_student_balance_account(uuid);
-DROP TABLE IF EXISTS public.student_balance_accounts;
-DROP TABLE IF EXISTS public.student_balance_transfers;
-DROP INDEX IF EXISTS commitments_balance_entry_type_idx;
-
-ALTER TABLE public.commitments
-  DROP CONSTRAINT IF EXISTS commitments_balance_entry_type_check,
-  DROP CONSTRAINT IF EXISTS commitments_transfer_not_self_check,
-  DROP CONSTRAINT IF EXISTS commitments_transfer_peer_student_id_fkey;
-
-ALTER TABLE public.commitments
-  DROP COLUMN IF EXISTS balance_entry_type,
-  DROP COLUMN IF EXISTS transfer_peer_student_id;
-
--- Drop consumption_entries table (data already migrated to ledger_transactions)
-DROP TABLE IF EXISTS public.consumption_entries CASCADE;
 
 -- -----------------------------------------------------------------
 -- Query-time balance computation helpers (ledger-based)
@@ -6368,11 +6320,11 @@ GRANT EXECUTE ON FUNCTION public.batch_sync_lesson_ledger_entries(
 
 -- -----------------------------------------------------------------
 -- Append-only billing ledger cutover
--- Final destructive section for MVP finance reset:
---   - drops commitment-era tables and RPCs
---   - recreates ledger_accounts + immutable ledger_transactions
---   - removes cached lesson billing columns
---   - adds HMO invoice metadata tables
+-- Final finance cutover section is additive-only on rerun:
+--   - preserves existing ledger / commitments / cached lesson billing data
+--   - creates ledger_accounts + immutable ledger_transactions only if missing
+--   - preserves legacy columns/tables for audit safety
+--   - adds HMO invoice metadata tables if missing
 -- -----------------------------------------------------------------
 
 ALTER TABLE public.hmo_authorizations
@@ -6396,30 +6348,8 @@ WHERE contracted_rate_amount IS NULL;
 ALTER TABLE public.hmo_authorizations
   ALTER COLUMN contracted_rate_amount SET NOT NULL;
 
-ALTER TABLE public.hmo_authorizations
-  DROP COLUMN IF EXISTS customer_charge_amount_override,
-  DROP COLUMN IF EXISTS insurer_claim_amount_override,
-  DROP COLUMN IF EXISTS payment_mode;
 
-DROP FUNCTION IF EXISTS public.get_student_remaining_balance(uuid) CASCADE;
-DROP FUNCTION IF EXISTS public.create_commitment_transfer_atomic(uuid, integer, uuid, uuid, uuid, text, integer, timestamptz, text, uuid) CASCADE;
-DROP FUNCTION IF EXISTS public.ensure_hmo_authorization_and_link_commitment(jsonb, uuid) CASCADE;
-DROP FUNCTION IF EXISTS public.create_commitment_and_ledger_entry(uuid, uuid, text, integer, integer, uuid, text, boolean, timestamptz, jsonb, uuid, uuid, uuid) CASCADE;
-DROP FUNCTION IF EXISTS public.update_commitment_and_record_delta(uuid, uuid, uuid, text, integer, integer, uuid, text, boolean, timestamptz, jsonb) CASCADE;
-DROP FUNCTION IF EXISTS public.batch_sync_lesson_ledger_entries(uuid, uuid, jsonb) CASCADE;
-
-DROP TABLE IF EXISTS public.hmo_invoice_batch_items CASCADE;
-DROP TABLE IF EXISTS public.hmo_invoice_batches CASCADE;
-DROP TABLE IF EXISTS public.ledger_transactions CASCADE;
-DROP TABLE IF EXISTS public.ledger_accounts CASCADE;
-DROP TABLE IF EXISTS public.commitments CASCADE;
-
-ALTER TABLE public.lesson_participants
-  DROP COLUMN IF EXISTS commitment_id,
-  DROP COLUMN IF EXISTS price_charged,
-  DROP COLUMN IF EXISTS pricing_breakdown;
-
-CREATE TABLE public.ledger_accounts (
+CREATE TABLE IF NOT EXISTS public.ledger_accounts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_type text NOT NULL CHECK (account_type IN ('student', 'client_profile', 'hmo_provider')),
   student_id uuid NULL REFERENCES public.students(id) ON DELETE CASCADE,
@@ -6449,7 +6379,7 @@ CREATE TABLE public.ledger_accounts (
   )
 );
 
-CREATE TABLE public.ledger_transactions (
+CREATE TABLE IF NOT EXISTS public.ledger_transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ledger_account_id uuid NOT NULL REFERENCES public.ledger_accounts(id) ON DELETE RESTRICT,
   direction text NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')),
@@ -6523,7 +6453,7 @@ BEFORE UPDATE OR DELETE ON public.ledger_transactions
 FOR EACH ROW
 EXECUTE FUNCTION public.prevent_ledger_transaction_mutation();
 
-CREATE TABLE public.hmo_invoice_batches (
+CREATE TABLE IF NOT EXISTS public.hmo_invoice_batches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   hmo_provider_id uuid NOT NULL REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
   period_start date NULL,
@@ -6544,7 +6474,7 @@ CREATE TABLE public.hmo_invoice_batches (
 CREATE INDEX IF NOT EXISTS hmo_invoice_batches_provider_idx
   ON public.hmo_invoice_batches (hmo_provider_id, created_at DESC);
 
-CREATE TABLE public.hmo_invoice_batch_items (
+CREATE TABLE IF NOT EXISTS public.hmo_invoice_batch_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   batch_id uuid NOT NULL REFERENCES public.hmo_invoice_batches(id) ON DELETE CASCADE,
   ledger_transaction_id uuid NOT NULL UNIQUE REFERENCES public.ledger_transactions(id) ON DELETE RESTRICT,

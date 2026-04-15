@@ -83,6 +83,8 @@ Each criterion must be expressed with this structure:
   - service.default_customer_charge_amount = 18000
   - authorization.id = auth-1
   - authorization.provider_id = hmo-1
+  - authorization.provider_track.payment_mode = partially_paid_by_hmo
+  - authorization.provider_track.default_customer_charge_amount = 1000
   - authorization.contracted_rate_amount = 12000
   - policies.billingConsumptionPolicy.attended = true
 - when:
@@ -91,7 +93,7 @@ Each criterion must be expressed with this structure:
   - result.status equals debited
   - result.billingReason equals hmo_split_charge
   - result.entries length equals 2
-  - contains entry where accountType equals student and amount equals 6000 and rateSource equals hmo_authorization and hmoAuthorizationId equals auth-1
+  - contains entry where accountType equals student and amount equals 1000 and rateSource equals hmo_authorization and hmoAuthorizationId equals auth-1
   - contains entry where accountType equals hmo_provider and amount equals 12000 and rateSource equals hmo_authorization and hmoAuthorizationId equals auth-1
 
 #### AC-BILL-004
@@ -104,6 +106,8 @@ Each criterion must be expressed with this structure:
   - service.default_customer_charge_amount = 10000
   - authorization.id = auth-1
   - authorization.provider_id = hmo-1
+  - authorization.provider_track.payment_mode = fully_paid_by_hmo
+  - authorization.provider_track.default_customer_charge_amount = 0
   - authorization.contracted_rate_amount = 12000
   - policies.billingConsumptionPolicy.attended = true
 - when:

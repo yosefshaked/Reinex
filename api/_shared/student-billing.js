@@ -1,17 +1,18 @@
 // @ts-check
 /* eslint-env node */
-import BillingLedgerService, { buildDesiredChargeDescriptors } from './BillingLedgerService.js';
+import BillingLedgerService, { buildDesiredChargeDescriptors, resolveHmoSplitAmounts } from './BillingLedgerService.js';
 import { loadFinancePolicies } from './employee-finance.js';
 import { normalizeString } from './org-bff.js';
 import { loadHmoAuthorizations, resolveActiveAuthorizationForStudentService } from './hmo.js';
 
-export const BILLING_BREAKDOWN_VERSION = 2;
+export const BILLING_BREAKDOWN_VERSION = 3;
 
 function buildBreakdown({
   participant,
   instance,
   detail,
   authorization = null,
+  splitAmounts = null,
 }) {
   const warning = Array.isArray(detail?.warnings) && detail.warnings.length > 0
     ? detail.warnings[0]
@@ -24,7 +25,12 @@ function buildBreakdown({
     billing_status: detail?.billingStatus || null,
     billing_reason: detail?.billingReason || warning || null,
     hmo_authorization_id: authorization?.id || null,
+    hmo_provider_track_id: authorization?.provider_track_id || null,
+    hmo_payment_mode: splitAmounts?.paymentMode || null,
     contracted_rate_amount: authorization?.contracted_rate_amount ?? null,
+    student_charge_amount: splitAmounts?.studentCopayAmount ?? null,
+    insurer_claim_amount: splitAmounts?.insurerClaimAmount ?? null,
+    uses_track_pricing: splitAmounts?.usesTrackPricing === true,
   };
 }
 
@@ -55,15 +61,22 @@ export async function loadCommitmentsMap() {
   return new Map();
 }
 
-export async function buildBillingDecision({ participant, instance, policies, tenantClient }) {
-  const service = tenantClient ? await loadServiceForInstance(tenantClient, instance) : null;
-  const authorization = participant?.student_id && tenantClient
+export async function buildBillingDecision({
+  participant,
+  instance,
+  policies,
+  tenantClient,
+  service: providedService = null,
+  authorization: providedAuthorization = null,
+}) {
+  const service = providedService || (tenantClient ? await loadServiceForInstance(tenantClient, instance) : null);
+  const authorization = providedAuthorization || (participant?.student_id && tenantClient
     ? await resolveActiveAuthorizationForStudentService(tenantClient, {
       studentId: participant.student_id,
       serviceId: instance?.service_id,
       lessonDate: instance?.datetime_start,
     })
-    : null;
+    : null);
   const detail = buildDesiredChargeDescriptors({
     participant,
     instance,
@@ -71,16 +84,17 @@ export async function buildBillingDecision({ participant, instance, policies, te
     authorization,
     policies,
   });
-  const primaryEntry = detail.entries[0] || null;
+  const splitAmounts = authorization?.id ? resolveHmoSplitAmounts({ service, authorization }) : null;
+  const studentEntry = detail.entries.find((entry) => entry.accountType === 'student' || entry.accountType === 'client_profile') || null;
   return {
     shouldCharge: detail.entries.length > 0,
-    chargeAmount: primaryEntry?.amount ?? null,
+    chargeAmount: studentEntry?.amount ?? splitAmounts?.studentCopayAmount ?? null,
     coverage: null,
     billingStatus: detail.billingStatus,
     billingReason: detail.billingReason,
     requiresAttention: detail.status === 'blocked',
     usageType: authorization?.id ? 'hmo_split' : 'standard',
-    pricingBreakdown: buildBreakdown({ participant, instance, detail, authorization }),
+    pricingBreakdown: buildBreakdown({ participant, instance, detail, authorization, splitAmounts }),
   };
 }
 

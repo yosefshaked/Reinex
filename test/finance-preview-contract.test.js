@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDesiredChargeDescriptors } from '../api/_shared/BillingLedgerService.js';
+import { buildBillingDecision } from '../api/_shared/student-billing.js';
 import { buildAttendanceTransitionAuditChanges } from '../api/_shared/attendance-audit.js';
 
 const BASE_POLICIES = {
@@ -17,7 +18,47 @@ function service(amount) {
 }
 
 describe('finance preview contract - billing descriptors', () => {
-  it('builds HMO split charges for attended with active authorization', () => {
+  it('builds billing decision from explicit preview HMO context', async () => {
+    const participant = {
+      participant_status: 'attended',
+      client_profile_id: 'cp-1',
+      student_id: 'st-1',
+    };
+    const instance = {
+      service_id: 'svc-1',
+      datetime_start: '2026-04-14T10:00:00.000Z',
+      status: 'completed',
+    };
+    const authorization = {
+      id: 'auth-1',
+      provider_id: 'hmo-1',
+      contracted_rate_amount: 12000,
+      provider_track_id: 'track-1',
+      provider_track: {
+        id: 'track-1',
+        payment_mode: 'partially_paid_by_hmo',
+        default_customer_charge_amount: 1000,
+      },
+    };
+
+    const decision = await buildBillingDecision({
+      participant,
+      instance,
+      service: service(18000),
+      authorization,
+      policies: BASE_POLICIES,
+    });
+
+    assert.equal(decision.shouldCharge, true);
+    assert.equal(decision.usageType, 'hmo_split');
+    assert.equal(decision.chargeAmount, 1000);
+    assert.equal(decision.billingReason, 'hmo_split_charge');
+    assert.equal(decision.pricingBreakdown.hmo_authorization_id, 'auth-1');
+    assert.equal(decision.pricingBreakdown.student_charge_amount, 1000);
+    assert.equal(decision.pricingBreakdown.insurer_claim_amount, 12000);
+  });
+
+  it('builds HMO split charges from assigned track amounts', () => {
     const participant = {
       participant_status: 'attended',
       client_profile_id: 'cp-1',
@@ -27,6 +68,11 @@ describe('finance preview contract - billing descriptors', () => {
       id: 'auth-1',
       provider_id: 'hmo-1',
       contracted_rate_amount: 12000,
+      provider_track: {
+        id: 'track-1',
+        payment_mode: 'partially_paid_by_hmo',
+        default_customer_charge_amount: 1000,
+      },
     };
 
     const result = buildDesiredChargeDescriptors({
@@ -45,10 +91,76 @@ describe('finance preview contract - billing descriptors', () => {
 
     assert.ok(studentEntry, 'expected student split entry');
     assert.ok(hmoEntry, 'expected hmo split entry');
-    assert.equal(studentEntry.amount, 6000);
+    assert.equal(studentEntry.amount, 1000);
     assert.equal(hmoEntry.amount, 12000);
     assert.equal(studentEntry.hmoAuthorizationId, 'auth-1');
     assert.equal(hmoEntry.hmoAuthorizationId, 'auth-1');
+  });
+
+  it('reports zero student preview charge when the assigned track is fully paid by HMO', async () => {
+    const participant = {
+      participant_status: 'attended',
+      client_profile_id: 'cp-1',
+      student_id: 'st-1',
+    };
+    const instance = {
+      service_id: 'svc-1',
+      datetime_start: '2026-04-14T10:00:00.000Z',
+      status: 'completed',
+    };
+    const authorization = {
+      id: 'auth-2',
+      provider_id: 'hmo-2',
+      contracted_rate_amount: 9500,
+      provider_track_id: 'track-2',
+      provider_track: {
+        id: 'track-2',
+        payment_mode: 'fully_paid_by_hmo',
+        default_customer_charge_amount: 0,
+      },
+    };
+
+    const decision = await buildBillingDecision({
+      participant,
+      instance,
+      service: service(18000),
+      authorization,
+      policies: BASE_POLICIES,
+    });
+
+    assert.equal(decision.chargeAmount, 0);
+    assert.equal(decision.pricingBreakdown.student_charge_amount, 0);
+    assert.equal(decision.pricingBreakdown.insurer_claim_amount, 9500);
+  });
+
+  it('supports fully paid by HMO track without charging the student balance', () => {
+    const participant = {
+      participant_status: 'attended',
+      client_profile_id: 'cp-1',
+      student_id: 'st-1',
+    };
+    const authorization = {
+      id: 'auth-2',
+      provider_id: 'hmo-2',
+      contracted_rate_amount: 9500,
+      provider_track: {
+        id: 'track-2',
+        payment_mode: 'fully_paid_by_hmo',
+        default_customer_charge_amount: 0,
+      },
+    };
+
+    const result = buildDesiredChargeDescriptors({
+      participant,
+      service: service(18000),
+      authorization,
+      policies: BASE_POLICIES,
+    });
+
+    assert.equal(result.status, 'debited');
+    assert.equal(result.entries.length, 1);
+    assert.equal(result.entries[0].accountType, 'hmo_provider');
+    assert.equal(result.entries[0].amount, 9500);
   });
 
   it('returns not chargeable for no_show when policy excludes no_show', () => {

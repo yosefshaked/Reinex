@@ -73,9 +73,16 @@ Source: `api/_shared/BillingLedgerService.js`
 - One-time customer path (`!student_id`) creates one DEBIT entry on `client_profile` with `rateSource: service_rate` and reason `direct_client_charge`.
 - Student without active authorization creates one DEBIT entry on `student` with `rateSource: service_rate` and reason `service_rate_charge`.
 - Student with active authorization uses split billing:
-	- `studentCopay = max(service.default_customer_charge_amount - authorization.contracted_rate_amount, 0)`
+	- if `authorization.provider_track` exists, track pricing is authoritative:
+		- `payment_mode = authorization.provider_track.payment_mode`
+		- `studentCopay = authorization.provider_track.default_customer_charge_amount` for `partially_paid_by_hmo`
+		- `studentCopay = 0` for `fully_paid_by_hmo`
+		- `studentCopay = authorization.provider_track.default_customer_charge_amount || service.default_customer_charge_amount` for `fully_paid_by_customer`
+		- `insurerClaim = authorization.contracted_rate_amount` for `partially_paid_by_hmo` and `fully_paid_by_hmo`
+		- `insurerClaim = 0` for `fully_paid_by_customer`
+	- if no provider track is present, fallback remains `max(service.default_customer_charge_amount - authorization.contracted_rate_amount, 0)` for student copay
 	- student DEBIT entry on `student` only if `studentCopay > 0`
-	- insurer DEBIT entry on `hmo_provider` for `contracted_rate_amount` only if `contracted_rate_amount > 0`
+	- insurer DEBIT entry on `hmo_provider` only if `insurerClaim > 0`
 	- reason is `hmo_split_charge` when entries exist
 
 ### 2) Ledger mutation rules (current behavior)
@@ -129,12 +136,12 @@ Source: `src/features/calendar/components/LessonInstanceDialog.jsx`
 
 - Frontend calls `calendar/attendance` preview actions via `openAttendancePreview(...)`.
 - Preview impacts are grouped by type into UI domains:
-	- billing: `billing_reversal`, `billing_charge`, `billing_update`
+	- billing: `billing_reversal`, `billing_charge`, `billing_update`, `billing_blocked`
 	- payroll: `instructor_earning_reversal`, `instructor_earning_add`, `instructor_earning_update`
 	- attendance: `instructor_attendance_remove`, `instructor_attendance_update`, `instructor_attendance_add`
-	- hmo: `hmo_task_resolve`
+	- hmo: `hmo_task_resolve`, `hmo_split_detail`
 	- workflow: all others
-- Current limitation (intentionally captured): preview currently shows aggregate billing amount impact but does not expose explicit student copay vs insurer claim split details.
+- Preview exposes explicit student copay vs insurer claim split details from shared billing metadata and shows blocked billing reasons when preview cannot price the lesson.
 
 ## Explicit Non-Goals (Step 1)
 - No behavior change in billing, payroll, attendance, HMO authorization, or task resolution logic.

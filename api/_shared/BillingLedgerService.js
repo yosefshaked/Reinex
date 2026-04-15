@@ -365,6 +365,53 @@ function buildLessonChargeMetadata({
   };
 }
 
+export function resolveHmoSplitAmounts({
+  service,
+  authorization,
+}) {
+  const serviceRate = coerceAgorot(service?.default_customer_charge_amount);
+  const contractedRateAmount = authorization?.contracted_rate_amount == null
+    ? null
+    : coerceAgorot(authorization.contracted_rate_amount);
+  const providerTrack = authorization?.provider_track || null;
+  const paymentMode = normalizeString(providerTrack?.payment_mode).toLowerCase() || 'partially_paid_by_hmo';
+  const trackCustomerChargeAmount = coerceAgorot(providerTrack?.default_customer_charge_amount);
+
+  if (contractedRateAmount == null) {
+    return {
+      paymentMode,
+      studentCopayAmount: 0,
+      insurerClaimAmount: null,
+      contractedRateAmount: null,
+      usesTrackPricing: Boolean(providerTrack?.id),
+    };
+  }
+
+  let studentCopayAmount;
+  let insurerClaimAmount;
+
+  if (paymentMode === 'fully_paid_by_hmo') {
+    studentCopayAmount = 0;
+    insurerClaimAmount = contractedRateAmount;
+  } else if (paymentMode === 'fully_paid_by_customer') {
+    studentCopayAmount = trackCustomerChargeAmount > 0 ? trackCustomerChargeAmount : serviceRate;
+    insurerClaimAmount = 0;
+  } else {
+    studentCopayAmount = trackCustomerChargeAmount > 0
+      ? trackCustomerChargeAmount
+      : Math.max(serviceRate - contractedRateAmount, 0);
+    insurerClaimAmount = contractedRateAmount;
+  }
+
+  return {
+    paymentMode,
+    studentCopayAmount: coerceAgorot(studentCopayAmount),
+    insurerClaimAmount: coerceAgorot(insurerClaimAmount),
+    contractedRateAmount,
+    usesTrackPricing: Boolean(providerTrack?.id),
+  };
+}
+
 export function buildDesiredChargeDescriptors({
   participant,
   service,
@@ -447,8 +494,10 @@ export function buildDesiredChargeDescriptors({
       entries: [],
     };
   }
-  const contractedRateAmount = coerceAgorot(authorization.contracted_rate_amount);
-  const studentCopay = Math.max(coerceAgorot(serviceRate) - contractedRateAmount, 0);
+  const splitAmounts = resolveHmoSplitAmounts({ service, authorization });
+  const contractedRateAmount = coerceAgorot(splitAmounts.contractedRateAmount);
+  const studentCopay = coerceAgorot(splitAmounts.studentCopayAmount);
+  const insurerClaimAmount = coerceAgorot(splitAmounts.insurerClaimAmount);
   const entries = [];
 
   if (studentCopay > 0) {
@@ -461,12 +510,12 @@ export function buildDesiredChargeDescriptors({
       hmoAuthorizationId: authorization.id,
     });
   }
-  if (contractedRateAmount > 0) {
+  if (insurerClaimAmount > 0) {
     entries.push({
       accountType: HMO_ACCOUNT_TYPE,
       accountRefId: authorization.provider_id,
       direction: 'DEBIT',
-      amount: contractedRateAmount,
+      amount: insurerClaimAmount,
       rateSource: 'hmo_authorization',
       hmoAuthorizationId: authorization.id,
     });

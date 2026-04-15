@@ -76,6 +76,21 @@ function fmtILS(agorot) {
   return toShekel(coerceAgorot(agorot)).toFixed(2);
 }
 
+function getBillingPreviewBlockMessage(billingReason) {
+  switch (billingReason) {
+    case 'missing_service_default_customer_charge_amount':
+      return 'לא ניתן לחשב חיוב כי לשירות אין תעריף לקוח ברירת מחדל.';
+    case 'missing_client_profile_id':
+      return 'לא ניתן לחשב חיוב כי למשתתף אין כרטיס לקוח מקושר.';
+    case 'missing_contracted_rate_amount':
+      return 'לא ניתן לחשב פיצול גורם מממן כי לא הוגדר תעריף חוזי לאישור.';
+    default:
+      return billingReason
+        ? `לא ניתן לחשב את החיוב כרגע (${billingReason}).`
+        : 'לא ניתן לחשב את החיוב כרגע.';
+  }
+}
+
 async function recordGraceCancellationRequest(tenantClient, {
   participantId,
   userId,
@@ -748,15 +763,17 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   const projectedHasHmoSplit = Boolean(projectedAuthorization?.id);
   const projectedHmoProvider = projectedAuthorization?.provider || null;
   const projectedHmoTrack = projectedAuthorization?.provider_track || null;
-  const projectedServiceRate = coerceAgorot(serviceRow?.default_customer_charge_amount);
+  const projectedPricingBreakdown = projectedBillingDecision?.pricingBreakdown && typeof projectedBillingDecision.pricingBreakdown === 'object'
+    ? projectedBillingDecision.pricingBreakdown
+    : null;
   const projectedContractedRateAmount = projectedHasHmoSplit
-    ? coerceAgorot(projectedAuthorization?.contracted_rate_amount)
+    ? coerceAgorot(projectedPricingBreakdown?.contracted_rate_amount)
     : 0;
   const projectedStudentCopayAmount = projectedHasHmoSplit
-    ? Math.max(projectedServiceRate - projectedContractedRateAmount, 0)
+    ? coerceAgorot(projectedPricingBreakdown?.student_charge_amount)
     : 0;
   const projectedInsurerClaimAmount = projectedHasHmoSplit
-    ? projectedContractedRateAmount
+    ? coerceAgorot(projectedPricingBreakdown?.insurer_claim_amount)
     : 0;
 
   const instructorName = [employeeRow?.first_name, employeeRow?.middle_name, employeeRow?.last_name].filter(Boolean).join(' ').trim() || 'המדריך';
@@ -826,6 +843,13 @@ async function buildParticipantStatusPreview(tenantClient, body, {
       hmo_student_copay_amount: projectedStudentCopayAmount,
       hmo_insurer_claim_amount: projectedInsurerClaimAmount,
       message: `פיצול גורם מממן: לקוח/ה ₪${fmtILS(projectedStudentCopayAmount)}, תביעה לגורם מממן ₪${fmtILS(projectedInsurerClaimAmount)} (${providerSummary}).`,
+    });
+  }
+  if (projectedBillingDecision?.requiresAttention) {
+    impacts.push({
+      type: 'billing_blocked',
+      billing_reason: projectedBillingDecision?.billingReason || null,
+      message: getBillingPreviewBlockMessage(projectedBillingDecision?.billingReason),
     });
   }
   if (currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0) {

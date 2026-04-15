@@ -366,7 +366,7 @@ function isResolvedParticipantStatus(status) {
 }
 
 function getImpactGroupMeta(type) {
-  if (['billing_reversal', 'billing_charge', 'billing_update'].includes(type)) {
+  if (['billing_reversal', 'billing_charge', 'billing_update', 'billing_blocked'].includes(type)) {
     return { key: 'billing', label: 'חיוב כספי', borderClass: 'border-amber-200', bgClass: 'bg-amber-50/70' };
   }
   if (['instructor_earning_reversal', 'instructor_earning_add', 'instructor_earning_update'].includes(type)) {
