@@ -61,6 +61,17 @@ function isPublishedMetadata(metadata) {
   return Boolean(metadata && typeof metadata === 'object' && !Array.isArray(metadata) && metadata.published_form_schema && typeof metadata.published_form_schema === 'object');
 }
 
+function requiresPublishMigration(formRecord) {
+  if (isPublishedMetadata(formRecord?.metadata)) return false;
+  const publishedAt = normalizeString(formRecord?.published_at);
+  const hasDraftSchema = Boolean(formRecord?.form_schema && typeof formRecord.form_schema === 'object' && !Array.isArray(formRecord.form_schema));
+  return Boolean(publishedAt) && hasDraftSchema;
+}
+
+function isPublishedFormRecord(formRecord) {
+  return isPublishedMetadata(formRecord?.metadata);
+}
+
 function resolveUpdatedMetadata(existingMetadata, updates = {}) {
   return {
     ...(existingMetadata && typeof existingMetadata === 'object' && !Array.isArray(existingMetadata) ? existingMetadata : {}),
@@ -199,7 +210,8 @@ async function buildFormResponse(tenantClient, formRecord) {
     shared_blocks: sharedBlocks,
     resolved_form_schema: resolveSchemaWithSharedBlocks(rawSchema, sharedBlockMap),
     missing_shared_block_ids: missingSharedBlockIds,
-    is_published: isPublishedMetadata(metadata),
+    is_published: isPublishedFormRecord(formRecord),
+    requires_publish_migration: requiresPublishMigration(formRecord),
   };
 }
 
@@ -326,7 +338,7 @@ export default async function forms(context, req) {
     }
 
     const selectFields = selectionMode
-      ? 'id, name, description, form_usage, is_active, metadata'
+      ? 'id, name, description, form_usage, form_schema, is_active, metadata, published_at'
       : SELECT_FIELDS;
     const query = tenantClient
       .from('forms')
@@ -349,7 +361,13 @@ export default async function forms(context, req) {
 
     let rows = Array.isArray(data) ? data : [];
     if (selectionMode) {
-      rows = rows.filter((row) => isPublishedMetadata(row?.metadata));
+      rows = rows
+        .filter((row) => isPublishedFormRecord(row) || requiresPublishMigration(row))
+        .map((row) => ({
+          ...row,
+          is_published: isPublishedFormRecord(row),
+          requires_publish_migration: requiresPublishMigration(row),
+        }));
       if (selectionMode === 'waiting_list_invite') {
         rows = rows.filter((row) => row?.form_usage === 'waiting_list_intake');
       }
@@ -480,6 +498,108 @@ export default async function forms(context, req) {
 
     if (!existing) {
       return respond(context, 404, { message: 'form_not_found' });
+    }
+
+    if (body?.action === 'migrate_publish_structure') {
+      if (isPublishedMetadata(existing?.metadata)) {
+        const responseBody = await buildFormResponse(tenantClient, {
+          ...existing,
+          metadata: existing.metadata,
+        });
+        return respond(context, 200, {
+          ...responseBody,
+          migration_status: 'already_migrated',
+        });
+      }
+
+      if (!requiresPublishMigration(existing)) {
+        return respond(context, 409, { message: 'form_not_published' });
+      }
+
+      const updatedAt = new Date().toISOString();
+      const normalizedSchema = normalizeFormSchema(existing.form_schema || {});
+      const normalizedAlertRules = normalizeAlertRules(existing.alert_rules);
+      const normalizedVisibilityRules = normalizeVisibilityRules(existing.visibility_rules);
+      const schemaIssues = validateNormalizedFormSchemaIntegrity({
+        formSchema: normalizedSchema,
+        visibilityRules: normalizedVisibilityRules,
+        alertRules: normalizedAlertRules,
+      });
+      if (schemaIssues.length) {
+        return respond(context, 409, { message: 'invalid_form_schema_structure', details: schemaIssues });
+      }
+
+      const migratedMetadata = resolveUpdatedMetadata(existing.metadata, {
+        published_form_schema: normalizedSchema,
+        published_alert_rules: normalizedAlertRules,
+        published_visibility_rules: normalizedVisibilityRules,
+        published_version: Number.isFinite(Number(existing.version)) ? Number(existing.version) : 1,
+        published_by: userId,
+        published_at: normalizeString(existing.published_at) || updatedAt,
+        publish_structure_migrated_at: updatedAt,
+        publish_structure_migrated_by: userId,
+      });
+
+      const { data: migrated, error: migratedError } = await tenantClient
+        .from('forms')
+        .update({
+          metadata: migratedMetadata,
+          published_at: normalizeString(existing.published_at) || updatedAt,
+          updated_at: updatedAt,
+        })
+        .eq('id', formId)
+        .select(SELECT_FIELDS)
+        .maybeSingle();
+
+      if (migratedError || !migrated) {
+        context.log?.error?.('forms failed to migrate publish structure', {
+          message: migratedError?.message,
+          formId,
+        });
+        return respond(context, 500, { message: 'failed_to_migrate_publish_structure' });
+      }
+
+      await syncFormSharedBlockLinks(tenantClient, formId, {
+        draftSchema: normalizedSchema,
+        publishedSchema: normalizedSchema,
+      });
+
+      await logAuditEvent(supabase, {
+        orgId,
+        userId,
+        userEmail,
+        userRole: role,
+        actionType: AUDIT_ACTIONS.FORM_TEMPLATE_PUBLISHED,
+        actionCategory: AUDIT_CATEGORIES.FORMS,
+        resourceType: 'form',
+        resourceId: formId,
+        details: {
+          migration_only: true,
+          published_version: migrated?.metadata?.published_version || migrated.version,
+        },
+      });
+
+      await writeTenantFormAudit(tenantClient, context, {
+        actorUserId: userId,
+        eventType: 'form.template_publish_structure_migrated',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'form',
+        resourceId: formId,
+        beforeState: {
+          published_at: existing.published_at,
+          had_published_form_schema: isPublishedMetadata(existing.metadata),
+        },
+        afterState: {
+          published_at: migrated.published_at,
+          has_published_form_schema: isPublishedMetadata(migrated.metadata),
+        },
+      });
+
+      const responseBody = await buildFormResponse(tenantClient, migrated);
+      return respond(context, 200, {
+        ...responseBody,
+        migration_status: 'migrated',
+      });
     }
 
     const updates = {

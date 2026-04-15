@@ -321,15 +321,35 @@ function parseInviteTtlMinutes(raw) {
   return Math.min(parsed, MAX_INVITE_TTL_MINUTES);
 }
 
+function isPublishedFormRecord(form) {
+  const metadata = form?.metadata && typeof form.metadata === 'object' && !Array.isArray(form.metadata)
+    ? form.metadata
+    : {};
+  const hasPublishedSchema = Boolean(metadata.published_form_schema && typeof metadata.published_form_schema === 'object');
+  return hasPublishedSchema;
+}
+
+function requiresPublishMigration(form) {
+  if (!form || typeof form !== 'object') return false;
+  if (isPublishedFormRecord(form)) return false;
+  const publishedAt = normalizeString(form?.published_at);
+  const hasDraftSchema = Boolean(form?.form_schema && typeof form.form_schema === 'object' && !Array.isArray(form.form_schema));
+  return Boolean(publishedAt) && hasDraftSchema;
+}
+
 async function requireWaitingListIntakeForm(tenantClient, formId) {
   const { data, error } = await tenantClient
     .from('forms')
-    .select('id, name, description, form_usage, form_schema, alert_rules, visibility_rules, metadata, is_active')
+    .select('id, name, description, form_usage, form_schema, alert_rules, visibility_rules, metadata, is_active, published_at')
     .eq('id', formId)
     .maybeSingle();
   if (error) throw new Error(`failed_to_load_form:${error.message}`);
-  const isPublished = Boolean(data?.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata) && data.metadata.published_form_schema && typeof data.metadata.published_form_schema === 'object');
-  if (!data || data.is_active === false || data.form_usage !== 'waiting_list_intake' || !isPublished) return null;
+  const isPublished = isPublishedFormRecord(data);
+  if (!data || data.is_active === false || data.form_usage !== 'waiting_list_intake') return null;
+  if (!isPublished) {
+    if (requiresPublishMigration(data)) throw new Error('form_requires_publish_migration');
+    throw new Error('form_not_published');
+  }
   return data;
 }
 
@@ -545,6 +565,12 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
     if (message.startsWith('failed_to_load_form:')) {
       context.log?.error?.('waiting-list-intake failed to load form', { message: message.slice('failed_to_load_form:'.length), formId });
       return respond(context, 500, { message: 'failed_to_load_form' });
+    }
+    if (message === 'form_requires_publish_migration') {
+      return respond(context, 409, { message: 'form_requires_publish_migration' });
+    }
+    if (message === 'form_not_published') {
+      return respond(context, 409, { message: 'form_not_published' });
     }
     if (message.startsWith('failed_to_load_service:')) {
       context.log?.error?.('waiting-list-intake failed to load service', { message: message.slice('failed_to_load_service:'.length), desiredServiceId });

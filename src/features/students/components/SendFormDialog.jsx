@@ -81,6 +81,27 @@ function buildSubjectName(subject) {
   return [subject?.first_name, subject?.middle_name, subject?.last_name].filter(Boolean).join(' ').trim() || 'הלקוח/ה';
 }
 
+function mapSendFormErrorMessage(code) {
+  switch (String(code || '').trim()) {
+    case 'form_not_found':
+      return 'הטופס שנבחר אינו זמין כרגע. אפשר לרענן ולנסות שוב.';
+    case 'form_requires_publish_migration':
+      return 'מבנה הפרסום של הטופס ישן ודורש מיגרציה. לחצו על "בצע מיגרציה" ואז נסו שוב.';
+    case 'form_not_published':
+      return 'הטופס קיים אך לא פורסם למילוי. יש לפרסם אותו במסך הטפסים ואז לנסות שוב.';
+    case 'form_unavailable':
+      return 'הטופס אינו זמין כרגע (רכיב משותף חסר). יש להשלים את הרכיב החסר ולנסות שוב.';
+    case 'failed_to_create_otp':
+      return 'לא הצלחנו ליצור קוד אימות כרגע. נסו שוב בעוד כמה דקות.';
+    case 'failed_to_create_active_routing':
+      return 'לא הצלחנו להכין קישור מילוי כרגע. נסו שוב בעוד כמה דקות.';
+    case 'failed_to_send_email':
+      return 'שליחת האימייל נכשלה כרגע. אפשר לנסות שוב או לבחור וואטסאפ.';
+    default:
+      return String(code || '').trim() || 'שליחת הטופס נכשלה';
+  }
+}
+
 export default function SendFormDialog({ open, onOpenChange, student = null, clientProfile = null, onSent }) {
   const { session } = useSupabase();
   const { activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
@@ -93,6 +114,7 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
   const [validityOption, setValidityOption] = useState('10080');
   const [customDays, setCustomDays] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const [migrating, setMigrating] = useState(false);
   const [result, setResult] = useState(null);
 
   const canFetch = Boolean(open && session && activeOrgId && activeOrgHasConnection && tenantClientReady);
@@ -136,6 +158,10 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
   const handleSend = async () => {
     if (!subject?.id || !selectedFormId || !activeOrgId) {
       toast.error('חסרים נתונים לשליחת הטופס');
+      return;
+    }
+    if (selectedTemplate?.requires_publish_migration) {
+      toast.error('הטופס דורש מיגרציית פרסום לפני שליחה');
       return;
     }
 
@@ -189,9 +215,37 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
       toast.success('קוד אימות נוצר. אפשר לשלוח בוואטסאפ.');
     } catch (error) {
       console.error('Failed to initiate form submission', error);
-      toast.error(error?.message || 'שליחת הטופס נכשלה');
+      const errorCode = error?.data?.message || error?.message;
+      toast.error(mapSendFormErrorMessage(errorCode));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleMigrateTemplate = async () => {
+    if (!selectedFormId || !activeOrgId || !session) {
+      toast.error('חסרים נתונים לביצוע מיגרציה');
+      return;
+    }
+
+    setMigrating(true);
+    try {
+      await authenticatedFetch(`forms/${selectedFormId}`, {
+        method: 'PUT',
+        session,
+        body: {
+          org_id: activeOrgId,
+          action: 'migrate_publish_structure',
+        },
+      });
+      toast.success('מיגרציית מבנה הפרסום הושלמה');
+      await loadTemplates();
+    } catch (error) {
+      console.error('Failed to migrate publish structure', error);
+      const errorCode = error?.data?.message || error?.message;
+      toast.error(mapSendFormErrorMessage(errorCode));
+    } finally {
+      setMigrating(false);
     }
   };
 
@@ -208,7 +262,7 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
         <div className="space-y-4 py-2">
           <div className="space-y-2">
             <Label>תבנית טופס</Label>
-            <Select value={selectedFormId} onValueChange={setSelectedFormId} disabled={loadingTemplates || submitting}>
+            <Select value={selectedFormId} onValueChange={setSelectedFormId} disabled={loadingTemplates || submitting || migrating}>
               <SelectTrigger>
                 <SelectValue placeholder="בחר תבנית" />
               </SelectTrigger>
@@ -230,7 +284,7 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
 
           <div className="space-y-2">
             <Label>שיטת שליחה</Label>
-            <Select value={deliveryMethod} onValueChange={setDeliveryMethod} disabled={submitting}>
+            <Select value={deliveryMethod} onValueChange={setDeliveryMethod} disabled={submitting || migrating}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -243,7 +297,7 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
 
           <div className="space-y-2">
             <Label>תוקף הקישור</Label>
-            <Select value={validityOption} onValueChange={setValidityOption} disabled={submitting}>
+            <Select value={validityOption} onValueChange={setValidityOption} disabled={submitting || migrating}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -264,7 +318,7 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
                   max={14}
                   value={customDays}
                   onChange={(e) => setCustomDays(Math.min(14, Math.max(1, Number(e.target.value) || 1)))}
-                  disabled={submitting}
+                  disabled={submitting || migrating}
                   className="w-24"
                 />
                 <span className="text-sm text-muted-foreground">ימים (מקסימום 14)</span>
@@ -276,6 +330,24 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
             <Alert>
               <AlertDescription>
                 טופס נבחר: <strong>{selectedTemplate.name}</strong>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {selectedTemplate?.requires_publish_migration && (
+            <Alert>
+              <AlertDescription className="space-y-2">
+                <p>הטופס נבחר אך מבנה הפרסום שלו ישן, ולכן אי אפשר לשלוח אותו עד ביצוע מיגרציה.</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleMigrateTemplate}
+                  disabled={submitting || migrating}
+                  className="gap-2"
+                >
+                  {migrating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  בצע מיגרציה למבנה הפרסום
+                </Button>
               </AlertDescription>
             </Alert>
           )}
@@ -314,14 +386,14 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
         </div>
 
         <DialogFooter className="gap-2 sm:justify-start">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting || migrating}>
             סגור
           </Button>
           {!result && (
             <Button
               type="button"
               onClick={handleSend}
-              disabled={submitting || !selectedFormId || loadingTemplates || !templates.length}
+              disabled={submitting || migrating || !selectedFormId || loadingTemplates || !templates.length || Boolean(selectedTemplate?.requires_publish_migration)}
               className="gap-2"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : deliveryMethod === 'email' ? <Mail className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}

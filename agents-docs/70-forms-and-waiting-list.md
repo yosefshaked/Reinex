@@ -34,5 +34,7 @@
 - Form schemas are normalized both in the builder and in the backend runtime; reuse the existing helper pair instead of inventing a new schema shape.
 - Shared blocks are linked explicitly and missing block IDs are treated as real errors.
 - Draft and published schemas are separate states inside the form record flow; do not add a parallel publish model.
+- Sending flows (`form-submissions` and `waiting-list-intake/send`) must require canonical publish metadata (`metadata.published_form_schema`); legacy `published_at`+draft-schema rows are treated as `form_requires_publish_migration` and are not silently accepted.
+- Use `PUT /api/forms/{formId}` with `action: migrate_publish_structure` to migrate legacy-published forms into canonical publish metadata before allowing delivery/invite sends.
 - Waiting-list intake depends on built-in field IDs and writes into routing/client/guardian flows; keep those identifiers stable.
 - Visibility rules and alert rules are runtime-evaluated by shared helpers, not by ad hoc component logic.

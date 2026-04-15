@@ -48,6 +48,21 @@ function normalizeDeliveryMethod(value) {
   return normalized === 'whatsapp' || normalized === 'email' ? normalized : '';
 }
 
+function hasLegacyPublishedMarker(form) {
+  const publishedAt = normalizeString(form?.published_at);
+  const hasDraftSchema = Boolean(form?.form_schema && typeof form.form_schema === 'object' && !Array.isArray(form.form_schema));
+  return Boolean(publishedAt) && hasDraftSchema;
+}
+
+function requiresPublishMigration(form) {
+  if (!form || typeof form !== 'object') return false;
+  const metadata = form?.metadata && typeof form.metadata === 'object' && !Array.isArray(form.metadata)
+    ? form.metadata
+    : {};
+  const hasPublishedSchema = Boolean(metadata.published_form_schema && typeof metadata.published_form_schema === 'object');
+  return !hasPublishedSchema && hasLegacyPublishedMarker(form);
+}
+
 function normalizeOtp(value) {
   return String(value || '').replace(/\D/g, '').slice(0, OTP_DIGITS);
 }
@@ -347,7 +362,11 @@ async function resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, 
 }
 
 function isPublishedFormRecord(form) {
-  return Boolean(form?.metadata && typeof form.metadata === 'object' && !Array.isArray(form.metadata) && form.metadata.published_form_schema && typeof form.metadata.published_form_schema === 'object');
+  const metadata = form?.metadata && typeof form.metadata === 'object' && !Array.isArray(form.metadata)
+    ? form.metadata
+    : {};
+  const hasPublishedSchema = Boolean(metadata.published_form_schema && typeof metadata.published_form_schema === 'object');
+  return hasPublishedSchema;
 }
 
 async function resolveSubmissionDestination(tenantClient, clientProfileId, deliveryMethod) {
@@ -1049,7 +1068,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
   const [{ data: form, error: formError }, subject] = await Promise.all([
     tenantClient
       .from('forms')
-      .select('id, name, is_active')
+      .select('id, name, is_active, form_schema, metadata, published_at')
       .eq('id', formId)
       .maybeSingle(),
     resolveSubmissionSubject(tenantClient, {
@@ -1063,7 +1082,10 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     return respond(context, 500, { message: 'failed_to_load_form' });
   }
   if (!form || !form.is_active) return respond(context, 404, { message: 'form_not_found' });
-  if (!isPublishedFormRecord(form)) return respond(context, 409, { message: 'form_not_published' });
+  if (!isPublishedFormRecord(form)) {
+    if (requiresPublishMigration(form)) return respond(context, 409, { message: 'form_requires_publish_migration' });
+    return respond(context, 409, { message: 'form_not_published' });
+  }
   if (subject.error) {
     context.log?.error?.('form-submissions failed to load submission subject', {
       message: subject.error?.message,
@@ -1278,7 +1300,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   }
 
   const [{ data: form, error: formError }, subject] = await Promise.all([
-    tenantClient.from('forms').select('id, name, metadata').eq('id', submission.form_id).maybeSingle(),
+    tenantClient.from('forms').select('id, name, form_schema, metadata, published_at').eq('id', submission.form_id).maybeSingle(),
     resolveSubmissionSubject(tenantClient, {
       clientProfileId: submission.client_profile_id,
       studentId: submission.student_id,
@@ -1294,7 +1316,10 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
     return respond(context, 500, { message: 'failed_to_load_form' });
   }
   if (!form) return respond(context, 404, { message: 'form_not_found' });
-  if (!isPublishedFormRecord(form)) return respond(context, 409, { message: 'form_not_published' });
+  if (!isPublishedFormRecord(form)) {
+    if (requiresPublishMigration(form)) return respond(context, 409, { message: 'form_requires_publish_migration' });
+    return respond(context, 409, { message: 'form_not_published' });
+  }
   if (subject.error) {
     context.log?.error?.('form-submissions failed loading submission subject for resend', {
       message: subject.error?.message,

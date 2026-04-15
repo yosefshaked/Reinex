@@ -129,6 +129,12 @@ function mapWaitingListInviteErrorMessage(code) {
       return 'יש להשלים את כל שדות החובה לפני שליחת הטופס.';
     case 'form_not_found':
       return 'טופס ההמתנה שנבחר אינו זמין כרגע. אפשר לרענן את הרשימה ולנסות שוב.';
+    case 'form_requires_publish_migration':
+      return 'מבנה הפרסום של הטופס ישן ודורש מיגרציה. לחצו על "בצע מיגרציה" ואז נסו שוב.';
+    case 'form_not_published':
+      return 'טופס ההמתנה קיים אך לא פורסם למילוי. יש לפרסם אותו במסך הטפסים ואז לנסות שוב.';
+    case 'form_unavailable':
+      return 'טופס ההמתנה אינו זמין כרגע (רכיב משותף חסר). יש להשלים את הרכיב החסר ולנסות שוב.';
     case 'form_usage_not_waiting_list':
       return 'הטופס שנבחר אינו מוגדר כטופס רשימת המתנה.';
     case 'failed_to_create_student':
@@ -384,6 +390,7 @@ export default function WaitingListPage() {
   const [inviteFormValues, setInviteFormValues] = useState(buildInitialInviteForm());
   const [inviteError, setInviteError] = useState('');
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [inviteMigrating, setInviteMigrating] = useState(false);
   const [inviteResult, setInviteResult] = useState(null);
   const [selectedEntryId, setSelectedEntryId] = useState('');
   const [suggestionMode, setSuggestionMode] = useState('capacity');
@@ -434,6 +441,10 @@ export default function WaitingListPage() {
   const waitingListFormOptions = useMemo(
     () => (waitingListForms || []).map((form) => ({ value: form.id, label: form.name })),
     [waitingListForms]
+  );
+  const selectedInviteForm = useMemo(
+    () => (waitingListForms || []).find((form) => form.id === inviteFormValues.formId) || null,
+    [waitingListForms, inviteFormValues.formId]
   );
   const sortedEntries = useMemo(
     () => [...entries].sort(compareWaitingListEntries),
@@ -687,6 +698,11 @@ export default function WaitingListPage() {
   const handleInviteSubmit = async (event) => {
     event.preventDefault();
 
+    if (selectedInviteForm?.requires_publish_migration) {
+      setInviteError('הטופס דורש מיגרציית פרסום לפני שליחה.');
+      return;
+    }
+
     if (!inviteFormValues.formId || !inviteFormValues.studentFirstName.trim() || !inviteFormValues.studentLastName.trim() || !inviteFormValues.identityNumber.trim() || !inviteFormValues.serviceId) {
       setInviteError('יש לבחור טופס, למלא שם פרטי, שם משפחה ומספר זהות של התלמיד/ה ולבחור שירות.');
       return;
@@ -741,6 +757,34 @@ export default function WaitingListPage() {
       setInviteSubmitting(false);
     }
   };
+
+  const handleMigrateInviteForm = useCallback(async () => {
+    const formId = inviteFormValues.formId;
+    if (!formId || !activeOrgId || !session) {
+      setInviteError('חסרים נתונים לביצוע מיגרציה.');
+      return;
+    }
+
+    setInviteMigrating(true);
+    setInviteError('');
+    try {
+      await authenticatedFetch(`forms/${formId}`, {
+        method: 'PUT',
+        session,
+        body: {
+          org_id: activeOrgId,
+          action: 'migrate_publish_structure',
+        },
+      });
+      toast.success('מיגרציית מבנה הפרסום הושלמה');
+      await loadWaitingListForms();
+    } catch (error) {
+      const errorCode = error?.data?.message || error?.message;
+      setInviteError(mapWaitingListInviteErrorMessage(errorCode));
+    } finally {
+      setInviteMigrating(false);
+    }
+  }, [activeOrgId, inviteFormValues.formId, loadWaitingListForms, session]);
 
   const handlePrepareAdditionalInvite = () => {
     resetInviteComposer();
@@ -1355,10 +1399,23 @@ export default function WaitingListPage() {
                     options={waitingListFormOptions}
                     placeholder="בחרו טופס רשימת המתנה"
                     required
-                    disabled={loadingWaitingListForms}
+                    disabled={loadingWaitingListForms || inviteSubmitting || inviteMigrating}
                   />
                   {loadingWaitingListForms ? (
                     <p className="text-xs text-neutral-500">טוען טפסי רשימת המתנה...</p>
+                  ) : null}
+                  {selectedInviteForm?.requires_publish_migration ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 space-y-2">
+                      <p>הטופס שנבחר דורש מיגרציה למבנה הפרסום החדש לפני שליחה.</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleMigrateInviteForm}
+                        disabled={inviteSubmitting || inviteMigrating}
+                      >
+                        {inviteMigrating ? 'מבצע מיגרציה...' : 'בצע מיגרציה למבנה הפרסום'}
+                      </Button>
+                    </div>
                   ) : null}
 
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -1515,11 +1572,11 @@ export default function WaitingListPage() {
               <Button
                 type={inviteResult ? 'button' : 'submit'}
                 onClick={inviteResult ? handlePrepareAdditionalInvite : undefined}
-                disabled={inviteSubmitting || waitingListFormOptions.length === 0}
+                disabled={inviteSubmitting || inviteMigrating || waitingListFormOptions.length === 0 || Boolean(selectedInviteForm?.requires_publish_migration)}
               >
                 {inviteSubmitting ? 'שולח...' : inviteResult ? 'שלח טופס נוסף' : 'שלח טופס'}
               </Button>
-              <Button type="button" variant="outline" onClick={() => setInviteDialogOpen(false)} disabled={inviteSubmitting}>
+              <Button type="button" variant="outline" onClick={() => setInviteDialogOpen(false)} disabled={inviteSubmitting || inviteMigrating}>
                 ביטול
               </Button>
             </div>
