@@ -1,6 +1,6 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
-import { resolveTenantClient, ensureMembership, readEnv, respond } from '../_shared/org-bff.js';
+import { ensureMembership, readEnv, respond, withOrgScope } from '../_shared/org-bff.js';
 import { validateIsraeliPhone, coerceOptionalString, coerceOptionalEmail } from '../_shared/student-validation.js';
 
 function normalizeStoredText(value) {
@@ -82,24 +82,18 @@ export default async function handler(context, req) {
     return respond(context, 403, { error: 'not_a_member' });
   }
 
-  // Get tenant client (env already loaded at top)
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   const method = req.method;
   const guardianId = context.bindingData?.id;
 
   try {
     if (method === 'GET') {
-      return await handleGet(context, tenantClient);
+      return await handleGet(context, supabase, orgId);
     } else if (method === 'POST') {
-      return await handlePost(context, req, tenantClient, userId);
+      return await handlePost(context, req, supabase, orgId, userId);
     } else if (method === 'PUT' && guardianId) {
-      return await handlePut(context, req, tenantClient, guardianId, userId);
+      return await handlePut(context, req, supabase, orgId, guardianId, userId);
     } else if (method === 'DELETE' && guardianId) {
-      return await handleDelete(context, tenantClient, guardianId);
+      return await handleDelete(context, supabase, orgId, guardianId);
     } else {
       return respond(context, 405, { error: 'method_not_allowed' });
     }
@@ -112,9 +106,8 @@ export default async function handler(context, req) {
 /**
  * GET /api/guardians - List all guardians
  */
-async function handleGet(context, tenantClient) {
-  const { data, error } = await tenantClient
-    .from('guardians')
+async function handleGet(context, client, orgId) {
+  const { data, error } = await withOrgScope(client, 'guardians', orgId)
     .select('*')
     .order('last_name', { ascending: true })
     .order('first_name', { ascending: true });
@@ -137,8 +130,7 @@ async function handleGet(context, tenantClient) {
   }
 
   const guardianIds = guardians.map(guardian => guardian.id);
-  const { data: links, error: linksError } = await tenantClient
-    .from('client_guardians')
+  const { data: links, error: linksError } = await withOrgScope(client, 'client_guardians', orgId)
     .select('guardian_id, client_profile_id, relationship, is_primary, client_profile:client_profiles(id, first_name, middle_name, last_name)')
     .in('guardian_id', guardianIds);
 
@@ -149,8 +141,7 @@ async function handleGet(context, tenantClient) {
 
   const linkedProfileIds = Array.from(new Set((links || []).map((link) => link?.client_profile_id).filter(Boolean)));
   const { data: students, error: studentsError } = linkedProfileIds.length > 0
-    ? await tenantClient
-      .from('students')
+    ? await withOrgScope(client, 'students', orgId)
       .select('id, client_profile_id')
       .in('client_profile_id', linkedProfileIds)
     : { data: [], error: null };
@@ -192,7 +183,7 @@ async function handleGet(context, tenantClient) {
 /**
  * POST /api/guardians - Create new guardian
  */
-async function handlePost(context, req, tenantClient, userId) {
+async function handlePost(context, req, client, orgId, userId) {
   const body = req.body || {};
 
   // Required fields
@@ -240,8 +231,7 @@ async function handlePost(context, req, tenantClient, userId) {
     },
   };
 
-  const { data, error } = await tenantClient
-    .from('guardians')
+  const { data, error } = await withOrgScope(client, 'guardians', orgId)
     .insert(payload)
     .select()
     .single();
@@ -258,7 +248,7 @@ async function handlePost(context, req, tenantClient, userId) {
 /**
  * PUT /api/guardians/:id - Update guardian
  */
-async function handlePut(context, req, tenantClient, guardianId, userId) {
+async function handlePut(context, req, client, orgId, guardianId, userId) {
   const body = req.body || {};
   const updates = {};
 
@@ -311,8 +301,7 @@ async function handlePut(context, req, tenantClient, guardianId, userId) {
   }
 
   // Fetch existing metadata to preserve created_by/created_at
-  const { data: existing, error: fetchError } = await tenantClient
-    .from('guardians')
+  const { data: existing, error: fetchError } = await withOrgScope(client, 'guardians', orgId)
     .select('metadata')
     .eq('id', guardianId)
     .maybeSingle();
@@ -333,8 +322,7 @@ async function handlePut(context, req, tenantClient, guardianId, userId) {
     updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await tenantClient
-    .from('guardians')
+  const { data, error } = await withOrgScope(client, 'guardians', orgId)
     .update(updates)
     .eq('id', guardianId)
     .select()
@@ -356,10 +344,9 @@ async function handlePut(context, req, tenantClient, guardianId, userId) {
 /**
  * DELETE /api/guardians/:id - Delete guardian
  */
-async function handleDelete(context, tenantClient, guardianId) {
+async function handleDelete(context, client, orgId, guardianId) {
   // Check if guardian has linked client profiles
-  const { data: links, error: checkError } = await tenantClient
-    .from('client_guardians')
+  const { data: links, error: checkError } = await withOrgScope(client, 'client_guardians', orgId)
     .select('id')
     .eq('guardian_id', guardianId)
     .limit(1);
@@ -377,8 +364,7 @@ async function handleDelete(context, tenantClient, guardianId) {
   }
 
   // Hard delete
-  const { data, error } = await tenantClient
-    .from('guardians')
+  const { data, error } = await withOrgScope(client, 'guardians', orgId)
     .delete()
     .eq('id', guardianId)
     .select()

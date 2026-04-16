@@ -9,7 +9,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { logAuditEvent, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
@@ -75,9 +75,9 @@ function validateSharedBlockContent(blockType, contentSchema) {
   return '';
 }
 
-async function writeTenantBlockAudit(tenantClient, context, params) {
+async function writeTenantBlockAudit(client, context, params) {
   try {
-    await logTenantAuditEvent(tenantClient, params);
+    await logTenantAuditEvent(client, params);
   } catch (error) {
     context.log?.warn?.('form-blocks failed to write tenant audit event', {
       message: error?.message,
@@ -87,9 +87,8 @@ async function writeTenantBlockAudit(tenantClient, context, params) {
   }
 }
 
-async function loadUsage(tenantClient, blockId) {
-  const { data, error } = await tenantClient
-    .from('form_shared_block_links')
+async function loadUsage(client, orgId, blockId) {
+  const { data, error } = await withOrgScope(client, 'form_shared_block_links', orgId)
     .select('form_id, section_id, item_id, schema_scope')
     .eq('shared_block_id', blockId)
     .order('form_id');
@@ -102,8 +101,7 @@ async function loadUsage(tenantClient, blockId) {
   const formIds = Array.from(new Set(rows.map((row) => row.form_id).filter(Boolean)));
   let formMap = {};
   if (formIds.length) {
-    const { data: forms, error: formsError } = await tenantClient
-      .from('forms')
+    const { data: forms, error: formsError } = await withOrgScope(client, 'forms', orgId)
       .select('id, name, is_active, updated_at, version')
       .in('id', formIds);
 
@@ -213,11 +211,6 @@ export default async function formBlocks(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   const blockId = normalizeRequiredText(context?.bindingData?.blockId || body?.id);
 
   if (method === 'GET') {
@@ -226,8 +219,7 @@ export default async function formBlocks(context, req) {
         return respond(context, 400, { message: 'invalid_block_id' });
       }
 
-      const { data, error } = await tenantClient
-        .from('shared_form_blocks')
+      const { data, error } = await withOrgScope(supabase, 'shared_form_blocks', orgId)
         .select(SELECT_FIELDS)
         .eq('id', blockId)
         .maybeSingle();
@@ -242,7 +234,7 @@ export default async function formBlocks(context, req) {
       }
 
       try {
-        const usage = await loadUsage(tenantClient, blockId);
+        const usage = await loadUsage(supabase, orgId, blockId);
         return respond(context, 200, {
           ...data,
           usage,
@@ -257,8 +249,7 @@ export default async function formBlocks(context, req) {
     const typeFilter = normalizeBlockType(req?.query?.block_type || req?.query?.blockType || body?.block_type || body?.blockType);
     const includeInactive = String(req?.query?.include_inactive || body?.include_inactive || '').toLowerCase() === 'true';
 
-    let query = tenantClient
-      .from('shared_form_blocks')
+    let query = withOrgScope(supabase, 'shared_form_blocks', orgId)
       .select(SELECT_FIELDS)
       .order('updated_at', { ascending: false });
 
@@ -279,8 +270,7 @@ export default async function formBlocks(context, req) {
     const ids = blocks.map((block) => block.id);
     let usageCounts = {};
     if (ids.length) {
-      const { data: usageRows, error: usageError } = await tenantClient
-        .from('form_shared_block_links')
+      const { data: usageRows, error: usageError } = await withOrgScope(supabase, 'form_shared_block_links', orgId)
         .select('shared_block_id, form_id')
         .in('shared_block_id', ids);
       if (usageError) {
@@ -320,8 +310,7 @@ export default async function formBlocks(context, req) {
     }
     const metadata = normalizeOptionalJson(body?.metadata);
 
-    const { data, error } = await tenantClient
-      .from('shared_form_blocks')
+    const { data, error } = await withOrgScope(supabase, 'shared_form_blocks', orgId)
       .insert({
         block_type: blockType,
         name,
@@ -348,7 +337,7 @@ export default async function formBlocks(context, req) {
       resourceId: data.id,
       details: { name: data.name, block_type: data.block_type },
     });
-    await writeTenantBlockAudit(tenantClient, context, {
+    await writeTenantBlockAudit(supabase, context, {
       actorUserId: userId,
       eventType: 'form_block.created',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -369,8 +358,7 @@ export default async function formBlocks(context, req) {
       return respond(context, 400, { message: 'invalid_block_id' });
     }
 
-    const { data: existing, error: existingError } = await tenantClient
-      .from('shared_form_blocks')
+    const { data: existing, error: existingError } = await withOrgScope(supabase, 'shared_form_blocks', orgId)
       .select(SELECT_FIELDS)
       .eq('id', blockId)
       .maybeSingle();
@@ -412,7 +400,7 @@ export default async function formBlocks(context, req) {
     let usage = [];
     if (updates.is_active === false) {
       try {
-        usage = await loadUsage(tenantClient, blockId);
+        usage = await loadUsage(supabase, orgId, blockId);
       } catch (usageError) {
         context.log?.error?.('form-blocks failed to load usage before deactivate update', { message: usageError?.message, blockId });
         return respond(context, 500, { message: 'failed_to_update_form_block' });
@@ -426,8 +414,7 @@ export default async function formBlocks(context, req) {
       }
     }
 
-    const { data, error } = await tenantClient
-      .from('shared_form_blocks')
+    const { data, error } = await withOrgScope(supabase, 'shared_form_blocks', orgId)
       .update(updates)
       .eq('id', blockId)
       .select(SELECT_FIELDS)
@@ -440,7 +427,7 @@ export default async function formBlocks(context, req) {
 
     if (!usage.length) {
       try {
-        usage = await loadUsage(tenantClient, blockId);
+        usage = await loadUsage(supabase, orgId, blockId);
       } catch (usageError) {
         context.log?.error?.('form-blocks failed to load usage after update', { message: usageError?.message, blockId });
         return respond(context, 500, { message: 'failed_to_update_form_block' });
@@ -465,7 +452,7 @@ export default async function formBlocks(context, req) {
         after_content_schema: data.content_schema,
       },
     });
-    await writeTenantBlockAudit(tenantClient, context, {
+    await writeTenantBlockAudit(supabase, context, {
       actorUserId: userId,
       eventType: 'form_block.updated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -499,7 +486,7 @@ export default async function formBlocks(context, req) {
 
     let usage = [];
     try {
-      usage = await loadUsage(tenantClient, blockId);
+      usage = await loadUsage(supabase, orgId, blockId);
     } catch (usageError) {
       context.log?.error?.('form-blocks failed to load usage before deactivate', { message: usageError?.message, blockId });
       return respond(context, 500, { message: 'failed_to_update_form_block' });
@@ -512,8 +499,7 @@ export default async function formBlocks(context, req) {
       });
     }
 
-    const { data, error } = await tenantClient
-      .from('shared_form_blocks')
+    const { data, error } = await withOrgScope(supabase, 'shared_form_blocks', orgId)
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', blockId)
       .select(SELECT_FIELDS)
@@ -539,7 +525,7 @@ export default async function formBlocks(context, req) {
       resourceId: data.id,
       details: { name: data.name, usage_count: usage.length },
     });
-    await writeTenantBlockAudit(tenantClient, context, {
+    await writeTenantBlockAudit(supabase, context, {
       actorUserId: userId,
       eventType: 'form_block.deactivated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,

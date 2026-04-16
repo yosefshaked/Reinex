@@ -6,7 +6,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 
@@ -78,15 +78,10 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  return await handleConflictCheck(context, body, tenantClient);
+  return await handleConflictCheck(context, body, supabase, orgId);
 }
 
-async function handleConflictCheck(context, body, tenantClient) {
+async function handleConflictCheck(context, body, supabase, orgId) {
   // Validate required fields
   if (!body.datetime_start) {
     return respond(context, 400, { message: 'missing datetime_start' });
@@ -109,8 +104,7 @@ async function handleConflictCheck(context, body, tenantClient) {
   const endTime = new Date(startTime.getTime() + body.duration_minutes * 60000);
   
   // Fetch overlapping instances
-  const { data: instances, error } = await tenantClient
-    .from('lesson_instances')
+  const { data: instances, error } = await withOrgScope(supabase, 'lesson_instances', orgId)
     .select(`
       id,
       datetime_start,
@@ -233,8 +227,7 @@ async function handleConflictCheck(context, body, tenantClient) {
 
   // Check capacity (if instructor_service_capabilities exists)
   if (body.service_id) {
-    const { data: capability } = await tenantClient
-      .from('instructor_service_capabilities')
+    const { data: capability } = await withOrgScope(supabase, 'instructor_service_capabilities', orgId)
       .select('max_students')
       .eq('employee_id', body.instructor_employee_id)
       .eq('service_id', body.service_id)

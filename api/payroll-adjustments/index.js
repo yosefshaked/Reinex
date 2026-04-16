@@ -8,7 +8,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import {
@@ -77,16 +77,11 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   if (method === 'GET') {
     const employeeId = normalizeString(req?.query?.employee_id);
     const startDate = normalizeString(req?.query?.start_date);
     const endDate = normalizeString(req?.query?.end_date);
-    const entries = await listFinanceCorrections(tenantClient, {
+    const entries = await listFinanceCorrections(supabase, {
       employeeId,
       startDate: isYmdDate(startDate) ? startDate : '',
       endDate: isYmdDate(endDate) ? endDate : '',
@@ -137,8 +132,7 @@ export default async function (context, req) {
     if (method === 'POST') {
       // Idempotency: return existing record if the same key was already processed
       if (idempotencyKey) {
-        const { data: existing } = await tenantClient
-          .from('finance_corrections')
+        const { data: existing } = await withOrgScope(supabase, 'finance_corrections', orgId)
           .select('id, employee_id, correction_type, amount, effective_date, notes, created_by, updated_by, created_at, updated_at, metadata')
           .filter('metadata->>idempotency_key', 'eq', idempotencyKey)
           .eq('employee_id', employeeId)
@@ -150,8 +144,7 @@ export default async function (context, req) {
 
       payload.created_by = userId;
       payload.created_at = new Date().toISOString();
-      const { data, error } = await tenantClient
-        .from('finance_corrections')
+      const { data, error } = await withOrgScope(supabase, 'finance_corrections', orgId)
         .insert(payload)
         .select('id, employee_id, correction_type, amount, effective_date, notes, created_by, updated_by, created_at, updated_at, metadata')
         .single();
@@ -169,8 +162,7 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'missing_adjustment_id' });
     }
 
-    const { data, error } = await tenantClient
-      .from('finance_corrections')
+    const { data, error } = await withOrgScope(supabase, 'finance_corrections', orgId)
       .update(payload)
       .eq('id', id)
       .select('id, employee_id, correction_type, amount, effective_date, notes, created_by, updated_by, created_at, updated_at, metadata')
@@ -193,8 +185,7 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'missing_adjustment_id' });
     }
 
-    const { data, error } = await tenantClient
-      .from('finance_corrections')
+    const { data, error } = await withOrgScope(supabase, 'finance_corrections', orgId)
       .delete()
       .eq('id', id)
       .select('id')

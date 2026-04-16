@@ -96,6 +96,247 @@ END
 $$;
 
 -- =================================================================
+-- Control / Platform Tables (Shared across all tenants)
+-- =================================================================
+
+-- -----------------------------------------------------------------
+-- public.organizations (merged with org_settings)
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.organizations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  slug text NOT NULL UNIQUE,
+  created_by uuid NOT NULL,
+  setup_completed boolean NOT NULL DEFAULT false,
+  verified_at timestamptz NULL,
+  -- Merged from org_settings
+  permissions jsonb NOT NULL DEFAULT '{}'::jsonb,
+  logo_url text NULL,
+  storage_profile jsonb NOT NULL DEFAULT '{}'::jsonb,
+  storage_grace_ends_at timestamptz NULL,
+  backup_history jsonb NOT NULL DEFAULT '[]'::jsonb,
+  -- General
+  policy_links jsonb NULL,
+  legal_settings jsonb NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.organizations
+  ADD COLUMN IF NOT EXISTS name text,
+  ADD COLUMN IF NOT EXISTS slug text,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS setup_completed boolean,
+  ADD COLUMN IF NOT EXISTS verified_at timestamptz,
+  ADD COLUMN IF NOT EXISTS permissions jsonb,
+  ADD COLUMN IF NOT EXISTS logo_url text,
+  ADD COLUMN IF NOT EXISTS storage_profile jsonb,
+  ADD COLUMN IF NOT EXISTS storage_grace_ends_at timestamptz,
+  ADD COLUMN IF NOT EXISTS backup_history jsonb,
+  ADD COLUMN IF NOT EXISTS policy_links jsonb,
+  ADD COLUMN IF NOT EXISTS legal_settings jsonb,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+CREATE INDEX IF NOT EXISTS organizations_slug_idx
+  ON public.organizations (slug);
+
+CREATE INDEX IF NOT EXISTS organizations_created_by_idx
+  ON public.organizations (created_by);
+
+-- -----------------------------------------------------------------
+-- public.profiles (linked to auth.users)
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  full_name text NULL,
+  avatar_url text NULL,
+  phone text NULL,
+  locale text NOT NULL DEFAULT 'he',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NULL
+);
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS full_name text,
+  ADD COLUMN IF NOT EXISTS avatar_url text,
+  ADD COLUMN IF NOT EXISTS phone text,
+  ADD COLUMN IF NOT EXISTS locale text,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+-- -----------------------------------------------------------------
+-- public.org_memberships
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.org_memberships (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  role text NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'office', 'instructor', 'member')),
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.org_memberships
+  ADD COLUMN IF NOT EXISTS org_id uuid,
+  ADD COLUMN IF NOT EXISTS user_id uuid,
+  ADD COLUMN IF NOT EXISTS role text,
+  ADD COLUMN IF NOT EXISTS is_active boolean,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+
+CREATE UNIQUE INDEX IF NOT EXISTS org_memberships_org_user_uidx
+  ON public.org_memberships (org_id, user_id);
+
+CREATE INDEX IF NOT EXISTS org_memberships_user_idx
+  ON public.org_memberships (user_id);
+
+-- -----------------------------------------------------------------
+-- public.org_invitations
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.org_invitations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  email text NOT NULL,
+  role text NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'office', 'instructor', 'member')),
+  invited_by uuid NOT NULL REFERENCES auth.users(id),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'expired', 'revoked')),
+  token text NOT NULL UNIQUE,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.org_invitations
+  ADD COLUMN IF NOT EXISTS org_id uuid,
+  ADD COLUMN IF NOT EXISTS email text,
+  ADD COLUMN IF NOT EXISTS role text,
+  ADD COLUMN IF NOT EXISTS invited_by uuid,
+  ADD COLUMN IF NOT EXISTS status text,
+  ADD COLUMN IF NOT EXISTS token text,
+  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS org_invitations_org_idx
+  ON public.org_invitations (org_id, status);
+
+CREATE INDEX IF NOT EXISTS org_invitations_email_idx
+  ON public.org_invitations (email, status);
+
+-- -----------------------------------------------------------------
+-- public.permission_registry (reference data, not org-scoped)
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.permission_registry (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  permission_key text NOT NULL UNIQUE,
+  description text NULL,
+  category text NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.permission_registry
+  ADD COLUMN IF NOT EXISTS permission_key text,
+  ADD COLUMN IF NOT EXISTS description text,
+  ADD COLUMN IF NOT EXISTS category text,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz;
+
+-- -----------------------------------------------------------------
+-- public.active_routing (maps user → currently active org)
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.active_routing (
+  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.active_routing
+  ADD COLUMN IF NOT EXISTS org_id uuid,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS active_routing_org_idx
+  ON public.active_routing (org_id);
+
+-- -----------------------------------------------------------------
+-- public.audit_log (unified: replaces both control audit_log and
+-- tenant tenant_audit_log)
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.audit_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid REFERENCES public.organizations(id) ON DELETE SET NULL,
+  actor_user_id uuid NULL,
+  actor_email text NULL,
+  actor_role text NULL,
+  correlation_id uuid NULL,
+  event_type text NOT NULL,
+  action_category text NULL,
+  retention_category text NOT NULL DEFAULT 'standard',
+  resource_type text NULL,
+  resource_id text NULL,
+  before_state jsonb NULL,
+  after_state jsonb NULL,
+  details jsonb NULL,
+  metadata jsonb NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NULL
+);
+
+ALTER TABLE public.audit_log
+  ADD COLUMN IF NOT EXISTS org_id uuid,
+  ADD COLUMN IF NOT EXISTS actor_user_id uuid,
+  ADD COLUMN IF NOT EXISTS actor_email text,
+  ADD COLUMN IF NOT EXISTS actor_role text,
+  ADD COLUMN IF NOT EXISTS correlation_id uuid,
+  ADD COLUMN IF NOT EXISTS event_type text,
+  ADD COLUMN IF NOT EXISTS action_category text,
+  ADD COLUMN IF NOT EXISTS retention_category text,
+  ADD COLUMN IF NOT EXISTS resource_type text,
+  ADD COLUMN IF NOT EXISTS resource_id text,
+  ADD COLUMN IF NOT EXISTS before_state jsonb,
+  ADD COLUMN IF NOT EXISTS after_state jsonb,
+  ADD COLUMN IF NOT EXISTS details jsonb,
+  ADD COLUMN IF NOT EXISTS metadata jsonb,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS expires_at timestamptz;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'audit_log_retention_category_check'
+  ) THEN
+    ALTER TABLE public.audit_log
+      ADD CONSTRAINT audit_log_retention_category_check
+      CHECK (retention_category IN ('critical', 'standard', 'diagnostic'));
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS audit_log_org_idx
+  ON public.audit_log (org_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS audit_log_resource_idx
+  ON public.audit_log (resource_type, resource_id);
+
+CREATE INDEX IF NOT EXISTS audit_log_expiry_idx
+  ON public.audit_log (expires_at)
+  WHERE expires_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS audit_log_event_type_idx
+  ON public.audit_log (event_type, created_at DESC);
+
+-- =================================================================
 -- Tenant Public Domain Tables (Product-Agnostic)
 -- =================================================================
 
@@ -105,6 +346,7 @@ $$;
 
 CREATE TABLE IF NOT EXISTS public.students (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   client_profile_id uuid,
   notes_internal text NULL,
   medical_provider text NULL,
@@ -116,6 +358,7 @@ CREATE TABLE IF NOT EXISTS public.students (
 );
 
 ALTER TABLE public.students
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS notes_internal text,
   ADD COLUMN IF NOT EXISTS medical_provider text,
@@ -131,6 +374,7 @@ ALTER TABLE public.students
 
 CREATE TABLE IF NOT EXISTS public.guardians (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   first_name text NOT NULL,
   middle_name text NULL,
   last_name text NULL,
@@ -141,6 +385,7 @@ CREATE TABLE IF NOT EXISTS public.guardians (
 );
 
 ALTER TABLE public.guardians
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS first_name text,
   ADD COLUMN IF NOT EXISTS middle_name text,
   ADD COLUMN IF NOT EXISTS last_name text,
@@ -157,7 +402,7 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS guardians_name_idx
-  ON public.guardians (first_name, last_name);
+  ON public.guardians (org_id, first_name, last_name);
 
 -- -----------------------------------------------------------------
 -- public.client_profiles
@@ -165,6 +410,7 @@ CREATE INDEX IF NOT EXISTS guardians_name_idx
 
 CREATE TABLE IF NOT EXISTS public.client_profiles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   first_name text NOT NULL,
   middle_name text NULL,
   last_name text NOT NULL,
@@ -182,6 +428,7 @@ CREATE TABLE IF NOT EXISTS public.client_profiles (
 );
 
 ALTER TABLE public.client_profiles
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS first_name text,
   ADD COLUMN IF NOT EXISTS middle_name text,
   ADD COLUMN IF NOT EXISTS last_name text,
@@ -247,19 +494,20 @@ EXCEPTION
   WHEN others THEN NULL;
 END $$;
 
-CREATE INDEX IF NOT EXISTS client_profiles_is_active_idx ON public.client_profiles (is_active);
-CREATE INDEX IF NOT EXISTS client_profiles_name_idx ON public.client_profiles (first_name, last_name);
+CREATE INDEX IF NOT EXISTS client_profiles_is_active_idx ON public.client_profiles (org_id, is_active);
+CREATE INDEX IF NOT EXISTS client_profiles_name_idx ON public.client_profiles (org_id, first_name, last_name);
 
 DO $$
 BEGIN
   CREATE UNIQUE INDEX IF NOT EXISTS client_profiles_identity_number_unique_idx
-    ON public.client_profiles (identity_number)
+    ON public.client_profiles (org_id, identity_number)
     WHERE identity_number IS NOT NULL AND identity_number <> '';
 EXCEPTION
   WHEN others THEN NULL;
 END $$;
 
 ALTER TABLE public.students
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS client_profile_id uuid;
 
 DO $$
@@ -275,7 +523,7 @@ END $$;
 DO $$
 BEGIN
   CREATE UNIQUE INDEX IF NOT EXISTS students_client_profile_id_uidx
-    ON public.students (client_profile_id)
+    ON public.students (org_id, client_profile_id)
     WHERE client_profile_id IS NOT NULL;
 EXCEPTION
   WHEN others THEN NULL;
@@ -406,6 +654,7 @@ DROP INDEX IF EXISTS public.students_name_idx;
 
 CREATE TABLE IF NOT EXISTS public.client_guardians (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   client_profile_id uuid NOT NULL,
   guardian_id uuid NOT NULL,
   relationship text NOT NULL,
@@ -414,6 +663,7 @@ CREATE TABLE IF NOT EXISTS public.client_guardians (
 );
 
 ALTER TABLE public.client_guardians
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS guardian_id uuid,
   ADD COLUMN IF NOT EXISTS relationship text,
@@ -451,10 +701,10 @@ EXCEPTION
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS client_guardians_client_guardian_uidx
-  ON public.client_guardians (client_profile_id, guardian_id);
+  ON public.client_guardians (org_id, client_profile_id, guardian_id);
 
 CREATE INDEX IF NOT EXISTS client_guardians_client_profile_id_idx
-  ON public.client_guardians (client_profile_id);
+  ON public.client_guardians (org_id, client_profile_id);
 
 DO $$
 BEGIN
@@ -476,6 +726,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS public."Employees" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+  "org_id" uuid NOT NULL REFERENCES public.organizations(id),
   "user_id" uuid,
   "first_name" text NOT NULL,
   "middle_name" text,
@@ -501,6 +752,7 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
 );
 
 ALTER TABLE public."Employees"
+  ADD COLUMN IF NOT EXISTS "org_id" uuid,
   ADD COLUMN IF NOT EXISTS "user_id" uuid,
   ADD COLUMN IF NOT EXISTS "first_name" text,
   ADD COLUMN IF NOT EXISTS "middle_name" text,
@@ -523,8 +775,8 @@ ALTER TABLE public."Employees"
   ADD COLUMN IF NOT EXISTS "instructor_types" uuid[],
   ADD COLUMN IF NOT EXISTS "metadata" jsonb;
 
-CREATE INDEX IF NOT EXISTS "Employees_name_idx" ON public."Employees" ("first_name", "last_name");
-CREATE INDEX IF NOT EXISTS "Employees_user_id_idx" ON public."Employees" ("user_id");
+CREATE INDEX IF NOT EXISTS "Employees_name_idx" ON public."Employees" ("org_id", "first_name", "last_name");
+CREATE INDEX IF NOT EXISTS "Employees_user_id_idx" ON public."Employees" ("org_id", "user_id");
 
 DO $$
 BEGIN
@@ -542,6 +794,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS public."Services" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+  "org_id" uuid NOT NULL REFERENCES public.organizations(id),
   "name" text NOT NULL,
   "duration_minutes" bigint,
   "payment_model" text,
@@ -553,6 +806,7 @@ CREATE TABLE IF NOT EXISTS public."Services" (
 );
 
 ALTER TABLE public."Services"
+  ADD COLUMN IF NOT EXISTS "org_id" uuid,
   ADD COLUMN IF NOT EXISTS "name" text,
   ADD COLUMN IF NOT EXISTS "duration_minutes" bigint,
   ADD COLUMN IF NOT EXISTS "payment_model" text,
@@ -587,6 +841,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS public."RateHistory" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+  "org_id" uuid NOT NULL REFERENCES public.organizations(id),
   "rate" integer NOT NULL,
   "effective_date" date NOT NULL,
   "notes" text,
@@ -599,6 +854,7 @@ CREATE TABLE IF NOT EXISTS public."RateHistory" (
 );
 
 ALTER TABLE public."RateHistory"
+  ADD COLUMN IF NOT EXISTS "org_id" uuid,
   ADD COLUMN IF NOT EXISTS "rate" integer,
   ADD COLUMN IF NOT EXISTS "effective_date" date,
   ADD COLUMN IF NOT EXISTS "notes" text,
@@ -633,12 +889,12 @@ BEGIN
         DROP INDEX IF EXISTS public."RateHistory_employee_service_effective_date_key";
         ALTER TABLE public."RateHistory"
           ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
-          UNIQUE (employee_id, service_id, effective_date);
+          UNIQUE (org_id, employee_id, service_id, effective_date);
     END;
   ELSE
     ALTER TABLE public."RateHistory"
       ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
-      UNIQUE (employee_id, service_id, effective_date);
+      UNIQUE (org_id, employee_id, service_id, effective_date);
   END IF;
 EXCEPTION
   WHEN duplicate_object OR duplicate_table THEN
@@ -653,6 +909,7 @@ $$;
 
 CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   employee_id uuid NOT NULL,
   attendance_date date NOT NULL,
   status text NOT NULL DEFAULT 'present',
@@ -668,6 +925,7 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
 );
 
 ALTER TABLE public.employee_attendance_records
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS attendance_date date,
   ADD COLUMN IF NOT EXISTS status text,
@@ -714,14 +972,14 @@ END $$;
 DROP INDEX IF EXISTS public.employee_attendance_records_employee_date_uidx;
 
 CREATE UNIQUE INDEX IF NOT EXISTS employee_attendance_records_primary_date_uidx
-  ON public.employee_attendance_records (employee_id, attendance_date)
+  ON public.employee_attendance_records (org_id, employee_id, attendance_date)
   WHERE source_type IN ('manual', 'import', 'system');
 
 CREATE INDEX IF NOT EXISTS employee_attendance_records_date_idx
-  ON public.employee_attendance_records (attendance_date);
+  ON public.employee_attendance_records (org_id, attendance_date);
 
 CREATE INDEX IF NOT EXISTS employee_attendance_records_correction_idx
-  ON public.employee_attendance_records (employee_id, attendance_date, source_type)
+  ON public.employee_attendance_records (org_id, employee_id, attendance_date, source_type)
   WHERE source_type = 'correction';
 
 -- -----------------------------------------------------------------
@@ -730,6 +988,7 @@ CREATE INDEX IF NOT EXISTS employee_attendance_records_correction_idx
 
 CREATE TABLE IF NOT EXISTS public.employee_leave_entries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   employee_id uuid NOT NULL,
   leave_type text NOT NULL,
   status text NOT NULL DEFAULT 'approved',
@@ -749,6 +1008,7 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_entries (
 );
 
 ALTER TABLE public.employee_leave_entries
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS leave_type text,
   ADD COLUMN IF NOT EXISTS status text,
@@ -817,7 +1077,7 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS employee_leave_entries_employee_range_idx
-  ON public.employee_leave_entries (employee_id, start_date, end_date);
+  ON public.employee_leave_entries (org_id, employee_id, start_date, end_date);
 
 -- -----------------------------------------------------------------
 -- public.employee_leave_days
@@ -825,6 +1085,7 @@ CREATE INDEX IF NOT EXISTS employee_leave_entries_employee_range_idx
 
 CREATE TABLE IF NOT EXISTS public.employee_leave_days (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   leave_entry_id uuid NOT NULL,
   employee_id uuid NOT NULL,
   leave_date date NOT NULL,
@@ -837,6 +1098,7 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_days (
 );
 
 ALTER TABLE public.employee_leave_days
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS leave_entry_id uuid,
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS leave_date date,
@@ -888,10 +1150,10 @@ EXCEPTION
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS employee_leave_days_employee_date_uidx
-  ON public.employee_leave_days (employee_id, leave_date);
+  ON public.employee_leave_days (org_id, employee_id, leave_date);
 
 CREATE INDEX IF NOT EXISTS employee_leave_days_entry_idx
-  ON public.employee_leave_days (leave_entry_id);
+  ON public.employee_leave_days (org_id, leave_entry_id);
 
 -- -----------------------------------------------------------------
 -- public.employee_leave_balance_events
@@ -899,6 +1161,7 @@ CREATE INDEX IF NOT EXISTS employee_leave_days_entry_idx
 
 CREATE TABLE IF NOT EXISTS public.employee_leave_balance_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   employee_id uuid NOT NULL,
   leave_entry_id uuid NULL,
   leave_day_id uuid NULL,
@@ -913,6 +1176,7 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_balance_events (
 );
 
 ALTER TABLE public.employee_leave_balance_events
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS leave_entry_id uuid,
   ADD COLUMN IF NOT EXISTS leave_day_id uuid,
@@ -966,7 +1230,7 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS employee_leave_balance_events_employee_date_idx
-  ON public.employee_leave_balance_events (employee_id, effective_date);
+  ON public.employee_leave_balance_events (org_id, employee_id, effective_date);
 
 -- -----------------------------------------------------------------
 -- public.finance_corrections
@@ -974,6 +1238,7 @@ CREATE INDEX IF NOT EXISTS employee_leave_balance_events_employee_date_idx
 
 CREATE TABLE IF NOT EXISTS public.finance_corrections (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   employee_id uuid NOT NULL,
   correction_type text NOT NULL,
   amount integer NOT NULL,
@@ -988,6 +1253,7 @@ CREATE TABLE IF NOT EXISTS public.finance_corrections (
 );
 
 ALTER TABLE public.finance_corrections
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS correction_type text,
   ADD COLUMN IF NOT EXISTS amount integer,
@@ -1021,7 +1287,7 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS finance_corrections_employee_date_idx
-  ON public.finance_corrections (employee_id, effective_date);
+  ON public.finance_corrections (org_id, employee_id, effective_date);
 
 -- -----------------------------------------------------------------
 -- public.instructor_profiles
@@ -1034,6 +1300,7 @@ CREATE TABLE IF NOT EXISTS public.instructor_profiles (
 );
 
 ALTER TABLE public.instructor_profiles
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS break_time_minutes int,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
@@ -1055,6 +1322,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS public.instructor_service_capabilities (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   employee_id uuid NOT NULL,
   service_id uuid NOT NULL,
   max_students int NOT NULL DEFAULT 1,
@@ -1064,6 +1332,7 @@ CREATE TABLE IF NOT EXISTS public.instructor_service_capabilities (
 );
 
 ALTER TABLE public.instructor_service_capabilities
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS max_students int,
@@ -1106,10 +1375,10 @@ EXCEPTION
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS instructor_service_capabilities_employee_service_uidx
-  ON public.instructor_service_capabilities (employee_id, service_id);
+  ON public.instructor_service_capabilities (org_id, employee_id, service_id);
 
 CREATE INDEX IF NOT EXISTS instructor_service_capabilities_employee_id_idx
-  ON public.instructor_service_capabilities (employee_id);
+  ON public.instructor_service_capabilities (org_id, employee_id);
 
 -- -----------------------------------------------------------------
 -- public.lesson_templates
@@ -1117,6 +1386,7 @@ CREATE INDEX IF NOT EXISTS instructor_service_capabilities_employee_id_idx
 
 CREATE TABLE IF NOT EXISTS public.lesson_templates (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   student_id uuid NOT NULL,
   instructor_employee_id uuid NOT NULL,
   service_id uuid NOT NULL,
@@ -1137,6 +1407,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_templates (
 );
 
 ALTER TABLE public.lesson_templates
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS instructor_employee_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
@@ -1227,8 +1498,8 @@ ALTER TABLE public.lesson_templates
   ADD CONSTRAINT lesson_templates_day_of_week_check
   CHECK (day_of_week IN ('sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'));
 
-CREATE INDEX IF NOT EXISTS lesson_templates_student_id_idx ON public.lesson_templates (student_id);
-CREATE INDEX IF NOT EXISTS lesson_templates_instructor_day_time_idx ON public.lesson_templates (instructor_employee_id, day_of_week, time_of_day);
+CREATE INDEX IF NOT EXISTS lesson_templates_student_id_idx ON public.lesson_templates (org_id, student_id);
+CREATE INDEX IF NOT EXISTS lesson_templates_instructor_day_time_idx ON public.lesson_templates (org_id, instructor_employee_id, day_of_week, time_of_day);
 
 CREATE OR REPLACE FUNCTION public.validate_lesson_template_no_active_overlap()
 RETURNS trigger
@@ -1247,6 +1518,7 @@ BEGIN
     SELECT 1
     FROM public.lesson_templates existing
     WHERE existing.id IS DISTINCT FROM NEW.id
+      AND existing.org_id = NEW.org_id
       AND existing.student_id = NEW.student_id
       AND existing.instructor_employee_id = NEW.instructor_employee_id
       AND existing.day_of_week = NEW.day_of_week
@@ -1287,6 +1559,7 @@ $$;
 
 CREATE TABLE IF NOT EXISTS public.lesson_template_overrides (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   template_id uuid NOT NULL,
   target_date date NOT NULL,
   override_type text NOT NULL,
@@ -1300,6 +1573,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_template_overrides (
 );
 
 ALTER TABLE public.lesson_template_overrides
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS template_id uuid,
   ADD COLUMN IF NOT EXISTS target_date date,
   ADD COLUMN IF NOT EXISTS override_type text,
@@ -1352,10 +1626,10 @@ EXCEPTION
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS lesson_template_overrides_template_date_uidx
-  ON public.lesson_template_overrides (template_id, target_date);
+  ON public.lesson_template_overrides (org_id, template_id, target_date);
 
 CREATE INDEX IF NOT EXISTS lesson_template_overrides_target_date_idx
-  ON public.lesson_template_overrides (target_date);
+  ON public.lesson_template_overrides (org_id, target_date);
 
 -- -----------------------------------------------------------------
 -- public.lesson_instances
@@ -1367,6 +1641,7 @@ CREATE INDEX IF NOT EXISTS lesson_template_overrides_target_date_idx
 
 CREATE TABLE IF NOT EXISTS public.lesson_instances (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   template_id uuid NULL,
   applied_override_id uuid NULL,
   datetime_start timestamptz NOT NULL,
@@ -1389,6 +1664,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_instances (
 );
 
 ALTER TABLE public.lesson_instances
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS template_id uuid,
   ADD COLUMN IF NOT EXISTS applied_override_id uuid,
   ADD COLUMN IF NOT EXISTS datetime_start timestamptz,
@@ -1549,9 +1825,9 @@ EXCEPTION
     RAISE EXCEPTION 'Cannot apply lesson_instances_created_source_check; violating lesson_instances.created_source values remain: %', COALESCE(invalid_values, '[unknown]');
 END $$;
 
-CREATE INDEX IF NOT EXISTS lesson_instances_datetime_start_idx ON public.lesson_instances (datetime_start);
-CREATE INDEX IF NOT EXISTS lesson_instances_instructor_datetime_idx ON public.lesson_instances (instructor_employee_id, datetime_start);
-CREATE INDEX IF NOT EXISTS lesson_instances_applied_override_id_idx ON public.lesson_instances (applied_override_id) WHERE applied_override_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS lesson_instances_datetime_start_idx ON public.lesson_instances (org_id, datetime_start);
+CREATE INDEX IF NOT EXISTS lesson_instances_instructor_datetime_idx ON public.lesson_instances (org_id, instructor_employee_id, datetime_start);
+CREATE INDEX IF NOT EXISTS lesson_instances_applied_override_id_idx ON public.lesson_instances (org_id, applied_override_id) WHERE applied_override_id IS NOT NULL;
 
 -- -----------------------------------------------------------------
 -- public.lesson_participants
@@ -1563,6 +1839,7 @@ CREATE INDEX IF NOT EXISTS lesson_instances_applied_override_id_idx ON public.le
 
 CREATE TABLE IF NOT EXISTS public.lesson_participants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   lesson_instance_id uuid NOT NULL,
   client_profile_id uuid NOT NULL,
   student_id uuid NULL,
@@ -1584,6 +1861,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_participants (
 );
 
 ALTER TABLE public.lesson_participants
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
   ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
@@ -1662,13 +1940,13 @@ EXCEPTION
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS lesson_participants_instance_client_profile_uidx
-  ON public.lesson_participants (lesson_instance_id, client_profile_id);
+  ON public.lesson_participants (org_id, lesson_instance_id, client_profile_id);
 
 CREATE INDEX IF NOT EXISTS lesson_participants_client_profile_id_idx
-  ON public.lesson_participants (client_profile_id);
+  ON public.lesson_participants (org_id, client_profile_id);
 
 CREATE INDEX IF NOT EXISTS lesson_participants_student_id_idx
-  ON public.lesson_participants (student_id);
+  ON public.lesson_participants (org_id, student_id);
 
 DO $$
 BEGIN
@@ -1696,7 +1974,7 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS lesson_participants_locked_at_idx
-  ON public.lesson_participants (locked_at) WHERE locked_at IS NOT NULL;
+  ON public.lesson_participants (org_id, locked_at) WHERE locked_at IS NOT NULL;
 
 -- -----------------------------------------------------------------
 -- public.grace_cancellation_requests
@@ -1704,6 +1982,7 @@ CREATE INDEX IF NOT EXISTS lesson_participants_locked_at_idx
 
 CREATE TABLE IF NOT EXISTS public.grace_cancellation_requests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   lesson_participant_id uuid NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   created_by uuid NULL,
@@ -1712,6 +1991,7 @@ CREATE TABLE IF NOT EXISTS public.grace_cancellation_requests (
 );
 
 ALTER TABLE public.grace_cancellation_requests
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
   ADD COLUMN IF NOT EXISTS created_at timestamptz,
   ADD COLUMN IF NOT EXISTS created_by uuid,
@@ -1746,10 +2026,10 @@ EXCEPTION
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS grace_cancellation_requests_participant_uidx
-  ON public.grace_cancellation_requests (lesson_participant_id);
+  ON public.grace_cancellation_requests (org_id, lesson_participant_id);
 
 CREATE INDEX IF NOT EXISTS grace_cancellation_requests_created_at_idx
-  ON public.grace_cancellation_requests (created_at DESC);
+  ON public.grace_cancellation_requests (org_id, created_at DESC);
 
 -- -----------------------------------------------------------------
 -- public.payroll_runs
@@ -1757,6 +2037,7 @@ CREATE INDEX IF NOT EXISTS grace_cancellation_requests_created_at_idx
 
 CREATE TABLE IF NOT EXISTS public.payroll_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   period_start date NOT NULL,
   period_end date NOT NULL,
   status text NOT NULL DEFAULT 'draft',
@@ -1769,6 +2050,7 @@ CREATE TABLE IF NOT EXISTS public.payroll_runs (
 );
 
 ALTER TABLE public.payroll_runs
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS period_start date,
   ADD COLUMN IF NOT EXISTS period_end date,
   ADD COLUMN IF NOT EXISTS status text,
@@ -1789,7 +2071,7 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS payroll_runs_period_idx
-  ON public.payroll_runs (period_start, period_end, status);
+  ON public.payroll_runs (org_id, period_start, period_end, status);
 
 -- -----------------------------------------------------------------
 -- public.claim_batches
@@ -1797,6 +2079,7 @@ CREATE INDEX IF NOT EXISTS payroll_runs_period_idx
 
 CREATE TABLE IF NOT EXISTS public.claim_batches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   batch_type text NOT NULL DEFAULT 'hmo',
   period_start date NOT NULL,
   period_end date NOT NULL,
@@ -1812,6 +2095,7 @@ CREATE TABLE IF NOT EXISTS public.claim_batches (
 );
 
 ALTER TABLE public.claim_batches
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS batch_type text,
   ADD COLUMN IF NOT EXISTS period_start date,
   ADD COLUMN IF NOT EXISTS period_end date,
@@ -1844,7 +2128,7 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS claim_batches_period_idx
-  ON public.claim_batches (period_start, period_end, status);
+  ON public.claim_batches (org_id, period_start, period_end, status);
 
 -- -----------------------------------------------------------------
 -- public.instance_locks
@@ -1852,6 +2136,7 @@ CREATE INDEX IF NOT EXISTS claim_batches_period_idx
 
 CREATE TABLE IF NOT EXISTS public.instance_locks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   lesson_instance_id uuid NOT NULL,
   lock_source_type text NOT NULL,
   lock_source_id uuid NOT NULL,
@@ -1862,6 +2147,7 @@ CREATE TABLE IF NOT EXISTS public.instance_locks (
 );
 
 ALTER TABLE public.instance_locks
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
   ADD COLUMN IF NOT EXISTS lock_source_type text,
   ADD COLUMN IF NOT EXISTS lock_source_id uuid,
@@ -1889,10 +2175,10 @@ EXCEPTION
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS instance_locks_instance_source_uidx
-  ON public.instance_locks (lesson_instance_id, lock_source_type, lock_source_id);
+  ON public.instance_locks (org_id, lesson_instance_id, lock_source_type, lock_source_id);
 
 CREATE INDEX IF NOT EXISTS instance_locks_instance_idx
-  ON public.instance_locks (lesson_instance_id, created_at DESC);
+  ON public.instance_locks (org_id, lesson_instance_id, created_at DESC);
 
 -- -----------------------------------------------------------------
 -- public.participant_locks
@@ -1900,6 +2186,7 @@ CREATE INDEX IF NOT EXISTS instance_locks_instance_idx
 
 CREATE TABLE IF NOT EXISTS public.participant_locks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   lesson_participant_id uuid NOT NULL,
   lock_source_type text NOT NULL,
   lock_source_id uuid NOT NULL,
@@ -1910,6 +2197,7 @@ CREATE TABLE IF NOT EXISTS public.participant_locks (
 );
 
 ALTER TABLE public.participant_locks
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
   ADD COLUMN IF NOT EXISTS lock_source_type text,
   ADD COLUMN IF NOT EXISTS lock_source_id uuid,
@@ -1937,10 +2225,10 @@ EXCEPTION
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS participant_locks_participant_source_uidx
-  ON public.participant_locks (lesson_participant_id, lock_source_type, lock_source_id);
+  ON public.participant_locks (org_id, lesson_participant_id, lock_source_type, lock_source_id);
 
 CREATE INDEX IF NOT EXISTS participant_locks_participant_idx
-  ON public.participant_locks (lesson_participant_id, created_at DESC);
+  ON public.participant_locks (org_id, lesson_participant_id, created_at DESC);
 
 -- -----------------------------------------------------------------
 -- public.calendar_instance_corrections
@@ -1948,6 +2236,7 @@ CREATE INDEX IF NOT EXISTS participant_locks_participant_idx
 
 CREATE TABLE IF NOT EXISTS public.calendar_instance_corrections (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   original_instance_id uuid NOT NULL,
   correction_mode text NOT NULL DEFAULT 'value_only',
   reason_code text NOT NULL,
@@ -1967,6 +2256,7 @@ CREATE TABLE IF NOT EXISTS public.calendar_instance_corrections (
 );
 
 ALTER TABLE public.calendar_instance_corrections
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS original_instance_id uuid,
   ADD COLUMN IF NOT EXISTS correction_mode text,
   ADD COLUMN IF NOT EXISTS reason_code text,
@@ -2012,53 +2302,9 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS calendar_instance_corrections_instance_idx
-  ON public.calendar_instance_corrections (original_instance_id, created_at DESC);
+  ON public.calendar_instance_corrections (org_id, original_instance_id, created_at DESC);
 
--- -----------------------------------------------------------------
--- public.tenant_audit_log
--- -----------------------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS public.tenant_audit_log (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  correlation_id uuid NULL,
-  actor_user_id uuid NULL,
-  event_type text NOT NULL,
-  retention_category text NOT NULL DEFAULT 'standard',
-  resource_type text NOT NULL,
-  resource_id text NOT NULL,
-  before_state jsonb NULL,
-  after_state jsonb NULL,
-  details jsonb NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  expires_at timestamptz NULL
-);
-
-ALTER TABLE public.tenant_audit_log
-  ADD COLUMN IF NOT EXISTS correlation_id uuid,
-  ADD COLUMN IF NOT EXISTS actor_user_id uuid,
-  ADD COLUMN IF NOT EXISTS event_type text,
-  ADD COLUMN IF NOT EXISTS retention_category text,
-  ADD COLUMN IF NOT EXISTS resource_type text,
-  ADD COLUMN IF NOT EXISTS resource_id text,
-  ADD COLUMN IF NOT EXISTS before_state jsonb,
-  ADD COLUMN IF NOT EXISTS after_state jsonb,
-  ADD COLUMN IF NOT EXISTS details jsonb,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS expires_at timestamptz;
-
-DO $$
-BEGIN
-  ALTER TABLE public.tenant_audit_log
-    ADD CONSTRAINT tenant_audit_log_retention_category_check
-    CHECK (retention_category IN ('critical', 'standard', 'diagnostic'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
-
-CREATE INDEX IF NOT EXISTS tenant_audit_log_resource_idx
-  ON public.tenant_audit_log (resource_type, resource_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS tenant_audit_log_expiry_idx
-  ON public.tenant_audit_log (expires_at) WHERE expires_at IS NOT NULL;
+-- (tenant_audit_log removed — replaced by unified public.audit_log in Control Tables section above)
 
 -- -----------------------------------------------------------------
 -- public.dashboard_tasks
@@ -2066,6 +2312,7 @@ CREATE INDEX IF NOT EXISTS tenant_audit_log_expiry_idx
 
 CREATE TABLE IF NOT EXISTS public.dashboard_tasks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   task_type text NOT NULL,
   title text NOT NULL,
   description text NOT NULL,
@@ -2085,6 +2332,7 @@ CREATE TABLE IF NOT EXISTS public.dashboard_tasks (
 );
 
 ALTER TABLE public.dashboard_tasks
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS task_type text,
   ADD COLUMN IF NOT EXISTS title text,
   ADD COLUMN IF NOT EXISTS description text,
@@ -2121,7 +2369,7 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS dashboard_tasks_open_idx
-  ON public.dashboard_tasks (status, priority, created_at DESC)
+  ON public.dashboard_tasks (org_id, status, priority, created_at DESC)
   WHERE status = 'open';
 
 -- -----------------------------------------------------------------
@@ -2130,6 +2378,7 @@ CREATE INDEX IF NOT EXISTS dashboard_tasks_open_idx
 
 CREATE TABLE IF NOT EXISTS public.hmo_providers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   name text NOT NULL,
   is_active boolean NOT NULL DEFAULT true,
   metadata jsonb NULL,
@@ -2138,6 +2387,7 @@ CREATE TABLE IF NOT EXISTS public.hmo_providers (
 );
 
 ALTER TABLE public.hmo_providers
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS name text,
   ADD COLUMN IF NOT EXISTS is_active boolean,
   ADD COLUMN IF NOT EXISTS metadata jsonb,
@@ -2145,7 +2395,7 @@ ALTER TABLE public.hmo_providers
   ADD COLUMN IF NOT EXISTS updated_at timestamptz;
 
 CREATE UNIQUE INDEX IF NOT EXISTS hmo_providers_name_uidx
-  ON public.hmo_providers (lower(name));
+  ON public.hmo_providers (org_id, lower(name));
 
 -- -----------------------------------------------------------------
 -- public.hmo_provider_tracks
@@ -2153,6 +2403,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS hmo_providers_name_uidx
 
 CREATE TABLE IF NOT EXISTS public.hmo_provider_tracks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   provider_id uuid NOT NULL,
   service_id uuid NULL,
   name text NOT NULL,
@@ -2167,6 +2418,7 @@ CREATE TABLE IF NOT EXISTS public.hmo_provider_tracks (
 );
 
 ALTER TABLE public.hmo_provider_tracks
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS provider_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS name text,
@@ -2234,13 +2486,13 @@ END $$;
 DROP INDEX IF EXISTS hmo_provider_tracks_provider_name_uidx;
 
 CREATE UNIQUE INDEX IF NOT EXISTS hmo_provider_tracks_provider_service_name_uidx
-  ON public.hmo_provider_tracks (provider_id, service_id, lower(name));
+  ON public.hmo_provider_tracks (org_id, provider_id, service_id, lower(name));
 
 CREATE INDEX IF NOT EXISTS hmo_provider_tracks_provider_id_idx
-  ON public.hmo_provider_tracks (provider_id);
+  ON public.hmo_provider_tracks (org_id, provider_id);
 
 CREATE INDEX IF NOT EXISTS hmo_provider_tracks_service_id_idx
-  ON public.hmo_provider_tracks (service_id);
+  ON public.hmo_provider_tracks (org_id, service_id);
 
 -- -----------------------------------------------------------------
 -- public.hmo_authorizations
@@ -2248,6 +2500,7 @@ CREATE INDEX IF NOT EXISTS hmo_provider_tracks_service_id_idx
 
 CREATE TABLE IF NOT EXISTS public.hmo_authorizations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   student_id uuid NOT NULL,
   service_id uuid NOT NULL,
   provider_id uuid NOT NULL,
@@ -2268,6 +2521,7 @@ CREATE TABLE IF NOT EXISTS public.hmo_authorizations (
 );
 
 ALTER TABLE public.hmo_authorizations
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS provider_id uuid,
@@ -2369,19 +2623,19 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS hmo_authorizations_student_id_idx
-  ON public.hmo_authorizations (student_id);
+  ON public.hmo_authorizations (org_id, student_id);
 
 CREATE INDEX IF NOT EXISTS hmo_authorizations_service_id_idx
-  ON public.hmo_authorizations (service_id);
+  ON public.hmo_authorizations (org_id, service_id);
 
 CREATE INDEX IF NOT EXISTS hmo_authorizations_provider_id_idx
-  ON public.hmo_authorizations (provider_id);
+  ON public.hmo_authorizations (org_id, provider_id);
 
 CREATE INDEX IF NOT EXISTS hmo_authorizations_provider_track_id_idx
-  ON public.hmo_authorizations (provider_track_id);
+  ON public.hmo_authorizations (org_id, provider_track_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS hmo_authorizations_active_student_service_uidx
-  ON public.hmo_authorizations (student_id, service_id)
+  ON public.hmo_authorizations (org_id, student_id, service_id)
   WHERE status = 'active';
 
 -- -----------------------------------------------------------------
@@ -2390,6 +2644,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS hmo_authorizations_active_student_service_uidx
 
 CREATE TABLE IF NOT EXISTS public.commitments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   student_id uuid NOT NULL,
   service_id uuid NOT NULL,
   commitment_type text NOT NULL DEFAULT 'package',
@@ -2408,6 +2663,7 @@ CREATE TABLE IF NOT EXISTS public.commitments (
 );
 
 ALTER TABLE public.commitments
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS service_id uuid,
   ADD COLUMN IF NOT EXISTS commitment_type text,
@@ -2506,11 +2762,11 @@ EXCEPTION
     NULL;
 END $$;
 
-CREATE INDEX IF NOT EXISTS commitments_student_id_idx ON public.commitments (student_id);
-CREATE INDEX IF NOT EXISTS commitments_transfer_ref_idx ON public.commitments (transfer_ref) WHERE transfer_ref IS NOT NULL;
-CREATE INDEX IF NOT EXISTS commitments_hmo_provider_id_idx ON public.commitments (hmo_provider_id) WHERE hmo_provider_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS commitments_hmo_provider_track_id_idx ON public.commitments (hmo_provider_track_id) WHERE hmo_provider_track_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS commitments_hmo_authorization_id_uidx ON public.commitments (hmo_authorization_id) WHERE hmo_authorization_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS commitments_student_id_idx ON public.commitments (org_id, student_id);
+CREATE INDEX IF NOT EXISTS commitments_transfer_ref_idx ON public.commitments (org_id, transfer_ref) WHERE transfer_ref IS NOT NULL;
+CREATE INDEX IF NOT EXISTS commitments_hmo_provider_id_idx ON public.commitments (org_id, hmo_provider_id) WHERE hmo_provider_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS commitments_hmo_provider_track_id_idx ON public.commitments (org_id, hmo_provider_track_id) WHERE hmo_provider_track_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS commitments_hmo_authorization_id_uidx ON public.commitments (org_id, hmo_authorization_id) WHERE hmo_authorization_id IS NOT NULL;
 
 DO $$
 BEGIN
@@ -2529,6 +2785,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS public.ledger_transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   client_profile_id uuid NOT NULL,
   student_id uuid NULL,
   commitment_id uuid NULL,
@@ -2545,6 +2802,7 @@ CREATE TABLE IF NOT EXISTS public.ledger_transactions (
 );
 
 ALTER TABLE public.ledger_transactions
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS commitment_id uuid,
@@ -2686,12 +2944,12 @@ BEGIN
         DROP INDEX IF EXISTS public.ledger_transactions_source_usage_unique;
         ALTER TABLE public.ledger_transactions
           ADD CONSTRAINT ledger_transactions_source_usage_unique
-          UNIQUE (source_ref, usage_type);
+          UNIQUE (org_id, source_ref, usage_type);
     END;
   ELSE
     ALTER TABLE public.ledger_transactions
       ADD CONSTRAINT ledger_transactions_source_usage_unique
-      UNIQUE (source_ref, usage_type);
+      UNIQUE (org_id, source_ref, usage_type);
   END IF;
 EXCEPTION
   WHEN duplicate_object OR duplicate_table THEN
@@ -2699,17 +2957,17 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_commitment_id_idx
-  ON public.ledger_transactions (commitment_id);
+  ON public.ledger_transactions (org_id, commitment_id);
 CREATE INDEX IF NOT EXISTS ledger_transactions_client_profile_id_idx
-  ON public.ledger_transactions (client_profile_id);
+  ON public.ledger_transactions (org_id, client_profile_id);
 CREATE INDEX IF NOT EXISTS ledger_transactions_student_id_idx
-  ON public.ledger_transactions (student_id);
+  ON public.ledger_transactions (org_id, student_id);
 CREATE INDEX IF NOT EXISTS ledger_transactions_transaction_type_idx
-  ON public.ledger_transactions (transaction_type);
+  ON public.ledger_transactions (org_id, transaction_type);
 CREATE INDEX IF NOT EXISTS ledger_transactions_usage_type_idx
-  ON public.ledger_transactions (usage_type);
+  ON public.ledger_transactions (org_id, usage_type);
 CREATE INDEX IF NOT EXISTS ledger_transactions_created_at_idx
-  ON public.ledger_transactions (created_at);
+  ON public.ledger_transactions (org_id, created_at);
 
 -- Trigger: validate that ledger transaction commitment belongs to the same student
 CREATE OR REPLACE FUNCTION public.validate_ledger_commitment_ownership()
@@ -2731,8 +2989,9 @@ BEGIN
   SELECT c.student_id, s.client_profile_id
     INTO v_commitment_student_id, v_commitment_client_profile_id
   FROM public.commitments c
-  LEFT JOIN public.students s ON s.id = c.student_id
-  WHERE c.id = NEW.commitment_id;
+  LEFT JOIN public.students s ON s.id = c.student_id AND s.org_id = NEW.org_id
+  WHERE c.id = NEW.commitment_id
+    AND c.org_id = NEW.org_id;
 
   IF v_commitment_student_id IS NULL THEN
     RAISE EXCEPTION 'Invalid commitment_id for ledger transaction';
@@ -2863,7 +3122,7 @@ DROP FUNCTION IF EXISTS public.recalculate_student_balance_account(uuid);
 -- -----------------------------------------------------------------
 
 -- Returns balance in agorot (integer). amount column is integer since agorot migration.
-CREATE OR REPLACE FUNCTION public.get_student_remaining_balance(p_student_id uuid)
+CREATE OR REPLACE FUNCTION public.get_student_remaining_balance(p_org_id uuid, p_student_id uuid)
 RETURNS bigint
 LANGUAGE plpgsql
 AS $$
@@ -2878,13 +3137,15 @@ BEGIN
   SELECT COALESCE(SUM(lt.amount), 0)
     INTO v_credits
   FROM public.ledger_transactions lt
-  WHERE lt.student_id = p_student_id
+  WHERE lt.org_id = p_org_id
+    AND lt.student_id = p_student_id
     AND lt.transaction_type = 'CREDIT';
 
   SELECT COALESCE(SUM(lt.amount), 0)
     INTO v_debits
   FROM public.ledger_transactions lt
-  WHERE lt.student_id = p_student_id
+  WHERE lt.org_id = p_org_id
+    AND lt.student_id = p_student_id
     AND lt.transaction_type = 'DEBIT';
 
   RETURN v_credits - v_debits;
@@ -2897,6 +3158,7 @@ $$;
 
 CREATE TABLE IF NOT EXISTS public.lesson_earnings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   employee_id uuid NOT NULL,
   lesson_instance_id uuid NOT NULL,
   rate_used integer NOT NULL,
@@ -2906,6 +3168,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_earnings (
 );
 
 ALTER TABLE public.lesson_earnings
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS employee_id uuid,
   ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
   ADD COLUMN IF NOT EXISTS rate_used integer,
@@ -2934,10 +3197,10 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS lesson_earnings_employee_id_idx
-  ON public.lesson_earnings (employee_id);
+  ON public.lesson_earnings (org_id, employee_id);
 
 CREATE INDEX IF NOT EXISTS lesson_earnings_lesson_instance_id_idx
-  ON public.lesson_earnings (lesson_instance_id);
+  ON public.lesson_earnings (org_id, lesson_instance_id);
 
 DO $$
 BEGIN
@@ -2965,12 +3228,12 @@ BEGIN
         DROP INDEX IF EXISTS public.lesson_earnings_employee_lesson_unique;
         ALTER TABLE public.lesson_earnings
           ADD CONSTRAINT lesson_earnings_employee_lesson_unique
-          UNIQUE (employee_id, lesson_instance_id);
+          UNIQUE (org_id, employee_id, lesson_instance_id);
     END;
   ELSE
     ALTER TABLE public.lesson_earnings
       ADD CONSTRAINT lesson_earnings_employee_lesson_unique
-      UNIQUE (employee_id, lesson_instance_id);
+      UNIQUE (org_id, employee_id, lesson_instance_id);
   END IF;
 EXCEPTION
   WHEN duplicate_object OR duplicate_table THEN
@@ -2983,6 +3246,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS public.forms (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   name text NOT NULL,
   description text NULL,
   form_usage text NOT NULL DEFAULT 'general',
@@ -3000,6 +3264,7 @@ CREATE TABLE IF NOT EXISTS public.forms (
 );
 
 ALTER TABLE public.forms
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS name text,
   ADD COLUMN IF NOT EXISTS description text,
   ADD COLUMN IF NOT EXISTS form_usage text,
@@ -3047,8 +3312,8 @@ EXCEPTION
     NULL;
 END $$;
 
-CREATE INDEX IF NOT EXISTS forms_is_active_idx ON public.forms (is_active);
-CREATE INDEX IF NOT EXISTS forms_form_usage_idx ON public.forms (form_usage);
+CREATE INDEX IF NOT EXISTS forms_is_active_idx ON public.forms (org_id, is_active);
+CREATE INDEX IF NOT EXISTS forms_form_usage_idx ON public.forms (org_id, form_usage);
 
 -- -----------------------------------------------------------------
 -- public.shared_form_blocks
@@ -3056,6 +3321,7 @@ CREATE INDEX IF NOT EXISTS forms_form_usage_idx ON public.forms (form_usage);
 
 CREATE TABLE IF NOT EXISTS public.shared_form_blocks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   block_type text NOT NULL,
   name text NOT NULL,
   content_schema jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -3067,6 +3333,7 @@ CREATE TABLE IF NOT EXISTS public.shared_form_blocks (
 );
 
 ALTER TABLE public.shared_form_blocks
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS block_type text,
   ADD COLUMN IF NOT EXISTS name text,
   ADD COLUMN IF NOT EXISTS content_schema jsonb,
@@ -3096,8 +3363,8 @@ EXCEPTION
     NULL;
 END $$;
 
-CREATE INDEX IF NOT EXISTS shared_form_blocks_is_active_idx ON public.shared_form_blocks (is_active);
-CREATE INDEX IF NOT EXISTS shared_form_blocks_block_type_idx ON public.shared_form_blocks (block_type);
+CREATE INDEX IF NOT EXISTS shared_form_blocks_is_active_idx ON public.shared_form_blocks (org_id, is_active);
+CREATE INDEX IF NOT EXISTS shared_form_blocks_block_type_idx ON public.shared_form_blocks (org_id, block_type);
 
 -- -----------------------------------------------------------------
 -- public.form_shared_block_links
@@ -3105,6 +3372,7 @@ CREATE INDEX IF NOT EXISTS shared_form_blocks_block_type_idx ON public.shared_fo
 
 CREATE TABLE IF NOT EXISTS public.form_shared_block_links (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   form_id uuid NOT NULL,
   shared_block_id uuid NOT NULL,
   section_id text NOT NULL,
@@ -3114,6 +3382,7 @@ CREATE TABLE IF NOT EXISTS public.form_shared_block_links (
 );
 
 ALTER TABLE public.form_shared_block_links
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS form_id uuid,
   ADD COLUMN IF NOT EXISTS shared_block_id uuid,
   ADD COLUMN IF NOT EXISTS section_id text,
@@ -3179,12 +3448,12 @@ BEGIN
         DROP INDEX IF EXISTS public.form_shared_block_links_unique_form_item_scope;
         ALTER TABLE public.form_shared_block_links
           ADD CONSTRAINT form_shared_block_links_unique_form_item_scope
-          UNIQUE (form_id, item_id, schema_scope);
+          UNIQUE (org_id, form_id, item_id, schema_scope);
     END;
   ELSE
     ALTER TABLE public.form_shared_block_links
       ADD CONSTRAINT form_shared_block_links_unique_form_item_scope
-      UNIQUE (form_id, item_id, schema_scope);
+      UNIQUE (org_id, form_id, item_id, schema_scope);
   END IF;
 EXCEPTION
   WHEN duplicate_object OR duplicate_table THEN
@@ -3211,9 +3480,9 @@ EXCEPTION
     NULL;
 END $$;
 
-CREATE INDEX IF NOT EXISTS form_shared_block_links_form_idx ON public.form_shared_block_links (form_id);
-CREATE INDEX IF NOT EXISTS form_shared_block_links_shared_block_idx ON public.form_shared_block_links (shared_block_id);
-CREATE INDEX IF NOT EXISTS form_shared_block_links_scope_idx ON public.form_shared_block_links (schema_scope);
+CREATE INDEX IF NOT EXISTS form_shared_block_links_form_idx ON public.form_shared_block_links (org_id, form_id);
+CREATE INDEX IF NOT EXISTS form_shared_block_links_shared_block_idx ON public.form_shared_block_links (org_id, shared_block_id);
+CREATE INDEX IF NOT EXISTS form_shared_block_links_scope_idx ON public.form_shared_block_links (org_id, schema_scope);
 
 -- -----------------------------------------------------------------
 -- public.form_submissions
@@ -3221,6 +3490,7 @@ CREATE INDEX IF NOT EXISTS form_shared_block_links_scope_idx ON public.form_shar
 
 CREATE TABLE IF NOT EXISTS public.form_submissions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   form_id uuid NOT NULL,
   client_profile_id uuid NOT NULL,
   student_id uuid NULL,
@@ -3237,6 +3507,7 @@ CREATE TABLE IF NOT EXISTS public.form_submissions (
 );
 
 ALTER TABLE public.form_submissions
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS form_id uuid,
   ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
@@ -3311,16 +3582,16 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS form_submissions_form_id_idx
-  ON public.form_submissions (form_id);
+  ON public.form_submissions (org_id, form_id);
 
 CREATE INDEX IF NOT EXISTS form_submissions_client_profile_id_idx
-  ON public.form_submissions (client_profile_id);
+  ON public.form_submissions (org_id, client_profile_id);
 
 CREATE INDEX IF NOT EXISTS form_submissions_student_id_idx
-  ON public.form_submissions (student_id);
+  ON public.form_submissions (org_id, student_id);
 
 CREATE INDEX IF NOT EXISTS form_submissions_submitted_by_guardian_id_idx
-  ON public.form_submissions (submitted_by_guardian_id) WHERE submitted_by_guardian_id IS NOT NULL;
+  ON public.form_submissions (org_id, submitted_by_guardian_id) WHERE submitted_by_guardian_id IS NOT NULL;
 
 -- -----------------------------------------------------------------
 -- public.otp_challenges
@@ -3328,6 +3599,7 @@ CREATE INDEX IF NOT EXISTS form_submissions_submitted_by_guardian_id_idx
 
 CREATE TABLE IF NOT EXISTS public.otp_challenges (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   client_profile_id uuid NOT NULL,
   student_id uuid NULL,
   channel text NOT NULL,
@@ -3342,6 +3614,7 @@ CREATE TABLE IF NOT EXISTS public.otp_challenges (
 );
 
 ALTER TABLE public.otp_challenges
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS channel text,
@@ -3395,16 +3668,16 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS otp_challenges_client_profile_id_idx
-  ON public.otp_challenges (client_profile_id);
+  ON public.otp_challenges (org_id, client_profile_id);
 
 CREATE INDEX IF NOT EXISTS otp_challenges_student_id_idx
-  ON public.otp_challenges (student_id);
+  ON public.otp_challenges (org_id, student_id);
 
 CREATE INDEX IF NOT EXISTS otp_challenges_status_idx
-  ON public.otp_challenges (status);
+  ON public.otp_challenges (org_id, status);
 
 CREATE INDEX IF NOT EXISTS otp_challenges_expires_at_idx
-  ON public.otp_challenges (expires_at);
+  ON public.otp_challenges (org_id, expires_at);
 
 -- -----------------------------------------------------------------
 -- public.waiting_list_entries
@@ -3412,6 +3685,7 @@ CREATE INDEX IF NOT EXISTS otp_challenges_expires_at_idx
 
 CREATE TABLE IF NOT EXISTS public.waiting_list_entries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   client_profile_id uuid NOT NULL,
   student_id uuid NULL,
   desired_service_id uuid NOT NULL,
@@ -3429,6 +3703,7 @@ CREATE TABLE IF NOT EXISTS public.waiting_list_entries (
 );
 
 ALTER TABLE public.waiting_list_entries
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS client_profile_id uuid,
   ADD COLUMN IF NOT EXISTS student_id uuid,
   ADD COLUMN IF NOT EXISTS desired_service_id uuid,
@@ -3503,13 +3778,13 @@ EXCEPTION
 END $$;
 
 CREATE INDEX IF NOT EXISTS waiting_list_entries_client_profile_id_idx
-  ON public.waiting_list_entries (client_profile_id);
+  ON public.waiting_list_entries (org_id, client_profile_id);
 
 CREATE INDEX IF NOT EXISTS waiting_list_entries_student_id_idx
-  ON public.waiting_list_entries (student_id);
+  ON public.waiting_list_entries (org_id, student_id);
 
 CREATE INDEX IF NOT EXISTS waiting_list_entries_status_idx
-  ON public.waiting_list_entries (status);
+  ON public.waiting_list_entries (org_id, status);
 
 DO $$
 BEGIN
@@ -3561,14 +3836,19 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS public."Settings" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-  "key" text NOT NULL UNIQUE,
+  "org_id" uuid NOT NULL REFERENCES public.organizations(id),
+  "key" text NOT NULL,
   "settings_value" jsonb NOT NULL,
   "metadata" jsonb,
   "created_at" timestamptz NOT NULL DEFAULT now(),
   "updated_at" timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS settings_org_key_uidx
+  ON public."Settings" ("org_id", "key");
+
 ALTER TABLE public."Settings"
+  ADD COLUMN IF NOT EXISTS "org_id" uuid,
   ADD COLUMN IF NOT EXISTS "metadata" jsonb,
   ADD COLUMN IF NOT EXISTS "created_at" timestamptz,
   ADD COLUMN IF NOT EXISTS "updated_at" timestamptz;
@@ -3579,7 +3859,7 @@ VALUES
   ('leave_pay_policy', '{"default_method":"legal","lookback_months":3,"legal_allow_12m_if_better":true,"fixed_rate_default":0}'::jsonb),
   ('billing_consumption_policy', '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb),
   ('instructor_earnings_policy', '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
-ON CONFLICT ("key") DO NOTHING;
+ON CONFLICT ("org_id", "key") DO NOTHING;
 
 -- -----------------------------------------------------------------
 -- HMO provider / authorization compatibility backfill
@@ -3888,6 +4168,7 @@ WHERE c.id = lhc.commitment_id;
 
 CREATE TABLE IF NOT EXISTS public."Documents" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  "org_id" uuid NOT NULL REFERENCES public.organizations(id),
   "entity_type" text NOT NULL,
   "entity_id" uuid NOT NULL,
   "name" text NOT NULL,
@@ -3909,6 +4190,7 @@ CREATE TABLE IF NOT EXISTS public."Documents" (
 );
 
 ALTER TABLE public."Documents"
+  ADD COLUMN IF NOT EXISTS "org_id" uuid,
   ADD COLUMN IF NOT EXISTS "metadata" jsonb;
 
 -- Drop entity_type CHECK constraint if it exists (moved to UI validation)
@@ -3930,10 +4212,10 @@ BEGIN
   END IF;
 END $$;
 
-CREATE INDEX IF NOT EXISTS "Documents_entity_idx" ON public."Documents" ("entity_type", "entity_id");
-CREATE INDEX IF NOT EXISTS "Documents_uploaded_at_idx" ON public."Documents" ("uploaded_at");
-CREATE INDEX IF NOT EXISTS "Documents_expiration_idx" ON public."Documents" ("expiration_date") WHERE "expiration_date" IS NOT NULL;
-CREATE INDEX IF NOT EXISTS "Documents_hash_idx" ON public."Documents" ("hash") WHERE "hash" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "Documents_entity_idx" ON public."Documents" ("org_id", "entity_type", "entity_id");
+CREATE INDEX IF NOT EXISTS "Documents_uploaded_at_idx" ON public."Documents" ("org_id", "uploaded_at");
+CREATE INDEX IF NOT EXISTS "Documents_expiration_idx" ON public."Documents" ("org_id", "expiration_date") WHERE "expiration_date" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "Documents_hash_idx" ON public."Documents" ("org_id", "hash") WHERE "hash" IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION public.set_entity_updated_at_and_version()
 RETURNS trigger
@@ -3966,7 +4248,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.set_tenant_audit_log_expiry()
+CREATE OR REPLACE FUNCTION public.set_audit_log_expiry()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
@@ -4005,6 +4287,7 @@ BEGIN
     SELECT 1
     FROM public.instance_locks locked
     WHERE locked.lesson_instance_id = target_instance_id
+      AND locked.org_id = COALESCE(NEW.org_id, OLD.org_id)
   ) THEN
     RAISE EXCEPTION 'lesson_instance_locked'
       USING ERRCODE = 'P0001',
@@ -4031,6 +4314,7 @@ BEGIN
     SELECT 1
     FROM public.participant_locks locked
     WHERE locked.lesson_participant_id = target_participant_id
+      AND locked.org_id = COALESCE(NEW.org_id, OLD.org_id)
   ) THEN
     RAISE EXCEPTION 'lesson_participant_locked'
       USING ERRCODE = 'P0001',
@@ -4042,6 +4326,7 @@ BEGIN
     SELECT 1
     FROM public.instance_locks locked
     WHERE locked.lesson_instance_id = target_instance_id
+      AND locked.org_id = COALESCE(NEW.org_id, OLD.org_id)
   ) THEN
     RAISE EXCEPTION 'lesson_instance_locked'
       USING ERRCODE = 'P0001',
@@ -4054,6 +4339,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION public.cancel_lesson_instance_with_participants(
+  p_org_id uuid,
   p_instance_id uuid,
   p_actor_user_id uuid,
   p_expected_version integer DEFAULT NULL,
@@ -4088,6 +4374,7 @@ BEGIN
   INTO v_instance
   FROM public.lesson_instances
   WHERE id = p_instance_id
+    AND org_id = p_org_id
   FOR UPDATE;
 
   IF NOT FOUND THEN
@@ -4125,6 +4412,7 @@ BEGIN
     SELECT 1
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
+      AND org_id = p_org_id
       AND lock_source_type IN ('payroll_run', 'claim_batch')
   ) OR EXISTS (
     SELECT 1
@@ -4132,6 +4420,7 @@ BEGIN
     JOIN public.lesson_participants participant
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
+      AND participant.org_id = p_org_id
       AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
   ) THEN
     RETURN QUERY
@@ -4150,6 +4439,7 @@ BEGIN
   PERFORM 1
   FROM public.lesson_participants
   WHERE lesson_instance_id = p_instance_id
+    AND org_id = p_org_id
   FOR UPDATE;
 
   SELECT COALESCE(
@@ -4182,6 +4472,7 @@ BEGIN
   LEFT JOIN public.client_profiles scp
     ON scp.id = student.client_profile_id
   WHERE participant.lesson_instance_id = p_instance_id
+    AND participant.org_id = p_org_id
     AND participant.participant_status = 'attended';
 
   IF jsonb_array_length(v_attended_participants) > 0 THEN
@@ -4203,7 +4494,8 @@ BEGIN
   SELECT settings_value
   INTO v_billing_policy
   FROM public."Settings"
-  WHERE key = 'billing_consumption_policy'
+  WHERE "org_id" = p_org_id
+    AND key = 'billing_consumption_policy'
   LIMIT 1;
 
   IF v_billing_policy IS NULL THEN
@@ -4213,7 +4505,8 @@ BEGIN
   SELECT settings_value
   INTO v_instructor_policy
   FROM public."Settings"
-  WHERE key = 'instructor_earnings_policy'
+  WHERE "org_id" = p_org_id
+    AND key = 'instructor_earnings_policy'
   LIMIT 1;
 
   IF v_instructor_policy IS NULL THEN
@@ -4226,6 +4519,7 @@ BEGIN
       to_jsonb(participant.*) AS before_state
     FROM public.lesson_participants participant
     WHERE participant.lesson_instance_id = p_instance_id
+      AND participant.org_id = p_org_id
       AND participant.participant_status = 'scheduled'
     FOR UPDATE
   ),
@@ -4311,6 +4605,7 @@ BEGIN
       ),
     updated_by = p_actor_user_id
   WHERE instance.id = p_instance_id
+    AND instance.org_id = p_org_id
   RETURNING instance.version, instance.metadata, to_jsonb(instance.*)
   INTO instance_version, instance_metadata, v_instance_after_state;
 
@@ -4325,6 +4620,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION public.complete_lesson_instance_with_participants(
+  p_org_id uuid,
   p_instance_id uuid,
   p_actor_user_id uuid,
   p_expected_version integer DEFAULT NULL,
@@ -4357,6 +4653,7 @@ BEGIN
   INTO v_instance
   FROM public.lesson_instances
   WHERE id = p_instance_id
+    AND org_id = p_org_id
   FOR UPDATE;
 
   IF NOT FOUND THEN
@@ -4392,6 +4689,7 @@ BEGIN
     SELECT 1
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
+      AND org_id = p_org_id
       AND lock_source_type IN ('payroll_run', 'claim_batch')
   ) OR EXISTS (
     SELECT 1
@@ -4399,6 +4697,7 @@ BEGIN
     JOIN public.lesson_participants participant
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
+      AND participant.org_id = p_org_id
       AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
   ) THEN
     RETURN QUERY
@@ -4416,6 +4715,7 @@ BEGIN
   PERFORM 1
   FROM public.lesson_participants
   WHERE lesson_instance_id = p_instance_id
+    AND org_id = p_org_id
   FOR UPDATE;
 
   v_base_metadata := COALESCE(v_instance.metadata, '{}'::jsonb);
@@ -4423,7 +4723,7 @@ BEGIN
   SELECT settings_value
   INTO v_billing_policy
   FROM public."Settings"
-  WHERE key = 'billing_consumption_policy'
+  WHERE "org_id" = p_org_id AND key = 'billing_consumption_policy'
   LIMIT 1;
 
   IF v_billing_policy IS NULL THEN
@@ -4433,7 +4733,7 @@ BEGIN
   SELECT settings_value
   INTO v_instructor_policy
   FROM public."Settings"
-  WHERE key = 'instructor_earnings_policy'
+  WHERE "org_id" = p_org_id AND key = 'instructor_earnings_policy'
   LIMIT 1;
 
   IF v_instructor_policy IS NULL THEN
@@ -4446,6 +4746,7 @@ BEGIN
       to_jsonb(participant.*) AS before_state
     FROM public.lesson_participants participant
     WHERE participant.lesson_instance_id = p_instance_id
+      AND participant.org_id = p_org_id
       AND participant.participant_status = 'scheduled'
     FOR UPDATE
   ),
@@ -4531,6 +4832,7 @@ BEGIN
       ),
     updated_by = p_actor_user_id
   WHERE instance.id = p_instance_id
+    AND instance.org_id = p_org_id
   RETURNING instance.version, instance.metadata, to_jsonb(instance.*)
   INTO instance_version, instance_metadata, v_instance_after_state;
 
@@ -4544,6 +4846,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION public.cancel_selected_scheduled_participants_and_reconcile_instance(
+  p_org_id uuid,
   p_instance_id uuid,
   p_participant_ids uuid[],
   p_actor_user_id uuid
@@ -4581,6 +4884,7 @@ BEGIN
   INTO v_instance
   FROM public.lesson_instances
   WHERE id = p_instance_id
+    AND org_id = p_org_id
   FOR UPDATE;
 
   IF NOT FOUND THEN
@@ -4604,6 +4908,7 @@ BEGIN
     SELECT 1
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
+      AND org_id = p_org_id
       AND lock_source_type IN ('payroll_run', 'claim_batch')
   ) OR EXISTS (
     SELECT 1
@@ -4611,6 +4916,7 @@ BEGIN
     JOIN public.lesson_participants participant
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
+      AND participant.org_id = p_org_id
       AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
   ) THEN
     RETURN QUERY
@@ -4630,6 +4936,7 @@ BEGIN
   PERFORM 1
   FROM public.lesson_participants
   WHERE lesson_instance_id = p_instance_id
+    AND org_id = p_org_id
   FOR UPDATE;
 
   SELECT COALESCE(
@@ -4663,6 +4970,7 @@ BEGIN
   LEFT JOIN public.client_profiles scp
     ON scp.id = student.client_profile_id
   WHERE participant.lesson_instance_id = p_instance_id
+    AND participant.org_id = p_org_id
     AND participant.id = ANY(COALESCE(p_participant_ids, ARRAY[]::uuid[]))
     AND participant.participant_status <> 'scheduled';
 
@@ -4686,7 +4994,7 @@ BEGIN
   SELECT settings_value
   INTO v_billing_policy
   FROM public."Settings"
-  WHERE key = 'billing_consumption_policy'
+  WHERE "org_id" = p_org_id AND key = 'billing_consumption_policy'
   LIMIT 1;
 
   IF v_billing_policy IS NULL THEN
@@ -4696,7 +5004,7 @@ BEGIN
   SELECT settings_value
   INTO v_instructor_policy
   FROM public."Settings"
-  WHERE key = 'instructor_earnings_policy'
+  WHERE "org_id" = p_org_id AND key = 'instructor_earnings_policy'
   LIMIT 1;
 
   IF v_instructor_policy IS NULL THEN
@@ -4709,6 +5017,7 @@ BEGIN
       to_jsonb(participant.*) AS before_state
     FROM public.lesson_participants participant
     WHERE participant.lesson_instance_id = p_instance_id
+      AND participant.org_id = p_org_id
       AND participant.id = ANY(COALESCE(p_participant_ids, ARRAY[]::uuid[]))
       AND participant.participant_status = 'scheduled'
     FOR UPDATE
@@ -4804,12 +5113,14 @@ BEGIN
       SELECT 1
       FROM public.lesson_participants
       WHERE lesson_instance_id = p_instance_id
+        AND org_id = p_org_id
         AND participant_status = 'scheduled'
     ),
     EXISTS (
       SELECT 1
       FROM public.lesson_participants
       WHERE lesson_instance_id = p_instance_id
+        AND org_id = p_org_id
         AND participant_status = 'attended'
     )
   INTO v_has_scheduled, v_has_attended;
@@ -4832,6 +5143,7 @@ BEGIN
       ),
     updated_by = p_actor_user_id
   WHERE instance.id = p_instance_id
+    AND instance.org_id = p_org_id
   RETURNING instance.version, instance.metadata, instance.status, to_jsonb(instance.*)
   INTO instance_version, instance_metadata, instance_status, v_instance_after_state;
 
@@ -5038,13 +5350,13 @@ BEGIN
 
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger
-    WHERE tgname = 'trg_tenant_audit_log_set_expiry'
-      AND tgrelid = 'public.tenant_audit_log'::regclass
+    WHERE tgname = 'trg_audit_log_set_expiry'
+      AND tgrelid = 'public.audit_log'::regclass
   ) THEN
-    CREATE TRIGGER trg_tenant_audit_log_set_expiry
-      BEFORE INSERT ON public.tenant_audit_log
+    CREATE TRIGGER trg_audit_log_set_expiry
+      BEFORE INSERT ON public.audit_log
       FOR EACH ROW
-      EXECUTE FUNCTION public.set_tenant_audit_log_expiry();
+      EXECUTE FUNCTION public.set_audit_log_expiry();
   END IF;
 END $$;
 
@@ -5053,16 +5365,265 @@ END $$;
 -- =================================================================
 
 -- Add indexes for payroll tables
-CREATE INDEX IF NOT EXISTS "RateHistory_employee_service_idx" ON public."RateHistory" ("employee_id", "service_id", "effective_date");
-CREATE INDEX IF NOT EXISTS hmo_providers_is_active_idx ON public.hmo_providers (is_active);
-CREATE INDEX IF NOT EXISTS hmo_provider_tracks_is_active_idx ON public.hmo_provider_tracks (is_active);
-CREATE INDEX IF NOT EXISTS hmo_authorizations_status_idx ON public.hmo_authorizations (status);
-CREATE INDEX IF NOT EXISTS employee_leave_entries_status_idx ON public.employee_leave_entries (status);
-CREATE INDEX IF NOT EXISTS employee_leave_days_date_idx ON public.employee_leave_days (leave_date);
-CREATE INDEX IF NOT EXISTS finance_corrections_type_idx ON public.finance_corrections (correction_type);
-CREATE INDEX IF NOT EXISTS payroll_runs_status_idx ON public.payroll_runs (status, finalized_at);
-CREATE INDEX IF NOT EXISTS claim_batches_status_idx ON public.claim_batches (status, paid_at);
-CREATE INDEX IF NOT EXISTS dashboard_tasks_resource_idx ON public.dashboard_tasks (resource_type, resource_id, status);
+CREATE INDEX IF NOT EXISTS "RateHistory_employee_service_idx" ON public."RateHistory" ("org_id", "employee_id", "service_id", "effective_date");
+CREATE INDEX IF NOT EXISTS hmo_providers_is_active_idx ON public.hmo_providers (org_id, is_active);
+CREATE INDEX IF NOT EXISTS hmo_provider_tracks_is_active_idx ON public.hmo_provider_tracks (org_id, is_active);
+CREATE INDEX IF NOT EXISTS hmo_authorizations_status_idx ON public.hmo_authorizations (org_id, status);
+CREATE INDEX IF NOT EXISTS employee_leave_entries_status_idx ON public.employee_leave_entries (org_id, status);
+CREATE INDEX IF NOT EXISTS employee_leave_days_date_idx ON public.employee_leave_days (org_id, leave_date);
+CREATE INDEX IF NOT EXISTS finance_corrections_type_idx ON public.finance_corrections (org_id, correction_type);
+CREATE INDEX IF NOT EXISTS payroll_runs_status_idx ON public.payroll_runs (org_id, status, finalized_at);
+CREATE INDEX IF NOT EXISTS claim_batches_status_idx ON public.claim_batches (org_id, status, paid_at);
+CREATE INDEX IF NOT EXISTS dashboard_tasks_resource_idx ON public.dashboard_tasks (org_id, resource_type, resource_id, status);
+
+-- =================================================================
+-- RLS Helper Functions (SECURITY DEFINER)
+-- Must be defined BEFORE any RLS policy that references them.
+-- =================================================================
+
+-- get_active_org_id()
+-- Reads the x-org-id header injected by the frontend Supabase client,
+-- validates that the authenticated user is a member of that org, and
+-- returns the org UUID. Used as the single gatekeeper in all tenant
+-- RLS policies: WHERE org_id = get_active_org_id().
+--
+-- Raises an exception (→ denies all rows) when:
+--   • The header is missing or not a valid UUID
+--   • The caller is not authenticated
+--   • The authenticated user is not a member of the requested org
+CREATE OR REPLACE FUNCTION public.get_active_org_id()
+RETURNS uuid
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_raw text;
+  v_org_id uuid;
+BEGIN
+  -- Extract x-org-id from PostgREST request headers
+  v_raw := current_setting('request.headers', true)::json->>'x-org-id';
+
+  IF v_raw IS NULL OR v_raw = '' THEN
+    RAISE EXCEPTION 'missing_org_id: x-org-id header is required';
+  END IF;
+
+  BEGIN
+    v_org_id := v_raw::uuid;
+  EXCEPTION WHEN invalid_text_representation THEN
+    RAISE EXCEPTION 'invalid_org_id: x-org-id header is not a valid UUID';
+  END;
+
+  -- Verify the caller is a member of the requested org
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.org_memberships
+    WHERE org_id = v_org_id
+      AND user_id = auth.uid()
+  ) THEN
+    RAISE EXCEPTION 'forbidden: user is not a member of org %', v_org_id;
+  END IF;
+
+  RETURN v_org_id;
+END;
+$$;
+
+-- get_my_org_ids()
+-- Returns the set of org UUIDs the authenticated user belongs to.
+-- Used for multi-org list views (e.g., org switcher) and control-
+-- table RLS policies that need "show all my orgs" semantics.
+CREATE OR REPLACE FUNCTION public.get_my_org_ids()
+RETURNS SETOF uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT org_id
+  FROM public.org_memberships
+  WHERE user_id = auth.uid();
+$$;
+
+-- Enable RLS on control tables
+ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.org_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.org_invitations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.permission_registry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.active_routing ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
+
+-- =================================================================
+-- RLS Policies — Control Tables
+-- These use INLINE subqueries (no function calls) to avoid infinite
+-- recursion, since get_active_org_id() itself queries org_memberships.
+-- =================================================================
+
+-- org_memberships: users see only their own memberships
+DROP POLICY IF EXISTS "org_memberships_select" ON public.org_memberships;
+CREATE POLICY "org_memberships_select"
+  ON public.org_memberships FOR SELECT
+  TO authenticated, app_user
+  USING (user_id = auth.uid());
+
+DROP POLICY IF EXISTS "org_memberships_insert" ON public.org_memberships;
+CREATE POLICY "org_memberships_insert"
+  ON public.org_memberships FOR INSERT
+  TO authenticated, app_user
+  WITH CHECK (user_id = auth.uid());
+
+DROP POLICY IF EXISTS "org_memberships_update" ON public.org_memberships;
+CREATE POLICY "org_memberships_update"
+  ON public.org_memberships FOR UPDATE
+  TO authenticated, app_user
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+DROP POLICY IF EXISTS "org_memberships_delete" ON public.org_memberships;
+CREATE POLICY "org_memberships_delete"
+  ON public.org_memberships FOR DELETE
+  TO authenticated, app_user
+  USING (user_id = auth.uid());
+
+-- organizations: users see orgs they belong to
+DROP POLICY IF EXISTS "organizations_select" ON public.organizations;
+CREATE POLICY "organizations_select"
+  ON public.organizations FOR SELECT
+  TO authenticated, app_user
+  USING (id IN (SELECT org_id FROM public.org_memberships WHERE user_id = auth.uid()));
+
+DROP POLICY IF EXISTS "organizations_insert" ON public.organizations;
+CREATE POLICY "organizations_insert"
+  ON public.organizations FOR INSERT
+  TO authenticated, app_user
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "organizations_update" ON public.organizations;
+CREATE POLICY "organizations_update"
+  ON public.organizations FOR UPDATE
+  TO authenticated, app_user
+  USING (id IN (SELECT org_id FROM public.org_memberships WHERE user_id = auth.uid()));
+
+DROP POLICY IF EXISTS "organizations_delete" ON public.organizations;
+CREATE POLICY "organizations_delete"
+  ON public.organizations FOR DELETE
+  TO authenticated, app_user
+  USING (id IN (SELECT org_id FROM public.org_memberships WHERE user_id = auth.uid()));
+
+-- profiles: users see only their own profile
+DROP POLICY IF EXISTS "profiles_select" ON public.profiles;
+CREATE POLICY "profiles_select"
+  ON public.profiles FOR SELECT
+  TO authenticated, app_user
+  USING (id = auth.uid());
+
+DROP POLICY IF EXISTS "profiles_insert" ON public.profiles;
+CREATE POLICY "profiles_insert"
+  ON public.profiles FOR INSERT
+  TO authenticated, app_user
+  WITH CHECK (id = auth.uid());
+
+DROP POLICY IF EXISTS "profiles_update" ON public.profiles;
+CREATE POLICY "profiles_update"
+  ON public.profiles FOR UPDATE
+  TO authenticated, app_user
+  USING (id = auth.uid())
+  WITH CHECK (id = auth.uid());
+
+DROP POLICY IF EXISTS "profiles_delete" ON public.profiles;
+CREATE POLICY "profiles_delete"
+  ON public.profiles FOR DELETE
+  TO authenticated, app_user
+  USING (id = auth.uid());
+
+-- org_invitations: members of the org OR the invited email can see
+DROP POLICY IF EXISTS "org_invitations_select" ON public.org_invitations;
+CREATE POLICY "org_invitations_select"
+  ON public.org_invitations FOR SELECT
+  TO authenticated, app_user
+  USING (
+    org_id IN (SELECT om.org_id FROM public.org_memberships om WHERE om.user_id = auth.uid())
+    OR email = auth.jwt()->>'email'
+  );
+
+DROP POLICY IF EXISTS "org_invitations_insert" ON public.org_invitations;
+CREATE POLICY "org_invitations_insert"
+  ON public.org_invitations FOR INSERT
+  TO authenticated, app_user
+  WITH CHECK (
+    org_id IN (SELECT om.org_id FROM public.org_memberships om WHERE om.user_id = auth.uid())
+  );
+
+DROP POLICY IF EXISTS "org_invitations_update" ON public.org_invitations;
+CREATE POLICY "org_invitations_update"
+  ON public.org_invitations FOR UPDATE
+  TO authenticated, app_user
+  USING (
+    org_id IN (SELECT om.org_id FROM public.org_memberships om WHERE om.user_id = auth.uid())
+  );
+
+DROP POLICY IF EXISTS "org_invitations_delete" ON public.org_invitations;
+CREATE POLICY "org_invitations_delete"
+  ON public.org_invitations FOR DELETE
+  TO authenticated, app_user
+  USING (
+    org_id IN (SELECT om.org_id FROM public.org_memberships om WHERE om.user_id = auth.uid())
+  );
+
+-- permission_registry: read-only reference data, visible to all authenticated users
+DROP POLICY IF EXISTS "permission_registry_select" ON public.permission_registry;
+CREATE POLICY "permission_registry_select"
+  ON public.permission_registry FOR SELECT
+  TO authenticated, app_user
+  USING (true);
+
+-- No INSERT/UPDATE/DELETE policies for permission_registry (admin-only via service_role)
+
+-- active_routing: users see/manage only their own routing row
+DROP POLICY IF EXISTS "active_routing_select" ON public.active_routing;
+CREATE POLICY "active_routing_select"
+  ON public.active_routing FOR SELECT
+  TO authenticated, app_user
+  USING (user_id = auth.uid());
+
+DROP POLICY IF EXISTS "active_routing_insert" ON public.active_routing;
+CREATE POLICY "active_routing_insert"
+  ON public.active_routing FOR INSERT
+  TO authenticated, app_user
+  WITH CHECK (user_id = auth.uid());
+
+DROP POLICY IF EXISTS "active_routing_update" ON public.active_routing;
+CREATE POLICY "active_routing_update"
+  ON public.active_routing FOR UPDATE
+  TO authenticated, app_user
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+DROP POLICY IF EXISTS "active_routing_delete" ON public.active_routing;
+CREATE POLICY "active_routing_delete"
+  ON public.active_routing FOR DELETE
+  TO authenticated, app_user
+  USING (user_id = auth.uid());
+
+-- audit_log: users see audit entries for their orgs (org_id is nullable for system events)
+DROP POLICY IF EXISTS "audit_log_select" ON public.audit_log;
+CREATE POLICY "audit_log_select"
+  ON public.audit_log FOR SELECT
+  TO authenticated, app_user
+  USING (
+    org_id IN (SELECT om.org_id FROM public.org_memberships om WHERE om.user_id = auth.uid())
+  );
+
+DROP POLICY IF EXISTS "audit_log_insert" ON public.audit_log;
+CREATE POLICY "audit_log_insert"
+  ON public.audit_log FOR INSERT
+  TO authenticated, app_user
+  WITH CHECK (
+    org_id IN (SELECT om.org_id FROM public.org_memberships om WHERE om.user_id = auth.uid())
+  );
+
+-- No UPDATE/DELETE policies for audit_log (append-only via service_role)
 
 -- Enable RLS on all tables (both domain and payroll)
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
@@ -5085,7 +5646,6 @@ ALTER TABLE public.claim_batches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instance_locks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.participant_locks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.calendar_instance_corrections ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.tenant_audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.dashboard_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instructor_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instructor_service_capabilities ENABLE ROW LEVEL SECURITY;
@@ -5109,7 +5669,9 @@ ALTER TABLE public."Documents" ENABLE ROW LEVEL SECURITY;
 DO $$
 DECLARE
   tbl text;
-  policy_name text;
+  ops text[] := ARRAY['SELECT','INSERT','UPDATE','DELETE'];
+  op text;
+  pol text;
 BEGIN
   FOREACH tbl IN ARRAY ARRAY[
     'students',
@@ -5132,7 +5694,6 @@ BEGIN
     'instance_locks',
     'participant_locks',
     'calendar_instance_corrections',
-    'tenant_audit_log',
     'dashboard_tasks',
     'instructor_profiles',
     'instructor_service_capabilities',
@@ -5154,40 +5715,56 @@ BEGIN
     'Documents'
   ]
   LOOP
-    -- Postgres identifiers are limited to 63 bytes; long policy names are silently truncated.
-    policy_name := left('Allow full access to authenticated users on ' || tbl, 63);
-    
-    EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl);
-    
-    EXECUTE 'CREATE POLICY ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl) || ' FOR ALL TO authenticated, app_user USING (true) WITH CHECK (true)';
-  END LOOP;
-END $$;
+    -- Drop the old permissive "USING (true)" policy if it exists
+    EXECUTE 'DROP POLICY IF EXISTS '
+      || quote_ident(left('Allow full access to authenticated users on ' || tbl, 63))
+      || ' ON public.' || quote_ident(tbl);
 
--- Safety net: ensure key policies exist even if a prior run missed them
-DO $$
-DECLARE
-  tbl text;
-  policy_name text;
-BEGIN
-  FOREACH tbl IN ARRAY ARRAY[
-    'instructor_service_capabilities',
-    'lesson_template_overrides',
-    'waiting_list_entries'
-  ]
-  LOOP
-    policy_name := left('Allow full access to authenticated users on ' || tbl, 63);
-    EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl);
-    EXECUTE 'CREATE POLICY ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl) || ' FOR ALL TO authenticated, app_user USING (true) WITH CHECK (true)';
+    FOREACH op IN ARRAY ops
+    LOOP
+      pol := left('tenant_' || lower(op) || '_' || tbl, 63);
+      EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(pol) || ' ON public.' || quote_ident(tbl);
+
+      IF op = 'SELECT' THEN
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated, app_user USING (org_id = get_active_org_id())',
+          pol, tbl);
+      ELSIF op = 'INSERT' THEN
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR INSERT TO authenticated, app_user WITH CHECK (org_id = get_active_org_id())',
+          pol, tbl);
+      ELSE  -- UPDATE / DELETE
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR %s TO authenticated, app_user USING (org_id = get_active_org_id())',
+          pol, tbl, op);
+        IF op = 'UPDATE' THEN
+          -- Also enforce WITH CHECK on UPDATE to prevent changing org_id
+          EXECUTE format(
+            'ALTER POLICY %I ON public.%I WITH CHECK (org_id = get_active_org_id())',
+            pol, tbl);
+        END IF;
+      END IF;
+    END LOOP;
   END LOOP;
 END $$;
 
 GRANT USAGE ON SCHEMA public TO app_user;
-GRANT EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, integer, text) TO app_user;
-GRANT EXECUTE ON FUNCTION public.complete_lesson_instance_with_participants(uuid, uuid, integer, text) TO app_user;
-GRANT EXECUTE ON FUNCTION public.cancel_selected_scheduled_participants_and_reconcile_instance(uuid, uuid[], uuid) TO app_user;
-REVOKE EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, integer, text) FROM authenticated;
-REVOKE EXECUTE ON FUNCTION public.complete_lesson_instance_with_participants(uuid, uuid, integer, text) FROM authenticated;
-REVOKE EXECUTE ON FUNCTION public.cancel_selected_scheduled_participants_and_reconcile_instance(uuid, uuid[], uuid) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.get_active_org_id() TO authenticated, app_user;
+GRANT EXECUTE ON FUNCTION public.get_my_org_ids() TO authenticated, app_user;
+GRANT EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, uuid, integer, text) TO app_user;
+GRANT EXECUTE ON FUNCTION public.complete_lesson_instance_with_participants(uuid, uuid, uuid, integer, text) TO app_user;
+GRANT EXECUTE ON FUNCTION public.cancel_selected_scheduled_participants_and_reconcile_instance(uuid, uuid, uuid[], uuid) TO app_user;
+REVOKE EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, uuid, integer, text) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.complete_lesson_instance_with_participants(uuid, uuid, uuid, integer, text) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.cancel_selected_scheduled_participants_and_reconcile_instance(uuid, uuid, uuid[], uuid) FROM authenticated;
+
+-- Grants for control tables
+GRANT ALL ON TABLE public.organizations TO app_user;
+GRANT ALL ON TABLE public.profiles TO app_user;
+GRANT ALL ON TABLE public.org_memberships TO app_user;
+GRANT ALL ON TABLE public.org_invitations TO app_user;
+GRANT ALL ON TABLE public.permission_registry TO app_user;
+GRANT ALL ON TABLE public.active_routing TO app_user;
 
 GRANT ALL ON TABLE public.students TO app_user;
 GRANT ALL ON TABLE public.guardians TO app_user;
@@ -5209,7 +5786,7 @@ GRANT ALL ON TABLE public.claim_batches TO app_user;
 GRANT ALL ON TABLE public.instance_locks TO app_user;
 GRANT ALL ON TABLE public.participant_locks TO app_user;
 GRANT ALL ON TABLE public.calendar_instance_corrections TO app_user;
-GRANT ALL ON TABLE public.tenant_audit_log TO app_user;
+GRANT ALL ON TABLE public.audit_log TO app_user;
 GRANT ALL ON TABLE public.dashboard_tasks TO app_user;
 GRANT ALL ON TABLE public.instructor_profiles TO app_user;
 GRANT ALL ON TABLE public.instructor_service_capabilities TO app_user;
@@ -5238,6 +5815,13 @@ LANGUAGE plpgsql SECURITY DEFINER
 AS $$
 DECLARE
   required_tables constant text[] := array[
+    'organizations',
+    'profiles',
+    'org_memberships',
+    'org_invitations',
+    'permission_registry',
+    'active_routing',
+    'audit_log',
     'students',
     'guardians',
     'client_profiles',
@@ -5597,6 +6181,7 @@ GRANT EXECUTE ON FUNCTION public.schema_execute_statements_v1(text[], boolean, t
 -- -----------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.create_commitment_transfer_atomic(
+  p_org_id                    uuid,
   p_source_commitment_id      uuid,
   p_transfer_amount           integer,   -- in agorot
   p_transfer_ref              uuid,
@@ -5635,7 +6220,8 @@ BEGIN
     INTO v_source_student_id, v_source_client_profile_id
   FROM public.commitments c
   JOIN public.students s ON s.id = c.student_id
-  WHERE c.id = p_source_commitment_id;
+  WHERE c.id = p_source_commitment_id
+    AND c.org_id = p_org_id;
 
   IF v_source_student_id IS NULL THEN
     RAISE EXCEPTION 'source_commitment_not_found';
@@ -5645,7 +6231,8 @@ BEGIN
   SELECT client_profile_id
     INTO v_target_client_profile_id
   FROM public.students
-  WHERE id = p_target_student_id;
+  WHERE id = p_target_student_id
+    AND org_id = p_org_id;
 
   IF v_target_client_profile_id IS NULL THEN
     RAISE EXCEPTION 'target_student_not_found';
@@ -5653,6 +6240,7 @@ BEGIN
 
   -- Step 1: Create target commitment
   INSERT INTO public.commitments (
+    org_id,
     student_id,
     service_id,
     commitment_type,
@@ -5665,6 +6253,7 @@ BEGIN
     created_at,
     updated_at
   ) VALUES (
+    p_org_id,
     p_target_student_id,
     p_target_service_id,
     p_target_commitment_type,
@@ -5681,6 +6270,7 @@ BEGIN
 
   -- Step 2: Insert source DEBIT (deducts from source commitment)
   INSERT INTO public.ledger_transactions (
+    org_id,
     client_profile_id,
     student_id,
     commitment_id,
@@ -5693,6 +6283,7 @@ BEGIN
     updated_at,
     metadata
   ) VALUES (
+    p_org_id,
     v_source_client_profile_id,
     v_source_student_id,
     p_source_commitment_id,
@@ -5709,6 +6300,7 @@ BEGIN
 
   -- Step 3: Insert target CREDIT (funds the new commitment)
   INSERT INTO public.ledger_transactions (
+    org_id,
     client_profile_id,
     student_id,
     commitment_id,
@@ -5721,6 +6313,7 @@ BEGIN
     updated_at,
     metadata
   ) VALUES (
+    p_org_id,
     v_target_client_profile_id,
     p_target_student_id,
     v_target_commitment_id,
@@ -5744,7 +6337,7 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.create_commitment_transfer_atomic(
-  uuid, integer, uuid, uuid, uuid, text, integer, timestamptz, text, uuid
+  uuid, uuid, integer, uuid, uuid, uuid, text, integer, timestamptz, text, uuid
 ) TO authenticated, service_role;
 
 -- -----------------------------------------------------------------
@@ -5768,6 +6361,7 @@ GRANT EXECUTE ON FUNCTION public.create_commitment_transfer_atomic(
 -- -----------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.ensure_hmo_authorization_and_link_commitment(
+  p_org_id              uuid,
   p_authorization_data  jsonb,
   p_commitment_id       uuid
 )
@@ -5792,6 +6386,7 @@ BEGIN
   -- Upsert authorization (idempotent via id conflict)
   INSERT INTO public.hmo_authorizations (
     id,
+    org_id,
     student_id,
     service_id,
     provider_id,
@@ -5808,6 +6403,7 @@ BEGIN
     updated_at
   ) VALUES (
     v_auth_id_input,
+    p_org_id,
     (p_authorization_data->>'student_id')::uuid,
     (p_authorization_data->>'service_id')::uuid,
     (p_authorization_data->>'provider_id')::uuid,
@@ -5842,7 +6438,8 @@ BEGIN
     hmo_provider_id        = (p_authorization_data->>'provider_id')::uuid,
     hmo_provider_track_id  = (p_authorization_data->>'provider_track_id')::uuid,
     updated_at             = now()
-  WHERE id = p_commitment_id;
+  WHERE id = p_commitment_id
+    AND org_id = p_org_id;
 
   IF NOT FOUND THEN
     -- Commitment not found: roll back by raising (Postgres will undo the INSERT above)
@@ -5857,7 +6454,7 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.ensure_hmo_authorization_and_link_commitment(
-  jsonb, uuid
+  uuid, jsonb, uuid
 ) TO authenticated, service_role;
 
 -- -----------------------------------------------------------------
@@ -5875,6 +6472,7 @@ GRANT EXECUTE ON FUNCTION public.ensure_hmo_authorization_and_link_commitment(
 -- -----------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.create_commitment_and_ledger_entry(
+  p_org_id                  uuid,
   p_student_id              uuid,
   p_service_id              uuid,
   p_commitment_type         text,
@@ -5918,7 +6516,8 @@ BEGIN
   SELECT client_profile_id
     INTO v_client_profile_id
   FROM public.students
-  WHERE id = p_student_id;
+  WHERE id = p_student_id
+    AND org_id = p_org_id;
 
   IF v_client_profile_id IS NULL THEN
     RAISE EXCEPTION 'student_not_found_or_missing_client_profile';
@@ -5926,6 +6525,7 @@ BEGIN
 
   -- Step 1: Insert commitment
   INSERT INTO public.commitments (
+    org_id,
     student_id,
     service_id,
     commitment_type,
@@ -5942,6 +6542,7 @@ BEGIN
     created_at,
     updated_at
   ) VALUES (
+    p_org_id,
     p_student_id,
     p_service_id,
     p_commitment_type,
@@ -5968,6 +6569,7 @@ BEGIN
     END;
 
     INSERT INTO public.ledger_transactions (
+      org_id,
       client_profile_id,
       student_id,
       commitment_id,
@@ -5980,6 +6582,7 @@ BEGIN
       updated_at,
       metadata
     ) VALUES (
+      p_org_id,
       v_client_profile_id,
       p_student_id,
       v_commitment_id,
@@ -6003,7 +6606,7 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.create_commitment_and_ledger_entry(
-  uuid, uuid, text, integer, integer, uuid, text, boolean, timestamptz, jsonb, uuid, uuid, uuid
+  uuid, uuid, uuid, text, integer, integer, uuid, text, boolean, timestamptz, jsonb, uuid, uuid, uuid
 ) TO authenticated, service_role;
 
 -- -----------------------------------------------------------------
@@ -6017,6 +6620,7 @@ GRANT EXECUTE ON FUNCTION public.create_commitment_and_ledger_entry(
 -- -----------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.update_commitment_and_record_delta(
+  p_org_id                  uuid,
   p_commitment_id           uuid,
   p_student_id              uuid,
   p_service_id              uuid,
@@ -6052,6 +6656,7 @@ BEGIN
     INTO v_old_total
   FROM public.commitments
   WHERE id = p_commitment_id
+    AND org_id = p_org_id
   FOR UPDATE;
 
   IF NOT FOUND THEN
@@ -6071,7 +6676,8 @@ BEGIN
     expires_at            = p_expires_at,
     metadata              = COALESCE(p_metadata, '{}'::jsonb),
     updated_at            = v_now
-  WHERE id = p_commitment_id;
+  WHERE id = p_commitment_id
+    AND org_id = p_org_id;
 
   -- Record a ledger delta if total_amount changed
   v_delta := p_total_amount - COALESCE(v_old_total, 0);
@@ -6081,13 +6687,15 @@ BEGIN
     SELECT client_profile_id
       INTO v_client_profile_id
     FROM public.students
-    WHERE id = p_student_id;
+    WHERE id = p_student_id
+      AND org_id = p_org_id;
 
     IF v_client_profile_id IS NULL THEN
       RAISE EXCEPTION 'student_not_found_or_missing_client_profile';
     END IF;
 
     INSERT INTO public.ledger_transactions (
+      org_id,
       client_profile_id,
       student_id,
       commitment_id,
@@ -6100,6 +6708,7 @@ BEGIN
       updated_at,
       metadata
     ) VALUES (
+      p_org_id,
       v_client_profile_id,
       p_student_id,
       p_commitment_id,
@@ -6124,7 +6733,7 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.update_commitment_and_record_delta(
-  uuid, uuid, uuid, text, integer, integer, uuid, text, boolean, timestamptz, jsonb
+  uuid, uuid, uuid, uuid, text, integer, integer, uuid, text, boolean, timestamptz, jsonb
 ) TO authenticated, service_role;
 
 -- -----------------------------------------------------------------
@@ -6160,6 +6769,7 @@ GRANT EXECUTE ON FUNCTION public.update_commitment_and_record_delta(
 -- -----------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.batch_sync_lesson_ledger_entries(
+  p_org_id              uuid,
   p_lesson_instance_id  uuid,
   p_actor_user_id       uuid,
   p_entries             jsonb
@@ -6214,6 +6824,7 @@ BEGIN
     IF v_should_charge AND v_amount IS NOT NULL AND v_amount > 0 THEN
       -- Upsert the DEBIT ledger entry (idempotent: unique on source_ref + usage_type)
       INSERT INTO public.ledger_transactions (
+        org_id,
         client_profile_id,
         student_id,
         commitment_id,
@@ -6226,6 +6837,7 @@ BEGIN
         updated_at,
         metadata
       ) VALUES (
+        p_org_id,
         v_client_id,
         v_student_id,
         v_commitment_id,
@@ -6238,7 +6850,7 @@ BEGIN
         now(),
         jsonb_build_object('actor_user_id', p_actor_user_id, 'lesson_instance_id', p_lesson_instance_id)
       )
-      ON CONFLICT (source_ref, usage_type) DO UPDATE SET
+      ON CONFLICT (org_id, source_ref, usage_type) DO UPDATE SET
         commitment_id     = EXCLUDED.commitment_id,
         amount            = EXCLUDED.amount,
         notes             = EXCLUDED.notes,
@@ -6250,6 +6862,7 @@ BEGIN
       IF v_source_ref IS NOT NULL AND v_usage_type IS NOT NULL THEN
         DELETE FROM public.ledger_transactions
         WHERE source_ref = v_source_ref
+          AND org_id = p_org_id
           AND usage_type = v_usage_type
           AND transaction_type = 'DEBIT';
       END IF;
@@ -6263,7 +6876,8 @@ BEGIN
       price_charged     = CASE WHEN v_should_charge THEN v_amount ELSE NULL END,
       pricing_breakdown = v_breakdown,
       updated_by        = p_actor_user_id
-    WHERE id = v_participant_id;
+    WHERE id = v_participant_id
+      AND org_id = p_org_id;
 
     v_updated := v_updated + 1;
   END LOOP;
@@ -6277,7 +6891,7 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.batch_sync_lesson_ledger_entries(
-  uuid, uuid, jsonb
+  uuid, uuid, uuid, jsonb
 ) TO authenticated, service_role;
 
 -- -----------------------------------------------------------------
@@ -6290,6 +6904,7 @@ GRANT EXECUTE ON FUNCTION public.batch_sync_lesson_ledger_entries(
 -- -----------------------------------------------------------------
 
 ALTER TABLE public.hmo_authorizations
+  ADD COLUMN IF NOT EXISTS org_id uuid,
   ADD COLUMN IF NOT EXISTS contracted_rate_amount integer;
 
 UPDATE public.hmo_authorizations AS auth
@@ -6313,6 +6928,7 @@ ALTER TABLE public.hmo_authorizations
 
 CREATE TABLE IF NOT EXISTS public.ledger_accounts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   account_type text NOT NULL CHECK (account_type IN ('student', 'client_profile', 'hmo_provider')),
   student_id uuid NULL REFERENCES public.students(id) ON DELETE CASCADE,
   client_profile_id uuid NULL REFERENCES public.client_profiles(id) ON DELETE CASCADE,
@@ -6324,9 +6940,9 @@ CREATE TABLE IF NOT EXISTS public.ledger_accounts (
   -- Real UNIQUE constraints (not partial indexes) are required for PostgREST
   -- upsert on_conflict resolution (ON CONFLICT column). PostgreSQL allows
   -- multiple NULLs in a UNIQUE column so this is safe for nullable FK columns.
-  CONSTRAINT ledger_accounts_student_id_key UNIQUE (student_id),
-  CONSTRAINT ledger_accounts_client_profile_id_key UNIQUE (client_profile_id),
-  CONSTRAINT ledger_accounts_hmo_provider_id_key UNIQUE (hmo_provider_id),
+  CONSTRAINT ledger_accounts_student_id_key UNIQUE (org_id, student_id),
+  CONSTRAINT ledger_accounts_client_profile_id_key UNIQUE (org_id, client_profile_id),
+  CONSTRAINT ledger_accounts_hmo_provider_id_key UNIQUE (org_id, hmo_provider_id),
   CONSTRAINT ledger_accounts_exactly_one_owner_chk CHECK (
     (
       CASE WHEN student_id IS NOT NULL THEN 1 ELSE 0 END +
@@ -6343,6 +6959,7 @@ CREATE TABLE IF NOT EXISTS public.ledger_accounts (
 
 CREATE TABLE IF NOT EXISTS public.ledger_transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   ledger_account_id uuid NOT NULL REFERENCES public.ledger_accounts(id) ON DELETE RESTRICT,
   direction text NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')),
   amount integer NOT NULL CHECK (amount > 0),
@@ -6377,28 +6994,28 @@ CREATE TABLE IF NOT EXISTS public.ledger_transactions (
 );
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_account_effective_idx
-  ON public.ledger_transactions (ledger_account_id, effective_at);
+  ON public.ledger_transactions (org_id, ledger_account_id, effective_at);
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_source_idx
-  ON public.ledger_transactions (source_type, source_id);
+  ON public.ledger_transactions (org_id, source_type, source_id);
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_lesson_participant_idx
-  ON public.ledger_transactions (lesson_participant_id);
+  ON public.ledger_transactions (org_id, lesson_participant_id);
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_student_effective_idx
-  ON public.ledger_transactions (student_id, effective_at);
+  ON public.ledger_transactions (org_id, student_id, effective_at);
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_client_effective_idx
-  ON public.ledger_transactions (client_profile_id, effective_at);
+  ON public.ledger_transactions (org_id, client_profile_id, effective_at);
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_hmo_provider_effective_idx
-  ON public.ledger_transactions (hmo_provider_id, effective_at);
+  ON public.ledger_transactions (org_id, hmo_provider_id, effective_at);
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_hmo_authorization_idx
-  ON public.ledger_transactions (hmo_authorization_id);
+  ON public.ledger_transactions (org_id, hmo_authorization_id);
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_reverses_idx
-  ON public.ledger_transactions (reverses_transaction_id);
+  ON public.ledger_transactions (org_id, reverses_transaction_id);
 
 CREATE OR REPLACE FUNCTION public.prevent_ledger_transaction_mutation()
 RETURNS trigger
@@ -6417,6 +7034,7 @@ EXECUTE FUNCTION public.prevent_ledger_transaction_mutation();
 
 CREATE TABLE IF NOT EXISTS public.hmo_invoice_batches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   hmo_provider_id uuid NOT NULL REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
   period_start date NULL,
   period_end date NULL,
@@ -6434,10 +7052,11 @@ CREATE TABLE IF NOT EXISTS public.hmo_invoice_batches (
 );
 
 CREATE INDEX IF NOT EXISTS hmo_invoice_batches_provider_idx
-  ON public.hmo_invoice_batches (hmo_provider_id, created_at DESC);
+  ON public.hmo_invoice_batches (org_id, hmo_provider_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS public.hmo_invoice_batch_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   batch_id uuid NOT NULL REFERENCES public.hmo_invoice_batches(id) ON DELETE CASCADE,
   ledger_transaction_id uuid NOT NULL UNIQUE REFERENCES public.ledger_transactions(id) ON DELETE RESTRICT,
   amount integer NOT NULL CHECK (amount > 0),
@@ -6446,7 +7065,7 @@ CREATE TABLE IF NOT EXISTS public.hmo_invoice_batch_items (
 );
 
 CREATE INDEX IF NOT EXISTS hmo_invoice_batch_items_batch_idx
-  ON public.hmo_invoice_batch_items (batch_id);
+  ON public.hmo_invoice_batch_items (org_id, batch_id);
 
 -- RLS for billing ledger tables (must run after the cutover DROP/CREATE above)
 ALTER TABLE public.ledger_accounts ENABLE ROW LEVEL SECURITY;
@@ -6457,7 +7076,9 @@ ALTER TABLE public.hmo_invoice_batch_items ENABLE ROW LEVEL SECURITY;
 DO $$
 DECLARE
   tbl text;
-  policy_name text;
+  ops text[] := ARRAY['SELECT','INSERT','UPDATE','DELETE'];
+  op text;
+  pol text;
 BEGIN
   FOREACH tbl IN ARRAY ARRAY[
     'ledger_accounts',
@@ -6466,9 +7087,35 @@ BEGIN
     'hmo_invoice_batch_items'
   ]
   LOOP
-    policy_name := left('Allow full access to authenticated users on ' || tbl, 63);
-    EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl);
-    EXECUTE 'CREATE POLICY ' || quote_ident(policy_name) || ' ON public.' || quote_ident(tbl) || ' FOR ALL TO authenticated, app_user USING (true) WITH CHECK (true)';
+    -- Drop the old permissive "USING (true)" policy if it exists
+    EXECUTE 'DROP POLICY IF EXISTS '
+      || quote_ident(left('Allow full access to authenticated users on ' || tbl, 63))
+      || ' ON public.' || quote_ident(tbl);
+
+    FOREACH op IN ARRAY ops
+    LOOP
+      pol := left('tenant_' || lower(op) || '_' || tbl, 63);
+      EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(pol) || ' ON public.' || quote_ident(tbl);
+
+      IF op = 'SELECT' THEN
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated, app_user USING (org_id = get_active_org_id())',
+          pol, tbl);
+      ELSIF op = 'INSERT' THEN
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR INSERT TO authenticated, app_user WITH CHECK (org_id = get_active_org_id())',
+          pol, tbl);
+      ELSE
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR %s TO authenticated, app_user USING (org_id = get_active_org_id())',
+          pol, tbl, op);
+        IF op = 'UPDATE' THEN
+          EXECUTE format(
+            'ALTER POLICY %I ON public.%I WITH CHECK (org_id = get_active_org_id())',
+            pol, tbl);
+        END IF;
+      END IF;
+    END LOOP;
   END LOOP;
 END $$;
 

@@ -9,7 +9,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { listDashboardTasks, resolveDashboardTask } from '../_shared/dashboard-tasks.js';
@@ -70,14 +70,9 @@ export default async function dashboardTasks(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   if (method === 'GET') {
     try {
-      const entries = await listDashboardTasks(tenantClient, {
+      const entries = await listDashboardTasks(supabase, {
         status: normalizeString(req?.query?.status) || 'open',
         resourceType: normalizeString(req?.query?.resource_type),
         resourceId: normalizeString(req?.query?.resource_id),
@@ -96,7 +91,7 @@ export default async function dashboardTasks(context, req) {
     }
 
     try {
-      const resolvedTask = await resolveDashboardTask(tenantClient, {
+      const resolvedTask = await resolveDashboardTask(supabase, {
         taskId,
         resolvedBy: userId,
         metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
@@ -122,7 +117,7 @@ export default async function dashboardTasks(context, req) {
         },
       });
 
-      await logTenantAuditEvent(tenantClient, {
+      await logTenantAuditEvent(supabase, {
         actorUserId: userId,
         eventType: 'dashboard.task.resolved',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -134,10 +129,9 @@ export default async function dashboardTasks(context, req) {
       try {
         const resourceType = normalizeString(resolvedTask.resource_type);
         if (resourceType === 'lesson_instance' && resolvedTask.resource_id) {
-          await syncLessonClosureState(tenantClient, resolvedTask.resource_id, userId);
+          await syncLessonClosureState(supabase, resolvedTask.resource_id, userId);
         } else if (resourceType === 'lesson_participant' && resolvedTask.resource_id) {
-          const { data: participantRow, error: participantError } = await tenantClient
-            .from('lesson_participants')
+          const { data: participantRow, error: participantError } = await withOrgScope(supabase, 'lesson_participants', orgId)
             .select('lesson_instance_id')
             .eq('id', resolvedTask.resource_id)
             .maybeSingle();
@@ -147,7 +141,7 @@ export default async function dashboardTasks(context, req) {
           }
 
           if (participantRow?.lesson_instance_id) {
-            await syncLessonClosureState(tenantClient, participantRow.lesson_instance_id, userId);
+            await syncLessonClosureState(supabase, participantRow.lesson_instance_id, userId);
           }
         }
       } catch (closureError) {

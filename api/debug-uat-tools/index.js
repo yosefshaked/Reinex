@@ -11,7 +11,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
@@ -39,12 +39,11 @@ function safePasswordEquals(candidate, expected) {
   return timingSafeEqual(Buffer.from(left), Buffer.from(right));
 }
 
-async function lockLessonForPayroll({ tenantClient, lessonInstanceId, userId }) {
+async function lockLessonForPayroll({ client, orgId, lessonInstanceId, userId }) {
   const now = new Date();
   const periodStart = now.toISOString().slice(0, 10);
 
-  const { data: payrollRun, error: payrollRunError } = await tenantClient
-    .from('payroll_runs')
+  const { data: payrollRun, error: payrollRunError } = await withOrgScope(client, 'payroll_runs', orgId)
     .insert({
       period_start: periodStart,
       period_end: periodStart,
@@ -62,8 +61,7 @@ async function lockLessonForPayroll({ tenantClient, lessonInstanceId, userId }) 
     throw payrollRunError;
   }
 
-  const { data: lock, error: lockError } = await tenantClient
-    .from('instance_locks')
+  const { data: lock, error: lockError } = await withOrgScope(client, 'instance_locks', orgId)
     .insert({
       lesson_instance_id: lessonInstanceId,
       lock_source_type: 'payroll_run',
@@ -87,12 +85,11 @@ async function lockLessonForPayroll({ tenantClient, lessonInstanceId, userId }) 
   };
 }
 
-async function lockLessonForPaidClaim({ tenantClient, lessonInstanceId, userId }) {
+async function lockLessonForPaidClaim({ client, orgId, lessonInstanceId, userId }) {
   const now = new Date();
   const periodStart = now.toISOString().slice(0, 10);
 
-  const { data: claimBatch, error: claimBatchError } = await tenantClient
-    .from('claim_batches')
+  const { data: claimBatch, error: claimBatchError } = await withOrgScope(client, 'claim_batches', orgId)
     .insert({
       batch_type: 'manual',
       period_start: periodStart,
@@ -113,8 +110,7 @@ async function lockLessonForPaidClaim({ tenantClient, lessonInstanceId, userId }
     throw claimBatchError;
   }
 
-  const { data: lock, error: lockError } = await tenantClient
-    .from('instance_locks')
+  const { data: lock, error: lockError } = await withOrgScope(client, 'instance_locks', orgId)
     .insert({
       lesson_instance_id: lessonInstanceId,
       lock_source_type: 'claim_batch',
@@ -140,7 +136,8 @@ async function lockLessonForPaidClaim({ tenantClient, lessonInstanceId, userId }
 }
 
 async function inspectHmoChargeContext({
-  tenantClient,
+  client,
+  orgId,
   lessonInstanceId,
   lessonParticipantId = '',
   targetParticipantStatus = '',
@@ -148,8 +145,7 @@ async function inspectHmoChargeContext({
   const normalizedParticipantId = normalizeString(lessonParticipantId);
   const normalizedTargetParticipantStatus = normalizeString(targetParticipantStatus).toLowerCase();
 
-  const { data: instance, error: instanceError } = await tenantClient
-    .from('lesson_instances')
+  const { data: instance, error: instanceError } = await withOrgScope(client, 'lesson_instances', orgId)
     .select('id, datetime_start, service_id, status')
     .eq('id', lessonInstanceId)
     .maybeSingle();
@@ -161,8 +157,7 @@ async function inspectHmoChargeContext({
     return { error: 'lesson_instance_not_found' };
   }
 
-  const { data: participants, error: participantsError } = await tenantClient
-    .from('lesson_participants')
+  const { data: participants, error: participantsError } = await withOrgScope(client, 'lesson_participants', orgId)
     .select('id, client_profile_id, student_id, participant_status, metadata')
     .eq('lesson_instance_id', lessonInstanceId)
     .order('id', { ascending: true });
@@ -185,8 +180,7 @@ async function inspectHmoChargeContext({
     };
   }
 
-  const { data: service, error: serviceError } = await tenantClient
-    .from('Services')
+  const { data: service, error: serviceError } = await withOrgScope(client, 'Services', orgId)
     .select('id, name, default_customer_charge_amount, is_active')
     .eq('id', instance.service_id)
     .maybeSingle();
@@ -197,7 +191,7 @@ async function inspectHmoChargeContext({
 
   const studentId = normalizeString(selectedParticipant.student_id);
   const activeAuthorization = studentId
-    ? await resolveActiveAuthorizationForStudentService(tenantClient, {
+    ? await resolveActiveAuthorizationForStudentService(client, {
       studentId,
       serviceId: instance.service_id,
       lessonDate: instance.datetime_start,
@@ -205,7 +199,7 @@ async function inspectHmoChargeContext({
     : null;
 
   const allActiveAuthorizationsForStudent = studentId
-    ? await loadHmoAuthorizations(tenantClient, {
+    ? await loadHmoAuthorizations(client, {
       studentId,
       activeOnly: true,
     })
@@ -221,7 +215,7 @@ async function inspectHmoChargeContext({
     }
     : selectedParticipant;
 
-  const policies = await loadFinancePolicies(tenantClient);
+  const policies = await loadFinancePolicies(client);
   const chargeDecision = buildDesiredChargeDescriptors({
     participant: effectiveParticipant,
     service,
@@ -232,8 +226,7 @@ async function inspectHmoChargeContext({
     ? resolveHmoSplitAmounts({ service, authorization: activeAuthorization })
     : null;
 
-  const { data: ledgerRows, error: ledgerError } = await tenantClient
-    .from('ledger_transactions')
+  const { data: ledgerRows, error: ledgerError } = await withOrgScope(client, 'ledger_transactions', orgId)
     .select('id, source_type, direction, amount, posted_at, effective_at, student_id, client_profile_id, hmo_provider_id, hmo_authorization_id, service_id, rate_source, reverses_transaction_id, metadata')
     .eq('lesson_participant_id', selectedParticipant.id)
     .order('posted_at', { ascending: true });
@@ -365,13 +358,7 @@ export default async function debugUatTools(context, req) {
     return respond(context, 400, { message: 'invalid_lock_kind' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  const { data: instance, error: instanceError } = await tenantClient
-    .from('lesson_instances')
+  const { data: instance, error: instanceError } = await withOrgScope(supabase, 'lesson_instances', orgId)
     .select('id')
     .eq('id', lessonInstanceId)
     .maybeSingle();
@@ -388,7 +375,8 @@ export default async function debugUatTools(context, req) {
   try {
     if (action === 'inspect_hmo_charge_context') {
       const inspection = await inspectHmoChargeContext({
-        tenantClient,
+        client: supabase,
+        orgId,
         lessonInstanceId,
         lessonParticipantId,
         targetParticipantStatus,
@@ -421,8 +409,8 @@ export default async function debugUatTools(context, req) {
     }
 
     const result = lockKind === 'payroll'
-      ? await lockLessonForPayroll({ tenantClient, lessonInstanceId, userId })
-      : await lockLessonForPaidClaim({ tenantClient, lessonInstanceId, userId });
+      ? await lockLessonForPayroll({ client: supabase, orgId, lessonInstanceId, userId })
+      : await lockLessonForPaidClaim({ client: supabase, orgId, lessonInstanceId, userId });
 
     await logAuditEvent(supabase, {
       orgId,
@@ -440,7 +428,7 @@ export default async function debugUatTools(context, req) {
       },
     });
 
-    await logTenantAuditEvent(tenantClient, {
+    await logTenantAuditEvent(supabase, {
       actorUserId: userId,
       eventType: 'calendar.instance.lock_created_debug_uat',
       retentionCategory: TENANT_AUDIT_RETENTION.DIAGNOSTIC,

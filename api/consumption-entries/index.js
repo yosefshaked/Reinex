@@ -10,7 +10,6 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
@@ -65,12 +64,7 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  const billingService = new BillingLedgerService({ tenantClient });
+  const billingService = new BillingLedgerService({ tenantClient: supabase });
 
   if (method === 'GET') {
     const studentId = normalizeString(req?.query?.student_id);

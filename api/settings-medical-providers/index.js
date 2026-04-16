@@ -9,7 +9,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { HMO_PAYMENT_MODES, loadHmoProviders } from '../_shared/hmo.js';
@@ -32,8 +32,8 @@ function normalizeTrackPayload(body = {}) {
   };
 }
 
-async function respondWithProviders(context, tenantClient) {
-  const providers = await loadHmoProviders(tenantClient);
+async function respondWithProviders(context, client) {
+  const providers = await loadHmoProviders(client);
   return respond(context, 200, { providers }, { 'Cache-Control': 'no-store' });
 }
 
@@ -88,14 +88,9 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   if (method === 'GET') {
     try {
-      return await respondWithProviders(context, tenantClient);
+      return await respondWithProviders(context, supabase);
     } catch (error) {
       context.log?.error?.('settings-medical-providers: failed to load providers', { message: error?.message, code: error?.code });
       return respond(context, 500, { message: error?.code === '42P01' ? 'schema_upgrade_required' : 'failed_to_load_providers' });
@@ -125,8 +120,7 @@ export default async function (context, req) {
         metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
       };
 
-      const { data, error } = await tenantClient
-        .from('hmo_providers')
+      const { data, error } = await withOrgScope(supabase, 'hmo_providers', orgId)
         .insert(payload)
         .select('id, name, is_active, metadata, created_at, updated_at')
         .maybeSingle();
@@ -138,7 +132,7 @@ export default async function (context, req) {
         throw error;
       }
 
-      const providers = await loadHmoProviders(tenantClient);
+      const providers = await loadHmoProviders(supabase);
       return respond(context, 201, { providers, created: data });
     }
 
@@ -163,8 +157,7 @@ export default async function (context, req) {
         return respond(context, 400, { message: 'invalid_default_insurer_claim_amount' });
       }
 
-      const { data, error } = await tenantClient
-        .from('hmo_provider_tracks')
+      const { data, error } = await withOrgScope(supabase, 'hmo_provider_tracks', orgId)
         .insert({
           id: normalizeString(body?.id) || randomUUID(),
           ...track,
@@ -179,7 +172,7 @@ export default async function (context, req) {
         throw error;
       }
 
-      const providers = await loadHmoProviders(tenantClient);
+      const providers = await loadHmoProviders(supabase);
       return respond(context, 201, { providers, created: data });
     }
 
@@ -193,8 +186,7 @@ export default async function (context, req) {
         return respond(context, 400, { message: 'missing_provider_name' });
       }
 
-      const { data, error } = await tenantClient
-        .from('hmo_providers')
+      const { data, error } = await withOrgScope(supabase, 'hmo_providers', orgId)
         .update({
           name,
           is_active: body?.is_active !== false,
@@ -212,7 +204,7 @@ export default async function (context, req) {
         return respond(context, 404, { message: 'provider_not_found' });
       }
 
-      const providers = await loadHmoProviders(tenantClient);
+      const providers = await loadHmoProviders(supabase);
       return respond(context, 200, { providers, updated: data });
     }
 
@@ -235,8 +227,7 @@ export default async function (context, req) {
         return respond(context, 400, { message: 'invalid_payment_mode' });
       }
 
-      const { data, error } = await tenantClient
-        .from('hmo_provider_tracks')
+      const { data, error } = await withOrgScope(supabase, 'hmo_provider_tracks', orgId)
         .update({
           ...track,
           updated_at: new Date().toISOString(),
@@ -252,7 +243,7 @@ export default async function (context, req) {
         return respond(context, 404, { message: 'track_not_found' });
       }
 
-      const providers = await loadHmoProviders(tenantClient);
+      const providers = await loadHmoProviders(supabase);
       return respond(context, 200, { providers, updated: data });
     }
 
@@ -263,8 +254,8 @@ export default async function (context, req) {
       }
 
       const [{ data: trackRows, error: trackError }, { data: authRows, error: authError }] = await Promise.all([
-        tenantClient.from('hmo_provider_tracks').select('id').eq('provider_id', id).limit(1),
-        tenantClient.from('hmo_authorizations').select('id').eq('provider_id', id).limit(1),
+        withOrgScope(supabase, 'hmo_provider_tracks', orgId).select('id').eq('provider_id', id).limit(1),
+        withOrgScope(supabase, 'hmo_authorizations', orgId).select('id').eq('provider_id', id).limit(1),
       ]);
 
       if (trackError && trackError.code !== '42P01') throw trackError;
@@ -273,8 +264,7 @@ export default async function (context, req) {
         return respond(context, 409, { message: 'provider_in_use' });
       }
 
-      const { data, error } = await tenantClient
-        .from('hmo_providers')
+      const { data, error } = await withOrgScope(supabase, 'hmo_providers', orgId)
         .delete()
         .eq('id', id)
         .select('id')
@@ -285,7 +275,7 @@ export default async function (context, req) {
         return respond(context, 404, { message: 'provider_not_found' });
       }
 
-      const providers = await loadHmoProviders(tenantClient);
+      const providers = await loadHmoProviders(supabase);
       return respond(context, 200, { providers, deleted: { id } });
     }
 
@@ -296,7 +286,7 @@ export default async function (context, req) {
       }
 
       const [{ data: authRows, error: authError }] = await Promise.all([
-        tenantClient.from('hmo_authorizations').select('id').eq('provider_track_id', id).limit(1),
+        withOrgScope(supabase, 'hmo_authorizations', orgId).select('id').eq('provider_track_id', id).limit(1),
       ]);
 
       if (authError && authError.code !== '42P01') throw authError;
@@ -304,8 +294,7 @@ export default async function (context, req) {
         return respond(context, 409, { message: 'track_in_use' });
       }
 
-      const { data, error } = await tenantClient
-        .from('hmo_provider_tracks')
+      const { data, error } = await withOrgScope(supabase, 'hmo_provider_tracks', orgId)
         .delete()
         .eq('id', id)
         .select('id')
@@ -316,7 +305,7 @@ export default async function (context, req) {
         return respond(context, 404, { message: 'track_not_found' });
       }
 
-      const providers = await loadHmoProviders(tenantClient);
+      const providers = await loadHmoProviders(supabase);
       return respond(context, 200, { providers, deleted: { id } });
     }
 

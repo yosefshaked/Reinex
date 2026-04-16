@@ -10,7 +10,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
@@ -67,19 +67,14 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  const billingService = new BillingLedgerService({ tenantClient });
+  const billingService = new BillingLedgerService({ tenantClient: supabase });
 
   if (method === 'GET') {
     try {
       const studentId = normalizeString(req?.query?.student_id);
       const serviceId = normalizeString(req?.query?.service_id);
       const activeOnly = String(req?.query?.active_only || '').toLowerCase() === 'true';
-      const authorizations = await loadHmoAuthorizations(tenantClient, {
+      const authorizations = await loadHmoAuthorizations(supabase, {
         studentId,
         serviceId,
         activeOnly,
@@ -116,7 +111,7 @@ export default async function (context, req) {
         return respond(context, 400, { message: 'invalid_authorized_lessons' });
       }
 
-      const trackMap = await loadHmoTrackMap(tenantClient, [providerTrackId]);
+      const trackMap = await loadHmoTrackMap(supabase, [providerTrackId]);
       const providerTrack = trackMap.get(providerTrackId) || null;
       if (!providerTrack) {
         return respond(context, 404, { message: 'provider_track_not_found' });
@@ -151,8 +146,7 @@ export default async function (context, req) {
 
       let savedId = '';
       if (method === 'POST') {
-        const { data, error } = await tenantClient
-          .from('hmo_authorizations')
+        const { data, error } = await withOrgScope(supabase, 'hmo_authorizations', orgId)
           .insert(payload)
           .select('id')
           .single();
@@ -166,8 +160,7 @@ export default async function (context, req) {
           return respond(context, 400, { message: 'missing_authorization_id' });
         }
 
-        const { data, error } = await tenantClient
-          .from('hmo_authorizations')
+        const { data, error } = await withOrgScope(supabase, 'hmo_authorizations', orgId)
           .update(payload)
           .eq('id', id)
           .select('id')
@@ -186,7 +179,7 @@ export default async function (context, req) {
         actorUserId: userId,
         reasonCode: method === 'POST' ? 'authorization_created' : 'authorization_updated',
       });
-      const [authorizationRow] = await loadHmoAuthorizations(tenantClient, { authorizationIds: [savedId] });
+      const [authorizationRow] = await loadHmoAuthorizations(supabase, { authorizationIds: [savedId] });
       return respond(context, method === 'POST' ? 201 : 200, { authorization: authorizationRow });
     }
 
@@ -196,8 +189,7 @@ export default async function (context, req) {
         return respond(context, 400, { message: 'missing_authorization_id' });
       }
 
-      const { data, error } = await tenantClient
-        .from('hmo_authorizations')
+      const { data, error } = await withOrgScope(supabase, 'hmo_authorizations', orgId)
         .update({
           status: 'cancelled',
           updated_at: new Date().toISOString(),
@@ -218,7 +210,7 @@ export default async function (context, req) {
         actorUserId: userId,
         reasonCode: 'authorization_cancelled',
       });
-      const [authorizationRow] = await loadHmoAuthorizations(tenantClient, { authorizationIds: [id] });
+      const [authorizationRow] = await loadHmoAuthorizations(supabase, { authorizationIds: [id] });
       return respond(context, 200, { authorization: authorizationRow, deleted: true });
     }
   } catch (error) {

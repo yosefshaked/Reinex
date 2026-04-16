@@ -8,7 +8,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 
 /**
@@ -73,17 +73,11 @@ export default async function (context, req) {
 
   const isAdmin = isAdminRole(role);
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   const query = req.query || {};
   const includeInactive = normalizeString(query.include_inactive).toLowerCase() === 'true';
 
   // Build query for instructors
-  let instructorsQuery = tenantClient
-    .from('Employees')
+  let instructorsQuery = withOrgScope(supabase, 'Employees', orgId)
     .select('id, first_name, middle_name, last_name, email, phone, metadata, employee_type')
     .order('first_name', { ascending: true });
 
@@ -117,12 +111,10 @@ export default async function (context, req) {
   // 3) has at least one instructor service capability row.
   const instructorIds = instructors.map(i => i.id);
   const [profilesResult, capabilitiesResult] = await Promise.all([
-    tenantClient
-      .from('instructor_profiles')
+    withOrgScope(supabase, 'instructor_profiles', orgId)
       .select('employee_id')
       .in('employee_id', instructorIds),
-    tenantClient
-      .from('instructor_service_capabilities')
+    withOrgScope(supabase, 'instructor_service_capabilities', orgId)
       .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
       .in('employee_id', instructorIds),
   ]);

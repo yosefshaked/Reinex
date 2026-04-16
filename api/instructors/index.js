@@ -9,7 +9,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit, validateInstructorCreate, validateInstructorUpdate } from '../_shared/validation.js';
 import { ensureInstructorColors } from '../_shared/instructor-colors.js';
@@ -98,13 +98,12 @@ function normalizeServiceCapabilitiesInput(value) {
   return { provided: true, valid: true, value: normalized };
 }
 
-async function buildRosterQuery(tenantClient, includeInactive, includeInstructorTypes, isAdmin, userId) {
+async function buildRosterQuery(client, orgId, includeInactive, includeInstructorTypes, isAdmin, userId) {
   const selectColumns = includeInstructorTypes
     ? EMPLOYEE_SELECT_COLUMNS
     : EMPLOYEE_SELECT_COLUMNS.replace(', instructor_types', '');
 
-  let query = tenantClient
-    .from('Employees')
+  let query = withOrgScope(client, 'Employees', orgId)
     .select(selectColumns)
     .order('first_name', { ascending: true });
 
@@ -128,19 +127,17 @@ function hasIncompleteInstructorSetup(employee, profile, capabilities) {
   return capabilityRows.length === 0 || capabilityRows.some((capability) => !hasConfiguredAvailability(capability?.availability_windows));
 }
 
-async function enrichEmployees({ tenantClient, employees }) {
+async function enrichEmployees({ client, orgId, employees }) {
   if (!Array.isArray(employees) || employees.length === 0) {
     return [];
   }
 
   const employeeIds = employees.map((employee) => employee.id);
   const [{ data: profiles }, { data: capabilities }] = await Promise.all([
-    tenantClient
-      .from('instructor_profiles')
+    withOrgScope(client, 'instructor_profiles', orgId)
       .select('employee_id, break_time_minutes, metadata')
       .in('employee_id', employeeIds),
-    tenantClient
-      .from('instructor_service_capabilities')
+    withOrgScope(client, 'instructor_service_capabilities', orgId)
       .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
       .in('employee_id', employeeIds),
   ]);
@@ -204,10 +201,9 @@ async function fetchUnlinkedMembers({ supabase, orgId, enrichedEmployees }) {
   }));
 }
 
-async function writeServiceCapabilities(tenantClient, instructorId, serviceCapabilities) {
+async function writeServiceCapabilities(client, orgId, instructorId, serviceCapabilities) {
   const normalizedCapabilities = Array.isArray(serviceCapabilities) ? serviceCapabilities : [];
-  const { data: previousRows, error: previousError } = await tenantClient
-    .from('instructor_service_capabilities')
+  const { data: previousRows, error: previousError } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
     .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
     .eq('employee_id', instructorId);
 
@@ -236,8 +232,7 @@ async function writeServiceCapabilities(tenantClient, instructorId, serviceCapab
     }));
 
     if (previousPayload.length > 0) {
-      const { error: restoreError } = await tenantClient
-        .from('instructor_service_capabilities')
+      const { error: restoreError } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
         .upsert(previousPayload, { onConflict: 'employee_id,service_id' });
       if (restoreError) {
         throw restoreError;
@@ -253,8 +248,7 @@ async function writeServiceCapabilities(tenantClient, instructorId, serviceCapab
       .filter((serviceId) => serviceId && !previousServiceSet.has(serviceId));
 
     if (restoredRowsToDelete.length > 0) {
-      const { error: cleanupError } = await tenantClient
-        .from('instructor_service_capabilities')
+      const { error: cleanupError } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
         .delete()
         .eq('employee_id', instructorId)
         .in('service_id', restoredRowsToDelete);
@@ -266,8 +260,7 @@ async function writeServiceCapabilities(tenantClient, instructorId, serviceCapab
 
   try {
     if (nextPayload.length > 0) {
-      const { error: upsertError } = await tenantClient
-        .from('instructor_service_capabilities')
+      const { error: upsertError } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
         .upsert(nextPayload, { onConflict: 'employee_id,service_id' });
 
       if (upsertError) {
@@ -284,8 +277,7 @@ async function writeServiceCapabilities(tenantClient, instructorId, serviceCapab
       .filter((serviceId) => serviceId && !nextServiceSet.has(serviceId));
 
     if (removedServiceIds.length > 0) {
-      const { error: deleteError } = await tenantClient
-        .from('instructor_service_capabilities')
+      const { error: deleteError } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
         .delete()
         .eq('employee_id', instructorId)
         .in('service_id', removedServiceIds);
@@ -303,9 +295,9 @@ async function writeServiceCapabilities(tenantClient, instructorId, serviceCapab
   }
 }
 
-async function writeTenantAudit(context, tenantClient, params) {
+async function writeTenantAudit(context, client, params) {
   try {
-    await logTenantAuditEvent(tenantClient, params);
+    await logTenantAuditEvent(client, params);
   } catch (error) {
     context.log?.warn?.('instructors failed to write tenant audit', {
       message: error?.message,
@@ -374,13 +366,9 @@ export default async function (context, req) {
 
   const isAdmin = isAdminRole(role);
   const isOffice = !isAdmin && isAdminOrOffice(role);
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
 
   if (method === 'GET') {
-    const colorResult = await ensureInstructorColors(tenantClient, {
+    const colorResult = await ensureInstructorColors(supabase, {
       context,
       table: 'Employees',
       columns: 'id, metadata',
@@ -392,9 +380,9 @@ export default async function (context, req) {
     const includeInactive = normalizeString(req?.query?.include_inactive).toLowerCase() === 'true';
     const includeUnlinkedMembers = normalizeString(req?.query?.include_unlinked_members).toLowerCase() === 'true';
 
-    let rosterResult = await buildRosterQuery(tenantClient, includeInactive, true, isAdmin, userId);
+    let rosterResult = await buildRosterQuery(supabase, orgId, includeInactive, true, isAdmin, userId);
     if (rosterResult.error && rosterResult.error?.code === '42703') {
-      rosterResult = await buildRosterQuery(tenantClient, includeInactive, false, isAdmin, userId);
+      rosterResult = await buildRosterQuery(supabase, orgId, includeInactive, false, isAdmin, userId);
     }
 
     if (rosterResult.error) {
@@ -403,7 +391,7 @@ export default async function (context, req) {
     }
 
     const employees = Array.isArray(rosterResult.data) ? rosterResult.data : [];
-    const enrichedEmployees = await enrichEmployees({ tenantClient, employees });
+    const enrichedEmployees = await enrichEmployees({ client: supabase, orgId, employees });
 
     if (includeUnlinkedMembers) {
       if (!isAdmin) {
@@ -510,8 +498,7 @@ export default async function (context, req) {
       employment_scope: validation.employmentScope || null,
     };
 
-    const { data, error } = await tenantClient
-      .from('Employees')
+    const { data, error } = await withOrgScope(supabase, 'Employees', orgId)
       .insert(insertPayload)
       .select(EMPLOYEE_SELECT_COLUMNS)
       .single();
@@ -527,8 +514,7 @@ export default async function (context, req) {
         profilePayload.break_time_minutes = body.break_time_minutes;
       }
 
-      const { error: profileError } = await tenantClient
-        .from('instructor_profiles')
+      const { error: profileError } = await withOrgScope(supabase, 'instructor_profiles', orgId)
         .upsert(profilePayload, { onConflict: 'employee_id' });
 
       if (profileError) {
@@ -540,8 +526,8 @@ export default async function (context, req) {
     if (employeeType === 'instructor' && serviceCapabilitiesInput.provided) {
       try {
         const beforeCapabilities = [];
-        await writeServiceCapabilities(tenantClient, data.id, serviceCapabilitiesInput.value);
-        await writeTenantAudit(context, tenantClient, {
+        await writeServiceCapabilities(supabase, orgId, data.id, serviceCapabilitiesInput.value);
+        await writeTenantAudit(context, supabase, {
           actorUserId: userId,
           eventType: 'instructor.service_capabilities.updated',
           retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -576,7 +562,7 @@ export default async function (context, req) {
       },
     });
 
-    const [enriched] = await enrichEmployees({ tenantClient, employees: [data] });
+    const [enriched] = await enrichEmployees({ client: supabase, orgId, employees: [data] });
     return respond(context, 200, enriched || data);
   }
 
@@ -621,8 +607,7 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid_service_capabilities' });
     }
 
-    const { data: existingEmployee, error: fetchError } = await tenantClient
-      .from('Employees')
+    const { data: existingEmployee, error: fetchError } = await withOrgScope(supabase, 'Employees', orgId)
       .select('*')
       .eq('id', instructorId)
       .maybeSingle();
@@ -709,8 +694,7 @@ export default async function (context, req) {
 
     let employeeRecord = existingEmployee;
     if (Object.keys(updates).length > 0) {
-      const { data, error } = await tenantClient
-        .from('Employees')
+      const { data, error } = await withOrgScope(supabase, 'Employees', orgId)
         .update(updates)
         .eq('id', instructorId)
         .select(EMPLOYEE_SELECT_COLUMNS)
@@ -732,8 +716,7 @@ export default async function (context, req) {
         profilePayload.break_time_minutes = body.break_time_minutes;
       }
 
-      const { error: profileError } = await tenantClient
-        .from('instructor_profiles')
+      const { error: profileError } = await withOrgScope(supabase, 'instructor_profiles', orgId)
         .upsert(profilePayload, { onConflict: 'employee_id' });
 
       if (profileError) {
@@ -745,13 +728,12 @@ export default async function (context, req) {
 
     if (serviceCapabilitiesInput.provided) {
       try {
-        const { data: previousCapabilities } = await tenantClient
-          .from('instructor_service_capabilities')
+        const { data: previousCapabilities } = await withOrgScope(supabase, 'instructor_service_capabilities', orgId)
           .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
           .eq('employee_id', instructorId);
-        await writeServiceCapabilities(tenantClient, instructorId, serviceCapabilitiesInput.value);
+        await writeServiceCapabilities(supabase, orgId, instructorId, serviceCapabilitiesInput.value);
         changedFields.push('service_capabilities');
-        await writeTenantAudit(context, tenantClient, {
+        await writeTenantAudit(context, supabase, {
           actorUserId: userId,
           eventType: 'instructor.service_capabilities.updated',
           retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -793,8 +775,7 @@ export default async function (context, req) {
     });
 
     const [{ data: refreshedEmployee, error: refreshedEmployeeError }] = await Promise.all([
-      tenantClient
-        .from('Employees')
+      withOrgScope(supabase, 'Employees', orgId)
         .select(EMPLOYEE_SELECT_COLUMNS)
         .eq('id', instructorId)
         .maybeSingle(),
@@ -808,7 +789,7 @@ export default async function (context, req) {
       return respond(context, 500, { message: 'failed_to_refresh_instructor' });
     }
 
-    const [enriched] = await enrichEmployees({ tenantClient, employees: [refreshedEmployee] });
+    const [enriched] = await enrichEmployees({ client: supabase, orgId, employees: [refreshedEmployee] });
     return respond(context, 200, enriched || refreshedEmployee);
   }
 
@@ -822,8 +803,7 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'missing instructor id' });
     }
 
-    const { data, error } = await tenantClient
-      .from('Employees')
+    const { data, error } = await withOrgScope(supabase, 'Employees', orgId)
       .update({ is_active: false })
       .eq('id', instructorId)
       .select(EMPLOYEE_SELECT_COLUMNS)

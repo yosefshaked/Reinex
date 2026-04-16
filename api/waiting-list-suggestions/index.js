@@ -10,7 +10,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import {
   getAvailabilityWindowsForDay,
@@ -401,13 +401,7 @@ export default async function waitingListSuggestions(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  const { data: entry, error: entryError } = await tenantClient
-    .from('waiting_list_entries')
+  const { data: entry, error: entryError } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
     .select(buildEntrySelect())
     .eq('id', entryId)
     .maybeSingle();
@@ -427,8 +421,7 @@ export default async function waitingListSuggestions(context, req) {
 
   const today = parseIsoDateInTimezone();
 
-  const { data: instructorRows, error: instructorError } = await tenantClient
-    .from('Employees')
+  const { data: instructorRows, error: instructorError } = await withOrgScope(supabase, 'Employees', orgId)
     .select('id, first_name, middle_name, last_name, is_active')
     .eq('is_active', true);
 
@@ -452,13 +445,11 @@ export default async function waitingListSuggestions(context, req) {
     capabilityResult,
     templateResult,
   ] = await Promise.all([
-    tenantClient
-      .from('instructor_service_capabilities')
+    withOrgScope(supabase, 'instructor_service_capabilities', orgId)
       .select('employee_id, service_id, max_students, availability_windows')
       .eq('service_id', entry.desired_service_id)
       .in('employee_id', instructorIds),
-    tenantClient
-      .from('lesson_templates')
+    withOrgScope(supabase, 'lesson_templates', orgId)
       .select('id, student_id, instructor_employee_id, service_id, day_of_week, time_of_day, duration_minutes, valid_from, valid_until, is_active')
       .eq('is_active', true)
       .in('instructor_employee_id', instructorIds),

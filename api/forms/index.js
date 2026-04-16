@@ -9,7 +9,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
@@ -83,7 +83,7 @@ function uniqueIds(values) {
   return Array.from(new Set((Array.isArray(values) ? values : []).filter(Boolean)));
 }
 
-async function loadSharedBlocksForSchemas(tenantClient, schemas = []) {
+async function loadSharedBlocksForSchemas(client, orgId, schemas = []) {
   const sharedBlockIds = uniqueIds(
     schemas.flatMap((schema) => collectSharedBlockIds(schema)),
   );
@@ -92,8 +92,7 @@ async function loadSharedBlocksForSchemas(tenantClient, schemas = []) {
     return [];
   }
 
-  const { data, error } = await tenantClient
-    .from('shared_form_blocks')
+  const { data, error } = await withOrgScope(client, 'shared_form_blocks', orgId)
     .select('id, block_type, name, content_schema, is_active, metadata, created_at, updated_at')
     .eq('is_active', true)
     .in('id', sharedBlockIds);
@@ -121,14 +120,13 @@ function buildSharedBlockLinkRows(formId, formSchema, schemaScope) {
   );
 }
 
-async function syncFormSharedBlockLinks(tenantClient, formId, { draftSchema, publishedSchema }) {
+async function syncFormSharedBlockLinks(client, orgId, formId, { draftSchema, publishedSchema }) {
   const rows = [
     ...buildSharedBlockLinkRows(formId, draftSchema, 'draft'),
     ...buildSharedBlockLinkRows(formId, publishedSchema, 'published'),
   ];
 
-  const { error: deleteError } = await tenantClient
-    .from('form_shared_block_links')
+  const { error: deleteError } = await withOrgScope(client, 'form_shared_block_links', orgId)
     .delete()
     .eq('form_id', formId);
 
@@ -140,8 +138,7 @@ async function syncFormSharedBlockLinks(tenantClient, formId, { draftSchema, pub
     return;
   }
 
-  const { error: insertError } = await tenantClient
-    .from('form_shared_block_links')
+  const { error: insertError } = await withOrgScope(client, 'form_shared_block_links', orgId)
     .insert(rows);
 
   if (insertError) {
@@ -149,10 +146,9 @@ async function syncFormSharedBlockLinks(tenantClient, formId, { draftSchema, pub
   }
 }
 
-async function revertFormAfterFailedLinkSync(tenantClient, context, formId, previousRecord) {
+async function revertFormAfterFailedLinkSync(client, orgId, context, formId, previousRecord) {
   try {
-    await tenantClient
-      .from('forms')
+    await withOrgScope(client, 'forms', orgId)
       .update({
         name: previousRecord.name,
         description: previousRecord.description,
@@ -168,7 +164,7 @@ async function revertFormAfterFailedLinkSync(tenantClient, context, formId, prev
       })
       .eq('id', formId);
 
-    await syncFormSharedBlockLinks(tenantClient, formId, {
+    await syncFormSharedBlockLinks(client, orgId, formId, {
       draftSchema: previousRecord.form_schema || {},
       publishedSchema: previousRecord?.metadata?.published_form_schema || {},
     });
@@ -180,9 +176,8 @@ async function revertFormAfterFailedLinkSync(tenantClient, context, formId, prev
   }
 }
 
-async function deleteCreatedFormAfterFailedLinkSync(tenantClient, context, formId) {
-  const { error } = await tenantClient
-    .from('forms')
+async function deleteCreatedFormAfterFailedLinkSync(client, orgId, context, formId) {
+  const { error } = await withOrgScope(client, 'forms', orgId)
     .delete()
     .eq('id', formId);
 
@@ -195,13 +190,13 @@ async function deleteCreatedFormAfterFailedLinkSync(tenantClient, context, formI
   }
 }
 
-async function buildFormResponse(tenantClient, formRecord) {
+async function buildFormResponse(client, orgId, formRecord) {
   const metadata = formRecord?.metadata && typeof formRecord.metadata === 'object' && !Array.isArray(formRecord.metadata)
     ? formRecord.metadata
     : {};
   const rawSchema = normalizeFormSchema(formRecord?.form_schema || {});
   const publishedSchema = normalizeFormSchema(metadata?.published_form_schema || {});
-  const sharedBlocks = await loadSharedBlocksForSchemas(tenantClient, [rawSchema, publishedSchema]);
+  const sharedBlocks = await loadSharedBlocksForSchemas(client, orgId, [rawSchema, publishedSchema]);
   const sharedBlockMap = buildSharedBlockMap(sharedBlocks);
   const missingSharedBlockIds = findMissingSharedBlockIds(rawSchema, sharedBlockMap);
 
@@ -215,9 +210,9 @@ async function buildFormResponse(tenantClient, formRecord) {
   };
 }
 
-async function writeTenantFormAudit(tenantClient, context, params) {
+async function writeTenantFormAudit(client, context, params) {
   try {
-    await logTenantAuditEvent(tenantClient, params);
+    await logTenantAuditEvent(client, params);
   } catch (auditError) {
     context.log?.warn?.('forms failed to write tenant audit event', {
       message: auditError?.message,
@@ -286,11 +281,6 @@ export default async function forms(context, req) {
 
   const isAdmin = isAdminRole(role);
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   // ── GET: Fetch form templates ──
   if (method === 'GET') {
     const formId = context?.bindingData?.formId;
@@ -306,8 +296,7 @@ export default async function forms(context, req) {
         return respond(context, 400, { message: 'invalid_form_id' });
       }
 
-      const { data, error } = await tenantClient
-        .from('forms')
+      const { data, error } = await withOrgScope(supabase, 'forms', orgId)
         .select(SELECT_FIELDS)
         .eq('id', formId)
         .maybeSingle();
@@ -322,7 +311,7 @@ export default async function forms(context, req) {
       }
 
       try {
-        const responseBody = await buildFormResponse(tenantClient, data);
+        const responseBody = await buildFormResponse(supabase, orgId, data);
         return respond(context, 200, responseBody);
       } catch (sharedBlocksError) {
         context.log?.error?.('forms failed to resolve shared blocks for template', {
@@ -340,8 +329,7 @@ export default async function forms(context, req) {
     const selectFields = selectionMode
       ? 'id, name, description, form_usage, form_schema, is_active, metadata, published_at'
       : SELECT_FIELDS;
-    const query = tenantClient
-      .from('forms')
+    const query = withOrgScope(supabase, 'forms', orgId)
       .select(selectFields)
       .order('created_at', { ascending: false });
 
@@ -402,8 +390,7 @@ export default async function forms(context, req) {
       return respond(context, 400, { message: 'invalid_form_schema_structure', details: schemaIssues });
     }
 
-    const { data, error } = await tenantClient
-      .from('forms')
+    const { data, error } = await withOrgScope(supabase, 'forms', orgId)
       .insert({
         name,
         description,
@@ -425,7 +412,7 @@ export default async function forms(context, req) {
     }
 
     try {
-      await syncFormSharedBlockLinks(tenantClient, data.id, {
+      await syncFormSharedBlockLinks(supabase, orgId, data.id, {
         draftSchema: formSchema,
         publishedSchema: {},
       });
@@ -435,7 +422,7 @@ export default async function forms(context, req) {
         formId: data.id,
       });
       try {
-        await deleteCreatedFormAfterFailedLinkSync(tenantClient, context, data.id);
+        await deleteCreatedFormAfterFailedLinkSync(supabase, orgId, context, data.id);
       } catch {
         return respond(context, 500, {
           message: 'failed_to_create_form',
@@ -456,7 +443,7 @@ export default async function forms(context, req) {
       resourceId: data.id,
       details: { name },
     });
-    await writeTenantFormAudit(tenantClient, context, {
+    await writeTenantFormAudit(supabase, context, {
       actorUserId: userId,
       eventType: 'form.template_created',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -466,7 +453,7 @@ export default async function forms(context, req) {
     });
 
     try {
-      const responseBody = await buildFormResponse(tenantClient, data);
+      const responseBody = await buildFormResponse(supabase, orgId, data);
       return respond(context, 201, responseBody);
     } catch (sharedBlocksError) {
       context.log?.error?.('forms failed to resolve shared blocks after create', {
@@ -485,8 +472,7 @@ export default async function forms(context, req) {
     }
 
     // Fetch existing to get current version
-    const { data: existing, error: fetchError } = await tenantClient
-      .from('forms')
+    const { data: existing, error: fetchError } = await withOrgScope(supabase, 'forms', orgId)
       .select('id, name, description, form_usage, form_schema, alert_rules, visibility_rules, is_active, version, metadata, published_at, updated_at')
       .eq('id', formId)
       .maybeSingle();
@@ -502,7 +488,7 @@ export default async function forms(context, req) {
 
     if (body?.action === 'migrate_publish_structure') {
       if (isPublishedMetadata(existing?.metadata)) {
-        const responseBody = await buildFormResponse(tenantClient, {
+        const responseBody = await buildFormResponse(supabase, orgId, {
           ...existing,
           metadata: existing.metadata,
         });
@@ -540,8 +526,7 @@ export default async function forms(context, req) {
         publish_structure_migrated_by: userId,
       });
 
-      const { data: migrated, error: migratedError } = await tenantClient
-        .from('forms')
+      const { data: migrated, error: migratedError } = await withOrgScope(supabase, 'forms', orgId)
         .update({
           metadata: migratedMetadata,
           published_at: normalizeString(existing.published_at) || updatedAt,
@@ -559,7 +544,7 @@ export default async function forms(context, req) {
         return respond(context, 500, { message: 'failed_to_migrate_publish_structure' });
       }
 
-      await syncFormSharedBlockLinks(tenantClient, formId, {
+      await syncFormSharedBlockLinks(supabase, orgId, formId, {
         draftSchema: normalizedSchema,
         publishedSchema: normalizedSchema,
       });
@@ -579,7 +564,7 @@ export default async function forms(context, req) {
         },
       });
 
-      await writeTenantFormAudit(tenantClient, context, {
+      await writeTenantFormAudit(supabase, context, {
         actorUserId: userId,
         eventType: 'form.template_publish_structure_migrated',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -595,7 +580,7 @@ export default async function forms(context, req) {
         },
       });
 
-      const responseBody = await buildFormResponse(tenantClient, migrated);
+      const responseBody = await buildFormResponse(supabase, orgId, migrated);
       return respond(context, 200, {
         ...responseBody,
         migration_status: 'migrated',
@@ -696,8 +681,7 @@ export default async function forms(context, req) {
       return respond(context, 400, { message: 'missing_updates' });
     }
 
-    const { data, error } = await tenantClient
-      .from('forms')
+    const { data, error } = await withOrgScope(supabase, 'forms', orgId)
       .update(updates)
       .eq('id', formId)
       .select(SELECT_FIELDS)
@@ -713,7 +697,7 @@ export default async function forms(context, req) {
     }
 
     try {
-      await syncFormSharedBlockLinks(tenantClient, formId, {
+      await syncFormSharedBlockLinks(supabase, orgId, formId, {
         draftSchema: nextSchema,
         publishedSchema: nextPublishedSchema,
       });
@@ -722,7 +706,7 @@ export default async function forms(context, req) {
         message: linksError?.message,
         formId,
       });
-      await revertFormAfterFailedLinkSync(tenantClient, context, formId, existing);
+      await revertFormAfterFailedLinkSync(supabase, orgId, context, formId, existing);
       return respond(context, 500, { message: 'failed_to_update_form' });
     }
 
@@ -740,7 +724,7 @@ export default async function forms(context, req) {
         new_version: data.version,
       },
     });
-    await writeTenantFormAudit(tenantClient, context, {
+    await writeTenantFormAudit(supabase, context, {
       actorUserId: userId,
       eventType: publishRequested ? 'form.template_published' : 'form.template_updated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -777,7 +761,7 @@ export default async function forms(context, req) {
     }
 
     try {
-      const responseBody = await buildFormResponse(tenantClient, data);
+      const responseBody = await buildFormResponse(supabase, orgId, data);
       return respond(context, 200, responseBody);
     } catch (sharedBlocksError) {
       context.log?.error?.('forms failed to resolve shared blocks after update', {
@@ -795,8 +779,7 @@ export default async function forms(context, req) {
       return respond(context, 400, { message: 'invalid_form_id' });
     }
 
-    const { data, error } = await tenantClient
-      .from('forms')
+    const { data, error } = await withOrgScope(supabase, 'forms', orgId)
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', formId)
       .select('id, name, is_active')
@@ -822,7 +805,7 @@ export default async function forms(context, req) {
       resourceId: formId,
       details: { name: data.name },
     });
-    await writeTenantFormAudit(tenantClient, context, {
+    await writeTenantFormAudit(supabase, context, {
       actorUserId: userId,
       eventType: 'form.template_deactivated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,

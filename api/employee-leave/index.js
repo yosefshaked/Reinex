@@ -7,7 +7,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import {
@@ -72,9 +72,8 @@ function computeRecordedBalances(summary) {
   }];
 }
 
-async function fetchLeaveEntry(tenantClient, leaveEntryId) {
-  const { data, error } = await tenantClient
-    .from('employee_leave_entries')
+async function fetchLeaveEntry(client, orgId, leaveEntryId) {
+  const { data, error } = await withOrgScope(client, 'employee_leave_entries', orgId)
     .select('id, employee_id, leave_type, status, duration_mode, half_day_part, start_date, end_date, reason, notes, source_type, approved_by, created_by, updated_by, created_at, updated_at, metadata')
     .eq('id', leaveEntryId)
     .maybeSingle();
@@ -86,9 +85,8 @@ async function fetchLeaveEntry(tenantClient, leaveEntryId) {
   return data || null;
 }
 
-async function fetchBalanceEvents(tenantClient, employeeId) {
-  const { data, error } = await tenantClient
-    .from('employee_leave_balance_events')
+async function fetchBalanceEvents(client, orgId, employeeId) {
+  const { data, error } = await withOrgScope(client, 'employee_leave_balance_events', orgId)
     .select('id, employee_id, leave_entry_id, leave_day_id, event_type, leave_type, quantity_days, effective_date, notes, created_by, created_at, metadata')
     .eq('employee_id', employeeId)
     .order('effective_date', { ascending: false })
@@ -104,9 +102,8 @@ async function fetchBalanceEvents(tenantClient, employeeId) {
   return data || [];
 }
 
-async function fetchBalanceEvent(tenantClient, balanceEventId) {
-  const { data, error } = await tenantClient
-    .from('employee_leave_balance_events')
+async function fetchBalanceEvent(client, orgId, balanceEventId) {
+  const { data, error } = await withOrgScope(client, 'employee_leave_balance_events', orgId)
     .select('id, employee_id, leave_entry_id, leave_day_id, event_type, leave_type, quantity_days, effective_date, notes, created_by, created_at, metadata')
     .eq('id', balanceEventId)
     .maybeSingle();
@@ -128,9 +125,8 @@ function isManualBalanceEvent(event) {
     && normalizeString(event.event_type).toLowerCase() !== 'usage';
 }
 
-async function fetchLeaveEntriesForEmployee(tenantClient, employeeId, { startDate = '', endDate = '' } = {}) {
-  let query = tenantClient
-    .from('employee_leave_entries')
+async function fetchLeaveEntriesForEmployee(client, orgId, employeeId, { startDate = '', endDate = '' } = {}) {
+  let query = withOrgScope(client, 'employee_leave_entries', orgId)
     .select('id, employee_id, leave_type, status, duration_mode, half_day_part, start_date, end_date, reason, notes, source_type, approved_by, created_by, updated_by, created_at, updated_at, metadata')
     .eq('employee_id', employeeId)
     .order('start_date', { ascending: false })
@@ -208,15 +204,10 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   const canManageAll = canManageEmployeeOps(role);
 
   if (method === 'GET') {
-    return handleGet(context, req, tenantClient, userId, canManageAll);
+    return handleGet(context, req, supabase, orgId, userId, canManageAll);
   }
 
   if (!canManageAll) {
@@ -225,26 +216,26 @@ export default async function (context, req) {
 
   if (method === 'POST' || method === 'PUT') {
     if (isBalanceEventRequest(body)) {
-      return handleBalanceEventUpsert(context, tenantClient, body, userId, method);
+      return handleBalanceEventUpsert(context, supabase, orgId, body, userId, method);
     }
-    return handleUpsert(context, tenantClient, body, userId, method);
+    return handleUpsert(context, supabase, orgId, body, userId, method);
   }
 
   if (method === 'DELETE') {
     if (isBalanceEventRequest(body)) {
-      return handleBalanceEventDelete(context, tenantClient, body);
+      return handleBalanceEventDelete(context, supabase, orgId, body);
     }
-    return handleDelete(context, tenantClient, body, userId);
+    return handleDelete(context, supabase, orgId, body, userId);
   }
 
   return respond(context, 405, { message: 'method not allowed' });
 }
 
-async function handleGet(context, req, tenantClient, userId, canManageAll) {
+async function handleGet(context, req, client, orgId, userId, canManageAll) {
   const employeeIdParam = normalizeString(req?.query?.employee_id);
   const startDate = normalizeString(req?.query?.start_date);
   const endDate = normalizeString(req?.query?.end_date);
-  const employeeResult = await resolveEmployeeRecord(tenantClient, {
+  const employeeResult = await resolveEmployeeRecord(client, {
     employeeId: employeeIdParam,
     userId,
     canManageAll,
@@ -259,14 +250,14 @@ async function handleGet(context, req, tenantClient, userId, canManageAll) {
   }
 
   const employee = employeeResult.employee;
-  const policies = await loadFinancePolicies(tenantClient);
+  const policies = await loadFinancePolicies(client);
   const [balanceEvents, leaveEntries, leaveDays] = await Promise.all([
-    fetchBalanceEvents(tenantClient, employee.id),
-    fetchLeaveEntriesForEmployee(tenantClient, employee.id, {
+    fetchBalanceEvents(client, orgId, employee.id),
+    fetchLeaveEntriesForEmployee(client, orgId, employee.id, {
       startDate: isYmdDate(startDate) ? startDate : '',
       endDate: isYmdDate(endDate) ? endDate : '',
     }),
-    fetchApprovedLeaveDays(tenantClient, {
+    fetchApprovedLeaveDays(client, {
       employeeId: employee.id,
       startDate: isYmdDate(startDate) ? startDate : `${new Date().getFullYear()}-01-01`,
       endDate: isYmdDate(endDate) ? endDate : `${new Date().getFullYear()}-12-31`,
@@ -301,7 +292,7 @@ async function handleGet(context, req, tenantClient, userId, canManageAll) {
   });
 }
 
-async function handleUpsert(context, tenantClient, body, userId, method) {
+async function handleUpsert(context, client, orgId, body, userId, method) {
   const leaveType = normalizeLeaveType(body?.leave_type);
   const employeeId = normalizeString(body?.employee_id);
   const startDate = normalizeString(body?.start_date);
@@ -335,13 +326,13 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
       return respond(context, 400, { message: 'missing_leave_entry_id' });
     }
 
-    existingEntry = await fetchLeaveEntry(tenantClient, leaveEntryId);
+    existingEntry = await fetchLeaveEntry(client, orgId, leaveEntryId);
     if (!existingEntry) {
       return respond(context, 404, { message: 'leave_entry_not_found' });
     }
   }
 
-  const overlappingLeaveDays = await fetchApprovedLeaveDays(tenantClient, {
+  const overlappingLeaveDays = await fetchApprovedLeaveDays(client, {
     employeeId,
     startDate,
     endDate,
@@ -356,7 +347,7 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
     });
   }
 
-  const operationalConflict = await assertNoOperationalConflictsForLeave(tenantClient, {
+  const operationalConflict = await assertNoOperationalConflictsForLeave(client, {
     employeeId,
     startDate,
     endDate,
@@ -389,8 +380,7 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
     if (!existingEntry) {
       payload.created_by = userId;
       payload.created_at = new Date().toISOString();
-      const { data, error } = await tenantClient
-        .from('employee_leave_entries')
+      const { data, error } = await withOrgScope(client, 'employee_leave_entries', orgId)
         .insert(payload)
         .select('id')
         .single();
@@ -400,8 +390,7 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
       }
       leaveEntryId = data.id;
     } else {
-      const { error } = await tenantClient
-        .from('employee_leave_entries')
+      const { error } = await withOrgScope(client, 'employee_leave_entries', orgId)
         .update(payload)
         .eq('id', leaveEntryId);
 
@@ -409,7 +398,7 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
         throw error;
       }
 
-      await deleteLeaveArtifacts(tenantClient, leaveEntryId);
+      await deleteLeaveArtifacts(client, leaveEntryId);
     }
 
     if (status === 'approved') {
@@ -423,8 +412,7 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
         halfDayPart,
       });
 
-      const { data: leaveDays, error: leaveDaysError } = await tenantClient
-        .from('employee_leave_days')
+      const { data: leaveDays, error: leaveDaysError } = await withOrgScope(client, 'employee_leave_days', orgId)
         .insert(leaveDaysPayload)
         .select('id, leave_entry_id, employee_id, leave_date, day_portion, leave_type, balance_days_delta, pay_fraction, metadata');
 
@@ -432,7 +420,7 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
         throw leaveDaysError;
       }
 
-      await upsertLeaveBalanceUsage(tenantClient, leaveDays || [], {
+      await upsertLeaveBalanceUsage(client, leaveDays || [], {
         leaveEntryId,
         employeeId,
         leaveType,
@@ -447,30 +435,29 @@ async function handleUpsert(context, tenantClient, body, userId, method) {
     });
 
     if (!existingEntry && leaveEntryId) {
-      await tenantClient.from('employee_leave_entries').delete().eq('id', leaveEntryId);
+      await withOrgScope(client, 'employee_leave_entries', orgId).delete().eq('id', leaveEntryId);
     }
     return respond(context, 500, { message: 'failed_to_save_leave_entry' });
   }
 
-  const savedEntry = await fetchLeaveEntry(tenantClient, leaveEntryId);
+  const savedEntry = await fetchLeaveEntry(client, orgId, leaveEntryId);
   return respond(context, existingEntry ? 200 : 201, savedEntry);
 }
 
-async function handleDelete(context, tenantClient, body, userId) {
+async function handleDelete(context, client, orgId, body, userId) {
   const leaveEntryId = normalizeString(body?.id);
   if (!leaveEntryId) {
     return respond(context, 400, { message: 'missing_leave_entry_id' });
   }
 
-  const existingEntry = await fetchLeaveEntry(tenantClient, leaveEntryId);
+  const existingEntry = await fetchLeaveEntry(client, orgId, leaveEntryId);
   if (!existingEntry) {
     return respond(context, 404, { message: 'leave_entry_not_found' });
   }
 
   try {
-    await deleteLeaveArtifacts(tenantClient, leaveEntryId);
-    const { data, error } = await tenantClient
-      .from('employee_leave_entries')
+    await deleteLeaveArtifacts(client, leaveEntryId);
+    const { data, error } = await withOrgScope(client, 'employee_leave_entries', orgId)
       .update({
         status: 'cancelled',
         updated_by: userId,
@@ -492,7 +479,7 @@ async function handleDelete(context, tenantClient, body, userId) {
 }
 
 
-async function handleBalanceEventUpsert(context, tenantClient, body, userId, method) {
+async function handleBalanceEventUpsert(context, client, orgId, body, userId, method) {
   const employeeId = normalizeString(body?.employee_id);
   const eventType = normalizeBalanceEventType(body?.event_type);
   const effectiveDate = normalizeString(body?.effective_date);
@@ -523,7 +510,7 @@ async function handleBalanceEventUpsert(context, tenantClient, body, userId, met
       return respond(context, 400, { message: 'missing_balance_event_id' });
     }
 
-    existingEvent = await fetchBalanceEvent(tenantClient, balanceEventId);
+    existingEvent = await fetchBalanceEvent(client, orgId, balanceEventId);
     if (!existingEvent) {
       return respond(context, 404, { message: 'balance_event_not_found' });
     }
@@ -550,8 +537,7 @@ async function handleBalanceEventUpsert(context, tenantClient, body, userId, met
     if (!existingEvent) {
       payload.created_by = userId;
       payload.created_at = new Date().toISOString();
-      const { data, error } = await tenantClient
-        .from('employee_leave_balance_events')
+      const { data, error } = await withOrgScope(client, 'employee_leave_balance_events', orgId)
         .insert(payload)
         .select('id, employee_id, leave_entry_id, leave_day_id, event_type, leave_type, quantity_days, effective_date, notes, created_by, created_at, metadata')
         .single();
@@ -563,8 +549,7 @@ async function handleBalanceEventUpsert(context, tenantClient, body, userId, met
       return respond(context, 201, data);
     }
 
-    const { data, error } = await tenantClient
-      .from('employee_leave_balance_events')
+    const { data, error } = await withOrgScope(client, 'employee_leave_balance_events', orgId)
       .update(payload)
       .eq('id', existingEvent.id)
       .select('id, employee_id, leave_entry_id, leave_day_id, event_type, leave_type, quantity_days, effective_date, notes, created_by, created_at, metadata')
@@ -587,13 +572,13 @@ async function handleBalanceEventUpsert(context, tenantClient, body, userId, met
   }
 }
 
-async function handleBalanceEventDelete(context, tenantClient, body) {
+async function handleBalanceEventDelete(context, client, orgId, body) {
   const balanceEventId = normalizeString(body?.id);
   if (!balanceEventId) {
     return respond(context, 400, { message: 'missing_balance_event_id' });
   }
 
-  const existingEvent = await fetchBalanceEvent(tenantClient, balanceEventId);
+  const existingEvent = await fetchBalanceEvent(client, orgId, balanceEventId);
   if (!existingEvent) {
     return respond(context, 404, { message: 'balance_event_not_found' });
   }
@@ -602,8 +587,7 @@ async function handleBalanceEventDelete(context, tenantClient, body) {
   }
 
   try {
-    const { data, error } = await tenantClient
-      .from('employee_leave_balance_events')
+    const { data, error } = await withOrgScope(client, 'employee_leave_balance_events', orgId)
       .delete()
       .eq('id', balanceEventId)
       .select('id')

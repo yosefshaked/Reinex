@@ -11,7 +11,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 
 function normalizeUuid(value) {
@@ -171,19 +171,13 @@ export default async function lessonTemplateOverrides(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   if (method === 'GET') {
     const templateId = normalizeUuid(req?.query?.template_id || req?.query?.templateId || body?.template_id || body?.templateId);
     if (!templateId) {
       return respond(context, 400, { message: 'invalid_template_id' });
     }
 
-    const { data, error } = await tenantClient
-      .from('lesson_template_overrides')
+    const { data, error } = await withOrgScope(supabase, 'lesson_template_overrides', orgId)
       .select(buildOverrideSelect())
       .eq('template_id', templateId)
       .order('target_date', { ascending: false })
@@ -258,8 +252,7 @@ export default async function lessonTemplateOverrides(context, req) {
       return respond(context, 400, { message: 'modify_override_requires_fields' });
     }
 
-    const { data: existingTemplate, error: existingTemplateError } = await tenantClient
-      .from('lesson_templates')
+    const { data: existingTemplate, error: existingTemplateError } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .select('id, valid_from, valid_until')
       .eq('id', templateId)
       .maybeSingle();
@@ -280,8 +273,7 @@ export default async function lessonTemplateOverrides(context, req) {
       return respond(context, 400, { message: 'target_date_outside_template_range' });
     }
 
-    const { data, error } = await tenantClient
-      .from('lesson_template_overrides')
+    const { data, error } = await withOrgScope(supabase, 'lesson_template_overrides', orgId)
       .insert(payload)
       .select(buildOverrideSelect())
       .single();
@@ -338,8 +330,7 @@ export default async function lessonTemplateOverrides(context, req) {
       return respond(context, 400, { message: 'invalid_override_id' });
     }
 
-    const { data: existingOverride, error: existingOverrideError } = await tenantClient
-      .from('lesson_template_overrides')
+    const { data: existingOverride, error: existingOverrideError } = await withOrgScope(supabase, 'lesson_template_overrides', orgId)
       .select('id, template_id, target_date, override_type, new_instructor_employee_id, new_service_id, new_time_of_day, new_duration_minutes, note')
       .eq('id', overrideId)
       .maybeSingle();
@@ -356,8 +347,7 @@ export default async function lessonTemplateOverrides(context, req) {
       return respond(context, 404, { message: 'template_override_not_found' });
     }
 
-    const { error } = await tenantClient
-      .from('lesson_template_overrides')
+    const { error } = await withOrgScope(supabase, 'lesson_template_overrides', orgId)
       .delete()
       .eq('id', overrideId);
 

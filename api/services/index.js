@@ -10,7 +10,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 
 function normalizeServiceName(value) {
@@ -150,14 +150,8 @@ export default async function services(context, req) {
 
   const isAdmin = isAdminRole(role);
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   if (method === 'GET') {
-    const { data, error } = await tenantClient
-      .from('Services')
+    const { data, error } = await withOrgScope(supabase, 'Services', orgId)
       .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata')
       .order('name', { ascending: true });
 
@@ -211,8 +205,7 @@ export default async function services(context, req) {
       return respond(context, 400, { message: 'invalid_metadata' });
     }
 
-    const { data, error } = await tenantClient
-      .from('Services')
+    const { data, error } = await withOrgScope(supabase, 'Services', orgId)
       .insert({
         name,
         duration_minutes: durationResult.value,
@@ -308,8 +301,7 @@ export default async function services(context, req) {
       return respond(context, 400, { message: 'missing_updates' });
     }
 
-    const { data, error } = await tenantClient
-      .from('Services')
+    const { data, error } = await withOrgScope(supabase, 'Services', orgId)
       .update(updates)
       .eq('id', serviceId)
       .select('id, name, duration_minutes, payment_model, default_customer_charge_amount, color, is_active, metadata')

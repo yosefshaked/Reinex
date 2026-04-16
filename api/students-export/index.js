@@ -10,7 +10,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { ensureOrgPermissions } from '../_shared/permissions-utils.js';
 import { extractQuestionsForVersion } from '../_shared/version-lookup.js';
@@ -579,16 +579,10 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_student_id' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   // Fetch student data
   let student;
   try {
-    const { data, error } = await tenantClient
-      .from('Students')
+    const { data, error } = await withOrgScope(supabase, 'Students', orgId)
       .select('*')
       .eq('id', studentId)
       .maybeSingle();
@@ -611,8 +605,7 @@ export default async function (context, req) {
   // Fetch session records
   let sessions;
   try {
-    const { data, error } = await tenantClient
-      .from('SessionRecords')
+    const { data, error } = await withOrgScope(supabase, 'SessionRecords', orgId)
       .select('*')
       .eq('student_id', studentId)
       .order('date', { ascending: false });
@@ -631,8 +624,7 @@ export default async function (context, req) {
   // Fetch session form config (complete with version history)
   let formConfig = null;
   try {
-    const { data, error } = await tenantClient
-      .from('Settings')
+    const { data, error } = await withOrgScope(supabase, 'Settings', orgId)
       .select('settings_value')
       .eq('key', 'session_form_config')
       .maybeSingle();

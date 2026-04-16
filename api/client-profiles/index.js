@@ -9,8 +9,8 @@ import {
   parseRequestBody,
   readEnv,
   resolveOrgId,
-  resolveTenantClient,
   respond,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import {
@@ -179,11 +179,6 @@ export default async function handler(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   const clientProfileId = normalizeString(context?.bindingData?.clientProfileId);
 
   if (method === 'GET') {
@@ -192,15 +187,14 @@ export default async function handler(context, req) {
     }
 
     if (clientProfileId && UUID_PATTERN.test(clientProfileId)) {
-      const { data: profile, error } = await tenantClient
-        .from('client_profiles')
+      const { data: profile, error } = await withOrgScope(supabase, 'client_profiles', orgId)
         .select('*')
         .eq('id', clientProfileId)
         .maybeSingle();
       if (error) return respond(context, 500, { message: 'failed_to_load_client_profile' });
       if (!profile) return respond(context, 404, { message: 'client_profile_not_found' });
-      const { data: student } = await tenantClient.from('students').select('id').eq('client_profile_id', clientProfileId).maybeSingle();
-      const { guardian } = await fetchPrimaryGuardianForClientProfile(tenantClient, clientProfileId);
+      const { data: student } = await withOrgScope(supabase, 'students', orgId).select('id').eq('client_profile_id', clientProfileId).maybeSingle();
+      const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, clientProfileId);
       return respond(context, 200, mergeClientProfile(profile, student?.id || null, guardian || null));
     }
 
@@ -210,8 +204,7 @@ export default async function handler(context, req) {
     const segment = normalizeString(req?.query?.segment || req?.query?.kind);
     const search = normalizeString(req?.query?.search);
 
-    let query = tenantClient
-      .from('client_profiles')
+    let query = withOrgScope(supabase, 'client_profiles', orgId)
       .select('*', { count: 'exact' })
       .order('first_name', { ascending: true })
       .order('last_name', { ascending: true });
@@ -228,8 +221,7 @@ export default async function handler(context, req) {
 
     const profileIds = rows.map((row) => row.id);
     const { data: students } = profileIds.length > 0
-      ? await tenantClient
-        .from('students')
+      ? await withOrgScope(supabase, 'students', orgId)
         .select('id, client_profile_id')
         .in('client_profile_id', profileIds)
       : { data: [] };
@@ -244,16 +236,13 @@ export default async function handler(context, req) {
     if (segment === 'one_time_customers' && rows.length > 0) {
       const currentProfileIds = rows.map((row) => row.id);
       const [{ data: lessonParticipants }, { data: formSubmissions }, { data: waitingListEntries }] = await Promise.all([
-        tenantClient
-          .from('lesson_participants')
+        withOrgScope(supabase, 'lesson_participants', orgId)
           .select('client_profile_id')
           .in('client_profile_id', currentProfileIds),
-        tenantClient
-          .from('form_submissions')
+        withOrgScope(supabase, 'form_submissions', orgId)
           .select('client_profile_id')
           .in('client_profile_id', currentProfileIds),
-        tenantClient
-          .from('waiting_list_entries')
+        withOrgScope(supabase, 'waiting_list_entries', orgId)
           .select('client_profile_id, status')
           .in('client_profile_id', currentProfileIds),
       ]);
@@ -277,7 +266,7 @@ export default async function handler(context, req) {
 
     const mergedRows = [];
     for (const row of pagedRows) {
-      const { guardian } = await fetchPrimaryGuardianForClientProfile(tenantClient, row.id);
+      const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, row.id);
       mergedRows.push(mergeClientProfile(row, studentMap.get(row.id) || null, guardian || null));
     }
 
@@ -338,7 +327,7 @@ export default async function handler(context, req) {
 
     let result;
     try {
-      result = await createOrReuseClientProfile(tenantClient, {
+      result = await createOrReuseClientProfile(supabase, {
         first_name: firstName,
         middle_name: middleName,
         last_name: lastName,
@@ -363,8 +352,7 @@ export default async function handler(context, req) {
       return respond(context, 500, { message: 'failed_to_create_client_profile' });
     }
 
-    const { data: profile, error: profileError } = await tenantClient
-      .from('client_profiles')
+    const { data: profile, error: profileError } = await withOrgScope(supabase, 'client_profiles', orgId)
       .select('*')
       .eq('id', result.clientProfileId)
       .maybeSingle();
@@ -373,16 +361,15 @@ export default async function handler(context, req) {
       return respond(context, 500, { message: 'failed_to_load_client_profile' });
     }
 
-    const { data: student } = await tenantClient
-      .from('students')
+    const { data: student } = await withOrgScope(supabase, 'students', orgId)
       .select('id')
       .eq('client_profile_id', result.clientProfileId)
       .maybeSingle();
-    const { guardian } = await fetchPrimaryGuardianForClientProfile(tenantClient, result.clientProfileId);
+    const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, result.clientProfileId);
     const merged = mergeClientProfile(profile, student?.id || null, guardian || null);
 
     try {
-      await logTenantAuditEvent(tenantClient, {
+      await logTenantAuditEvent(supabase, {
         actorUserId: userId,
         eventType: result.action === 'created' ? 'client_profile.created' : 'client_profile.reused_for_one_time_customer',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -418,8 +405,7 @@ export default async function handler(context, req) {
     return respond(context, 400, { message: normalized.error });
   }
 
-  const { data: beforeProfile, error: beforeError } = await tenantClient
-    .from('client_profiles')
+  const { data: beforeProfile, error: beforeError } = await withOrgScope(supabase, 'client_profiles', orgId)
     .select('*')
     .eq('id', clientProfileId)
     .maybeSingle();
@@ -427,8 +413,7 @@ export default async function handler(context, req) {
   if (beforeError) return respond(context, 500, { message: 'failed_to_load_client_profile' });
   if (!beforeProfile) return respond(context, 404, { message: 'client_profile_not_found' });
 
-  const { data: updated, error } = await tenantClient
-    .from('client_profiles')
+  const { data: updated, error } = await withOrgScope(supabase, 'client_profiles', orgId)
     .update({
       ...normalized.updates,
       updated_at: new Date().toISOString(),
@@ -440,11 +425,11 @@ export default async function handler(context, req) {
   if (error) return respond(context, 500, { message: 'failed_to_update_client_profile' });
   if (!updated) return respond(context, 404, { message: 'client_profile_not_found' });
 
-  const { data: student } = await tenantClient.from('students').select('id').eq('client_profile_id', clientProfileId).maybeSingle();
-  const { guardian } = await fetchPrimaryGuardianForClientProfile(tenantClient, clientProfileId);
+  const { data: student } = await withOrgScope(supabase, 'students', orgId).select('id').eq('client_profile_id', clientProfileId).maybeSingle();
+  const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, clientProfileId);
 
   try {
-    await logTenantAuditEvent(tenantClient, {
+    await logTenantAuditEvent(supabase, {
       actorUserId: userId,
       eventType: 'client_profile.updated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,

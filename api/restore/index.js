@@ -9,7 +9,6 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { decryptBackup, validateBackupManifest, restoreTenantData } from '../_shared/backup-utils.js';
@@ -155,14 +154,6 @@ export default async function restore(context, req) {
   }
   context.log?.info?.('restore: encrypted file prepared', { size_bytes: encryptedBuffer?.byteLength ?? encryptedBuffer?.length });
 
-  // Get tenant client
-  context.log?.info?.('restore: resolving tenant client');
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-  context.log?.info?.('restore: tenant client ready');
-
   try {
     // Decrypt
     const tDecryptStart = Date.now();
@@ -197,7 +188,7 @@ export default async function restore(context, req) {
     // Restore
     const tRestoreStart = Date.now();
     context.log?.info?.('restore: restoring data', { orgId, clearExisting, records: manifest.metadata.total_records });
-    const result = await restoreTenantData(tenantClient, manifest, { clearExisting });
+    const result = await restoreTenantData(supabase, manifest, { clearExisting });
     const tRestoreMs = Date.now() - tRestoreStart;
 
     // Record success

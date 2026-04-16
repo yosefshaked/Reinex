@@ -8,7 +8,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js'
 import { ensureInstructorColors, resolveInstructorColor } from '../_shared/instructor-colors.js'
 
@@ -165,11 +165,6 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' })
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId)
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body)
-  }
-
   const dateQuery = normalizeString(req?.query?.date || req?.query?.day || req?.query?.target_date)
   const targetDay = parseDateParam(dateQuery)
   if (!targetDay) {
@@ -182,7 +177,7 @@ export default async function (context, req) {
   const dayOfWeek = jsDayIndex + 1 // Convert to 1-7 with Sunday=1
   const dayLabel = DAY_LABELS[jsDayIndex] || ''
 
-  const colorsResult = await ensureInstructorColors(tenantClient, {
+  const colorsResult = await ensureInstructorColors(supabase, {
     context,
     columns: 'id, name, metadata, is_active',
   })
@@ -210,8 +205,7 @@ export default async function (context, req) {
     }
   }
 
-  let studentQuery = tenantClient
-    .from('Students')
+  let studentQuery = withOrgScope(supabase, 'Students', orgId)
     .select('id, name, assigned_instructor_id, default_day_of_week, default_session_time, is_active')
     .eq('is_active', true)
 
@@ -243,8 +237,7 @@ export default async function (context, req) {
 
   const recordsByStudent = new Map()
   if (studentIdSet.size > 0) {
-    let recordsQuery = tenantClient
-      .from('SessionRecords')
+    let recordsQuery = withOrgScope(supabase, 'SessionRecords', orgId)
       .select('id, student_id, date')
       .eq('deleted', false)
       .eq('date', isoDate)

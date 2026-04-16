@@ -9,7 +9,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { isUUID, parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
@@ -79,11 +79,6 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   if (method === 'GET') {
     // Two modes controlled by query parameter:
     // 1. ?view=mine (default for non-admin, available to all): User's own loose reports (pending, rejected, accepted)
@@ -97,8 +92,7 @@ export default async function (context, req) {
       //                rejected (deleted=true with rejection metadata),
       //                accepted (student_id set by admin)
       // Filter by metadata.unassigned_details existence to identify loose reports
-      const query = tenantClient
-        .from('SessionRecords')
+      const query = withOrgScope(supabase, 'SessionRecords', orgId)
         .select(`
           id, 
           date, 
@@ -136,8 +130,7 @@ export default async function (context, req) {
         return respond(context, 403, { message: 'forbidden' });
       }
       
-      const query = tenantClient
-        .from('SessionRecords')
+      const query = withOrgScope(supabase, 'SessionRecords', orgId)
         .select(`
           id, 
           date, 
@@ -181,8 +174,7 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_action' });
   }
 
-  const { data: sessionRow, error: sessionError } = await tenantClient
-    .from('SessionRecords')
+  const { data: sessionRow, error: sessionError } = await withOrgScope(supabase, 'SessionRecords', orgId)
     .select('*')
     .eq('id', sessionId)
     .maybeSingle();
@@ -224,8 +216,7 @@ export default async function (context, req) {
     };
 
     const now = new Date().toISOString();
-    const { error: deleteError } = await tenantClient
-      .from('SessionRecords')
+    const { error: deleteError } = await withOrgScope(supabase, 'SessionRecords', orgId)
       .update({ deleted: true, deleted_at: now, metadata: rejectionMetadata })
       .eq('id', sessionId);
 
@@ -262,8 +253,7 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid_student_id' });
     }
 
-    const { data: studentRow, error: studentError } = await tenantClient
-      .from('Students')
+    const { data: studentRow, error: studentError } = await withOrgScope(supabase, 'Students', orgId)
       .select('id, default_service, is_active')
       .eq('id', studentId)
       .maybeSingle();
@@ -289,8 +279,7 @@ export default async function (context, req) {
       },
     };
 
-    const { data: updatedSession, error: updateError } = await tenantClient
-      .from('SessionRecords')
+    const { data: updatedSession, error: updateError } = await withOrgScope(supabase, 'SessionRecords', orgId)
       .update({
         student_id: studentRow.id,
         service_context: newServiceContext,
@@ -340,8 +329,7 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_instructor_id' });
   }
 
-  const { data: instructorRow, error: instructorError } = await tenantClient
-    .from('Employees')
+  const { data: instructorRow, error: instructorError } = await withOrgScope(supabase, 'Employees', orgId)
     .select('id, is_active')
     .eq('id', assignedInstructorId)
     .maybeSingle();
@@ -368,8 +356,7 @@ export default async function (context, req) {
   }
 
   // Check for duplicate national_id
-  const { data: existingStudent, error: checkError } = await tenantClient
-    .from('Students')
+  const { data: existingStudent, error: checkError } = await withOrgScope(supabase, 'Students', orgId)
     .select('id, name')
     .eq('national_id', nationalId)
     .maybeSingle();
@@ -401,8 +388,7 @@ export default async function (context, req) {
     },
   };
 
-  const { data: newStudent, error: createError } = await tenantClient
-    .from('Students')
+  const { data: newStudent, error: createError } = await withOrgScope(supabase, 'Students', orgId)
     .insert([studentInsert])
     .select('id, name, assigned_instructor_id, default_service')
     .single();
@@ -424,8 +410,7 @@ export default async function (context, req) {
     },
   };
 
-  const { data: resolvedSession, error: resolveError } = await tenantClient
-    .from('SessionRecords')
+  const { data: resolvedSession, error: resolveError } = await withOrgScope(supabase, 'SessionRecords', orgId)
     .update({
       student_id: newStudent.id,
       service_context: newServiceContext,

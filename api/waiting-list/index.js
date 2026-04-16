@@ -12,7 +12,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 
 const STATUS_OPTIONS = new Set(['new', 'open', 'matched', 'closed', 'active', 'all']);
@@ -128,9 +128,9 @@ function buildWaitingListSelect() {
   ].join(',');
 }
 
-async function writeTenantAudit(context, tenantClient, params) {
+async function writeTenantAudit(context, client, params) {
   try {
-    await logTenantAuditEvent(tenantClient, params);
+    await logTenantAuditEvent(client, params);
   } catch (auditError) {
     context.log?.warn?.('waiting-list failed to write tenant audit event', {
       message: auditError?.message,
@@ -202,11 +202,6 @@ export default async function waitingList(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   if (method === 'GET') {
     const rawStatus = req?.query?.status ?? body?.status ?? 'active';
     const statusFilter = normalizeStatus(rawStatus, { allowAll: true }) || 'active';
@@ -215,8 +210,7 @@ export default async function waitingList(context, req) {
       return respond(context, 400, { message: 'invalid_status_filter' });
     }
 
-    let builder = tenantClient
-      .from('waiting_list_entries')
+    let builder = withOrgScope(supabase, 'waiting_list_entries', orgId)
       .select(buildWaitingListSelect())
       .order('priority_flag', { ascending: false })
       .order('created_at', { ascending: false });
@@ -270,8 +264,7 @@ export default async function waitingList(context, req) {
       status,
     };
 
-    const { data, error } = await tenantClient
-      .from('waiting_list_entries')
+    const { data, error } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
       .insert(payload)
       .select(buildWaitingListSelect())
       .single();
@@ -281,7 +274,7 @@ export default async function waitingList(context, req) {
       return respond(context, 500, { message: 'failed_to_create_waiting_list' });
     }
 
-    await writeTenantAudit(context, tenantClient, {
+    await writeTenantAudit(context, supabase, {
       correlationId: randomUUID(),
       actorUserId: userId,
       eventType: 'waiting_list.entry.created',
@@ -358,8 +351,7 @@ export default async function waitingList(context, req) {
     return respond(context, 400, { message: 'missing_updates' });
   }
 
-  const { data: existingEntry, error: existingEntryError } = await tenantClient
-    .from('waiting_list_entries')
+  const { data: existingEntry, error: existingEntryError } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
     .select(buildWaitingListSelect())
     .eq('id', entryId)
     .maybeSingle();
@@ -373,8 +365,7 @@ export default async function waitingList(context, req) {
     return respond(context, 404, { message: 'waiting_list_entry_not_found' });
   }
 
-  const { data, error } = await tenantClient
-    .from('waiting_list_entries')
+  const { data, error } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
     .update(updates)
     .eq('id', entryId)
     .select(buildWaitingListSelect())
@@ -385,7 +376,7 @@ export default async function waitingList(context, req) {
     return respond(context, 500, { message: 'failed_to_update_waiting_list' });
   }
 
-  await writeTenantAudit(context, tenantClient, {
+  await writeTenantAudit(context, supabase, {
     correlationId: randomUUID(),
     actorUserId: userId,
     eventType: 'waiting_list.entry.updated',

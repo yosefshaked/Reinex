@@ -10,7 +10,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
@@ -67,7 +67,8 @@ function dedupeHmoClaimTasks(tasks = []) {
 }
 
 async function buildHmoClaimsReadModel({
-  tenantClient,
+  client,
+  orgId,
   billingService,
   startDate = '',
   endDate = '',
@@ -76,8 +77,7 @@ async function buildHmoClaimsReadModel({
   const normalizedStartDate = normalizeDateKey(startDate);
   const normalizedEndDate = normalizeDateKey(endDate);
 
-  let taskQuery = tenantClient
-    .from('dashboard_tasks')
+  let taskQuery = withOrgScope(client, 'dashboard_tasks', orgId)
     .select('id, task_type, title, description, status, priority, resource_type, resource_id, metadata, created_at, resolved_at')
     .eq('task_type', 'hmo_claim_submission')
     .order('created_at', { ascending: false });
@@ -119,8 +119,7 @@ async function buildHmoClaimsReadModel({
 
   const [{ data: participants, error: participantsError }, { data: authorizations, error: authorizationsError }] = await Promise.all([
     participantIds.length > 0
-      ? tenantClient
-        .from('lesson_participants')
+      ? withOrgScope(client, 'lesson_participants', orgId)
         .select(`
           id,
           student_id,
@@ -144,8 +143,7 @@ async function buildHmoClaimsReadModel({
         .in('id', participantIds)
       : Promise.resolve({ data: [], error: null }),
     authorizationIds.length > 0
-      ? tenantClient
-        .from('hmo_authorizations')
+      ? withOrgScope(client, 'hmo_authorizations', orgId)
         .select('id, provider_id, authorization_reference, status, contracted_rate_amount')
         .in('id', authorizationIds)
       : Promise.resolve({ data: [], error: null }),
@@ -172,14 +170,12 @@ async function buildHmoClaimsReadModel({
 
   const [{ data: services, error: servicesError }, { data: providers, error: providersError }] = await Promise.all([
     serviceIds.length > 0
-      ? tenantClient
-        .from('Services')
+      ? withOrgScope(client, 'Services', orgId)
         .select('id, name')
         .in('id', serviceIds)
       : Promise.resolve({ data: [], error: null }),
     providerIds.length > 0
-      ? tenantClient
-        .from('hmo_providers')
+      ? withOrgScope(client, 'hmo_providers', orgId)
         .select('id, name, is_active')
         .in('id', providerIds)
       : Promise.resolve({ data: [], error: null }),
@@ -321,7 +317,7 @@ function mapBillingActionError(errorCode) {
   }
 }
 
-async function resolveProviderClaimTaskIds(tenantClient, {
+async function resolveProviderClaimTaskIds(client, orgId, {
   hmoProviderId,
   taskIds = [],
 } = {}) {
@@ -330,8 +326,7 @@ async function resolveProviderClaimTaskIds(tenantClient, {
     throw new Error('missing_hmo_provider_id');
   }
 
-  let taskQuery = tenantClient
-    .from('dashboard_tasks')
+  let taskQuery = withOrgScope(client, 'dashboard_tasks', orgId)
     .select('id, metadata')
     .eq('task_type', 'hmo_claim_submission')
     .eq('status', 'open');
@@ -358,8 +353,7 @@ async function resolveProviderClaimTaskIds(tenantClient, {
     return [];
   }
 
-  const { data: authorizationRows, error: authorizationError } = await tenantClient
-    .from('hmo_authorizations')
+  const { data: authorizationRows, error: authorizationError } = await withOrgScope(client, 'hmo_authorizations', orgId)
     .select('id, provider_id')
     .in('id', authorizationIds);
 
@@ -430,12 +424,7 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  const billingService = new BillingLedgerService({ tenantClient });
+  const billingService = new BillingLedgerService({ tenantClient: supabase });
 
   if (method === 'GET') {
     const view = normalizeString(req?.query?.view).toLowerCase();
@@ -448,7 +437,8 @@ export default async function (context, req) {
     if (view === 'hmo_claims') {
       try {
         const readModel = await buildHmoClaimsReadModel({
-          tenantClient,
+          client: supabase,
+          orgId,
           billingService,
           startDate,
           endDate,
@@ -487,7 +477,7 @@ export default async function (context, req) {
         periodStart: startDate || null,
         periodEnd: endDate || null,
       })
-      : await fetchBillingSnapshot(tenantClient, {
+      : await fetchBillingSnapshot(supabase, {
         studentId,
         clientProfileId,
         startDate,
@@ -504,7 +494,7 @@ export default async function (context, req) {
   const action = normalizeString(body?.action).toLowerCase();
 
   if (method === 'POST' && action === 'reconcile_student_billing') {
-    const result = await reconcileStudentBilling(tenantClient, {
+    const result = await reconcileStudentBilling(supabase, {
       studentId: normalizeNullableId(body?.student_id),
       startDate: normalizeString(body?.start_date),
       endDate: normalizeString(body?.end_date),
@@ -619,13 +609,13 @@ export default async function (context, req) {
         const requestedTaskIds = Array.isArray(body?.task_ids)
           ? body.task_ids
           : (Array.isArray(body?.taskIds) ? body.taskIds : []);
-        const taskIds = await resolveProviderClaimTaskIds(tenantClient, {
+        const taskIds = await resolveProviderClaimTaskIds(supabase, orgId, {
           hmoProviderId,
           taskIds: requestedTaskIds,
         });
 
         for (const taskId of taskIds) {
-          const resolved = await resolveDashboardTask(tenantClient, {
+          const resolved = await resolveDashboardTask(supabase, {
             taskId,
             resolvedBy: userId,
             metadata: {

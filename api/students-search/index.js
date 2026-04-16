@@ -14,7 +14,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { fetchStudentIdsByInstructor } from '../_shared/instructor-student-scope.js';
 
@@ -83,11 +83,6 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   const query = normalizeString(req?.query?.query || req?.query?.q || '');
   if (!query || query.length < 2) {
     return respond(context, 200, []);
@@ -95,8 +90,7 @@ export default async function (context, req) {
   const searchSpec = parseStudentSearchQuery(query);
 
   // Build query with role-based filtering
-  let builder = tenantClient
-    .from('students')
+  let builder = withOrgScope(supabase, 'students', orgId)
     .select(`
       id,
       client_profile_id,
@@ -114,7 +108,7 @@ export default async function (context, req) {
 
   // Member instructors can only see students from their active templates.
   if (!isAdminRole(role)) {
-    const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(tenantClient, userId);
+    const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(supabase, userId);
     if (lessonError) {
       context.log?.error?.('students-search failed to fetch instructor lesson templates', {
         message: lessonError.message,
@@ -132,7 +126,7 @@ export default async function (context, req) {
   }
 
   const { ids: matchingClientProfileIds, error: profileSearchError } = await fetchMatchingStudentClientProfileIds(
-    tenantClient,
+    supabase,
     searchSpec,
     { limit: 250 },
   );

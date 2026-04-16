@@ -16,7 +16,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import {
@@ -91,7 +91,7 @@ function getBillingPreviewBlockMessage(billingReason) {
   }
 }
 
-async function recordGraceCancellationRequest(tenantClient, {
+async function recordGraceCancellationRequest(client, orgId, {
   participantId,
   userId,
   reason,
@@ -103,8 +103,7 @@ async function recordGraceCancellationRequest(tenantClient, {
     status: 'manually_excused',
   };
 
-  const { error: upsertError } = await tenantClient
-    .from('grace_cancellation_requests')
+  const { error: upsertError } = await withOrgScope(client, 'grace_cancellation_requests', orgId)
     .upsert(payload, { onConflict: 'lesson_participant_id' });
 
   if (!upsertError) {
@@ -117,8 +116,7 @@ async function recordGraceCancellationRequest(tenantClient, {
     return upsertError;
   }
 
-  const { data: existingRows, error: existingError } = await tenantClient
-    .from('grace_cancellation_requests')
+  const { data: existingRows, error: existingError } = await withOrgScope(client, 'grace_cancellation_requests', orgId)
     .select('id')
     .eq('lesson_participant_id', participantId)
     .order('created_at', { ascending: false })
@@ -133,8 +131,7 @@ async function recordGraceCancellationRequest(tenantClient, {
     : null;
 
   if (existingRequestId) {
-    const { error: updateError } = await tenantClient
-      .from('grace_cancellation_requests')
+    const { error: updateError } = await withOrgScope(client, 'grace_cancellation_requests', orgId)
       .update({
         created_by: userId,
         reason: reason || null,
@@ -145,8 +142,7 @@ async function recordGraceCancellationRequest(tenantClient, {
     return updateError || null;
   }
 
-  const { error: insertError } = await tenantClient
-    .from('grace_cancellation_requests')
+  const { error: insertError } = await withOrgScope(client, 'grace_cancellation_requests', orgId)
     .insert(payload);
 
   if (!insertError) {
@@ -154,8 +150,7 @@ async function recordGraceCancellationRequest(tenantClient, {
   }
 
   if (insertError.code === '23505') {
-    const { error: retryUpdateError } = await tenantClient
-      .from('grace_cancellation_requests')
+    const { error: retryUpdateError } = await withOrgScope(client, 'grace_cancellation_requests', orgId)
       .update({
         created_by: userId,
         reason: reason || null,
@@ -246,7 +241,7 @@ function buildParticipantWorkflowPatch(
   };
 }
 
-async function getAttendanceStatusRequirements(tenantClient, participantStatus) {
+async function getAttendanceStatusRequirements(client, participantStatus) {
   const normalizedStatus = typeof participantStatus === 'string'
     ? participantStatus.trim().toLowerCase()
     : '';
@@ -295,7 +290,7 @@ function projectParticipantsForStatusChange(
   });
 }
 
-async function validateProjectedInstructorRate(tenantClient, instance, participants, {
+async function validateProjectedInstructorRate(client, orgId, instance, participants, {
   targetStatus,
   participantId,
   requestedInstructorCompensationDecision = 'unknown',
@@ -384,13 +379,9 @@ export default async function (context, req) {
 
   const isAdmin = isAdminRole(role);
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-  const billingService = new BillingLedgerService({ tenantClient });
+  const billingService = new BillingLedgerService({ tenantClient: supabase });
 
-  return await handleMarkAttendance(context, body, tenantClient, userId, isAdmin, {
+  return await handleMarkAttendance(context, body, { client: supabase, orgId }, userId, isAdmin, {
     supabase,
     orgId,
     userEmail: authResult.data.user.email || null,
@@ -399,7 +390,8 @@ export default async function (context, req) {
   });
 }
 
-async function handleUpdateReminder(context, body, tenantClient, userId) {
+async function handleUpdateReminder(context, body, dbContext, userId) {
+  const { client, orgId } = dbContext;
   if (!body.instance_id) {
     return respond(context, 400, { message: 'missing instance_id' });
   }
@@ -525,14 +517,14 @@ async function handleUpdateReminder(context, body, tenantClient, userId) {
   return respond(context, 200, { message: 'reminder updated' });
 }
 
-async function buildRestorePreview(tenantClient, body) {
-  return buildParticipantStatusPreview(tenantClient, body, {
+async function buildRestorePreview(client, orgId, body) {
+  return buildParticipantStatusPreview(client, orgId, body, {
     targetStatus: 'scheduled',
     requestedInstructorCompensationDecision: 'unknown',
   });
 }
 
-async function buildParticipantStatusPreview(tenantClient, body, {
+async function buildParticipantStatusPreview(client, orgId, body, {
   targetStatus,
   requestedInstructorCompensationDecision = 'unknown',
 } = {}) {
@@ -932,7 +924,8 @@ async function buildParticipantStatusPreview(tenantClient, body, {
   };
 }
 
-async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin, auditContext = {}) {
+async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, auditContext = {}) {
+  const { client, orgId } = dbContext;
   if (body.action === 'update-reminder') {
     return handleUpdateReminder(context, body, tenantClient, userId);
   }
@@ -1257,7 +1250,7 @@ async function handleMarkAttendance(context, body, tenantClient, userId, isAdmin
   }
 
   if (requestedGraceExcuse) {
-    const graceUpsertError = await recordGraceCancellationRequest(tenantClient, {
+    const graceUpsertError = await recordGraceCancellationRequest(client, orgId, {
       participantId: body.participant_id,
       userId,
       reason: graceReason,

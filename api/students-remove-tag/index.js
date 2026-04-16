@@ -6,7 +6,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 
@@ -55,13 +55,7 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  const { data: clientProfiles, error: fetchError } = await tenantClient
-    .from('client_profiles')
+  const { data: clientProfiles, error: fetchError } = await withOrgScope(supabase, 'client_profiles', orgId)
     .select('id, tags')
     .contains('tags', [tagId]);
 
@@ -77,8 +71,7 @@ export default async function (context, req) {
   const failures = [];
   for (const profile of clientProfiles) {
     const updatedTags = (profile.tags || []).filter((id) => id !== tagId);
-    const { error } = await tenantClient
-      .from('client_profiles')
+    const { error } = await withOrgScope(supabase, 'client_profiles', orgId)
       .update({ tags: updatedTags })
       .eq('id', profile.id);
     if (error) {

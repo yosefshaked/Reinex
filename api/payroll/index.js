@@ -7,7 +7,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import {
   canManageEmployeeOps,
@@ -45,9 +45,8 @@ function getPayrollModel(employee) {
   return normalizeString(employee?.employee_type).toLowerCase() === 'instructor' ? 'lesson_based' : 'hourly';
 }
 
-async function fetchLessonEarningHistory(tenantClient, employeeId) {
-  const { data: earnings, error } = await tenantClient
-    .from('lesson_earnings')
+async function fetchLessonEarningHistory(client, orgId, employeeId) {
+  const { data: earnings, error } = await withOrgScope(client, 'lesson_earnings', orgId)
     .select('id, employee_id, lesson_instance_id, rate_used, payout_amount, created_at, metadata')
     .eq('employee_id', employeeId);
 
@@ -63,8 +62,7 @@ async function fetchLessonEarningHistory(tenantClient, employeeId) {
     return [];
   }
 
-  const { data: instances, error: instanceError } = await tenantClient
-    .from('lesson_instances')
+  const { data: instances, error: instanceError } = await withOrgScope(client, 'lesson_instances', orgId)
     .select('id, datetime_start, duration_minutes')
     .in('id', lessonInstanceIds);
 
@@ -110,14 +108,14 @@ function collectWorkingDates(startDate, endDate, workingDays) {
   return dates;
 }
 
-async function buildEmployeePayrollPreview(tenantClient, employee, profile, startDate, endDate, policies) {
+async function buildEmployeePayrollPreview(client, orgId, employee, profile, startDate, endDate, policies) {
   const historyStart = shiftMonths(startDate, -12);
   const payrollModel = getPayrollModel(employee);
   const [attendanceHistory, leaveDays, corrections, lessonEarnings] = await Promise.all([
-    fetchAttendanceRecords(tenantClient, { employeeId: employee.id, startDate: historyStart, endDate }),
-    fetchApprovedLeaveDays(tenantClient, { employeeId: employee.id, startDate, endDate }),
-    listFinanceCorrections(tenantClient, { employeeId: employee.id, startDate, endDate }),
-    fetchLessonEarningHistory(tenantClient, employee.id),
+    fetchAttendanceRecords(client, { employeeId: employee.id, startDate: historyStart, endDate }),
+    fetchApprovedLeaveDays(client, { employeeId: employee.id, startDate, endDate }),
+    listFinanceCorrections(client, { employeeId: employee.id, startDate, endDate }),
+    fetchLessonEarningHistory(client, orgId, employee.id),
   ]);
 
   const attendanceInPeriod = filterByDateRange(attendanceHistory, startDate, endDate, 'attendance_date');
@@ -253,11 +251,6 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   const canManageAll = canManageEmployeeOps(role);
   const employeeId = normalizeString(req?.query?.employee_id);
   const startDate = normalizeString(req?.query?.start_date);
@@ -265,12 +258,11 @@ export default async function (context, req) {
   const defaultDate = toDateKey(new Date());
   const resolvedStart = isYmdDate(startDate) ? startDate : startOfMonthKey(defaultDate);
   const resolvedEnd = isYmdDate(endDate) ? endDate : endOfMonthKey(resolvedStart);
-  const policies = await loadFinancePolicies(tenantClient);
+  const policies = await loadFinancePolicies(supabase);
 
   let employees = [];
   if (canManageAll) {
-    let query = tenantClient
-      .from('Employees')
+    let query = withOrgScope(supabase, 'Employees', orgId)
       .select('id, user_id, first_name, last_name, employee_id, employee_type, payroll_model, current_rate, monthly_salary_amount, start_date, annual_leave_days, leave_pay_method, leave_fixed_day_rate, working_days')
       .eq('is_active', true)
       .order('first_name', { ascending: true });
@@ -286,7 +278,7 @@ export default async function (context, req) {
     }
     employees = data || [];
   } else {
-    const employeeResult = await resolveEmployeeRecord(tenantClient, {
+    const employeeResult = await resolveEmployeeRecord(supabase, {
       employeeId,
       userId,
       canManageAll,
@@ -299,11 +291,12 @@ export default async function (context, req) {
     employees = [employeeResult.employee];
   }
 
-  const profilesMap = await loadInstructorProfilesMap(tenantClient, employees.map((row) => row.id));
+  const profilesMap = await loadInstructorProfilesMap(supabase, employees.map((row) => row.id));
   const previews = [];
   for (const employee of employees) {
     const preview = await buildEmployeePayrollPreview(
-      tenantClient,
+      supabase,
+      orgId,
       employee,
       profilesMap.get(employee.id) || null,
       resolvedStart,

@@ -9,7 +9,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 
 function buildEmployeeName(row) {
@@ -84,15 +84,9 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid student id' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   // For members, verify the student is assigned to them
   if (isMemberRole(role)) {
-    const assignCheck = await tenantClient
-      .from('Students')
+    const assignCheck = await withOrgScope(supabase, 'Students', orgId)
       .select('assigned_instructor_id')
       .eq('id', studentId)
       .maybeSingle();
@@ -108,8 +102,7 @@ export default async function (context, req) {
     }
   }
 
-  const { data, error } = await tenantClient
-    .from('SessionRecords')
+  const { data, error } = await withOrgScope(supabase, 'SessionRecords', orgId)
     .select('*')
     .eq('student_id', studentId)
     .order('date', { ascending: false });
@@ -129,8 +122,7 @@ export default async function (context, req) {
   let instructorMap = new Map();
 
   if (instructorIds.length > 0) {
-    const { data: instructorRows, error: instructorError } = await tenantClient
-      .from('Employees')
+    const { data: instructorRows, error: instructorError } = await withOrgScope(supabase, 'Employees', orgId)
       .select('id, first_name, middle_name, last_name, email')
       .in('id', instructorIds);
 

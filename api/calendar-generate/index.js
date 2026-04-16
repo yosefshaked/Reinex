@@ -10,7 +10,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { dayTokenForDate, normalizeDayToken } from '../_shared/day-of-week.js';
@@ -398,15 +398,9 @@ export default async function calendarGenerate(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   const generationRunId = generateRunId();
 
-  const { data: templates, error: templatesError } = await tenantClient
-    .from('lesson_templates')
+  const { data: templates, error: templatesError } = await withOrgScope(supabase, 'lesson_templates', orgId)
     .select('id, student_id, instructor_employee_id, service_id, day_of_week, time_of_day, duration_minutes, valid_from, valid_until, is_active')
     .eq('is_active', true)
     .lte('valid_from', endDate)
@@ -442,8 +436,7 @@ export default async function calendarGenerate(context, req) {
   let hmoAuthorizationRows = [];
   let hmoWarningsNotice = null;
   if (templateStudentIds.length > 0 && templateServiceIds.length > 0) {
-    const { data: authorizationRows, error: authorizationError } = await tenantClient
-      .from('hmo_authorizations')
+    const { data: authorizationRows, error: authorizationError } = await withOrgScope(supabase, 'hmo_authorizations', orgId)
       .select('id, student_id, service_id, status, valid_from, expires_at, provider_id, provider_track_id')
       .in('student_id', templateStudentIds)
       .in('service_id', templateServiceIds);
@@ -469,19 +462,16 @@ export default async function calendarGenerate(context, req) {
   }
 
   const [{ data: overridesRows, error: overridesError }, { data: existingRows, error: existingError }, { data: capabilitiesRows, error: capabilitiesError }] = await Promise.all([
-    tenantClient
-      .from('lesson_template_overrides')
+    withOrgScope(supabase, 'lesson_template_overrides', orgId)
       .select('id, template_id, target_date, override_type, new_instructor_employee_id, new_service_id, new_time_of_day, new_duration_minutes, note')
       .in('template_id', templateIds)
       .gte('target_date', startDate)
       .lte('target_date', endDate),
-    tenantClient
-      .from('lesson_instances')
+    withOrgScope(supabase, 'lesson_instances', orgId)
       .select('id, template_id, datetime_start, duration_minutes, instructor_employee_id, service_id, status, participants:lesson_participants(student_id)')
       .gte('datetime_start', instanceRangeBounds.startIso)
       .lt('datetime_start', instanceRangeBounds.endExclusiveIso),
-    tenantClient
-      .from('instructor_service_capabilities')
+    withOrgScope(supabase, 'instructor_service_capabilities', orgId)
       .select('employee_id, service_id, max_students'),
   ]);
 
@@ -651,8 +641,7 @@ export default async function calendarGenerate(context, req) {
         instanceMetadata.applied_override_id = proposal.override_id;
       }
 
-      const { data: insertedInstance, error: insertInstanceError } = await tenantClient
-        .from('lesson_instances')
+      const { data: insertedInstance, error: insertInstanceError } = await withOrgScope(supabase, 'lesson_instances', orgId)
         .insert({
           template_id: proposal.template_id,
           datetime_start: proposal.datetime_start,
@@ -680,8 +669,7 @@ export default async function calendarGenerate(context, req) {
         continue;
       }
 
-      const { data: insertedParticipant, error: insertParticipantError } = await tenantClient
-        .from('lesson_participants')
+      const { data: insertedParticipant, error: insertParticipantError } = await withOrgScope(supabase, 'lesson_participants', orgId)
         .insert({
           lesson_instance_id: insertedInstance.id,
           student_id: proposal.student_id,
@@ -695,8 +683,7 @@ export default async function calendarGenerate(context, req) {
         .single();
 
       if (insertParticipantError || !insertedParticipant?.id) {
-        await tenantClient
-          .from('lesson_instances')
+        await withOrgScope(supabase, 'lesson_instances', orgId)
           .delete()
           .eq('id', insertedInstance.id);
 

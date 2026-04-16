@@ -9,7 +9,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 
@@ -61,9 +61,8 @@ function normalizeTagEntries(candidate) {
   return normalized;
 }
 
-async function loadExistingTags(tenantClient) {
-  const { data, error } = await tenantClient
-    .from('Settings')
+async function loadExistingTags(client, orgId) {
+  const { data, error } = await withOrgScope(client, 'Settings', orgId)
     .select('settings_value')
     .eq('key', SETTINGS_KEY)
     .maybeSingle();
@@ -138,14 +137,9 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   if (method === 'GET') {
     try {
-      const tags = await loadExistingTags(tenantClient);
+      const tags = await loadExistingTags(supabase, orgId);
       return respond(context, 200, { tags }, { 'Cache-Control': 'no-store' });
     } catch (error) {
       context.log?.error?.('settings-student-tags: failed to load tags', { message: error?.message });
@@ -167,7 +161,7 @@ export default async function (context, req) {
 
   let existingTags;
   try {
-    existingTags = await loadExistingTags(tenantClient);
+    existingTags = await loadExistingTags(supabase, orgId);
   } catch (error) {
     context.log?.error?.('settings-student-tags: failed to load tags before insert', { message: error?.message });
     return respond(context, 500, { message: 'failed_to_load_tags' });
@@ -181,8 +175,7 @@ export default async function (context, req) {
   const newTag = { id: createTagId(), name: nameInput };
   const updated = [...existingTags, newTag];
 
-  const { error: upsertError } = await tenantClient
-    .from('Settings')
+  const { error: upsertError } = await withOrgScope(supabase, 'Settings', orgId)
     .upsert({ key: SETTINGS_KEY, settings_value: updated }, { onConflict: 'key' });
 
   if (upsertError) {
@@ -191,7 +184,7 @@ export default async function (context, req) {
   }
 
   try {
-    const refreshed = await loadExistingTags(tenantClient);
+    const refreshed = await loadExistingTags(supabase, orgId);
     return respond(context, 200, { tags: refreshed, created: newTag });
   } catch (error) {
     context.log?.warn?.('settings-student-tags: tag saved but reload failed', { message: error?.message });

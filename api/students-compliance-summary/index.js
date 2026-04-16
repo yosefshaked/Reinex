@@ -8,7 +8,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 
 /**
@@ -79,11 +79,6 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   // Parse optional student_ids filter
   const studentIdsParam = normalizeString(req?.query?.student_ids || '');
   const studentIdsFilter = studentIdsParam
@@ -104,8 +99,7 @@ export default async function (context, req) {
       filterCount: studentIdsFilter?.length || 0,
     });
     
-    let query = tenantClient
-      .from('Documents')
+    let query = withOrgScope(supabase, 'Documents', orgId)
       .select('entity_id, expiration_date, resolved')
       .eq('entity_type', 'student')
       .not('expiration_date', 'is', null)

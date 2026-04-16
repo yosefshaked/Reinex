@@ -9,7 +9,6 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
 } from '../_shared/org-bff.js';
 import { encryptBackup, exportTenantData } from '../_shared/backup-utils.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
@@ -182,16 +181,10 @@ export default async function backup(context, req) {
   // Example: ABCD-EF12-3456-7890-ABCD (80 bits of entropy)
   const password = generateProductKeyPassword(10);
 
-  // Get tenant client
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   try {
     // Export tenant data
     context.log?.info?.('backup: exporting tenant data', { orgId });
-    const manifest = await exportTenantData(tenantClient, orgId);
+    const manifest = await exportTenantData(supabase, orgId);
 
     // Encrypt
     context.log?.info?.('backup: encrypting data', { orgId, records: manifest.metadata.total_records });

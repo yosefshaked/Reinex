@@ -9,8 +9,8 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
   UUID_PATTERN,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import {
   coerceNationalId,
@@ -59,12 +59,12 @@ function normalizeTags(raw) {
   return sanitized.length ? sanitized : null;
 }
 
-async function ensureNationalIdAvailable(tenantClient, nationalId, { excludeIds = [] } = {}) {
+async function ensureNationalIdAvailable(client, orgId, nationalId, { excludeIds = [] } = {}) {
   if (!nationalId) {
     return { ok: true };
   }
 
-  let query = tenantClient.from('students').select('id').eq('national_id', nationalId);
+  let query = withOrgScope(client, 'students', orgId).select('id').eq('national_id', nationalId);
   for (const id of excludeIds) {
     query = query.neq('id', id);
   }
@@ -146,13 +146,7 @@ export default async function handler(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  const { data: sourceStudent, error: sourceError } = await tenantClient
-    .from('students')
+  const { data: sourceStudent, error: sourceError } = await withOrgScope(supabase, 'students', orgId)
     .select('*')
     .eq('id', sourceStudentId)
     .maybeSingle();
@@ -170,8 +164,7 @@ export default async function handler(context, req) {
     return respond(context, 404, { message: 'source_student_not_found' });
   }
 
-  const { data: targetStudent, error: targetError } = await tenantClient
-    .from('students')
+  const { data: targetStudent, error: targetError } = await withOrgScope(supabase, 'students', orgId)
     .select('*')
     .eq('id', targetStudentId)
     .maybeSingle();
@@ -222,7 +215,7 @@ export default async function handler(context, req) {
   }
 
   if (nationalIdResult.value) {
-    const availability = await ensureNationalIdAvailable(tenantClient, nationalIdResult.value, {
+    const availability = await ensureNationalIdAvailable(supabase, orgId, nationalIdResult.value, {
       excludeIds: [sourceStudentId, targetStudentId],
     });
     if (!availability.ok && availability.conflictId) {
@@ -269,8 +262,7 @@ export default async function handler(context, req) {
     updates.intake_responses = sourceStudent.intake_responses;
   }
 
-  const { data: updatedTarget, error: updateError } = await tenantClient
-    .from('students')
+  const { data: updatedTarget, error: updateError } = await withOrgScope(supabase, 'students', orgId)
     .update(updates)
     .eq('id', targetStudentId)
     .select()
@@ -285,8 +277,7 @@ export default async function handler(context, req) {
     return respond(context, 500, { message: 'failed_to_update_target' });
   }
 
-  const { data: deletedSource, error: sourceDeleteError } = await tenantClient
-    .from('students')
+  const { data: deletedSource, error: sourceDeleteError } = await withOrgScope(supabase, 'students', orgId)
     .delete()
     .eq('id', sourceStudentId)
     .select()

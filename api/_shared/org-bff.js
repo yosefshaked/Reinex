@@ -1,7 +1,7 @@
 /* eslint-env node */
 import process from 'node:process';
 import { Buffer } from 'node:buffer';
-import { createHash, createDecipheriv } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { json } from './http.js';
 
@@ -100,43 +100,114 @@ export async function ensureMembership(supabase, orgId, userId) {
   return data.role || 'member';
 }
 
-export async function fetchOrgConnection(supabase, orgId) {
-  const [{ data: settings, error: settingsError }, { data: organization, error: orgError }] = await Promise.all([
-    supabase
-      .from('org_settings')
-      .select('supabase_url, anon_key')
-      .eq('org_id', orgId)
-      .maybeSingle(),
-    supabase
-      .from('organizations')
-      .select('dedicated_key_encrypted')
-      .eq('id', orgId)
-      .maybeSingle(),
-  ]);
+// ---------------------------------------------------------------------------
+// Single-DB Client (replaces the BYOD dual-client pattern)
+// ---------------------------------------------------------------------------
 
-  if (settingsError) {
-    return { error: settingsError };
+let _singletonClient = null;
+
+/**
+ * Returns a service_role Supabase client for the single merged database.
+ * Re-uses a module-level singleton across invocations in the same process.
+ *
+ * @param {Record<string, string>} env - Environment variables (or process.env).
+ * @returns {import('@supabase/supabase-js').SupabaseClient}
+ */
+export function createSingleClient(env) {
+  if (_singletonClient) {
+    return _singletonClient;
   }
 
-  if (orgError) {
-    return { error: orgError };
+  const supabaseUrl = env.SUPABASE_URL || env.APP_CONTROL_DB_URL || env.APP_SUPABASE_URL;
+  const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY || env.APP_CONTROL_DB_SERVICE_ROLE_KEY || env.APP_SUPABASE_SERVICE_ROLE;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment.');
   }
 
-  if (!settings || !settings.supabase_url || !settings.anon_key) {
-    return { error: new Error('missing_connection_settings') };
-  }
+  _singletonClient = createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
 
-  if (!organization || !organization.dedicated_key_encrypted) {
-    return { error: new Error('missing_dedicated_key') };
-  }
+  return _singletonClient;
+}
 
+/**
+ * Returns a scoped query builder that auto-injects org_id on every operation.
+ * Drop-in replacement for `client.from(table)`:
+ *   withOrgScope(client, 'students', orgId).select('*')
+ *   withOrgScope(client, 'students', orgId).insert({ name: 'x' })  // org_id auto-injected
+ *   withOrgScope(client, 'students', orgId).update({ name: 'y' }).eq('id', id)
+ *   withOrgScope(client, 'students', orgId).delete().eq('id', id)
+ *
+ * @param {import('@supabase/supabase-js').SupabaseClient} client
+ * @param {string} table
+ * @param {string} orgId
+ */
+export function withOrgScope(client, table, orgId) {
+  const base = client.from(table);
   return {
-    supabaseUrl: settings.supabase_url,
-    anonKey: settings.anon_key,
-    encryptedKey: organization.dedicated_key_encrypted,
+    select(...args)       { return base.select(...args).eq('org_id', orgId); },
+    insert(data, opts)    {
+      const rows = Array.isArray(data)
+        ? data.map(r => ({ ...r, org_id: orgId }))
+        : { ...data, org_id: orgId };
+      return base.insert(rows, opts);
+    },
+    update(data, opts)    { return base.update(data, opts).eq('org_id', orgId); },
+    upsert(data, opts)    {
+      const rows = Array.isArray(data)
+        ? data.map(r => ({ ...r, org_id: orgId }))
+        : { ...data, org_id: orgId };
+      return base.upsert(rows, opts);
+    },
+    delete(opts)          { return base.delete(opts).eq('org_id', orgId); },
   };
 }
 
+export function resolveOrgId(req, body) {
+  const query = req?.query ?? {};
+  const candidate = body?.org_id || body?.orgId || query.org_id || query.orgId;
+  const normalized = normalizeString(candidate);
+  return normalized && isValidOrgId(normalized) ? normalized : '';
+}
+
+// ---------------------------------------------------------------------------
+// DEPRECATED — BYOD helpers (will be removed after Step 12 bulk migration)
+// Kept temporarily so that un-migrated endpoints continue to work.
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use createSingleClient(env) — will be removed after endpoint migration. */
+export function buildTenantError(message, status = 500) {
+  return { status, body: { message } };
+}
+
+/** @deprecated Use createSingleClient(env) — will be removed after endpoint migration. */
+export function mapConnectionError(error) {
+  const message = error?.message || 'failed_to_load_connection';
+  const status = message === 'missing_connection_settings'
+    ? 412
+    : message === 'missing_dedicated_key'
+      ? 428
+      : 500;
+  return buildTenantError(message, status);
+}
+
+/**
+ * @deprecated Use createSingleClient(env) — will be removed after endpoint migration.
+ * In the merged single-DB, this simply returns the same admin client that was passed in.
+ * The encryption/decryption pipeline is bypassed.
+ */
+// eslint-disable-next-line no-unused-vars
+export async function resolveTenantClient(context, supabase, env, orgId) {
+  return { client: supabase };
+}
+
+/** @deprecated Kept for forms-runtime.js compatibility — will be removed after endpoint migration. */
 export function resolveEncryptionSecret(env) {
   const candidates = [
     env.APP_ORG_CREDENTIALS_ENCRYPTION_KEY,
@@ -155,26 +226,7 @@ export function resolveEncryptionSecret(env) {
   return '';
 }
 
-function decodeKeyMaterial(secret) {
-  const attempts = [
-    () => Buffer.from(secret, 'base64'),
-    () => Buffer.from(secret, 'hex'),
-  ];
-
-  for (const attempt of attempts) {
-    try {
-      const buffer = attempt();
-      if (buffer.length) {
-        return buffer;
-      }
-    } catch {
-      // ignore and try next format
-    }
-  }
-
-  return Buffer.from(secret, 'utf8');
-}
-
+/** @deprecated Kept for forms-runtime.js compatibility — will be removed after endpoint migration. */
 export function deriveEncryptionKey(secret) {
   const normalized = normalizeString(secret);
   if (!normalized) {
@@ -198,110 +250,22 @@ export function deriveEncryptionKey(secret) {
   return keyBuffer;
 }
 
-export function decryptDedicatedKey(payload, keyBuffer) {
-  const normalized = normalizeString(payload);
-  if (!normalized || !keyBuffer) {
-    return null;
+function decodeKeyMaterial(secret) {
+  const attempts = [
+    () => Buffer.from(secret, 'base64'),
+    () => Buffer.from(secret, 'hex'),
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const buffer = attempt();
+      if (buffer.length) {
+        return buffer;
+      }
+    } catch {
+      // ignore and try next format
+    }
   }
 
-  const segments = normalized.split(':');
-  if (segments.length !== 5) {
-    return null;
-  }
-
-  const [, mode, ivPart, authTagPart, cipherPart] = segments;
-  if (mode !== 'gcm') {
-    return null;
-  }
-
-  try {
-    const iv = Buffer.from(ivPart, 'base64');
-    const authTag = Buffer.from(authTagPart, 'base64');
-    const cipherText = Buffer.from(cipherPart, 'base64');
-    const decipher = createDecipheriv('aes-256-gcm', keyBuffer, iv);
-    decipher.setAuthTag(authTag);
-    const decrypted = Buffer.concat([decipher.update(cipherText), decipher.final()]);
-    return decrypted.toString('utf8');
-  } catch {
-    return null;
-  }
+  return Buffer.from(secret, 'utf8');
 }
-
-export function createTenantClient({ supabaseUrl, anonKey, dedicatedKey }) {
-  if (!supabaseUrl || !anonKey || !dedicatedKey) {
-    throw new Error('Missing tenant connection parameters.');
-  }
-
-  const client = createClient(supabaseUrl, anonKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
-    global: {
-      headers: {
-        Authorization: `Bearer ${dedicatedKey}`,
-      },
-    },
-  });
-
-  // Explicitly set schema to 'public' for Reinex (AGENTS.md line 8: "Tenant DB schema is **public only**")
-  // This is required for Postgres to properly resolve table references like 'students' 
-  // (lowercase, unquoted) alongside legacy tables like "Employees" (capital, quoted).
-  return client.schema('public');
-}
-
-export function resolveOrgId(req, body) {
-  const query = req?.query ?? {};
-  const candidate = body?.org_id || body?.orgId || query.org_id || query.orgId;
-  const normalized = normalizeString(candidate);
-  return normalized && isValidOrgId(normalized) ? normalized : '';
-}
-
-export function buildTenantError(message, status = 500) {
-  return { status, body: { message } };
-}
-
-export function mapConnectionError(error) {
-  const message = error?.message || 'failed_to_load_connection';
-  const status = message === 'missing_connection_settings'
-    ? 412
-    : message === 'missing_dedicated_key'
-      ? 428
-      : 500;
-  return buildTenantError(message, status);
-}
-
-export async function resolveTenantClient(context, supabase, env, orgId) {
-  const connectionResult = await fetchOrgConnection(supabase, orgId);
-  if (connectionResult.error) {
-    return { error: mapConnectionError(connectionResult.error) };
-  }
-
-  const encryptionSecret = resolveEncryptionSecret(env);
-  const encryptionKey = deriveEncryptionKey(encryptionSecret);
-
-  if (!encryptionKey) {
-    context.log?.error?.('tenant connection missing encryption secret');
-    return { error: buildTenantError('encryption_not_configured') };
-  }
-
-  const dedicatedKey = decryptDedicatedKey(connectionResult.encryptedKey, encryptionKey);
-  if (!dedicatedKey) {
-    context.log?.error?.('Tenant key decryption failed');
-    return { error: buildTenantError('failed_to_decrypt_key') };
-  }
-
-  try {
-    const tenantClient = createTenantClient({
-      supabaseUrl: connectionResult.supabaseUrl,
-      anonKey: connectionResult.anonKey,
-      dedicatedKey,
-    });
-    return { client: tenantClient };
-  } catch (clientError) {
-    context.log?.error?.('tenant connection failed to create client', { message: clientError?.message });
-    return { error: buildTenantError('failed_to_connect_tenant') };
-  }
-}
-  

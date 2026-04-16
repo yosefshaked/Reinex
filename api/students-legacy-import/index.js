@@ -9,8 +9,8 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
   UUID_PATTERN,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseCsv } from '../_shared/csv.js';
 import { coerceOptionalText, parseJsonBodyWithLimit } from '../_shared/validation.js';
@@ -263,13 +263,7 @@ export default async function legacyImport(context, req) {
   const permissions = parsePermissions(orgSettings?.permissions);
   const canReupload = permissions.can_reupload_legacy_reports === true;
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  const { data: studentRecord, error: studentError } = await tenantClient
-    .from('Students')
+  const { data: studentRecord, error: studentError } = await withOrgScope(supabase, 'Students', orgId)
     .select('id, assigned_instructor_id')
     .eq('id', studentId)
     .maybeSingle();
@@ -288,8 +282,7 @@ export default async function legacyImport(context, req) {
     return respond(context, 400, { message: 'student_missing_instructor' });
   }
 
-  const { count: legacyCount, error: legacyCheckError } = await tenantClient
-    .from('SessionRecords')
+  const { count: legacyCount, error: legacyCheckError } = await withOrgScope(supabase, 'SessionRecords', orgId)
     .select('id', { count: 'exact', head: true })
     .eq('student_id', studentId)
     .eq('is_legacy', true);
@@ -374,7 +367,7 @@ export default async function legacyImport(context, req) {
   const customLabels = isCustomFlow ? parseColumnMappings(body?.custom_labels) : {};
 
   const metadataResult = await buildSessionMetadata({
-    tenantClient,
+    tenantClient: supabase,
     userId,
     role,
     source: 'legacy_import',
@@ -460,8 +453,7 @@ export default async function legacyImport(context, req) {
 
   const replaced = legacyCount || 0;
 
-  const { error: deleteError } = await tenantClient
-    .from('SessionRecords')
+  const { error: deleteError } = await withOrgScope(supabase, 'SessionRecords', orgId)
     .delete()
     .eq('student_id', studentId)
     .eq('is_legacy', true);
@@ -471,7 +463,7 @@ export default async function legacyImport(context, req) {
     return respond(context, 500, { message: 'failed_to_clear_legacy_records' });
   }
 
-  const { error: insertError } = await tenantClient.from('SessionRecords').insert(records);
+  const { error: insertError } = await withOrgScope(supabase, 'SessionRecords', orgId).insert(records);
 
   if (insertError) {
     context.log?.error?.('legacy-import failed to insert legacy rows', { message: insertError.message });

@@ -22,7 +22,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { syncLessonInstructorEarnings, syncInstructorAttendanceFromLessons } from '../_shared/employee-finance.js';
@@ -137,10 +137,9 @@ function normalizeCancelledParticipantAuditRows(value) {
     : [];
 }
 
-async function loadCreatedInstanceResponse(tenantClient, instanceId, fallbackInstance = null) {
+async function loadCreatedInstanceResponse(client, orgId, instanceId, fallbackInstance = null) {
   const loadEnriched = async () => {
-    const { data, error } = await tenantClient
-      .from('lesson_instances')
+    const { data, error } = await withOrgScope(client, 'lesson_instances', orgId)
       .select(buildInstanceSelect())
       .eq('id', instanceId)
       .single();
@@ -149,7 +148,7 @@ async function loadCreatedInstanceResponse(tenantClient, instanceId, fallbackIns
       throw error;
     }
 
-    const [enriched] = await enrichInstancesWithCorrectionState(tenantClient, [normalizeLessonInstanceRecord(data)]);
+    const [enriched] = await enrichInstancesWithCorrectionState(client, [normalizeLessonInstanceRecord(data)]);
     if (enriched?.version !== undefined) {
       enriched.version = normalizeEntityVersion(enriched.version);
     }
@@ -163,7 +162,7 @@ async function loadCreatedInstanceResponse(tenantClient, instanceId, fallbackIns
       return await loadEnriched();
     } catch (secondError) {
       if (fallbackInstance) {
-        const [enrichedFallback] = await enrichInstancesWithCorrectionState(tenantClient, [normalizeLessonInstanceRecord(fallbackInstance)]);
+        const [enrichedFallback] = await enrichInstancesWithCorrectionState(client, [normalizeLessonInstanceRecord(fallbackInstance)]);
         return enrichedFallback || fallbackInstance;
       }
       throw secondError || firstError;
@@ -230,14 +229,10 @@ export default async function lessonInstances(context, req) {
   const isAdmin = isAdminRole(role);
   let actorInstructorId = '';
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-  const billingService = new BillingLedgerService({ tenantClient });
+  const billingService = new BillingLedgerService({ tenantClient: supabase });
 
   if (!isAdmin) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(tenantClient, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(supabase, userId);
     if (instructorError) {
       context.log?.error?.('lesson-instances failed to resolve actor instructor', { message: instructorError.message, userId });
       return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
@@ -253,8 +248,7 @@ export default async function lessonInstances(context, req) {
     const requestedClientProfileId = normalizeUuid(req?.query?.client_profile_id || req?.query?.clientProfileId);
 
     if (lessonInstanceId) {
-      let builder = tenantClient
-        .from('lesson_instances')
+      let builder = withOrgScope(supabase, 'lesson_instances', orgId)
         .select(buildInstanceSelect())
         .eq('id', lessonInstanceId);
 
@@ -274,7 +268,7 @@ export default async function lessonInstances(context, req) {
         return respond(context, 404, { message: 'lesson_instance_not_found' });
       }
 
-      const [enriched] = await enrichInstancesWithCorrectionState(tenantClient, [normalizeLessonInstanceRecord(data)]);
+      const [enriched] = await enrichInstancesWithCorrectionState(supabase, [normalizeLessonInstanceRecord(data)]);
       if (enriched?.version !== undefined) {
         enriched.version = normalizeEntityVersion(enriched.version);
       }
@@ -294,8 +288,7 @@ export default async function lessonInstances(context, req) {
       ? buildInstanceSelect({ participantsJoin: 'lesson_participants!inner' })
       : buildInstanceSelect();
 
-    let builder = tenantClient
-      .from('lesson_instances')
+    let builder = withOrgScope(supabase, 'lesson_instances', orgId)
       .select(selectClause)
       .gte('datetime_start', range.start)
       .lt('datetime_start', range.end)
@@ -324,7 +317,7 @@ export default async function lessonInstances(context, req) {
     }
 
     const enrichedData = await enrichInstancesWithCorrectionState(
-      tenantClient,
+      supabase,
       (Array.isArray(data) ? data : []).map(normalizeLessonInstanceRecord),
     );
     return respond(context, 200, enrichedData);
@@ -377,8 +370,7 @@ export default async function lessonInstances(context, req) {
       return respond(context, 400, { message: 'missing_participants' });
     }
 
-    const { data: instanceRow, error: instanceError } = await tenantClient
-      .from('lesson_instances')
+    const { data: instanceRow, error: instanceError } = await withOrgScope(supabase, 'lesson_instances', orgId)
       .insert({
         datetime_start: datetimeStart,
         duration_minutes: durationMinutes,
@@ -435,8 +427,7 @@ export default async function lessonInstances(context, req) {
     ];
 
     if (normalizedClientProfileIds.length > 0) {
-      const { data: linkedStudents } = await tenantClient
-        .from('students')
+      const { data: linkedStudents } = await withOrgScope(supabase, 'students', orgId)
         .select('id, client_profile_id')
         .in('client_profile_id', normalizedClientProfileIds);
       const linkedStudentByClientProfile = new Map((linkedStudents || []).map((row) => [row.client_profile_id, row.id]));
@@ -448,8 +439,7 @@ export default async function lessonInstances(context, req) {
     }
 
     if (normalizedStudentIds.length > 0) {
-      const { data: studentProfiles } = await tenantClient
-        .from('students')
+      const { data: studentProfiles } = await withOrgScope(supabase, 'students', orgId)
         .select('id, client_profile_id')
         .in('id', normalizedStudentIds);
       const profileByStudentId = new Map((studentProfiles || []).map((row) => [row.id, row.client_profile_id]));
@@ -464,8 +454,7 @@ export default async function lessonInstances(context, req) {
       return respond(context, 400, { message: 'invalid_participants_missing_client_profile' });
     }
 
-    const { data: insertedParticipants, error: participantsError } = await tenantClient
-      .from('lesson_participants')
+    const { data: insertedParticipants, error: participantsError } = await withOrgScope(supabase, 'lesson_participants', orgId)
       .insert(participantsPayload)
       .select(`
         id,
@@ -481,8 +470,7 @@ export default async function lessonInstances(context, req) {
       `);
 
     if (participantsError) {
-      const { error: cleanupError } = await tenantClient
-        .from('lesson_instances')
+      const { error: cleanupError } = await withOrgScope(supabase, 'lesson_instances', orgId)
         .delete()
         .eq('id', instanceRow.id);
       context.log?.error?.('lesson-instances failed to create participants', { message: participantsError.message });
@@ -496,7 +484,7 @@ export default async function lessonInstances(context, req) {
     }
 
     try {
-      await logTenantAuditEvent(tenantClient, {
+      await logTenantAuditEvent(supabase, {
         actorUserId: userId,
         eventType: 'calendar.lesson_instance.created',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -528,8 +516,7 @@ export default async function lessonInstances(context, req) {
         { data: serviceRow },
         { data: instructorRow },
       ] = await Promise.all([
-        tenantClient
-          .from('lesson_participants')
+        withOrgScope(supabase, 'lesson_participants', orgId)
           .select(`
             id,
             client_profile_id,
@@ -545,13 +532,11 @@ export default async function lessonInstances(context, req) {
             client_profile:client_profiles(id, first_name, middle_name, last_name)
           `)
           .eq('lesson_instance_id', instanceRow.id),
-        tenantClient
-          .from('Services')
+        withOrgScope(supabase, 'Services', orgId)
           .select('id, name, color, duration_minutes')
           .eq('id', serviceId)
           .maybeSingle(),
-        tenantClient
-          .from('Employees')
+        withOrgScope(supabase, 'Employees', orgId)
           .select('id, first_name, middle_name, last_name, name')
           .eq('id', instructorEmployeeId)
           .maybeSingle(),
@@ -577,7 +562,7 @@ export default async function lessonInstances(context, req) {
     }
 
     try {
-      const responseData = await loadCreatedInstanceResponse(tenantClient, instanceRow.id, fallbackInstance);
+      const responseData = await loadCreatedInstanceResponse(supabase, orgId, instanceRow.id, fallbackInstance);
       return respond(context, 201, responseData);
     } catch (loadError) {
       context.log?.error?.('lesson-instances failed to load created instance after successful write', {
@@ -605,7 +590,7 @@ export default async function lessonInstances(context, req) {
     const allowedStatus = ACTIVE_LESSON_INSTANCE_STATUSES;
     const allowedDocumentation = new Set(['undocumented', 'documented']);
 
-    const { error: stateError, result: mutationState } = await fetchLessonMutationState(tenantClient, {
+    const { error: stateError, result: mutationState } = await fetchLessonMutationState(supabase, {
       instanceId: lessonInstanceId,
     });
 
@@ -663,7 +648,7 @@ export default async function lessonInstances(context, req) {
       }
       if (nextStatus === 'cancelled') {
         try {
-          const cancellationResult = await cancelLessonInstanceWithParticipants(tenantClient, {
+          const cancellationResult = await cancelLessonInstanceWithParticipants(supabase, {
             instanceId: lessonInstanceId,
             userId,
             expectedVersion,
@@ -691,7 +676,7 @@ export default async function lessonInstances(context, req) {
           }
 
           if (cancellationResult.outcome === 'locked' || cancellationResult.outcome === 'closed') {
-            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, {
               instanceId: lessonInstanceId,
             });
             if (refreshedError) {
@@ -745,7 +730,7 @@ export default async function lessonInstances(context, req) {
       }
       if (nextStatus === 'completed') {
         try {
-          const completionResult = await completeLessonInstanceWithParticipants(tenantClient, {
+          const completionResult = await completeLessonInstanceWithParticipants(supabase, {
             instanceId: lessonInstanceId,
             userId,
             expectedVersion,
@@ -766,7 +751,7 @@ export default async function lessonInstances(context, req) {
           }
 
           if (completionResult.outcome === 'locked' || completionResult.outcome === 'closed') {
-            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+            const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, {
               instanceId: lessonInstanceId,
             });
             if (refreshedError) {
@@ -823,8 +808,7 @@ export default async function lessonInstances(context, req) {
     }
 
     if (nextStatus !== 'cancelled' && nextStatus !== 'completed') {
-      let updateBuilder = tenantClient
-        .from('lesson_instances')
+      let updateBuilder = withOrgScope(supabase, 'lesson_instances', orgId)
         .update(updates)
         .eq('id', lessonInstanceId);
 
@@ -848,7 +832,7 @@ export default async function lessonInstances(context, req) {
       }
 
       if (!updatedInstanceRows) {
-        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(supabase, {
           instanceId: lessonInstanceId,
         });
         if (refreshedError) {
@@ -879,9 +863,9 @@ export default async function lessonInstances(context, req) {
           actorUserId: userId,
           reasonCode: 'lesson_updated',
         });
-        await syncLessonInstructorEarnings(tenantClient, lessonInstanceId, userId);
-        await syncInstructorAttendanceFromLessons(tenantClient, lessonInstanceId, userId);
-        await syncLessonClosureState(tenantClient, lessonInstanceId, userId);
+        await syncLessonInstructorEarnings(supabase, lessonInstanceId, userId);
+        await syncInstructorAttendanceFromLessons(supabase, lessonInstanceId, userId);
+        await syncLessonClosureState(supabase, lessonInstanceId, userId);
       } catch (syncError) {
         context.log?.error?.('lesson-instances failed to sync financial artifacts', {
           message: syncError?.message,
@@ -891,8 +875,7 @@ export default async function lessonInstances(context, req) {
       }
     }
 
-    const { data, error } = await tenantClient
-      .from('lesson_instances')
+    const { data, error } = await withOrgScope(supabase, 'lesson_instances', orgId)
       .select(buildInstanceSelect())
       .eq('id', lessonInstanceId)
       .single();
@@ -903,7 +886,7 @@ export default async function lessonInstances(context, req) {
     }
 
     try {
-      await logTenantAuditEvent(tenantClient, {
+      await logTenantAuditEvent(supabase, {
         actorUserId: userId,
         eventType: 'calendar.lesson_instance.updated',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -923,7 +906,7 @@ export default async function lessonInstances(context, req) {
     if (nextStatus === 'cancelled' && cancelledParticipantIds.length > 0) {
       try {
         for (const row of cancelledParticipantAuditRows) {
-          await logTenantAuditEvent(tenantClient, {
+          await logTenantAuditEvent(supabase, {
             actorUserId: userId,
             eventType: 'calendar.lesson_participant.cancelled_by_instance',
             retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -949,7 +932,7 @@ export default async function lessonInstances(context, req) {
     if (nextStatus === 'completed' && completedParticipantAuditRows.length > 0) {
       try {
         for (const row of completedParticipantAuditRows) {
-          await logTenantAuditEvent(tenantClient, {
+          await logTenantAuditEvent(supabase, {
             actorUserId: userId,
             eventType: 'calendar.lesson_participant.attended_by_instance_completion',
             retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -973,7 +956,7 @@ export default async function lessonInstances(context, req) {
     }
 
     const [enriched] = await enrichInstancesWithCorrectionState(
-      tenantClient,
+      supabase,
       data ? [normalizeLessonInstanceRecord(data)] : [],
     );
     if (enriched?.version !== undefined) {
@@ -1002,7 +985,7 @@ export default async function lessonInstances(context, req) {
       if (!instanceId) return respond(context, 400, { message: 'missing_instance_id' });
       if (!studentId && !clientProfileId) return respond(context, 400, { message: 'missing_client_profile_or_student_id' });
 
-      const { error: addStateError, result: addMutationState } = await fetchLessonMutationState(tenantClient, { instanceId });
+      const { error: addStateError, result: addMutationState } = await fetchLessonMutationState(supabase, { instanceId });
       if (addStateError) {
         context.log?.error?.('lesson-instances add-participant failed to load state', { message: addStateError.message });
         return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
@@ -1023,16 +1006,14 @@ export default async function lessonInstances(context, req) {
       let resolvedStudentId = studentId;
       let resolvedClientProfileId = clientProfileId;
       if (resolvedStudentId && !resolvedClientProfileId) {
-        const { data: studentRow } = await tenantClient
-          .from('students')
+        const { data: studentRow } = await withOrgScope(supabase, 'students', orgId)
           .select('id, client_profile_id')
           .eq('id', resolvedStudentId)
           .maybeSingle();
         resolvedClientProfileId = studentRow?.client_profile_id || '';
       }
       if (resolvedClientProfileId && !resolvedStudentId) {
-        const { data: studentRow } = await tenantClient
-          .from('students')
+        const { data: studentRow } = await withOrgScope(supabase, 'students', orgId)
           .select('id, client_profile_id')
           .eq('client_profile_id', resolvedClientProfileId)
           .maybeSingle();
@@ -1045,13 +1026,11 @@ export default async function lessonInstances(context, req) {
 
       // Capacity check: cancelled/absent participants do not count toward max_students
       const [{ data: activeParticipants, error: countError }, { data: capability }] = await Promise.all([
-        tenantClient
-          .from('lesson_participants')
+        withOrgScope(supabase, 'lesson_participants', orgId)
           .select('id')
           .eq('lesson_instance_id', instanceId)
           .in('participant_status', ['scheduled', 'attended']),
-        tenantClient
-          .from('instructor_service_capabilities')
+        withOrgScope(supabase, 'instructor_service_capabilities', orgId)
           .select('max_students')
           .eq('employee_id', addMutationState.instance.instructor_employee_id)
           .eq('service_id', addMutationState.instance.service_id)
@@ -1074,8 +1053,7 @@ export default async function lessonInstances(context, req) {
         }
       }
 
-      const { data: newParticipant, error: insertError } = await tenantClient
-        .from('lesson_participants')
+      const { data: newParticipant, error: insertError } = await withOrgScope(supabase, 'lesson_participants', orgId)
         .insert({
           lesson_instance_id: instanceId,
           client_profile_id: resolvedClientProfileId,
@@ -1092,7 +1070,7 @@ export default async function lessonInstances(context, req) {
       }
 
       try {
-        await logTenantAuditEvent(tenantClient, {
+        await logTenantAuditEvent(supabase, {
           actorUserId: userId,
           eventType: 'calendar.lesson_participant.added',
           retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1111,7 +1089,7 @@ export default async function lessonInstances(context, req) {
       }
 
       try {
-        await syncLessonClosureState(tenantClient, instanceId, userId);
+        await syncLessonClosureState(supabase, instanceId, userId);
       } catch (closureError) {
         context.log?.warn?.('lesson-instances failed to sync lesson closure after add-participant', {
           message: closureError?.message,
@@ -1119,11 +1097,11 @@ export default async function lessonInstances(context, req) {
         });
       }
 
-      const { data: addedRefreshed, error: addedRefreshError } = await tenantClient
-        .from('lesson_instances').select(buildInstanceSelect()).eq('id', instanceId).single();
+      const { data: addedRefreshed, error: addedRefreshError } = await withOrgScope(supabase, 'lesson_instances', orgId)
+        .select(buildInstanceSelect()).eq('id', instanceId).single();
       if (addedRefreshError) return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
       const [addedEnriched] = await enrichInstancesWithCorrectionState(
-        tenantClient,
+        supabase,
         addedRefreshed ? [normalizeLessonInstanceRecord(addedRefreshed)] : [],
       );
       return respond(context, 200, addedEnriched || addedRefreshed);

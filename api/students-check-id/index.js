@@ -8,7 +8,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
   UUID_PATTERN,
 } from '../_shared/org-bff.js';
 
@@ -75,11 +75,6 @@ export default async function (context, req) {
   // All org members can check for duplicate national IDs to prevent data quality issues
   // Non-admin members cannot create students, so this is a read-only validation check
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   const identityNumber = normalizeString(
     req?.query?.identity_number || req?.query?.identityNumber || req?.query?.national_id || req?.query?.nationalId || '',
   );
@@ -104,15 +99,13 @@ export default async function (context, req) {
     hasExcludeId: !!excludeId,
   });
 
-  let profileQuery = tenantClient
-    .from('client_profiles')
+  let profileQuery = withOrgScope(supabase, 'client_profiles', orgId)
     .select('id, first_name, last_name, identity_number, is_active')
     .eq('identity_number', identityNumber)
     .limit(1);
 
   if (excludeId) {
-    const { data: excludedStudent, error: excludedStudentError } = await tenantClient
-      .from('students')
+    const { data: excludedStudent, error: excludedStudentError } = await withOrgScope(supabase, 'students', orgId)
       .select('id, client_profile_id')
       .eq('id', excludeId)
       .maybeSingle();
@@ -153,8 +146,7 @@ export default async function (context, req) {
     return respond(context, 200, { exists: false });
   }
 
-  const { data: student, error: studentError } = await tenantClient
-    .from('students')
+  const { data: student, error: studentError } = await withOrgScope(supabase, 'students', orgId)
     .select('id, client_profile_id')
     .eq('client_profile_id', profile.id)
     .maybeSingle();

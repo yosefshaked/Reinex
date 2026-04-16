@@ -7,7 +7,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import {
@@ -99,10 +99,7 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
+
 
   const canManageAll = canManageEmployeeOps(role);
 
@@ -114,7 +111,7 @@ export default async function (context, req) {
     const resolvedStart = isYmdDate(startDate) ? startDate : startOfMonthKey(defaultMonthDate);
     const resolvedEnd = isYmdDate(endDate) ? endDate : endOfMonthKey(resolvedStart);
 
-    const employeeResult = await resolveEmployeeRecord(tenantClient, {
+    const employeeResult = await resolveEmployeeRecord(supabase, {
       employeeId,
       userId,
       canManageAll,
@@ -130,8 +127,8 @@ export default async function (context, req) {
 
     const employee = employeeResult.employee;
     const [records, leaveDays] = await Promise.all([
-      fetchAttendanceRecords(tenantClient, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
-      fetchApprovedLeaveDays(tenantClient, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
+      fetchAttendanceRecords(supabase, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
+      fetchApprovedLeaveDays(supabase, { employeeId: employee.id, startDate: resolvedStart, endDate: resolvedEnd }),
     ]);
 
     return respond(context, 200, {
@@ -167,7 +164,7 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid_worked_minutes' });
     }
 
-    const conflict = await assertNoLeaveForAttendance(tenantClient, {
+    const conflict = await assertNoLeaveForAttendance(supabase, {
       employeeId,
       date: attendanceDate,
       excludeEntryId: '',
@@ -191,8 +188,7 @@ export default async function (context, req) {
     if (method === 'POST') {
       payload.created_by = userId;
       payload.created_at = new Date().toISOString();
-      const { data, error } = await tenantClient
-        .from('employee_attendance_records')
+      const { data, error } = await withOrgScope(supabase, 'employee_attendance_records', orgId)
         .insert(payload)
         .select('id, employee_id, attendance_date, status, worked_minutes, notes, source_type, created_by, updated_by, created_at, updated_at, metadata')
         .single();
@@ -209,8 +205,7 @@ export default async function (context, req) {
     }
 
     const recordId = normalizeString(body?.id);
-    let query = tenantClient
-      .from('employee_attendance_records')
+    let query = withOrgScope(supabase, 'employee_attendance_records', orgId)
       .update(payload)
       .eq('employee_id', employeeId)
       .eq('attendance_date', attendanceDate);
@@ -243,7 +238,7 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'missing_delete_target' });
     }
 
-    let query = tenantClient.from('employee_attendance_records').delete();
+    let query = withOrgScope(supabase, 'employee_attendance_records', orgId).delete();
     if (recordId) {
       query = query.eq('id', recordId);
     } else {

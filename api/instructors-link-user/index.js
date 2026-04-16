@@ -8,14 +8,13 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 
-async function loadEmployee(tenantClient, employeeId) {
-  const { data, error } = await tenantClient
-    .from('Employees')
+async function loadEmployee(client, orgId, employeeId) {
+  const { data, error } = await withOrgScope(client, 'Employees', orgId)
     .select('id, user_id, first_name, last_name, email, metadata')
     .eq('id', employeeId)
     .maybeSingle();
@@ -26,7 +25,6 @@ async function loadEmployee(tenantClient, employeeId) {
 async function sendInvitationFlow({
   context,
   supabase,
-  tenantClient,
   authResult,
   role,
   orgId,
@@ -73,8 +71,7 @@ async function sendInvitationFlow({
     },
   };
 
-  await tenantClient
-    .from('Employees')
+  await withOrgScope(supabase, 'Employees', orgId)
     .update({ metadata: updatedMetadata, email })
     .eq('id', employeeId);
 
@@ -104,7 +101,6 @@ async function sendInvitationFlow({
 async function directLinkFlow({
   context,
   supabase,
-  tenantClient,
   authResult,
   role,
   orgId,
@@ -133,8 +129,7 @@ async function directLinkFlow({
     return respond(context, 404, { message: 'member_not_found_in_org' });
   }
 
-  const { data: conflictingEmployee, error: conflictError } = await tenantClient
-    .from('Employees')
+  const { data: conflictingEmployee, error: conflictError } = await withOrgScope(supabase, 'Employees', orgId)
     .select('id')
     .eq('user_id', memberUserId)
     .neq('id', employeeId)
@@ -158,8 +153,7 @@ async function directLinkFlow({
   };
   delete metadata.invitation_pending;
 
-  const { data: updatedEmployee, error: updateError } = await tenantClient
-    .from('Employees')
+  const { data: updatedEmployee, error: updateError } = await withOrgScope(supabase, 'Employees', orgId)
     .update({
       user_id: memberUserId,
       metadata,
@@ -282,12 +276,7 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'missing_employee_id' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  const { employee, error: fetchError } = await loadEmployee(tenantClient, employeeId);
+  const { employee, error: fetchError } = await loadEmployee(supabase, orgId, employeeId);
   if (fetchError) {
     context.log?.error?.('instructors-link-user failed to fetch employee', { message: fetchError.message });
     return respond(context, 500, { message: 'failed_to_fetch_employee' });
@@ -308,7 +297,6 @@ export default async function (context, req) {
     return directLinkFlow({
       context,
       supabase,
-      tenantClient,
       authResult,
       role,
       orgId,
@@ -327,7 +315,6 @@ export default async function (context, req) {
     return await sendInvitationFlow({
       context,
       supabase,
-      tenantClient,
       authResult,
       role,
       orgId,

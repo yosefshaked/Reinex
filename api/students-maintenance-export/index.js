@@ -10,7 +10,7 @@ import {
   parseRequestBody,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 
 const EXPORT_COLUMNS = [
@@ -111,13 +111,7 @@ export default async function handler(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  const { data: students, error: studentsError } = await tenantClient
-    .from('students')
+  const { data: students, error: studentsError } = await withOrgScope(supabase, 'students', orgId)
     .select(
       'id, name, national_id, contact_name, contact_phone, assigned_instructor_id, default_service, default_day_of_week, default_session_time, notes, tags, is_active',
     )
@@ -135,8 +129,7 @@ export default async function handler(context, req) {
     firstStudent: students?.[0] ? Object.keys(students[0]) : null,
   });
 
-  const { data: instructors, error: instructorsError } = await tenantClient
-    .from('Employees')
+  const { data: instructors, error: instructorsError } = await withOrgScope(supabase, 'Employees', orgId)
     .select('id, name, email, is_active, employee_type')
     .or('employee_type.is.null,employee_type.eq.instructor');
 
@@ -146,8 +139,7 @@ export default async function handler(context, req) {
   }
 
   // Fetch student tags for name lookup
-  const { data: tagsSettings } = await tenantClient
-    .from('Settings')
+  const { data: tagsSettings } = await withOrgScope(supabase, 'Settings', orgId)
     .select('settings_value')
     .eq('key', 'student_tags')
     .maybeSingle();

@@ -14,7 +14,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { ensureStudentForClientProfile } from '../_shared/client-profiles.js';
 
@@ -85,7 +85,7 @@ function rangesOverlap(startA, endA, startB, endB) {
   return normalizedStartA <= normalizedEndB && normalizedStartB <= normalizedEndA;
 }
 
-async function findExactTemplateConflict(tenantClient, {
+async function findExactTemplateConflict(client, orgId, {
   studentId,
   instructorEmployeeId,
   dayOfWeek,
@@ -94,8 +94,7 @@ async function findExactTemplateConflict(tenantClient, {
   validUntil,
   excludeTemplateId = null,
 }) {
-  let query = tenantClient
-    .from('lesson_templates')
+  let query = withOrgScope(client, 'lesson_templates', orgId)
     .select('id, valid_from, valid_until')
     .eq('student_id', studentId)
     .eq('instructor_employee_id', instructorEmployeeId)
@@ -200,9 +199,8 @@ function computeSafeDeactivationUntil(existingTemplate, today) {
   return safeValidUntil;
 }
 
-async function resolveInstructorEmployeeIdsForUser(tenantClient, userId) {
-  const { data, error } = await tenantClient
-    .from('Employees')
+async function resolveInstructorEmployeeIdsForUser(client, orgId, userId) {
+  const { data, error } = await withOrgScope(client, 'Employees', orgId)
     .select('id')
     .eq('user_id', userId);
 
@@ -216,13 +214,12 @@ async function resolveInstructorEmployeeIdsForUser(tenantClient, userId) {
   };
 }
 
-async function serviceExists(tenantClient, serviceId) {
+async function serviceExists(client, orgId, serviceId) {
   if (!serviceId) {
     return false;
   }
 
-  const { data, error } = await tenantClient
-    .from('Services')
+  const { data, error } = await withOrgScope(client, 'Services', orgId)
     .select('id')
     .eq('id', serviceId)
     .maybeSingle();
@@ -234,15 +231,14 @@ async function serviceExists(tenantClient, serviceId) {
   return Boolean(data?.id);
 }
 
-async function validateInstructorServiceAvailability(tenantClient, {
+async function validateInstructorServiceAvailability(client, orgId, {
   instructorEmployeeId,
   serviceId,
   dayOfWeek,
   timeOfDay,
   durationMinutes,
 }) {
-  const { data, error } = await tenantClient
-    .from('instructor_service_capabilities')
+  const { data, error } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
     .select('employee_id, service_id, availability_windows')
     .eq('employee_id', instructorEmployeeId)
     .eq('service_id', serviceId)
@@ -272,9 +268,9 @@ async function validateInstructorServiceAvailability(tenantClient, {
   return { ok: true, code: null };
 }
 
-async function writeTenantAudit(context, tenantClient, params) {
+async function writeTenantAudit(context, client, params) {
   try {
-    await logTenantAuditEvent(tenantClient, params);
+    await logTenantAuditEvent(client, params);
   } catch (auditError) {
     context.log?.warn?.('lesson-templates failed to write tenant audit event', {
       message: auditError?.message,
@@ -285,9 +281,8 @@ async function writeTenantAudit(context, tenantClient, params) {
   }
 }
 
-async function rollbackCreatedTemplate(context, tenantClient, templateId, details = {}) {
-  const rollbackResult = await tenantClient
-    .from('lesson_templates')
+async function rollbackCreatedTemplate(context, client, orgId, templateId, details = {}) {
+  const rollbackResult = await withOrgScope(client, 'lesson_templates', orgId)
     .delete()
     .eq('id', templateId);
 
@@ -362,11 +357,6 @@ export default async function lessonTemplates(context, req) {
 
   const isAdmin = isAdminOrOffice(role);
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   if (method === 'GET') {
     const studentId = normalizeUuid(req?.query?.student_id || body?.student_id || body?.studentId);
     const listAll = normalizeString(req?.query?.all) === 'true';
@@ -380,8 +370,7 @@ export default async function lessonTemplates(context, req) {
       const showInactive = normalizeString(req?.query?.show_inactive) === 'true';
       const instructorId = normalizeUuid(req?.query?.instructor_id);
 
-      let query = tenantClient
-        .from('lesson_templates')
+      let query = withOrgScope(supabase, 'lesson_templates', orgId)
         .select(buildTemplateSelect({ includeStudent: true }));
 
       if (!showInactive) {
@@ -410,7 +399,7 @@ export default async function lessonTemplates(context, req) {
       const {
         ids: instructorEmployeeIds,
         error: instructorLookupError,
-      } = await resolveInstructorEmployeeIdsForUser(tenantClient, userId);
+      } = await resolveInstructorEmployeeIdsForUser(supabase, orgId, userId);
 
       if (instructorLookupError) {
         context.log?.error?.('lesson-templates failed to resolve instructor mapping', {
@@ -424,8 +413,7 @@ export default async function lessonTemplates(context, req) {
         return respond(context, 403, { message: 'student_not_assigned_to_user' });
       }
 
-      const { data: assignmentRows, error: assignmentError } = await tenantClient
-        .from('lesson_templates')
+      const { data: assignmentRows, error: assignmentError } = await withOrgScope(supabase, 'lesson_templates', orgId)
         .select('id')
         .eq('student_id', studentId)
         .in('instructor_employee_id', instructorEmployeeIds)
@@ -446,8 +434,7 @@ export default async function lessonTemplates(context, req) {
       }
     }
 
-    const { data, error } = await tenantClient
-      .from('lesson_templates')
+    const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .select(buildTemplateSelect())
       .eq('student_id', studentId)
       .order('is_active', { ascending: false })
@@ -491,7 +478,7 @@ export default async function lessonTemplates(context, req) {
     }
 
     try {
-      if (!(await serviceExists(tenantClient, serviceId))) {
+      if (!(await serviceExists(supabase, orgId, serviceId))) {
         return respond(context, 400, { message: 'invalid_service_id' });
       }
     } catch (serviceLookupError) {
@@ -527,7 +514,7 @@ export default async function lessonTemplates(context, req) {
     }
 
     try {
-      const availabilityResult = await validateInstructorServiceAvailability(tenantClient, {
+      const availabilityResult = await validateInstructorServiceAvailability(supabase, orgId, {
         instructorEmployeeId,
         serviceId,
         dayOfWeek,
@@ -552,8 +539,7 @@ export default async function lessonTemplates(context, req) {
     let effectiveStudentId = studentId;
     let resolvedClientProfileId = clientProfileIdFromBody;
     if (waitingListEntryId) {
-      const { data: waitingListData, error: waitingListError } = await tenantClient
-        .from('waiting_list_entries')
+      const { data: waitingListData, error: waitingListError } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
         .select('id, client_profile_id, student_id, desired_service_id, status, metadata')
         .eq('id', waitingListEntryId)
         .maybeSingle();
@@ -586,8 +572,7 @@ export default async function lessonTemplates(context, req) {
       resolvedClientProfileId = waitingListData.client_profile_id || resolvedClientProfileId;
 
       if (resolvedClientProfileId) {
-        const { data: clientProfileData, error: clientProfileError } = await tenantClient
-          .from('client_profiles')
+        const { data: clientProfileData, error: clientProfileError } = await withOrgScope(supabase, 'client_profiles', orgId)
           .select('id, first_name, middle_name, last_name, is_active, onboarding_status, metadata')
           .eq('id', resolvedClientProfileId)
           .maybeSingle();
@@ -604,7 +589,7 @@ export default async function lessonTemplates(context, req) {
 
       if (!effectiveStudentId && resolvedClientProfileId) {
         try {
-          const ensuredStudent = await ensureStudentForClientProfile(tenantClient, resolvedClientProfileId);
+          const ensuredStudent = await ensureStudentForClientProfile(supabase, resolvedClientProfileId);
           if (ensuredStudent.error || !ensuredStudent.student?.id) {
             return respond(context, 500, { message: 'failed_to_activate_student_from_waiting_list' });
           }
@@ -620,8 +605,7 @@ export default async function lessonTemplates(context, req) {
         }
       }
 
-      const { data: studentData, error: studentError } = await tenantClient
-        .from('students')
+      const { data: studentData, error: studentError } = await withOrgScope(supabase, 'students', orgId)
         .select('id, client_profile_id')
         .eq('id', effectiveStudentId)
         .maybeSingle();
@@ -641,7 +625,7 @@ export default async function lessonTemplates(context, req) {
 
     } else if (!effectiveStudentId && resolvedClientProfileId) {
       try {
-        const ensuredStudent = await ensureStudentForClientProfile(tenantClient, resolvedClientProfileId);
+        const ensuredStudent = await ensureStudentForClientProfile(supabase, resolvedClientProfileId);
         if (ensuredStudent.error || !ensuredStudent.student?.id) {
           return respond(context, 500, { message: 'failed_to_create_lesson_template' });
         }
@@ -656,7 +640,7 @@ export default async function lessonTemplates(context, req) {
       }
     }
 
-    const { conflict, error: conflictCheckError } = await findExactTemplateConflict(tenantClient, {
+    const { conflict, error: conflictCheckError } = await findExactTemplateConflict(supabase, orgId, {
       studentId: effectiveStudentId,
       instructorEmployeeId,
       dayOfWeek,
@@ -680,8 +664,7 @@ export default async function lessonTemplates(context, req) {
       });
     }
 
-    const { data, error } = await tenantClient
-      .from('lesson_templates')
+    const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .insert({
         student_id: effectiveStudentId,
         instructor_employee_id: instructorEmployeeId,
@@ -731,8 +714,7 @@ export default async function lessonTemplates(context, req) {
         activationPayload.onboarding_status = 'approved';
       }
 
-      const { data: activatedStudent, error: activationError } = await tenantClient
-        .from('client_profiles')
+      const { data: activatedStudent, error: activationError } = await withOrgScope(supabase, 'client_profiles', orgId)
         .update(activationPayload)
         .eq('id', resolvedClientProfileId)
         .select('id, first_name, middle_name, last_name, is_active, onboarding_status, metadata')
@@ -746,7 +728,7 @@ export default async function lessonTemplates(context, req) {
           clientProfileId: resolvedClientProfileId,
         });
 
-        const rollbackTemplateResult = await rollbackCreatedTemplate(context, tenantClient, data.id, {
+        const rollbackTemplateResult = await rollbackCreatedTemplate(context, supabase, orgId, data.id, {
           waitingListEntryId: waitingListEntry.id,
           clientProfileId: resolvedClientProfileId,
           reason: 'student_activation_failed',
@@ -775,8 +757,7 @@ export default async function lessonTemplates(context, req) {
         matched_by_user_id: userId,
       };
 
-      const { data: matchedEntry, error: waitingListUpdateError } = await tenantClient
-        .from('waiting_list_entries')
+      const { data: matchedEntry, error: waitingListUpdateError } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
         .update({
           status: 'matched',
           metadata: nextMetadata,
@@ -792,7 +773,7 @@ export default async function lessonTemplates(context, req) {
           templateId: data.id,
         });
 
-        const rollbackTemplateResult = await rollbackCreatedTemplate(context, tenantClient, data.id, {
+        const rollbackTemplateResult = await rollbackCreatedTemplate(context, supabase, orgId, data.id, {
           waitingListEntryId: waitingListEntry.id,
           studentId: effectiveStudentId,
           reason: 'waiting_list_update_failed',
@@ -800,8 +781,7 @@ export default async function lessonTemplates(context, req) {
         let rollbackStudentOk = true;
 
         if (studentReactivated && clientProfileBeforeMatch) {
-          const { error: rollbackStudentError } = await tenantClient
-            .from('client_profiles')
+          const { error: rollbackStudentError } = await withOrgScope(supabase, 'client_profiles', orgId)
             .update({
               is_active: clientProfileBeforeMatch?.is_active,
               onboarding_status: clientProfileBeforeMatch?.onboarding_status,
@@ -828,7 +808,7 @@ export default async function lessonTemplates(context, req) {
       }
 
       if (studentReactivated && studentAfterActivation) {
-        await writeTenantAudit(context, tenantClient, {
+        await writeTenantAudit(context, supabase, {
           actorUserId: userId,
           eventType: 'student.reactivated_from_waiting_list_match',
           retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -844,7 +824,7 @@ export default async function lessonTemplates(context, req) {
         });
       }
 
-      await writeTenantAudit(context, tenantClient, {
+      await writeTenantAudit(context, supabase, {
         actorUserId: userId,
         eventType: 'waiting_list.entry.matched',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -908,8 +888,7 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 400, { message: 'invalid_template_id' });
     }
 
-    const { data: existingTemplate, error: existingTemplateError } = await tenantClient
-      .from('lesson_templates')
+    const { data: existingTemplate, error: existingTemplateError } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .select('id, student_id, instructor_employee_id, service_id, day_of_week, time_of_day, duration_minutes, valid_from, valid_until, is_active')
       .eq('id', templateId)
       .maybeSingle();
@@ -951,7 +930,7 @@ export default async function lessonTemplates(context, req) {
       }
 
       try {
-        if (!(await serviceExists(tenantClient, serviceId))) {
+        if (!(await serviceExists(supabase, orgId, serviceId))) {
           return respond(context, 400, { message: 'invalid_service_id' });
         }
       } catch (serviceLookupError) {
@@ -1032,7 +1011,7 @@ export default async function lessonTemplates(context, req) {
     }
 
     try {
-      const availabilityResult = await validateInstructorServiceAvailability(tenantClient, {
+      const availabilityResult = await validateInstructorServiceAvailability(supabase, orgId, {
         instructorEmployeeId: nextTemplateState.instructor_employee_id,
         serviceId: updates.service_id ?? existingTemplate.service_id,
         dayOfWeek: nextTemplateState.day_of_week,
@@ -1066,7 +1045,7 @@ export default async function lessonTemplates(context, req) {
     }
 
     if (nextTemplateState.is_active) {
-      const { conflict, error: conflictCheckError } = await findExactTemplateConflict(tenantClient, {
+      const { conflict, error: conflictCheckError } = await findExactTemplateConflict(supabase, orgId, {
         studentId: nextTemplateState.student_id,
         instructorEmployeeId: nextTemplateState.instructor_employee_id,
         dayOfWeek: nextTemplateState.day_of_week,
@@ -1094,8 +1073,7 @@ export default async function lessonTemplates(context, req) {
 
     updates.updated_at = new Date().toISOString();
 
-    const { data, error } = await tenantClient
-      .from('lesson_templates')
+    const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .update(updates)
       .eq('id', templateId)
       .select(buildTemplateSelect())
@@ -1174,8 +1152,7 @@ export default async function lessonTemplates(context, req) {
 
     const today = new Date().toISOString().split('T')[0];
 
-    const { data: existingTemplate, error: loadTemplateError } = await tenantClient
-      .from('lesson_templates')
+    const { data: existingTemplate, error: loadTemplateError } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .select('id, student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active')
       .eq('id', templateId)
       .maybeSingle();
@@ -1194,8 +1171,7 @@ export default async function lessonTemplates(context, req) {
 
     const safeValidUntil = computeSafeDeactivationUntil(existingTemplate, today);
 
-    const { data, error } = await tenantClient
-      .from('lesson_templates')
+    const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .update({ is_active: false, valid_until: safeValidUntil, updated_at: new Date().toISOString() })
       .eq('id', templateId)
       .select('id, student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active')

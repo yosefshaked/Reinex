@@ -8,7 +8,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 
@@ -166,18 +166,12 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   const employeeId = normalizeString(req?.query?.employee_id || body?.employee_id);
   if (!employeeId) {
     return respond(context, 400, { message: 'missing_employee_id' });
   }
 
-  const { data: employee, error: employeeError } = await tenantClient
-    .from('Employees')
+  const { data: employee, error: employeeError } = await withOrgScope(supabase, 'Employees', orgId)
     .select('id, user_id, first_name, last_name')
     .eq('id', employeeId)
     .maybeSingle();

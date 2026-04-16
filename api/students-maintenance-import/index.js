@@ -9,8 +9,8 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
   UUID_PATTERN,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import {
   coerceBooleanFlag,
@@ -268,14 +268,8 @@ export default async function handler(context, req) {
     .map((entry) => entry.studentId)
     .filter((id) => id && UUID_PATTERN.test(id))));
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   // Fetch all instructors for name matching
-  const { data: instructors, error: instructorsError } = await tenantClient
-    .from('Employees')
+  const { data: instructors, error: instructorsError } = await withOrgScope(supabase, 'Employees', orgId)
     .select('id, name, email, is_active, employee_type')
     .or('employee_type.is.null,employee_type.eq.instructor');
 
@@ -303,8 +297,7 @@ export default async function handler(context, req) {
   }
 
   // Fetch student tags for name-to-ID lookup
-  const { data: tagsSettings } = await tenantClient
-    .from('Settings')
+  const { data: tagsSettings } = await withOrgScope(supabase, 'Settings', orgId)
     .select('settings_value')
     .eq('key', 'student_tags')
     .maybeSingle();
@@ -341,8 +334,7 @@ export default async function handler(context, req) {
 
   let existingStudents = [];
   if (validIds.length > 0) {
-    const { data, error: fetchError } = await tenantClient
-      .from('students')
+    const { data, error: fetchError } = await withOrgScope(supabase, 'students', orgId)
       .select('*')
       .in('id', validIds);
 
@@ -680,8 +672,7 @@ export default async function handler(context, req) {
   ));
 
   if (nationalIdsToCheck.length) {
-    const { data: conflicts, error: nationalLookupError } = await tenantClient
-      .from('students')
+    const { data: conflicts, error: nationalLookupError } = await withOrgScope(supabase, 'students', orgId)
       .select('id, name, national_id')
       .in('national_id', nationalIdsToCheck);
 
@@ -770,8 +761,7 @@ export default async function handler(context, req) {
 
     const payload = { ...updates, metadata: updatedMetadata };
 
-    const { error: updateError } = await tenantClient
-      .from('students')
+    const { error: updateError } = await withOrgScope(supabase, 'students', orgId)
       .update(payload)
       .eq('id', studentId);
 

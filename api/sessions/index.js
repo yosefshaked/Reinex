@@ -8,7 +8,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { isUUID, parseJsonBodyWithLimit, validateSessionWrite } from '../_shared/validation.js';
 import { buildSessionMetadata } from '../_shared/session-metadata.js';
@@ -107,18 +107,12 @@ export default async function (context, req) {
 
   const isLoose = !validation.studentId;
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   let assignedInstructor = '';
   const normalizedUserId = normalizeString(userId);
 
   let studentRecord = null;
   if (!isLoose) {
-    const studentResult = await tenantClient
-      .from('Students')
+    const studentResult = await withOrgScope(supabase, 'Students', orgId)
       .select('id, assigned_instructor_id, default_service')
       .eq('id', validation.studentId)
       .maybeSingle();
@@ -164,8 +158,7 @@ export default async function (context, req) {
       // Admins can only submit as themselves if they're also an instructor
       if (!isMemberRole(role)) {
         // Admin without specified instructor - must be an instructor themselves
-        const adminInstructorCheck = await tenantClient
-          .from('Employees')
+        const adminInstructorCheck = await withOrgScope(supabase, 'Employees', orgId)
           .select('id, is_active')
           .eq('user_id', normalizedUserId)
           .maybeSingle();
@@ -189,8 +182,7 @@ export default async function (context, req) {
   }
 
   if (!sessionInstructorId && !isMemberRole(role) && normalizedUserId) {
-    const instructorLookup = await tenantClient
-      .from('Employees')
+    const instructorLookup = await withOrgScope(supabase, 'Employees', orgId)
       .select('id, is_active')
       .eq('user_id', normalizedUserId)
       .maybeSingle();
@@ -207,8 +199,7 @@ export default async function (context, req) {
 
   // For loose reports, or when attributing to the acting user, ensure the instructor exists to avoid FK errors
   if (sessionInstructorId && (isLoose || sessionInstructorId === normalizedUserId)) {
-    const instructorCheck = await tenantClient
-      .from('Employees')
+    const instructorCheck = await withOrgScope(supabase, 'Employees', orgId)
       .select('id')
       .eq('id', sessionInstructorId)
       .maybeSingle();
@@ -229,7 +220,7 @@ export default async function (context, req) {
   }
 
   const { metadata } = await buildSessionMetadata({
-    tenantClient,
+    tenantClient: supabase,
     userId: normalizedUserId,
     role,
     logger: context.log,
@@ -265,8 +256,7 @@ export default async function (context, req) {
     ? mergeMetadata(mergedMetadata, clientMetadataAdditions)
     : mergedMetadata;
 
-  const { data, error } = await tenantClient
-    .from('SessionRecords')
+  const { data, error } = await withOrgScope(supabase, 'SessionRecords', orgId)
     .insert([
       {
         student_id: validation.studentId,
@@ -294,8 +284,7 @@ export default async function (context, req) {
     const now = new Date().toISOString();
 
     try {
-      const originalResult = await tenantClient
-        .from('SessionRecords')
+      const originalResult = await withOrgScope(supabase, 'SessionRecords', orgId)
         .select('id, instructor_id, deleted, metadata')
         .eq('id', originalId)
         .maybeSingle();
@@ -313,8 +302,7 @@ export default async function (context, req) {
           },
         });
 
-        const updateResult = await tenantClient
-          .from('SessionRecords')
+        const updateResult = await withOrgScope(supabase, 'SessionRecords', orgId)
           .update({ metadata: nextMetadata })
           .eq('id', originalId);
 
