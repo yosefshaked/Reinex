@@ -1730,10 +1730,8 @@ END $$;
 DO $$
 BEGIN
   ALTER TABLE public.grace_cancellation_requests
-    ADD CONSTRAINT grace_cancellation_requests_created_by_fkey
-    FOREIGN KEY (created_by) REFERENCES auth.users(id);
+    DROP CONSTRAINT IF EXISTS grace_cancellation_requests_created_by_fkey;
 EXCEPTION
-  WHEN duplicate_object THEN NULL;
   WHEN undefined_table THEN NULL;
   WHEN insufficient_privilege THEN NULL;
 END $$;

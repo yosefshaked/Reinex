@@ -2510,7 +2510,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           <DialogHeader>
             <DialogTitle>אישור ויתור חיוב</DialogTitle>
             <DialogDescription>
-              אישור ביטול החיוב ימנע מיצירת חיוב עבור התלמיד ורישום תשלום למדריך, גם אם הגדרת הארגון היא לחייב במקרה זה. במקרה של רצון לבצע תשלום למדריך, יש להקים תוספת ידנית דרך פרופיל המדריך.
+              אישור ויתור החיוב ימנע מיצירת חיוב עבור התלמיד, גם אם הגדרת הארגון היא לחייב במקרה זה.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
