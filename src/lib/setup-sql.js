@@ -4106,20 +4106,6 @@ BEGIN
 
   v_instance_before_state := to_jsonb(v_instance);
 
-  IF COALESCE(v_instance.is_closed, false) THEN
-    RETURN QUERY
-    SELECT
-      'closed'::text,
-      COALESCE(v_instance.version, 1)::integer,
-      COALESCE(v_instance.metadata, '{}'::jsonb),
-      ARRAY[]::uuid[],
-      '[]'::jsonb,
-      '[]'::jsonb,
-      v_instance_before_state,
-      v_instance_before_state;
-    RETURN;
-  END IF;
-
   IF p_expected_version IS NOT NULL
     AND COALESCE(v_instance.version, 1) <> p_expected_version THEN
     RETURN QUERY
@@ -4139,12 +4125,14 @@ BEGIN
     SELECT 1
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
+      AND lock_source_type IN ('payroll_run', 'claim_batch')
   ) OR EXISTS (
     SELECT 1
     FROM public.participant_locks lock_row
     JOIN public.lesson_participants participant
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
+      AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
   ) THEN
     RETURN QUERY
     SELECT
@@ -4386,19 +4374,6 @@ BEGIN
 
   v_instance_before_state := to_jsonb(v_instance);
 
-  IF COALESCE(v_instance.is_closed, false) THEN
-    RETURN QUERY
-    SELECT
-      'closed'::text,
-      COALESCE(v_instance.version, 1)::integer,
-      COALESCE(v_instance.metadata, '{}'::jsonb),
-      ARRAY[]::uuid[],
-      '[]'::jsonb,
-      v_instance_before_state,
-      v_instance_before_state;
-    RETURN;
-  END IF;
-
   IF p_expected_version IS NOT NULL
     AND COALESCE(v_instance.version, 1) <> p_expected_version THEN
     RETURN QUERY
@@ -4417,12 +4392,14 @@ BEGIN
     SELECT 1
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
+      AND lock_source_type IN ('payroll_run', 'claim_batch')
   ) OR EXISTS (
     SELECT 1
     FROM public.participant_locks lock_row
     JOIN public.lesson_participants participant
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
+      AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
   ) THEN
     RETURN QUERY
     SELECT
@@ -4623,31 +4600,18 @@ BEGIN
 
   v_instance_before_state := to_jsonb(v_instance);
 
-  IF COALESCE(v_instance.is_closed, false) THEN
-    RETURN QUERY
-    SELECT
-      'closed'::text,
-      COALESCE(v_instance.version, 1)::integer,
-      normalize_lesson_instance_status(v_instance.status)::text,
-      COALESCE(v_instance.metadata, '{}'::jsonb),
-      ARRAY[]::uuid[],
-      '[]'::jsonb,
-      '[]'::jsonb,
-      v_instance_before_state,
-      v_instance_before_state;
-    RETURN;
-  END IF;
-
   IF EXISTS (
     SELECT 1
     FROM public.instance_locks
     WHERE lesson_instance_id = p_instance_id
+      AND lock_source_type IN ('payroll_run', 'claim_batch')
   ) OR EXISTS (
     SELECT 1
     FROM public.participant_locks lock_row
     JOIN public.lesson_participants participant
       ON participant.id = lock_row.lesson_participant_id
     WHERE participant.lesson_instance_id = p_instance_id
+      AND lock_row.lock_source_type IN ('payroll_run', 'claim_batch')
   ) THEN
     RETURN QUERY
     SELECT

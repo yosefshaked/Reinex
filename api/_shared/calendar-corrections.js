@@ -615,11 +615,13 @@ export async function enrichInstancesWithCorrectionState(tenantClient, instances
         .map((lock) => lock.lock_source_id),
     ].filter(Boolean)));
 
+    const hasInstanceFinanceLocks = instanceLockRows.some((lock) => lock.lock_source_type === 'payroll_run' || lock.lock_source_type === 'claim_batch');
+    const hasParticipantFinanceLocks = participantRows.some((participant) => participant.locks.some((lock) => lock.lock_source_type === 'payroll_run' || lock.lock_source_type === 'claim_batch'));
     const latestCorrection = latestCorrectionByInstanceId.get(row.id) || null;
     return {
       ...row,
       participants: participantRows,
-      is_locked: Boolean(row.is_closed) || instanceLockRows.length > 0 || participantRows.some((participant) => participant.locks.length > 0),
+      is_locked: hasInstanceFinanceLocks || hasParticipantFinanceLocks,
       hard_blocked_by_paid_claim: paidClaimBatchIds.length > 0,
       paid_claim_batch_ids: paidClaimBatchIds,
       locks: {

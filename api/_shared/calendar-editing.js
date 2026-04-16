@@ -129,22 +129,13 @@ export async function fetchLessonMutationState(tenantClient, options) {
 }
 
 export function respondWithLockedMutation(context, options) {
-  const lockScope = options?.participantLocks?.length ? 'participant' : 'instance';
   const locks = [
     ...(Array.isArray(options?.participantLocks) ? options.participantLocks : []),
     ...(Array.isArray(options?.instanceLocks) ? options.instanceLocks : []),
   ];
-  if (locks.length === 0 && options?.closed) {
-    locks.push({
-      id: null,
-      lock_source_type: 'workflow_closed',
-      lock_source_id: null,
-      lock_reason: 'lesson_instance_closed',
-      metadata: {
-        workflow_closed: true,
-      },
-    });
-  }
+  const lockScope = Array.isArray(options?.participantLocks) && options.participantLocks.length > 0
+    ? 'participant'
+    : 'instance';
 
   return respond(context, 423, {
     message: lockScope === 'participant' ? 'lesson_participant_locked' : 'lesson_instance_locked',
@@ -168,10 +159,11 @@ export function respondWithVersionConflict(context, options) {
 }
 
 export function isLockedState(state) {
+  const isFinanceLock = (lock) => ['payroll_run', 'claim_batch'].includes(normalizeString(lock?.lock_source_type));
+  const hasInstanceFinanceLocks = Array.isArray(state?.instanceLocks) && state.instanceLocks.some(isFinanceLock);
+  const hasParticipantFinanceLocks = Array.isArray(state?.participantLocks) && state.participantLocks.some(isFinanceLock);
   return Boolean(
-    state?.instance?.is_closed
-      || state?.instanceLocks?.length
-      || state?.participantLocks?.length
-      || state?.participant?.locked_at
+    hasInstanceFinanceLocks
+      || hasParticipantFinanceLocks
   );
 }

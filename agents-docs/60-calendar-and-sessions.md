@@ -50,4 +50,5 @@
 - Correction flows may add manual financial adjustments, but the persisted ledger write still goes through `BillingLedgerService`.
 - Templates and date-specific overrides are separate resources; do not collapse them into one model.
 - Cancellation modal uses a server-backed preview action (`PUT /api/calendar/instances` with `action: 'preview-cancel-instance'`) before submitting cancellation, so UI impact text is based on current server state.
+- Lesson `is_closed` is a workflow-state flag and does not hard-lock edits by itself. Hard lock enforcement for mutations uses finance lock sources only (`payroll_run`, `claim_batch`).
 - Pending reports / loose sessions already have shared API wrappers and error mapping.
