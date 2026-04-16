@@ -73,6 +73,50 @@ function normalizeLessonInstanceAuditState(value) {
   };
 }
 
+function resolveParticipantDisplayName(participant) {
+  const student = participant?.student && typeof participant.student === 'object'
+    ? participant.student
+    : null;
+  const profile = participant?.client_profile && typeof participant.client_profile === 'object'
+    ? participant.client_profile
+    : null;
+
+  const firstName = normalizeString(student?.first_name || profile?.first_name);
+  const lastName = normalizeString(student?.last_name || profile?.last_name);
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  return fullName || 'לקוח/ה';
+}
+
+async function buildCancelInstancePreview(tenantClient, { instanceId } = {}) {
+  const { data: rows, error } = await tenantClient
+    .from('lesson_participants')
+    .select('id, participant_status, student:students(first_name,last_name), client_profile:client_profiles(first_name,last_name)')
+    .eq('lesson_instance_id', instanceId);
+
+  if (error) {
+    throw error;
+  }
+
+  const participants = Array.isArray(rows) ? rows : [];
+  const attendedParticipants = participants
+    .filter((participant) => participant?.participant_status === 'attended')
+    .map((participant) => ({
+      id: participant.id,
+      name: resolveParticipantDisplayName(participant),
+    }));
+
+  const scheduledParticipantsCount = participants.filter((participant) => participant?.participant_status === 'scheduled').length;
+  const resolvedParticipantsCount = participants.length - scheduledParticipantsCount;
+
+  return {
+    total_participants: participants.length,
+    scheduled_participants_count: scheduledParticipantsCount,
+    resolved_participants_count: resolvedParticipantsCount,
+    attended_participants: attendedParticipants,
+    can_cancel: attendedParticipants.length === 0,
+  };
+}
+
 function normalizeSchedulingOverrideMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     return { metadata: {}, override: null };
@@ -935,6 +979,7 @@ async function handleCreateInstance(context, body, tenantClient, supabase, authC
 
 async function handleUpdateInstance(context, body, tenantClient, supabase, authContext) {
   const { orgId, userId, userEmail, role, canManageAll, billingService } = authContext;
+  const action = normalizeString(body.action).toLowerCase();
   if (!body.id) {
     return respond(context, 400, { message: 'missing instance id' });
   }
@@ -985,6 +1030,10 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
       return respond(context, 403, { message: 'forbidden: can only update your own lessons' });
     }
 
+    if (action === 'preview-cancel-instance') {
+      return respond(context, 403, { message: 'forbidden: instructors cannot preview instance cancellation' });
+    }
+
     const allowedStatusUpdates = new Set(['completed']);
     const requestedStatus = normalizeLessonInstanceStatus(body.status);
     const hasOtherUpdates = [
@@ -1009,6 +1058,29 @@ async function handleUpdateInstance(context, body, tenantClient, supabase, authC
     }
 
     body.status = requestedStatus;
+  }
+
+  if (action === 'preview-cancel-instance') {
+    if (!canManageAll) {
+      return respond(context, 403, { message: 'forbidden' });
+    }
+
+    try {
+      const preview = await buildCancelInstancePreview(tenantClient, { instanceId: body.id });
+      return respond(context, 200, {
+        action,
+        instance_id: body.id,
+        instance_status: normalizeLessonInstanceStatus(existingInstance.status) || existingInstance.status || 'scheduled',
+        instance_version: existingInstance.version,
+        preview,
+      });
+    } catch (previewError) {
+      context.log?.error?.('calendar/instances failed to build cancellation preview', {
+        message: previewError?.message,
+        instanceId: body.id,
+      });
+      return respond(context, 500, { message: 'failed_to_build_status_change_preview' });
+    }
   }
 
   if (body.status !== undefined) {

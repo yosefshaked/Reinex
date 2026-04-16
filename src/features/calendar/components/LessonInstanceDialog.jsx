@@ -476,9 +476,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [restorePreview, setRestorePreview] = useState(null);
   const [restorePreviewError, setRestorePreviewError] = useState('');
   const [restorePreviewLoading, setRestorePreviewLoading] = useState(false);
+  const [cancelPreview, setCancelPreview] = useState(null);
+  const [cancelPreviewError, setCancelPreviewError] = useState('');
+  const [cancelPreviewLoading, setCancelPreviewLoading] = useState(false);
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
   const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
   const latestPreviewRequestIdRef = useRef(0);
+  const latestCancelPreviewRequestIdRef = useRef(0);
   const latestStudentSearchRequestIdRef = useRef(0);
   
   const [formData, setFormData] = useState({
@@ -533,7 +537,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setRestorePreview(null);
     setRestorePreviewError('');
     setRestorePreviewLoading(false);
+    setCancelDialogOpen(false);
+    setCancelPreview(null);
+    setCancelPreviewError('');
+    setCancelPreviewLoading(false);
     latestPreviewRequestIdRef.current += 1;
+    latestCancelPreviewRequestIdRef.current += 1;
     latestStudentSearchRequestIdRef.current += 1;
   }, [instance?.id, instance?.latest_correction?.id]);
 
@@ -1139,7 +1148,56 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     }
   }
 
+  async function openCancelPreview() {
+    if (!org?.id || !instance?.id) return;
+    const requestId = latestCancelPreviewRequestIdRef.current + 1;
+    latestCancelPreviewRequestIdRef.current = requestId;
+    setCancelPreviewLoading(true);
+    setCancelPreviewError('');
+    setError(null);
+
+    try {
+      const result = await authenticatedFetch('calendar/instances', {
+        method: 'PUT',
+        body: {
+          action: 'preview-cancel-instance',
+          id: instance.id,
+          org_id: org.id,
+          expected_version: instance.version,
+        },
+      });
+      if (requestId !== latestCancelPreviewRequestIdRef.current) {
+        return;
+      }
+      setCancelPreview(result?.preview || null);
+      setCancelPreviewError('');
+    } catch (err) {
+      if (requestId !== latestCancelPreviewRequestIdRef.current) {
+        return;
+      }
+      console.error('Error building cancel preview:', err);
+      const resolvedError = resolveMutationError(err) || 'טעינת תצוגת ההשפעה לביטול נכשלה.';
+      setCancelPreview(null);
+      setCancelPreviewError(resolvedError);
+      setError(resolvedError);
+    } finally {
+      if (requestId === latestCancelPreviewRequestIdRef.current) {
+        setCancelPreviewLoading(false);
+      }
+    }
+  }
+
   async function handleCancelSelection(status) {
+    if (cancelPreviewLoading) {
+      return;
+    }
+    if (!cancelPreview) {
+      await openCancelPreview();
+      return;
+    }
+    if (cancelPreview.can_cancel === false) {
+      return;
+    }
     setCancelDialogOpen(false);
     await handleCancel(status);
   }
@@ -1467,6 +1525,16 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const attendedParticipantNames = attendedParticipants
     .map((participant) => getParticipantDisplayName(participant, 'לקוח/ה'))
     .filter(Boolean);
+  const cancelPreviewScheduledCount = typeof cancelPreview?.scheduled_participants_count === 'number'
+    ? cancelPreview.scheduled_participants_count
+    : scheduledParticipantsCount;
+  const cancelPreviewResolvedCount = typeof cancelPreview?.resolved_participants_count === 'number'
+    ? cancelPreview.resolved_participants_count
+    : resolvedParticipantsCount;
+  const cancelPreviewAttendedNames = Array.isArray(cancelPreview?.attended_participants)
+    ? cancelPreview.attended_participants.map((participant) => participant?.name).filter(Boolean)
+    : attendedParticipantNames;
+  const cancelPreviewBlocked = cancelPreview?.can_cancel === false;
   // Block completing an instance when at least one participant still has no resolved attendance status.
   // An instance with zero participants is exempt (e.g. template-generated shells before enrolment).
   const hasUnsetParticipants =
@@ -2448,7 +2516,20 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           </div>
         )}
       </DialogContent>
-      <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+      <Dialog
+        open={cancelDialogOpen}
+        onOpenChange={(openValue) => {
+          setCancelDialogOpen(openValue);
+          if (!openValue) {
+            latestCancelPreviewRequestIdRef.current += 1;
+            setCancelPreview(null);
+            setCancelPreviewError('');
+            setCancelPreviewLoading(false);
+            return;
+          }
+          void openCancelPreview();
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>ביטול שיעור</DialogTitle>
@@ -2457,23 +2538,36 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {attendedParticipants.length > 0 ? (
+            {cancelPreviewLoading && (
+              <Alert>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <AlertDescription>טוען תצוגה מקדימה עדכנית מהשרת...</AlertDescription>
+              </Alert>
+            )}
+            {cancelPreviewError && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>{cancelPreviewError}</AlertDescription>
+              </Alert>
+            )}
+            {!cancelPreviewLoading && !cancelPreviewError && cancelPreviewBlocked ? (
               <Alert variant="destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <AlertDescription>
-                  לא ניתן לבטל שיעור שבו כבר סומנה נוכחות. יש להסדיר קודם את: {attendedParticipantNames.join(', ')}.
+                  לא ניתן לבטל שיעור שבו כבר סומנה נוכחות. יש להסדיר קודם את: {cancelPreviewAttendedNames.join(', ')}.
                 </AlertDescription>
               </Alert>
-            ) : (
+            ) : null}
+            {!cancelPreviewLoading && !cancelPreviewError && !cancelPreviewBlocked ? (
               <Alert>
                 <AlertTriangle className="h-4 w-4" />
                 <AlertDescription>
-                  {scheduledParticipantsCount > 0
-                    ? `${scheduledParticipantsCount} משתתפים/ות שעדיין במצב מתוכנן יסומנו כ-"בוטל ע"י המרפאה". ${resolvedParticipantsCount > 0 ? `${resolvedParticipantsCount} משתתפים/ות שכבר הוכרעו יישארו ללא שינוי.` : ''}`
+                  {cancelPreviewScheduledCount > 0
+                    ? `${cancelPreviewScheduledCount} משתתפים/ות שעדיין במצב מתוכנן יסומנו כ-"בוטל ע"י המרפאה". ${cancelPreviewResolvedCount > 0 ? `${cancelPreviewResolvedCount} משתתפים/ות שכבר הוכרעו יישארו ללא שינוי.` : ''}`
                     : 'לשיעור הזה אין משתתפים במצב מתוכנן, ולכן הפעולה תעדכן רק את סטטוס השיעור עצמו.'}
                 </AlertDescription>
               </Alert>
-            )}
+            ) : null}
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
               <div className="font-medium text-slate-900">השפעת מדיניות הארגון</div>
               <ul className="mt-3 space-y-2">
@@ -2491,14 +2585,14 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setCancelDialogOpen(false)} disabled={isSaving}>
+            <Button type="button" variant="outline" onClick={() => setCancelDialogOpen(false)} disabled={isSaving || cancelPreviewLoading}>
               חזרה
             </Button>
             <Button
               type="button"
               variant="destructive"
               onClick={() => handleCancelSelection('cancelled')}
-              disabled={isSaving || attendedParticipants.length > 0}
+              disabled={isSaving || cancelPreviewLoading || Boolean(cancelPreviewError) || cancelPreviewBlocked}
             >
               בטל שיעור
             </Button>

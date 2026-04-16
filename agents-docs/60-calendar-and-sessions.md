@@ -49,4 +49,5 @@
 - Attendance changes, lesson edits, and HMO authorization changes are coupled to ledger resync. Skipping the ledger service will create billing drift even if the lesson mutation succeeds.
 - Correction flows may add manual financial adjustments, but the persisted ledger write still goes through `BillingLedgerService`.
 - Templates and date-specific overrides are separate resources; do not collapse them into one model.
+- Cancellation modal uses a server-backed preview action (`PUT /api/calendar/instances` with `action: 'preview-cancel-instance'`) before submitting cancellation, so UI impact text is based on current server state.
 - Pending reports / loose sessions already have shared API wrappers and error mapping.
