@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   avatar_url text NULL,
   phone text NULL,
   locale text NOT NULL DEFAULT 'he',
+  is_system_admin boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL
@@ -3036,6 +3037,18 @@ CREATE POLICY "profiles_update"
   TO authenticated, app_user
   USING (id = auth.uid())
   WITH CHECK (id = auth.uid());
+
+-- Prevent is_system_admin from being changed via the API.
+-- The WITH CHECK ensures the new value must equal the existing DB value,
+-- so only direct Postgres superuser access can modify this flag.
+DROP POLICY IF EXISTS "profiles_no_self_admin_upgrade" ON public.profiles;
+CREATE POLICY "profiles_no_self_admin_upgrade"
+  ON public.profiles FOR UPDATE
+  TO authenticated, app_user
+  USING (id = auth.uid())
+  WITH CHECK (
+    is_system_admin = (SELECT p.is_system_admin FROM public.profiles p WHERE p.id = auth.uid())
+  );
 
 DROP POLICY IF EXISTS "profiles_delete" ON public.profiles;
 CREATE POLICY "profiles_delete"

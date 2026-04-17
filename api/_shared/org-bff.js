@@ -101,6 +101,121 @@ export async function ensureMembership(supabase, orgId, userId) {
 }
 
 // ---------------------------------------------------------------------------
+// System Admin Guard (MFA + is_system_admin flag)
+// ---------------------------------------------------------------------------
+
+/**
+ * Decodes a JWT payload without signature verification.
+ * Signature trust is established by the preceding `supabase.auth.getUser(token)` call.
+ * @param {string} token
+ * @returns {Record<string, unknown> | null}
+ */
+function decodeJwtPayload(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = Buffer.from(parts[1], 'base64url').toString('utf8');
+    return JSON.parse(payload);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Verifies that the request comes from a system admin with MFA (AAL2).
+ *
+ * Checks (in order):
+ * 1. Valid Bearer token → `supabase.auth.getUser()` (server-side verification).
+ * 2. JWT `aal` claim must be `aal2` (TOTP/MFA completed).
+ * 3. `profiles.is_system_admin` must be `true` (set only via direct DB access).
+ *
+ * On failure a structured error is thrown (callers should catch and respond 403).
+ * Every attempt (success or failure) is logged to `audit_log`.
+ *
+ * @param {import('express').Request} req  - Azure Function HTTP request
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase - service_role client
+ * @param {{ token: string }} authorization - result of resolveBearerAuthorization(req)
+ * @param {object} [options]
+ * @param {object} [options.context] - Azure Function context (for context.log)
+ * @returns {Promise<{ userId: string, email: string }>}
+ */
+export async function ensureSystemAdmin(req, supabase, authorization, options = {}) {
+  const { context } = options;
+  const token = authorization?.token;
+
+  if (!token) {
+    throw Object.assign(new Error('missing_bearer_token'), { statusCode: 401 });
+  }
+
+  // 1. Verify token server-side
+  let user;
+  try {
+    const result = await supabase.auth.getUser(token);
+    if (result.error || !result.data?.user?.id) {
+      throw new Error('invalid_token');
+    }
+    user = result.data.user;
+  } catch {
+    await logAdminAttempt(supabase, { userId: null, success: false, reason: 'invalid_token', context });
+    throw Object.assign(new Error('invalid_or_expired_token'), { statusCode: 401 });
+  }
+
+  const userId = user.id;
+  const email = user.email || '';
+
+  // 2. Check AAL2 (MFA/TOTP verified)
+  const jwtPayload = decodeJwtPayload(token);
+  const aal = jwtPayload?.aal || 'aal1';
+
+  if (aal !== 'aal2') {
+    await logAdminAttempt(supabase, { userId, email, success: false, reason: 'mfa_required', context });
+    throw Object.assign(new Error('mfa_required'), { statusCode: 403 });
+  }
+
+  // 3. Verify is_system_admin flag in profiles (service_role bypasses RLS)
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('is_system_admin')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (profileError) {
+    context?.log?.error?.('ensureSystemAdmin: profile lookup failed', { message: profileError.message, userId });
+    await logAdminAttempt(supabase, { userId, email, success: false, reason: 'profile_lookup_error', context });
+    throw Object.assign(new Error('authorization_check_failed'), { statusCode: 500 });
+  }
+
+  if (!profile?.is_system_admin) {
+    await logAdminAttempt(supabase, { userId, email, success: false, reason: 'not_system_admin', context });
+    throw Object.assign(new Error('forbidden'), { statusCode: 403 });
+  }
+
+  // All checks passed
+  await logAdminAttempt(supabase, { userId, email, success: true, reason: null, context });
+  return { userId, email };
+}
+
+/**
+ * Writes a system-admin access attempt to audit_log.
+ * Failures are swallowed (audit logging must not break the auth flow).
+ */
+async function logAdminAttempt(supabase, { userId, email, success, reason, context }) {
+  try {
+    await supabase.from('audit_log').insert({
+      actor_user_id: userId || null,
+      actor_email: email || null,
+      event_type: success ? 'system_admin.access_granted' : 'system_admin.access_denied',
+      action_category: 'security',
+      retention_category: 'critical',
+      resource_type: 'system_admin',
+      details: reason ? { reason } : null,
+    });
+  } catch (err) {
+    context?.log?.warn?.('ensureSystemAdmin: audit log insert failed', { message: err?.message });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Single-DB Client (replaces the BYOD dual-client pattern)
 // ---------------------------------------------------------------------------
 

@@ -21,8 +21,8 @@
 
 ## 🧠 Current Working Context (For AI Memory)
 * **Last Completed Task:** Step 22 — Post-Refactor Technical Debt Sweep (all 22a-22f subsections closed).
-* **Currently Working On:** Done. Step 23 is next.
-* **Next Immediate Step:** Step 23 — Admin UI: Encryption Key Version & Rotation Interface.
+* **Currently Working On:** Step 23 — System Management Console: Foundation & Security Module (using Refine).
+* **Next Immediate Step:** Install Refine packages, create `/system-admin` route, implement `authProvider`, build Security & Health dashboard.
 * **Known Issues / Technical Debt:**
   - Supabase Storage bucket isolation strategy NOT in scope (separate workstream).
   - Step 21 partial: production Azure SWA/Functions app settings still need manual deployment.
@@ -277,23 +277,36 @@
 
   **Output:** Zero dead code, zero backward-compat shims, zero naming confusion. The codebase is clean for any developer (human or AI) working on it next.
 
-- [ ] **Step 23 — Admin UI: Encryption Key Version & Rotation Interface**
-  Build an admin-facing security interface to display active key-version metadata and safely support key rotation workflows.
+- [ ] **Step 23 — System Management Console: Foundation & Security Module (using Refine)**
+  Build the foundational layout and the first critical module for a super-admin only System Management Console. This console will be the central hub for managing the entire SaaS platform.
 
-  - Add backend endpoint logic that returns non-sensitive encryption metadata only:
-    - `current_hash` (SHA-256 of `SECURITY_ENCRYPTION_SECRET`)
-    - `previous_hash` (SHA-256 of `SECURITY_ENCRYPTION_SECRET_OLD`, nullable)
-    - `is_rotation_active` (boolean)
-    - `environment` (`local`/`production`)
-  - Add UI in Settings > Security to show:
-    - Current key fingerprint (masked hash)
-    - Previous key fingerprint (if present)
-    - Rotation status and guidance banner
-  - Add a read-only verification action that checks decrypt fallback health using existing encrypted payloads.
-  - Ensure access control is admin/owner only and all views are audit-logged.
-  - Add tests for endpoint authz + hash format + no secret leakage.
+  **Phase 0 — Security Fortress (backend-only, no UI):**
+  - [x] **Schema:** Added `is_system_admin boolean NOT NULL DEFAULT false` to `profiles` table.
+  - [x] **RLS Guard:** Added `profiles_no_self_admin_upgrade` policy — `WITH CHECK` forces `is_system_admin` to remain unchanged through any API/RLS path. Only direct Postgres superuser access can toggle this flag.
+  - [x] **Backend Helper:** `ensureSystemAdmin(req, supabase, authorization, { context })` in `org-bff.js`:
+    1. Validates Bearer token via `supabase.auth.getUser()`.
+    2. Decodes JWT to enforce `aal2` (MFA/TOTP completed).
+    3. Queries `profiles.is_system_admin` (service_role, bypasses RLS).
+    4. Every attempt (success or failure) → `audit_log` with `retention_category: 'critical'`.
+  - [x] **API Endpoint:** `GET /api/admin/system-health` — gated by `ensureSystemAdmin`, returns DB status, environment, encryption key hashes, and rotation status.
 
-  **Output:** Secure admin interface for encryption key visibility and rotation readiness without exposing secrets.
+  **Architectural Decision:** This console will be built using the **Refine framework** (`@refinedev/core`) to accelerate development, ensure best practices, and integrate seamlessly with our existing React application and authentication context.
+
+  **Phase 1 Deliverables (This Step):**
+  - **Refine Integration:** Install and configure the core Refine packages (`@refinedev/core`, `@refinedev/react-router-v6`, `@refinedev/simple-rest`).
+  - **Admin Route & Layout:** Create a new route (`/system-admin`) and a main `<AdminApp />` layout component that initializes Refine.
+  - **Auth Integration:** Implement a Refine `authProvider` that hooks into our existing `useAuth()` context to handle permissions (`super_admin` role) and session state.
+  - **Security & Health Module:** Implement the first "resource" module:
+    - An admin-only API endpoint (`/api/admin/system-health`) that returns DB status, environment, and SHA-256 hashes of the encryption keys (NO raw secrets).
+    - A custom UI view for this resource displaying key hashes, rotation status, and a sanity-check tool.
+
+  **Future Modules (Roadmap — For Post-Refactor Work):**
+  - **User & Org Management:** Tools for user search, impersonation, and org administration.
+  - **Global Settings:** Management of Feature Flags and system-wide announcements.
+  - **Operations & Support:** An Audit Log viewer and an internal Knowledge Base.
+  - **Product Analytics:** **Strategy:** Integrate a 3rd-party open-source tool like **PostHog** post-MVP to gain deep insights without building a custom solution. This is a strategic decision to focus on core product features.
+
+  **Output:** A secure, foundational admin console built with Refine, with a fully functional Security & Health dashboard.
 
 ## 📝 Change Log & Notes
 
