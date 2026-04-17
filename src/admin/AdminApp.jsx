@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { Refine } from '@refinedev/core';
-import routerProvider from '@refinedev/react-router-v6/legacy';
+import routerProvider from '@refinedev/react-router';
 import dataProvider from '@refinedev/simple-rest';
 import { adminAuthProvider } from './authProvider.js';
 import MfaPage from './MfaPage.jsx';
