@@ -1295,6 +1295,7 @@ CREATE INDEX IF NOT EXISTS finance_corrections_employee_date_idx
 
 CREATE TABLE IF NOT EXISTS public.instructor_profiles (
   employee_id uuid PRIMARY KEY,
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
   break_time_minutes int NULL,
   metadata jsonb NULL
 );

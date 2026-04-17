@@ -14,6 +14,8 @@ const RULES = {
   UNIQUE_GUARD: 'SQL007',
   APP_USER_ROLE: 'SQL008',
   PUBLIC_SCHEMA_USAGE: 'SQL009',
+  ORG_ID_COLUMN: 'SQL010',
+  GET_ACTIVE_ORG_ID: 'SQL011',
   BROAD_EXCEPTION_SWALLOW: 'SQL101',
   DESTRUCTIVE_DROP_TABLE: 'SQL102',
 };
@@ -131,6 +133,18 @@ function extractArrayTableNames() {
   return unique(names);
 }
 
+// These control-DB tables have hand-written RLS policies and are intentionally
+// excluded from the generated tenant RLS policy loop (SQL006).
+const TABLES_WITH_CUSTOM_RLS = new Set([
+  'organizations',
+  'profiles',
+  'org_memberships',
+  'org_invitations',
+  'permission_registry',
+  'active_routing',
+  'audit_log',
+]);
+
 function validatePresenceCoverage() {
   const createdTables = collectMatches(/CREATE TABLE IF NOT EXISTS\s+public\.("?[\w]+"?)/g, (match) => normalizeIdentifier(match[1]));
   const rlsTables = collectMatches(/ALTER TABLE\s+public\.("?[\w]+"?)\s+ENABLE ROW LEVEL SECURITY;/g, (match) => normalizeIdentifier(match[1]));
@@ -149,7 +163,7 @@ function validatePresenceCoverage() {
       addError(RULES.TABLE_GRANT_COVERAGE, `Table "${tableName}" is missing GRANT ALL ... TO app_user coverage.`, position);
     }
 
-    if (!policyTables.includes(tableName)) {
+    if (!policyTables.includes(tableName) && !TABLES_WITH_CUSTOM_RLS.has(tableName)) {
       addError(RULES.TABLE_POLICY_COVERAGE, `Table "${tableName}" is missing from the generated RLS policy loop.`, position);
     }
   }
@@ -228,6 +242,42 @@ function validateRlsEngineering() {
   const schemaUsageMatch = sql.match(/GRANT USAGE ON SCHEMA public TO app_user;/i);
   if (!schemaUsageMatch) {
     addError(RULES.PUBLIC_SCHEMA_USAGE, 'The setup SQL is missing GRANT USAGE ON SCHEMA public TO app_user.');
+  }
+
+  // SQL011: The get_active_org_id() function powers all tenant RLS policies.
+  // If it is missing the entire tenant isolation model silently breaks.
+  if (!sql.match(/CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.get_active_org_id\s*\(/i)) {
+    addError(RULES.GET_ACTIVE_ORG_ID, 'get_active_org_id() function is not defined. All tenant RLS policies depend on it.');
+  }
+}
+
+// SQL010: Every table enrolled in the tenant RLS policy loop must declare an
+// org_id column so the generated policies can filter by it.
+function validateOrgIdOnTenantTables() {
+  const policyTables = extractArrayTableNames();
+
+  for (const tableName of policyTables) {
+    const escapedName = tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Match both quoted (e.g. public."Employees") and unquoted forms.
+    const headerRegex = new RegExp(
+      `CREATE TABLE IF NOT EXISTS\\s+public\\.(?:"${escapedName}"|${escapedName})\\s*\\(`,
+      'i',
+    );
+    const headerMatch = sql.match(headerRegex);
+    if (!headerMatch) continue; // SQL006 already errors when the CREATE TABLE is absent.
+
+    const startIdx = headerMatch.index + headerMatch[0].length;
+    // Find the closing ");" of this CREATE TABLE block.
+    const closingIdx = sql.indexOf(');', startIdx);
+    const block = closingIdx !== -1 ? sql.slice(startIdx, closingIdx) : sql.slice(startIdx, startIdx + 4000);
+
+    if (!/\borg_id\b/.test(block)) {
+      addError(
+        RULES.ORG_ID_COLUMN,
+        `Tenant table "${tableName}" is in the RLS policy loop but its CREATE TABLE block has no "org_id" column. Every tenant table must include org_id for row-level isolation.`,
+        offsetToPosition(headerMatch.index),
+      );
+    }
   }
 }
 
@@ -388,6 +438,7 @@ function main() {
     validateCreateStatements();
     validateUniqueConstraintGuards();
     validateRlsEngineering();
+    validateOrgIdOnTenantTables();
     validateWarnings();
   }
 
