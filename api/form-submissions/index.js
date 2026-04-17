@@ -11,7 +11,7 @@ import {
   parseRequestBody,
   readEnv,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
   respond,
 } from '../_shared/org-bff.js';
 import { sendBrevoEmail } from '../_shared/brevo.js';
@@ -29,11 +29,6 @@ import {
   resolvePublicFormState,
   resolveSchemaWithSharedBlocks,
 } from '../_shared/forms-runtime.js';
-import {
-  findClientProfileById,
-  resolveClientProfileDestination,
-} from '../_shared/client-profiles.js';
-
 const OTP_DIGITS = 6;
 const OTP_TTL_MINUTES = 15;
 const ROUTING_CATEGORY = 'form_submission';
@@ -284,13 +279,12 @@ function resolveClientIp(req) {
   return '';
 }
 
-async function resolveSubmissionSubject(tenantClient, { clientProfileId, studentId }) {
+async function resolveSubmissionSubject(client, orgId, { clientProfileId, studentId }) {
   let profile = null;
   let student = null;
 
   if (UUID_PATTERN.test(String(studentId || ''))) {
-    const { data, error } = await tenantClient
-      .from('students')
+    const { data, error } = await withOrgScope(client, 'students', orgId)
       .select('id, client_profile_id')
       .eq('id', studentId)
       .maybeSingle();
@@ -304,7 +298,10 @@ async function resolveSubmissionSubject(tenantClient, { clientProfileId, student
   }
 
   if (UUID_PATTERN.test(String(clientProfileId || ''))) {
-    const { data, error } = await findClientProfileById(tenantClient, clientProfileId);
+    const { data, error } = await withOrgScope(client, 'client_profiles', orgId)
+      .select('*')
+      .eq('id', clientProfileId)
+      .maybeSingle();
     if (error) {
       return { clientProfileId: null, studentId: null, profile: null, student: null, identityNumber: '', error };
     }
@@ -312,8 +309,7 @@ async function resolveSubmissionSubject(tenantClient, { clientProfileId, student
   }
 
   if (!student && profile?.id) {
-    const { data, error } = await tenantClient
-      .from('students')
+    const { data, error } = await withOrgScope(client, 'students', orgId)
       .select('id, client_profile_id')
       .eq('client_profile_id', profile.id)
       .maybeSingle();
@@ -333,15 +329,14 @@ async function resolveSubmissionSubject(tenantClient, { clientProfileId, student
   };
 }
 
-async function resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, options = {}) {
+async function resolvePublicFormStateWithSharedBlocks(client, orgId, formRecord, options = {}) {
   const initialState = resolvePublicFormState(formRecord, { ...options, sharedBlocksById: {} });
   const blockIds = collectSharedBlockIds(initialState.raw_form_schema || initialState.form_schema);
   if (!blockIds.length) {
     return initialState;
   }
 
-  const { data, error } = await tenantClient
-    .from('shared_form_blocks')
+  const { data, error } = await withOrgScope(client, 'shared_form_blocks', orgId)
     .select('id, block_type, name, content_schema, is_active, metadata')
     .eq('is_active', true)
     .in('id', blockIds);
@@ -369,14 +364,43 @@ function isPublishedFormRecord(form) {
   return hasPublishedSchema;
 }
 
-async function resolveSubmissionDestination(tenantClient, clientProfileId, deliveryMethod) {
+async function resolveSubmissionDestination(client, orgId, clientProfileId, deliveryMethod) {
   if (!UUID_PATTERN.test(String(clientProfileId || ''))) {
     return '';
   }
-  const value = await resolveClientProfileDestination(tenantClient, clientProfileId, deliveryMethod);
-  return deliveryMethod === 'whatsapp'
-    ? normalizePhone(value)
-    : normalizeString(value).toLowerCase();
+
+  const { data: clientProfile, error: profileError } = await withOrgScope(client, 'client_profiles', orgId)
+    .select('id, phone, email')
+    .eq('id', clientProfileId)
+    .maybeSingle();
+
+  if (profileError) throw profileError;
+  if (!clientProfile) return '';
+
+  const { data: guardianLink, error: guardianLinkError } = await withOrgScope(client, 'client_profile_guardians', orgId)
+    .select('guardian_id, is_primary')
+    .eq('client_profile_id', clientProfileId)
+    .order('is_primary', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (guardianLinkError) throw guardianLinkError;
+
+  let guardian = null;
+  if (guardianLink?.guardian_id) {
+    const { data: guardianRow, error: guardianError } = await withOrgScope(client, 'guardians', orgId)
+      .select('id, phone, email')
+      .eq('id', guardianLink.guardian_id)
+      .maybeSingle();
+    if (guardianError) throw guardianError;
+    guardian = guardianRow || null;
+  }
+
+  if (deliveryMethod === 'whatsapp') {
+    return normalizePhone(clientProfile.phone) || normalizePhone(guardian?.phone);
+  }
+
+  return normalizeString(clientProfile.email || guardian?.email).toLowerCase();
 }
 
 function withOtpSubjectFilter(query, { clientProfileId, studentId }) {
@@ -389,13 +413,12 @@ function withOtpSubjectFilter(query, { clientProfileId, studentId }) {
   return query.eq('id', '__no_match__');
 }
 
-async function findTenantOtpChallenge(tenantClient, { clientProfileId, studentId, submissionId, otp }) {
+async function findTenantOtpChallenge(client, orgId, { clientProfileId, studentId, submissionId, otp }) {
   const tokenHash = hashOtp(otp);
   const nowIso = getNowIso();
 
   const { data, error } = await withOtpSubjectFilter(
-    tenantClient
-    .from('otp_challenges')
+    withOrgScope(client, 'otp_challenges', orgId)
     .select('id, status, expires_at, metadata')
     .eq('token_hash', tokenHash)
     .in('status', ['pending', 'verified'])
@@ -411,13 +434,12 @@ async function findTenantOtpChallenge(tenantClient, { clientProfileId, studentId
   return rows.find((row) => String(row?.metadata?.submission_id || '') === submissionId) || null;
 }
 
-async function findTenantPendingOtpChallenge(tenantClient, { clientProfileId, studentId, submissionId, otp }) {
+async function findTenantPendingOtpChallenge(client, orgId, { clientProfileId, studentId, submissionId, otp }) {
   const tokenHash = hashOtp(otp);
   const nowIso = getNowIso();
 
   const { data, error } = await withOtpSubjectFilter(
-    tenantClient
-    .from('otp_challenges')
+    withOrgScope(client, 'otp_challenges', orgId)
     .select('id, status, expires_at, metadata')
     .eq('token_hash', tokenHash)
     .eq('status', 'pending')
@@ -448,7 +470,7 @@ async function findActiveRoutingRowsBySubmission(controlClient, submissionId) {
   return Array.isArray(data) ? data : [];
 }
 
-async function findReusableSubmissionAccess(tenantClient, controlClient, { orgId, clientProfileId, studentId, submissionId }) {
+async function findReusableSubmissionAccess(client, controlClient, { orgId, clientProfileId, studentId, submissionId }) {
   const routingRows = await findActiveRoutingRowsBySubmission(controlClient, submissionId);
 
   for (const routingRow of routingRows) {
@@ -461,7 +483,7 @@ async function findReusableSubmissionAccess(tenantClient, controlClient, { orgId
       continue;
     }
 
-    const otpChallenge = await findTenantPendingOtpChallenge(tenantClient, {
+    const otpChallenge = await findTenantPendingOtpChallenge(client, orgId, {
       clientProfileId,
       studentId,
       submissionId,
@@ -483,10 +505,9 @@ async function findReusableSubmissionAccess(tenantClient, controlClient, { orgId
   return null;
 }
 
-async function expirePendingOtps(tenantClient, controlClient, logger) {
+async function expirePendingOtps(client, orgId, controlClient, logger) {
   const nowIso = getNowIso();
-  const { data: expiredRows, error: expireError } = await tenantClient
-    .from('otp_challenges')
+  const { data: expiredRows, error: expireError } = await withOrgScope(client, 'otp_challenges', orgId)
     .update({ status: 'expired' })
     .eq('status', 'pending')
     .lt('expires_at', nowIso)
@@ -505,8 +526,7 @@ async function expirePendingOtps(tenantClient, controlClient, logger) {
   );
 
   if (submissionIds.length) {
-    const { data: submissions, error: submissionsError } = await tenantClient
-      .from('form_submissions')
+    const { data: submissions, error: submissionsError } = await withOrgScope(client, 'form_submissions', orgId)
       .select('id, otp_metadata, metadata')
       .in('id', submissionIds);
 
@@ -520,8 +540,7 @@ async function expirePendingOtps(tenantClient, controlClient, logger) {
         return;
       }
 
-      const { error: updateError } = await tenantClient
-        .from('form_submissions')
+      const { error: updateError } = await withOrgScope(client, 'form_submissions', orgId)
         .update({
           otp_metadata: {
             ...currentOtpMetadata,
@@ -691,7 +710,7 @@ async function deleteActiveRoutingRowsByIdentity(controlClient, identityNumber) 
   if (error) throw error;
 }
 
-async function cancelPendingOtpsForLockdown(context, controlClient, env, routingRows) {
+async function cancelPendingOtpsForLockdown(context, controlClient, routingRows) {
   const targetsByOrg = new Map();
 
   for (const row of routingRows || []) {
@@ -707,17 +726,7 @@ async function cancelPendingOtpsForLockdown(context, controlClient, env, routing
   }
 
   for (const [orgId, clientProfileIds] of targetsByOrg.entries()) {
-    const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-    if (tenantError) {
-      context.log?.warn?.('form-submissions lockdown failed resolving tenant client', {
-        orgId,
-        status: tenantError.status,
-      });
-      continue;
-    }
-
-    const { error } = await tenantClient
-      .from('otp_challenges')
+    const { error } = await withOrgScope(controlClient, 'otp_challenges', orgId)
       .update({ status: 'cancelled' })
       .in('client_profile_id', Array.from(clientProfileIds))
       .eq('status', 'pending');
@@ -731,7 +740,7 @@ async function cancelPendingOtpsForLockdown(context, controlClient, env, routing
   }
 }
 
-async function processFailedVerifyAttempt(context, { controlClient, env, identityNumber, ipAddress }) {
+async function processFailedVerifyAttempt(context, { controlClient, identityNumber, ipAddress }) {
   const result = await appendFailedAttemptToActiveRoutes(controlClient, identityNumber, ipAddress);
 
   if (!result.shouldLockDown) {
@@ -739,7 +748,7 @@ async function processFailedVerifyAttempt(context, { controlClient, env, identit
   }
 
   await deleteActiveRoutingRowsByIdentity(controlClient, identityNumber);
-  await cancelPendingOtpsForLockdown(context, controlClient, env, result.routingRows);
+  await cancelPendingOtpsForLockdown(context, controlClient, result.routingRows);
 
   return { shouldLockDown: true };
 }
@@ -831,7 +840,7 @@ async function sendSubmissionDelivery(context, {
 }
 
 async function createSubmissionAccessArtifacts({
-  tenantClient,
+  client,
   controlClient,
   orgId,
   userId,
@@ -847,8 +856,7 @@ async function createSubmissionAccessArtifacts({
   const otpCode = generateOtp();
   const expiresAt = getFutureIso(ttlMinutes);
 
-  const { error: otpError } = await tenantClient
-    .from('otp_challenges')
+  const { error: otpError } = await withOrgScope(client, 'otp_challenges', orgId)
     .insert({
       client_profile_id: clientProfileId,
       student_id: studentId,
@@ -897,13 +905,12 @@ async function createSubmissionAccessArtifacts({
   return { otpCode, expiresAt };
 }
 
-async function fetchStudentIdsByInstructor(tenantClient, instructorEmployeeId) {
+async function fetchStudentIdsByInstructor(client, orgId, instructorEmployeeId) {
   if (!instructorEmployeeId) {
     return { studentIds: [], error: null };
   }
 
-  const { data, error } = await tenantClient
-    .from('lesson_templates')
+  const { data, error } = await withOrgScope(client, 'lesson_templates', orgId)
     .select('student_id')
     .eq('instructor_employee_id', instructorEmployeeId)
     .eq('is_active', true);
@@ -926,11 +933,8 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
     return respond(context, 400, { message: 'invalid_client_profile_or_student_id' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) return respond(context, tenantError.status, tenantError.body);
-
   try {
-    await expirePendingOtps(tenantClient, controlClient, context.log);
+    await expirePendingOtps(controlClient, orgId, controlClient, context.log);
   } catch (cleanupError) {
     context.log?.error?.('form-submissions failed cleanup before listing submissions', {
       message: cleanupError?.message,
@@ -943,8 +947,7 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
   let clientProfileId = UUID_PATTERN.test(requestedClientProfileId) ? requestedClientProfileId : '';
 
   if (studentId && !clientProfileId) {
-    const { data: student, error: studentError } = await tenantClient
-      .from('students')
+    const { data: student, error: studentError } = await withOrgScope(controlClient, 'students', orgId)
       .select('id, client_profile_id')
       .eq('id', studentId)
       .maybeSingle();
@@ -959,7 +962,7 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
   }
 
   if (!canManageRoster) {
-    const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(tenantClient, userId);
+    const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(controlClient, orgId, userId);
     if (lessonError) {
       context.log?.error?.('form-submissions failed to resolve instructor student access', {
         message: lessonError?.message,
@@ -972,8 +975,7 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
     }
   }
 
-  let submissionsQuery = tenantClient
-    .from('form_submissions')
+  let submissionsQuery = withOrgScope(controlClient, 'form_submissions', orgId)
     .select('id, form_id, client_profile_id, student_id, answers, alert_flags, otp_metadata, source, submitted_at, metadata')
     .order('submitted_at', { ascending: false })
     .limit(limit);
@@ -1000,8 +1002,7 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
 
   let formsById = new Map();
   if (formIds.length > 0) {
-    const { data: forms, error: formsError } = await tenantClient
-      .from('forms')
+    const { data: forms, error: formsError } = await withOrgScope(controlClient, 'forms', orgId)
       .select('id, name')
       .in('id', formIds);
 
@@ -1062,16 +1063,12 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
   }
   if (!deliveryMethod) return respond(context, 400, { message: 'invalid_delivery_method' });
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) return respond(context, tenantError.status, tenantError.body);
-
   const [{ data: form, error: formError }, subject] = await Promise.all([
-    tenantClient
-      .from('forms')
+    withOrgScope(controlClient, 'forms', orgId)
       .select('id, name, is_active, form_schema, metadata, published_at')
       .eq('id', formId)
       .maybeSingle(),
-    resolveSubmissionSubject(tenantClient, {
+    resolveSubmissionSubject(controlClient, orgId, {
       clientProfileId: requestedClientProfileId,
       studentId: requestedStudentId,
     }),
@@ -1104,7 +1101,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
 
   let destination = '';
   try {
-    destination = await resolveSubmissionDestination(tenantClient, subject.clientProfileId, deliveryMethod);
+    destination = await resolveSubmissionDestination(controlClient, orgId, subject.clientProfileId, deliveryMethod);
     if (!destination) {
       return respond(context, 400, { message: deliveryMethod === 'whatsapp' ? 'client_phone_missing' : 'client_email_missing' });
     }
@@ -1122,8 +1119,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     initiated_by: userId,
   };
 
-  const { data: submission, error: submissionError } = await tenantClient
-    .from('form_submissions')
+  const { data: submission, error: submissionError } = await withOrgScope(controlClient, 'form_submissions', orgId)
     .insert({
       form_id: formId,
       client_profile_id: subject.clientProfileId,
@@ -1152,7 +1148,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
   let expiresAt;
   try {
     ({ otpCode, expiresAt } = await createSubmissionAccessArtifacts({
-      tenantClient,
+      client: controlClient,
       controlClient,
       orgId,
       userId,
@@ -1183,8 +1179,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     return respond(context, 500, { message: 'failed_to_create_active_routing' });
   }
 
-  const { error: updateSubmissionExpirationError } = await tenantClient
-    .from('form_submissions')
+  const { error: updateSubmissionExpirationError } = await withOrgScope(controlClient, 'form_submissions', orgId)
     .update({
       otp_metadata: {
         delivery_method: deliveryMethod,
@@ -1276,11 +1271,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   if (!UUID_PATTERN.test(submissionId)) return respond(context, 400, { message: 'invalid_submission_id' });
   if (!deliveryMethod) return respond(context, 400, { message: 'invalid_delivery_method' });
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) return respond(context, tenantError.status, tenantError.body);
-
-  const { data: submission, error: submissionError } = await tenantClient
-    .from('form_submissions')
+  const { data: submission, error: submissionError } = await withOrgScope(controlClient, 'form_submissions', orgId)
     .select('id, form_id, client_profile_id, student_id, metadata, otp_metadata')
     .eq('id', submissionId)
     .maybeSingle();
@@ -1300,8 +1291,8 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   }
 
   const [{ data: form, error: formError }, subject] = await Promise.all([
-    tenantClient.from('forms').select('id, name, form_schema, metadata, published_at').eq('id', submission.form_id).maybeSingle(),
-    resolveSubmissionSubject(tenantClient, {
+    withOrgScope(controlClient, 'forms', orgId).select('id, name, form_schema, metadata, published_at').eq('id', submission.form_id).maybeSingle(),
+    resolveSubmissionSubject(controlClient, orgId, {
       clientProfileId: submission.client_profile_id,
       studentId: submission.student_id,
     }),
@@ -1338,7 +1329,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
 
   let destination = '';
   try {
-    destination = await resolveSubmissionDestination(tenantClient, subject.clientProfileId, deliveryMethod);
+    destination = await resolveSubmissionDestination(controlClient, orgId, subject.clientProfileId, deliveryMethod);
     if (!destination) {
       return respond(context, 400, { message: deliveryMethod === 'whatsapp' ? 'client_phone_missing' : 'client_email_missing' });
     }
@@ -1352,7 +1343,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   }
 
   try {
-    await expirePendingOtps(tenantClient, controlClient, context.log);
+    await expirePendingOtps(controlClient, orgId, controlClient, context.log);
   } catch (cleanupError) {
     context.log?.error?.('form-submissions failed cleanup before resend', {
       message: cleanupError?.message,
@@ -1373,7 +1364,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   let reusedExistingOtp = false;
 
   try {
-    const reusableAccess = await findReusableSubmissionAccess(tenantClient, controlClient, {
+    const reusableAccess = await findReusableSubmissionAccess(controlClient, controlClient, {
       orgId,
       clientProfileId: subject.clientProfileId,
       studentId: submission.student_id,
@@ -1395,8 +1386,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   }
 
   if (!reusedExistingOtp) {
-    const { error: expireOtpError } = await tenantClient
-      .from('otp_challenges')
+    const { error: expireOtpError } = await withOrgScope(controlClient, 'otp_challenges', orgId)
       .update({ status: 'expired' })
       .eq('status', 'pending')
       .contains('metadata', { submission_id: submissionId });
@@ -1413,7 +1403,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   if (!reusedExistingOtp) {
     try {
       ({ otpCode, expiresAt } = await createSubmissionAccessArtifacts({
-        tenantClient,
+        client: controlClient,
         controlClient,
         orgId,
         userId,
@@ -1448,8 +1438,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   const priorResendCount = Number(existingOtpMetadata.resend_count || currentMetadata.resend_count || 0);
   const nextResendCount = priorResendCount + 1;
 
-  const { error: updateSubmissionError } = await tenantClient
-    .from('form_submissions')
+  const { error: updateSubmissionError } = await withOrgScope(controlClient, 'form_submissions', orgId)
     .update({
       source: deliveryMethod,
       otp_metadata: {
@@ -1540,7 +1529,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   return respond(context, 200, responseBody);
 }
 
-async function verifySubmissionAccess(context, req, { controlClient, env }) {
+async function verifySubmissionAccess(context, req, { controlClient }) {
   const body = parseRequestBody(req);
   const identityNumber = normalizeIdentityNumber(body?.identity_number || body?.identityNumber);
   const otpCode = normalizeOtp(body?.otp);
@@ -1563,7 +1552,6 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     try {
       const result = await processFailedVerifyAttempt(context, {
         controlClient,
-        env,
         identityNumber,
         ipAddress,
       });
@@ -1585,7 +1573,6 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     try {
       const result = await processFailedVerifyAttempt(context, {
         controlClient,
-        env,
         identityNumber,
         ipAddress,
       });
@@ -1600,13 +1587,8 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   try {
-    await expirePendingOtps(tenantClient, controlClient, context.log);
+    await expirePendingOtps(controlClient, orgId, controlClient, context.log);
   } catch (cleanupError) {
     context.log?.error?.('form-submissions verify failed cleanup before otp verification', {
       message: cleanupError?.message,
@@ -1616,8 +1598,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     return respond(context, 500, { message: 'failed_to_verify_otp' });
   }
 
-  const { data: submission, error: submissionError } = await tenantClient
-    .from('form_submissions')
+  const { data: submission, error: submissionError } = await withOrgScope(controlClient, 'form_submissions', orgId)
     .select('id, client_profile_id, student_id, form_id, metadata, otp_metadata')
     .eq('id', submissionId)
     .maybeSingle();
@@ -1626,7 +1607,6 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     try {
       const result = await processFailedVerifyAttempt(context, {
         controlClient,
-        env,
         identityNumber,
         ipAddress,
       });
@@ -1641,7 +1621,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
   }
 
-  const subject = await resolveSubmissionSubject(tenantClient, {
+  const subject = await resolveSubmissionSubject(controlClient, orgId, {
     clientProfileId: submission.client_profile_id,
     studentId: submission.student_id,
   });
@@ -1659,7 +1639,6 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     try {
       const result = await processFailedVerifyAttempt(context, {
         controlClient,
-        env,
         identityNumber,
         ipAddress,
       });
@@ -1676,7 +1655,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   let otpChallenge;
   try {
-    otpChallenge = await findTenantPendingOtpChallenge(tenantClient, {
+    otpChallenge = await findTenantPendingOtpChallenge(controlClient, orgId, {
       clientProfileId: submission.client_profile_id,
       studentId: submission.student_id,
       submissionId,
@@ -1691,7 +1670,6 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     try {
       const result = await processFailedVerifyAttempt(context, {
         controlClient,
-        env,
         identityNumber,
         ipAddress,
       });
@@ -1708,8 +1686,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   const verifyMetadata = normalizeJsonObject(submission.metadata, {});
   const verifyNowIso = getNowIso();
-  const { error: updateVerifyMetaError } = await tenantClient
-    .from('form_submissions')
+  const { error: updateVerifyMetaError } = await withOrgScope(controlClient, 'form_submissions', orgId)
     .update({
       metadata: {
         ...verifyMetadata,
@@ -1728,8 +1705,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
     return respond(context, 500, { message: 'failed_to_verify_otp' });
   }
 
-  const { data: form, error: formError } = await tenantClient
-    .from('forms')
+  const { data: form, error: formError } = await withOrgScope(controlClient, 'forms', orgId)
     .select('id, name, description, form_schema, alert_rules, visibility_rules, metadata')
     .eq('id', submission.form_id)
     .maybeSingle();
@@ -1740,7 +1716,7 @@ async function verifySubmissionAccess(context, req, { controlClient, env }) {
 
   let publicFormState;
   try {
-    publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+    publicFormState = await resolvePublicFormStateWithSharedBlocks(controlClient, orgId, form, { allowDraftFallback: false });
   } catch (error) {
     if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
       return respond(context, 409, { message: 'form_unavailable' });
@@ -1789,11 +1765,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) return respond(context, tenantError.status, tenantError.body);
-
-  const { data: submission, error: submissionError } = await tenantClient
-    .from('form_submissions')
+  const { data: submission, error: submissionError } = await withOrgScope(controlClient, 'form_submissions', orgId)
     .select('id, client_profile_id, student_id, form_id, metadata, otp_metadata, submitted_at')
     .eq('id', submissionId)
     .maybeSingle();
@@ -1809,7 +1781,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
 
   let otpChallenge;
   try {
-    otpChallenge = await findTenantOtpChallenge(tenantClient, {
+    otpChallenge = await findTenantOtpChallenge(controlClient, orgId, {
       clientProfileId: submission.client_profile_id,
       studentId: submission.student_id,
       submissionId,
@@ -1833,14 +1805,13 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     alert_rules: [],
   };
   if (submission.form_id && UUID_PATTERN.test(String(submission.form_id))) {
-    const { data: formRecord } = await tenantClient
-      .from('forms')
+    const { data: formRecord } = await withOrgScope(controlClient, 'forms', orgId)
       .select('form_schema, alert_rules, visibility_rules, metadata')
       .eq('id', submission.form_id)
       .maybeSingle();
     if (formRecord) {
       try {
-        publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, { allowDraftFallback: false });
+        publicFormState = await resolvePublicFormStateWithSharedBlocks(controlClient, orgId, formRecord, { allowDraftFallback: false });
       } catch (error) {
         if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
           return respond(context, 409, { message: 'form_unavailable' });
@@ -1864,8 +1835,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     answers: preparedAnswers,
   });
 
-  const { error: updateSubmissionError } = await tenantClient
-    .from('form_submissions')
+  const { error: updateSubmissionError } = await withOrgScope(controlClient, 'form_submissions', orgId)
     .update({
       answers: preparedAnswers,
       alert_flags: alertFlags,
@@ -1898,8 +1868,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     return respond(context, 500, { message: 'failed_to_submit_form' });
   }
 
-  const { error: updateOtpError } = await tenantClient
-    .from('otp_challenges')
+  const { error: updateOtpError } = await withOrgScope(controlClient, 'otp_challenges', orgId)
     .update({
       status: 'verified',
       verified_at: nowIso,
@@ -1935,7 +1904,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   }
 
   try {
-    await logTenantAuditEvent(tenantClient, {
+    await logTenantAuditEvent(controlClient, {
       actorUserId: null,
       eventType: 'form_submission.completed',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -2057,7 +2026,6 @@ export default async function formSubmissions(context, req) {
   if (method === 'POST' && action === 'verify') {
     return verifySubmissionAccess(context, req, {
       controlClient,
-      env,
     });
   }
 

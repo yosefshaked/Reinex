@@ -45,9 +45,8 @@ function normalizeParticipantPatches(value) {
     : [];
 }
 
-async function createBlockedCorrectionArtifacts({ tenantClient, userId, preview, reasonCode, reasonText }) {
-  const { data: correction, error: correctionError } = await tenantClient
-    .from('calendar_instance_corrections')
+async function createBlockedCorrectionArtifacts({ client, orgId, userId, preview, reasonCode, reasonText }) {
+  const { data: correction, error: correctionError } = await withOrgScope(client, 'calendar_instance_corrections', orgId)
     .insert({
       original_instance_id: preview.original_instance_id,
       correction_mode: preview.correction_mode,
@@ -72,7 +71,7 @@ async function createBlockedCorrectionArtifacts({ tenantClient, userId, preview,
     throw correctionError;
   }
 
-  const task = await createDashboardTask(tenantClient, {
+  const task = await createDashboardTask(client, {
     taskType: 'calendar_correction_paid_claim_block',
     title: 'נדרשת בדיקה ידנית לתיקון שיעור חסום',
     description: 'התיקון נחסם כי השיעור קשור לאצוות תביעה שסומנה כשולמה. נדרשת בדיקה ידנית לפני המשך טיפול.',
@@ -91,9 +90,8 @@ async function createBlockedCorrectionArtifacts({ tenantClient, userId, preview,
   return { correction, task };
 }
 
-async function createAppliedCorrectionArtifacts({ tenantClient, billingService, userId, preview, reasonCode, reasonText }) {
-  const { data: correction, error: correctionError } = await tenantClient
-    .from('calendar_instance_corrections')
+async function createAppliedCorrectionArtifacts({ client, orgId, billingService, userId, preview, reasonCode, reasonText }) {
+  const { data: correction, error: correctionError } = await withOrgScope(client, 'calendar_instance_corrections', orgId)
     .insert({
       original_instance_id: preview.original_instance_id,
       correction_mode: preview.correction_mode,
@@ -127,8 +125,7 @@ async function createAppliedCorrectionArtifacts({ tenantClient, billingService, 
 
   const payrollDelta = Number(preview.impact_snapshot?.payroll?.delta_amount || 0);
   if (payrollDelta !== 0) {
-    const { data: financeCorrection, error: financeError } = await tenantClient
-      .from('finance_corrections')
+    const { data: financeCorrection, error: financeError } = await withOrgScope(client, 'finance_corrections', orgId)
       .insert({
         employee_id: preview.effective_state?.instance?.instructor_employee_id || preview.effective_state?.instance?.instructor_id,
         correction_type: 'correction',
@@ -154,8 +151,7 @@ async function createAppliedCorrectionArtifacts({ tenantClient, billingService, 
 
   const workedMinutesDelta = Number(preview.impact_snapshot?.operational?.delta_minutes || 0);
   if (workedMinutesDelta !== 0) {
-    const { data: attendanceCorrection, error: attendanceError } = await tenantClient
-      .from('employee_attendance_records')
+    const { data: attendanceCorrection, error: attendanceError } = await withOrgScope(client, 'employee_attendance_records', orgId)
       .insert({
         employee_id: preview.effective_state?.instance?.instructor_employee_id,
         attendance_date: preview.impact_snapshot?.operational?.attendance_date,
@@ -269,11 +265,7 @@ export default async function calendarCorrections(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-  const billingService = new BillingLedgerService({ tenantClient });
+  const billingService = new BillingLedgerService({ tenantClient: supabase });
 
   if (method !== 'POST') {
     return respond(context, 405, { message: 'method not allowed' });
@@ -310,7 +302,7 @@ export default async function calendarCorrections(context, req) {
 
   let preview;
   try {
-    preview = await buildInstanceCorrectionPreview(tenantClient, {
+    preview = await buildInstanceCorrectionPreview(supabase, {
       originalInstanceId,
       correctionMode,
       instancePatch,
@@ -344,7 +336,7 @@ export default async function calendarCorrections(context, req) {
     }
 
     try {
-      const task = await createDashboardTask(tenantClient, {
+      const task = await createDashboardTask(supabase, {
         taskType: 'calendar_correction_paid_claim_block',
         title: 'נדרשת בדיקה ידנית לתיקון שיעור חסום',
         description: 'ניסיון תיקון נחסם כי השיעור קשור לאצוות תביעה שסומנה כשולמה. נדרשת בדיקה ידנית.',
@@ -374,7 +366,7 @@ export default async function calendarCorrections(context, req) {
         },
       });
 
-      await logTenantAuditEvent(tenantClient, {
+      await logTenantAuditEvent(supabase, {
         actorUserId: userId,
         eventType: 'calendar.instance.blocked_attempt_task_created',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -416,7 +408,8 @@ export default async function calendarCorrections(context, req) {
   try {
     if (preview.blocked_by_paid_claim) {
       const { correction, task } = await createBlockedCorrectionArtifacts({
-        tenantClient,
+        client: supabase,
+        orgId,
         userId,
         preview,
         reasonCode,
@@ -439,7 +432,7 @@ export default async function calendarCorrections(context, req) {
         },
       });
 
-      await logTenantAuditEvent(tenantClient, {
+      await logTenantAuditEvent(supabase, {
         actorUserId: userId,
         eventType: 'calendar.instance.correction_blocked_paid_claim',
         retentionCategory: TENANT_AUDIT_RETENTION.CRITICAL,
@@ -461,7 +454,8 @@ export default async function calendarCorrections(context, req) {
     }
 
     const result = await createAppliedCorrectionArtifacts({
-      tenantClient,
+      client: supabase,
+      orgId,
       billingService,
       userId,
       preview,
@@ -470,7 +464,7 @@ export default async function calendarCorrections(context, req) {
     });
 
     try {
-      await syncLessonClosureState(tenantClient, originalInstanceId, userId);
+      await syncLessonClosureState(supabase, originalInstanceId, userId);
     } catch (closureError) {
       context.log?.warn?.('calendar-corrections failed to sync lesson closure after correction', {
         message: closureError?.message,
@@ -495,7 +489,7 @@ export default async function calendarCorrections(context, req) {
       },
     });
 
-    await logTenantAuditEvent(tenantClient, {
+    await logTenantAuditEvent(supabase, {
       actorUserId: userId,
       eventType: 'calendar.instance.corrected',
       retentionCategory: TENANT_AUDIT_RETENTION.CRITICAL,

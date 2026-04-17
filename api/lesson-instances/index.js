@@ -189,6 +189,7 @@ export default async function lessonInstances(context, req) {
   const supabase = createSupabaseAdminClient(adminConfig, {
     global: { headers: { 'Cache-Control': 'no-store' } },
   });
+  const client = supabase;
 
   let authResult;
   try {
@@ -1125,8 +1126,7 @@ export default async function lessonInstances(context, req) {
     }
 
     // Find all future lesson_instances where this student is a participant and status is 'scheduled'
-    let futureParticipantsQuery = tenantClient
-      .from('lesson_participants')
+    let futureParticipantsQuery = withOrgScope(client, 'lesson_participants', orgId)
       .select('id, lesson_instance_id, lesson_instance:lesson_instances(id, datetime_start, status)')
       .gte('lesson_instance.datetime_start', fromBounds.startIso)
       .eq('lesson_instance.status', 'scheduled');
@@ -1169,7 +1169,7 @@ export default async function lessonInstances(context, req) {
 
       let cancellationResult;
       try {
-        cancellationResult = await cancelSelectedScheduledParticipantsAndReconcileInstance(tenantClient, {
+        cancellationResult = await cancelSelectedScheduledParticipantsAndReconcileInstance(client, {
           instanceId: instId,
           participantIds: targetedParticipantIds,
           userId,
@@ -1187,7 +1187,7 @@ export default async function lessonInstances(context, req) {
         syncedInstanceIds.push(instId);
 
         try {
-          await logTenantAuditEvent(tenantClient, {
+          await logTenantAuditEvent(client, {
             actorUserId: userId,
             eventType: 'calendar.lesson_instance.updated',
             retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1214,7 +1214,7 @@ export default async function lessonInstances(context, req) {
 
         try {
           for (const row of normalizeCancelledParticipantAuditRows(cancellationResult.cancelledParticipantAuditRows)) {
-            await logTenantAuditEvent(tenantClient, {
+            await logTenantAuditEvent(client, {
               actorUserId: userId,
               eventType: 'calendar.lesson_participant.cancelled_student_bulk',
               retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1242,9 +1242,9 @@ export default async function lessonInstances(context, req) {
             actorUserId: userId,
             reasonCode: 'lesson_updated',
           });
-          await syncLessonInstructorEarnings(tenantClient, instId, userId);
-          await syncInstructorAttendanceFromLessons(tenantClient, instId, userId);
-          await syncLessonClosureState(tenantClient, instId, userId);
+          await syncLessonInstructorEarnings(client, instId, userId);
+          await syncInstructorAttendanceFromLessons(client, instId, userId);
+          await syncLessonClosureState(client, instId, userId);
         } catch (syncError) {
           context.log?.error?.('lesson-instances bulk-cancel failed to sync lesson workflow', {
             message: syncError?.message,

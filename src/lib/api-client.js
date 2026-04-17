@@ -1,5 +1,15 @@
 import { getAuthClient } from '@/lib/supabase-manager.js';
 
+const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
+
+function getActiveOrgId() {
+  try {
+    return window.localStorage.getItem(ACTIVE_ORG_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
 async function resolveBearerToken() {
   const authClient = getAuthClient();
   const { data, error } = await authClient.auth.getSession();
@@ -33,7 +43,7 @@ function resolveTokenFromOverrides(session, accessToken) {
   return { token: null, source: 'none' };
 }
 
-function createAuthorizationHeaders(customHeaders = {}, bearer, { includeJsonContentType = false } = {}) {
+function createAuthorizationHeaders(customHeaders = {}, bearer, { includeJsonContentType = false, orgId = '' } = {}) {
   const headers = includeJsonContentType
     ? { 'Content-Type': 'application/json', ...customHeaders }
     : { ...customHeaders };
@@ -44,6 +54,10 @@ function createAuthorizationHeaders(customHeaders = {}, bearer, { includeJsonCon
   headers['x-supabase-authorization'] = bearer;
   headers['x-supabase-auth'] = bearer;
 
+  if (orgId) {
+    headers['x-org-id'] = orgId;
+  }
+
   return headers;
 }
 
@@ -51,9 +65,10 @@ export async function authenticatedFetch(path, { session: _session, accessToken:
   const resolved = resolveTokenFromOverrides(_session, _accessToken);
   const token = resolved.token || await resolveBearerToken();
   const bearer = `Bearer ${token}`;
+  const orgId = getActiveOrgId();
 
   const { headers: customHeaders = {}, body, params, ...rest } = options;
-  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: true });
+  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: true, orgId });
 
   let requestBody = body;
   if (requestBody && typeof requestBody === 'object' && !(requestBody instanceof FormData)) {
@@ -119,9 +134,10 @@ export async function authenticatedFetchBlob(path, { session: _session, accessTo
   const resolved = resolveTokenFromOverrides(_session, _accessToken);
   const token = resolved.token || await resolveBearerToken();
   const bearer = `Bearer ${token}`;
+  const orgId = getActiveOrgId();
 
   const { headers: customHeaders = {}, params, ...rest } = options;
-  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: false });
+  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: false, orgId });
 
   const normalizedPath = String(path || '')
     .replace(/^\/+/, '')
@@ -176,9 +192,10 @@ export async function authenticatedFetchText(path, { session: _session, accessTo
   const resolved = resolveTokenFromOverrides(_session, _accessToken);
   const token = resolved.token || await resolveBearerToken();
   const bearer = `Bearer ${token}`;
+  const orgId = getActiveOrgId();
 
   const { headers: customHeaders = {}, params, ...rest } = options;
-  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: false });
+  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: false, orgId });
 
   const normalizedPath = String(path || '')
     .replace(/^\/+/, '')

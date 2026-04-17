@@ -28,7 +28,7 @@ import {
   normalizeString,
   readEnv,
   respond,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import crypto from 'crypto';
 import multipart from 'parse-multipart-data';
@@ -88,10 +88,9 @@ function parseMultipartData(req) {
 /**
  * Get entity names for duplicates based on entity type
  */
-async function getEntityNames(tenantClient, entityType, entityIds) {
+async function getEntityNames(client, entityType, entityIds, orgId) {
   if (entityType === 'student') {
-    const { data: students } = await tenantClient
-      .from('students')
+    const { data: students } = await withOrgScope(client, 'students', orgId)
       .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
       .in('id', entityIds);
     return new Map((students || []).map((row) => [
@@ -101,8 +100,7 @@ async function getEntityNames(tenantClient, entityType, entityIds) {
   }
   
   if (entityType === 'instructor') {
-    const { data: instructors } = await tenantClient
-      .from('Employees')
+    const { data: instructors } = await withOrgScope(client, 'Employees', orgId)
       .select('id, first_name, middle_name, last_name')
       .in('id', entityIds);
     return new Map((instructors || []).map((row) => [row.id, buildEmployeeName(row) || 'Unknown']));
@@ -115,7 +113,7 @@ async function getEntityNames(tenantClient, entityType, entityIds) {
 /**
  * Validate permissions for entity type and user
  */
-async function validateEntityPermissions(tenantClient, entityType, entityId, userId, isAdmin) {
+async function validateEntityPermissions(client, entityType, entityId, userId, isAdmin, orgId) {
   // Student documents: All org members can see duplicates across all students
   if (entityType === 'student') {
     return true; // All org members can check
@@ -126,8 +124,7 @@ async function validateEntityPermissions(tenantClient, entityType, entityId, use
     if (isAdmin) {
       return true;
     }
-    const { data: instructorRow, error } = await tenantClient
-      .from('Employees')
+    const { data: instructorRow, error } = await withOrgScope(client, 'Employees', orgId)
       .select('id, user_id')
       .eq('id', entityId)
       .maybeSingle();
@@ -275,20 +272,9 @@ export default async function (context, req) {
 
   const isAdmin = role === 'admin' || role === 'owner';
 
-  // Get tenant client
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(
-    context,
-    controlClient,
-    env,
-    orgId
-  );
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   let hasPermission;
   try {
-    hasPermission = await validateEntityPermissions(tenantClient, entityType, entityId, userId, isAdmin);
+    hasPermission = await validateEntityPermissions(controlClient, entityType, entityId, userId, isAdmin, orgId);
   } catch (permissionError) {
     context.log?.error?.('documents-check: failed to validate entity permissions', {
       message: permissionError?.message,
@@ -321,8 +307,7 @@ export default async function (context, req) {
   context.log?.info?.('📄 [DOCUMENTS-CHECK] Hash calculated', { hash: fileHash });
 
   // Query Documents table for duplicates
-  const { data: allDocuments, error: documentsError } = await tenantClient
-    .from('Documents')
+  const { data: allDocuments, error: documentsError } = await withOrgScope(controlClient, 'Documents', orgId)
     .select('id, name, uploaded_at, entity_id, hash')
     .eq('entity_type', entityType)
     .eq('hash', fileHash);
@@ -352,7 +337,7 @@ export default async function (context, req) {
   const duplicates = [];
   if (filtersDocuments.length > 0) {
     const entityIds = [...new Set(filtersDocuments.map(doc => doc.entity_id))];
-    const nameMap = await getEntityNames(tenantClient, entityType, entityIds);
+    const nameMap = await getEntityNames(controlClient, entityType, entityIds, orgId);
 
     for (const doc of filtersDocuments) {
       const entityName = entityType === 'organization' 

@@ -245,7 +245,7 @@ async function getAttendanceStatusRequirements(client, participantStatus) {
   const normalizedStatus = typeof participantStatus === 'string'
     ? participantStatus.trim().toLowerCase()
     : '';
-  const policies = await loadFinancePolicies(tenantClient);
+  const policies = await loadFinancePolicies(client);
   const studentBillingApplies = Boolean(policies?.billingConsumptionPolicy?.[normalizedStatus]);
   const requiresInstructorCompensationDecision = studentBillingApplies
     && (normalizedStatus === 'no_show' || normalizedStatus === 'cancelled_student' || normalizedStatus === 'cancelled_clinic');
@@ -303,11 +303,11 @@ async function validateProjectedInstructorRate(client, orgId, instance, particip
     requestedInstructorCompensationDecision,
     statusRequirements,
   );
-  const policies = await loadFinancePolicies(tenantClient);
+  const policies = await loadFinancePolicies(client);
   if (!lessonHasInstructorCompensation(projectedParticipants, policies)) {
     return null;
   }
-  return validateInstructorRateForLesson(tenantClient, {
+  return validateInstructorRateForLesson(client, {
     instructorEmployeeId: instance?.instructor_employee_id,
     serviceId: instance?.service_id,
   });
@@ -407,7 +407,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
     body.expectedVersion,
   );
 
-  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(tenantClient, {
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, {
     instanceId: body.instance_id,
     participantId: body.participant_id,
   });
@@ -452,8 +452,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
     return respond(context, 400, { message: 'no reminder fields to update' });
   }
 
-  let updateQuery = tenantClient
-    .from('lesson_participants')
+  let updateQuery = withOrgScope(client, 'lesson_participants', orgId)
     .update(update)
     .eq('id', body.participant_id)
     .eq('lesson_instance_id', body.instance_id);
@@ -476,7 +475,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
   }
 
   if (!updatedRow) {
-    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
       participantId: body.participant_id,
       instanceId: body.instance_id,
     });
@@ -493,7 +492,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
   }
 
   try {
-    await logTenantAuditEvent(tenantClient, {
+    await logTenantAuditEvent(client, {
       actorUserId: userId,
       eventType: 'calendar.lesson_participant.reminder_updated',
       retentionCategory: TENANT_AUDIT_RETENTION.DIAGNOSTIC,
@@ -528,7 +527,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   targetStatus,
   requestedInstructorCompensationDecision = 'unknown',
 } = {}) {
-  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(tenantClient, {
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, {
     instanceId: body.instance_id,
     participantId: body.participant_id,
   });
@@ -550,28 +549,24 @@ async function buildParticipantStatusPreview(client, orgId, body, {
 
   const statusRequirements = resolvedTargetStatus === 'attended' || resolvedTargetStatus === 'scheduled'
     ? null
-    : await getAttendanceStatusRequirements(tenantClient, resolvedTargetStatus);
+    : await getAttendanceStatusRequirements(client, resolvedTargetStatus);
 
   const [{ data: instanceDetail, error: instanceDetailError }, { data: allParticipants, error: participantsError }, { data: lessonEarningRows, error: earningError }, { data: participantLedgerRows, error: ledgerError }, dashboardTasks] = await Promise.all([
-    tenantClient
-      .from('lesson_instances')
+    withOrgScope(client, 'lesson_instances', orgId)
       .select('id, instructor_employee_id, service_id, duration_minutes, status, datetime_start')
       .eq('id', body.instance_id)
       .maybeSingle(),
-    tenantClient
-      .from('lesson_participants')
+    withOrgScope(client, 'lesson_participants', orgId)
       .select('id, student_id, client_profile_id, participant_status, lesson_instance_id, metadata')
       .eq('lesson_instance_id', body.instance_id),
-    tenantClient
-      .from('lesson_earnings')
+    withOrgScope(client, 'lesson_earnings', orgId)
       .select('id, employee_id, rate_used, payout_amount, metadata')
       .eq('lesson_instance_id', body.instance_id),
-    tenantClient
-      .from('ledger_transactions')
+    withOrgScope(client, 'ledger_transactions', orgId)
       .select('id, student_id, client_profile_id, hmo_provider_id, direction, amount, lesson_participant_id, reverses_transaction_id, source_type, metadata')
       .eq('lesson_participant_id', body.participant_id)
       .in('source_type', ['lesson_charge', 'reversal']),
-    listDashboardTasks(tenantClient, {
+    listDashboardTasks(client, {
       status: 'open',
       resourceType: 'lesson_participant',
       resourceId: body.participant_id,
@@ -593,7 +588,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
     statusRequirements,
   );
 
-  const rateError = await validateProjectedInstructorRate(tenantClient, instanceDetail, currentParticipants, {
+  const rateError = await validateProjectedInstructorRate(client, orgId, instanceDetail, currentParticipants, {
     targetStatus: resolvedTargetStatus,
     participantId: body.participant_id,
     requestedInstructorCompensationDecision,
@@ -623,47 +618,40 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   const lessonDayBounds = lessonDateKey
     ? buildUtcBoundsForTimezoneDateRange(lessonDateKey, lessonDateKey)
     : null;
-  const policiesPromise = loadFinancePolicies(tenantClient);
+  const policiesPromise = loadFinancePolicies(client);
   const [{ data: dayLessons, error: dayLessonsError }, { data: systemAttendanceRecord, error: attendanceError }, { data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }, { data: clientProfileRow, error: clientProfileError }, { data: serviceRow, error: serviceError }, { data: capabilityRow, error: capabilityError }, policies] = await Promise.all([
-    tenantClient
-      .from('lesson_instances')
+    withOrgScope(client, 'lesson_instances', orgId)
       .select('id, status, duration_minutes')
       .eq('instructor_employee_id', instanceDetail.instructor_employee_id)
       .gte('datetime_start', lessonDayBounds?.startIso || '')
       .lt('datetime_start', lessonDayBounds?.endExclusiveIso || ''),
-    tenantClient
-      .from('employee_attendance_records')
+    withOrgScope(client, 'employee_attendance_records', orgId)
       .select('id, status, worked_minutes, source_type, metadata')
       .eq('employee_id', instanceDetail.instructor_employee_id)
       .eq('attendance_date', lessonDateKey)
       .in('source_type', ['manual', 'import', 'system'])
       .maybeSingle(),
-    tenantClient
-      .from('Employees')
+    withOrgScope(client, 'Employees', orgId)
       .select('id, first_name, middle_name, last_name')
       .eq('id', instanceDetail.instructor_employee_id)
       .maybeSingle(),
     normalizedParticipantStudentId
-      ? tenantClient
-        .from('students')
+      ? withOrgScope(client, 'students', orgId)
         .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
         .eq('id', normalizedParticipantStudentId)
         .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     normalizedParticipantClientProfileId
-      ? tenantClient
-        .from('client_profiles')
+      ? withOrgScope(client, 'client_profiles', orgId)
         .select('id, first_name, middle_name, last_name')
         .eq('id', normalizedParticipantClientProfileId)
         .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    tenantClient
-      .from('Services')
+    withOrgScope(client, 'Services', orgId)
       .select('id, name, default_customer_charge_amount')
       .eq('id', instanceDetail.service_id)
       .maybeSingle(),
-    tenantClient
-      .from('instructor_service_capabilities')
+    withOrgScope(client, 'instructor_service_capabilities', orgId)
       .select('base_rate')
       .eq('employee_id', instanceDetail.instructor_employee_id)
       .eq('service_id', instanceDetail.service_id)
@@ -684,8 +672,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   const allDayLessons = dayLessons || [];
   const dayLessonIds = allDayLessons.map((row) => row.id).filter(Boolean);
   const { data: dayParticipants, error: dayParticipantsError } = dayLessonIds.length > 0
-    ? await tenantClient
-      .from('lesson_participants')
+    ? await withOrgScope(client, 'lesson_participants', orgId)
       .select('lesson_instance_id, participant_status, metadata')
       .in('lesson_instance_id', dayLessonIds)
     : { data: [], error: null };
@@ -724,7 +711,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
     return sum;
   }, 0));
   const projectedAuthorization = targetParticipantAfter?.student_id
-    ? await resolveActiveAuthorizationForStudentService(tenantClient, {
+    ? await resolveActiveAuthorizationForStudentService(client, {
       studentId: targetParticipantAfter.student_id,
       serviceId: instanceDetail?.service_id,
       lessonDate: instanceDetail?.datetime_start,
@@ -927,7 +914,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
 async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, auditContext = {}) {
   const { client, orgId } = dbContext;
   if (body.action === 'update-reminder') {
-    return handleUpdateReminder(context, body, tenantClient, userId);
+    return handleUpdateReminder(context, body, dbContext, userId);
   }
   if (body.action === 'status-requirements') {
     const requestedStatus = typeof body.participant_status === 'string'
@@ -937,7 +924,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       return respond(context, 400, { message: 'missing participant_status' });
     }
     try {
-      const requirements = await getAttendanceStatusRequirements(tenantClient, requestedStatus);
+      const requirements = await getAttendanceStatusRequirements(client, requestedStatus);
       return respond(context, 200, requirements);
     } catch (error) {
       context.log?.error?.('calendar/attendance failed to load status requirements', {
@@ -984,7 +971,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
   }
 
   // Fetch instance to verify permissions
-  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(tenantClient, {
+  const { error: mutationStateError, result: mutationState } = await fetchLessonMutationState(client, {
     instanceId: body.instance_id,
     participantId: body.participant_id,
   });
@@ -1031,7 +1018,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   // Non-admin users can only mark attendance for their own lessons
   if (!isAdmin) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(tenantClient, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
     if (instructorError) {
       context.log?.error?.('calendar/attendance failed to resolve actor instructor', { message: instructorError.message, userId });
       return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
@@ -1044,7 +1031,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   if (isRestorePreviewAction) {
     try {
-      const preview = await buildRestorePreview(tenantClient, body);
+      const preview = await buildRestorePreview(client, orgId, body);
       if (!preview) {
         return respond(context, 404, { message: 'instance not found' });
       }
@@ -1074,7 +1061,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       return respond(context, 400, { message: 'missing target_participant_status' });
     }
     try {
-      const preview = await buildParticipantStatusPreview(tenantClient, body, {
+      const preview = await buildParticipantStatusPreview(client, orgId, body, {
         targetStatus: previewTargetStatus,
         requestedInstructorCompensationDecision: requestedDecision,
       });
@@ -1130,7 +1117,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     );
 
     if (participantStatus !== 'scheduled' && participantStatus !== 'attended') {
-      statusRequirements = await getAttendanceStatusRequirements(tenantClient, participantStatus);
+      statusRequirements = await getAttendanceStatusRequirements(client, participantStatus);
 
       if (statusRequirements.requires_instructor_compensation_decision && !['compensated', 'not_compensated'].includes(requestedInstructorCompensationDecision)) {
         return respond(context, 400, {
@@ -1143,7 +1130,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
     if (participantStatus === 'scheduled') {
       try {
-        transitionAuditPreview = await buildRestorePreview(tenantClient, body);
+        transitionAuditPreview = await buildRestorePreview(client, orgId, body);
       } catch (previewError) {
         context.log?.warn?.('calendar/attendance failed to capture restore preview for audit', {
           message: previewError?.message,
@@ -1164,7 +1151,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
     if (!transitionAuditPreview && participant.participant_status !== participantStatus) {
       try {
-        transitionAuditPreview = await buildParticipantStatusPreview(tenantClient, body, {
+        transitionAuditPreview = await buildParticipantStatusPreview(client, orgId, body, {
           targetStatus: participantStatus,
           requestedInstructorCompensationDecision,
         });
@@ -1220,8 +1207,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       };
     }
 
-    const { data: participantRowsForRate, error: participantRowsForRateError } = await tenantClient
-      .from('lesson_participants')
+    const { data: participantRowsForRate, error: participantRowsForRateError } = await withOrgScope(client, 'lesson_participants', orgId)
       .select('id, participant_status, metadata')
       .eq('lesson_instance_id', body.instance_id);
 
@@ -1233,7 +1219,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       return respond(context, 500, { message: 'failed_to_load_attendance_state' });
     }
 
-    const rateError = await validateProjectedInstructorRate(tenantClient, instance, participantRowsForRate || [], {
+    const rateError = await validateProjectedInstructorRate(client, orgId, instance, participantRowsForRate || [], {
       targetStatus: participantStatus,
       participantId: body.participant_id,
       requestedInstructorCompensationDecision,
@@ -1267,8 +1253,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     }
   }
 
-  let participantUpdateQuery = tenantClient
-    .from('lesson_participants')
+  let participantUpdateQuery = withOrgScope(client, 'lesson_participants', orgId)
     .update(participantUpdate)
     .eq('id', body.participant_id)
     .eq('lesson_instance_id', body.instance_id);
@@ -1295,7 +1280,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
   }
 
   if (!updatedParticipant) {
-    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+    const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
       instanceId: body.instance_id,
       participantId: body.participant_id,
     });
@@ -1312,7 +1297,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
   }
 
   try {
-    await logTenantAuditEvent(tenantClient, {
+    await logTenantAuditEvent(client, {
       actorUserId: userId,
       eventType: 'calendar.lesson_participant.attendance_updated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1335,7 +1320,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   if (participantUpdate.participant_status) {
     try {
-      const policies = await loadFinancePolicies(tenantClient);
+      const policies = await loadFinancePolicies(client);
       const currentMetadata = mutationState.instance?.metadata && typeof mutationState.instance.metadata === 'object'
         ? mutationState.instance.metadata
         : {};
@@ -1343,8 +1328,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
         ? currentMetadata.attendance_resolution_snapshots
         : {};
 
-      await tenantClient
-        .from('lesson_instances')
+      await withOrgScope(client, 'lesson_instances', orgId)
         .update({
           metadata: {
             ...currentMetadata,
@@ -1376,8 +1360,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   if (Object.prototype.hasOwnProperty.call(participantUpdate, 'participant_status')) {
     // Check if all participants have attendance statuses so instance can be marked completed.
-    const { data: allParticipants, error: fetchError } = await tenantClient
-      .from('lesson_participants')
+    const { data: allParticipants, error: fetchError } = await withOrgScope(client, 'lesson_participants', orgId)
       .select('participant_status')
       .eq('lesson_instance_id', body.instance_id);
 
@@ -1386,8 +1369,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     } else if (allParticipants) {
       const nextInstanceStatus = deriveAggregateInstanceStatus(allParticipants, instance.status);
     if (nextInstanceStatus !== normalizeLessonInstanceStatus(instance.status)) {
-        let instanceUpdateQuery = tenantClient
-          .from('lesson_instances')
+        let instanceUpdateQuery = withOrgScope(client, 'lesson_instances', orgId)
           .update({
             status: nextInstanceStatus,
             updated_at: new Date().toISOString(),
@@ -1416,8 +1398,8 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       actorUserId: userId,
       reasonCode: 'attendance_changed',
     });
-    await syncLessonInstructorEarnings(tenantClient, body.instance_id, userId);
-    await syncInstructorAttendanceFromLessons(tenantClient, body.instance_id, userId);
+    await syncLessonInstructorEarnings(client, body.instance_id, userId);
+    await syncInstructorAttendanceFromLessons(client, body.instance_id, userId);
     billingWarnings = (billingResult?.participantResults || [])
       .filter((row) => row.status === 'blocked')
       .map((row) => ({
@@ -1438,20 +1420,18 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
   if (participantUpdate.participant_status === 'attended') {
     try {
       const [{ data: participantDetail }, { data: instanceDetail }] = await Promise.all([
-        tenantClient
-          .from('lesson_participants')
+        withOrgScope(client, 'lesson_participants', orgId)
           .select('student_id')
           .eq('id', body.participant_id)
           .maybeSingle(),
-        tenantClient
-          .from('lesson_instances')
+        withOrgScope(client, 'lesson_instances', orgId)
           .select('datetime_start, service_id')
           .eq('id', body.instance_id)
           .maybeSingle(),
       ]);
 
       if (participantDetail?.student_id && instanceDetail?.service_id) {
-        const activeAuthorization = await resolveActiveAuthorizationForStudentService(tenantClient, {
+        const activeAuthorization = await resolveActiveAuthorizationForStudentService(client, {
           studentId: participantDetail.student_id,
           serviceId: instanceDetail.service_id,
           lessonDate: instanceDetail.datetime_start,
@@ -1460,8 +1440,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
         if (activeAuthorization?.id) {
           const normalizedParticipantDetailStudentId = normalizeNullableId(participantDetail.student_id);
           const { data: student } = normalizedParticipantDetailStudentId
-            ? await tenantClient
-              .from('students')
+            ? await withOrgScope(client, 'students', orgId)
               .select('client_profile:client_profiles(first_name, last_name)')
               .eq('id', normalizedParticipantDetailStudentId)
               .maybeSingle()
@@ -1475,7 +1454,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
             ? `שיעור של ${studentName} בתאריך ${lessonDate} דורש הגשת תביעה.`
             : `שיעור של ${studentName} דורש הגשת תביעה.`;
 
-          await createDashboardTask(tenantClient, {
+          await createDashboardTask(client, {
             taskType: 'hmo_claim_submission',
             title: 'הגשת תביעה לביטוח לאומי',
             description,
@@ -1501,14 +1480,14 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   if (participantUpdate.participant_status === 'scheduled') {
     try {
-      const openTasks = await listDashboardTasks(tenantClient, {
+      const openTasks = await listDashboardTasks(client, {
         status: 'open',
         resourceType: 'lesson_participant',
         resourceId: body.participant_id,
       });
       const hmoTask = (openTasks || []).find((task) => task.task_type === 'hmo_claim_submission');
       if (hmoTask?.id) {
-        await resolveDashboardTask(tenantClient, {
+        await resolveDashboardTask(client, {
           taskId: hmoTask.id,
           resolvedBy: userId,
           metadata: {
@@ -1565,7 +1544,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     }
 
     try {
-      await logTenantAuditEvent(tenantClient, {
+      await logTenantAuditEvent(client, {
         actorUserId: userId,
         eventType: 'calendar.lesson_participant.restored_to_scheduled',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1632,7 +1611,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     }
 
     try {
-      await logTenantAuditEvent(tenantClient, {
+      await logTenantAuditEvent(client, {
         actorUserId: userId,
         eventType: 'calendar.lesson_participant.status_transition_applied',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1657,7 +1636,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
   }
 
   try {
-    await syncLessonClosureState(tenantClient, body.instance_id, userId);
+    await syncLessonClosureState(client, body.instance_id, userId);
   } catch (closureError) {
     context.log?.warn?.('calendar/attendance failed to sync lesson closure state', {
       message: closureError?.message,

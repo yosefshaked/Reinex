@@ -13,7 +13,7 @@
  */
 
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
-import { ensureMembership, resolveTenantClient, readEnv, respond } from '../_shared/org-bff.js';
+import { ensureMembership, withOrgScope, readEnv, respond } from '../_shared/org-bff.js';
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { decryptStorageProfile } from '../_shared/storage-encryption.js';
@@ -89,13 +89,6 @@ export default async function handler(context, req) {
     const userRole = role;
     const isAdmin = ['admin', 'owner'].includes(userRole);
 
-    // Get tenant client
-    const tenantResult = await resolveTenantClient(context, supabase, env, org_id);
-    if (tenantResult.error) {
-      return respond(context, 424, { error: 'tenant_not_configured', details: tenantResult.error });
-    }
-    const tenantClient = tenantResult.client;
-
     // Get storage profile
     const { data: orgSettings, error: orgSettingsError } = await supabase
       .from('org_settings')
@@ -118,7 +111,7 @@ export default async function handler(context, req) {
       schema: 'public'
     });
 
-    const { data: document, error: fetchError } = await tenantClient
+    const { data: document, error: fetchError } = await withOrgScope(supabase, 'Documents', org_id)
       .from('Documents')
       .select('*')
       .eq('id', document_id)
@@ -150,7 +143,7 @@ export default async function handler(context, req) {
     // Permission validation
     if (document.entity_type === 'organization' && !isAdmin) {
       // Check org_documents_member_visibility setting (stored as bare boolean)
-      const { data: visibilitySetting } = await tenantClient
+      const { data: visibilitySetting } = await withOrgScope(supabase, 'Settings', org_id)
         .from('Settings')
         .select('settings_value')
         .eq('key', 'org_documents_member_visibility')

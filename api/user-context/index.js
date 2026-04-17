@@ -7,13 +7,13 @@ function respond(context, status, body, extraHeaders = {}) {
   return _respond(context, status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
 }
 
-function mapOrganizationRecord(record, membership, connection) {
+function mapOrganizationRecord(record, membership) {
   if (!record || !membership) {
     return null;
   }
 
   // Strip sensitive credentials from storage profile for non-admin users
-  let storageProfile = connection?.storageProfile ?? null;
+  let storageProfile = record.storage_profile ?? null;
   const userRole = membership?.role || 'member';
   const isAdmin = userRole === 'admin' || userRole === 'owner';
   
@@ -46,7 +46,7 @@ function mapOrganizationRecord(record, membership, connection) {
     created_at: record.created_at,
     updated_at: record.updated_at,
     dedicated_key_saved_at: record.dedicated_key_saved_at || null,
-    has_connection: Boolean(connection?.supabaseUrl && connection?.supabaseAnonKey),
+    has_connection: true,
     membership: {
       id: membership.id,
       org_id: membership.org_id,
@@ -54,9 +54,7 @@ function mapOrganizationRecord(record, membership, connection) {
       user_id: membership.user_id,
       created_at: membership.created_at,
     },
-    permissions: connection?.permissions ?? {},
-    org_settings_metadata: connection?.metadata ?? null,
-    org_settings_updated_at: connection?.updatedAt ?? null,
+    permissions: record.permissions ?? {},
     storage_profile: storageProfile,
   };
 }
@@ -178,7 +176,6 @@ export default async function userContext(context, req) {
   }
 
   let organizationsResponse = { data: [], error: null };
-  let settingsResponse = { data: [], error: null };
 
   if (orgIds.size > 0) {
     const idsArray = Array.from(orgIds);
@@ -186,14 +183,9 @@ export default async function userContext(context, req) {
       organizationsResponse = await supabase
         .from('organizations')
         .select(
-          'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at, dedicated_key_saved_at, dedicated_key_encrypted',
+          'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at, dedicated_key_saved_at, dedicated_key_encrypted, permissions, storage_profile',
         )
         .in('id', idsArray);
-
-      settingsResponse = await supabase
-        .from('org_settings')
-        .select('org_id, supabase_url, anon_key, metadata, updated_at, permissions, storage_profile')
-        .in('org_id', idsArray);
     } catch (error) {
       context.log?.error?.('user-context enrichment queries failed', { message: error?.message, userId });
       return respond(context, 500, { message: 'failed to load organizations' });
@@ -204,40 +196,16 @@ export default async function userContext(context, req) {
       context.log?.error?.('user-context organizations query error', { status, userId });
       return respond(context, status, { message: 'failed to load organizations' });
     }
-
-    if (settingsResponse.error) {
-      context.log?.warn?.('user-context settings query error', {
-        status: settingsResponse.error.status || 500,
-        userId,
-      });
-    }
   }
 
   const organizationsData = Array.isArray(organizationsResponse.data) ? organizationsResponse.data : [];
-  const settingsData = Array.isArray(settingsResponse.data) ? settingsResponse.data : [];
 
   const organizationMap = new Map(organizationsData.map((org) => [org.id, org]));
-  const connectionMap = new Map(
-    settingsData
-      .filter((record) => record?.org_id)
-      .map((record) => [
-        record.org_id,
-        {
-          supabaseUrl: record.supabase_url || '',
-          supabaseAnonKey: record.anon_key || '',
-          metadata: record.metadata ?? null,
-          updatedAt: record.updated_at || null,
-          permissions: record.permissions ?? {},
-          storageProfile: record.storage_profile ?? null,
-        },
-      ]),
-  );
 
   const normalizedOrganizations = memberships
     .map((membership) => {
       const organization = organizationMap.get(membership.org_id);
-      const connection = connectionMap.get(membership.org_id);
-      return mapOrganizationRecord(organization, membership, connection);
+      return mapOrganizationRecord(organization, membership);
     })
     .filter(Boolean);
 
@@ -248,8 +216,6 @@ export default async function userContext(context, req) {
     })
     .filter(Boolean);
 
-  const connectionsPayload = Object.fromEntries(connectionMap.entries());
-
   context.log?.info?.('user-context loaded memberships', {
     userId,
     membershipCount: normalizedOrganizations.length,
@@ -259,6 +225,5 @@ export default async function userContext(context, req) {
   return respond(context, 200, {
     organizations: normalizedOrganizations,
     incomingInvites: normalizedInvites,
-    connections: connectionsPayload,
   });
 }

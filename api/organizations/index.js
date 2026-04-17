@@ -304,8 +304,6 @@ export default async function (context, req) {
     return;
   }
 
-  const incomingSupabaseUrl = typeof body.supabaseUrl === 'string' ? body.supabaseUrl.trim() : '';
-  const incomingAnonKey = typeof body.supabaseAnonKey === 'string' ? body.supabaseAnonKey.trim() : '';
   const policyLinks = normalizePolicyLinks(body.policyLinks);
   const legalSettings = sanitizeLegalSettings(body.legalSettings);
   const now = new Date().toISOString();
@@ -315,8 +313,6 @@ export default async function (context, req) {
       .from('organizations')
       .insert({
         name: trimmedName,
-        supabase_url: incomingSupabaseUrl || null,
-        supabase_anon_key: incomingAnonKey || null,
         policy_links: policyLinks,
         legal_settings: legalSettings,
         created_by: userId,
@@ -344,21 +340,6 @@ export default async function (context, req) {
 
     if (membershipError && membershipError.code !== '23505') {
       throw membershipError;
-    }
-
-    if (incomingSupabaseUrl && incomingAnonKey) {
-      const { error: settingsError } = await supabase
-        .from('org_settings')
-        .upsert({
-          org_id: orgData.id,
-          supabase_url: incomingSupabaseUrl,
-          anon_key: incomingAnonKey,
-          updated_at: now,
-        }, { onConflict: 'org_id' });
-
-      if (settingsError) {
-        throw settingsError;
-      }
     }
 
     context.log.info('Organization created successfully.', {

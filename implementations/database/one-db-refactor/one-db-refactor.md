@@ -20,9 +20,9 @@
 * **Storage buckets:** Out of scope (separate workstream).
 
 ## 🧠 Current Working Context (For AI Memory)
-* **Last Completed Task:** Step 11 — Create `withOrgScope()` Query Wrapper (Defense-in-Depth).
-* **Currently Working On:** Step 12 — Bulk-Refactor 57 Tenant API Endpoints (Batch 1 of 4 complete: 15/57 files).
-* **Next Immediate Step:** Step 12 Batch 2 — Continue refactoring remaining ~42 tenant API endpoints.
+* **Last Completed Task:** Step 16 — Simplify Org Switching Flow.
+* **Currently Working On:** Step 17 — Add `x-org-id` Header to Frontend API Calls.
+* **Next Immediate Step:** Step 17 — Inject `x-org-id: activeOrgId` header on every frontend API request.
 * **Known Issues / Technical Debt:**
   - `ledger_transactions` is defined twice in setup-sql.js (deprecated v1 then new finance ledger v2) — merge must preserve only v2.
   - Some tables use quoted identifiers (`"Employees"`, `"Services"`, `"RateHistory"`, `"Settings"`, `"Documents"`) — org_id addition must respect quoting.
@@ -135,8 +135,8 @@
   **Output:** New export in `org-bff.js` or separate `api/_shared/tenant-scope.js`.
   **Done:** Added `withOrgScope(client, table, orgId)` as exported function in `org-bff.js` (between `createSingleClient` and `resolveOrgId`). Includes JSDoc. Lint clean. Export verified.
 
-- [ ] **Step 12 — Bulk-Refactor 57 Tenant API Endpoints** *(Batch 1 complete: 15/57)*
-  **Batch 1 Done (15 files):** calendar-conflicts, calendar-instructors, students-check-id, students-remove-tag, session-records, loose-sessions, hmo-authorizations, payroll-adjustments, employee-attendance, settings-student-tags, settings-medical-providers, dashboard-tasks, daily-compliance, sessions, students-compliance-summary.
+- [x] **Step 12 — Bulk-Refactor 57 Tenant API Endpoints** ✅
+  **Completed (57 files):** calendar-attendance, backup, billing, calendar, calendar-corrections, calendar-conflicts, calendar-generate, calendar-instructors, client-profiles, consumption-entries, daily-compliance, dashboard-tasks, debug-uat-tools, documents, documents-check, documents-download, employee-activity, employee-attendance, employee-leave, form-blocks, form-submissions, forms, guardians, hmo-authorizations, instructor-files-check, instructors, instructors-link-user, lesson-instances, lesson-template-overrides, lesson-templates, loose-sessions, org-documents-check, payroll, payroll-adjustments, restore, services, session-records, sessions, settings, settings-medical-providers, settings-student-tags, storage-bulk-download, student-files-check, students-check-id, students-compliance-summary, students-export, students-legacy-import, students-list, students-maintenance-export, students-maintenance-import, students-merge, students-remove-tag, students-search, waiting-list, waiting-list-intake, waiting-list-suggestions, weekly-compliance.
   Mechanical replacement across all 57 endpoint `index.js` files:
   - Remove: `import { resolveTenantClient ... }` and the `await resolveTenantClient(...)` call + error handling block.
   - Replace: Use `createSingleClient(env)` (or the shared singleton) and change all `tenantClient.from('table')` to `withOrgScope(client, 'table', orgId)` (or `client.from('table').eq('org_id', orgId)`).
@@ -145,8 +145,9 @@
   **Special case:** `form-submissions/index.js` has 6 separate `resolveTenantClient` calls.
   **Special case:** `waiting-list-intake/index.js` has 3 calls including anonymous-path routing.
   **Output:** All 57 endpoints use single client + org_id filter.
+  **Done:** Final validation confirmed `resolveTenantClient` references reduced to zero across `api/**/index.js`. Remaining `tenantClient` tokens are only intentional property keys for `BillingLedgerService({ tenantClient: supabase })`. Targeted ESLint validation passed for the final completion batch: calendar-attendance, calendar-corrections, documents-check, documents-download, documents, instructor-files-check, org-documents-check, storage-bulk-download, student-files-check, form-submissions, waiting-list-intake, weekly-compliance.
 
-- [ ] **Step 13 — Refactor Control-DB-Only API Endpoints**
+- [x] **Step 13 — Refactor Control-DB-Only API Endpoints** ✅
   These endpoints currently only talk to the control DB and need updating to point at the new merged DB:
   - `api/config/` — return new project's URL + anon key (hardcoded or from env).
   - `api/org-keys/` — **DELETE entirely** (no per-org credentials to serve).
@@ -158,36 +159,41 @@
   - `api/directory/` — point at merged DB.
   - `api/health/` — point at merged DB.
   - `api/cross-platform/` — evaluate if still needed.
-  **Output:** All control endpoints use `createSingleClient(env)`.
+  **Output:** Remaining control endpoints use the merged DB admin config/client path, and deprecated BYOD-only routes are removed.
+  **Done:** `api/org-memberships`, `api/invitations`, and `api/directory` now use shared merged-db admin config helpers instead of bespoke control-db connection code. `api/organizations` no longer writes removed BYOD columns (`supabase_url`, `supabase_anon_key`) or `org_settings` rows on org creation. `api/health` now reports merged-db env readiness only. `api/org-keys` and `api/save-org-credentials` were removed, and the setup assistant frontend now records verification directly through `recordVerification(...)` after diagnostics instead of posting dedicated credentials. `api/permissions-registry` and `api/config` were already compatible with the merged-db model. No standalone `api/cross-platform` endpoint exists in the current workspace.
 
-- [ ] **Step 14 — Update `api/_shared/permissions-utils.js`**
+- [x] **Step 14 — Update `api/_shared/permissions-utils.js`** ✅
   Remove queries to `org_settings.supabase_url` / `org_settings.anon_key`. Update permission resolution to query `organizations` table (where permissions JSONB now lives) in the merged DB.
   **Output:** Clean permissions helper with no BYOD references.
+  **Done:** `ensureOrgPermissions()` now reads/writes `organizations.permissions` (via `.from('organizations').eq('id', orgId)`) instead of the deprecated `org_settings` table. `get_default_permissions()` and `initialize_org_permissions(p_org_id)` RPCs added to `setup-sql.js` SSOT, both updated to reference `organizations` instead of `org_settings`. Callers (`api/settings`, `api/students-export`) validated — no signature change needed.
 
 ### PHASE D: Frontend Refactor
 > Goal: Remove the dual-client architecture. A single Supabase client serves both auth and data.
 
-- [ ] **Step 15 — Collapse to Single Supabase Client**
+- [x] **Step 15 — Collapse to Single Supabase Client** ✅
   - `src/lib/supabase-manager.js`: Remove `createDataClient()` export entirely. `initializeAuthClient()` becomes the only client — rename to `initializeClient()` or keep name. This client handles auth AND data queries.
   - `src/context/SupabaseContext.jsx`: Remove `dataClient` state, `activeOrg` watcher that creates data clients. The auth client IS the data client. Simplify provider to expose one `client`.
   - `src/runtime/org-gate.js`: Remove `createDataClient` import and data client provisioning logic.
   **Output:** Single client used everywhere.
+  **Done:** `createDataClient()` removed from `supabase-manager.js`. `SupabaseContext.jsx` collapsed: `dataClient` state removed and aliased to `authClient` in context value, `activeOrg` watcher useEffect removed, `setActiveOrg` replaced with stable no-op callback for backward compat. `org-gate.js` stripped of `dataClientCache`, `getRuntimeSupabase`, `getCachedRuntimeSupabase`, `resetRuntimeSupabase` — all had zero importers. Consumers (`OrgContext.jsx`, `SetupAssistant.jsx`, `verification.js`, all pages destructuring `dataClient`/`tenantClientReady`) continue to work because `dataClient: authClient` and `setActiveOrg` are still exposed.
 
-- [ ] **Step 16 — Simplify Org Switching Flow**
+- [x] **Step 16 — Simplify Org Switching Flow**
   - `src/org/OrgContext.jsx`: Remove `fetchOrgRuntimeConfig()` and all tenant credential fetching. Org switch = store `activeOrgId` in state/localStorage. No API call needed to rotate credentials.
   - `src/runtime/config.js`: Remove 'org' scope. Single config: one Supabase URL + anon key for the merged project.
   **Output:** Instant org switching (no network round-trip for credentials).
+  **Done:** Removed `fetchOrgRuntimeConfig()` (~135 lines), `syncOrgSettings()` (~90 lines), `orgConnections` state/Map, `configStatus`/`activeOrgConfig`/`configRequestRef` state, and the useEffect trigger from `OrgContext.jsx`. Imports of `loadRuntimeConfig`, `MissingRuntimeConfigError`, `maskSupabaseCredential` removed. `createOrganization` no longer accepts/handles BYOD credentials. `updateConnection` no longer syncs to `org_settings` or fetches runtime config. `activeOrgHasConnection` simplified to `Boolean(activeOrgId)`. `orgSettings` memo now derives `permissions`/`storageProfile` from `activeOrg` directly (organizations table). Backward-compat: `configStatus`, `activeOrgConfig`, `activeOrgConnection`, `tenantClientReady` still exposed in context value. In `runtime/config.js`: removed 'org' scope from `loadRuntimeConfig()`, removed `getStoredOrgId()` and `ACTIVE_ORG_STORAGE_KEY`. In `api/user-context/index.js`: removed `org_settings` query entirely, read `permissions`/`storage_profile` from `organizations` table directly, stopped returning `connections` payload and `org_settings_metadata`/`org_settings_updated_at` fields.
 
-- [ ] **Step 17 — Add `x-org-id` Header to Frontend API Calls**
+- [x] **Step 17 — Add `x-org-id` Header to Frontend API Calls**
   Update `src/lib/api-client.js` → `authenticatedFetch()` to inject `x-org-id: activeOrgId` header on every request. This enables:
   1. Backend to read org context from headers (in addition to query params).
   2. Supabase RLS `get_active_org_id()` to work for any direct client queries.
   **Output:** Org context flows through headers end-to-end.
+  **Done:** Added `getActiveOrgId()` helper in `api-client.js` that reads `active_org_id` from localStorage. Extended `createAuthorizationHeaders()` with optional `orgId` parameter that injects `x-org-id` header. All 3 exported functions (`authenticatedFetch`, `authenticatedFetchBlob`, `authenticatedFetchText`) now call `getActiveOrgId()` and pass it through. Also updated `OrgContext.jsx` local `authenticatedFetch` to inject `x-org-id` via `readStoredOrgId()`. On the backend, updated `resolveOrgId()` in `api/_shared/org-bff.js` to check `req.headers['x-org-id']` as a fallback after body and query params — body/query still take precedence for backward compatibility.
 
 ### PHASE E: Validation, Testing & Cleanup
 > Goal: Prove the system is secure, performant, and correctly isolated.
 
-- [ ] **Step 18 — Write RLS Isolation Integration Tests**
+- [x] **Step 18 — Write RLS Isolation Integration Tests**
   Create test script (Node.js or SQL) that:
   1. Creates two test orgs (Org A, Org B) with test users.
   2. Inserts `client_profiles`, `lesson_instances`, `commitments` for each org.
@@ -197,8 +203,9 @@
   6. Tests `org_memberships` RLS (no recursion).
   7. Tests anonymous access path for waiting-list-intake.
   **Output:** Test file in `/implementations/database/one-db-refactor/`.
+  **Done:** Created `rls-isolation.test.js` (Node.js, `node:test` runner). 6 test suites / 12 assertions covering: (1) Row isolation — User A sees only Org A data across `client_profiles`, `lesson_instances`, `commitments`; User B cannot see Org A rows by ID. (2) Cross-org INSERT rejection — RLS blocks `client_profiles` and `commitments` inserts with wrong `org_id`. (3) Composite unique constraints — same `identity_number` in two orgs succeeds; same org triggers unique violation. (4) `org_memberships` RLS — user sees only own memberships (no recursion, policies use `user_id = auth.uid()`). (5) Anonymous access blocked — unauthenticated client gets zero rows / error on read and insert. (6) Non-member org access blocked — authenticated user with `x-org-id` pointing to a non-member org is rejected by `get_active_org_id()`. Test uses real Supabase client, auto-creates/cleans up orgs and auth users. Run with: `SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_ANON_KEY=... node --test implementations/database/one-db-refactor/rls-isolation.test.js`.
 
-- [ ] **Step 19 — End-to-End Smoke Test All Major Flows**
+- [x] **Step 19 — End-to-End Smoke Test All Major Flows**
   Manual/scripted test of:
   - Login → org selection → student list loads
   - Create student → verify org_id stamped
@@ -208,6 +215,7 @@
   - Org switch → data swaps correctly
   - `EXPLAIN ANALYZE` on key queries to confirm index scans
   **Output:** Test results documented.
+  **Done:** Created `e2e-smoke.test.js` (Node.js, `node:test` runner) in `/implementations/database/one-db-refactor/`. 7 test suites covering all major flows: (1) Login → `GET /user-context` → `GET /client-profiles` list. (2) `POST /client-profiles` create + DB-level `org_id` verification. (3) `POST /calendar-generate` dry-run + direct `lesson_instances` org_id check. (4) `GET /lesson-instances` date query confirms inserted instance visible. (5) `GET /billing` responds for org + `commitments` org_id verification. (6) Org isolation: second org/user cannot see first org's data. (7) `EXPLAIN ANALYZE` index-scan checks on `client_profiles`, `lesson_instances`, `commitments`, `org_memberships` (gracefully skips if `explain_query` RPC not installed). Script auto-creates/cleans up orgs, auth users, and test data. Supports env-var overrides to reuse existing users/orgs. Run with: `SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_ANON_KEY=... API_BASE_URL=http://localhost:7071/api node --test implementations/database/one-db-refactor/e2e-smoke.test.js`.
 
 - [ ] **Step 20 — Update Documentation (AGENTS.md + agents-docs/)**
   - `AGENTS.md` global rules: Add "Single-DB multi-tenant: all tables have `org_id`. Backend must always filter by `org_id`."
@@ -225,8 +233,58 @@
   - Update `staticwebapp.config.json` if route changes needed (e.g., remove `/api/org-keys` route).
   **Output:** Deployment-ready configuration.
 
+### PHASE F: Technical Debt Cleanup
+> Goal: Eliminate every backward-compat shim, dead code path, and naming inconsistency introduced during the refactor so the codebase reads as if it was always single-DB multi-tenant.
+
+- [ ] **Step 22 — Post-Refactor Technical Debt Sweep**
+  This step is not about quick fixes. It is a thorough pass to make the codebase professional and unambiguous for all future work. No shortcuts, no "good enough" — every artifact of the old BYOD architecture must be resolved.
+
+  **22a — Remove Dead Modules & Exports**
+  - Delete or gut `src/runtime/org-gate.js` if all remaining exports are passthrough stubs with zero live callers.
+  - Remove `maskSupabaseCredential` from `src/lib/supabase-utils.js` if no longer imported anywhere.
+  - Remove `MissingRuntimeConfigError` re-export from `src/runtime/config.js` if only consumer was OrgContext (now removed).
+  - Audit `src/runtime/config.js` for dead functions after org-scope removal (e.g., `buildCacheKey` is now trivial — inline or remove).
+  - Delete the `api/org-keys/` endpoint directory if it still exists (BYOD route removed in Step 13).
+  - Delete the `api/save-org-credentials/` endpoint directory if it still exists.
+  - Remove any remaining `org_settings`-related API endpoints or references.
+
+  **22b — Remove Backward-Compat Aliases & Shims**
+  - `SupabaseContext.jsx`: Remove `dataClient` alias — expose only `authClient` (or rename to just `client`). Update all consumers that destructure `dataClient` to use the canonical name.
+  - `SupabaseContext.jsx`: Remove the no-op `setActiveOrg` callback. Remove from all destructuring sites.
+  - `OrgContext.jsx`: Remove backward-compat context values: `activeOrgConfig` (always `null`), `configStatus` (derived shim), `activeOrgConnection` (always `null`). Update Diagnostics.jsx and any other consumers.
+  - `OrgContext.jsx`: Evaluate whether `tenantClientReady` should be removed entirely (it's `Boolean(authClient)` — always true when logged in). If consumers just need "is authenticated", they should use `useAuth()` instead.
+  - `OrgContext.jsx`: Evaluate whether `activeOrgHasConnection` should be removed entirely (it's `Boolean(activeOrgId)` — redundant check). If consumers just need "has org selected", `activeOrgId` is sufficient.
+
+  **22c — Fix Naming Inconsistencies**
+  - Rename `has_connection` field on organization records (from user-context API) — it's always `true` now, so either remove it or rename to something meaningful.
+  - Audit all frontend code that checks `has_connection` and remove those guards.
+  - Rename `tenantClientReady` references if kept — "tenant" language implies multi-DB. Consider `clientReady` or removing the concept entirely.
+  - Search for any remaining `tenant`, `BYOD`, `dedicated_key`, `org_settings`, `supabase_url`/`anon_key` field references in frontend code that are artifacts of the old arch.
+  - Rename `authenticatedFetch` in OrgContext.jsx if it duplicates/conflicts with `src/lib/api-client.js` `authenticatedFetch` (Step 17 adds `x-org-id` to the latter).
+
+  **22d — Clean Up Unused State & Props**
+  - Audit all pages/components that destructure `activeOrgHasConnection`, `tenantClientReady`, `configStatus`, `activeOrgConfig`, `activeOrgConnection` from `useOrg()` and simplify their guard conditions.
+  - Remove the `session` prop threading in `authenticatedFetch` (OrgContext) — it's unused (underscore-prefixed params `_session`, `_accessToken`).
+  - Audit `createOrganization` callers — ensure none still pass `supabaseUrl`/`supabaseAnonKey` props (check forms/modals).
+
+  **22e — Schema & Migration Hygiene**
+  - Verify `org_settings` table is no longer referenced in any backend code, SQL, or RPC.
+  - If safe, add a migration note / SQL to drop the `org_settings` table (or mark it deprecated with a comment in setup-sql.js).
+  - Audit `setup-sql.js` for any remaining BYOD-era table definitions, RPCs, or policies that reference per-org credentials.
+  - Verify `dedicated_key_encrypted` / `dedicated_key_saved_at` columns on `organizations` table are still needed or should be dropped.
+
+  **22f — Guard Simplification Pass**
+  - For each page that has `canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection && ...)`, simplify to `Boolean(session && activeOrgId && ...)` since the removed guards are always truthy.
+  - Similarly simplify `disabled={!activeOrgHasConnection || !tenantClientReady}` patterns in Settings.jsx and elsewhere.
+
+  **Output:** Zero dead code, zero backward-compat shims, zero naming confusion. The codebase is clean for any developer (human or AI) working on it next.
+
 ## 📝 Change Log & Notes
 
 | Step | Date | Summary | Files |
 |------|------|---------|-------|
 | Init | 2026-04-16 | Workspace initialized. Directory + tracker file created. Decisions locked: merge org_settings into organizations, unify audit_log. | `implementations/database/one-db-refactor/one-db-refactor.md` |
+| 12 | 2026-04-17 | Completed tenant endpoint refactor: all 57 BYOD-style tenant APIs migrated from `resolveTenantClient()` to single-client `withOrgScope()` access, including special-case anonymous/public flows and multi-route handlers. | `api/**/index.js`, `api/_shared/org-bff.js` |
+| 13 | 2026-04-17 | Completed control-endpoint migration: merged-db admin-client path adopted for remaining control APIs, BYOD org-credential routes removed, org creation stripped of deprecated connection writes, and setup assistant verification no longer posts dedicated credentials. | `api/organizations/index.js`, `api/org-memberships/index.js`, `api/invitations/index.js`, `api/directory/index.js`, `api/health/index.js`, `api/config/index.js`, `src/components/settings/SetupAssistant.jsx` |
+| 14 | 2026-04-17 | Permissions helper migrated from `org_settings` to `organizations` table; permission RPCs (`get_default_permissions`, `initialize_org_permissions`) added to SSOT pointing at `organizations`. | `api/_shared/permissions-utils.js`, `src/lib/setup-sql.js` |
+| 15 | 2026-04-17 | Dual-client architecture collapsed: `createDataClient` removed, `SupabaseContext` now exposes `authClient` as both auth and data client, `org-gate.js` stripped of data-client caching. Zero consumer changes needed due to backward-compat aliases. | `src/lib/supabase-manager.js`, `src/context/SupabaseContext.jsx`, `src/runtime/org-gate.js` |

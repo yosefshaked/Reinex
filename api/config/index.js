@@ -18,7 +18,6 @@ export default async function (context) {
       context.log?.error?.('Base runtime config is missing Supabase URL.', {
         hasAppSupabaseUrl: Boolean(env.APP_SUPABASE_URL),
         hasSupabaseUrl: Boolean(env.SUPABASE_URL),
-        hasAppControlDbUrl: Boolean(env.APP_CONTROL_DB_URL),
         hasViteAppSupabaseUrl: Boolean(env.VITE_APP_SUPABASE_URL),
         hasViteSupabaseUrl: Boolean(env.VITE_SUPABASE_URL),
       });
@@ -29,7 +28,6 @@ export default async function (context) {
       context.log?.error?.('Base runtime config is missing Supabase anon key.', {
         hasAppSupabaseAnonKey: Boolean(env.APP_SUPABASE_ANON_KEY),
         hasSupabaseAnonKey: Boolean(env.SUPABASE_ANON_KEY),
-        hasAppControlDbAnonKey: Boolean(env.APP_CONTROL_DB_ANON_KEY),
         hasViteAppSupabaseAnonKey: Boolean(env.VITE_APP_SUPABASE_ANON_KEY),
         hasViteSupabaseAnonKey: Boolean(env.VITE_SUPABASE_ANON_KEY),
       });

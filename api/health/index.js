@@ -10,10 +10,9 @@ export default async function (context) {
   // Surface which required env vars are present (not their values) so the
   // diagnostics page can show a deployment checklist without auth.
   const envCheck = {
-    APP_SUPABASE_URL: Boolean(publicConfig.supabaseUrl),
-    APP_SUPABASE_ANON_KEY: Boolean(publicConfig.anonKey),
+    SUPABASE_URL: Boolean(publicConfig.supabaseUrl),
+    SUPABASE_ANON_KEY: Boolean(publicConfig.anonKey),
     SUPABASE_SERVICE_ROLE_KEY: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
-    ORG_CREDENTIALS_ENCRYPTION_KEY: Boolean(env.ORG_CREDENTIALS_ENCRYPTION_KEY),
   };
 
   context.res = {

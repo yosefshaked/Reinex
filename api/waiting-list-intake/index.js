@@ -12,8 +12,8 @@ import {
   parseRequestBody,
   readEnv,
   resolveOrgId,
-  resolveTenantClient,
   respond,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { sendBrevoEmail } from '../_shared/brevo.js';
 import {
@@ -89,15 +89,14 @@ function normalizeBoolean(value, defaultValue = false) {
   return defaultValue;
 }
 
-async function resolvePublicFormStateWithSharedBlocks(tenantClient, formRecord, options = {}) {
+async function resolvePublicFormStateWithSharedBlocks(client, orgId, formRecord, options = {}) {
   const initialState = resolvePublicFormState(formRecord, { ...options, sharedBlocksById: {} });
   const blockIds = collectSharedBlockIds(initialState.raw_form_schema || initialState.form_schema);
   if (!blockIds.length) {
     return initialState;
   }
 
-  const { data, error } = await tenantClient
-    .from('shared_form_blocks')
+  const { data, error } = await withOrgScope(client, 'shared_form_blocks', orgId)
     .select('id, block_type, name, content_schema, is_active, metadata')
     .eq('is_active', true)
     .in('id', blockIds);
@@ -337,9 +336,8 @@ function requiresPublishMigration(form) {
   return Boolean(publishedAt) && hasDraftSchema;
 }
 
-async function requireWaitingListIntakeForm(tenantClient, formId) {
-  const { data, error } = await tenantClient
-    .from('forms')
+async function requireWaitingListIntakeForm(client, orgId, formId) {
+  const { data, error } = await withOrgScope(client, 'forms', orgId)
     .select('id, name, description, form_usage, form_schema, alert_rules, visibility_rules, metadata, is_active, published_at')
     .eq('id', formId)
     .maybeSingle();
@@ -353,9 +351,8 @@ async function requireWaitingListIntakeForm(tenantClient, formId) {
   return data;
 }
 
-async function requireActiveService(tenantClient, serviceId) {
-  const { data, error } = await tenantClient
-    .from('Services')
+async function requireActiveService(client, orgId, serviceId) {
+  const { data, error } = await withOrgScope(client, 'Services', orgId)
     .select('id, name, is_active')
     .eq('id', serviceId)
     .maybeSingle();
@@ -364,9 +361,8 @@ async function requireActiveService(tenantClient, serviceId) {
   return data;
 }
 
-async function listActiveServices(tenantClient) {
-  const { data, error } = await tenantClient
-    .from('Services')
+async function listActiveServices(client, orgId) {
+  const { data, error } = await withOrgScope(client, 'Services', orgId)
     .select('id, name, is_active')
     .eq('is_active', true)
     .order('name', { ascending: true });
@@ -434,13 +430,12 @@ async function findActiveInviteRoutingBySubmission(controlClient, submissionId) 
   return data || null;
 }
 
-async function findPendingIntakeSubmission(tenantClient, { clientProfileId, formId, primaryServiceId, allowAdditionalServices }) {
+async function findPendingIntakeSubmission(client, orgId, { clientProfileId, formId, primaryServiceId, allowAdditionalServices }) {
   if (!UUID_PATTERN.test(String(clientProfileId || '')) || !UUID_PATTERN.test(String(formId || '')) || !UUID_PATTERN.test(String(primaryServiceId || ''))) {
     return null;
   }
 
-  const { data, error } = await tenantClient
-    .from('form_submissions')
+  const { data, error } = await withOrgScope(client, 'form_submissions', orgId)
     .select('id, metadata, submitted_at')
     .eq('client_profile_id', clientProfileId)
     .eq('form_id', formId)
@@ -462,13 +457,13 @@ function normalizeCustomAnswers(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
-async function createOrReuseProspectStudent(tenantClient, payload) {
+async function createOrReuseProspectStudent(client, orgId, payload) {
   const firstName = normalizeString(payload.student_first_name || payload.studentFirstName);
   const lastName = normalizeString(payload.student_last_name || payload.studentLastName);
   if (!firstName || !lastName) {
     throw new Error('missing_student_name');
   }
-  const result = await createOrReuseClientProfile(tenantClient, {
+  const result = await createOrReuseClientProfile(client, {
     first_name: firstName,
     last_name: lastName,
     identity_number: normalizeIdentityNumber(payload.identity_number) || null,
@@ -483,8 +478,7 @@ async function createOrReuseProspectStudent(tenantClient, payload) {
     },
   });
 
-  const { data: studentRow, error: studentLookupError } = await tenantClient
-    .from('students')
+  const { data: studentRow, error: studentLookupError } = await withOrgScope(client, 'students', orgId)
     .select('id')
     .eq('client_profile_id', result.clientProfileId)
     .maybeSingle();
@@ -501,9 +495,9 @@ async function createOrReuseProspectStudent(tenantClient, payload) {
   };
 }
 
-async function writeTenantAudit(context, tenantClient, params) {
+async function writeTenantAudit(context, client, params) {
   try {
-    await logTenantAuditEvent(tenantClient, params);
+    await logTenantAuditEvent(client, params);
   } catch (auditError) {
     context.log?.warn?.('waiting-list-intake failed to write tenant audit event', {
       message: auditError?.message,
@@ -550,15 +544,14 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
   if (deliveryMethod === 'whatsapp' && !phone) return respond(context, 400, { message: 'missing_phone' });
   if (deliveryMethod === 'email' && !email) return respond(context, 400, { message: 'missing_email' });
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) return respond(context, tenantError.status, tenantError.body);
+  const client = controlClient;
 
   let form;
   let service;
   try {
     [form, service] = await Promise.all([
-      requireWaitingListIntakeForm(tenantClient, formId),
-      requireActiveService(tenantClient, desiredServiceId),
+      requireWaitingListIntakeForm(client, orgId, formId),
+      requireActiveService(client, orgId, desiredServiceId),
     ]);
   } catch (error) {
     const message = String(error?.message || '');
@@ -586,7 +579,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
   let clientProfileId = '';
   let studentResult = null;
   try {
-    studentResult = await createOrReuseProspectStudent(tenantClient, {
+    studentResult = await createOrReuseProspectStudent(client, orgId, {
       student_first_name: studentFirstName,
       student_last_name: studentLastName,
       phone,
@@ -619,7 +612,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
   let submissionId = '';
 
   if (studentResult?.action === 'created' || studentResult?.action === 'updated_existing') {
-    await writeTenantAudit(context, tenantClient, {
+    await writeTenantAudit(context, client, {
       correlationId,
       actorUserId: userId,
       eventType: studentResult.action === 'created'
@@ -639,7 +632,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
   }
 
   try {
-    const existingSubmission = await findPendingIntakeSubmission(tenantClient, {
+    const existingSubmission = await findPendingIntakeSubmission(client, orgId, {
       clientProfileId,
       formId,
       primaryServiceId: desiredServiceId,
@@ -722,8 +715,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
     return respond(context, 500, { message: 'failed_to_prepare_invite' });
   }
 
-  const { data: submission, error: submissionError } = await tenantClient
-    .from('form_submissions')
+  const { data: submission, error: submissionError } = await withOrgScope(client, 'form_submissions', orgId)
     .insert({
       form_id: formId,
       client_profile_id: clientProfileId,
@@ -763,7 +755,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
   }
   submissionId = submission.id;
 
-  await writeTenantAudit(context, tenantClient, {
+  await writeTenantAudit(context, client, {
     correlationId,
     actorUserId: userId,
     eventType: 'form_submission.waiting_list_intake.prepared',
@@ -811,8 +803,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
 
   if (routingError || !routingRow?.id) {
     if (submissionId) {
-      const { error: cleanupSubmissionError } = await tenantClient
-        .from('form_submissions')
+      const { error: cleanupSubmissionError } = await withOrgScope(client, 'form_submissions', orgId)
         .delete()
         .eq('id', submissionId);
 
@@ -892,7 +883,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
   return respond(context, 200, responseBody);
 }
 
-async function loadPublicInvite(context, req, { controlClient, env }) {
+async function loadPublicInvite(context, req, { controlClient }) {
   const inviteToken = normalizeUuid(req?.query?.invite || req?.query?.invite_token || req?.query?.inviteToken);
   if (!inviteToken) return respond(context, 400, { message: 'invalid_invite_token' });
 
@@ -906,14 +897,13 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
 
   if (!routingRow?.org_id) return respond(context, 404, { message: 'invite_not_found' });
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, routingRow.org_id);
-  if (tenantError) return respond(context, tenantError.status, tenantError.body);
+  const client = controlClient;
+  const orgId = routingRow.org_id;
 
   const submissionId = normalizeUuid(routingRow?.routing_info?.submission_id);
   if (!submissionId) return respond(context, 404, { message: 'invite_not_found' });
 
-  const { data: submission, error: submissionError } = await tenantClient
-    .from('form_submissions')
+  const { data: submission, error: submissionError } = await withOrgScope(client, 'form_submissions', orgId)
     .select('id, client_profile_id, student_id, form_id, answers, metadata, submitted_at')
     .eq('id', submissionId)
     .maybeSingle();
@@ -929,9 +919,9 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
   }
 
   const [{ data: form }, { data: clientProfile }, services] = await Promise.all([
-    tenantClient.from('forms').select('id, name, description, form_schema, alert_rules, visibility_rules, metadata, form_usage').eq('id', submission.form_id).maybeSingle(),
-    tenantClient.from('client_profiles').select('id, first_name, last_name, identity_number, phone, email').eq('id', submission.client_profile_id).maybeSingle(),
-    listActiveServices(tenantClient),
+    withOrgScope(client, 'forms', orgId).select('id, name, description, form_schema, alert_rules, visibility_rules, metadata, form_usage').eq('id', submission.form_id).maybeSingle(),
+    withOrgScope(client, 'client_profiles', orgId).select('id, first_name, last_name, identity_number, phone, email').eq('id', submission.client_profile_id).maybeSingle(),
+    listActiveServices(client, orgId),
   ]);
 
   if (!form || form.form_usage !== 'waiting_list_intake') {
@@ -940,7 +930,7 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
 
   let publicFormState;
   try {
-    publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+    publicFormState = await resolvePublicFormStateWithSharedBlocks(client, orgId, form, { allowDraftFallback: false });
   } catch (error) {
     if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
       return respond(context, 409, { message: 'form_unavailable' });
@@ -981,7 +971,8 @@ async function loadPublicInvite(context, req, { controlClient, env }) {
   });
 }
 
-async function submitPublicInvite(context, req, { controlClient, env }) {
+async function submitPublicInvite(context, req, { controlClient }) {
+  const env = readEnv(context);
   const body = parseRequestBody(req);
   const inviteToken = normalizeUuid(body?.invite_token || body?.inviteToken || body?.invite);
   if (!inviteToken) return respond(context, 400, { message: 'invalid_invite_token' });
@@ -996,14 +987,13 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
 
   if (!routingRow?.org_id) return respond(context, 404, { message: 'invite_not_found' });
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, routingRow.org_id);
-  if (tenantError) return respond(context, tenantError.status, tenantError.body);
+  const client = controlClient;
+  const orgId = routingRow.org_id;
 
   const submissionId = normalizeUuid(routingRow?.routing_info?.submission_id);
   if (!submissionId) return respond(context, 404, { message: 'invite_not_found' });
 
-  const { data: submission, error: submissionError } = await tenantClient
-    .from('form_submissions')
+  const { data: submission, error: submissionError } = await withOrgScope(client, 'form_submissions', orgId)
     .select('id, client_profile_id, student_id, form_id, answers, metadata, submitted_at')
     .eq('id', submissionId)
     .maybeSingle();
@@ -1019,8 +1009,8 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
   }
 
   const [{ data: form }, services] = await Promise.all([
-    tenantClient.from('forms').select('id, form_schema, alert_rules, visibility_rules, metadata, form_usage').eq('id', submission.form_id).maybeSingle(),
-    listActiveServices(tenantClient),
+    withOrgScope(client, 'forms', orgId).select('id, form_schema, alert_rules, visibility_rules, metadata, form_usage').eq('id', submission.form_id).maybeSingle(),
+    listActiveServices(client, orgId),
   ]);
 
   if (!form || form.form_usage !== 'waiting_list_intake') {
@@ -1029,7 +1019,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
 
   let publicFormState;
   try {
-    publicFormState = await resolvePublicFormStateWithSharedBlocks(tenantClient, form, { allowDraftFallback: false });
+    publicFormState = await resolvePublicFormStateWithSharedBlocks(client, orgId, form, { allowDraftFallback: false });
   } catch (error) {
     if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
       return respond(context, 409, { message: 'form_unavailable' });
@@ -1110,7 +1100,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
 
   let identityConflictStudentId = '';
   if (identityNumber) {
-    const { data: conflictProfile, error } = await findClientProfileByIdentityNumber(tenantClient, identityNumber, {
+    const { data: conflictProfile, error } = await findClientProfileByIdentityNumber(client, identityNumber, {
       excludeId: submission.client_profile_id,
     });
     if (error) {
@@ -1121,8 +1111,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
       return respond(context, 500, { message: 'failed_to_validate_identity_number' });
     }
     if (conflictProfile?.id) {
-      const { data: conflictStudent } = await tenantClient
-        .from('students')
+      const { data: conflictStudent } = await withOrgScope(client, 'students', orgId)
         .select('id')
         .eq('client_profile_id', conflictProfile.id)
         .maybeSingle();
@@ -1141,8 +1130,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     clientProfileUpdates.identity_number = identityNumber;
   }
 
-  const { error: updateStudentError } = await tenantClient
-    .from('client_profiles')
+  const { error: updateStudentError } = await withOrgScope(client, 'client_profiles', orgId)
     .update(clientProfileUpdates)
     .eq('id', submission.client_profile_id);
 
@@ -1154,7 +1142,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     return respond(context, 500, { message: 'failed_to_update_student' });
   }
 
-  await writeTenantAudit(context, tenantClient, {
+  await writeTenantAudit(context, client, {
     correlationId,
     actorUserId: null,
     eventType: 'client_profile.waiting_list_intake_profile_updated',
@@ -1173,14 +1161,14 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
   let guardianResult = null;
   if (contactRelationship !== 'self') {
     try {
-      guardianResult = await createOrReuseGuardian(tenantClient, {
+      guardianResult = await createOrReuseGuardian(client, {
         contactName,
         phone,
         email,
       });
       guardianId = guardianResult?.guardianId || null;
       if (guardianId) {
-        await upsertClientGuardianLink(tenantClient, {
+        await upsertClientGuardianLink(client, {
           clientProfileId: submission.client_profile_id,
           guardianId,
           relationship: contactRelationship,
@@ -1197,7 +1185,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
   }
 
   if (guardianResult?.action === 'created' || guardianResult?.action === 'updated_existing') {
-    await writeTenantAudit(context, tenantClient, {
+    await writeTenantAudit(context, client, {
       correlationId,
       actorUserId: null,
       eventType: guardianResult.action === 'created'
@@ -1217,7 +1205,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
   }
 
   if (guardianId) {
-    await writeTenantAudit(context, tenantClient, {
+    await writeTenantAudit(context, client, {
       correlationId,
       actorUserId: null,
       eventType: 'client_profile.guardian_linked_from_waiting_list_intake',
@@ -1237,8 +1225,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     });
   }
 
-  const { error: updateSubmissionError } = await tenantClient
-    .from('form_submissions')
+  const { error: updateSubmissionError } = await withOrgScope(client, 'form_submissions', orgId)
     .update({
       answers: {
         intake: {
@@ -1294,7 +1281,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
     return respond(context, 500, { message: 'failed_to_submit_intake' });
   }
 
-  await writeTenantAudit(context, tenantClient, {
+  await writeTenantAudit(context, client, {
     correlationId,
     actorUserId: null,
     eventType: 'form_submission.waiting_list_intake.completed',
@@ -1330,8 +1317,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
       submitted_at: nowIso,
     };
 
-    const { data: existingEntry, error: existingEntryError } = await tenantClient
-      .from('waiting_list_entries')
+    const { data: existingEntry, error: existingEntryError } = await withOrgScope(client, 'waiting_list_entries', orgId)
       .select('id, metadata')
       .eq('client_profile_id', submission.client_profile_id)
       .eq('desired_service_id', serviceId)
@@ -1353,8 +1339,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
       const mergedMetadata = existingEntry.metadata && typeof existingEntry.metadata === 'object'
         ? { ...existingEntry.metadata, ...intakeMetadata }
         : intakeMetadata;
-      const { error: updateEntryError } = await tenantClient
-        .from('waiting_list_entries')
+      const { error: updateEntryError } = await withOrgScope(client, 'waiting_list_entries', orgId)
         .update({
           latest_submission_id: submissionId,
           preferred_days: preferredDays,
@@ -1373,7 +1358,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
         return respond(context, 500, { message: 'failed_to_create_waiting_list' });
       }
 
-      await writeTenantAudit(context, tenantClient, {
+      await writeTenantAudit(context, client, {
         correlationId,
         actorUserId: null,
         eventType: 'waiting_list.entry.updated_from_intake',
@@ -1395,8 +1380,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
         },
       });
     } else {
-      const { data: insertedEntry, error: insertEntryError } = await tenantClient
-        .from('waiting_list_entries')
+      const { data: insertedEntry, error: insertEntryError } = await withOrgScope(client, 'waiting_list_entries', orgId)
         .insert({
           client_profile_id: submission.client_profile_id,
           student_id: submission.student_id,
@@ -1420,7 +1404,7 @@ async function submitPublicInvite(context, req, { controlClient, env }) {
         return respond(context, 500, { message: 'failed_to_create_waiting_list' });
       }
 
-      await writeTenantAudit(context, tenantClient, {
+      await writeTenantAudit(context, client, {
         correlationId,
         actorUserId: null,
         eventType: 'waiting_list.entry.created_from_intake',
@@ -1474,11 +1458,11 @@ export default async function waitingListIntake(context, req) {
   });
 
   if (method === 'GET' && (!action || action === 'load')) {
-    return loadPublicInvite(context, req, { controlClient, env });
+    return loadPublicInvite(context, req, { controlClient });
   }
 
   if (method === 'POST' && action === 'submit') {
-    return submitPublicInvite(context, req, { controlClient, env });
+    return submitPublicInvite(context, req, { controlClient });
   }
 
   if (method !== 'POST' || action !== 'send') {

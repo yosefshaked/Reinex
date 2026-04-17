@@ -9,9 +9,7 @@ import React, {
 } from 'react';
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
-import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
 import { getAuthClient } from '@/lib/supabase-manager.js';
-import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { useRuntimeConfig } from '@/runtime/RuntimeConfigContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
@@ -127,6 +125,11 @@ async function authenticatedFetch(path, { params, session: _session, accessToken
   headers['x-supabase-authorization'] = bearer;
   headers['x-supabase-auth'] = bearer;
 
+  const storedOrgId = readStoredOrgId();
+  if (storedOrgId) {
+    headers['x-org-id'] = storedOrgId;
+  }
+
   let requestBody = body;
   if (requestBody && typeof requestBody === 'object' && !(requestBody instanceof FormData)) {
     requestBody = JSON.stringify(requestBody);
@@ -211,10 +214,7 @@ export function OrgProvider({ children }) {
   const [incomingInvites, setIncomingInvites] = useState([]);
   const [orgMembers, setOrgMembers] = useState([]);
   const [orgInvites, setOrgInvites] = useState([]);
-  const [orgConnections, setOrgConnections] = useState(new Map());
   const [error, setError] = useState(null);
-  const [configStatus, setConfigStatus] = useState('idle');
-  const [activeOrgConfig, setActiveOrgConfig] = useState(null);
   const [directoryEnabled, setDirectoryEnabled] = useState(false);
   const sessionAccessToken = session?.access_token || null;
 
@@ -229,7 +229,6 @@ export function OrgProvider({ children }) {
   }, []);
   const loadingRef = useRef(false);
   const lastUserIdRef = useRef(null);
-  const configRequestRef = useRef(0);
   const tenantClientReady = Boolean(dataClient);
   const hasRuntimeConfig = Boolean(runtimeConfig?.supabaseUrl && runtimeConfig?.supabaseAnonKey);
 
@@ -241,10 +240,7 @@ export function OrgProvider({ children }) {
     setIncomingInvites([]);
     setOrgMembers([]);
     setOrgInvites([]);
-    setOrgConnections(new Map());
     setError(null);
-    setActiveOrgConfig(null);
-    setConfigStatus('idle');
     setDirectoryEnabled(false);
     setSupabaseActiveOrg(null);
   }, [setSupabaseActiveOrg]);
@@ -270,30 +266,6 @@ export function OrgProvider({ children }) {
     try {
       const payload = await authenticatedFetch('user-context');
 
-      const connectionEntries = payload?.connections && typeof payload.connections === 'object'
-        ? Object.entries(payload.connections)
-        : [];
-
-      const connectionMap = new Map(
-        connectionEntries
-          .map(([orgId, connection]) => {
-            if (!orgId) return null;
-            const normalized = connection && typeof connection === 'object' ? connection : {};
-            return [
-              orgId,
-              {
-                supabaseUrl: normalized.supabaseUrl || normalized.supabase_url || '',
-                supabaseAnonKey: normalized.supabaseAnonKey || normalized.supabase_anon_key || '',
-                metadata: normalized.metadata ?? null,
-                updatedAt: normalized.updatedAt || normalized.updated_at || null,
-                permissions: normalized.permissions ?? {},
-                storageProfile: normalized.storageProfile ?? null,
-              },
-            ];
-          })
-          .filter(Boolean),
-      );
-
       const organizationsPayload = Array.isArray(payload?.organizations)
         ? payload.organizations.filter((org) => org && org.id)
         : [];
@@ -302,7 +274,6 @@ export function OrgProvider({ children }) {
         ? payload.incomingInvites.filter(Boolean)
         : [];
 
-      setOrgConnections(connectionMap);
       setOrganizations(organizationsPayload);
       setIncomingInvites(invitesPayload);
 
@@ -312,7 +283,6 @@ export function OrgProvider({ children }) {
       setError(loadError);
       setOrganizations([]);
       setIncomingInvites([]);
-      setOrgConnections(new Map());
       throw loadError;
     } finally {
       loadingRef.current = false;
@@ -369,116 +339,6 @@ export function OrgProvider({ children }) {
     [sessionAccessToken],
   );
 
-  const fetchOrgRuntimeConfig = useCallback(async (orgId) => {
-    if (!orgId) {
-      setActiveOrgConfig(null);
-      setConfigStatus('idle');
-      setSupabaseActiveOrg(null);
-      return;
-    }
-
-    if (!authClient) {
-      setActiveOrgConfig(null);
-      setConfigStatus('idle');
-      setSupabaseActiveOrg(null);
-      return;
-    }
-
-    const requestId = configRequestRef.current + 1;
-    configRequestRef.current = requestId;
-    setConfigStatus('loading');
-
-    const client = authClient;
-
-    try {
-      const { data: sessionData, error: sessionError } = await client.auth.getSession();
-
-      if (configRequestRef.current !== requestId) {
-        return;
-      }
-
-      if (sessionError) {
-        const authError = new MissingRuntimeConfigError('פג תוקף כניסה/חסר Bearer');
-        authError.status = 401;
-        authError.cause = sessionError;
-        throw authError;
-      }
-
-      const accessToken = sessionData?.session?.access_token || null;
-
-      if (!accessToken) {
-        const missingTokenError = new MissingRuntimeConfigError('פג תוקף כניסה/חסר Bearer');
-        missingTokenError.status = 401;
-        throw missingTokenError;
-      }
-
-      const config = await loadRuntimeConfig({ accessToken, orgId, force: true });
-
-      if (configRequestRef.current !== requestId) {
-        return;
-      }
-
-      setActiveOrgConfig((current) => {
-        const normalized = {
-          orgId,
-          supabaseUrl: config.supabaseUrl,
-          supabaseAnonKey: config.supabaseAnonKey,
-        };
-
-        if (
-          current &&
-          current.orgId === normalized.orgId &&
-          current.supabaseUrl === normalized.supabaseUrl &&
-          current.supabaseAnonKey === normalized.supabaseAnonKey
-        ) {
-          return current;
-        }
-
-        return normalized;
-      });
-      setSupabaseActiveOrg({
-        id: orgId,
-        supabase_url: config.supabaseUrl,
-        supabase_anon_key: config.supabaseAnonKey,
-      });
-      setConfigStatus('success');
-      console.info('[OrgSupabase]', {
-        action: 'config-fetched',
-        orgId,
-        supabaseUrl: maskSupabaseCredential(config.supabaseUrl),
-        anonKey: maskSupabaseCredential(config.supabaseAnonKey),
-        source: config.source || 'unknown',
-      });
-    } catch (error) {
-      if (configRequestRef.current !== requestId) {
-        return;
-      }
-
-      console.error('Failed to fetch organization config', error);
-
-      if (error?.status === 401) {
-        toast.error('פג תוקף כניסה/חסר Bearer');
-        try {
-          await client.auth.refreshSession();
-        } catch (refreshError) {
-          console.error('Failed to refresh Supabase session after 401', refreshError);
-        }
-      } else if (error?.status === 404) {
-        toast.error('לא נמצא ארגון או שאין הרשאה');
-      } else if (typeof error?.status === 'number' && error.status >= 500) {
-        toast.error('שגיאת שרת בעת טעינת מפתחות הארגון.');
-      } else if (error instanceof MissingRuntimeConfigError) {
-        toast.error(error.message);
-      } else {
-        toast.error('לא ניתן היה לטעון את הגדרות הארגון. נסה שוב בעוד מספר רגעים.');
-      }
-
-      setActiveOrgConfig(null);
-      setConfigStatus('error');
-      setSupabaseActiveOrg(null);
-    }
-  }, [authClient, setSupabaseActiveOrg]);
-
   const determineStatus = useCallback(
     (orgList, currentOrgId = activeOrgId) => {
       if (!user) return 'idle';
@@ -495,17 +355,12 @@ export function OrgProvider({ children }) {
       if (!org) {
         setActiveOrgId(null);
         setActiveOrg(null);
-        setActiveOrgConfig(null);
-        setConfigStatus('idle');
         setSupabaseActiveOrg(null);
         return;
       }
 
       setActiveOrgId(org.id);
       setActiveOrg(org);
-
-      setActiveOrgConfig(null);
-      setConfigStatus('idle');
     },
     [setSupabaseActiveOrg],
   );
@@ -618,11 +473,6 @@ export function OrgProvider({ children }) {
     };
   }, [activeOrgId, sessionAccessToken, loadOrgDirectory, hasRuntimeConfig, directoryEnabled]);
 
-  useEffect(() => {
-    if (!activeOrgId) return;
-    void fetchOrgRuntimeConfig(activeOrgId);
-  }, [activeOrgId, fetchOrgRuntimeConfig]);
-
   const selectOrg = useCallback(
     async (orgId) => {
       if (!orgId) {
@@ -670,101 +520,8 @@ export function OrgProvider({ children }) {
     [user, activeOrgId, loadMemberships, applyActiveOrg, loadOrgDirectory, determineStatus],
   );
 
-  const syncOrgSettings = useCallback(
-    async (orgId, supabaseUrl, supabaseAnonKey) => {
-      if (!orgId) throw new Error('זיהוי ארגון חסר.');
-      const client = requireAuthClient();
-      const normalizedUrl = supabaseUrl ? supabaseUrl.trim() : '';
-      const normalizedKey = supabaseAnonKey ? supabaseAnonKey.trim() : '';
-
-      if (!normalizedUrl || !normalizedKey) {
-        const { error } = await client
-          .from('org_settings')
-          .delete()
-          .eq('org_id', orgId);
-        if (error) throw error;
-        setOrgConnections((prev) => {
-          const next = new Map(prev);
-          next.delete(orgId);
-          return next;
-        });
-        setOrganizations((prev) =>
-          prev.map((org) =>
-            org.id === orgId
-              ? {
-                  ...org,
-                  has_connection: false,
-                  org_settings_metadata: null,
-                  org_settings_updated_at: null,
-                }
-              : org,
-          ),
-        );
-        if (orgId === activeOrgId) {
-          setActiveOrg((current) => {
-            if (!current || current.id !== orgId) return current;
-            return {
-              ...current,
-              has_connection: false,
-              org_settings_metadata: null,
-              org_settings_updated_at: null,
-            };
-          });
-        }
-        return;
-      }
-
-      const payload = {
-        org_id: orgId,
-        supabase_url: normalizedUrl,
-        anon_key: normalizedKey,
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error } = await client
-        .from('org_settings')
-        .upsert(payload, { onConflict: 'org_id' });
-      if (error) throw error;
-      setOrgConnections((prev) => {
-        const next = new Map(prev);
-        const previous = prev.get(orgId);
-        next.set(orgId, {
-          supabaseUrl: normalizedUrl,
-          supabaseAnonKey: normalizedKey,
-          metadata: previous?.metadata ?? null,
-          updatedAt: payload.updated_at,
-        });
-        return next;
-      });
-      setOrganizations((prev) =>
-        prev.map((org) =>
-          org.id === orgId
-            ? {
-                ...org,
-                has_connection: Boolean(normalizedUrl && normalizedKey),
-                org_settings_metadata: org.org_settings_metadata ?? null,
-                org_settings_updated_at: payload.updated_at,
-              }
-            : org,
-        ),
-      );
-      if (orgId === activeOrgId) {
-        setActiveOrg((current) => {
-          if (!current || current.id !== orgId) return current;
-          return {
-            ...current,
-            has_connection: Boolean(normalizedUrl && normalizedKey),
-            org_settings_metadata: current.org_settings_metadata ?? null,
-            org_settings_updated_at: payload.updated_at,
-          };
-        });
-      }
-    },
-    [requireAuthClient, activeOrgId],
-  );
-
   const createOrganization = useCallback(
-    async ({ name, supabaseUrl, supabaseAnonKey, policyLinks = [], legalSettings = {} }) => {
+    async ({ name, policyLinks = [], legalSettings = {} }) => {
       const client = requireAuthClient();
       if (!user?.id && !session?.user?.id) {
         const { data: authUser, error: authError } = await client.auth.getUser();
@@ -784,14 +541,6 @@ export function OrgProvider({ children }) {
       }
 
       const payload = {};
-
-      if (typeof supabaseUrl === 'string' && supabaseUrl.trim()) {
-        payload.supabaseUrl = supabaseUrl.trim();
-      }
-
-      if (typeof supabaseAnonKey === 'string' && supabaseAnonKey.trim()) {
-        payload.supabaseAnonKey = supabaseAnonKey.trim();
-      }
 
       if (Array.isArray(policyLinks)) {
         payload.policyLinks = policyLinks
@@ -816,14 +565,6 @@ export function OrgProvider({ children }) {
 
         const updates = {};
 
-        if (Object.prototype.hasOwnProperty.call(payload, 'supabaseUrl')) {
-          updates.supabase_url = payload.supabaseUrl || null;
-        }
-
-        if (Object.prototype.hasOwnProperty.call(payload, 'supabaseAnonKey')) {
-          updates.supabase_anon_key = payload.supabaseAnonKey || null;
-        }
-
         if (Object.prototype.hasOwnProperty.call(payload, 'policyLinks')) {
           updates.policy_links = payload.policyLinks || [];
         }
@@ -846,8 +587,6 @@ export function OrgProvider({ children }) {
           }
         }
 
-        await syncOrgSettings(effectiveOrgId, payload.supabaseUrl, payload.supabaseAnonKey);
-
         await refreshOrganizations({ keepSelection: false });
         await selectOrg(effectiveOrgId);
         toast.success('הארגון נוצר בהצלחה.');
@@ -858,7 +597,7 @@ export function OrgProvider({ children }) {
         throw new Error(message);
       }
     },
-    [requireAuthClient, user, sessionAccessToken, refreshOrganizations, selectOrg, syncOrgSettings],
+    [requireAuthClient, user, sessionAccessToken, refreshOrganizations, selectOrg],
   );
 
   const updateOrganizationMetadata = useCallback(
@@ -877,11 +616,8 @@ export function OrgProvider({ children }) {
   );
 
   const updateConnection = useCallback(
-    async (orgId, { supabaseUrl, supabaseAnonKey, policyLinks, legalSettings }) => {
-      const updates = {
-        supabase_url: supabaseUrl ? supabaseUrl.trim() : null,
-        supabase_anon_key: supabaseAnonKey ? supabaseAnonKey.trim() : null,
-      };
+    async (orgId, { policyLinks, legalSettings }) => {
+      const updates = {};
       if (Array.isArray(policyLinks)) {
         updates.policy_links = policyLinks;
       }
@@ -889,12 +625,8 @@ export function OrgProvider({ children }) {
         updates.legal_settings = legalSettings;
       }
       await updateOrganizationMetadata(orgId, updates);
-      await syncOrgSettings(orgId, supabaseUrl, supabaseAnonKey);
-      if (orgId && orgId === activeOrgId) {
-        await fetchOrgRuntimeConfig(orgId);
-      }
     },
-    [updateOrganizationMetadata, syncOrgSettings, activeOrgId, fetchOrgRuntimeConfig],
+    [updateOrganizationMetadata],
   );
 
   const recordVerification = useCallback(
@@ -1043,23 +775,16 @@ export function OrgProvider({ children }) {
     [requireAuthClient, user, refreshOrganizations, selectOrg],
   );
 
-  const activeOrgConnection = useMemo(() => {
-    if (!activeOrgId) return null;
-    const connection = orgConnections.get(activeOrgId);
-    if (!connection) return null;
-    return connection;
-  }, [activeOrgId, orgConnections]);
-
   // Expose org settings (permissions and storage profile) for the active org
   const orgSettings = useMemo(() => {
-    if (!activeOrgConnection) {
+    if (!activeOrg) {
       return { permissions: {}, storageProfile: null };
     }
     return {
-      permissions: activeOrgConnection.permissions ?? {},
-      storageProfile: activeOrgConnection.storageProfile ?? null,
+      permissions: activeOrg.permissions ?? {},
+      storageProfile: activeOrg.storage_profile ?? null,
     };
-  }, [activeOrgConnection]);
+  }, [activeOrg]);
 
   const value = useMemo(
     () => ({
@@ -1085,13 +810,12 @@ export function OrgProvider({ children }) {
       acceptInvite,
       enableDirectory,
       disableDirectory,
-      activeOrgHasConnection: Boolean(
-        (activeOrgConnection?.supabaseUrl || activeOrgConfig?.supabaseUrl) &&
-          (activeOrgConnection?.supabaseAnonKey || activeOrgConfig?.supabaseAnonKey),
-      ),
-      activeOrgConfig,
-      configStatus,
-      activeOrgConnection,
+      // In the merged single-DB model, connection is always available when an org is selected
+      activeOrgHasConnection: Boolean(activeOrgId),
+      // Backward compat: configStatus is always 'success' when org selected, 'idle' otherwise
+      activeOrgConfig: null,
+      configStatus: activeOrgId ? 'success' : 'idle',
+      activeOrgConnection: null,
       tenantClientReady,
       orgSettings,
     }),
@@ -1118,9 +842,6 @@ export function OrgProvider({ children }) {
       acceptInvite,
       enableDirectory,
       disableDirectory,
-      configStatus,
-      activeOrgConfig,
-      activeOrgConnection,
       tenantClientReady,
       orgSettings,
     ],

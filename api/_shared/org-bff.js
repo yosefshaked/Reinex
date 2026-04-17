@@ -171,7 +171,11 @@ export function withOrgScope(client, table, orgId) {
 
 export function resolveOrgId(req, body) {
   const query = req?.query ?? {};
-  const candidate = body?.org_id || body?.orgId || query.org_id || query.orgId;
+  const headers = req?.headers ?? {};
+  const candidate =
+    body?.org_id || body?.orgId ||
+    query.org_id || query.orgId ||
+    headers['x-org-id'];
   const normalized = normalizeString(candidate);
   return normalized && isValidOrgId(normalized) ? normalized : '';
 }

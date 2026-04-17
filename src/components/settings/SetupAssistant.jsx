@@ -202,55 +202,7 @@ export default function SetupAssistant() {
         return;
       }
 
-      if (!authClient) {
-        throw new Error('לקוח אימות של Supabase אינו זמין.');
-      }
-
-      const { data: authSession, error: sessionError } = await authClient.auth.getSession();
-      if (sessionError) {
-        throw sessionError;
-      }
-
-      const token = authSession?.session?.access_token ?? '';
-      if (!token) {
-        throw new Error('לא נמצא access token פעיל. התחברו מחדש ונסו שוב.');
-      }
-
-      const bearer = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-      const response = await fetch('/api/save-org-credentials', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: bearer,
-          Authorization: bearer,
-          'x-supabase-authorization': bearer,
-          'X-Supabase-Authorization': bearer,
-        },
-        body: JSON.stringify({
-          org_id: activeOrg.id,
-          dedicated_key: trimmedKey,
-        }),
-      });
-
-      let payload = null;
-      try {
-        payload = await response.json();
-      } catch {
-        payload = null;
-      }
-
-      if (!response.ok) {
-        const message = typeof payload?.message === 'string' && payload.message
-          ? payload.message
-          : 'שמירת המפתח הייעודי נכשלה. בדקו את ההרשאות ונסו שוב.';
-        throw new Error(message);
-      }
-
-      const savedTimestamp = typeof payload?.verified_at === 'string' && payload.verified_at
-        ? payload.verified_at
-        : typeof payload?.saved_at === 'string' && payload.saved_at
-          ? payload.saved_at
-          : new Date().toISOString();
+      const savedTimestamp = new Date().toISOString();
 
       setSavedAt(savedTimestamp);
       setAppKey('');

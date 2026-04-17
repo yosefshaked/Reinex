@@ -5809,6 +5809,93 @@ GRANT ALL ON TABLE public."Documents" TO app_user;
 
 GRANT app_user TO postgres, authenticated, anon;
 
+-- =================================================================
+-- Permission helpers
+-- =================================================================
+
+-- get_default_permissions()
+-- Aggregates all permission_key → default_value pairs from permission_registry.
+CREATE OR REPLACE FUNCTION public.get_default_permissions()
+RETURNS JSONB
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+  result JSONB;
+BEGIN
+  SELECT jsonb_object_agg(permission_key, default_value)
+  INTO result
+  FROM public.permission_registry;
+
+  RETURN COALESCE(result, '{}'::jsonb);
+END;
+$$;
+
+-- initialize_org_permissions(p_org_id)
+-- Ensures the organizations.permissions JSONB column is populated.
+-- If empty/null → sets to registry defaults.
+-- Otherwise → merges any newly-added registry keys into existing permissions.
+CREATE OR REPLACE FUNCTION public.initialize_org_permissions(p_org_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  current_permissions JSONB;
+  default_permissions JSONB;
+  merged_permissions JSONB;
+  permission_key TEXT;
+  default_value JSONB;
+BEGIN
+  SELECT permissions
+  INTO current_permissions
+  FROM public.organizations
+  WHERE id = p_org_id;
+
+  default_permissions := public.get_default_permissions();
+
+  IF current_permissions IS NULL OR
+     current_permissions = '{}'::jsonb OR
+     jsonb_typeof(current_permissions) = 'null' OR
+     (SELECT COUNT(*) FROM jsonb_object_keys(current_permissions)) = 0 THEN
+
+    UPDATE public.organizations
+    SET permissions = default_permissions,
+        updated_at = NOW()
+    WHERE id = p_org_id;
+
+    RETURN default_permissions;
+  END IF;
+
+  merged_permissions := current_permissions;
+
+  FOR permission_key, default_value IN
+    SELECT key, value
+    FROM jsonb_each(default_permissions)
+  LOOP
+    IF NOT (merged_permissions ? permission_key) THEN
+      merged_permissions := jsonb_set(
+        merged_permissions,
+        ARRAY[permission_key],
+        default_value,
+        true
+      );
+    END IF;
+  END LOOP;
+
+  UPDATE public.organizations
+  SET permissions = merged_permissions,
+      updated_at = NOW()
+  WHERE id = p_org_id;
+
+  RETURN merged_permissions;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_default_permissions() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_default_permissions() TO app_user;
+GRANT EXECUTE ON FUNCTION public.initialize_org_permissions(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.initialize_org_permissions(UUID) TO app_user;
+
 CREATE OR REPLACE FUNCTION public.setup_assistant_diagnostics()
 RETURNS TABLE (check_name text, success boolean, details text)
 LANGUAGE plpgsql SECURITY DEFINER

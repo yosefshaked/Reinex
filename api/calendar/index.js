@@ -474,8 +474,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
 
   const primaryGuardianLinkByClientProfile = new Map();
   if (clientProfileIds.length > 0) {
-    const { data: clientGuardianLinks, error: linksError } = await tenantClient
-      .from('client_guardians')
+    const { data: clientGuardianLinks, error: linksError } = await withOrgScope(client, 'client_guardians', orgId)
       .select('client_profile_id, guardian_id, relationship, is_primary, created_at')
       .in('client_profile_id', clientProfileIds)
       .order('client_profile_id', { ascending: true })
@@ -627,7 +626,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
 
 async function handleCreateInstance(context, body, dbContext, supabase, authContext) {
   const { client, orgId } = dbContext;
-  const { orgId, userId, userEmail, role, canManageAll: isAdmin, billingService } = authContext;
+  const { userId, userEmail, role, canManageAll: isAdmin, billingService } = authContext;
   // Validate required fields
   if (!body.datetime_start) {
     return respond(context, 400, { message: 'missing datetime_start' });
@@ -661,7 +660,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
 
   // Non-admin users can only create lessons for themselves
   if (!isAdmin) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(tenantClient, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to resolve actor instructor', { message: instructorError.message, userId });
       return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
@@ -767,8 +766,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
       return respond(context, 400, { message: 'invalid_client_profile_id' });
     }
 
-    const { data: linkedStudents, error: linkedStudentsError } = await tenantClient
-      .from('students')
+    const { data: linkedStudents, error: linkedStudentsError } = await withOrgScope(client, 'students', orgId)
       .select('id, client_profile_id')
       .in('client_profile_id', clientProfileIds);
 
@@ -803,7 +801,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     return respond(context, 400, { message: 'missing_or_invalid_participants' });
   }
 
-  const leaveConflict = await assertNoLeaveForLesson(tenantClient, {
+  const leaveConflict = await assertNoLeaveForLesson(client, {
     employeeId: body.instructor_employee_id,
     date: toDateKey(body.datetime_start),
   });
@@ -813,7 +811,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
   }
 
   try {
-    const availabilityValidation = await validateLessonInstanceAvailability(tenantClient, {
+    const availabilityValidation = await validateLessonInstanceAvailability(client, orgId, {
       instructorEmployeeId: body.instructor_employee_id,
       serviceId: body.service_id,
       datetimeStart: body.datetime_start,
@@ -926,7 +924,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
   }
 
   try {
-    await logTenantAuditEvent(tenantClient, {
+    await logTenantAuditEvent(client, {
       actorUserId: userId,
       eventType: 'calendar.instance.created',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -967,7 +965,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
 
 async function handleUpdateInstance(context, body, dbContext, supabase, authContext) {
   const { client, orgId } = dbContext;
-  const { orgId, userId, userEmail, role, canManageAll, billingService } = authContext;
+  const { userId, userEmail, role, canManageAll, billingService } = authContext;
   const action = normalizeString(body.action).toLowerCase();
   if (!body.id) {
     return respond(context, 400, { message: 'missing instance id' });
@@ -1009,7 +1007,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
 
   // Instructors (non-admin/office) can only update their own lessons
   if (!canManageAll) {
-    const { instructorId, error: instructorError } = await resolveActorInstructorId(tenantClient, userId);
+    const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to resolve actor instructor', { message: instructorError.message, userId });
       return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
@@ -1215,7 +1213,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
       }
 
       if (cancellationResult.outcome === 'locked' || cancellationResult.outcome === 'closed') {
-        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
           instanceId: body.id,
         });
         if (refreshedError) {
@@ -1291,7 +1289,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
       }
 
       if (completionResult.outcome === 'locked' || completionResult.outcome === 'closed') {
-        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+        const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
           instanceId: body.id,
         });
         if (refreshedError) {
@@ -1367,7 +1365,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
     }
 
     if (!updatedInstanceRow) {
-      const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(tenantClient, {
+      const { error: refreshedError, result: refreshedState } = await fetchLessonMutationState(client, {
         instanceId: body.id,
       });
       if (refreshedError) {
@@ -1425,7 +1423,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
   }
 
   try {
-    await logTenantAuditEvent(tenantClient, {
+    await logTenantAuditEvent(client, {
       actorUserId: userId,
       eventType: 'calendar.instance.updated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1449,7 +1447,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
   if (isCancellationUpdate && cancelledParticipantIds.length > 0) {
     try {
       for (const row of cancelledParticipantAuditRows) {
-        await logTenantAuditEvent(tenantClient, {
+        await logTenantAuditEvent(client, {
           actorUserId: userId,
           eventType: 'calendar.lesson_participant.cancelled_by_instance',
           retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1475,7 +1473,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
   if (isCompletionUpdate && completedParticipantAuditRows.length > 0) {
     try {
       for (const row of completedParticipantAuditRows) {
-        await logTenantAuditEvent(tenantClient, {
+        await logTenantAuditEvent(client, {
           actorUserId: userId,
           eventType: 'calendar.lesson_participant.attended_by_instance_completion',
           retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,

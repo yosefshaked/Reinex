@@ -16,7 +16,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
@@ -119,21 +119,8 @@ export default async function (context, req) {
   }
   // BYOS bulk download always allowed (user owns storage)
 
-  // Get tenant client to fetch all student files
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(
-    context,
-    controlClient,
-    env,
-    orgId
-  );
-
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   // Fetch all students
-  const { data: students, error: studentsError } = await tenantClient
-    .from('students')
+  const { data: students, error: studentsError } = await withOrgScope(controlClient, 'students', orgId)
     .select('id, client_profile:client_profiles(first_name, middle_name, last_name)');
 
   if (studentsError) {
@@ -142,8 +129,7 @@ export default async function (context, req) {
   }
 
   // Fetch all student documents from Documents table
-  const { data: documents, error: documentsError } = await tenantClient
-    .from('Documents')
+  const { data: documents, error: documentsError } = await withOrgScope(controlClient, 'Documents', orgId)
     .select('*')
     .eq('entity_type', 'student');
 

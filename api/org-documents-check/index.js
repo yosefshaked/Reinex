@@ -15,7 +15,7 @@ import {
   ensureMembership,
   readEnv,
   respond,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import crypto from 'crypto';
 import multipart from 'parse-multipart-data';
@@ -168,15 +168,8 @@ export default async function (context, req) {
   // Calculate file hash
   const fileHash = calculateFileHash(filePart.data);
 
-  // Get tenant client
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   // Fetch organization documents from polymorphic Documents table
-  const { data: orgDocuments, error: documentsError } = await tenantClient
-    .from('Documents')
+  const { data: orgDocuments, error: documentsError } = await withOrgScope(controlClient, 'Documents', orgId)
     .select('id, name, uploaded_at, hash')
     .eq('entity_type', 'organization')
     .eq('entity_id', orgId);

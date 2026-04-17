@@ -87,31 +87,4 @@ export function resetAuthClient() {
   lastCredentials = null;
 }
 
-// --- Data Client Factory ---
-// This function will create isolated data clients on demand.
 
-export function createDataClient(orgConfig) {
-  const { supabaseUrl, supabaseAnonKey } = normalizeCredentials(orgConfig);
-  const orgId =
-    orgConfig?.id ?? orgConfig?.orgId ?? orgConfig?.organization_id ?? orgConfig?.organizationId ?? null;
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('[DataClient] Cannot create data client without URL and Key for org:', orgId);
-    return null;
-  }
-
-  console.log(`[DataClient] Creating new data client for org: ${orgId ?? 'unknown'}`);
-
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    // Absolute isolation settings
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
-    // Always target the tenant schema for data access
-    db: {
-      schema: 'public',
-    },
-  });
-}

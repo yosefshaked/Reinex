@@ -14,7 +14,7 @@ import {
   ensureMembership,
   readEnv,
   respond,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import crypto from 'crypto';
 import multipart from 'parse-multipart-data';
@@ -161,15 +161,8 @@ export default async function (context, req) {
   // Calculate file hash
   const fileHash = calculateFileHash(filePart.data);
 
-  // Get tenant client
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   // Check for duplicate files across ALL students in Documents table
-  const { data: allDocuments, error: documentsError } = await tenantClient
-    .from('Documents')
+  const { data: allDocuments, error: documentsError } = await withOrgScope(controlClient, 'Documents', orgId)
     .select('id, name, uploaded_at, entity_id, hash')
     .eq('entity_type', 'student')
     .eq('hash', fileHash);
@@ -192,8 +185,7 @@ export default async function (context, req) {
   const duplicates = [];
   if (allDocuments && allDocuments.length > 0) {
     const studentIds = [...new Set(allDocuments.map(doc => doc.entity_id))];
-    const { data: students } = await tenantClient
-      .from('students')
+    const { data: students } = await withOrgScope(controlClient, 'students', orgId)
       .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
       .in('id', studentIds);
 

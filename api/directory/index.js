@@ -1,56 +1,18 @@
 /* eslint-env node */
-import process from 'node:process';
-import { createClient } from '@supabase/supabase-js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { readEnv, respond as _respond } from '../_shared/org-bff.js';
-
-const ADMIN_CLIENT_OPTIONS = {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-    detectSessionInUrl: false,
-  },
-  global: {
-    headers: {
-      Accept: 'application/json',
-    },
-  },
-};
-
-function selectStringCandidate(source, key) {
-  if (!source) {
-    return '';
-  }
-  const value = source[key];
-  if (typeof value === 'string' && value.trim()) {
-    return value.trim();
-  }
-  return '';
-}
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 
 function resolveAdminConfig(context) {
-  const env = readEnv(context);
-  const fallbackEnv = process.env ?? {};
-  const url =
-    selectStringCandidate(env, 'APP_CONTROL_DB_URL') ||
-    selectStringCandidate(fallbackEnv, 'APP_CONTROL_DB_URL');
-  const key =
-    selectStringCandidate(env, 'APP_CONTROL_DB_SERVICE_ROLE_KEY') ||
-    selectStringCandidate(fallbackEnv, 'APP_CONTROL_DB_SERVICE_ROLE_KEY');
-  return { url, key };
-}
-
-function createAdminClient(url, key) {
-  return createClient(url, key, ADMIN_CLIENT_OPTIONS);
+  return readSupabaseAdminConfig(readEnv(context));
 }
 
 function getAdminClient(context) {
   const config = resolveAdminConfig(context);
-  if (!config.url || !config.key) {
+  if (!config.supabaseUrl || !config.serviceRoleKey) {
     return { client: null, error: new Error('missing_admin_credentials') };
   }
-  const client = createAdminClient(config.url, config.key);
-  return { client, error: null };
+  return { client: createSupabaseAdminClient(config), error: null };
 }
 
 function respond(context, status, body, extraHeaders = {}) {

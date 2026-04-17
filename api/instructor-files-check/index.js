@@ -15,7 +15,7 @@ import {
   isAdminRole,
   readEnv,
   respond,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import crypto from 'crypto';
 import multipart from 'parse-multipart-data';
@@ -142,14 +142,8 @@ export default async function (context, req) {
   const isAdmin = isAdminRole(role);
 
   // Permission check: Non-admin users can only check their own files
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   if (!isAdmin) {
-    const { data: instructorRow, error: instructorError } = await tenantClient
-      .from('Employees')
+    const { data: instructorRow, error: instructorError } = await withOrgScope(controlClient, 'Employees', orgId)
       .select('id, user_id')
       .eq('id', instructorId)
       .maybeSingle();
@@ -175,8 +169,7 @@ export default async function (context, req) {
 
   // Check for duplicate files in Documents table
   // Admins can see all instructor duplicates, non-admins only their own
-  let documentsQuery = tenantClient
-    .from('Documents')
+  let documentsQuery = withOrgScope(controlClient, 'Documents', orgId)
     .select('id, name, uploaded_at, entity_id, hash')
     .eq('entity_type', 'instructor')
     .eq('hash', fileHash);
@@ -203,8 +196,7 @@ export default async function (context, req) {
   const duplicates = [];
   if (allDocuments && allDocuments.length > 0) {
     const instructorIds = [...new Set(allDocuments.map(doc => doc.entity_id))];
-    const { data: instructors } = await tenantClient
-      .from('Employees')
+    const { data: instructors } = await withOrgScope(controlClient, 'Employees', orgId)
       .select('id, first_name, middle_name, last_name')
       .in('id', instructorIds);
 
