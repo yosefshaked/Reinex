@@ -13,6 +13,8 @@ export default async function (context) {
     SUPABASE_URL: Boolean(publicConfig.supabaseUrl),
     SUPABASE_ANON_KEY: Boolean(publicConfig.anonKey),
     SUPABASE_SERVICE_ROLE_KEY: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
+    SECURITY_ENCRYPTION_SECRET: Boolean(env.SECURITY_ENCRYPTION_SECRET),
+    SECURITY_ENCRYPTION_SECRET_OLD: Boolean(env.SECURITY_ENCRYPTION_SECRET_OLD),
   };
 
   context.res = {

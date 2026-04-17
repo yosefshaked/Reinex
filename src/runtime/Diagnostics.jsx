@@ -132,7 +132,8 @@ export default function Diagnostics() {
     { key: 'APP_SUPABASE_URL',               label: 'Supabase URL (control)' },
     { key: 'APP_SUPABASE_ANON_KEY',          label: 'Supabase anon key (control)' },
     { key: 'SUPABASE_SERVICE_ROLE_KEY',      label: 'Service role key' },
-    { key: 'ORG_CREDENTIALS_ENCRYPTION_KEY', label: 'הצפנת מפתחות ארגון' },
+    { key: 'SECURITY_ENCRYPTION_SECRET',     label: 'הצפנת מפתחות ארגון (ראשי)' },
+    { key: 'SECURITY_ENCRYPTION_SECRET_OLD', label: 'הצפנת מפתחות ארגון (סיבוב/גיבוי)' },
   ];
 
   return (

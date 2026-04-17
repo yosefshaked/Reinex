@@ -20,17 +20,15 @@
 * **Storage buckets:** Out of scope (separate workstream).
 
 ## 🧠 Current Working Context (For AI Memory)
-* **Last Completed Task:** Step 16 — Simplify Org Switching Flow.
-* **Currently Working On:** Step 17 — Add `x-org-id` Header to Frontend API Calls.
-* **Next Immediate Step:** Step 17 — Inject `x-org-id: activeOrgId` header on every frontend API request.
+* **Last Completed Task:** Step 19 — RLS isolation test suite (14/14 ✔) and schema dry-run (0 SQL errors) against local Docker Supabase.
+* **Currently Working On:** Step 20 — Update Documentation (`AGENTS.md` + `agents-docs/`).
+* **Next Immediate Step:** Step 21 — Environment Variables & Deployment Config Cleanup.
 * **Known Issues / Technical Debt:**
-  - `ledger_transactions` is defined twice in setup-sql.js (deprecated v1 then new finance ledger v2) — merge must preserve only v2.
-  - Some tables use quoted identifiers (`"Employees"`, `"Services"`, `"RateHistory"`, `"Settings"`, `"Documents"`) — org_id addition must respect quoting.
-  - `identity_number` on `client_profiles` has a single-column UNIQUE that must become `(org_id, identity_number)`.
-  - `waiting-list-intake` endpoint supports anonymous/public access — needs special RLS handling.
   - Supabase Storage bucket isolation strategy NOT in scope (separate workstream).
+  - Step 22 (Technical Debt Sweep): backward-compat aliases (`dataClient`, `setActiveOrg`, `activeOrgHasConnection`, `tenantClientReady`, `configStatus`, `activeOrgConfig`) still exposed in `OrgContext` and `SupabaseContext` — to be cleaned up.
+  - `org_settings` table may still exist on any live DB from old BYOD era — add DROP in Step 21 or 22.
 
-## 📋 Execution Plan (21 Steps)
+## 📋 Execution Plan (23 Steps)
 
 ### PHASE A: Greenfield Merged Schema Design
 > Goal: Produce a clean, single SSOT in `setup-sql.js` that contains BOTH the control tables and the tenant tables, all with `org_id`.
@@ -226,8 +224,9 @@
   **Output:** All agent docs reflect new architecture.
 
 - [ ] **Step 21 — Environment Variables & Deployment Config Cleanup**
-  - Remove: `APP_ORG_CREDENTIALS_ENCRYPTION_KEY`, any per-tenant env vars.
+  - Remove: all legacy org-credential encryption env vars and per-tenant env vars.
   - Add/update: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` pointing to the new merged project.
+  - Add/update: `SECURITY_ENCRYPTION_SECRET` and optional `SECURITY_ENCRYPTION_SECRET_OLD` for dual-key rotation.
   - Update `api/local.settings.json` for local dev.
   - Update Azure SWA / Functions app settings for production.
   - Update `staticwebapp.config.json` if route changes needed (e.g., remove `/api/org-keys` route).
@@ -279,6 +278,24 @@
 
   **Output:** Zero dead code, zero backward-compat shims, zero naming confusion. The codebase is clean for any developer (human or AI) working on it next.
 
+- [ ] **Step 23 — Admin UI: Encryption Key Version & Rotation Interface**
+  Build an admin-facing security interface to display active key-version metadata and safely support key rotation workflows.
+
+  - Add backend endpoint logic that returns non-sensitive encryption metadata only:
+    - `current_hash` (SHA-256 of `SECURITY_ENCRYPTION_SECRET`)
+    - `previous_hash` (SHA-256 of `SECURITY_ENCRYPTION_SECRET_OLD`, nullable)
+    - `is_rotation_active` (boolean)
+    - `environment` (`local`/`production`)
+  - Add UI in Settings > Security to show:
+    - Current key fingerprint (masked hash)
+    - Previous key fingerprint (if present)
+    - Rotation status and guidance banner
+  - Add a read-only verification action that checks decrypt fallback health using existing encrypted payloads.
+  - Ensure access control is admin/owner only and all views are audit-logged.
+  - Add tests for endpoint authz + hash format + no secret leakage.
+
+  **Output:** Secure admin interface for encryption key visibility and rotation readiness without exposing secrets.
+
 ## 📝 Change Log & Notes
 
 | Step | Date | Summary | Files |
@@ -288,3 +305,7 @@
 | 13 | 2026-04-17 | Completed control-endpoint migration: merged-db admin-client path adopted for remaining control APIs, BYOD org-credential routes removed, org creation stripped of deprecated connection writes, and setup assistant verification no longer posts dedicated credentials. | `api/organizations/index.js`, `api/org-memberships/index.js`, `api/invitations/index.js`, `api/directory/index.js`, `api/health/index.js`, `api/config/index.js`, `src/components/settings/SetupAssistant.jsx` |
 | 14 | 2026-04-17 | Permissions helper migrated from `org_settings` to `organizations` table; permission RPCs (`get_default_permissions`, `initialize_org_permissions`) added to SSOT pointing at `organizations`. | `api/_shared/permissions-utils.js`, `src/lib/setup-sql.js` |
 | 15 | 2026-04-17 | Dual-client architecture collapsed: `createDataClient` removed, `SupabaseContext` now exposes `authClient` as both auth and data client, `org-gate.js` stripped of data-client caching. Zero consumer changes needed due to backward-compat aliases. | `src/lib/supabase-manager.js`, `src/context/SupabaseContext.jsx`, `src/runtime/org-gate.js` |
+| 16 | 2026-04-17 | Org switching simplified: `fetchOrgRuntimeConfig()` removed, `orgConnections` cache removed, `configStatus`/`activeOrgConfig`/`activeOrgConnection` reduced to backward-compat stubs. `organizations.permissions` now read directly instead of `org_settings`. | `src/org/OrgContext.jsx`, `src/runtime/config.js`, `api/user-context/index.js` |
+| 17 | 2026-04-17 | `x-org-id` header injection added to `api-client.js` (`authenticatedFetch`, `authenticatedFetchBlob`, `authenticatedFetchText`). `resolveOrgId()` updated to read from `req.headers['x-org-id']` as fallback. | `src/lib/api-client.js`, `api/_shared/org-bff.js`, `src/org/OrgContext.jsx` |
+| 18 | 2026-04-17 | RLS isolation test suite created (`rls-isolation.test.js`) — 6 suites, 14 assertions: row isolation, cross-org INSERT rejection, composite unique constraints, `org_memberships` non-recursion, anonymous access block, non-member org block. | `implementations/database/one-db-refactor/rls-isolation.test.js` |
+| 19 | 2026-04-17 | E2E smoke test script created (`e2e-smoke.test.js`) — 7 suites covering login→list, create+stamp, calendar gen, billing, org isolation, EXPLAIN ANALYZE index checks. Schema squash: `setup-sql.js` reduced by ~3,000 lines; broken DO block at L1368 fixed (missing `END $$`). Docker dry-run: 0 SQL errors. RLS test run: 14/14 ✔. | `implementations/database/one-db-refactor/e2e-smoke.test.js`, `src/lib/setup-sql.js` |

@@ -13,13 +13,20 @@
 - [`../src/components/settings/employee-management/DirectoryView.jsx`](../src/components/settings/employee-management/DirectoryView.jsx)
 - [`../src/components/settings/employee-management/InviteUserDialog.jsx`](../src/components/settings/employee-management/InviteUserDialog.jsx)
 
+## Architecture: Single-Database Multi-Tenant
+- All tenant tables live in one Supabase project. Every tenant table has `org_id uuid NOT NULL REFERENCES organizations(id)`.
+- RLS is the primary isolation layer (policies use `get_active_org_id()` SECURITY DEFINER function that reads `x-org-id` from request headers and verifies `org_memberships`).
+- The backend uses the `service_role` key (bypasses RLS). Org isolation is enforced programmatically — every query must filter by `org_id`.
+- **Never** reintroduce per-org database credentials (`dedicated_key`, `supabase_url` on orgs), BYOD patterns, `resolveTenantClient()`, or `org_settings` table — all are deprecated and removed.
+- Schema SSOT: `src/lib/setup-sql.js`.
+
 ## Shared helpers to reuse
-- `respond`, `readEnv`, `ensureMembership`, `resolveOrgId`, `resolveTenantClient` in [`../api/_shared/org-bff.js`](../api/_shared/org-bff.js)
+- `respond`, `readEnv`, `ensureMembership`, `resolveOrgId`, `createSingleClient`, `withOrgScope` in [`../api/_shared/org-bff.js`](../api/_shared/org-bff.js)
 - `resolveBearerAuthorization` in [`../api/_shared/http.js`](../api/_shared/http.js)
 - `createDashboardTask` (idempotent), `listDashboardTasks`, `resolveDashboardTask` in [`../api/_shared/dashboard-tasks.js`](../api/_shared/dashboard-tasks.js)
 
 ## Known patterns / do not reinvent
-- Tenant data is always resolved through control DB membership + decrypted org credentials; tenant schema is `public`.
+- All tenant data is in the shared Supabase project; tenant schema is `public`.
 - API route names are domain-based; do not add `reinex` to route paths.
 - Instructors are self-scoped unless membership role is `admin` or `owner`.
 - Current instructor shape is split across:

@@ -1,6 +1,6 @@
 /* eslint-env node */
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { deriveEncryptionKey, normalizeString, resolveEncryptionSecret } from './org-bff.js';
+import { getEncryptionConfig, getEncryptionKeyCandidates, normalizeString } from './org-bff.js';
 
 const FORM_SCHEMA_VERSION = 3;
 const SIGNATURE_PURPOSE = 'form-signature-v1';
@@ -678,9 +678,7 @@ export function evaluateAlertFlags({ formSchema, alertRules, answers, sharedBloc
   };
 }
 
-function deriveSignatureEncryptionKey(env) {
-  const secret = resolveEncryptionSecret(env);
-  const baseKey = deriveEncryptionKey(secret);
+function deriveSignatureEncryptionKeyFromBase(baseKey) {
   if (!baseKey) {
     throw new Error('signature_encryption_not_configured');
   }
@@ -689,6 +687,20 @@ function deriveSignatureEncryptionKey(env) {
     .update(baseKey)
     .update(SIGNATURE_PURPOSE)
     .digest();
+}
+
+function deriveSignatureEncryptionKey(env) {
+  const { current } = getEncryptionConfig(env);
+  const currentCandidate = getEncryptionKeyCandidates({ SECURITY_ENCRYPTION_SECRET: current })[0];
+  return deriveSignatureEncryptionKeyFromBase(currentCandidate?.key);
+}
+
+function getSignatureKeyCandidates(env) {
+  return getEncryptionKeyCandidates(env)
+    .map((candidate) => ({
+      label: candidate.label,
+      key: deriveSignatureEncryptionKeyFromBase(candidate.key),
+    }));
 }
 
 function encryptSignaturePayload(payload, env) {
@@ -712,15 +724,32 @@ function decryptSignaturePayload(payload, env) {
   if (segments.length !== 5 || segments[0] !== 'v1' || segments[1] !== 'gcm') {
     throw new Error('invalid_signature_payload');
   }
-  const key = deriveSignatureEncryptionKey(env);
+  const keyCandidates = getSignatureKeyCandidates(env);
+  if (!keyCandidates.length) {
+    throw new Error('signature_encryption_not_configured');
+  }
+
   const [, , ivBase64, authTagBase64, cipherTextBase64] = segments;
-  const decipher = createDecipheriv(SIGNATURE_ALGORITHM, key, Buffer.from(ivBase64, 'base64'));
-  decipher.setAuthTag(Buffer.from(authTagBase64, 'base64'));
-  const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(cipherTextBase64, 'base64')),
-    decipher.final(),
-  ]);
-  return JSON.parse(decrypted.toString('utf8'));
+  const iv = Buffer.from(ivBase64, 'base64');
+  const authTag = Buffer.from(authTagBase64, 'base64');
+  const cipherText = Buffer.from(cipherTextBase64, 'base64');
+
+  let lastError = null;
+  for (const candidate of keyCandidates) {
+    try {
+      const decipher = createDecipheriv(SIGNATURE_ALGORITHM, candidate.key, iv);
+      decipher.setAuthTag(authTag);
+      const decrypted = Buffer.concat([
+        decipher.update(cipherText),
+        decipher.final(),
+      ]);
+      return JSON.parse(decrypted.toString('utf8'));
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('invalid_signature_payload');
 }
 
 export function prepareAnswersForStorage({ formSchema, answers, env, sharedBlocksById = {} }) {

@@ -3,12 +3,14 @@
 Read this first. Detailed task docs live in [`./agents-docs`](agents-docs/).
 
 ## Global Rules
+- **Architecture: Single-Database Multi-Tenant.** All tenant data lives in one Supabase project. Every tenant table has an `org_id uuid NOT NULL` column. RLS is the primary isolation mechanism.
 - Tenant DB schema is `public` only.
-- Control DB is shared for organizations, memberships, and auth.
+- Backend APIs use the `service_role` key (RLS bypass); org isolation is enforced programmatically via `ensureMembership()` + `.eq('org_id', orgId)` or `withOrgScope(client, table, orgId)`.
+- **Never use `resolveTenantClient()`** — it is a deprecated BYOD shim. Use `createSingleClient(env)` from `api/_shared/org-bff.js`.
+- The frontend injects `x-org-id: activeOrgId` on every API call via `authenticatedFetch` in `src/lib/api-client.js`.
 - Do not put `reinex` in API route names; keep routes domain-based.
 - Instructors are self-scoped unless the membership role is `admin` or `owner`.
-- Azure Functions must return through `respond(context, ...)`.
-- Azure Functions must extract auth with `resolveBearerAuthorization(req)`.
+- Azure Functions must return through `respond(context, ...)` and extract auth with `resolveBearerAuthorization(req)`.
 - `supabase.auth.getUser(token)` returns `{ data, error }`; user is `result.data.user`.
 - Services are enabled/disabled with `is_active`; do not model disablement as deletion.
 

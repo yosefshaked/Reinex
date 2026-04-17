@@ -120,7 +120,7 @@ if (args.length < 2) {
   console.log('  - Or from Application Insights LOG 2 output');
   console.log('');
   console.log('Get the encryption secret from:');
-  console.log('  - Azure Static Web App → Configuration → APP_ORG_CREDENTIALS_ENCRYPTION_KEY');
+  console.log('  - Azure Static Web App → Configuration → SECURITY_ENCRYPTION_SECRET');
   process.exit(1);
 }
 

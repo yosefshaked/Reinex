@@ -211,23 +211,30 @@ export async function resolveTenantClient(context, supabase, env, orgId) {
   return { client: supabase };
 }
 
-/** @deprecated Kept for forms-runtime.js compatibility — will be removed after endpoint migration. */
-export function resolveEncryptionSecret(env) {
-  const candidates = [
-    env.APP_ORG_CREDENTIALS_ENCRYPTION_KEY,
-    env.ORG_CREDENTIALS_ENCRYPTION_KEY,
-    env.APP_SECRET_ENCRYPTION_KEY,
-    env.APP_ENCRYPTION_KEY,
-  ];
+export function getEncryptionConfig(env = process.env ?? {}) {
+  return {
+    current: normalizeString(env.SECURITY_ENCRYPTION_SECRET),
+    previous: normalizeString(env.SECURITY_ENCRYPTION_SECRET_OLD),
+    isProduction: normalizeString(env.AZURE_FUNCTIONS_ENVIRONMENT) === 'Production',
+  };
+}
 
-  for (const candidate of candidates) {
-    const normalized = normalizeString(candidate);
-    if (normalized) {
-      return normalized;
-    }
-  }
+/**
+ * Returns non-sensitive secret metadata for diagnostics/UI key-version display.
+ * Hashes are SHA-256 of the raw secret string and can be safely displayed.
+ */
+export function getEncryptionSecretMetadata(env = process.env ?? {}) {
+  const config = getEncryptionConfig(env);
+  return {
+    isProduction: config.isProduction,
+    currentHash: config.current ? createHash('sha256').update(config.current, 'utf8').digest('hex') : null,
+    previousHash: config.previous ? createHash('sha256').update(config.previous, 'utf8').digest('hex') : null,
+  };
+}
 
-  return '';
+/** @deprecated Kept for compatibility with encryption modules that still call this helper. */
+export function resolveEncryptionSecret(env = process.env ?? {}) {
+  return getEncryptionConfig(env).current;
 }
 
 /** @deprecated Kept for forms-runtime.js compatibility — will be removed after endpoint migration. */
@@ -252,6 +259,23 @@ export function deriveEncryptionKey(secret) {
   }
 
   return keyBuffer;
+}
+
+export function getEncryptionKeyCandidates(env = process.env ?? {}) {
+  const { current, previous } = getEncryptionConfig(env);
+  const currentKey = deriveEncryptionKey(current);
+  const previousKey = deriveEncryptionKey(previous);
+
+  const keys = [];
+  if (currentKey) {
+    keys.push({ label: 'current', key: currentKey });
+  }
+
+  if (previousKey && (!currentKey || !Buffer.from(previousKey).equals(currentKey))) {
+    keys.push({ label: 'previous', key: previousKey });
+  }
+
+  return keys;
 }
 
 function decodeKeyMaterial(secret) {

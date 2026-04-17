@@ -18,7 +18,8 @@ Ensure these environment variables are set in Azure Static Web App Configuration
 - `APP_CONTROL_DB_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_ROLE_KEY` - Service role key
 
 ### Encryption (Required for tenant access):
-- `APP_ORG_CREDENTIALS_ENCRYPTION_KEY` - 32-byte encryption key for decrypting tenant credentials
+- `SECURITY_ENCRYPTION_SECRET` - current encryption secret used for encrypt/decrypt
+- `SECURITY_ENCRYPTION_SECRET_OLD` - optional previous secret for zero-downtime rotation fallback
 
 ## 3. Verify Tenant Database Schema
 
@@ -152,7 +153,7 @@ View detailed error logs:
 
 ### Error: "failed_to_decrypt_key"
 **Cause**: Missing or incorrect encryption key  
-**Solution**: Verify APP_ORG_CREDENTIALS_ENCRYPTION_KEY is set correctly
+**Solution**: Verify SECURITY_ENCRYPTION_SECRET is set correctly (and set SECURITY_ENCRYPTION_SECRET_OLD during key rotation)
 
 ### Error: "failed_to_verify_membership"
 **Cause**: User is not a member of the organization  

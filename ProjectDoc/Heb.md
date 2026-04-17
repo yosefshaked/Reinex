@@ -52,7 +52,7 @@ Tuttiud מאפשרת לצוותי הוראה לתאם שיעורים, לעקוב
 ## 5. מודל אבטחה ומפתחות
 
 - RLS מופעל על כל הטבלאות. ב-MVP כל משתמש מאומת מקבל גישה מלאה, בעוד שהסינון בפועל נעשה בשכבת האפליקציה (לפי `assigned_instructor_id`). בעתיד ניתן להחמיר מדיניות ללא שינוי צד-לקוח.
-- האשף קולט את ה-JWT שהסקריפט יוצר. המפתח אינו נשמר בגלוי בדפדפן; `/api/save-org-credentials` מצפין אותו עם `APP_ORG_CREDENTIALS_ENCRYPTION_KEY` לפני שהוא נשמר ב-Control DB (`organizations.dedicated_key_encrypted`).
+- האשף קולט את ה-JWT שהסקריפט יוצר. המפתח אינו נשמר בגלוי בדפדפן; `/api/save-org-credentials` מצפין אותו עם `SECURITY_ENCRYPTION_SECRET` (ובזמן רוטציה תומך בפענוח נפילה דרך `SECURITY_ENCRYPTION_SECRET_OLD`) לפני שהוא נשמר ב-Control DB (`organizations.dedicated_key_encrypted`).
 - פונקציות ה-Azure מפענחות את המפתח רק בעת יצירת `tenantClient`. הצד-הקליינט משתמש במפתח האנונימי לבדיקות (`tuttiud.setup_assistant_diagnostics`) וחייב לבצע כל כתיבה דרך `/api/*`.
 
 ## 6. זרימת אשף ההקמה (הגדרות → חיבור Supabase)

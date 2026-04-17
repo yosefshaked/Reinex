@@ -124,22 +124,6 @@ CREATE TABLE IF NOT EXISTS public.organizations (
   metadata jsonb NULL
 );
 
-ALTER TABLE public.organizations
-  ADD COLUMN IF NOT EXISTS name text,
-  ADD COLUMN IF NOT EXISTS slug text,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS setup_completed boolean,
-  ADD COLUMN IF NOT EXISTS verified_at timestamptz,
-  ADD COLUMN IF NOT EXISTS permissions jsonb,
-  ADD COLUMN IF NOT EXISTS logo_url text,
-  ADD COLUMN IF NOT EXISTS storage_profile jsonb,
-  ADD COLUMN IF NOT EXISTS storage_grace_ends_at timestamptz,
-  ADD COLUMN IF NOT EXISTS backup_history jsonb,
-  ADD COLUMN IF NOT EXISTS policy_links jsonb,
-  ADD COLUMN IF NOT EXISTS legal_settings jsonb,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
 CREATE INDEX IF NOT EXISTS organizations_slug_idx
   ON public.organizations (slug);
@@ -162,14 +146,6 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   metadata jsonb NULL
 );
 
-ALTER TABLE public.profiles
-  ADD COLUMN IF NOT EXISTS full_name text,
-  ADD COLUMN IF NOT EXISTS avatar_url text,
-  ADD COLUMN IF NOT EXISTS phone text,
-  ADD COLUMN IF NOT EXISTS locale text,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
 -- -----------------------------------------------------------------
 -- public.org_memberships
@@ -185,13 +161,6 @@ CREATE TABLE IF NOT EXISTS public.org_memberships (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-ALTER TABLE public.org_memberships
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS user_id uuid,
-  ADD COLUMN IF NOT EXISTS role text,
-  ADD COLUMN IF NOT EXISTS is_active boolean,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
 
 CREATE UNIQUE INDEX IF NOT EXISTS org_memberships_org_user_uidx
   ON public.org_memberships (org_id, user_id);
@@ -216,16 +185,6 @@ CREATE TABLE IF NOT EXISTS public.org_invitations (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-ALTER TABLE public.org_invitations
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS email text,
-  ADD COLUMN IF NOT EXISTS role text,
-  ADD COLUMN IF NOT EXISTS invited_by uuid,
-  ADD COLUMN IF NOT EXISTS status text,
-  ADD COLUMN IF NOT EXISTS token text,
-  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
 
 CREATE INDEX IF NOT EXISTS org_invitations_org_idx
   ON public.org_invitations (org_id, status);
@@ -245,11 +204,6 @@ CREATE TABLE IF NOT EXISTS public.permission_registry (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-ALTER TABLE public.permission_registry
-  ADD COLUMN IF NOT EXISTS permission_key text,
-  ADD COLUMN IF NOT EXISTS description text,
-  ADD COLUMN IF NOT EXISTS category text,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz;
 
 -- -----------------------------------------------------------------
 -- public.active_routing (maps user → currently active org)
@@ -261,9 +215,6 @@ CREATE TABLE IF NOT EXISTS public.active_routing (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-ALTER TABLE public.active_routing
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
 
 CREATE INDEX IF NOT EXISTS active_routing_org_idx
   ON public.active_routing (org_id);
@@ -290,38 +241,10 @@ CREATE TABLE IF NOT EXISTS public.audit_log (
   details jsonb NULL,
   metadata jsonb NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  expires_at timestamptz NULL
+  expires_at timestamptz NULL,
+  CONSTRAINT audit_log_retention_category_check CHECK (retention_category IN ('critical', 'standard', 'diagnostic'))
 );
 
-ALTER TABLE public.audit_log
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS actor_user_id uuid,
-  ADD COLUMN IF NOT EXISTS actor_email text,
-  ADD COLUMN IF NOT EXISTS actor_role text,
-  ADD COLUMN IF NOT EXISTS correlation_id uuid,
-  ADD COLUMN IF NOT EXISTS event_type text,
-  ADD COLUMN IF NOT EXISTS action_category text,
-  ADD COLUMN IF NOT EXISTS retention_category text,
-  ADD COLUMN IF NOT EXISTS resource_type text,
-  ADD COLUMN IF NOT EXISTS resource_id text,
-  ADD COLUMN IF NOT EXISTS before_state jsonb,
-  ADD COLUMN IF NOT EXISTS after_state jsonb,
-  ADD COLUMN IF NOT EXISTS details jsonb,
-  ADD COLUMN IF NOT EXISTS metadata jsonb,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS expires_at timestamptz;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'audit_log_retention_category_check'
-  ) THEN
-    ALTER TABLE public.audit_log
-      ADD CONSTRAINT audit_log_retention_category_check
-      CHECK (retention_category IN ('critical', 'standard', 'diagnostic'));
-  END IF;
-END $$;
 
 CREATE INDEX IF NOT EXISTS audit_log_org_idx
   ON public.audit_log (org_id, created_at DESC);
@@ -354,19 +277,10 @@ CREATE TABLE IF NOT EXISTS public.students (
   medical_flags jsonb NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT students_client_profile_id_fkey FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id)
 );
 
-ALTER TABLE public.students
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
-  ADD COLUMN IF NOT EXISTS notes_internal text,
-  ADD COLUMN IF NOT EXISTS medical_provider text,
-  ADD COLUMN IF NOT EXISTS special_rate integer,
-  ADD COLUMN IF NOT EXISTS medical_flags jsonb,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
 DO $$
 BEGIN
@@ -414,22 +328,7 @@ CREATE TABLE IF NOT EXISTS public.guardians (
   metadata jsonb NULL
 );
 
-ALTER TABLE public.guardians
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS first_name text,
-  ADD COLUMN IF NOT EXISTS middle_name text,
-  ADD COLUMN IF NOT EXISTS last_name text,
-  ADD COLUMN IF NOT EXISTS phone text,
-  ADD COLUMN IF NOT EXISTS email text,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
-DO $$
-BEGIN
-  ALTER TABLE public.guardians ALTER COLUMN first_name SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS guardians_name_idx
   ON public.guardians (org_id, first_name, last_name);
@@ -454,75 +353,12 @@ CREATE TABLE IF NOT EXISTS public.client_profiles (
   is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT client_profiles_default_notification_method_check CHECK (default_notification_method IN ('whatsapp','email')),
+  CONSTRAINT client_profiles_onboarding_status_check CHECK (onboarding_status IN ('not_started','pending_forms','approved'))
 );
 
-ALTER TABLE public.client_profiles
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS first_name text,
-  ADD COLUMN IF NOT EXISTS middle_name text,
-  ADD COLUMN IF NOT EXISTS last_name text,
-  ADD COLUMN IF NOT EXISTS identity_number text,
-  ADD COLUMN IF NOT EXISTS phone text,
-  ADD COLUMN IF NOT EXISTS email text,
-  ADD COLUMN IF NOT EXISTS date_of_birth date,
-  ADD COLUMN IF NOT EXISTS default_notification_method text,
-  ADD COLUMN IF NOT EXISTS tags uuid[],
-  ADD COLUMN IF NOT EXISTS onboarding_status text,
-  ADD COLUMN IF NOT EXISTS is_active boolean,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
-DO $$
-BEGIN
-  ALTER TABLE public.client_profiles ALTER COLUMN first_name SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.client_profiles ALTER COLUMN last_name SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.client_profiles
-    ADD CONSTRAINT client_profiles_default_notification_method_check
-    CHECK (default_notification_method IN ('whatsapp','email'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  UPDATE public.client_profiles
-  SET onboarding_status = CASE
-    WHEN onboarding_status = 'in_progress' THEN 'pending_forms'
-    WHEN onboarding_status = 'completed' THEN 'approved'
-    ELSE onboarding_status
-  END
-  WHERE onboarding_status IN ('in_progress', 'completed');
-
-  IF EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'client_profiles_onboarding_status_check'
-      AND conrelid = 'public.client_profiles'::regclass
-  ) THEN
-    ALTER TABLE public.client_profiles DROP CONSTRAINT client_profiles_onboarding_status_check;
-  END IF;
-
-  ALTER TABLE public.client_profiles
-    ADD CONSTRAINT client_profiles_onboarding_status_check
-    CHECK (onboarding_status IN ('not_started','pending_forms','approved'));
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS client_profiles_is_active_idx ON public.client_profiles (org_id, is_active);
 CREATE INDEX IF NOT EXISTS client_profiles_name_idx ON public.client_profiles (org_id, first_name, last_name);
@@ -536,19 +372,6 @@ EXCEPTION
   WHEN others THEN NULL;
 END $$;
 
-ALTER TABLE public.students
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS client_profile_id uuid;
-
-DO $$
-BEGIN
-  ALTER TABLE public.students
-    ADD CONSTRAINT students_client_profile_id_fkey
-    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 DO $$
 BEGIN
@@ -558,124 +381,6 @@ BEGIN
 EXCEPTION
   WHEN others THEN NULL;
 END $$;
-
-DO $$
-DECLARE
-  student_row record;
-  profile_id uuid;
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'students'
-      AND column_name = 'first_name'
-  ) THEN
-    FOR student_row IN EXECUTE '
-      SELECT id, first_name, middle_name, last_name, identity_number, phone, email, date_of_birth,
-             default_notification_method, tags, onboarding_status, is_active, created_at, updated_at, metadata
-      FROM public.students
-      WHERE client_profile_id IS NULL
-    '
-    LOOP
-      SELECT id
-      INTO profile_id
-      FROM public.client_profiles
-      WHERE identity_number IS NOT DISTINCT FROM student_row.identity_number
-        AND (
-          student_row.identity_number IS NOT NULL
-          OR (
-            first_name IS NOT DISTINCT FROM student_row.first_name
-            AND middle_name IS NOT DISTINCT FROM student_row.middle_name
-            AND last_name IS NOT DISTINCT FROM student_row.last_name
-            AND phone IS NOT DISTINCT FROM student_row.phone
-            AND email IS NOT DISTINCT FROM student_row.email
-          )
-        )
-      ORDER BY created_at
-      LIMIT 1;
-
-      IF profile_id IS NULL THEN
-        INSERT INTO public.client_profiles (
-          first_name,
-          middle_name,
-          last_name,
-          identity_number,
-          phone,
-          email,
-          date_of_birth,
-          default_notification_method,
-          tags,
-          onboarding_status,
-          is_active,
-          created_at,
-          updated_at,
-          metadata
-        ) VALUES (
-          student_row.first_name,
-          student_row.middle_name,
-          student_row.last_name,
-          student_row.identity_number,
-          student_row.phone,
-          student_row.email,
-          student_row.date_of_birth,
-          COALESCE(student_row.default_notification_method, 'whatsapp'),
-          student_row.tags,
-          CASE
-            WHEN student_row.onboarding_status = 'pending_wl_form' THEN 'pending_forms'
-            ELSE COALESCE(student_row.onboarding_status, 'not_started')
-          END,
-          COALESCE(student_row.is_active, true),
-          COALESCE(student_row.created_at, now()),
-          COALESCE(student_row.updated_at, COALESCE(student_row.created_at, now())),
-          student_row.metadata
-        )
-        RETURNING id INTO profile_id;
-      END IF;
-
-      UPDATE public.students
-      SET client_profile_id = profile_id
-      WHERE id = student_row.id;
-    END LOOP;
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.students ALTER COLUMN client_profile_id SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-DROP TRIGGER IF EXISTS students_sync_person_fields_from_client_profile_trigger ON public.students;
-DROP TRIGGER IF EXISTS client_profiles_sync_to_students_trigger ON public.client_profiles;
-DROP FUNCTION IF EXISTS public.sync_student_person_fields_from_client_profile();
-DROP FUNCTION IF EXISTS public.sync_client_profile_changes_to_students();
-
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'students_default_notification_method_check'
-      AND conrelid = 'public.students'::regclass
-  ) THEN
-    ALTER TABLE public.students DROP CONSTRAINT students_default_notification_method_check;
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'students_onboarding_status_check'
-      AND conrelid = 'public.students'::regclass
-  ) THEN
-    ALTER TABLE public.students DROP CONSTRAINT students_onboarding_status_check;
-  END IF;
-END $$;
-
-DROP INDEX IF EXISTS public.students_identity_number_unique_idx;
-DROP INDEX IF EXISTS public.students_is_active_idx;
-DROP INDEX IF EXISTS public.students_name_idx;
 
 
 -- -----------------------------------------------------------------
@@ -689,66 +394,18 @@ CREATE TABLE IF NOT EXISTS public.client_guardians (
   guardian_id uuid NOT NULL,
   relationship text NOT NULL,
   is_primary boolean NOT NULL DEFAULT false,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT client_guardians_client_profile_id_fkey FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id),
+  CONSTRAINT client_guardians_guardian_id_fkey FOREIGN KEY (guardian_id) REFERENCES public.guardians(id),
+  CONSTRAINT client_guardians_relationship_check CHECK (relationship IN ('father','mother','self','caretaker','other'))
 );
 
-ALTER TABLE public.client_guardians
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
-  ADD COLUMN IF NOT EXISTS guardian_id uuid,
-  ADD COLUMN IF NOT EXISTS relationship text,
-  ADD COLUMN IF NOT EXISTS is_primary boolean,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz;
-
-DO $$
-BEGIN
-  ALTER TABLE public.client_guardians
-    ADD CONSTRAINT client_guardians_client_profile_id_fkey
-    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.client_guardians
-    ADD CONSTRAINT client_guardians_guardian_id_fkey
-    FOREIGN KEY (guardian_id) REFERENCES public.guardians(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.client_guardians
-    ADD CONSTRAINT client_guardians_relationship_check
-    CHECK (relationship IN ('father','mother','self','caretaker','other'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS client_guardians_client_guardian_uidx
   ON public.client_guardians (org_id, client_profile_id, guardian_id);
 
 CREATE INDEX IF NOT EXISTS client_guardians_client_profile_id_idx
   ON public.client_guardians (org_id, client_profile_id);
-
-DO $$
-BEGIN
-  INSERT INTO public.client_guardians (client_profile_id, guardian_id, relationship, is_primary, created_at)
-  SELECT s.client_profile_id, sg.guardian_id, sg.relationship, sg.is_primary, sg.created_at
-  FROM public.student_guardians sg
-  JOIN public.students s ON s.id = sg.student_id
-  WHERE s.client_profile_id IS NOT NULL
-  ON CONFLICT (client_profile_id, guardian_id) DO UPDATE
-  SET relationship = EXCLUDED.relationship,
-      is_primary = EXCLUDED.is_primary;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
 -- -----------------------------------------------------------------
 -- public.Employees (complete table with payroll fields)
@@ -778,45 +435,13 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
   "employment_scope" text,
   "instructor_types" uuid[],
   "metadata" jsonb,
-  CONSTRAINT "Employees_pkey" PRIMARY KEY ("id")
+  CONSTRAINT "Employees_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT Employees_payroll_model_check CHECK ("payroll_model" IS NULL OR "payroll_model" IN ('hourly', 'monthly_salary', 'lesson_based'))
 );
 
-ALTER TABLE public."Employees"
-  ADD COLUMN IF NOT EXISTS "org_id" uuid,
-  ADD COLUMN IF NOT EXISTS "user_id" uuid,
-  ADD COLUMN IF NOT EXISTS "first_name" text,
-  ADD COLUMN IF NOT EXISTS "middle_name" text,
-  ADD COLUMN IF NOT EXISTS "last_name" text,
-  ADD COLUMN IF NOT EXISTS "employee_id" text,
-  ADD COLUMN IF NOT EXISTS "employee_type" text,
-  ADD COLUMN IF NOT EXISTS "payroll_model" text,
-  ADD COLUMN IF NOT EXISTS "current_rate" integer,
-  ADD COLUMN IF NOT EXISTS "monthly_salary_amount" integer,
-  ADD COLUMN IF NOT EXISTS "phone" text,
-  ADD COLUMN IF NOT EXISTS "email" text,
-  ADD COLUMN IF NOT EXISTS "start_date" date,
-  ADD COLUMN IF NOT EXISTS "is_active" boolean,
-  ADD COLUMN IF NOT EXISTS "notes" text,
-  ADD COLUMN IF NOT EXISTS "working_days" jsonb,
-  ADD COLUMN IF NOT EXISTS "annual_leave_days" numeric,
-  ADD COLUMN IF NOT EXISTS "leave_pay_method" text,
-  ADD COLUMN IF NOT EXISTS "leave_fixed_day_rate" integer,
-  ADD COLUMN IF NOT EXISTS "employment_scope" text,
-  ADD COLUMN IF NOT EXISTS "instructor_types" uuid[],
-  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
 
 CREATE INDEX IF NOT EXISTS "Employees_name_idx" ON public."Employees" ("org_id", "first_name", "last_name");
 CREATE INDEX IF NOT EXISTS "Employees_user_id_idx" ON public."Employees" ("org_id", "user_id");
-
-DO $$
-BEGIN
-  ALTER TABLE public."Employees"
-    ADD CONSTRAINT "Employees_payroll_model_check"
-    CHECK ("payroll_model" IS NULL OR "payroll_model" IN ('hourly', 'monthly_salary', 'lesson_based'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 -- -----------------------------------------------------------------
 -- public.Services (service catalog)
@@ -832,38 +457,11 @@ CREATE TABLE IF NOT EXISTS public."Services" (
   "color" text,
   "is_active" boolean NOT NULL DEFAULT true,
   "metadata" jsonb,
-  CONSTRAINT "Services_pkey" PRIMARY KEY ("id")
+  CONSTRAINT "Services_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT Services_payment_model_check CHECK ("payment_model" IS NULL OR "payment_model" IN ('fixed_rate', 'per_student')),
+  CONSTRAINT Services_default_customer_charge_amount_non_negative_check CHECK ("default_customer_charge_amount" IS NULL OR "default_customer_charge_amount" >= 0)
 );
 
-ALTER TABLE public."Services"
-  ADD COLUMN IF NOT EXISTS "org_id" uuid,
-  ADD COLUMN IF NOT EXISTS "name" text,
-  ADD COLUMN IF NOT EXISTS "duration_minutes" bigint,
-  ADD COLUMN IF NOT EXISTS "payment_model" text,
-  ADD COLUMN IF NOT EXISTS "default_customer_charge_amount" integer,
-  ADD COLUMN IF NOT EXISTS "color" text,
-  ADD COLUMN IF NOT EXISTS "is_active" boolean,
-  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public."Services"
-    ADD CONSTRAINT "Services_payment_model_check"
-    CHECK ("payment_model" IS NULL OR "payment_model" IN ('fixed_rate', 'per_student'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public."Services"
-    ADD CONSTRAINT "Services_default_customer_charge_amount_non_negative_check"
-    CHECK ("default_customer_charge_amount" IS NULL OR "default_customer_charge_amount" >= 0);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 -- -----------------------------------------------------------------
 -- public.RateHistory (rate tracking per employee/service/date)
@@ -880,62 +478,11 @@ CREATE TABLE IF NOT EXISTS public."RateHistory" (
   "metadata" jsonb,
   CONSTRAINT "RateHistory_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "RateHistory_employee_id_fkey" FOREIGN KEY ("employee_id") REFERENCES public."Employees"("id"),
-  CONSTRAINT "RateHistory_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES public."Services"("id")
+  CONSTRAINT "RateHistory_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES public."Services"("id"),
+  CONSTRAINT RateHistory_employee_service_effective_date_key UNIQUE USING INDEX "RateHistory_employee_service_effective_date_key"
 );
 
-ALTER TABLE public."RateHistory"
-  ADD COLUMN IF NOT EXISTS "org_id" uuid,
-  ADD COLUMN IF NOT EXISTS "rate" integer,
-  ADD COLUMN IF NOT EXISTS "effective_date" date,
-  ADD COLUMN IF NOT EXISTS "notes" text,
-  ADD COLUMN IF NOT EXISTS "employee_id" uuid,
-  ADD COLUMN IF NOT EXISTS "service_id" uuid,
-  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
 
--- Add unique constraint to prevent duplicates per employee/service/effective_date
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'RateHistory_employee_service_effective_date_key'
-      AND conrelid = 'public."RateHistory"'::regclass
-  ) THEN
-    NULL;
-  ELSIF EXISTS (
-    SELECT 1
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE c.relname = 'RateHistory_employee_service_effective_date_key'
-      AND n.nspname = 'public'
-      AND c.relkind = 'i'
-  ) THEN
-    BEGIN
-      ALTER TABLE public."RateHistory"
-        ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
-        UNIQUE USING INDEX "RateHistory_employee_service_effective_date_key";
-    EXCEPTION
-      WHEN object_not_in_prerequisite_state THEN
-        DROP INDEX IF EXISTS public."RateHistory_employee_service_effective_date_key";
-        ALTER TABLE public."RateHistory"
-          ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
-          UNIQUE (org_id, employee_id, service_id, effective_date);
-    END;
-  ELSE
-    ALTER TABLE public."RateHistory"
-      ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
-      UNIQUE (org_id, employee_id, service_id, effective_date);
-  END IF;
-EXCEPTION
-  WHEN duplicate_object OR duplicate_table THEN
-    NULL;
-END;
-$$;
-
-
--- -----------------------------------------------------------------
--- public.employee_attendance_records
--- -----------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -951,53 +498,11 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT employee_attendance_records_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT employee_attendance_records_status_check CHECK (status IN ('present', 'partial', 'absent', 'remote')),
+  CONSTRAINT employee_attendance_records_source_type_check CHECK (source_type IN ('manual', 'import', 'system', 'correction'))
 );
-
-ALTER TABLE public.employee_attendance_records
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS employee_id uuid,
-  ADD COLUMN IF NOT EXISTS attendance_date date,
-  ADD COLUMN IF NOT EXISTS status text,
-  ADD COLUMN IF NOT EXISTS worked_minutes integer,
-  ADD COLUMN IF NOT EXISTS notes text,
-  ADD COLUMN IF NOT EXISTS source_type text,
-  ADD COLUMN IF NOT EXISTS version int,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS updated_by uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_attendance_records
-    ADD CONSTRAINT employee_attendance_records_employee_id_fkey
-    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_attendance_records
-    ADD CONSTRAINT employee_attendance_records_status_check
-    CHECK (status IN ('present', 'partial', 'absent', 'remote'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_attendance_records
-    ADD CONSTRAINT employee_attendance_records_source_type_check
-    CHECK (source_type IN ('manual', 'import', 'system', 'correction'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 DROP INDEX IF EXISTS public.employee_attendance_records_employee_date_uidx;
 
@@ -1034,77 +539,14 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_entries (
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT employee_leave_entries_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT employee_leave_entries_leave_type_check CHECK (leave_type IN ('employee_paid', 'system_paid', 'unpaid', 'half_day')),
+  CONSTRAINT employee_leave_entries_status_check CHECK (status IN ('approved', 'cancelled')),
+  CONSTRAINT employee_leave_entries_duration_mode_check CHECK (duration_mode IN ('full_day', 'half_day')),
+  CONSTRAINT employee_leave_entries_half_day_part_check CHECK (half_day_part IS NULL OR half_day_part IN ('first_half', 'second_half'))
 );
 
-ALTER TABLE public.employee_leave_entries
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS employee_id uuid,
-  ADD COLUMN IF NOT EXISTS leave_type text,
-  ADD COLUMN IF NOT EXISTS status text,
-  ADD COLUMN IF NOT EXISTS duration_mode text,
-  ADD COLUMN IF NOT EXISTS half_day_part text,
-  ADD COLUMN IF NOT EXISTS start_date date,
-  ADD COLUMN IF NOT EXISTS end_date date,
-  ADD COLUMN IF NOT EXISTS reason text,
-  ADD COLUMN IF NOT EXISTS notes text,
-  ADD COLUMN IF NOT EXISTS source_type text,
-  ADD COLUMN IF NOT EXISTS approved_by uuid,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS updated_by uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_entries
-    ADD CONSTRAINT employee_leave_entries_employee_id_fkey
-    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_entries
-    ADD CONSTRAINT employee_leave_entries_leave_type_check
-    CHECK (leave_type IN ('employee_paid', 'system_paid', 'unpaid', 'half_day'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_entries
-    ADD CONSTRAINT employee_leave_entries_status_check
-    CHECK (status IN ('approved', 'cancelled'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_entries
-    ADD CONSTRAINT employee_leave_entries_duration_mode_check
-    CHECK (duration_mode IN ('full_day', 'half_day'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_entries
-    ADD CONSTRAINT employee_leave_entries_half_day_part_check
-    CHECK (half_day_part IS NULL OR half_day_part IN ('first_half', 'second_half'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS employee_leave_entries_employee_range_idx
   ON public.employee_leave_entries (org_id, employee_id, start_date, end_date);
@@ -1124,60 +566,13 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_days (
   balance_days_delta numeric NOT NULL DEFAULT 0,
   pay_fraction numeric NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT employee_leave_days_leave_entry_id_fkey FOREIGN KEY (leave_entry_id) REFERENCES public.employee_leave_entries(id) ON DELETE CASCADE,
+  CONSTRAINT employee_leave_days_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT employee_leave_days_day_portion_check CHECK (day_portion IN ('full_day', 'first_half', 'second_half')),
+  CONSTRAINT employee_leave_days_leave_type_check CHECK (leave_type IN ('employee_paid', 'system_paid', 'unpaid', 'half_day'))
 );
 
-ALTER TABLE public.employee_leave_days
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS leave_entry_id uuid,
-  ADD COLUMN IF NOT EXISTS employee_id uuid,
-  ADD COLUMN IF NOT EXISTS leave_date date,
-  ADD COLUMN IF NOT EXISTS day_portion text,
-  ADD COLUMN IF NOT EXISTS leave_type text,
-  ADD COLUMN IF NOT EXISTS balance_days_delta numeric,
-  ADD COLUMN IF NOT EXISTS pay_fraction numeric,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_days
-    ADD CONSTRAINT employee_leave_days_leave_entry_id_fkey
-    FOREIGN KEY (leave_entry_id) REFERENCES public.employee_leave_entries(id) ON DELETE CASCADE;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_days
-    ADD CONSTRAINT employee_leave_days_employee_id_fkey
-    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_days
-    ADD CONSTRAINT employee_leave_days_day_portion_check
-    CHECK (day_portion IN ('full_day', 'first_half', 'second_half'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_days
-    ADD CONSTRAINT employee_leave_days_leave_type_check
-    CHECK (leave_type IN ('employee_paid', 'system_paid', 'unpaid', 'half_day'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS employee_leave_days_employee_date_uidx
   ON public.employee_leave_days (org_id, employee_id, leave_date);
@@ -1202,62 +597,13 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_balance_events (
   notes text NULL,
   created_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT employee_leave_balance_events_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT employee_leave_balance_events_leave_entry_id_fkey FOREIGN KEY (leave_entry_id) REFERENCES public.employee_leave_entries(id) ON DELETE SET NULL,
+  CONSTRAINT employee_leave_balance_events_leave_day_id_fkey FOREIGN KEY (leave_day_id) REFERENCES public.employee_leave_days(id) ON DELETE SET NULL,
+  CONSTRAINT employee_leave_balance_events_event_type_check CHECK (event_type IN ('allocation', 'carryover', 'adjustment', 'usage', 'reversal', 'correction'))
 );
 
-ALTER TABLE public.employee_leave_balance_events
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS employee_id uuid,
-  ADD COLUMN IF NOT EXISTS leave_entry_id uuid,
-  ADD COLUMN IF NOT EXISTS leave_day_id uuid,
-  ADD COLUMN IF NOT EXISTS event_type text,
-  ADD COLUMN IF NOT EXISTS leave_type text,
-  ADD COLUMN IF NOT EXISTS quantity_days numeric,
-  ADD COLUMN IF NOT EXISTS effective_date date,
-  ADD COLUMN IF NOT EXISTS notes text,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_balance_events
-    ADD CONSTRAINT employee_leave_balance_events_employee_id_fkey
-    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_balance_events
-    ADD CONSTRAINT employee_leave_balance_events_leave_entry_id_fkey
-    FOREIGN KEY (leave_entry_id) REFERENCES public.employee_leave_entries(id) ON DELETE SET NULL;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_balance_events
-    ADD CONSTRAINT employee_leave_balance_events_leave_day_id_fkey
-    FOREIGN KEY (leave_day_id) REFERENCES public.employee_leave_days(id) ON DELETE SET NULL;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.employee_leave_balance_events
-    ADD CONSTRAINT employee_leave_balance_events_event_type_check
-    CHECK (event_type IN ('allocation', 'carryover', 'adjustment', 'usage', 'reversal', 'correction'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS employee_leave_balance_events_employee_date_idx
   ON public.employee_leave_balance_events (org_id, employee_id, effective_date);
@@ -1279,42 +625,11 @@ CREATE TABLE IF NOT EXISTS public.finance_corrections (
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT finance_corrections_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT finance_corrections_correction_type_check CHECK (correction_type IN ('bonus', 'deduction', 'adjustment', 'correction'))
 );
 
-ALTER TABLE public.finance_corrections
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS employee_id uuid,
-  ADD COLUMN IF NOT EXISTS correction_type text,
-  ADD COLUMN IF NOT EXISTS amount integer,
-  ADD COLUMN IF NOT EXISTS effective_date date,
-  ADD COLUMN IF NOT EXISTS notes text,
-  ADD COLUMN IF NOT EXISTS version int,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS updated_by uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.finance_corrections
-    ADD CONSTRAINT finance_corrections_employee_id_fkey
-    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.finance_corrections
-    ADD CONSTRAINT finance_corrections_correction_type_check
-    CHECK (correction_type IN ('bonus', 'deduction', 'adjustment', 'correction'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS finance_corrections_employee_date_idx
   ON public.finance_corrections (org_id, employee_id, effective_date);
@@ -1327,25 +642,11 @@ CREATE TABLE IF NOT EXISTS public.instructor_profiles (
   employee_id uuid PRIMARY KEY,
   org_id uuid NOT NULL REFERENCES public.organizations(id),
   break_time_minutes int NULL,
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT instructor_profiles_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id)
 );
 
-ALTER TABLE public.instructor_profiles
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS employee_id uuid,
-  ADD COLUMN IF NOT EXISTS break_time_minutes int,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
-
-DO $$
-BEGIN
-  ALTER TABLE public.instructor_profiles
-    ADD CONSTRAINT instructor_profiles_employee_id_fkey
-    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 -- -----------------------------------------------------------------
 -- public.instructor_service_capabilities
@@ -1359,51 +660,16 @@ CREATE TABLE IF NOT EXISTS public.instructor_service_capabilities (
   max_students int NOT NULL DEFAULT 1,
   base_rate integer NULL,
   availability_windows jsonb NOT NULL DEFAULT '[]'::jsonb,
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT instructor_service_capabilities_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT instructor_service_capabilities_service_id_fkey FOREIGN KEY (service_id) REFERENCES public."Services"(id)
 );
 
-ALTER TABLE public.instructor_service_capabilities
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS employee_id uuid,
-  ADD COLUMN IF NOT EXISTS service_id uuid,
-  ADD COLUMN IF NOT EXISTS max_students int,
-  ADD COLUMN IF NOT EXISTS base_rate integer,
-  ADD COLUMN IF NOT EXISTS availability_windows jsonb,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
 UPDATE public.instructor_service_capabilities
 SET availability_windows = '[]'::jsonb
 WHERE availability_windows IS NULL;
 
-DO $$
-BEGIN
-  ALTER TABLE public.instructor_service_capabilities
-    ALTER COLUMN availability_windows SET DEFAULT '[]'::jsonb;
-  ALTER TABLE public.instructor_service_capabilities
-    ALTER COLUMN availability_windows SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.instructor_service_capabilities
-    ADD CONSTRAINT instructor_service_capabilities_employee_id_fkey
-    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.instructor_service_capabilities
-    ADD CONSTRAINT instructor_service_capabilities_service_id_fkey
-    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS instructor_service_capabilities_employee_service_uidx
   ON public.instructor_service_capabilities (org_id, employee_id, service_id);
@@ -1434,100 +700,14 @@ CREATE TABLE IF NOT EXISTS public.lesson_templates (
   supersedes_template_id uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT lesson_templates_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT lesson_templates_instructor_employee_id_fkey FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT lesson_templates_service_id_fkey FOREIGN KEY (service_id) REFERENCES public."Services"(id),
+  CONSTRAINT lesson_templates_supersedes_template_id_fkey FOREIGN KEY (supersedes_template_id) REFERENCES public.lesson_templates(id),
+  CONSTRAINT lesson_templates_day_of_week_check CHECK (day_of_week IN ('sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'))
 );
 
-ALTER TABLE public.lesson_templates
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS student_id uuid,
-  ADD COLUMN IF NOT EXISTS instructor_employee_id uuid,
-  ADD COLUMN IF NOT EXISTS service_id uuid,
-  ADD COLUMN IF NOT EXISTS day_of_week text,
-  ADD COLUMN IF NOT EXISTS time_of_day time,
-  ADD COLUMN IF NOT EXISTS duration_minutes int,
-  ADD COLUMN IF NOT EXISTS valid_from date,
-  ADD COLUMN IF NOT EXISTS valid_until date,
-  ADD COLUMN IF NOT EXISTS price_override integer,
-  ADD COLUMN IF NOT EXISTS notes_internal text,
-  ADD COLUMN IF NOT EXISTS flags jsonb,
-  ADD COLUMN IF NOT EXISTS is_active boolean,
-  ADD COLUMN IF NOT EXISTS version int,
-  ADD COLUMN IF NOT EXISTS supersedes_template_id uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_templates
-    ADD CONSTRAINT lesson_templates_student_id_fkey
-    FOREIGN KEY (student_id) REFERENCES public.students(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_templates
-    ADD CONSTRAINT lesson_templates_instructor_employee_id_fkey
-    FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_templates
-    ADD CONSTRAINT lesson_templates_service_id_fkey
-    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_templates
-    ADD CONSTRAINT lesson_templates_supersedes_template_id_fkey
-    FOREIGN KEY (supersedes_template_id) REFERENCES public.lesson_templates(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
--- Drop trigger and old day constraint before changing day_of_week type.
-DROP TRIGGER IF EXISTS trg_lesson_templates_active_overlap_guard
-  ON public.lesson_templates;
-
-ALTER TABLE public.lesson_templates
-  DROP CONSTRAINT IF EXISTS lesson_templates_day_of_week_check;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_templates
-    ALTER COLUMN day_of_week TYPE text
-    USING (
-      CASE
-        WHEN day_of_week::text = '0' THEN 'sunday'
-        WHEN day_of_week::text = '1' THEN 'monday'
-        WHEN day_of_week::text = '2' THEN 'tuesday'
-        WHEN day_of_week::text = '3' THEN 'wednesday'
-        WHEN day_of_week::text = '4' THEN 'thursday'
-        WHEN day_of_week::text = '5' THEN 'friday'
-        WHEN day_of_week::text = '6' THEN 'saturday'
-        ELSE lower(day_of_week::text)
-      END
-    );
-EXCEPTION
-  WHEN undefined_column THEN
-    NULL;
-END $$;
-
-ALTER TABLE public.lesson_templates
-  ADD CONSTRAINT lesson_templates_day_of_week_check
-  CHECK (day_of_week IN ('sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'));
 
 CREATE INDEX IF NOT EXISTS lesson_templates_student_id_idx ON public.lesson_templates (org_id, student_id);
 CREATE INDEX IF NOT EXISTS lesson_templates_instructor_day_time_idx ON public.lesson_templates (org_id, instructor_employee_id, day_of_week, time_of_day);
@@ -1567,26 +747,6 @@ BEGIN
 END;
 $$;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_trigger
-    WHERE tgname = 'trg_lesson_templates_active_overlap_guard'
-      AND tgrelid = 'public.lesson_templates'::regclass
-  ) THEN
-    CREATE TRIGGER trg_lesson_templates_active_overlap_guard
-      BEFORE INSERT OR UPDATE OF student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active
-      ON public.lesson_templates
-      FOR EACH ROW
-      EXECUTE FUNCTION public.validate_lesson_template_no_active_overlap();
-  END IF;
-END
-$$;
-
--- -----------------------------------------------------------------
--- public.lesson_template_overrides
--- -----------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS public.lesson_template_overrides (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1600,61 +760,12 @@ CREATE TABLE IF NOT EXISTS public.lesson_template_overrides (
   new_duration_minutes int NULL,
   note text NULL,
   created_by uuid NULL,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT lesson_template_overrides_template_id_fkey FOREIGN KEY (template_id) REFERENCES public.lesson_templates(id),
+  CONSTRAINT lesson_template_overrides_new_instructor_employee_id_fkey FOREIGN KEY (new_instructor_employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT lesson_template_overrides_new_service_id_fkey FOREIGN KEY (new_service_id) REFERENCES public."Services"(id),
+  CONSTRAINT lesson_template_overrides_override_type_check CHECK (override_type IN ('cancel','modify'))
 );
-
-ALTER TABLE public.lesson_template_overrides
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS template_id uuid,
-  ADD COLUMN IF NOT EXISTS target_date date,
-  ADD COLUMN IF NOT EXISTS override_type text,
-  ADD COLUMN IF NOT EXISTS new_instructor_employee_id uuid,
-  ADD COLUMN IF NOT EXISTS new_service_id uuid,
-  ADD COLUMN IF NOT EXISTS new_time_of_day time,
-  ADD COLUMN IF NOT EXISTS new_duration_minutes int,
-  ADD COLUMN IF NOT EXISTS note text,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_template_overrides
-    ADD CONSTRAINT lesson_template_overrides_template_id_fkey
-    FOREIGN KEY (template_id) REFERENCES public.lesson_templates(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_template_overrides
-    ADD CONSTRAINT lesson_template_overrides_new_instructor_employee_id_fkey
-    FOREIGN KEY (new_instructor_employee_id) REFERENCES public."Employees"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_template_overrides
-    ADD CONSTRAINT lesson_template_overrides_new_service_id_fkey
-    FOREIGN KEY (new_service_id) REFERENCES public."Services"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_template_overrides
-    ADD CONSTRAINT lesson_template_overrides_override_type_check
-    CHECK (override_type IN ('cancel','modify'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS lesson_template_overrides_template_date_uidx
   ON public.lesson_template_overrides (org_id, template_id, target_date);
@@ -1691,70 +802,16 @@ CREATE TABLE IF NOT EXISTS public.lesson_instances (
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT lesson_instances_template_id_fkey FOREIGN KEY (template_id) REFERENCES public.lesson_templates(id),
+  CONSTRAINT lesson_instances_instructor_employee_id_fkey FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT lesson_instances_service_id_fkey FOREIGN KEY (service_id) REFERENCES public."Services"(id),
+  CONSTRAINT lesson_instances_applied_override_id_fkey FOREIGN KEY (applied_override_id) REFERENCES public.lesson_template_overrides(id),
+  CONSTRAINT lesson_instances_status_check CHECK (status IN ('scheduled','completed','cancelled')),
+  CONSTRAINT lesson_instances_documentation_status_check CHECK (documentation_status IN ('undocumented','documented')),
+  CONSTRAINT lesson_instances_created_source_check CHECK (created_source IN ('weekly_generation','one_time','manual_reschedule','migration'))
 );
 
-ALTER TABLE public.lesson_instances
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS template_id uuid,
-  ADD COLUMN IF NOT EXISTS applied_override_id uuid,
-  ADD COLUMN IF NOT EXISTS datetime_start timestamptz,
-  ADD COLUMN IF NOT EXISTS duration_minutes int,
-  ADD COLUMN IF NOT EXISTS instructor_employee_id uuid,
-  ADD COLUMN IF NOT EXISTS service_id uuid,
-  ADD COLUMN IF NOT EXISTS status text,
-  ADD COLUMN IF NOT EXISTS documentation_status text,
-  ADD COLUMN IF NOT EXISTS is_closed boolean,
-  ADD COLUMN IF NOT EXISTS closed_reason text,
-  ADD COLUMN IF NOT EXISTS closed_by uuid,
-  ADD COLUMN IF NOT EXISTS closed_at timestamptz,
-  ADD COLUMN IF NOT EXISTS created_source text,
-  ADD COLUMN IF NOT EXISTS version int,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS updated_by uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_instances
-    ADD CONSTRAINT lesson_instances_template_id_fkey
-    FOREIGN KEY (template_id) REFERENCES public.lesson_templates(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_instances
-    ADD CONSTRAINT lesson_instances_instructor_employee_id_fkey
-    FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_instances
-    ADD CONSTRAINT lesson_instances_service_id_fkey
-    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_instances
-    ADD CONSTRAINT lesson_instances_applied_override_id_fkey
-    FOREIGN KEY (applied_override_id) REFERENCES public.lesson_template_overrides(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 DO $$
 BEGIN
@@ -1783,25 +840,6 @@ ALTER TABLE public.lesson_instances
   DROP CONSTRAINT IF EXISTS lesson_instances_status_check;
 
 DO $$
-DECLARE
-  invalid_values text;
-BEGIN
-  ALTER TABLE public.lesson_instances
-    ADD CONSTRAINT lesson_instances_status_check
-    CHECK (status IN ('scheduled','completed','cancelled'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-  WHEN check_violation THEN
-    SELECT string_agg(DISTINCT quote_nullable(status), ', ' ORDER BY quote_nullable(status))
-    INTO invalid_values
-    FROM public.lesson_instances
-    WHERE status IS NOT NULL
-      AND status NOT IN ('scheduled','completed','cancelled');
-    RAISE EXCEPTION 'Cannot apply lesson_instances_status_check; violating lesson_instances.status values remain: %', COALESCE(invalid_values, '[unknown]');
-END $$;
-
-DO $$
 BEGIN
   UPDATE public.lesson_instances
   SET created_source = CASE
@@ -1816,44 +854,6 @@ BEGIN
   WHERE created_source IS NOT NULL;
 EXCEPTION
   WHEN others THEN NULL;
-END $$;
-
-DO $$
-DECLARE
-  invalid_values text;
-BEGIN
-  ALTER TABLE public.lesson_instances
-    ADD CONSTRAINT lesson_instances_documentation_status_check
-    CHECK (documentation_status IN ('undocumented','documented'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-  WHEN check_violation THEN
-    SELECT string_agg(DISTINCT quote_nullable(documentation_status), ', ' ORDER BY quote_nullable(documentation_status))
-    INTO invalid_values
-    FROM public.lesson_instances
-    WHERE documentation_status IS NOT NULL
-      AND documentation_status NOT IN ('undocumented','documented');
-    RAISE EXCEPTION 'Cannot apply lesson_instances_documentation_status_check; violating lesson_instances.documentation_status values remain: %', COALESCE(invalid_values, '[unknown]');
-END $$;
-
-DO $$
-DECLARE
-  invalid_values text;
-BEGIN
-  ALTER TABLE public.lesson_instances
-    ADD CONSTRAINT lesson_instances_created_source_check
-    CHECK (created_source IN ('weekly_generation','one_time','manual_reschedule','migration'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-  WHEN check_violation THEN
-    SELECT string_agg(DISTINCT quote_nullable(created_source), ', ' ORDER BY quote_nullable(created_source))
-    INTO invalid_values
-    FROM public.lesson_instances
-    WHERE created_source IS NOT NULL
-      AND created_source NOT IN ('weekly_generation','one_time','manual_reschedule','migration');
-    RAISE EXCEPTION 'Cannot apply lesson_instances_created_source_check; violating lesson_instances.created_source values remain: %', COALESCE(invalid_values, '[unknown]');
 END $$;
 
 CREATE INDEX IF NOT EXISTS lesson_instances_datetime_start_idx ON public.lesson_instances (org_id, datetime_start);
@@ -1888,59 +888,14 @@ CREATE TABLE IF NOT EXISTS public.lesson_participants (
   locked_at timestamptz NULL,
   version int NOT NULL DEFAULT 1,
   updated_by uuid NULL,
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT lesson_participants_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id),
+  CONSTRAINT lesson_participants_client_profile_id_fkey FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id),
+  CONSTRAINT lesson_participants_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT lesson_participants_participant_status_check CHECK (participant_status IN ('scheduled','attended','cancelled_student','cancelled_clinic','no_show')),
+  CONSTRAINT lesson_participants_commitment_id_fkey FOREIGN KEY (commitment_id) REFERENCES public.commitments(id)
 );
 
-ALTER TABLE public.lesson_participants
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
-  ADD COLUMN IF NOT EXISTS student_id uuid,
-  ADD COLUMN IF NOT EXISTS participant_status text,
-  ADD COLUMN IF NOT EXISTS price_charged integer,
-  ADD COLUMN IF NOT EXISTS pricing_breakdown jsonb,
-  ADD COLUMN IF NOT EXISTS commitment_id uuid,
-  ADD COLUMN IF NOT EXISTS documentation_ref jsonb,
-  ADD COLUMN IF NOT EXISTS reminder_sent boolean,
-  ADD COLUMN IF NOT EXISTS reminder_seen boolean,
-  ADD COLUMN IF NOT EXISTS attendance_confirmed_at timestamptz,
-  ADD COLUMN IF NOT EXISTS attendance_confirmed_by uuid,
-  ADD COLUMN IF NOT EXISTS documented_at timestamptz,
-  ADD COLUMN IF NOT EXISTS documented_by uuid,
-  ADD COLUMN IF NOT EXISTS locked_at timestamptz,
-  ADD COLUMN IF NOT EXISTS version int,
-  ADD COLUMN IF NOT EXISTS updated_by uuid,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_participants
-    ADD CONSTRAINT lesson_participants_lesson_instance_id_fkey
-    FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_participants
-    ADD CONSTRAINT lesson_participants_client_profile_id_fkey
-    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_participants
-    ADD CONSTRAINT lesson_participants_student_id_fkey
-    FOREIGN KEY (student_id) REFERENCES public.students(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 DO $$
 BEGIN
@@ -1949,25 +904,6 @@ BEGIN
   WHERE participant_status IS NOT NULL;
 EXCEPTION
   WHEN others THEN NULL;
-END $$;
-
-DO $$
-DECLARE
-  invalid_values text;
-BEGIN
-  ALTER TABLE public.lesson_participants
-    ADD CONSTRAINT lesson_participants_participant_status_check
-    CHECK (participant_status IN ('scheduled','attended','cancelled_student','cancelled_clinic','no_show'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-  WHEN check_violation THEN
-    SELECT string_agg(DISTINCT quote_nullable(participant_status), ', ' ORDER BY quote_nullable(participant_status))
-    INTO invalid_values
-    FROM public.lesson_participants
-    WHERE participant_status IS NOT NULL
-      AND participant_status NOT IN ('scheduled','attended','cancelled_student','cancelled_clinic','no_show');
-    RAISE EXCEPTION 'Cannot apply lesson_participants_participant_status_check; violating lesson_participants.participant_status values remain: %', COALESCE(invalid_values, '[unknown]');
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS lesson_participants_instance_client_profile_uidx
@@ -1990,12 +926,6 @@ EXCEPTION
   WHEN others THEN NULL;
 END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_participants ALTER COLUMN client_profile_id SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
 DO $$
 BEGIN
@@ -2018,25 +948,11 @@ CREATE TABLE IF NOT EXISTS public.grace_cancellation_requests (
   created_at timestamptz NOT NULL DEFAULT now(),
   created_by uuid NULL,
   reason text NULL,
-  status text NOT NULL DEFAULT 'manually_excused'
+  status text NOT NULL DEFAULT 'manually_excused',
+  CONSTRAINT grace_cancellation_requests_lesson_participant_id_fkey FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id),
+  CONSTRAINT grace_cancellation_requests_status_check CHECK (status IN ('manually_excused'))
 );
 
-ALTER TABLE public.grace_cancellation_requests
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS reason text,
-  ADD COLUMN IF NOT EXISTS status text;
-
-DO $$
-BEGIN
-  ALTER TABLE public.grace_cancellation_requests
-    ADD CONSTRAINT grace_cancellation_requests_lesson_participant_id_fkey
-    FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id);
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
 
 DO $$
 BEGIN
@@ -2045,15 +961,6 @@ BEGIN
 EXCEPTION
   WHEN undefined_table THEN NULL;
   WHEN insufficient_privilege THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.grace_cancellation_requests
-    ADD CONSTRAINT grace_cancellation_requests_status_check
-    CHECK (status IN ('manually_excused'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS grace_cancellation_requests_participant_uidx
@@ -2077,29 +984,10 @@ CREATE TABLE IF NOT EXISTS public.payroll_runs (
   version int NOT NULL DEFAULT 1,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT payroll_runs_status_check CHECK (status IN ('draft', 'finalized', 'cancelled'))
 );
 
-ALTER TABLE public.payroll_runs
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS period_start date,
-  ADD COLUMN IF NOT EXISTS period_end date,
-  ADD COLUMN IF NOT EXISTS status text,
-  ADD COLUMN IF NOT EXISTS finalized_at timestamptz,
-  ADD COLUMN IF NOT EXISTS finalized_by uuid,
-  ADD COLUMN IF NOT EXISTS version int,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.payroll_runs
-    ADD CONSTRAINT payroll_runs_status_check
-    CHECK (status IN ('draft', 'finalized', 'cancelled'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS payroll_runs_period_idx
   ON public.payroll_runs (org_id, period_start, period_end, status);
@@ -2122,41 +1010,11 @@ CREATE TABLE IF NOT EXISTS public.claim_batches (
   version int NOT NULL DEFAULT 1,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT claim_batches_batch_type_check CHECK (batch_type IN ('hmo', 'manual')),
+  CONSTRAINT claim_batches_status_check CHECK (status IN ('draft', 'submitted', 'rejected', 'paid', 'cancelled'))
 );
 
-ALTER TABLE public.claim_batches
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS batch_type text,
-  ADD COLUMN IF NOT EXISTS period_start date,
-  ADD COLUMN IF NOT EXISTS period_end date,
-  ADD COLUMN IF NOT EXISTS status text,
-  ADD COLUMN IF NOT EXISTS submitted_at timestamptz,
-  ADD COLUMN IF NOT EXISTS submitted_by uuid,
-  ADD COLUMN IF NOT EXISTS paid_at timestamptz,
-  ADD COLUMN IF NOT EXISTS paid_by uuid,
-  ADD COLUMN IF NOT EXISTS version int,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.claim_batches
-    ADD CONSTRAINT claim_batches_batch_type_check
-    CHECK (batch_type IN ('hmo', 'manual'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.claim_batches
-    ADD CONSTRAINT claim_batches_status_check
-    CHECK (status IN ('draft', 'submitted', 'rejected', 'paid', 'cancelled'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS claim_batches_period_idx
   ON public.claim_batches (org_id, period_start, period_end, status);
@@ -2174,36 +1032,11 @@ CREATE TABLE IF NOT EXISTS public.instance_locks (
   lock_reason text NOT NULL,
   created_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT instance_locks_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id) ON DELETE CASCADE,
+  CONSTRAINT instance_locks_source_type_check CHECK (lock_source_type IN ('payroll_run', 'claim_batch', 'manual_compliance_lock'))
 );
 
-ALTER TABLE public.instance_locks
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
-  ADD COLUMN IF NOT EXISTS lock_source_type text,
-  ADD COLUMN IF NOT EXISTS lock_source_id uuid,
-  ADD COLUMN IF NOT EXISTS lock_reason text,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.instance_locks
-    ADD CONSTRAINT instance_locks_lesson_instance_id_fkey
-    FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id) ON DELETE CASCADE;
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.instance_locks
-    ADD CONSTRAINT instance_locks_source_type_check
-    CHECK (lock_source_type IN ('payroll_run', 'claim_batch', 'manual_compliance_lock'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS instance_locks_instance_source_uidx
   ON public.instance_locks (org_id, lesson_instance_id, lock_source_type, lock_source_id);
@@ -2224,36 +1057,11 @@ CREATE TABLE IF NOT EXISTS public.participant_locks (
   lock_reason text NOT NULL,
   created_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT participant_locks_lesson_participant_id_fkey FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id) ON DELETE CASCADE,
+  CONSTRAINT participant_locks_source_type_check CHECK (lock_source_type IN ('payroll_run', 'claim_batch', 'manual_compliance_lock'))
 );
 
-ALTER TABLE public.participant_locks
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
-  ADD COLUMN IF NOT EXISTS lock_source_type text,
-  ADD COLUMN IF NOT EXISTS lock_source_id uuid,
-  ADD COLUMN IF NOT EXISTS lock_reason text,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.participant_locks
-    ADD CONSTRAINT participant_locks_lesson_participant_id_fkey
-    FOREIGN KEY (lesson_participant_id) REFERENCES public.lesson_participants(id) ON DELETE CASCADE;
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.participant_locks
-    ADD CONSTRAINT participant_locks_source_type_check
-    CHECK (lock_source_type IN ('payroll_run', 'claim_batch', 'manual_compliance_lock'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS participant_locks_participant_source_uidx
   ON public.participant_locks (org_id, lesson_participant_id, lock_source_type, lock_source_id);
@@ -2283,54 +1091,12 @@ CREATE TABLE IF NOT EXISTS public.calendar_instance_corrections (
   updated_by uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT calendar_instance_corrections_instance_fkey FOREIGN KEY (original_instance_id) REFERENCES public.lesson_instances(id) ON DELETE CASCADE,
+  CONSTRAINT calendar_instance_corrections_mode_check CHECK (correction_mode IN ('value_only', 'replacement_instance', 'participant_adjustment')),
+  CONSTRAINT calendar_instance_corrections_status_check CHECK (status IN ('previewed', 'applied', 'blocked'))
 );
 
-ALTER TABLE public.calendar_instance_corrections
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS original_instance_id uuid,
-  ADD COLUMN IF NOT EXISTS correction_mode text,
-  ADD COLUMN IF NOT EXISTS reason_code text,
-  ADD COLUMN IF NOT EXISTS reason_text text,
-  ADD COLUMN IF NOT EXISTS status text,
-  ADD COLUMN IF NOT EXISTS instance_patch jsonb,
-  ADD COLUMN IF NOT EXISTS participant_patches jsonb,
-  ADD COLUMN IF NOT EXISTS effective_state jsonb,
-  ADD COLUMN IF NOT EXISTS impact_snapshot jsonb,
-  ADD COLUMN IF NOT EXISTS blocked_by_paid_claim boolean,
-  ADD COLUMN IF NOT EXISTS version int,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS updated_by uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.calendar_instance_corrections
-    ADD CONSTRAINT calendar_instance_corrections_instance_fkey
-    FOREIGN KEY (original_instance_id) REFERENCES public.lesson_instances(id) ON DELETE CASCADE;
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.calendar_instance_corrections
-    ADD CONSTRAINT calendar_instance_corrections_mode_check
-    CHECK (correction_mode IN ('value_only', 'replacement_instance', 'participant_adjustment'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.calendar_instance_corrections
-    ADD CONSTRAINT calendar_instance_corrections_status_check
-    CHECK (status IN ('previewed', 'applied', 'blocked'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS calendar_instance_corrections_instance_idx
   ON public.calendar_instance_corrections (org_id, original_instance_id, created_at DESC);
@@ -2359,45 +1125,11 @@ CREATE TABLE IF NOT EXISTS public.dashboard_tasks (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NULL,
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT dashboard_tasks_priority_check CHECK (priority IN ('low', 'medium', 'high', 'critical')),
+  CONSTRAINT dashboard_tasks_status_check CHECK (status IN ('open', 'resolved', 'dismissed'))
 );
 
-ALTER TABLE public.dashboard_tasks
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS task_type text,
-  ADD COLUMN IF NOT EXISTS title text,
-  ADD COLUMN IF NOT EXISTS description text,
-  ADD COLUMN IF NOT EXISTS priority text,
-  ADD COLUMN IF NOT EXISTS status text,
-  ADD COLUMN IF NOT EXISTS resource_type text,
-  ADD COLUMN IF NOT EXISTS resource_id text,
-  ADD COLUMN IF NOT EXISTS action_path text,
-  ADD COLUMN IF NOT EXISTS version int,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS resolved_by uuid,
-  ADD COLUMN IF NOT EXISTS resolved_at timestamptz,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.dashboard_tasks
-    ADD CONSTRAINT dashboard_tasks_priority_check
-    CHECK (priority IN ('low', 'medium', 'high', 'critical'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.dashboard_tasks
-    ADD CONSTRAINT dashboard_tasks_status_check
-    CHECK (status IN ('open', 'resolved', 'dismissed'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS dashboard_tasks_open_idx
   ON public.dashboard_tasks (org_id, status, priority, created_at DESC)
@@ -2417,13 +1149,6 @@ CREATE TABLE IF NOT EXISTS public.hmo_providers (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-ALTER TABLE public.hmo_providers
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS name text,
-  ADD COLUMN IF NOT EXISTS is_active boolean,
-  ADD COLUMN IF NOT EXISTS metadata jsonb,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
 
 CREATE UNIQUE INDEX IF NOT EXISTS hmo_providers_name_uidx
   ON public.hmo_providers (org_id, lower(name));
@@ -2445,74 +1170,15 @@ CREATE TABLE IF NOT EXISTS public.hmo_provider_tracks (
   is_active boolean NOT NULL DEFAULT true,
   metadata jsonb NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT hmo_provider_tracks_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
+  CONSTRAINT hmo_provider_tracks_service_id_fkey FOREIGN KEY (service_id) REFERENCES public."Services"(id),
+  CONSTRAINT hmo_provider_tracks_payment_mode_check CHECK (payment_mode IN ('fully_paid_by_hmo', 'partially_paid_by_hmo', 'fully_paid_by_customer')),
+  CONSTRAINT hmo_provider_tracks_customer_charge_non_negative_check CHECK (default_customer_charge_amount >= 0),
+  CONSTRAINT hmo_provider_tracks_insurer_claim_non_negative_check CHECK (default_insurer_claim_amount >= 0)
 );
 
-ALTER TABLE public.hmo_provider_tracks
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS provider_id uuid,
-  ADD COLUMN IF NOT EXISTS service_id uuid,
-  ADD COLUMN IF NOT EXISTS name text,
-  ADD COLUMN IF NOT EXISTS payment_mode text,
-  ADD COLUMN IF NOT EXISTS default_customer_charge_amount integer,
-  ADD COLUMN IF NOT EXISTS default_insurer_claim_amount integer,
-  ADD COLUMN IF NOT EXISTS default_workflow_notes text,
-  ADD COLUMN IF NOT EXISTS is_active boolean,
-  ADD COLUMN IF NOT EXISTS metadata jsonb,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
 
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_provider_tracks
-    DROP CONSTRAINT IF EXISTS hmo_provider_tracks_provider_id_fkey;
-  ALTER TABLE public.hmo_provider_tracks
-    ADD CONSTRAINT hmo_provider_tracks_provider_id_fkey
-    FOREIGN KEY (provider_id) REFERENCES public.hmo_providers(id) ON DELETE RESTRICT;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_provider_tracks
-    ADD CONSTRAINT hmo_provider_tracks_service_id_fkey
-    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_provider_tracks
-    ADD CONSTRAINT hmo_provider_tracks_payment_mode_check
-    CHECK (payment_mode IN ('fully_paid_by_hmo', 'partially_paid_by_hmo', 'fully_paid_by_customer'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_provider_tracks
-    ADD CONSTRAINT hmo_provider_tracks_customer_charge_non_negative_check
-    CHECK (default_customer_charge_amount >= 0);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_provider_tracks
-    ADD CONSTRAINT hmo_provider_tracks_insurer_claim_non_negative_check
-    CHECK (default_insurer_claim_amount >= 0);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 DROP INDEX IF EXISTS hmo_provider_tracks_provider_name_uidx;
 
@@ -2543,115 +1209,24 @@ CREATE TABLE IF NOT EXISTS public.hmo_authorizations (
   reminder_date date NULL,
   customer_charge_amount_override integer NULL,
   insurer_claim_amount_override integer NULL,
+  contracted_rate_amount integer NOT NULL DEFAULT 0,
   workflow_notes_override text NULL,
   status text NOT NULL DEFAULT 'active',
   notes text NULL,
   metadata jsonb NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT hmo_authorizations_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT hmo_authorizations_service_id_fkey FOREIGN KEY (service_id) REFERENCES public."Services"(id),
+  CONSTRAINT hmo_authorizations_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
+  CONSTRAINT hmo_authorizations_provider_track_id_fkey FOREIGN KEY (provider_track_id) REFERENCES public.hmo_provider_tracks(id) ON DELETE RESTRICT,
+  CONSTRAINT hmo_authorizations_status_check CHECK (status IN ('active', 'cancelled', 'completed', 'expired')),
+  CONSTRAINT hmo_authorizations_authorized_lessons_non_negative_check CHECK (authorized_lessons >= 0),
+  CONSTRAINT hmo_authorizations_customer_override_non_negative_check CHECK (customer_charge_amount_override IS NULL OR customer_charge_amount_override >= 0),
+  CONSTRAINT hmo_authorizations_insurer_override_non_negative_check CHECK (insurer_claim_amount_override IS NULL OR insurer_claim_amount_override >= 0)
 );
 
-ALTER TABLE public.hmo_authorizations
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS student_id uuid,
-  ADD COLUMN IF NOT EXISTS service_id uuid,
-  ADD COLUMN IF NOT EXISTS provider_id uuid,
-  ADD COLUMN IF NOT EXISTS provider_track_id uuid,
-  ADD COLUMN IF NOT EXISTS authorization_reference text,
-  ADD COLUMN IF NOT EXISTS authorized_lessons int,
-  ADD COLUMN IF NOT EXISTS valid_from date,
-  ADD COLUMN IF NOT EXISTS expires_at date,
-  ADD COLUMN IF NOT EXISTS reminder_date date,
-  ADD COLUMN IF NOT EXISTS customer_charge_amount_override integer,
-  ADD COLUMN IF NOT EXISTS insurer_claim_amount_override integer,
-  ADD COLUMN IF NOT EXISTS workflow_notes_override text,
-  ADD COLUMN IF NOT EXISTS status text,
-  ADD COLUMN IF NOT EXISTS notes text,
-  ADD COLUMN IF NOT EXISTS metadata jsonb,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
 
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_authorizations
-    ADD CONSTRAINT hmo_authorizations_student_id_fkey
-    FOREIGN KEY (student_id) REFERENCES public.students(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_authorizations
-    ADD CONSTRAINT hmo_authorizations_service_id_fkey
-    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_authorizations
-    DROP CONSTRAINT IF EXISTS hmo_authorizations_provider_id_fkey;
-  ALTER TABLE public.hmo_authorizations
-    ADD CONSTRAINT hmo_authorizations_provider_id_fkey
-    FOREIGN KEY (provider_id) REFERENCES public.hmo_providers(id) ON DELETE RESTRICT;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_authorizations
-    ADD CONSTRAINT hmo_authorizations_provider_track_id_fkey
-    FOREIGN KEY (provider_track_id) REFERENCES public.hmo_provider_tracks(id) ON DELETE RESTRICT;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_authorizations
-    ADD CONSTRAINT hmo_authorizations_status_check
-    CHECK (status IN ('active', 'cancelled', 'completed', 'expired'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_authorizations
-    ADD CONSTRAINT hmo_authorizations_authorized_lessons_non_negative_check
-    CHECK (authorized_lessons >= 0);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_authorizations
-    ADD CONSTRAINT hmo_authorizations_customer_override_non_negative_check
-    CHECK (customer_charge_amount_override IS NULL OR customer_charge_amount_override >= 0);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.hmo_authorizations
-    ADD CONSTRAINT hmo_authorizations_insurer_override_non_negative_check
-    CHECK (insurer_claim_amount_override IS NULL OR insurer_claim_amount_override >= 0);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS hmo_authorizations_student_id_idx
   ON public.hmo_authorizations (org_id, student_id);
@@ -2690,124 +1265,24 @@ CREATE TABLE IF NOT EXISTS public.commitments (
   metadata jsonb NULL,
   hmo_provider_id uuid NULL,
   hmo_provider_track_id uuid NULL,
-  hmo_authorization_id uuid NULL
+  hmo_authorization_id uuid NULL,
+  CONSTRAINT commitments_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT commitments_service_id_fkey FOREIGN KEY (service_id) REFERENCES public."Services"(id),
+  CONSTRAINT commitments_hmo_provider_id_fkey FOREIGN KEY (hmo_provider_id) REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
+  CONSTRAINT commitments_hmo_provider_track_id_fkey FOREIGN KEY (hmo_provider_track_id) REFERENCES public.hmo_provider_tracks(id) ON DELETE RESTRICT,
+  CONSTRAINT commitments_hmo_authorization_id_fkey FOREIGN KEY (hmo_authorization_id) REFERENCES public.hmo_authorizations(id),
+  CONSTRAINT commitments_commitment_type_check CHECK (commitment_type IN ('package', 'subscription', 'hmo', 'manual_credit')),
+  CONSTRAINT commitments_total_amount_non_negative_check CHECK (total_amount >= 0),
+  CONSTRAINT commitments_default_charge_amount_non_negative_check CHECK (default_charge_amount IS NULL OR default_charge_amount >= 0)
 );
 
-ALTER TABLE public.commitments
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS student_id uuid,
-  ADD COLUMN IF NOT EXISTS service_id uuid,
-  ADD COLUMN IF NOT EXISTS commitment_type text,
-  ADD COLUMN IF NOT EXISTS total_amount integer,
-  ADD COLUMN IF NOT EXISTS default_charge_amount integer,
-  ADD COLUMN IF NOT EXISTS transfer_ref uuid,
-  ADD COLUMN IF NOT EXISTS notes text,
-  ADD COLUMN IF NOT EXISTS is_active boolean,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb,
-  ADD COLUMN IF NOT EXISTS hmo_provider_id uuid,
-  ADD COLUMN IF NOT EXISTS hmo_provider_track_id uuid,
-  ADD COLUMN IF NOT EXISTS hmo_authorization_id uuid;
 
-DO $$
-BEGIN
-  ALTER TABLE public.commitments
-    ADD CONSTRAINT commitments_student_id_fkey
-    FOREIGN KEY (student_id) REFERENCES public.students(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.commitments
-    ADD CONSTRAINT commitments_service_id_fkey
-    FOREIGN KEY (service_id) REFERENCES public."Services"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.commitments
-    DROP CONSTRAINT IF EXISTS commitments_hmo_provider_id_fkey;
-  ALTER TABLE public.commitments
-    ADD CONSTRAINT commitments_hmo_provider_id_fkey
-    FOREIGN KEY (hmo_provider_id) REFERENCES public.hmo_providers(id) ON DELETE RESTRICT;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.commitments
-    ADD CONSTRAINT commitments_hmo_provider_track_id_fkey
-    FOREIGN KEY (hmo_provider_track_id) REFERENCES public.hmo_provider_tracks(id) ON DELETE RESTRICT;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.commitments
-    ADD CONSTRAINT commitments_hmo_authorization_id_fkey
-    FOREIGN KEY (hmo_authorization_id) REFERENCES public.hmo_authorizations(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.commitments
-    ADD CONSTRAINT commitments_commitment_type_check
-    CHECK (commitment_type IN ('package', 'subscription', 'hmo', 'manual_credit'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.commitments
-    ADD CONSTRAINT commitments_total_amount_non_negative_check
-    CHECK (total_amount >= 0);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.commitments
-    ADD CONSTRAINT commitments_default_charge_amount_non_negative_check
-    CHECK (default_charge_amount IS NULL OR default_charge_amount >= 0);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS commitments_student_id_idx ON public.commitments (org_id, student_id);
 CREATE INDEX IF NOT EXISTS commitments_transfer_ref_idx ON public.commitments (org_id, transfer_ref) WHERE transfer_ref IS NOT NULL;
 CREATE INDEX IF NOT EXISTS commitments_hmo_provider_id_idx ON public.commitments (org_id, hmo_provider_id) WHERE hmo_provider_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS commitments_hmo_provider_track_id_idx ON public.commitments (org_id, hmo_provider_track_id) WHERE hmo_provider_track_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS commitments_hmo_authorization_id_uidx ON public.commitments (org_id, hmo_authorization_id) WHERE hmo_authorization_id IS NOT NULL;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_participants
-    ADD CONSTRAINT lesson_participants_commitment_id_fkey
-    FOREIGN KEY (commitment_id) REFERENCES public.commitments(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 -- -----------------------------------------------------------------
 -- public.ledger_transactions (replaces consumption_entries)
@@ -2829,163 +1304,44 @@ CREATE TABLE IF NOT EXISTS public.ledger_transactions (
   notes text NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  -- v2 ledger compatibility columns kept in base schema for greenfield stability
+  ledger_account_id uuid NULL,
+  direction text NULL,
+  effective_at timestamptz NULL,
+  posted_at timestamptz NULL,
+  source_type text NULL,
+  source_id uuid NULL,
+  lesson_instance_id uuid NULL,
+  lesson_participant_id uuid NULL,
+  hmo_provider_id uuid NULL,
+  hmo_authorization_id uuid NULL,
+  service_id uuid NULL,
+  rate_source text NULL,
+  reverses_transaction_id uuid NULL,
+  external_reference text NULL,
+  posted_at_migrated boolean NULL,
+  metadata jsonb NULL,
+  CONSTRAINT ledger_transactions_client_profile_id_fkey FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id) ON DELETE CASCADE,
+  CONSTRAINT ledger_transactions_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id) ON DELETE CASCADE,
+  CONSTRAINT ledger_transactions_commitment_id_fkey FOREIGN KEY (commitment_id) REFERENCES public.commitments(id) ON DELETE CASCADE,
+  CONSTRAINT ledger_transactions_transaction_type_check CHECK (transaction_type IN ('CREDIT', 'DEBIT')),
+  CONSTRAINT ledger_transactions_usage_type_check CHECK (
+    (transaction_type = 'CREDIT' AND usage_type IN ('manual_topup', 'commitment_creation', 'transfer_received', 'hmo_authorization_added'))
+    OR (transaction_type = 'DEBIT' AND usage_type IN ('standard', 'double', 'cross_service', 'manual_adjustment', 'transfer_debit', 'refund'))
+  ),
+  CONSTRAINT ledger_transactions_amount_non_negative_check CHECK (amount >= 0)
 );
 
-ALTER TABLE public.ledger_transactions
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
-  ADD COLUMN IF NOT EXISTS student_id uuid,
-  ADD COLUMN IF NOT EXISTS commitment_id uuid,
-  ADD COLUMN IF NOT EXISTS transaction_type text,
-  ADD COLUMN IF NOT EXISTS usage_type text,
-  ADD COLUMN IF NOT EXISTS amount integer,
-  ADD COLUMN IF NOT EXISTS source_ref uuid,
-  ADD COLUMN IF NOT EXISTS invoice_id text,
-  ADD COLUMN IF NOT EXISTS invoice_link text,
-  ADD COLUMN IF NOT EXISTS notes text,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
-DO $$
-BEGIN
-  UPDATE public.ledger_transactions lt
-  SET client_profile_id = s.client_profile_id
-  FROM public.students s
-  WHERE lt.client_profile_id IS NULL
-    AND lt.student_id = s.id
-    AND s.client_profile_id IS NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions ALTER COLUMN student_id DROP NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions ALTER COLUMN commitment_id DROP NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions ALTER COLUMN client_profile_id SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions
-    ADD CONSTRAINT ledger_transactions_client_profile_id_fkey
-    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id) ON DELETE CASCADE;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions
-    ADD CONSTRAINT ledger_transactions_student_id_fkey
-    FOREIGN KEY (student_id) REFERENCES public.students(id) ON DELETE CASCADE;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions
-    ADD CONSTRAINT ledger_transactions_commitment_id_fkey
-    FOREIGN KEY (commitment_id) REFERENCES public.commitments(id) ON DELETE CASCADE;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions
-    ADD CONSTRAINT ledger_transactions_transaction_type_check
-    CHECK (transaction_type IN ('CREDIT', 'DEBIT'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 -- Drop and recreate usage_type constraint to include transfer_debit and refund DEBIT types.
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions
-    DROP CONSTRAINT IF EXISTS ledger_transactions_usage_type_check;
-  ALTER TABLE public.ledger_transactions
-    ADD CONSTRAINT ledger_transactions_usage_type_check
-    CHECK (
-      (transaction_type = 'CREDIT' AND usage_type IN ('manual_topup', 'commitment_creation', 'transfer_received', 'hmo_authorization_added'))
-      OR (transaction_type = 'DEBIT' AND usage_type IN ('standard', 'double', 'cross_service', 'manual_adjustment', 'transfer_debit', 'refund'))
-    );
-EXCEPTION
-  WHEN others THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions
-    ADD CONSTRAINT ledger_transactions_amount_non_negative_check
-    CHECK (amount >= 0);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
--- Unique constraint for lesson-based debits: one debit per (source_ref, usage_type).
--- NULL source_ref rows (manual adjustments, credits) are excluded by PostgreSQL semantics.
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'ledger_transactions_source_usage_unique'
-      AND conrelid = 'public.ledger_transactions'::regclass
-  ) THEN
-    NULL;
-  ELSIF EXISTS (
-    SELECT 1
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE c.relname = 'ledger_transactions_source_usage_unique'
-      AND n.nspname = 'public'
-      AND c.relkind = 'i'
-  ) THEN
-    BEGIN
-      ALTER TABLE public.ledger_transactions
-        ADD CONSTRAINT ledger_transactions_source_usage_unique
-        UNIQUE USING INDEX ledger_transactions_source_usage_unique;
-    EXCEPTION
-      WHEN object_not_in_prerequisite_state THEN
-        DROP INDEX IF EXISTS public.ledger_transactions_source_usage_unique;
-        ALTER TABLE public.ledger_transactions
-          ADD CONSTRAINT ledger_transactions_source_usage_unique
-          UNIQUE (org_id, source_ref, usage_type);
-    END;
-  ELSE
-    ALTER TABLE public.ledger_transactions
-      ADD CONSTRAINT ledger_transactions_source_usage_unique
-      UNIQUE (org_id, source_ref, usage_type);
-  END IF;
-EXCEPTION
-  WHEN duplicate_object OR duplicate_table THEN
-    NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_commitment_id_idx
   ON public.ledger_transactions (org_id, commitment_id);
@@ -3047,107 +1403,6 @@ ON public.ledger_transactions
 FOR EACH ROW
 EXECUTE FUNCTION public.validate_ledger_commitment_ownership();
 
--- =================================================================
--- Inline Data Migration: consumption_entries -> ledger_transactions
--- Runs BEFORE dropping consumption_entries. Fully idempotent.
--- =================================================================
-
--- 1) Migrate existing commitments as CREDIT (commitment_creation).
---    Deterministic UUID derived from commitment id to ensure idempotency.
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'commitments') THEN
-    INSERT INTO public.ledger_transactions (id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata)
-    SELECT
-      md5('commitment-credit:' || c.id::text)::uuid,
-      s.client_profile_id,
-      c.student_id,
-      c.id,
-      'CREDIT',
-      'commitment_creation',
-      COALESCE(c.total_amount, 0),
-      NULL,
-      'יצירת התחייבות (מיגרציה)',
-      c.created_at,
-      COALESCE(c.updated_at, c.created_at),
-      jsonb_build_object('migration', 'commitment_to_credit', 'original_commitment_id', c.id)
-    FROM public.commitments c
-    LEFT JOIN public.students s ON s.id = c.student_id
-    WHERE c.total_amount > 0
-    ON CONFLICT (id) DO UPDATE
-      SET notes = EXCLUDED.notes
-      WHERE ledger_transactions.notes = 'Migrated from commitment total_amount';
-  END IF;
-END $$;
-
--- 2) Migrate existing consumption_entries as DEBIT or CREDIT rows.
---    Only rows with a non-null commitment_id can be migrated (strict FK).
---    Uses the original consumption_entries.id as the new ledger id.
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'consumption_entries') THEN
-    INSERT INTO public.ledger_transactions (id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata)
-    SELECT
-      e.id,
-      COALESCE(lp.client_profile_id, s.client_profile_id, cs.client_profile_id),
-      COALESCE(e.student_id, lp.student_id, c.student_id),
-      e.commitment_id,
-      CASE WHEN e.amount_charged < 0 THEN 'CREDIT' ELSE 'DEBIT' END,
-      CASE
-        WHEN e.amount_charged < 0 THEN 'manual_topup'
-        WHEN e.source_type = 'lesson' THEN 'standard'
-        WHEN e.source_type = 'transfer' THEN 'manual_adjustment'
-        WHEN e.source_type = 'adjustment' THEN 'manual_adjustment'
-        ELSE 'manual_adjustment'
-      END,
-      ABS(e.amount_charged),
-      e.lesson_participant_id,
-      e.notes,
-      e.created_at,
-      e.created_at,
-      COALESCE(e.metadata, '{}'::jsonb)
-        || jsonb_build_object('migration', 'consumption_to_ledger', 'original_source_type', e.source_type)
-        || CASE WHEN e.transfer_ref IS NOT NULL THEN jsonb_build_object('transfer_ref', e.transfer_ref) ELSE '{}'::jsonb END
-        || CASE WHEN e.effective_date IS NOT NULL THEN jsonb_build_object('effective_date', e.effective_date::text) ELSE '{}'::jsonb END
-    FROM public.consumption_entries e
-    LEFT JOIN public.lesson_participants lp ON lp.id = e.lesson_participant_id
-    LEFT JOIN public.commitments c ON c.id = e.commitment_id
-    LEFT JOIN public.students s ON s.id = e.student_id
-    LEFT JOIN public.students cs ON cs.id = c.student_id
-    WHERE e.commitment_id IS NOT NULL
-      AND COALESCE(lp.client_profile_id, s.client_profile_id, cs.client_profile_id) IS NOT NULL
-    ON CONFLICT DO NOTHING;
-  END IF;
-END $$;
-
--- =================================================================
--- Cleanup: drop consumption_entries and all related objects
--- =================================================================
-
-DO $$
-BEGIN
-  IF to_regclass('public.consumption_entries') IS NOT NULL THEN
-    DROP TRIGGER IF EXISTS consumption_entries_validate_commitment_ownership_trg ON public.consumption_entries;
-  END IF;
-END $$;
-DROP FUNCTION IF EXISTS public.validate_consumption_commitment_ownership();
-
-DROP VIEW IF EXISTS public.commitment_balances;
-
--- Cleanup for deprecated precomputed balance model
-DROP TRIGGER IF EXISTS commitments_recalculate_student_balance_trg ON public.commitments;
-DO $$
-BEGIN
-  IF to_regclass('public.consumption_entries') IS NOT NULL THEN
-    DROP TRIGGER IF EXISTS consumption_entries_recalculate_student_balance_trg ON public.consumption_entries;
-  END IF;
-END $$;
-DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_commitments();
-DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_consumption_entries();
-DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_transfers();
-DROP FUNCTION IF EXISTS public.recalculate_student_balance_account_by_commitment(uuid);
-DROP FUNCTION IF EXISTS public.recalculate_student_balance_account(uuid);
-
 -- -----------------------------------------------------------------
 -- Query-time balance computation helpers (ledger-based)
 -- -----------------------------------------------------------------
@@ -3195,81 +1450,18 @@ CREATE TABLE IF NOT EXISTS public.lesson_earnings (
   rate_used integer NOT NULL,
   payout_amount integer NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT lesson_earnings_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
+  CONSTRAINT lesson_earnings_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id),
+  CONSTRAINT lesson_earnings_employee_lesson_unique UNIQUE USING INDEX lesson_earnings_employee_lesson_unique
 );
 
-ALTER TABLE public.lesson_earnings
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS employee_id uuid,
-  ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
-  ADD COLUMN IF NOT EXISTS rate_used integer,
-  ADD COLUMN IF NOT EXISTS payout_amount integer,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_earnings
-    ADD CONSTRAINT lesson_earnings_employee_id_fkey
-    FOREIGN KEY (employee_id) REFERENCES public."Employees"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.lesson_earnings
-    ADD CONSTRAINT lesson_earnings_lesson_instance_id_fkey
-    FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS lesson_earnings_employee_id_idx
   ON public.lesson_earnings (org_id, employee_id);
 
 CREATE INDEX IF NOT EXISTS lesson_earnings_lesson_instance_id_idx
   ON public.lesson_earnings (org_id, lesson_instance_id);
-
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'lesson_earnings_employee_lesson_unique'
-      AND conrelid = 'public.lesson_earnings'::regclass
-  ) THEN
-    NULL;
-  ELSIF EXISTS (
-    SELECT 1
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE c.relname = 'lesson_earnings_employee_lesson_unique'
-      AND n.nspname = 'public'
-      AND c.relkind = 'i'
-  ) THEN
-    BEGIN
-      ALTER TABLE public.lesson_earnings
-        ADD CONSTRAINT lesson_earnings_employee_lesson_unique
-        UNIQUE USING INDEX lesson_earnings_employee_lesson_unique;
-    EXCEPTION
-      WHEN object_not_in_prerequisite_state THEN
-        DROP INDEX IF EXISTS public.lesson_earnings_employee_lesson_unique;
-        ALTER TABLE public.lesson_earnings
-          ADD CONSTRAINT lesson_earnings_employee_lesson_unique
-          UNIQUE (org_id, employee_id, lesson_instance_id);
-    END;
-  ELSE
-    ALTER TABLE public.lesson_earnings
-      ADD CONSTRAINT lesson_earnings_employee_lesson_unique
-      UNIQUE (org_id, employee_id, lesson_instance_id);
-  END IF;
-EXCEPTION
-  WHEN duplicate_object OR duplicate_table THEN
-    NULL;
-END $$;
 
 -- -----------------------------------------------------------------
 -- public.forms
@@ -3291,57 +1483,16 @@ CREATE TABLE IF NOT EXISTS public.forms (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   is_active boolean NOT NULL DEFAULT true,
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT forms_form_usage_check CHECK (form_usage IN ('general','waiting_list_intake'))
 );
 
-ALTER TABLE public.forms
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS name text,
-  ADD COLUMN IF NOT EXISTS description text,
-  ADD COLUMN IF NOT EXISTS form_usage text,
-  ADD COLUMN IF NOT EXISTS form_schema jsonb,
-  ADD COLUMN IF NOT EXISTS alert_rules jsonb,
-  ADD COLUMN IF NOT EXISTS visibility_rules jsonb,
-  ADD COLUMN IF NOT EXISTS version int,
-  ADD COLUMN IF NOT EXISTS published_at timestamptz,
-  ADD COLUMN IF NOT EXISTS archived_at timestamptz,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS is_active boolean,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
-DO $$
-BEGIN
-  ALTER TABLE public.forms
-    ALTER COLUMN form_usage SET DEFAULT 'general';
-EXCEPTION
-  WHEN others THEN
-    NULL;
-END $$;
 
 UPDATE public.forms
 SET form_usage = COALESCE(NULLIF(form_usage, ''), 'general')
 WHERE form_usage IS NULL OR form_usage = '';
 
-DO $$
-BEGIN
-  ALTER TABLE public.forms
-    ALTER COLUMN form_usage SET NOT NULL;
-EXCEPTION
-  WHEN others THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.forms
-    ADD CONSTRAINT forms_form_usage_check
-    CHECK (form_usage IN ('general','waiting_list_intake'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS forms_is_active_idx ON public.forms (org_id, is_active);
 CREATE INDEX IF NOT EXISTS forms_form_usage_idx ON public.forms (org_id, form_usage);
@@ -3360,39 +1511,11 @@ CREATE TABLE IF NOT EXISTS public.shared_form_blocks (
   created_by uuid NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT shared_form_blocks_block_type_check CHECK (block_type IN ('question', 'text'))
 );
 
-ALTER TABLE public.shared_form_blocks
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS block_type text,
-  ADD COLUMN IF NOT EXISTS name text,
-  ADD COLUMN IF NOT EXISTS content_schema jsonb,
-  ADD COLUMN IF NOT EXISTS is_active boolean,
-  ADD COLUMN IF NOT EXISTS created_by uuid,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
 
-DO $$
-BEGIN
-  ALTER TABLE public.shared_form_blocks
-    ALTER COLUMN content_schema SET DEFAULT '{}'::jsonb,
-    ALTER COLUMN is_active SET DEFAULT true;
-EXCEPTION
-  WHEN others THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.shared_form_blocks
-    ADD CONSTRAINT shared_form_blocks_block_type_check
-    CHECK (block_type IN ('question', 'text'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS shared_form_blocks_is_active_idx ON public.shared_form_blocks (org_id, is_active);
 CREATE INDEX IF NOT EXISTS shared_form_blocks_block_type_idx ON public.shared_form_blocks (org_id, block_type);
@@ -3409,30 +1532,18 @@ CREATE TABLE IF NOT EXISTS public.form_shared_block_links (
   section_id text NOT NULL,
   item_id text NOT NULL,
   schema_scope text NOT NULL DEFAULT 'draft',
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT form_shared_block_links_schema_scope_check CHECK (schema_scope IN ('draft', 'published')),
+  CONSTRAINT form_shared_block_links_unique_form_item_scope UNIQUE USING INDEX form_shared_block_links_unique_form_item_scope,
+  CONSTRAINT form_shared_block_links_form_id_fkey FOREIGN KEY (form_id) REFERENCES public.forms(id) ON DELETE CASCADE,
+  CONSTRAINT form_shared_block_links_shared_block_id_fkey FOREIGN KEY (shared_block_id) REFERENCES public.shared_form_blocks(id) ON DELETE CASCADE
 );
 
-ALTER TABLE public.form_shared_block_links
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS form_id uuid,
-  ADD COLUMN IF NOT EXISTS shared_block_id uuid,
-  ADD COLUMN IF NOT EXISTS section_id text,
-  ADD COLUMN IF NOT EXISTS item_id text,
-  ADD COLUMN IF NOT EXISTS schema_scope text,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz;
 
 UPDATE public.form_shared_block_links
 SET schema_scope = 'draft'
 WHERE schema_scope IS NULL;
 
-DO $$
-BEGIN
-  ALTER TABLE public.form_shared_block_links
-    ALTER COLUMN schema_scope SET DEFAULT 'draft';
-EXCEPTION
-  WHEN others THEN
-    NULL;
-END $$;
 
 DO $$
 BEGIN
@@ -3440,74 +1551,6 @@ BEGIN
     DROP CONSTRAINT IF EXISTS form_shared_block_links_unique_form_item;
 EXCEPTION
   WHEN undefined_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.form_shared_block_links
-    ADD CONSTRAINT form_shared_block_links_schema_scope_check
-    CHECK (schema_scope IN ('draft', 'published'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conrelid = 'public.form_shared_block_links'::regclass
-      AND conname = 'form_shared_block_links_unique_form_item_scope'
-  ) THEN
-    NULL;
-  ELSIF EXISTS (
-    SELECT 1
-    FROM pg_class cls
-    JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace
-    WHERE nsp.nspname = 'public'
-      AND cls.relname = 'form_shared_block_links_unique_form_item_scope'
-      AND cls.relkind = 'i'
-  ) THEN
-    BEGIN
-      ALTER TABLE public.form_shared_block_links
-        ADD CONSTRAINT form_shared_block_links_unique_form_item_scope
-        UNIQUE USING INDEX form_shared_block_links_unique_form_item_scope;
-    EXCEPTION
-      WHEN object_not_in_prerequisite_state THEN
-        DROP INDEX IF EXISTS public.form_shared_block_links_unique_form_item_scope;
-        ALTER TABLE public.form_shared_block_links
-          ADD CONSTRAINT form_shared_block_links_unique_form_item_scope
-          UNIQUE (org_id, form_id, item_id, schema_scope);
-    END;
-  ELSE
-    ALTER TABLE public.form_shared_block_links
-      ADD CONSTRAINT form_shared_block_links_unique_form_item_scope
-      UNIQUE (org_id, form_id, item_id, schema_scope);
-  END IF;
-EXCEPTION
-  WHEN duplicate_object OR duplicate_table THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.form_shared_block_links
-    ADD CONSTRAINT form_shared_block_links_form_id_fkey
-    FOREIGN KEY (form_id) REFERENCES public.forms(id) ON DELETE CASCADE;
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.form_shared_block_links
-    ADD CONSTRAINT form_shared_block_links_shared_block_id_fkey
-    FOREIGN KEY (shared_block_id) REFERENCES public.shared_form_blocks(id) ON DELETE CASCADE;
-EXCEPTION
-  WHEN duplicate_object THEN
     NULL;
 END $$;
 
@@ -3534,83 +1577,14 @@ CREATE TABLE IF NOT EXISTS public.form_submissions (
   reviewed_by uuid NULL,
   reviewed_at timestamptz NULL,
   locked_at timestamptz NULL,
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT form_submissions_form_id_fkey FOREIGN KEY (form_id) REFERENCES public.forms(id),
+  CONSTRAINT form_submissions_client_profile_id_fkey FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id),
+  CONSTRAINT form_submissions_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT form_submissions_submitted_by_guardian_id_fkey FOREIGN KEY (submitted_by_guardian_id) REFERENCES public.guardians(id),
+  CONSTRAINT form_submissions_source_check CHECK (source IN ('web','whatsapp','internal','email','sms') OR source IS NULL)
 );
 
-ALTER TABLE public.form_submissions
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS form_id uuid,
-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
-  ADD COLUMN IF NOT EXISTS student_id uuid,
-  ADD COLUMN IF NOT EXISTS answers jsonb,
-  ADD COLUMN IF NOT EXISTS alert_flags jsonb,
-  ADD COLUMN IF NOT EXISTS otp_metadata jsonb,
-  ADD COLUMN IF NOT EXISTS submitted_by_guardian_id uuid,
-  ADD COLUMN IF NOT EXISTS source text,
-  ADD COLUMN IF NOT EXISTS submitted_at timestamptz,
-  ADD COLUMN IF NOT EXISTS reviewed_by uuid,
-  ADD COLUMN IF NOT EXISTS reviewed_at timestamptz,
-  ADD COLUMN IF NOT EXISTS locked_at timestamptz,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  BEGIN
-    ALTER TABLE public.form_submissions ALTER COLUMN submitted_at DROP NOT NULL;
-  EXCEPTION
-    WHEN undefined_column THEN NULL;
-  END;
-END$$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.form_submissions
-    ADD CONSTRAINT form_submissions_form_id_fkey
-    FOREIGN KEY (form_id) REFERENCES public.forms(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.form_submissions
-    ADD CONSTRAINT form_submissions_client_profile_id_fkey
-    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.form_submissions
-    ADD CONSTRAINT form_submissions_student_id_fkey
-    FOREIGN KEY (student_id) REFERENCES public.students(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.form_submissions
-    ADD CONSTRAINT form_submissions_submitted_by_guardian_id_fkey
-    FOREIGN KEY (submitted_by_guardian_id) REFERENCES public.guardians(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.form_submissions
-    ADD CONSTRAINT form_submissions_source_check
-    CHECK (source IN ('web','whatsapp','internal','email','sms') OR source IS NULL);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS form_submissions_form_id_idx
   ON public.form_submissions (org_id, form_id);
@@ -3641,62 +1615,13 @@ CREATE TABLE IF NOT EXISTS public.otp_challenges (
   verified_at timestamptz NULL,
   attempts int NOT NULL DEFAULT 0,
   ip text NULL,
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT otp_challenges_client_profile_id_fkey FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id),
+  CONSTRAINT otp_challenges_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT otp_challenges_channel_check CHECK (channel IN ('whatsapp','email')),
+  CONSTRAINT otp_challenges_status_check CHECK (status IN ('pending','verified','expired','cancelled'))
 );
 
-ALTER TABLE public.otp_challenges
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
-  ADD COLUMN IF NOT EXISTS student_id uuid,
-  ADD COLUMN IF NOT EXISTS channel text,
-  ADD COLUMN IF NOT EXISTS destination text,
-  ADD COLUMN IF NOT EXISTS token_hash text,
-  ADD COLUMN IF NOT EXISTS status text,
-  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
-  ADD COLUMN IF NOT EXISTS verified_at timestamptz,
-  ADD COLUMN IF NOT EXISTS attempts int,
-  ADD COLUMN IF NOT EXISTS ip text,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.otp_challenges
-    ADD CONSTRAINT otp_challenges_client_profile_id_fkey
-    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.otp_challenges
-    ADD CONSTRAINT otp_challenges_student_id_fkey
-    FOREIGN KEY (student_id) REFERENCES public.students(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.otp_challenges
-    ADD CONSTRAINT otp_challenges_channel_check
-    CHECK (channel IN ('whatsapp','email'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.otp_challenges
-    ADD CONSTRAINT otp_challenges_status_check
-    CHECK (status IN ('pending','verified','expired','cancelled'));
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS otp_challenges_client_profile_id_idx
   ON public.otp_challenges (org_id, client_profile_id);
@@ -3730,83 +1655,14 @@ CREATE TABLE IF NOT EXISTS public.waiting_list_entries (
   status text NOT NULL DEFAULT 'open',
   created_at timestamptz NOT NULL DEFAULT now(),
   latest_submission_id uuid NULL,
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT waiting_list_entries_client_profile_id_fkey FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id),
+  CONSTRAINT waiting_list_entries_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT waiting_list_entries_latest_submission_id_fkey FOREIGN KEY (latest_submission_id) REFERENCES public.form_submissions(id),
+  CONSTRAINT waiting_list_entries_desired_service_id_fkey FOREIGN KEY (desired_service_id) REFERENCES public."Services"(id),
+  CONSTRAINT waiting_list_entries_status_check CHECK (status IN ('new','open','matched','closed'))
 );
 
-ALTER TABLE public.waiting_list_entries
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
-  ADD COLUMN IF NOT EXISTS student_id uuid,
-  ADD COLUMN IF NOT EXISTS desired_service_id uuid,
-  ADD COLUMN IF NOT EXISTS preferred_days int[],
-  ADD COLUMN IF NOT EXISTS preferred_times jsonb,
-  ADD COLUMN IF NOT EXISTS instructor_preferences uuid[],
-  ADD COLUMN IF NOT EXISTS willing_to_pay_premium boolean,
-  ADD COLUMN IF NOT EXISTS priority_flag boolean,
-  ADD COLUMN IF NOT EXISTS priority_reason text,
-  ADD COLUMN IF NOT EXISTS notes text,
-  ADD COLUMN IF NOT EXISTS status text,
-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
-  ADD COLUMN IF NOT EXISTS latest_submission_id uuid,
-  ADD COLUMN IF NOT EXISTS metadata jsonb;
-
-DO $$
-BEGIN
-  ALTER TABLE public.waiting_list_entries
-    ADD CONSTRAINT waiting_list_entries_client_profile_id_fkey
-    FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.waiting_list_entries
-    ADD CONSTRAINT waiting_list_entries_student_id_fkey
-    FOREIGN KEY (student_id) REFERENCES public.students(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.waiting_list_entries
-    ADD CONSTRAINT waiting_list_entries_latest_submission_id_fkey
-    FOREIGN KEY (latest_submission_id) REFERENCES public.form_submissions(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.waiting_list_entries
-    ADD CONSTRAINT waiting_list_entries_desired_service_id_fkey
-    FOREIGN KEY (desired_service_id) REFERENCES public."Services"(id);
-EXCEPTION
-  WHEN duplicate_object THEN
-    NULL;
-END $$;
-
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'waiting_list_entries_status_check'
-      AND conrelid = 'public.waiting_list_entries'::regclass
-  ) THEN
-    ALTER TABLE public.waiting_list_entries DROP CONSTRAINT waiting_list_entries_status_check;
-  END IF;
-
-  ALTER TABLE public.waiting_list_entries
-    ADD CONSTRAINT waiting_list_entries_status_check
-    CHECK (status IN ('new','open','matched','closed'));
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
 CREATE INDEX IF NOT EXISTS waiting_list_entries_client_profile_id_idx
   ON public.waiting_list_entries (org_id, client_profile_id);
@@ -3840,26 +1696,8 @@ EXCEPTION
   WHEN others THEN NULL;
 END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.form_submissions ALTER COLUMN client_profile_id SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.otp_challenges ALTER COLUMN client_profile_id SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
-DO $$
-BEGIN
-  ALTER TABLE public.waiting_list_entries ALTER COLUMN client_profile_id SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
 
 -- -----------------------------------------------------------------
 -- public."Settings" (cross-feature configuration)
@@ -3875,13 +1713,6 @@ CREATE TABLE IF NOT EXISTS public."Settings" (
   "updated_at" timestamptz NOT NULL DEFAULT now()
 );
 
-ALTER TABLE public."Settings"
-  ADD COLUMN IF NOT EXISTS "key" text,
-  ADD COLUMN IF NOT EXISTS "settings_value" jsonb,
-  ADD COLUMN IF NOT EXISTS "org_id" uuid,
-  ADD COLUMN IF NOT EXISTS "metadata" jsonb,
-  ADD COLUMN IF NOT EXISTS "created_at" timestamptz,
-  ADD COLUMN IF NOT EXISTS "updated_at" timestamptz;
 
 DO $$
 BEGIN
@@ -3919,307 +1750,6 @@ CROSS JOIN (
 ON CONFLICT ("org_id", "key") DO NOTHING;
 
 -- -----------------------------------------------------------------
--- HMO provider / authorization compatibility backfill
--- -----------------------------------------------------------------
-
-WITH legacy_provider_entries AS (
-  SELECT
-    CASE
-      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'id'), '')
-      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
-    END AS legacy_key,
-    CASE
-      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'name'), '')
-      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
-    END AS provider_name
-  FROM public."Settings" s
-  CROSS JOIN LATERAL jsonb_array_elements(
-    CASE
-      WHEN jsonb_typeof(s.settings_value) = 'array' THEN s.settings_value
-      WHEN jsonb_typeof(s.settings_value) = 'object' AND jsonb_typeof(s.settings_value->'providers') = 'array' THEN s.settings_value->'providers'
-      ELSE '[]'::jsonb
-    END
-  ) AS entry
-  WHERE s.key = 'medical_providers'
-),
-normalized_legacy_providers AS (
-  SELECT DISTINCT
-    COALESCE(legacy_key, provider_name) AS provider_seed,
-    provider_name
-  FROM legacy_provider_entries
-  WHERE COALESCE(legacy_key, provider_name) IS NOT NULL
-    AND provider_name IS NOT NULL
-)
-INSERT INTO public.hmo_providers (id, name, is_active, metadata)
-SELECT
-  (
-    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 1, 8) || '-' ||
-    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 9, 4) || '-' ||
-    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 13, 4) || '-' ||
-    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 17, 4) || '-' ||
-    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 21, 12)
-  )::uuid,
-  provider_name,
-  true,
-  jsonb_build_object('legacy_source', 'settings.medical_providers', 'legacy_provider_seed', provider_seed)
-FROM normalized_legacy_providers
-ON CONFLICT DO NOTHING;
-
-WITH legacy_provider_entries AS (
-  SELECT
-    CASE
-      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'id'), '')
-      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
-    END AS legacy_key,
-    CASE
-      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'name'), '')
-      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
-    END AS provider_name
-  FROM public."Settings" s
-  CROSS JOIN LATERAL jsonb_array_elements(
-    CASE
-      WHEN jsonb_typeof(s.settings_value) = 'array' THEN s.settings_value
-      WHEN jsonb_typeof(s.settings_value) = 'object' AND jsonb_typeof(s.settings_value->'providers') = 'array' THEN s.settings_value->'providers'
-      ELSE '[]'::jsonb
-    END
-  ) AS entry
-  WHERE s.key = 'medical_providers'
-)
-UPDATE public.students st
-SET medical_provider = (
-  (
-    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 1, 8) || '-' ||
-    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 9, 4) || '-' ||
-    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 13, 4) || '-' ||
-    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 17, 4) || '-' ||
-    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 21, 12)
-  )::uuid
-)::text
-FROM legacy_provider_entries lp
-WHERE COALESCE(lp.legacy_key, lp.provider_name) IS NOT NULL
-  AND (
-    st.medical_provider = lp.legacy_key
-    OR st.medical_provider = lp.provider_name
-  );
-
-WITH legacy_hmo_commitments AS (
-  SELECT
-    c.id AS commitment_id,
-    c.student_id,
-    c.service_id,
-    c.created_at,
-    c.updated_at,
-    c.expires_at,
-    c.notes,
-    c.is_active,
-    c.default_charge_amount,
-    c.metadata,
-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'provider_name'), ''), 'גורם מממן') AS provider_name,
-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'payment_mode'), ''), 'partially_paid_by_hmo') AS payment_mode,
-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'customer_charge_amount'), '')::numeric, c.default_charge_amount, 0) AS customer_charge_amount,
-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'insurer_claim_amount'), '')::numeric, 0) AS insurer_claim_amount,
-    NULLIF(trim(c.metadata->'hmo'->>'workflow_notes'), '') AS workflow_notes,
-    NULLIF(trim(c.metadata->'hmo'->>'authorization_reference'), '') AS authorization_reference,
-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'authorized_lessons'), '')::int, 0) AS authorized_lessons,
-    NULLIF(trim(c.metadata->'hmo'->>'reminder_date'), '')::date AS reminder_date,
-    COALESCE(c.hmo_authorization_id, c.id) AS authorization_id
-  FROM public.commitments c
-  WHERE c.commitment_type = 'hmo'
-),
-provider_rows AS (
-  SELECT DISTINCT
-    provider_name,
-    (
-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
-    )::uuid AS provider_id
-  FROM legacy_hmo_commitments
-),
-inserted_providers AS (
-  INSERT INTO public.hmo_providers (id, name, is_active, metadata)
-  SELECT provider_id, provider_name, true, jsonb_build_object('legacy_source', 'commitments.metadata.hmo')
-  FROM provider_rows
-  ON CONFLICT (lower(name)) DO UPDATE
-    SET metadata = EXCLUDED.metadata
-  RETURNING id
-),
-track_rows AS (
-  SELECT DISTINCT
-    lhc.provider_name,
-    COALESCE(hp.id, pr.provider_id) AS provider_id,
-    lhc.service_id,
-    lhc.payment_mode,
-    lhc.customer_charge_amount,
-    lhc.insurer_claim_amount,
-    lhc.workflow_notes,
-    (
-      substr(md5(
-        COALESCE(hp.id, pr.provider_id)::text || '|' ||
-        COALESCE(lhc.service_id::text, '') || '|' ||
-        lhc.payment_mode || '|' ||
-        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
-        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
-        COALESCE(lhc.workflow_notes, '')
-      ), 1, 8) || '-' ||
-      substr(md5(
-        COALESCE(hp.id, pr.provider_id)::text || '|' ||
-        COALESCE(lhc.service_id::text, '') || '|' ||
-        lhc.payment_mode || '|' ||
-        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
-        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
-        COALESCE(lhc.workflow_notes, '')
-      ), 9, 4) || '-' ||
-      substr(md5(
-        COALESCE(hp.id, pr.provider_id)::text || '|' ||
-        COALESCE(lhc.service_id::text, '') || '|' ||
-        lhc.payment_mode || '|' ||
-        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
-        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
-        COALESCE(lhc.workflow_notes, '')
-      ), 13, 4) || '-' ||
-      substr(md5(
-        COALESCE(hp.id, pr.provider_id)::text || '|' ||
-        COALESCE(lhc.service_id::text, '') || '|' ||
-        lhc.payment_mode || '|' ||
-        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
-        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
-        COALESCE(lhc.workflow_notes, '')
-      ), 17, 4) || '-' ||
-      substr(md5(
-        COALESCE(hp.id, pr.provider_id)::text || '|' ||
-        COALESCE(lhc.service_id::text, '') || '|' ||
-        lhc.payment_mode || '|' ||
-        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
-        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
-        COALESCE(lhc.workflow_notes, '')
-      ), 21, 12)
-    )::uuid AS track_id
-  FROM legacy_hmo_commitments lhc
-  JOIN provider_rows pr ON pr.provider_name = lhc.provider_name
-  LEFT JOIN public.hmo_providers hp ON lower(hp.name) = lower(lhc.provider_name)
-),
-inserted_tracks AS (
-  INSERT INTO public.hmo_provider_tracks (
-    id,
-    provider_id,
-    service_id,
-    name,
-    payment_mode,
-    default_customer_charge_amount,
-    default_insurer_claim_amount,
-    default_workflow_notes,
-    is_active,
-    metadata
-  )
-  SELECT
-    track_id,
-    provider_id,
-    service_id,
-    'מסלול שהוסב • ' ||
-      CASE
-        WHEN payment_mode = 'fully_paid_by_hmo' THEN 'ממומן מלא'
-        WHEN payment_mode = 'fully_paid_by_customer' THEN 'לקוח משלם'
-        ELSE 'מימון חלקי'
-      END ||
-      ' • לקוח ' || COALESCE(customer_charge_amount, 0)::text ||
-      ' • קופה ' || COALESCE(insurer_claim_amount, 0)::text,
-    payment_mode,
-    COALESCE(customer_charge_amount, 0),
-    COALESCE(insurer_claim_amount, 0),
-    workflow_notes,
-    true,
-    jsonb_build_object('generated_from', 'legacy_hmo_commitment')
-  FROM track_rows
-  ON CONFLICT DO NOTHING
-  RETURNING id
-),
-authorization_source AS (
-  SELECT
-    lhc.*,
-    tr.provider_id,
-    tr.track_id,
-    CASE
-      WHEN row_number() OVER (
-        PARTITION BY lhc.student_id, lhc.service_id
-        ORDER BY CASE WHEN lhc.is_active THEN 0 ELSE 1 END, COALESCE(lhc.updated_at, lhc.created_at) DESC, lhc.commitment_id DESC
-      ) = 1 AND lhc.is_active THEN 'active'
-      WHEN lhc.expires_at IS NOT NULL AND lhc.expires_at < now() THEN 'expired'
-      WHEN lhc.is_active = false THEN 'cancelled'
-      ELSE 'completed'
-    END AS authorization_status
-  FROM legacy_hmo_commitments lhc
-  JOIN track_rows tr ON lower(tr.provider_name) = lower(lhc.provider_name)
-    AND tr.service_id IS NOT DISTINCT FROM lhc.service_id
-    AND tr.payment_mode = lhc.payment_mode
-    AND tr.customer_charge_amount = lhc.customer_charge_amount
-    AND tr.insurer_claim_amount = lhc.insurer_claim_amount
-    AND COALESCE(tr.workflow_notes, '') = COALESCE(lhc.workflow_notes, '')
-)
-INSERT INTO public.hmo_authorizations (
-  id,
-  student_id,
-  service_id,
-  provider_id,
-  provider_track_id,
-  authorization_reference,
-  authorized_lessons,
-  valid_from,
-  expires_at,
-  reminder_date,
-  status,
-  notes,
-  metadata
-)
-SELECT
-  authorization_id,
-  student_id,
-  service_id,
-  provider_id,
-  track_id,
-  authorization_reference,
-  GREATEST(authorized_lessons, 0),
-  created_at::date,
-  expires_at::date,
-  reminder_date,
-  authorization_status,
-  notes,
-  jsonb_build_object('generated_from', 'legacy_hmo_commitment', 'legacy_commitment_id', commitment_id)
-FROM authorization_source
-ON CONFLICT DO NOTHING;
-
-WITH legacy_hmo_commitments AS (
-  SELECT
-    c.id AS commitment_id,
-    c.service_id,
-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'provider_name'), ''), 'גורם מממן') AS provider_name,
-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'payment_mode'), ''), 'partially_paid_by_hmo') AS payment_mode,
-    COALESCE((c.metadata->'hmo'->>'customer_charge_amount')::numeric, c.default_charge_amount, 0) AS customer_charge_amount,
-    COALESCE((c.metadata->'hmo'->>'insurer_claim_amount')::numeric, 0) AS insurer_claim_amount,
-    NULLIF(trim(c.metadata->'hmo'->>'workflow_notes'), '') AS workflow_notes,
-    COALESCE(c.hmo_authorization_id, c.id) AS authorization_id
-  FROM public.commitments c
-  WHERE c.commitment_type = 'hmo'
-)
-UPDATE public.commitments c
-SET
-  hmo_provider_id = hp.id,
-  hmo_provider_track_id = hpt.id,
-  hmo_authorization_id = lhc.authorization_id
-FROM legacy_hmo_commitments lhc
-JOIN public.hmo_providers hp ON lower(hp.name) = lower(lhc.provider_name)
-JOIN public.hmo_provider_tracks hpt
-  ON hpt.provider_id = hp.id
-  AND hpt.service_id IS NOT DISTINCT FROM lhc.service_id
-  AND hpt.payment_mode = lhc.payment_mode
-  AND hpt.default_customer_charge_amount = COALESCE(lhc.customer_charge_amount, 0)
-  AND hpt.default_insurer_claim_amount = COALESCE(lhc.insurer_claim_amount, 0)
-  AND COALESCE(hpt.default_workflow_notes, '') = COALESCE(lhc.workflow_notes, '')
-WHERE c.id = lhc.commitment_id;
-
--- -----------------------------------------------------------------
 -- public."Documents" (polymorphic file metadata)
 -- -----------------------------------------------------------------
 
@@ -4246,9 +1776,6 @@ CREATE TABLE IF NOT EXISTS public."Documents" (
   "metadata" jsonb
 );
 
-ALTER TABLE public."Documents"
-  ADD COLUMN IF NOT EXISTS "org_id" uuid,
-  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
 
 -- Drop entity_type CHECK constraint if it exists (moved to UI validation)
 DO $$
@@ -5214,84 +2741,6 @@ BEGIN
   RETURN NEXT;
 END;
 $$;
-
-DO $$
-DECLARE
-  versioned_table text;
-  versioned_tables text[] := ARRAY[
-    'forms',
-    'employee_attendance_records',
-    'finance_corrections',
-    'lesson_templates',
-    'lesson_instances',
-    'lesson_participants',
-    'payroll_runs',
-    'claim_batches',
-    'calendar_instance_corrections',
-    'dashboard_tasks'
-  ];
-BEGIN
-  FOREACH versioned_table IN ARRAY versioned_tables
-  LOOP
-    IF EXISTS (
-      SELECT 1
-      FROM information_schema.columns
-      WHERE table_schema = 'public'
-        AND table_name = versioned_table
-        AND column_name = 'version'
-    ) THEN
-      IF versioned_table = 'lesson_instances'
-        AND EXISTS (
-          SELECT 1
-          FROM pg_trigger
-          WHERE tgname = 'trg_lesson_instances_guard_locked'
-            AND tgrelid = 'public.lesson_instances'::regclass
-        ) THEN
-        EXECUTE 'ALTER TABLE public.lesson_instances DISABLE TRIGGER trg_lesson_instances_guard_locked';
-      ELSIF versioned_table = 'lesson_participants'
-        AND EXISTS (
-          SELECT 1
-          FROM pg_trigger
-          WHERE tgname = 'trg_lesson_participants_guard_locked'
-            AND tgrelid = 'public.lesson_participants'::regclass
-        ) THEN
-        EXECUTE 'ALTER TABLE public.lesson_participants DISABLE TRIGGER trg_lesson_participants_guard_locked';
-      END IF;
-
-      EXECUTE format(
-        'UPDATE public.%I SET version = 1 WHERE version IS NULL OR version < 1',
-        versioned_table
-      );
-
-      IF versioned_table = 'lesson_instances'
-        AND EXISTS (
-          SELECT 1
-          FROM pg_trigger
-          WHERE tgname = 'trg_lesson_instances_guard_locked'
-            AND tgrelid = 'public.lesson_instances'::regclass
-        ) THEN
-        EXECUTE 'ALTER TABLE public.lesson_instances ENABLE TRIGGER trg_lesson_instances_guard_locked';
-      ELSIF versioned_table = 'lesson_participants'
-        AND EXISTS (
-          SELECT 1
-          FROM pg_trigger
-          WHERE tgname = 'trg_lesson_participants_guard_locked'
-            AND tgrelid = 'public.lesson_participants'::regclass
-        ) THEN
-        EXECUTE 'ALTER TABLE public.lesson_participants ENABLE TRIGGER trg_lesson_participants_guard_locked';
-      END IF;
-
-      EXECUTE format(
-        'ALTER TABLE public.%I ALTER COLUMN version SET DEFAULT 1',
-        versioned_table
-      );
-      EXECUTE format(
-        'ALTER TABLE public.%I ALTER COLUMN version SET NOT NULL',
-        versioned_table
-      );
-    END IF;
-  END LOOP;
-END $$;
 
 DO $$
 BEGIN
@@ -7047,200 +4496,7 @@ GRANT EXECUTE ON FUNCTION public.batch_sync_lesson_ledger_entries(
 --   - adds HMO invoice metadata tables if missing
 -- -----------------------------------------------------------------
 
-ALTER TABLE public.hmo_authorizations
-  ADD COLUMN IF NOT EXISTS org_id uuid,
-  ADD COLUMN IF NOT EXISTS contracted_rate_amount integer;
 
-UPDATE public.hmo_authorizations AS auth
-SET contracted_rate_amount = COALESCE(
-  auth.contracted_rate_amount,
-  auth.insurer_claim_amount_override,
-  track.default_insurer_claim_amount,
-  0
-)
-FROM public.hmo_provider_tracks AS track
-WHERE track.id = auth.provider_track_id
-  AND auth.contracted_rate_amount IS NULL;
-
-UPDATE public.hmo_authorizations
-SET contracted_rate_amount = 0
-WHERE contracted_rate_amount IS NULL;
-
-ALTER TABLE public.hmo_authorizations
-  ALTER COLUMN contracted_rate_amount SET NOT NULL;
-
-
-CREATE TABLE IF NOT EXISTS public.ledger_accounts (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id uuid NOT NULL REFERENCES public.organizations(id),
-  account_type text NOT NULL CHECK (account_type IN ('student', 'client_profile', 'hmo_provider')),
-  student_id uuid NULL REFERENCES public.students(id) ON DELETE CASCADE,
-  client_profile_id uuid NULL REFERENCES public.client_profiles(id) ON DELETE CASCADE,
-  hmo_provider_id uuid NULL REFERENCES public.hmo_providers(id) ON DELETE CASCADE,
-  is_active boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-  -- Real UNIQUE constraints (not partial indexes) are required for PostgREST
-  -- upsert on_conflict resolution (ON CONFLICT column). PostgreSQL allows
-  -- multiple NULLs in a UNIQUE column so this is safe for nullable FK columns.
-  CONSTRAINT ledger_accounts_student_id_key UNIQUE (org_id, student_id),
-  CONSTRAINT ledger_accounts_client_profile_id_key UNIQUE (org_id, client_profile_id),
-  CONSTRAINT ledger_accounts_hmo_provider_id_key UNIQUE (org_id, hmo_provider_id),
-  CONSTRAINT ledger_accounts_exactly_one_owner_chk CHECK (
-    (
-      CASE WHEN student_id IS NOT NULL THEN 1 ELSE 0 END +
-      CASE WHEN client_profile_id IS NOT NULL THEN 1 ELSE 0 END +
-      CASE WHEN hmo_provider_id IS NOT NULL THEN 1 ELSE 0 END
-    ) = 1
-  ),
-  CONSTRAINT ledger_accounts_type_match_chk CHECK (
-    (account_type = 'student' AND student_id IS NOT NULL AND client_profile_id IS NULL AND hmo_provider_id IS NULL) OR
-    (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL) OR
-    (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL AND client_profile_id IS NULL)
-  )
-);
-
-CREATE TABLE IF NOT EXISTS public.ledger_transactions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id uuid NOT NULL REFERENCES public.organizations(id),
-  ledger_account_id uuid NOT NULL REFERENCES public.ledger_accounts(id) ON DELETE RESTRICT,
-  direction text NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')),
-  amount integer NOT NULL CHECK (amount > 0),
-  effective_at timestamptz NOT NULL,
-  posted_at timestamptz NOT NULL DEFAULT now(),
-  source_type text NOT NULL CHECK (
-    source_type IN (
-      'lesson_charge',
-      'manual_payment',
-      'manual_adjustment',
-      'hmo_invoice_payment',
-      'opening_balance',
-      'reversal',
-      'migration'
-    )
-  ),
-  source_id uuid NULL,
-  lesson_instance_id uuid NULL REFERENCES public.lesson_instances(id) ON DELETE SET NULL,
-  lesson_participant_id uuid NULL REFERENCES public.lesson_participants(id) ON DELETE SET NULL,
-  student_id uuid NULL REFERENCES public.students(id) ON DELETE SET NULL,
-  client_profile_id uuid NULL REFERENCES public.client_profiles(id) ON DELETE SET NULL,
-  hmo_provider_id uuid NULL REFERENCES public.hmo_providers(id) ON DELETE SET NULL,
-  hmo_authorization_id uuid NULL REFERENCES public.hmo_authorizations(id) ON DELETE SET NULL,
-  service_id uuid NULL REFERENCES public."Services"(id) ON DELETE SET NULL,
-  rate_source text NULL CHECK (
-    rate_source IN ('hmo_authorization', 'service_rate', 'manual', 'opening_balance', 'migration')
-  ),
-  reverses_transaction_id uuid NULL UNIQUE REFERENCES public.ledger_transactions(id) ON DELETE RESTRICT,
-  external_reference text NULL,
-  notes text NULL,
-  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
-);
-
--- Legacy compatibility: when an older ledger_transactions schema already exists,
--- ensure all v2 columns exist before creating v2 indexes and policies.
-ALTER TABLE public.ledger_transactions
-  ADD COLUMN IF NOT EXISTS ledger_account_id uuid,
-  ADD COLUMN IF NOT EXISTS direction text,
-  ADD COLUMN IF NOT EXISTS effective_at timestamptz,
-  ADD COLUMN IF NOT EXISTS posted_at timestamptz,
-  ADD COLUMN IF NOT EXISTS source_type text,
-  ADD COLUMN IF NOT EXISTS source_id uuid,
-  ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
-  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
-  ADD COLUMN IF NOT EXISTS hmo_provider_id uuid,
-  ADD COLUMN IF NOT EXISTS hmo_authorization_id uuid,
-  ADD COLUMN IF NOT EXISTS service_id uuid,
-  ADD COLUMN IF NOT EXISTS rate_source text,
-  ADD COLUMN IF NOT EXISTS reverses_transaction_id uuid,
-  ADD COLUMN IF NOT EXISTS external_reference text,
-  ADD COLUMN IF NOT EXISTS posted_at_migrated boolean;
-
-UPDATE public.ledger_transactions
-SET direction = COALESCE(direction, CASE WHEN transaction_type = 'CREDIT' THEN 'CREDIT' ELSE 'DEBIT' END)
-WHERE direction IS NULL;
-
-UPDATE public.ledger_transactions
-SET effective_at = COALESCE(effective_at, created_at, now())
-WHERE effective_at IS NULL;
-
-UPDATE public.ledger_transactions
-SET posted_at = COALESCE(posted_at, created_at, now())
-WHERE posted_at IS NULL;
-
-UPDATE public.ledger_transactions
-SET source_type = COALESCE(source_type, 'migration')
-WHERE source_type IS NULL;
-
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions ALTER COLUMN direction SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions ALTER COLUMN effective_at SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions ALTER COLUMN posted_at SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.ledger_transactions ALTER COLUMN source_type SET NOT NULL;
-EXCEPTION
-  WHEN others THEN NULL;
-END $$;
-
-ALTER TABLE public.ledger_transactions
-  DROP COLUMN IF EXISTS posted_at_migrated;
-
-CREATE INDEX IF NOT EXISTS ledger_transactions_account_effective_idx
-  ON public.ledger_transactions (org_id, ledger_account_id, effective_at);
-
-CREATE INDEX IF NOT EXISTS ledger_transactions_source_idx
-  ON public.ledger_transactions (org_id, source_type, source_id);
-
-CREATE INDEX IF NOT EXISTS ledger_transactions_lesson_participant_idx
-  ON public.ledger_transactions (org_id, lesson_participant_id);
-
-CREATE INDEX IF NOT EXISTS ledger_transactions_student_effective_idx
-  ON public.ledger_transactions (org_id, student_id, effective_at);
-
-CREATE INDEX IF NOT EXISTS ledger_transactions_client_effective_idx
-  ON public.ledger_transactions (org_id, client_profile_id, effective_at);
-
-CREATE INDEX IF NOT EXISTS ledger_transactions_hmo_provider_effective_idx
-  ON public.ledger_transactions (org_id, hmo_provider_id, effective_at);
-
-CREATE INDEX IF NOT EXISTS ledger_transactions_hmo_authorization_idx
-  ON public.ledger_transactions (org_id, hmo_authorization_id);
-
-CREATE INDEX IF NOT EXISTS ledger_transactions_reverses_idx
-  ON public.ledger_transactions (org_id, reverses_transaction_id);
-
-CREATE OR REPLACE FUNCTION public.prevent_ledger_transaction_mutation()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  RAISE EXCEPTION 'ledger_transactions_is_append_only';
-END;
-$$;
-
-DROP TRIGGER IF EXISTS ledger_transactions_append_only_trigger ON public.ledger_transactions;
-CREATE TRIGGER ledger_transactions_append_only_trigger
-BEFORE UPDATE OR DELETE ON public.ledger_transactions
-FOR EACH ROW
-EXECUTE FUNCTION public.prevent_ledger_transaction_mutation();
 
 CREATE TABLE IF NOT EXISTS public.hmo_invoice_batches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -7277,8 +4533,7 @@ CREATE TABLE IF NOT EXISTS public.hmo_invoice_batch_items (
 CREATE INDEX IF NOT EXISTS hmo_invoice_batch_items_batch_idx
   ON public.hmo_invoice_batch_items (org_id, batch_id);
 
--- RLS for billing ledger tables (must run after the cutover DROP/CREATE above)
-ALTER TABLE public.ledger_accounts ENABLE ROW LEVEL SECURITY;
+-- RLS for billing ledger tables
 ALTER TABLE public.ledger_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hmo_invoice_batches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hmo_invoice_batch_items ENABLE ROW LEVEL SECURITY;
@@ -7291,7 +4546,6 @@ DECLARE
   pol text;
 BEGIN
   FOREACH tbl IN ARRAY ARRAY[
-    'ledger_accounts',
     'ledger_transactions',
     'hmo_invoice_batches',
     'hmo_invoice_batch_items'

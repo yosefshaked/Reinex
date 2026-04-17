@@ -294,7 +294,7 @@
   - Encrypted format: `v1:gcm:iv:authTag:cipherText` (base64-encoded)
   - **CRITICAL**: Uses snake_case field names (access_key_id, secret_access_key) to match normalizeStorageProfile() output
   - Decrypts automatically when loading storage profile (admin/owner only)
-  - Uses same encryption key as org credentials (`APP_ORG_CREDENTIALS_ENCRYPTION_KEY`)
+  - Uses same encryption key as org credentials (`SECURITY_ENCRYPTION_SECRET`, with optional `SECURITY_ENCRYPTION_SECRET_OLD` fallback during rotation)
   - Public fields (provider, endpoint, bucket, region) stored unencrypted for admin visibility
 - **Security model**:
   - **Admin/Owner**: GET endpoint decrypts and returns full profile including credentials
