@@ -73,9 +73,9 @@ function checkBackupCooldown(backupHistory, permissions) {
 
 async function appendBackupHistory(supabase, orgId, entry) {
   const { data: current } = await supabase
-    .from('org_settings')
+    .from('organizations')
     .select('backup_history')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .maybeSingle();
 
   const history = current?.backup_history || [];
@@ -85,9 +85,9 @@ async function appendBackupHistory(supabase, orgId, entry) {
   const trimmed = updated.slice(-100);
 
   await supabase
-    .from('org_settings')
+    .from('organizations')
     .update({ backup_history: trimmed })
-    .eq('org_id', orgId);
+    .eq('id', orgId);
 }
 
 export default async function backup(context, req) {
@@ -145,9 +145,9 @@ export default async function backup(context, req) {
 
   // Check backup permissions
   const { data: orgSettings, error: settingsError } = await supabase
-    .from('org_settings')
+    .from('organizations')
     .select('permissions, backup_history')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .maybeSingle();
 
   if (settingsError) {
@@ -220,9 +220,9 @@ export default async function backup(context, req) {
     if (wasOverridden) {
       const updatedPermissions = { ...permissions, backup_cooldown_override: false };
       await supabase
-        .from('org_settings')
+        .from('organizations')
         .update({ permissions: updatedPermissions })
-        .eq('org_id', orgId);
+        .eq('id', orgId);
       context.log?.info?.('backup: cooldown override consumed and cleared', { orgId });
     }
 

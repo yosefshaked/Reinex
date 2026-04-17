@@ -46,7 +46,7 @@ function getDraftDefaultsByUsage(usage) {
 
 export default function FormsListPage() {
   const navigate = useNavigate();
-  const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrg, activeOrgId } = useOrg();
   const { session } = useSupabase();
 
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || null);
@@ -61,7 +61,7 @@ export default function FormsListPage() {
   const [newDescription, setNewDescription] = useState('');
   const [newUsage, setNewUsage] = useState('general');
 
-  const canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection && isAdmin);
+  const canFetch = Boolean(session && activeOrgId && isAdmin);
 
   const loadForms = useCallback(async () => {
     if (!canFetch) return;

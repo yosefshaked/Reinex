@@ -219,9 +219,9 @@ export default function NewSessionModal({
   initialDate = '', // YYYY-MM-DD format
   onCreated,
 }) {
-  const { loading: supabaseLoading } = useSupabase();
+  const { session, loading: supabaseLoading } = useSupabase();
   const { user } = useAuth();
-  const { activeOrg, activeOrgHasConnection, tenantClientReady, activeOrgConnection } = useOrg();
+  const { activeOrg } = useOrg();
   const [studentsState, setStudentsState] = useState(REQUEST_STATE.idle);
   const [studentsError, setStudentsError] = useState('');
   const [students, setStudents] = useState([]);
@@ -254,12 +254,11 @@ export default function NewSessionModal({
   const canFetchStudents = useMemo(() => {
     return (
       open &&
+      Boolean(session) &&
       Boolean(activeOrgId) &&
-      activeOrgHasConnection &&
-      tenantClientReady &&
       !supabaseLoading
     );
-  }, [open, activeOrgId, activeOrgHasConnection, tenantClientReady, supabaseLoading]);
+  }, [open, session, activeOrgId, supabaseLoading]);
 
   // Fetch instructors for BOTH admins and non-admin instructors.
   // Backend enforces: non-admin users only receive their own instructor record.
@@ -288,7 +287,7 @@ export default function NewSessionModal({
   // Extract preanswers cap from permissions (must come from permission registry). If permissions are
   // stored as a JSON string, parse locally to avoid changing user-context API.
   const preanswersCapLimit = useMemo(() => {
-    const rawPerms = activeOrgConnection?.permissions ?? activeOrg?.connection?.permissions;
+    const rawPerms = activeOrg?.permissions ?? activeOrg?.connection?.permissions;
     let perms = null;
 
     if (typeof rawPerms === 'string') {
@@ -310,7 +309,7 @@ export default function NewSessionModal({
       return capRaw;
     }
     return undefined;
-  }, [activeOrg, activeOrgConnection]);
+  }, [activeOrg]);
 
   useEffect(() => {
     if (!open) {
@@ -327,7 +326,7 @@ export default function NewSessionModal({
       return;
     }
 
-    if (!activeOrgId || !activeOrgHasConnection || !tenantClientReady) {
+    if (!activeOrgId || !session) {
       setCanViewInactive(false);
       setVisibilityLoaded(false);
       if (statusFilter !== 'active') {
@@ -383,7 +382,7 @@ export default function NewSessionModal({
       cancelled = true;
       abortController.abort();
     };
-  }, [open, membershipRole, activeOrgId, activeOrgHasConnection, tenantClientReady, statusFilter, canAdmin]);
+  }, [open, membershipRole, activeOrgId, session, statusFilter, canAdmin]);
 
   useEffect(() => {
     if (!open) {
@@ -790,7 +789,7 @@ export default function NewSessionModal({
 
         {!canFetchStudents ? (
           <div className="space-y-sm text-sm text-neutral-600">
-            <p>יש לבחור ארגון בעל חיבור פעיל כדי ליצור מפגש חדש.</p>
+            <p>יש לבחור ארגון פעיל כדי ליצור מפגש חדש.</p>
           </div>
         ) : showLoading ? (
           <div className="flex items-center justify-center gap-sm py-lg text-neutral-600" role="status">

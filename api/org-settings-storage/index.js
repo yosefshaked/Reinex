@@ -84,9 +84,9 @@ export default async function (context, req) {
   // GET: All org members can read storage profile
   if (req.method === 'GET') {
     const { data: orgSettings, error } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .select('storage_profile')
-      .eq('org_id', orgId)
+      .eq('id', orgId)
       .maybeSingle();
 
     if (error) {
@@ -185,14 +185,14 @@ export default async function (context, req) {
     // Encrypt BYOS credentials before saving to database
     const encryptedProfile = encryptStorageProfile(profileToSave, env);
 
-    // Update the existing org_settings row (row must exist if user can access the app)
+    // Update the existing organizations row
     const { error: updateError } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .update({
         storage_profile: encryptedProfile,
         updated_at: new Date().toISOString(),
       })
-      .eq('org_id', orgId);
+      .eq('id', orgId);
 
     if (updateError) {
       context.log?.error?.('org-settings/storage failed to save storage_profile', {
@@ -244,9 +244,9 @@ export default async function (context, req) {
 
     // Fetch current storage profile
     const { data: orgSettings } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .select('storage_profile')
-      .eq('org_id', orgId)
+      .eq('id', orgId)
       .maybeSingle();
 
     const currentProfile = orgSettings?.storage_profile;
@@ -265,12 +265,12 @@ export default async function (context, req) {
     };
 
     const { error: deleteError } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .update({
         storage_profile: disconnectedProfile,
         updated_at: new Date().toISOString(),
       })
-      .eq('org_id', orgId);
+      .eq('id', orgId);
 
     if (deleteError) {
       context.log?.error?.('org-settings/storage failed to disconnect storage', {
@@ -323,9 +323,9 @@ export default async function (context, req) {
 
     // Fetch current storage profile
     const { data: orgSettings } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .select('storage_profile')
-      .eq('org_id', orgId)
+      .eq('id', orgId)
       .maybeSingle();
 
     const currentProfile = orgSettings?.storage_profile;
@@ -350,12 +350,12 @@ export default async function (context, req) {
     delete reconnectedProfile.disconnected_by;
 
     const { error: updateError } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .update({
         storage_profile: reconnectedProfile,
         updated_at: new Date().toISOString(),
       })
-      .eq('org_id', orgId);
+      .eq('id', orgId);
 
     if (updateError) {
       context.log?.error?.('org-settings/storage failed to reconnect storage', {

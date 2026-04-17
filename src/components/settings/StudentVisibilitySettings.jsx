@@ -18,7 +18,7 @@ function normalizeBoolean(value) {
   return false;
 }
 
-export default function StudentVisibilitySettings({ session, orgId, activeOrgHasConnection }) {
+export default function StudentVisibilitySettings({ session, orgId }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isEnabled, setIsEnabled] = useState(false);
@@ -29,7 +29,7 @@ export default function StudentVisibilitySettings({ session, orgId, activeOrgHas
     let cancelled = false;
 
     const loadSetting = async () => {
-      if (!session || !orgId || !activeOrgHasConnection) {
+      if (!session || !orgId) {
         setIsEnabled(false);
         setInitialEnabled(false);
         setIsLoading(false);
@@ -67,7 +67,7 @@ export default function StudentVisibilitySettings({ session, orgId, activeOrgHas
     return () => {
       cancelled = true;
     };
-  }, [session, orgId, activeOrgHasConnection]);
+  }, [session, orgId]);
 
   const hasChanges = useMemo(() => {
     return isEnabled !== initialEnabled;
@@ -82,11 +82,6 @@ export default function StudentVisibilitySettings({ session, orgId, activeOrgHas
       toast.error('נדרשת התחברות פעילה כדי לשמור את ההעדפה.');
       return;
     }
-    if (!activeOrgHasConnection) {
-      toast.error('השלימו את חיבור ה-Supabase לפני שמירה.');
-      return;
-    }
-
     setIsSaving(true);
     setError('');
 

@@ -60,7 +60,11 @@ function summarizeFailure(error, diagnostics) {
     };
   }
 
-  if (code === 'missing-keys' || rawMessage.includes('supabase_url') || rawMessage.includes('anon_key')) {
+  if (
+    code === 'missing-keys' ||
+    rawMessage.includes('supabaseurl') ||
+    rawMessage.includes('supabaseanonkey')
+  ) {
     return {
       title: 'המערכת עדיין לא הוגדרה עד הסוף',
       message: 'האתר חסר כרגע הגדרות חיבור בסיסיות ולכן אי אפשר להפעיל אותו. זו תקלה ברמת ההגדרות, לא פעולה שבמשתמש הקצה יכול/ה לפתור.',
@@ -249,16 +253,10 @@ function OwnerPanel({ diagnostics }) {
 
       const supabaseUrl = typeof parsed?.supabaseUrl === 'string'
         ? parsed.supabaseUrl
-        : typeof parsed?.supabase_url === 'string'
-          ? parsed.supabase_url
-          : '';
+        : '';
       const anonKey = typeof parsed?.supabaseAnonKey === 'string'
         ? parsed.supabaseAnonKey
-        : typeof parsed?.supabase_anon_key === 'string'
-          ? parsed.supabase_anon_key
-          : typeof parsed?.anon_key === 'string'
-            ? parsed.anon_key
-            : '';
+        : '';
 
       setTestState({
         status: 'success',

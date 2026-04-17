@@ -28,8 +28,8 @@ export default async function (context) {
   try {
     // Find all orgs with expired grace periods
     const { data: expiredOrgs, error: fetchError } = await supabase
-      .from('org_settings')
-      .select('org_id, storage_profile, storage_grace_ends_at')
+      .from('organizations')
+      .select('id, storage_profile, storage_grace_ends_at, permissions')
       .not('storage_grace_ends_at', 'is', null)
       .lt('storage_grace_ends_at', new Date().toISOString());
 
@@ -52,7 +52,7 @@ export default async function (context) {
 
     // Process each expired org
     for (const org of expiredOrgs) {
-      const { org_id: orgId, storage_profile: storageProfile, storage_grace_ends_at: graceEndsAt } = org;
+      const { id: orgId, storage_profile: storageProfile, storage_grace_ends_at: graceEndsAt } = org;
 
       try {
         // Only process managed storage (user owns BYOS data)
@@ -72,22 +72,23 @@ export default async function (context) {
             context.log.warn(`Driver doesn't support deletePrefix, skipping file deletion for ${orgId}`);
           }
 
+          const currentPermissions = (org?.permissions && typeof org.permissions === 'object')
+            ? org.permissions
+            : {};
+
           // Update org settings: clear storage config and grace period
           const { error: updateError } = await supabase
-            .from('org_settings')
+            .from('organizations')
             .update({
               storage_profile: null,
               storage_grace_ends_at: null,
-              permissions: supabase.raw(`
-                jsonb_set(
-                  COALESCE(permissions, '{}'::jsonb),
-                  '{storage_access_level}',
-                  'false'::jsonb
-                )
-              `),
+              permissions: {
+                ...currentPermissions,
+                storage_access_level: false,
+              },
               updated_at: new Date().toISOString(),
             })
-            .eq('org_id', orgId);
+            .eq('id', orgId);
 
           if (updateError) {
             context.log.error(`Failed to update org ${orgId}`, { message: updateError.message });
@@ -126,12 +127,12 @@ export default async function (context) {
         } else {
           // BYOS or no storage - just clear grace period
           const { error: updateError } = await supabase
-            .from('org_settings')
+            .from('organizations')
             .update({
               storage_grace_ends_at: null,
               updated_at: new Date().toISOString(),
             })
-            .eq('org_id', orgId);
+            .eq('id', orgId);
 
           if (updateError) {
             context.log.error(`Failed to clear grace period for ${orgId}`, { message: updateError.message });

@@ -21,7 +21,7 @@ function renderDisplayName(profile) {
 export default function OneTimeCustomersPage() {
   const { clientProfileId } = useParams();
   const navigate = useNavigate();
-  const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrg, activeOrgId } = useOrg();
   const { session } = useSupabase();
   const [search, setSearch] = useState('');
   const [sendFormOpen, setSendFormOpen] = useState(false);
@@ -29,7 +29,7 @@ export default function OneTimeCustomersPage() {
 
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || '');
   const canManage = isAdminOrOffice(membershipRole);
-  const canFetch = Boolean(session && activeOrgId && activeOrgHasConnection && tenantClientReady && canManage);
+  const canFetch = Boolean(session && activeOrgId && canManage);
 
   const { clientProfiles, loadingClientProfiles, clientProfilesError, refetchClientProfiles } = useClientProfiles({
     enabled: canFetch,

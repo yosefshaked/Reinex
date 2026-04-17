@@ -3,22 +3,19 @@ import { AlertTriangle } from 'lucide-react';
 import { useOrg } from '@/org/OrgContext.jsx';
 
 export default function OrgConfigBanner() {
-  const { activeOrg, activeOrgHasConnection } = useOrg();
+  const { activeOrg } = useOrg();
 
   if (!activeOrg) {
     return null;
   }
 
-  const missingConnection = !activeOrgHasConnection;
   const pendingSetup = !activeOrg.setup_completed;
 
-  if (!missingConnection && !pendingSetup) {
+  if (!pendingSetup) {
     return null;
   }
 
-  const message = missingConnection
-    ? 'כדי להתחיל להשתמש במערכת יש להוסיף את כתובת ה-URL והמפתח הציבורי של Supabase בארגון הנוכחי.'
-    : 'נדרש להשלים את אשף ההגדרות ולוודא שהטבלאות והמדיניות קיימות בפרויקט ה-Supabase שלכם.';
+  const message = 'נדרש להשלים את אשף ההגדרות ולוודא שהארגון הנוכחי מוכן לעבודה.';
 
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2 flex items-center gap-3 text-amber-800 text-sm mt-4 me-6 ms-6" role="status">

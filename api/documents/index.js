@@ -282,9 +282,9 @@ async function handlePost(req, supabase, client, orgId, userId, userEmail, userR
       // Load storage profile (cache after first lookup)
       if (storageProfile === null) {
         const { data: orgSettings } = await supabase
-          .from('org_settings')
+          .from('organizations')
           .select('storage_profile')
-          .eq('org_id', orgId)
+          .eq('id', orgId)
           .single();
 
         if (!orgSettings?.storage_profile) {
@@ -600,9 +600,9 @@ async function handleDelete(req, supabase, client, orgId, userId, userEmail, use
 
   // Load storage profile
   const { data: orgSettings } = await supabase
-    .from('org_settings')
+    .from('organizations')
     .select('storage_profile')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .single();
 
   if (!orgSettings?.storage_profile) {

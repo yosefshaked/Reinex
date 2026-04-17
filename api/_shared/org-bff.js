@@ -180,37 +180,6 @@ export function resolveOrgId(req, body) {
   return normalized && isValidOrgId(normalized) ? normalized : '';
 }
 
-// ---------------------------------------------------------------------------
-// DEPRECATED — BYOD helpers (will be removed after Step 12 bulk migration)
-// Kept temporarily so that un-migrated endpoints continue to work.
-// ---------------------------------------------------------------------------
-
-/** @deprecated Use createSingleClient(env) — will be removed after endpoint migration. */
-export function buildTenantError(message, status = 500) {
-  return { status, body: { message } };
-}
-
-/** @deprecated Use createSingleClient(env) — will be removed after endpoint migration. */
-export function mapConnectionError(error) {
-  const message = error?.message || 'failed_to_load_connection';
-  const status = message === 'missing_connection_settings'
-    ? 412
-    : message === 'missing_dedicated_key'
-      ? 428
-      : 500;
-  return buildTenantError(message, status);
-}
-
-/**
- * @deprecated Use createSingleClient(env) — will be removed after endpoint migration.
- * In the merged single-DB, this simply returns the same admin client that was passed in.
- * The encryption/decryption pipeline is bypassed.
- */
-// eslint-disable-next-line no-unused-vars
-export async function resolveTenantClient(context, supabase, env, orgId) {
-  return { client: supabase };
-}
-
 export function getEncryptionConfig(env = process.env ?? {}) {
   return {
     current: normalizeString(env.SECURITY_ENCRYPTION_SECRET),

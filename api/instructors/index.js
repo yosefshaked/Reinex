@@ -568,9 +568,9 @@ export default async function (context, req) {
 
   if (method === 'PUT') {
     const { data: orgSettings, error: permError } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .select('permissions')
-      .eq('org_id', orgId)
+      .eq('id', orgId)
       .maybeSingle();
 
     if (permError) {

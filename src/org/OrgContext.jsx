@@ -97,7 +97,7 @@ function normalizeMember(record) {
   };
 }
 
-async function authenticatedFetch(path, { params, session: _session, accessToken: _accessToken, ...options } = {}) {
+async function authenticatedFetch(path, { params, ...options } = {}) {
   const authClient = getAuthClient();
   const { data, error } = await authClient.auth.getSession();
 
@@ -183,7 +183,6 @@ async function authenticatedFetch(path, { params, session: _session, accessToken
   if (!response.ok) {
     const message = payload?.message || 'An API error occurred';
     const error = new Error(message);
-    void _session; void _accessToken;
     if (payload) {
       error.data = payload;
     }
@@ -197,8 +196,6 @@ export function OrgProvider({ children }) {
   const { status: authStatus, user, session } = useAuth();
   const {
     authClient,
-    dataClient,
-    setActiveOrg: setSupabaseActiveOrg,
   } = useSupabase();
   const runtimeConfig = useRuntimeConfig();
   const requireAuthClient = useCallback(() => {
@@ -229,7 +226,6 @@ export function OrgProvider({ children }) {
   }, []);
   const loadingRef = useRef(false);
   const lastUserIdRef = useRef(null);
-  const tenantClientReady = Boolean(dataClient);
   const hasRuntimeConfig = Boolean(runtimeConfig?.supabaseUrl && runtimeConfig?.supabaseAnonKey);
 
   const resetState = useCallback(() => {
@@ -242,8 +238,7 @@ export function OrgProvider({ children }) {
     setOrgInvites([]);
     setError(null);
     setDirectoryEnabled(false);
-    setSupabaseActiveOrg(null);
-  }, [setSupabaseActiveOrg]);
+  }, []);
 
   const loadMemberships = useCallback(async () => {
     if (!user) {
@@ -355,14 +350,13 @@ export function OrgProvider({ children }) {
       if (!org) {
         setActiveOrgId(null);
         setActiveOrg(null);
-        setSupabaseActiveOrg(null);
         return;
       }
 
       setActiveOrgId(org.id);
       setActiveOrg(org);
     },
-    [setSupabaseActiveOrg],
+    [],
   );
 
   useEffect(() => {
@@ -810,13 +804,6 @@ export function OrgProvider({ children }) {
       acceptInvite,
       enableDirectory,
       disableDirectory,
-      // In the merged single-DB model, connection is always available when an org is selected
-      activeOrgHasConnection: Boolean(activeOrgId),
-      // Backward compat: configStatus is always 'success' when org selected, 'idle' otherwise
-      activeOrgConfig: null,
-      configStatus: activeOrgId ? 'success' : 'idle',
-      activeOrgConnection: null,
-      tenantClientReady,
       orgSettings,
     }),
     [
@@ -842,7 +829,6 @@ export function OrgProvider({ children }) {
       acceptInvite,
       enableDirectory,
       disableDirectory,
-      tenantClientReady,
       orgSettings,
     ],
   );

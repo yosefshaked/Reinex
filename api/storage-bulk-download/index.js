@@ -89,9 +89,9 @@ export default async function (context, req) {
 
   // Get storage profile
   const { data: orgSettings, error: settingsError } = await controlClient
-    .from('org_settings')
+    .from('organizations')
     .select('storage_profile, permissions')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .maybeSingle();
 
   if (settingsError) {

@@ -19,6 +19,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { fetchLooseSessions, rejectLooseSession } from '@/features/sessions/api/loose-sessions.js';
 import { Checkbox } from '@/components/ui/checkbox';
 import ResolvePendingReportDialog from '../components/ResolvePendingReportDialog.jsx';
@@ -133,7 +134,8 @@ function buildAnswerList(content, questions) {
 }
 
 export default function PendingReportsPage() {
-  const { activeOrg, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrg } = useOrg();
+  const { session } = useSupabase();
   const [state, setState] = useState(REQUEST_STATE.idle);
   const [error, setError] = useState('');
   const [reports, setReports] = useState([]);
@@ -162,7 +164,7 @@ export default function PendingReportsPage() {
   const normalizedRole = useMemo(() => normalizeMembershipRole(membershipRole), [membershipRole]);
   const isAdminMember = isAdminRole(normalizedRole);
 
-  const canFetch = Boolean(activeOrgId && activeOrgHasConnection && tenantClientReady);
+  const canFetch = Boolean(session && activeOrgId);
 
   const loadQuestions = useCallback(async () => {
     if (!canFetch) return;
@@ -449,7 +451,7 @@ export default function PendingReportsPage() {
           <CardContent>
             <div className="flex items-center gap-2 text-neutral-600">
               <AlertCircle className="h-5 w-5" />
-              <p>יש לבחור ארגון בעל חיבור פעיל כדי לצפות בדיווחים ממתינים.</p>
+                <p>יש לבחור ארגון פעיל כדי לצפות בדיווחים ממתינים.</p>
             </div>
           </CardContent>
         </Card>

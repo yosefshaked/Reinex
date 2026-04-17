@@ -7,6 +7,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
 import ResubmitRejectedReportDialog from './ResubmitRejectedReportDialog.jsx';
 
@@ -59,7 +60,8 @@ function filterReportsByDateRange(reports, dateRangeDays) {
 }
 
 export default function MyPendingReportsCard() {
-  const { activeOrg, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrg } = useOrg();
+  const { session } = useSupabase();
   const [state, setState] = useState(REQUEST_STATE.idle);
   const [error, setError] = useState('');
   const [reports, setReports] = useState([]);
@@ -68,7 +70,7 @@ export default function MyPendingReportsCard() {
   const [dateRange, setDateRange] = useState('3months'); // Default to 3 months
 
   const activeOrgId = activeOrg?.id || null;
-  const canFetch = Boolean(activeOrgId && activeOrgHasConnection && tenantClientReady);
+  const canFetch = Boolean(session && activeOrgId);
 
   const loadReports = useCallback(async (options = {}) => {
     if (!canFetch) return;

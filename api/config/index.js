@@ -45,11 +45,7 @@ export default async function (context) {
       {
         source: 'api',
         supabaseUrl,
-        supabase_url: supabaseUrl,
         supabaseAnonKey: anonKey,
-        supabase_anon_key: anonKey,
-        anonKey,
-        anon_key: anonKey,
       },
       {
         'Cache-Control': 'no-store',

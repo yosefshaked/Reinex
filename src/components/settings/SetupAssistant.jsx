@@ -130,7 +130,7 @@ function DiagnosticsList({ diagnostics }) {
 
 export default function SetupAssistant() {
   const { activeOrg, recordVerification } = useOrg();
-  const { authClient, dataClient, loading, session } = useSupabase();
+  const { authClient, loading, session } = useSupabase();
   const [appKey, setAppKey] = useState('');
   const [isPasting, setIsPasting] = useState(false);
   const [validationState, setValidationState] = useState(VALIDATION_STATES.idle);
@@ -169,7 +169,7 @@ export default function SetupAssistant() {
       toast.error('חיבור Supabase עדיין נטען. נסו שוב בעוד רגע.');
       return;
     }
-    if (!dataClient) {
+    if (!authClient) {
       toast.error('חיבור הנתונים של הארגון אינו זמין. ודאו שפרטי Supabase נשמרו.');
       return;
     }
@@ -187,7 +187,7 @@ export default function SetupAssistant() {
     setSavingState('saving');
 
     try {
-      const { data, error } = await dataClient.rpc('setup_assistant_diagnostics');
+      const { data, error } = await authClient.rpc('setup_assistant_diagnostics');
       if (error) {
         throw error;
       }

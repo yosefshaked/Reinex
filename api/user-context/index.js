@@ -45,7 +45,6 @@ function mapOrganizationRecord(record, membership) {
     verified_at: record.verified_at || null,
     created_at: record.created_at,
     updated_at: record.updated_at,
-    has_connection: true,
     membership: {
       id: membership.id,
       org_id: membership.org_id,

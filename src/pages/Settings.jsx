@@ -39,12 +39,14 @@ const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = {
 };
 
 export default function Settings() {
-  const { activeOrg, activeOrgHasConnection, tenantClientReady, activeOrgId, refreshOrganizations } = useOrg();
+  const { activeOrg, activeOrgId, refreshOrganizations } = useOrg();
   const { authClient, user, loading, session } = useSupabase();
+  const hasActiveOrg = Boolean(activeOrgId);
+  const orgReady = Boolean(session && activeOrgId);
   const membershipRole = activeOrg?.membership?.role ?? null;
   const normalizedRole = typeof membershipRole === 'string' ? membershipRole.trim().toLowerCase() : '';
   const canManageSessionForm = normalizedRole === 'admin' || normalizedRole === 'owner';
-  const setupDialogAutoOpenRef = useRef(!activeOrgHasConnection);
+  const setupDialogAutoOpenRef = useRef(!hasActiveOrg);
   const orgIdSyncCompletedRef = useRef(new Set());
   const orgIdSyncInFlightRef = useRef(new Set());
   const [selectedModule, setSelectedModule] = useState(null); // 'setup' | 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
@@ -112,11 +114,11 @@ export default function Settings() {
 
   // Check if current user is an instructor (with caching)
   useEffect(() => {
-    if (!user?.id || !session || !tenantClientReady || !activeOrgId) {
+    if (!user?.id || !orgReady) {
       console.log('[Settings] Instructor check skipped:', {
         userId: user?.id,
         hasSession: !!session,
-        tenantClientReady,
+        orgReady,
         activeOrgId
       });
       setIsInstructor(false);
@@ -189,13 +191,13 @@ export default function Settings() {
 
     checkInstructorStatus();
     return () => { isCancelled = true; };
-  }, [user?.id, session, tenantClientReady, activeOrgId]);
+  }, [user?.id, session, activeOrgId, orgReady]);
 
   // Fetch org documents visibility setting
   useEffect(() => {
     const isAdmin = normalizedRole === 'admin' || normalizedRole === 'owner';
     
-    if (!session || !activeOrgId || !activeOrgHasConnection || isAdmin) {
+    if (!session || !activeOrgId || isAdmin) {
       // Admins always see the card, so set to true for them
       setOrgDocsVisibility(isAdmin);
       return;
@@ -218,11 +220,11 @@ export default function Settings() {
 
     loadVisibility();
     return () => { isCancelled = true; };
-  }, [session, activeOrgId, activeOrgHasConnection, normalizedRole]);
+  }, [session, activeOrgId, normalizedRole]);
 
   // Save org_id to Settings table for migration script
   useEffect(() => {
-    if (!session || !activeOrgId || !activeOrgHasConnection) return;
+    if (!session || !activeOrgId) return;
 
     const completedSet = orgIdSyncCompletedRef.current;
     const inFlightSet = orgIdSyncInFlightRef.current;
@@ -284,10 +286,10 @@ export default function Settings() {
       isCancelled = true;
       inFlightSet.delete(activeOrgId);
     };
-  }, [session, activeOrgId, activeOrgHasConnection]);
+  }, [session, activeOrgId]);
 
   useEffect(() => {
-    if (!session || !activeOrgId || !activeOrgHasConnection || !canManageSessionForm) {
+    if (!session || !activeOrgId || !canManageSessionForm) {
       setBillingPolicy(DEFAULT_BILLING_POLICY);
       setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
       return;
@@ -333,10 +335,10 @@ export default function Settings() {
     return () => {
       cancelled = true;
     };
-  }, [session, activeOrgId, activeOrgHasConnection, canManageSessionForm]);
+  }, [session, activeOrgId, canManageSessionForm]);
 
   useEffect(() => {
-    if (activeOrgHasConnection) {
+    if (hasActiveOrg) {
       setupDialogAutoOpenRef.current = false;
   // close any open module dialog
   setSelectedModule(null);
@@ -346,12 +348,12 @@ export default function Settings() {
       setupDialogAutoOpenRef.current = true;
       setSelectedModule('setup');
     }
-  }, [activeOrgHasConnection]);
+  }, [hasActiveOrg]);
 
   const handleModuleDialogChange = (open) => {
     if (!open) {
       setSelectedModule(null);
-      if (!activeOrgHasConnection) {
+      if (!hasActiveOrg) {
         setupDialogAutoOpenRef.current = true;
       }
     }
@@ -365,9 +367,9 @@ export default function Settings() {
     try {
       // Get current permissions
       const { data: orgSettings, error: fetchError } = await authClient
-        .from('org_settings')
+        .from('organizations')
         .select('permissions')
-        .eq('org_id', activeOrgId)
+        .eq('id', activeOrgId)
         .single();
       
       if (fetchError) {
@@ -398,11 +400,11 @@ export default function Settings() {
         }
       }
       
-      // Update org_settings with merged permissions
+      // Update organizations with merged permissions
       const { error: updateError } = await authClient
-        .from('org_settings')
+        .from('organizations')
         .update({ permissions: mergedPermissions })
-        .eq('org_id', activeOrgId);
+        .eq('id', activeOrgId);
       
       if (updateError) {
         console.error('Error updating permissions:', updateError);
@@ -558,8 +560,8 @@ export default function Settings() {
                     חיבור Supabase
                   </CardTitle>
                 </div>
-                <Badge className={activeOrgHasConnection ? 'bg-emerald-100 text-emerald-700 border-0' : 'bg-amber-100 text-amber-800 border-0'}>
-                  {activeOrgHasConnection ? 'פעיל' : 'נדרש'}
+                <Badge className={hasActiveOrg ? 'bg-emerald-100 text-emerald-700 border-0' : 'bg-amber-100 text-amber-800 border-0'}>
+                  {hasActiveOrg ? 'פעיל' : 'נדרש'}
                 </Badge>
               </div>
               <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
@@ -597,8 +599,8 @@ export default function Settings() {
                 size="sm"
                 className="w-full gap-2"
                 onClick={() => setSelectedModule('studentVisibility')}
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+                disabled={!canManageSessionForm || !orgReady}
+                variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
               >
                 <EyeOff className="h-4 w-4" /> ניהול תצוגת תלמידים
               </Button>
@@ -624,8 +626,8 @@ export default function Settings() {
                 size="sm"
                 className="w-full gap-2"
                 onClick={() => setSelectedModule('billingSettings')}
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+                disabled={!canManageSessionForm || !orgReady}
+                variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
               >
                 <Briefcase className="h-4 w-4" /> פתיחת הגדרות חיוב
               </Button>
@@ -726,8 +728,8 @@ export default function Settings() {
                 size="sm" 
                 className="w-full gap-2" 
                 onClick={() => setSelectedModule('tags')} 
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+                disabled={!canManageSessionForm || !orgReady}
+                variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
               >
                 <Tag className="h-4 w-4" /> ניהול תגיות וסיווגים
               </Button>
@@ -819,8 +821,8 @@ export default function Settings() {
                 size="sm" 
                 className="w-full gap-2" 
                 onClick={() => setSelectedModule('documents')} 
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+                disabled={!canManageSessionForm || !orgReady}
+                variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
               >
                 <FileText className="h-4 w-4" /> ניהול מסמכים נדרשים
               </Button>
@@ -848,8 +850,8 @@ export default function Settings() {
                 size="sm" 
                 className="w-full gap-2" 
                 onClick={() => setSelectedModule('orgDocuments')} 
-                disabled={!activeOrgHasConnection || !tenantClientReady}
-                variant={(!activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+                disabled={!orgReady}
+                variant={(!orgReady) ? 'secondary' : 'default'}
               >
                 <Briefcase className="h-4 w-4" /> ניהול מסמכי ארגון
               </Button>
@@ -891,7 +893,7 @@ export default function Settings() {
         )}
 
         {/* Instructor Documents Card - visible to any user who is an instructor (outside admin-only section) */}
-        {isInstructor && activeOrgHasConnection && tenantClientReady && (
+        {isInstructor && orgReady && (
           <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02]">
             <CardHeader className="space-y-2 pb-3">
               <div className="flex items-start justify-between gap-2">
@@ -919,8 +921,8 @@ export default function Settings() {
                   console.log('[Settings] Opening myDocuments modal');
                   setSelectedModule('myDocuments');
                 }}
-                disabled={!activeOrgHasConnection || !tenantClientReady}
-                variant={(!activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+                disabled={!orgReady}
+                variant={(!orgReady) ? 'secondary' : 'default'}
               >
                 <FileText className="h-4 w-4" />
                 ניהול המסמכים שלי
@@ -988,7 +990,6 @@ export default function Settings() {
                   <StudentVisibilitySettings
                     session={session}
                     orgId={activeOrgId}
-                    activeOrgHasConnection={activeOrgHasConnection}
                   />
                 )}
                 {selectedModule === 'storage' && (

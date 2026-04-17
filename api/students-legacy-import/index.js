@@ -250,9 +250,9 @@ export default async function legacyImport(context, req) {
   }
 
   const { data: orgSettings, error: settingsError } = await supabase
-    .from('org_settings')
+    .from('organizations')
     .select('permissions')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .maybeSingle();
 
   if (settingsError) {

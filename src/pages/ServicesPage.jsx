@@ -41,7 +41,7 @@ function buildInitialForm(service) {
 }
 
 export default function ServicesPage() {
-  const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrg, activeOrgId } = useOrg();
   const { session } = useSupabase();
 
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || null);
@@ -56,7 +56,7 @@ export default function ServicesPage() {
   const [formValues, setFormValues] = useState(buildInitialForm());
   const [touched, setTouched] = useState({});
 
-  const canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection);
+  const canFetch = Boolean(session && activeOrgId);
 
   const loadServices = useCallback(async () => {
     if (!canFetch) {
@@ -209,18 +209,6 @@ export default function ServicesPage() {
         <Card>
           <CardContent className="p-4 text-sm text-neutral-600">
             בחרו ארגון כדי לנהל שירותים.
-          </CardContent>
-        </Card>
-      </PageLayout>
-    );
-  }
-
-  if (!activeOrgHasConnection) {
-    return (
-      <PageLayout title="שירותים">
-        <Card>
-          <CardContent className="p-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md">
-            דרוש חיבור מאומת למסד הנתונים של הארגון כדי לנהל שירותים.
           </CardContent>
         </Card>
       </PageLayout>

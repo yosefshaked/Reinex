@@ -20,9 +20,8 @@ function normalizeCredentials(rawConfig) {
     return { supabaseUrl: null, supabaseAnonKey: null };
   }
 
-  const supabaseUrl = rawConfig.supabaseUrl ?? rawConfig.supabase_url ?? null;
-  const supabaseAnonKey =
-    rawConfig.supabaseAnonKey ?? rawConfig.supabase_anon_key ?? rawConfig.anon_key ?? null;
+  const supabaseUrl = rawConfig.supabaseUrl ?? null;
+  const supabaseAnonKey = rawConfig.supabaseAnonKey ?? null;
 
   return { supabaseUrl, supabaseAnonKey };
 }

@@ -38,8 +38,10 @@
 
 ## Known patterns / do not reinvent
 - Default to [`../src/lib/api-client.js`](../src/lib/api-client.js) for authenticated requests.
+- `authenticatedFetch` automatically adds `x-org-id` from `active_org_id` local storage; do not hand-build this header in feature code.
 - Prefer [`../src/hooks/useOrgData.js`](../src/hooks/useOrgData.js) for org-scoped lists before writing a new fetch hook.
 - The private `authenticatedFetch` inside [`../src/org/OrgContext.jsx`](../src/org/OrgContext.jsx) is local to that provider; do not copy it elsewhere.
 - [`../src/hooks/useDocuments.js`](../src/hooks/useDocuments.js) is a special-case raw-fetch hook for document upload/download flows; use it only for document work.
 - Money is carried as agorot integers across API/DB boundaries.
 - [`../src/lib/selectors.js`](../src/lib/selectors.js) is deprecated; do not reuse or extend it.
+- `createDataClient` is deprecated/removed in the single-DB model; do not reintroduce tenant client creation on the frontend.

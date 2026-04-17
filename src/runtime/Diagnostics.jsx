@@ -107,7 +107,7 @@ export default function Diagnostics() {
   const config = useRuntimeConfig();
   const diagSnapshot = getRuntimeConfigDiagnostics();
   const { user, session } = useAuth();
-  const { activeOrgId, configStatus, tenantClientReady } = useOrg();
+  const { activeOrgId } = useOrg();
 
   const [checks, setChecks] = useState(null);
   const [running, setRunning] = useState(false);
@@ -229,17 +229,15 @@ export default function Diagnostics() {
         <Row
           label="טעינת תצורת ארגון"
           status={
-            configStatus === 'success'
-              ? 'ok'
-              : configStatus === 'error'
-                ? 'error'
-                : configStatus === 'loading'
-                  ? 'loading'
-                  : 'skip'
+            !session
+              ? 'skip'
+              : activeOrgId
+                ? 'ok'
+                : 'loading'
           }
-          value={configStatus || '—'}
+          value={!session ? 'idle' : activeOrgId ? 'success' : 'loading'}
         />
-        <Row label="לקוח Supabase ארגוני מוכן" value={tenantClientReady ? 'כן' : 'לא'} />
+        <Row label="לקוח Supabase ארגוני מוכן" value={session ? 'כן' : 'לא'} />
       </Section>
 
       {/* ── Build info ── */}

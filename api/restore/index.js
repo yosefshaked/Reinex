@@ -34,9 +34,9 @@ function checkRestorePermission(orgSettings) {
 
 async function appendRestoreHistory(supabase, orgId, entry) {
   const { data: current } = await supabase
-    .from('org_settings')
+    .from('organizations')
     .select('backup_history')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .maybeSingle();
 
   const history = current?.backup_history || [];
@@ -46,9 +46,9 @@ async function appendRestoreHistory(supabase, orgId, entry) {
   const trimmed = updated.slice(-100);
 
   await supabase
-    .from('org_settings')
+    .from('organizations')
     .update({ backup_history: trimmed })
-    .eq('org_id', orgId);
+    .eq('id', orgId);
 }
 
 export default async function restore(context, req) {
@@ -114,9 +114,9 @@ export default async function restore(context, req) {
   // Check restore permissions
   context.log?.info?.('restore: fetching org settings (permissions)');
   const { data: orgSettings, error: settingsError } = await supabase
-    .from('org_settings')
+    .from('organizations')
     .select('permissions')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .maybeSingle();
 
   if (settingsError) {

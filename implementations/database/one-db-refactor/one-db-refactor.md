@@ -20,13 +20,12 @@
 * **Storage buckets:** Out of scope (separate workstream).
 
 ## 🧠 Current Working Context (For AI Memory)
-* **Last Completed Task:** Step 19 — RLS isolation test suite (14/14 ✔) and schema dry-run (0 SQL errors) against local Docker Supabase.
-* **Currently Working On:** Step 20 — Update Documentation (`AGENTS.md` + `agents-docs/`).
-* **Next Immediate Step:** Step 21 — Environment Variables & Deployment Config Cleanup.
+* **Last Completed Task:** Step 22 — Post-Refactor Technical Debt Sweep (all 22a-22f subsections closed).
+* **Currently Working On:** Done. Step 23 is next.
+* **Next Immediate Step:** Step 23 — Admin UI: Encryption Key Version & Rotation Interface.
 * **Known Issues / Technical Debt:**
   - Supabase Storage bucket isolation strategy NOT in scope (separate workstream).
-  - Step 22 (Technical Debt Sweep): backward-compat aliases (`dataClient`, `setActiveOrg`, `activeOrgHasConnection`, `tenantClientReady`, `configStatus`, `activeOrgConfig`) still exposed in `OrgContext` and `SupabaseContext` — to be cleaned up.
-  - `org_settings` table may still exist on any live DB from old BYOD era — add DROP in Step 21 or 22.
+  - Step 21 partial: production Azure SWA/Functions app settings still need manual deployment.
 
 ## 📋 Execution Plan (23 Steps)
 
@@ -215,13 +214,14 @@
   **Output:** Test results documented.
   **Done:** Created `e2e-smoke.test.js` (Node.js, `node:test` runner) in `/implementations/database/one-db-refactor/`. 7 test suites covering all major flows: (1) Login → `GET /user-context` → `GET /client-profiles` list. (2) `POST /client-profiles` create + DB-level `org_id` verification. (3) `POST /calendar-generate` dry-run + direct `lesson_instances` org_id check. (4) `GET /lesson-instances` date query confirms inserted instance visible. (5) `GET /billing` responds for org + `commitments` org_id verification. (6) Org isolation: second org/user cannot see first org's data. (7) `EXPLAIN ANALYZE` index-scan checks on `client_profiles`, `lesson_instances`, `commitments`, `org_memberships` (gracefully skips if `explain_query` RPC not installed). Script auto-creates/cleans up orgs, auth users, and test data. Supports env-var overrides to reuse existing users/orgs. Run with: `SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_ANON_KEY=... API_BASE_URL=http://localhost:7071/api node --test implementations/database/one-db-refactor/e2e-smoke.test.js`.
 
-- [ ] **Step 20 — Update Documentation (AGENTS.md + agents-docs/)**
+- [x] **Step 20 — Update Documentation (AGENTS.md + agents-docs/)**
   - `AGENTS.md` global rules: Add "Single-DB multi-tenant: all tables have `org_id`. Backend must always filter by `org_id`."
   - `agents-docs/00-core-rules.md`: Rewrite architecture section.
   - `agents-docs/10-runtime-auth-org.md`: Rewrite BYOD → single-DB flow.
   - `agents-docs/20-frontend-shared-helpers.md`: Remove `createDataClient` references.
   - `agents-docs/30-backend-shared-helpers.md`: Replace `resolveTenantClient` with `createSingleClient` / `withOrgScope` docs.
   **Output:** All agent docs reflect new architecture.
+  **Done:** Updated `AGENTS.md` global rules for single-DB multi-tenant and `x-org-id` flow. Rewrote `agents-docs/00-core-rules.md` architecture + helper guidance. Rewrote `agents-docs/10-runtime-auth-org.md` for single-client org switching. Updated `agents-docs/20-frontend-shared-helpers.md` to document automatic `x-org-id` header and removal of `createDataClient`. Updated `agents-docs/30-backend-shared-helpers.md` to replace `resolveTenantClient` flow with `createSingleClient` + org-scoped querying.
 
 - [ ] **Step 21 — Environment Variables & Deployment Config Cleanup**
   - Remove: all legacy org-credential encryption env vars and per-tenant env vars.
@@ -231,50 +231,49 @@
   - Update Azure SWA / Functions app settings for production.
   - Update `staticwebapp.config.json` if route changes needed (e.g., remove `/api/org-keys` route).
   **Output:** Deployment-ready configuration.
+  **Status:** Partially complete in repo. Completed: local env files (`api/local.settings.json`, `api/local.settings.example.json`) and code/docs migration to `SECURITY_ENCRYPTION_SECRET` + optional `SECURITY_ENCRYPTION_SECRET_OLD`; legacy key-name references removed from the codebase. Remaining manual action: apply production Azure SWA/Functions app settings and verify deployment runtime values.
 
 ### PHASE F: Technical Debt Cleanup
 > Goal: Eliminate every backward-compat shim, dead code path, and naming inconsistency introduced during the refactor so the codebase reads as if it was always single-DB multi-tenant.
 
-- [ ] **Step 22 — Post-Refactor Technical Debt Sweep**
+- [x] **Step 22 — Post-Refactor Technical Debt Sweep**
   This step is not about quick fixes. It is a thorough pass to make the codebase professional and unambiguous for all future work. No shortcuts, no "good enough" — every artifact of the old BYOD architecture must be resolved.
 
-  **22a — Remove Dead Modules & Exports**
-  - Delete or gut `src/runtime/org-gate.js` if all remaining exports are passthrough stubs with zero live callers.
-  - Remove `maskSupabaseCredential` from `src/lib/supabase-utils.js` if no longer imported anywhere.
-  - Remove `MissingRuntimeConfigError` re-export from `src/runtime/config.js` if only consumer was OrgContext (now removed).
-  - Audit `src/runtime/config.js` for dead functions after org-scope removal (e.g., `buildCacheKey` is now trivial — inline or remove).
-  - Delete the `api/org-keys/` endpoint directory if it still exists (BYOD route removed in Step 13).
-  - Delete the `api/save-org-credentials/` endpoint directory if it still exists.
-  - Remove any remaining `org_settings`-related API endpoints or references.
+  **Status:** ✅ Complete — all 22a-22f subsections closed.
 
-  **22b — Remove Backward-Compat Aliases & Shims**
-  - `SupabaseContext.jsx`: Remove `dataClient` alias — expose only `authClient` (or rename to just `client`). Update all consumers that destructure `dataClient` to use the canonical name.
-  - `SupabaseContext.jsx`: Remove the no-op `setActiveOrg` callback. Remove from all destructuring sites.
-  - `OrgContext.jsx`: Remove backward-compat context values: `activeOrgConfig` (always `null`), `configStatus` (derived shim), `activeOrgConnection` (always `null`). Update Diagnostics.jsx and any other consumers.
-  - `OrgContext.jsx`: Evaluate whether `tenantClientReady` should be removed entirely (it's `Boolean(authClient)` — always true when logged in). If consumers just need "is authenticated", they should use `useAuth()` instead.
-  - `OrgContext.jsx`: Evaluate whether `activeOrgHasConnection` should be removed entirely (it's `Boolean(activeOrgId)` — redundant check). If consumers just need "has org selected", `activeOrgId` is sufficient.
+  **22a — Remove Dead Modules & Exports:** ✅ Complete.
+  - BYOD credential endpoints removed (`api/org-keys`, `api/save-org-credentials`), broad `org_settings` API surface removed.
+  - `src/runtime/org-gate.js` deleted (zero importers; all 5 exports were passthroughs to `org-runtime.js`).
+  - `src/lib/supabase-utils.js` deleted (only contained `maskSupabaseCredential`; zero importers).
+  - `MissingRuntimeConfigError` retained — actively used by 8+ call sites in `config.js`, `org-runtime.js`, `error-utils.js`.
+  - Deprecated shims (`buildTenantError`, `mapConnectionError`, `resolveTenantClient`) removed from `api/_shared/org-bff.js` (zero callers confirmed).
+  - `org_settings` in frontend: only `setup-sql.js` SQL comments (historical context) and `AuditLogViewer.jsx` resource label (audit display) — both intentionally kept.
 
-  **22c — Fix Naming Inconsistencies**
-  - Rename `has_connection` field on organization records (from user-context API) — it's always `true` now, so either remove it or rename to something meaningful.
-  - Audit all frontend code that checks `has_connection` and remove those guards.
-  - Rename `tenantClientReady` references if kept — "tenant" language implies multi-DB. Consider `clientReady` or removing the concept entirely.
-  - Search for any remaining `tenant`, `BYOD`, `dedicated_key`, `org_settings`, `supabase_url`/`anon_key` field references in frontend code that are artifacts of the old arch.
-  - Rename `authenticatedFetch` in OrgContext.jsx if it duplicates/conflicts with `src/lib/api-client.js` `authenticatedFetch` (Step 17 adds `x-org-id` to the latter).
+  **22b — Remove Backward-Compat Aliases & Shims:** ✅ Complete.
+  - Deprecated org readiness shims (`activeOrgHasConnection`, `tenantClientReady`, `activeOrgConfig`, `configStatus`, `activeOrgConnection`) removed from active consumer paths.
+  - Final grep confirmed zero matches for any removed shim name across `src/**/*.{js,jsx}`.
 
-  **22d — Clean Up Unused State & Props**
-  - Audit all pages/components that destructure `activeOrgHasConnection`, `tenantClientReady`, `configStatus`, `activeOrgConfig`, `activeOrgConnection` from `useOrg()` and simplify their guard conditions.
-  - Remove the `session` prop threading in `authenticatedFetch` (OrgContext) — it's unused (underscore-prefixed params `_session`, `_accessToken`).
-  - Audit `createOrganization` callers — ensure none still pass `supabaseUrl`/`supabaseAnonKey` props (check forms/modals).
+  **22c — Fix Naming Inconsistencies:** ✅ Complete.
+  - `has_connection` removed from runtime payloads, canonical runtime key naming standardized to `supabaseUrl` / `supabaseAnonKey` across API + runtime + tests.
+  - `tenantClient` references in `setup-sql.js` SQL comment blocks updated to `client`.
+  - `SetupAssistant.jsx` references to `dedicated_key_saved_at` and `APP_DEDICATED_KEY` are intentionally kept — they serve the active setup wizard verification flow (not BYOD artifacts).
+  - `setup-sql.js` `APP_DEDICATED_KEY` SQL output retained — generates the `app_user` JWT needed by the setup wizard.
+  - No remaining `BYOD`/`tenant` wording in active code paths (only in historical docs/tracker).
 
-  **22e — Schema & Migration Hygiene**
-  - Verify `org_settings` table is no longer referenced in any backend code, SQL, or RPC.
-  - If safe, add a migration note / SQL to drop the `org_settings` table (or mark it deprecated with a comment in setup-sql.js).
-  - Audit `setup-sql.js` for any remaining BYOD-era table definitions, RPCs, or policies that reference per-org credentials.
-  - Verify `dedicated_key_encrypted` / `dedicated_key_saved_at` columns on `organizations` table are still needed or should be dropped.
+  **22d — Clean Up Unused State & Props:** ✅ Complete.
+  - Guard/state cleanup applied across core pages and settings flows.
+  - `OrgContext.jsx` `authenticatedFetch`: dead `_session`/`_accessToken` destructured params and `void` suppression removed. Signature now `{ params, ...options }`.
+  - Zero dead prop threading remains in `authenticatedFetch` call sites (confirmed via grep).
 
-  **22f — Guard Simplification Pass**
-  - For each page that has `canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection && ...)`, simplify to `Boolean(session && activeOrgId && ...)` since the removed guards are always truthy.
-  - Similarly simplify `disabled={!activeOrgHasConnection || !tenantClientReady}` patterns in Settings.jsx and elsewhere.
+  **22e — Schema & Migration Hygiene:** ✅ Complete.
+  - Code-level migration from `org_settings` to `organizations` for active runtime paths completed.
+  - **`org_settings` DROP guidance:** Not applicable — greenfield Supabase project; `org_settings` table was never created. For any legacy BYOD-era deployments, `DROP TABLE IF EXISTS org_settings CASCADE;` should be run after confirming no active readers.
+  - **Encryption column decision:** `dedicated_key_encrypted` and `dedicated_key_saved_at` columns on `organizations` (control DB schema in `docs/ssot/control-db-setup.sql`) are **intentionally retained** — actively used by `SetupAssistant.jsx` for the setup wizard verification flow. These are NOT BYOD artifacts; they store the `app_user` JWT credential used for schema diagnostics.
+
+  **22f — Guard Simplification Pass:** ✅ Complete.
+  - Completed: readiness guards normalized to `session + activeOrgId`/`orgReady` style across previously flagged areas.
+  - Remaining deltas:
+    - None identified beyond periodic regression checks.
 
   **Output:** Zero dead code, zero backward-compat shims, zero naming confusion. The codebase is clean for any developer (human or AI) working on it next.
 
@@ -309,3 +308,17 @@
 | 17 | 2026-04-17 | `x-org-id` header injection added to `api-client.js` (`authenticatedFetch`, `authenticatedFetchBlob`, `authenticatedFetchText`). `resolveOrgId()` updated to read from `req.headers['x-org-id']` as fallback. | `src/lib/api-client.js`, `api/_shared/org-bff.js`, `src/org/OrgContext.jsx` |
 | 18 | 2026-04-17 | RLS isolation test suite created (`rls-isolation.test.js`) — 6 suites, 14 assertions: row isolation, cross-org INSERT rejection, composite unique constraints, `org_memberships` non-recursion, anonymous access block, non-member org block. | `implementations/database/one-db-refactor/rls-isolation.test.js` |
 | 19 | 2026-04-17 | E2E smoke test script created (`e2e-smoke.test.js`) — 7 suites covering login→list, create+stamp, calendar gen, billing, org isolation, EXPLAIN ANALYZE index checks. Schema squash: `setup-sql.js` reduced by ~3,000 lines; broken DO block at L1368 fixed (missing `END $$`). Docker dry-run: 0 SQL errors. RLS test run: 14/14 ✔. | `implementations/database/one-db-refactor/e2e-smoke.test.js`, `src/lib/setup-sql.js` |
+| 22 | 2026-04-18 | Step 22 closed (all 22a-22f). Deleted dead modules (`org-gate.js`, `supabase-utils.js`). Removed deprecated backend shims (`buildTenantError`, `mapConnectionError`, `resolveTenantClient`) from `org-bff.js`. Cleaned dead `_session`/`_accessToken` params from `OrgContext.jsx`. Updated `tenantClient` → `client` in `setup-sql.js` SQL comments. Documented `org_settings` DROP guidance (N/A for greenfield) and encryption column keep decision. | `api/_shared/org-bff.js`, `src/org/OrgContext.jsx`, `src/lib/setup-sql.js` |
+| 20 | 2026-04-17 | Documentation baseline completed for single-DB architecture: updated `AGENTS.md`, `agents-docs/00-core-rules.md`, `agents-docs/10-runtime-auth-org.md`, `agents-docs/20-frontend-shared-helpers.md`, and `agents-docs/30-backend-shared-helpers.md` to remove BYOD/`resolveTenantClient` guidance and reflect `createSingleClient` + `withOrgScope` + `x-org-id` flow. | `AGENTS.md`, `agents-docs/00-core-rules.md`, `agents-docs/10-runtime-auth-org.md`, `agents-docs/20-frontend-shared-helpers.md`, `agents-docs/30-backend-shared-helpers.md` |
+| 21 | 2026-04-17 | Environment/config cleanup started: migrated encryption env naming to `SECURITY_ENCRYPTION_SECRET` (+ optional `_OLD`), added local templates, and removed legacy key-name references from code/docs. Azure production app setting rollout remains a manual deployment task. | `api/local.settings.json`, `api/local.settings.example.json`, `api/_shared/org-bff.js`, `api/_shared/storage-encryption.js`, `api/_shared/forms-runtime.js`, `api/health/index.js`, `src/runtime/Diagnostics.jsx`, `DEPLOYMENT_VERIFICATION.md` |
+| 22 (wave 1) | 2026-04-17 | Technical-debt sweep started: removed `dataClient`/`setActiveOrg` compat exports from `SupabaseContext`, removed `activeOrgConfig`/`configStatus`/`activeOrgConnection` from `OrgContext`, and updated `SetupAssistant`, `NewSessionModal`, and `Diagnostics` accordingly. | `src/context/SupabaseContext.jsx`, `src/org/OrgContext.jsx`, `src/components/settings/SetupAssistant.jsx`, `src/features/sessions/components/NewSessionModal.jsx`, `src/runtime/Diagnostics.jsx` |
+| 22 (wave 2) | 2026-04-17 | Guard simplification pass: replaced core `activeOrgHasConnection` checks with `activeOrgId`/`orgReady`, reduced `tenantClientReady` coupling in key pages, and simplified employee hub readiness props. | `src/auth/AuthGuard.jsx`, `src/pages/DashboardPage.jsx`, `src/pages/CalendarPage.jsx`, `src/pages/ServicesPage.jsx`, `src/pages/ServiceProfilePage.jsx`, `src/pages/EmployeesPage.jsx`, `src/components/settings/employee-management/InstructorManagementHub.jsx`, `src/pages/Settings.jsx` |
+| 22 (wave 3) | 2026-04-18 | Continued guard cleanup in waiting-list/settings surfaces: removed `activeOrgHasConnection`/`tenantClientReady` from waiting-list workflow and diagnostics readout, and simplified remaining instructor/session manager component readiness guards. | `src/features/waiting-list/pages/WaitingListPage.jsx`, `src/runtime/Diagnostics.jsx`, `src/components/settings/instructor-management/InstructorManagementHub.jsx`, `src/components/settings/SessionFormManager.jsx` |
+| 22 (wave 4) | 2026-04-18 | Finalized frontend guard sweep and removed compatibility exports: `StudentVisibilitySettings`, `EmploymentScopeSettings`, `MyPendingReportsCard`, and `Settings` call-site were simplified, then `activeOrgHasConnection`/`tenantClientReady` were removed from `OrgContext` value. | `src/components/settings/StudentVisibilitySettings.jsx`, `src/components/settings/EmploymentScopeSettings.jsx`, `src/features/sessions/components/MyPendingReportsCard.jsx`, `src/pages/Settings.jsx`, `src/org/OrgContext.jsx` |
+| 22 (wave 5) | 2026-04-18 | Frontend BYOD naming cleanup: replaced `org_settings` permission merge path with `organizations.permissions`, switched org selection status to `setup_completed`, and removed direct `org_settings` read from `SessionFormManager`. | `src/pages/Settings.jsx`, `src/pages/OrgSelection.jsx`, `src/components/settings/SessionFormManager.jsx` |
+| 22 (wave 6) | 2026-04-18 | Backend migration pass: replaced remaining `org_settings` table reads/writes with `organizations` across storage/backup/restore/documents/export/import flows, removed `has_connection` from `user-context`, and cleaned stale org_settings error naming. | `api/org-settings-storage/index.js`, `api/storage-start-grace-period/index.js`, `api/storage-cleanup-expired/index.js`, `api/backup-status/index.js`, `api/backup/index.js`, `api/storage-bulk-download/index.js`, `api/org-logo/index.js`, `api/user-context/index.js`, `api/instructors/index.js`, `api/documents-download/index.js`, `api/students-legacy-import/index.js`, `api/students-export/index.js`, `api/documents/index.js`, `api/restore/index.js` |
+| 22 (wave 7) | 2026-04-18 | Naming/message cleanup pass: runtime config failures now reference canonical key names, missing-key diagnostics recognize new formats, and audit resource labeling is aligned with organization terminology. | `src/runtime/config.js`, `src/runtime/ConfigErrorScreen.jsx`, `src/components/settings/AuditLogViewer.jsx` |
+| 22 (wave 8) | 2026-04-18 | Final runtime naming polish: updated remaining org-runtime key-name error wording to canonical single-DB naming (`supabaseUrl` / `supabaseAnonKey`). | `src/lib/org-runtime.js` |
+| 22 (wave 9) | 2026-04-18 | Canonical payload cleanup: `/api/config` now emits only camelCase runtime keys, removing duplicate snake_case aliases while preserving client fallback parsing for safe transition. | `api/config/index.js` |
+| 22 (wave 10) | 2026-04-18 | Core alias removal: runtime config and Supabase client initialization parsing no longer accept snake_case keys, enforcing canonical camelCase config end-to-end. | `src/runtime/config.js`, `src/lib/supabase-manager.js` |
+| 22 (wave 11) | 2026-04-18 | Final diagnostics/test cleanup: removed snake_case runtime key fallbacks from manual error-screen diagnostics and aligned test fixtures with canonical camelCase keys. | `src/runtime/ConfigErrorScreen.jsx`, `src/runtime/config.test.js` |

@@ -83,7 +83,7 @@ export async function activateConfig(rawConfig, options = {}) {
   const sanitized = sanitizeConfig(rawConfig, options.source || rawConfig?.source || 'manual');
 
   if (!sanitized) {
-    throw new MissingRuntimeConfigError('supabase_url ו-anon_key נדרשים להפעלת החיבור.');
+    throw new MissingRuntimeConfigError('נדרשים ערכי supabaseUrl ו-supabaseAnonKey להפעלת החיבור.');
   }
 
   const normalized = {
@@ -194,8 +194,8 @@ function sanitizeConfig(raw, source = 'api') {
   if (!raw || typeof raw !== 'object') {
     return undefined;
   }
-  const supabaseUrl = raw.supabaseUrl || raw.supabase_url;
-  const supabaseAnonKey = raw.supabaseAnonKey || raw.supabase_anon_key || raw.anon_key;
+  const supabaseUrl = raw.supabaseUrl;
+  const supabaseAnonKey = raw.supabaseAnonKey;
   const trimmedUrl = typeof supabaseUrl === 'string' ? supabaseUrl.trim() : '';
   const trimmedKey = typeof supabaseAnonKey === 'string' ? supabaseAnonKey.trim() : '';
 
@@ -282,7 +282,7 @@ async function ensureJsonResponse(response, orgId, scope, accessToken, endpoint)
     friendlyMessage =
       `הפונקציה ${endpointLabel} החזירה ${response.status} ללא JSON. ודא שסיפקת כותרת x-functions-key תקינה או שה- authLevel של הפונקציה הוא "anonymous".`;
   } else if (response.status === 404) {
-    friendlyMessage = `הפונקציה ${endpointLabel} החזירה 404 ללא JSON. ודא שהנתיב קיים ומחזיר supabase_url ו-anon_key.`;
+    friendlyMessage = `הפונקציה ${endpointLabel} החזירה 404 ללא JSON. ודא שהנתיב קיים ומחזיר supabaseUrl ו-supabaseAnonKey.`;
   }
 
   updateDiagnostics({
@@ -418,7 +418,7 @@ export async function loadRuntimeConfig(options = {}) {
       bodyText: rawBodyText,
     });
     const error = new MissingRuntimeConfigError(
-      `הפונקציה ${endpoint} לא סיפקה supabase_url ו-anon_key.`,
+      `הפונקציה ${endpoint} לא סיפקה supabaseUrl ו-supabaseAnonKey.`,
     );
     error.status = response.status;
     error.body = payload;
@@ -455,8 +455,8 @@ function hasPreloadedConfig(raw) {
   if (!raw || typeof raw !== 'object') {
     return false;
   }
-  const supabaseUrl = raw.supabaseUrl || raw.supabase_url;
-  const supabaseAnonKey = raw.supabaseAnonKey || raw.supabase_anon_key || raw.anon_key;
+  const supabaseUrl = raw.supabaseUrl;
+  const supabaseAnonKey = raw.supabaseAnonKey;
   return Boolean(
     typeof supabaseUrl === 'string' && supabaseUrl.trim() &&
     typeof supabaseAnonKey === 'string' && supabaseAnonKey.trim(),

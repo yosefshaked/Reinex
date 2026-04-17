@@ -364,7 +364,7 @@ function mapWaitingListSuggestionsBlockingReason(code) {
 
 export default function WaitingListPage() {
   const navigate = useNavigate();
-  const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrg, activeOrgId } = useOrg();
   const { session } = useSupabase();
 
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || null);
@@ -409,7 +409,7 @@ export default function WaitingListPage() {
   const openSelectCountRef = useRef(0);
   const isClosingSelectRef = useRef(false);
 
-  const canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection && canManage);
+  const canFetch = Boolean(session && activeOrgId && canManage);
   const canCreateStudent = isAdminRole(membershipRole);
 
   const studentOptionMap = useMemo(() => {
@@ -864,7 +864,7 @@ export default function WaitingListPage() {
   };
 
   const handleAddStudentSubmit = async (formData) => {
-    if (!session || !activeOrgId || !tenantClientReady || !activeOrgHasConnection) {
+    if (!session || !activeOrgId) {
       setCreateError('חיבור לא זמין. ודא את החיבור וניסיון מחדש.');
       return;
     }
@@ -1050,18 +1050,6 @@ export default function WaitingListPage() {
         <Card>
           <CardContent className="p-4 text-sm text-neutral-600">
             בחרו ארגון כדי לצפות ברשימת ההמתנה.
-          </CardContent>
-        </Card>
-      </PageLayout>
-    );
-  }
-
-  if (!activeOrgHasConnection) {
-    return (
-      <PageLayout title="רשימת המתנה">
-        <Card>
-          <CardContent className="p-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md">
-            דרוש חיבור מאומת למסד הנתונים של הארגון כדי לנהל את רשימת ההמתנה.
           </CardContent>
         </Card>
       </PageLayout>

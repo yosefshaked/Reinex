@@ -100,13 +100,13 @@ function OrganizationList({ organizations, onSelect }) {
                   <p className="text-xs text-slate-500 mt-1">חבר צוות</p>
                 )}
               </div>
-              {organization.has_connection ? (
+              {organization.setup_completed ? (
                 <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
-                  חיבור פעיל
+                  מוכן
                 </Badge>
               ) : (
                 <Badge variant="outline" className="text-amber-700 border-amber-200 bg-amber-50">
-                  נדרש חיבור Supabase
+                  נדרשת השלמת הגדרה
                 </Badge>
               )}
             </div>

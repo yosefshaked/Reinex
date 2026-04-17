@@ -91,9 +91,9 @@ export default async function handler(context, req) {
 
     // Get storage profile
     const { data: orgSettings, error: orgSettingsError } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .select('storage_profile')
-      .eq('org_id', org_id)
+      .eq('id', org_id)
       .single();
 
     if (orgSettingsError || !orgSettings) {
@@ -101,7 +101,7 @@ export default async function handler(context, req) {
         error: orgSettingsError?.message,
         org_id
       });
-      return respond(context, 424, { error: 'org_settings_not_found' });
+      return respond(context, 424, { error: 'organization_settings_not_found' });
     }
 
     // Fetch document

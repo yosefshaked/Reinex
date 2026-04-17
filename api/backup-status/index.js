@@ -99,9 +99,9 @@ export default async function (context, req) {
 
   // Load history and permissions from control DB
   const { data: orgSettings, error } = await supabase
-    .from('org_settings')
+    .from('organizations')
     .select('permissions, backup_history')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .maybeSingle();
 
   if (error) {

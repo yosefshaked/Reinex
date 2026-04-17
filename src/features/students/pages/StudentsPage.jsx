@@ -33,7 +33,7 @@ import { formatStudentName } from '@/features/students/utils/name-utils.js';
 import { toAgorot } from '@/lib/currency.js';
 
 export default function StudentsPage() {
-  const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrg, activeOrgId } = useOrg();
   const { session, loading: supabaseLoading } = useSupabase();
   const navigate = useNavigate();
 
@@ -77,9 +77,7 @@ export default function StudentsPage() {
 
   const canFetch = Boolean(
     session &&
-      activeOrgId &&
-      tenantClientReady &&
-      activeOrgHasConnection,
+      activeOrgId,
   );
 
   // Instructors need to load visibility permission
@@ -383,7 +381,7 @@ export default function StudentsPage() {
   };
 
   const handleAddSubmit = async (formData) => {
-    if (!session || !activeOrgId || !tenantClientReady || !activeOrgHasConnection) {
+    if (!session || !activeOrgId) {
       setCreateError('חיבור לא זמין. ודא את החיבור וניסיון מחדש.');
       return;
     }
@@ -482,7 +480,7 @@ export default function StudentsPage() {
   };
 
   const handleEditSubmit = async (payload) => {
-    if (!payload?.id || !session || !activeOrgId || !tenantClientReady || !activeOrgHasConnection) {
+    if (!payload?.id || !session || !activeOrgId) {
       setUpdateError('חיבור לא זמין. ודא את החיבור וניסיון מחדש.');
       return;
     }
@@ -568,10 +566,6 @@ export default function StudentsPage() {
       ) : !activeOrg ? (
         <div className="rounded-xl bg-neutral-50 p-lg text-center text-neutral-600" role="status">
           בחרו ארגון כדי להציג את רשימת התלמידים.
-        </div>
-      ) : !activeOrgHasConnection ? (
-        <div className="rounded-xl bg-amber-50 p-lg text-center text-amber-800" role="status">
-          דרוש חיבור מאומת למסד הנתונים של הארגון כדי להציג את רשימת התלמידים.
         </div>
       ) : isError ? (
         <div className="rounded-xl bg-red-50 p-lg text-center text-red-700" role="alert">

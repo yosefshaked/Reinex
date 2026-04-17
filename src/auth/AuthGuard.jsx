@@ -16,7 +16,7 @@ function LoadingScreen() {
 
 export default function AuthGuard() {
   const { status: authStatus, session } = useAuth();
-  const { status: orgStatus, activeOrgHasConnection } = useOrg();
+  const { status: orgStatus, activeOrgId } = useOrg();
   const location = useLocation();
 
   if (authStatus === 'loading') {
@@ -52,7 +52,7 @@ export default function AuthGuard() {
     return <Outlet />;
   }
 
-  if (!requiresOrgCreation && !requiresOrgSelection && !activeOrgHasConnection && location.pathname !== '/Settings') {
+  if (!requiresOrgCreation && !requiresOrgSelection && !activeOrgId && location.pathname !== '/Settings') {
     return <Navigate to="/Settings" replace />;
   }
 

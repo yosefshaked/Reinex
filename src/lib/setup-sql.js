@@ -3767,7 +3767,7 @@ GRANT EXECUTE ON FUNCTION public.schema_execute_statements_v1(text[], boolean, t
 -- back everything — no orphaned ledger entries possible.
 --
 -- Usage (JS):
---   const { data, error } = await tenantClient.rpc(
+--   const { data, error } = await client.rpc(
 --     'create_commitment_transfer_atomic', { p_source_commitment_id, ... }
 --   );
 -- Returns: { target_commitment_id, source_debit_id, target_credit_id }
@@ -4058,7 +4058,7 @@ GRANT EXECUTE ON FUNCTION public.ensure_hmo_authorization_and_link_commitment(
 -- financial integrity. This RPC performs both writes atomically.
 --
 -- Usage (JS):
---   const { data, error } = await tenantClient.rpc(
+--   const { data, error } = await client.rpc(
 --     'create_commitment_and_ledger_entry', { p_student_id, ... }
 --   );
 -- Returns: { commitment_id, ledger_entry_id }

@@ -642,9 +642,9 @@ export default async function (context, req) {
   if (permissions?.can_use_custom_logo_on_exports) {
     try {
       const { data, error } = await supabase
-        .from('org_settings')
+        .from('organizations')
         .select('logo_url')
-        .eq('org_id', orgId)
+        .eq('id', orgId)
         .maybeSingle();
 
       if (!error && data?.logo_url) {

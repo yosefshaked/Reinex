@@ -104,7 +104,7 @@ function mapSendFormErrorMessage(code) {
 
 export default function SendFormDialog({ open, onOpenChange, student = null, clientProfile = null, onSent }) {
   const { session } = useSupabase();
-  const { activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrgId } = useOrg();
   const subject = clientProfile || student;
 
   const [templates, setTemplates] = useState([]);
@@ -117,7 +117,7 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
   const [migrating, setMigrating] = useState(false);
   const [result, setResult] = useState(null);
 
-  const canFetch = Boolean(open && session && activeOrgId && activeOrgHasConnection && tenantClientReady);
+  const canFetch = Boolean(open && session && activeOrgId);
 
   const loadTemplates = useCallback(async () => {
     if (!canFetch) return;

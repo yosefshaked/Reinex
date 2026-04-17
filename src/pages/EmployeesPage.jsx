@@ -10,14 +10,12 @@ import { useOrg } from '@/org/OrgContext.jsx'
  */
 export default function EmployeesPage() {
   const { session } = useAuth()
-  const { activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg()
+  const { activeOrgId } = useOrg()
 
   return (
     <InstructorManagementHub
       session={session}
       orgId={activeOrgId}
-      activeOrgHasConnection={activeOrgHasConnection}
-      tenantClientReady={tenantClientReady}
     />
   )
 }

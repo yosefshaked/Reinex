@@ -14,19 +14,19 @@ const VIEW_TITLES = {
   documents: 'מרכז מסמכים',
 };
 
-export default function InstructorManagementHub({ session, orgId, activeOrgHasConnection, tenantClientReady }) {
+export default function InstructorManagementHub({ session, orgId }) {
   const [currentView, setCurrentView] = useState('menu');
 
-  const canLoad = Boolean(session && orgId && activeOrgHasConnection && tenantClientReady);
+  const canLoad = Boolean(session && orgId);
 
-  if (!activeOrgHasConnection || !tenantClientReady) {
+  if (!orgId) {
     return (
       <Card className="w-full border-0 shadow-lg bg-white/80">
         <CardHeader>
           <CardTitle>ניהול עובדים</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-slate-600">נדרש חיבור Supabase פעיל כדי לנהל עובדים.</p>
+          <p className="text-sm text-slate-600">בחרו ארגון כדי לנהל עובדים.</p>
         </CardContent>
       </Card>
     );

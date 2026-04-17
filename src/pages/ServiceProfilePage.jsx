@@ -28,14 +28,14 @@ function getPaymentModelLabel(paymentModel) {
 export default function ServiceProfilePage() {
   const { id } = useParams();
   const serviceId = typeof id === 'string' ? id : '';
-  const { activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrgId } = useOrg();
   const { session } = useSupabase();
 
   const [serviceState, setServiceState] = useState(REQUEST_STATE.idle);
   const [serviceError, setServiceError] = useState('');
   const [service, setService] = useState(null);
 
-  const canFetch = Boolean(session && activeOrgId && tenantClientReady && activeOrgHasConnection);
+  const canFetch = Boolean(session && activeOrgId);
 
   const loadService = useCallback(async () => {
     if (!canFetch || !serviceId) {
@@ -98,18 +98,6 @@ export default function ServiceProfilePage() {
         <Card>
           <CardContent className="p-4 text-sm text-neutral-600">
             בחרו ארגון כדי להציג שירות.
-          </CardContent>
-        </Card>
-      </PageLayout>
-    );
-  }
-
-  if (!activeOrgHasConnection) {
-    return (
-      <PageLayout title="שירות" description="פרופיל שירות">
-        <Card>
-          <CardContent className="p-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md">
-            דרוש חיבור מאומת למסד הנתונים של הארגון כדי להציג שירות.
           </CardContent>
         </Card>
       </PageLayout>

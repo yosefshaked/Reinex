@@ -42,7 +42,7 @@ export default function StudentDetailPage() {
   const activeTab = tabParam || 'overview';
 
   const { loading: supabaseLoading, session } = useSupabase();
-  const { activeOrg, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrg } = useOrg();
   // Student data state
   const [studentState, setStudentState] = useState(REQUEST_STATE.idle);
   const [student, setStudent] = useState(null);
@@ -60,9 +60,8 @@ export default function StudentDetailPage() {
 
   const canFetch = Boolean(
     studentId &&
+    session &&
     activeOrgId &&
-    activeOrgHasConnection &&
-    tenantClientReady &&
     !supabaseLoading
   );
 
@@ -186,8 +185,12 @@ export default function StudentDetailPage() {
     );
   }
 
-  if (!activeOrg || !activeOrgHasConnection) {
-    return <div className="text-sm text-amber-700">דרוש חיבור מאומת לארגון.</div>;
+  if (!session) {
+    return <div className="text-sm text-amber-700">נדרשת התחברות כדי לצפות בפרטי תלמיד.</div>;
+  }
+
+  if (!activeOrg) {
+    return <div className="text-sm text-amber-700">דרוש ארגון פעיל להצגת פרטי תלמיד.</div>;
   }
 
   // Error state

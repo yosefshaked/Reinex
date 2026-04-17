@@ -54,7 +54,7 @@ function buildGreeting(instructorName, profileName, authName, email) {
 
 export default function DashboardPage() {
   const { user, session } = useAuth()
-  const { activeOrgId, activeOrgHasConnection, tenantClientReady, activeOrg } = useOrg()
+  const { activeOrgId, activeOrg } = useOrg()
   const { authClient } = useSupabase()
   const navigate = useNavigate()
   const [instructorName, setInstructorName] = useState(null)
@@ -70,7 +70,7 @@ export default function DashboardPage() {
   const canManageAll = membershipRole === 'admin' || membershipRole === 'owner' || membershipRole === 'office'
 
   const { instructors } = useInstructors({
-    enabled: Boolean(user?.id && activeOrgId && tenantClientReady && activeOrgHasConnection && session),
+    enabled: Boolean(user?.id && activeOrgId && session),
     orgId: activeOrgId,
     session,
   })
@@ -125,7 +125,7 @@ export default function DashboardPage() {
   }, [user?.id, authClient])
 
   useEffect(() => {
-    if (!canManageAll || !activeOrgId || !tenantClientReady || !activeOrgHasConnection) {
+    if (!canManageAll || !activeOrgId || !session) {
       setDashboardTasks([])
       return
     }
@@ -160,7 +160,7 @@ export default function DashboardPage() {
     return () => {
       isMounted = false
     }
-  }, [activeOrgHasConnection, activeOrgId, canManageAll, session, tenantClientReady])
+  }, [activeOrgId, canManageAll, session])
 
   async function handleResolveTask(taskId) {
     if (!taskId || !activeOrgId) return
@@ -187,7 +187,7 @@ export default function DashboardPage() {
       return null
     }
 
-    if (!tenantClientReady || !activeOrgHasConnection) {
+    if (!activeOrgId || !session) {
       return null
     }
 
@@ -274,12 +274,12 @@ export default function DashboardPage() {
           {renderDashboardTasks()}
 
           {/* Weekly compliance - mobile */}
-          {tenantClientReady && activeOrgHasConnection ? (
+          {activeOrgId && session ? (
           <ComplianceHeatmap />
           ) : (
             <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
               <p className="text-sm text-muted-foreground">
-                לוח מעקב התיעודים השבועי יהיה זמין לאחר יצירת חיבור למסד הנתונים של הארגון.
+                לוח מעקב התיעודים השבועי יהיה זמין לאחר בחירת ארגון והתחברות.
               </p>
             </Card>
           )}
@@ -300,12 +300,12 @@ export default function DashboardPage() {
 
           {renderDashboardTasks()}
 
-          {tenantClientReady && activeOrgHasConnection ? (
+          {activeOrgId && session ? (
           <ComplianceHeatmap />
           ) : (
             <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
               <p className="text-sm text-muted-foreground">
-                לוח מעקב התיעודים השבועי יהיה זמין לאחר יצירת חיבור למסד הנתונים של הארגון.
+                לוח מעקב התיעודים השבועי יהיה זמין לאחר בחירת ארגון והתחברות.
               </p>
             </Card>
           )}

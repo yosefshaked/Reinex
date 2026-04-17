@@ -12,7 +12,6 @@ import { toast } from 'sonner';
 import QuestionTypePreview from './QuestionTypePreview.jsx';
 import { fetchSessionFormConfig } from '@/features/settings/api/index.js';
 import { upsertSetting } from '@/features/settings/api/settings.js';
-import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 
 const REQUEST_STATE = Object.freeze({
@@ -401,8 +400,6 @@ function questionLabel(question, index) {
 export default function SessionFormManager({
   session,
   orgId,
-  activeOrgHasConnection,
-  tenantClientReady,
 }) {
   const [questions, setQuestions] = useState([]);
   const [expanded, setExpanded] = useState({});
@@ -415,11 +412,10 @@ export default function SessionFormManager({
   const lastSavedPayloadRef = useRef([]);
   const [preanswersMap, setPreanswersMap] = useState({}); // { [questionId]: string[] }
   const lastSavedPreanswersRef = useRef({});
-  const { authClient } = useSupabase();
-  const { activeOrgId } = useOrg();
+  const { activeOrg } = useOrg();
   const [cap, setCap] = useState(50);
 
-  const canLoad = Boolean(session && orgId && activeOrgHasConnection && tenantClientReady);
+  const canLoad = Boolean(session && orgId);
 
   const currentSignature = useMemo(() => {
     const payload = buildPayloadFromQuestions(questions);
@@ -480,27 +476,15 @@ export default function SessionFormManager({
     }
   }, [applyLoadedQuestions, canLoad, orgId, session]);
 
-  // Load cap from control DB org permissions (fallback 50)
+  // Load cap from active org permissions (fallback 50)
   useEffect(() => {
-    const run = async () => {
-      try {
-        if (!authClient || !activeOrgId) return;
-        const { data: orgSettings, error } = await authClient
-          .from('org_settings')
-          .select('permissions')
-          .eq('org_id', activeOrgId)
-          .single();
-        if (error) return;
-        const perms = orgSettings?.permissions || {};
-        const capRaw = perms.session_form_preanswers_cap;
-        const parsed = Number.parseInt(String(capRaw ?? '50'), 10);
-        setCap(Number.isFinite(parsed) && parsed > 0 ? parsed : 50);
-      } catch {
-        setCap(50);
-      }
-    };
-    run();
-  }, [authClient, activeOrgId]);
+    const perms = activeOrg?.permissions && typeof activeOrg.permissions === 'object'
+      ? activeOrg.permissions
+      : {};
+    const capRaw = perms.session_form_preanswers_cap;
+    const parsed = Number.parseInt(String(capRaw ?? '50'), 10);
+    setCap(Number.isFinite(parsed) && parsed > 0 ? parsed : 50);
+  }, [activeOrg]);
 
   useEffect(() => {
     if (!canLoad) {
@@ -734,7 +718,7 @@ export default function SessionFormManager({
     }
   };
 
-  if (!activeOrgHasConnection || !tenantClientReady) {
+  if (!orgId) {
     return (
       <Card className="w-full border-0 shadow-lg bg-white/80">
         <CardHeader>
@@ -742,7 +726,7 @@ export default function SessionFormManager({
         </CardHeader>
         <CardContent>
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-sm text-xs text-amber-800 sm:p-md sm:text-sm" role="status">
-            חברו את הארגון ל-Supabase באמצעות האשף לפני ניהול שאלות המפגש.
+            בחרו ארגון לפני ניהול שאלות המפגש.
           </div>
         </CardContent>
       </Card>

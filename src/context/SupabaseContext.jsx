@@ -1,5 +1,5 @@
 // src/context/SupabaseContext.jsx
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { getAuthClient } from '../lib/supabase-manager.js';
 import { onConfigActivated, onConfigCleared } from '../runtime/config.js';
 import { useRuntimeConfig } from '../runtime/RuntimeConfigContext.jsx';
@@ -11,10 +11,6 @@ export const SupabaseProvider = ({ children }) => {
   const [authClient, setAuthClient] = useState(null);
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  // No-op setter kept for backward compat — OrgContext calls setSupabaseActiveOrg
-  // but the merged-DB model no longer needs a separate data client per org.
-  const setActiveOrg = useCallback(() => {}, []);
 
   const normalizedConfig = useMemo(() => {
     if (!runtimeConfig?.supabaseUrl || !runtimeConfig?.supabaseAnonKey) {
@@ -138,13 +134,11 @@ export const SupabaseProvider = ({ children }) => {
 
   const value = useMemo(() => ({
     authClient,
-    dataClient: authClient,
     session,
     user: session?.user ?? null,
     activeOrg: null,
-    setActiveOrg,
     loading: loading || !authClient,
-  }), [authClient, session, setActiveOrg, loading]);
+  }), [authClient, session, loading]);
 
   return (
     <SupabaseContext.Provider value={value}>

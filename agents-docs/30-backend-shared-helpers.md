@@ -23,7 +23,7 @@
 ## Shared helpers to reuse
 - `resolveBearerAuthorization`, `json`
 - `readEnv`, `respond`, `parseRequestBody`, `normalizeString`, `normalizeNullableId`
-- `ensureMembership`, `isAdminRole`, `isAdminOrOffice`, `resolveOrgId`, `resolveTenantClient`
+- `ensureMembership`, `isAdminRole`, `isAdminOrOffice`, `resolveOrgId`, `createSingleClient`, `withOrgScope`
 - `readSupabaseAdminConfig`, `createSupabaseAdminClient`
 - `parseJsonBodyWithLimit`, `validateSessionWrite`, instructor validators in [`../api/_shared/validation.js`](../api/_shared/validation.js)
 - `logAuditEvent`, `logTenantAuditEvent`
@@ -35,14 +35,13 @@
 ## Known patterns / do not reinvent
 - Standard endpoint flow is:
   - `readEnv(context)`
-  - `readSupabaseAdminConfig(...)`
-  - `createSupabaseAdminClient(...)`
+  - `createSingleClient(env)`
   - `resolveBearerAuthorization(req)`
   - `supabase.auth.getUser(token)`
   - `ensureMembership(...)`
-  - `resolveTenantClient(...)`
+  - `withOrgScope(...)` or explicit `.eq('org_id', orgId)`
   - `respond(context, ...)`
 - Always set `context.res` through `respond`.
 - Use `resolveOrgId` or `parseRequestBody` instead of ad hoc request parsing.
 - Use body-size-aware parsing for write endpoints.
-- Control DB auth/membership checks happen on the admin client; tenant reads/writes start only after `resolveTenantClient`.
+- Auth/membership checks happen first; tenant reads/writes must always be org-scoped in the shared single DB.
