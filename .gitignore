@@ -28,4 +28,4 @@ settings.json
 .env
 
 /supabase/.temp
-api/local.settings.json
+/api/local.settings.json
