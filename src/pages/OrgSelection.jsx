@@ -23,26 +23,43 @@ function LoadingState() {
   );
 }
 
-function EmptyState({ onCreate }) {
+function EmptyState({ canCreate, onCreate }) {
   return (
     <Card className="max-w-2xl w-full">
       <CardHeader className="space-y-2 text-end">
         <CardTitle className="text-2xl font-bold text-slate-900">ברוך הבא!</CardTitle>
-        <p className="text-slate-600 text-sm">
-          עדיין אין ארגון המשויך לחשבון שלך. צור ארגון חדש או בקש ממנהל להזמין אותך.
-        </p>
+        {canCreate ? (
+          <p className="text-slate-600 text-sm">
+            עדיין אין ארגון המשויך לחשבון שלך. צור ארגון חדש או בקש ממנהל להזמין אותך.
+          </p>
+        ) : (
+          <p className="text-slate-600 text-sm">
+            עדיין אין ארגון המשויך לחשבון שלך ואין הזמנה ממתינה. בקש ממנהל ארגון לשלוח לך הזמנה.
+          </p>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
-        <Button onClick={onCreate} className="w-full" size="lg">
-          <Building2 className="w-4 h-4 ms-2" />
-          צור ארגון חדש
-        </Button>
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3 text-sm text-blue-900" role="status">
-          <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
-          <p>
-            לאחר יצירת הארגון ניתן יהיה להגדיר את חיבור ה-Supabase ולצרף מנהלים נוספים מתוך מסך ההגדרות.
-          </p>
-        </div>
+        {canCreate ? (
+          <>
+            <Button onClick={onCreate} className="w-full" size="lg">
+              <Building2 className="w-4 h-4 ms-2" />
+              צור ארגון חדש
+            </Button>
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3 text-sm text-blue-900" role="status">
+              <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
+              <p>
+                לאחר יצירת הארגון ניתן יהיה להגדיר את חיבור ה-Supabase ולצרף מנהלים נוספים מתוך מסך ההגדרות.
+              </p>
+            </div>
+          </>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3 text-sm text-amber-900" role="status">
+            <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
+            <p>
+              אין לך הרשאה ליצור ארגון חדש. פנה למנהל ארגון ובקש הזמנה לחשבון שלך דרך מסך הניהול.
+            </p>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -184,7 +201,14 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
 }
 
 export default function OrgSelection() {
-  const { organizations, incomingInvites, status, selectOrg, createOrganization } = useOrg();
+  const {
+    organizations,
+    incomingInvites,
+    status,
+    selectOrg,
+    createOrganization,
+    canCreateOrganizations,
+  } = useOrg();
   const { signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -254,16 +278,16 @@ export default function OrgSelection() {
         <InviteList invites={incomingInvites} onAccept={handleAcceptInvite} />
         <OrganizationList organizations={organizations} onSelect={handleSelect} />
         {!hasOrganizations && !hasInvites ? (
-          <EmptyState onCreate={() => setIsCreateOpen(true)} />
-        ) : (
+          <EmptyState canCreate={canCreateOrganizations} onCreate={() => setIsCreateOpen(true)} />
+        ) : canCreateOrganizations ? (
           <Button variant="outline" onClick={() => setIsCreateOpen(true)} className="gap-2">
             <Building2 className="w-4 h-4" />
             צור ארגון חדש
           </Button>
-        )}
+        ) : null}
       </div>
       <CreateOrgDialog
-        open={isCreateOpen}
+        open={isCreateOpen && canCreateOrganizations}
         onClose={() => setIsCreateOpen(false)}
         onCreate={handleCreate}
       />

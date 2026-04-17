@@ -209,6 +209,8 @@ export function OrgProvider({ children }) {
   const [activeOrgId, setActiveOrgId] = useState(null);
   const [activeOrg, setActiveOrg] = useState(null);
   const [incomingInvites, setIncomingInvites] = useState([]);
+  const [canCreateOrganizations, setCanCreateOrganizations] = useState(false);
+  const [maxOwnedOrganizations, setMaxOwnedOrganizations] = useState(null);
   const [orgMembers, setOrgMembers] = useState([]);
   const [orgInvites, setOrgInvites] = useState([]);
   const [error, setError] = useState(null);
@@ -234,6 +236,8 @@ export function OrgProvider({ children }) {
     setActiveOrgId(null);
     setActiveOrg(null);
     setIncomingInvites([]);
+    setCanCreateOrganizations(false);
+    setMaxOwnedOrganizations(null);
     setOrgMembers([]);
     setOrgInvites([]);
     setError(null);
@@ -269,8 +273,15 @@ export function OrgProvider({ children }) {
         ? payload.incomingInvites.filter(Boolean)
         : [];
 
+      const canCreate = Boolean(payload?.canCreateOrganizations);
+      const maxOwned = Number.isInteger(payload?.maxOwnedOrganizations)
+        ? payload.maxOwnedOrganizations
+        : null;
+
       setOrganizations(organizationsPayload);
       setIncomingInvites(invitesPayload);
+      setCanCreateOrganizations(canCreate);
+      setMaxOwnedOrganizations(maxOwned);
 
       return { organizations: organizationsPayload, invites: invitesPayload };
     } catch (loadError) {
@@ -278,6 +289,8 @@ export function OrgProvider({ children }) {
       setError(loadError);
       setOrganizations([]);
       setIncomingInvites([]);
+      setCanCreateOrganizations(false);
+      setMaxOwnedOrganizations(null);
       throw loadError;
     } finally {
       loadingRef.current = false;
@@ -788,6 +801,8 @@ export function OrgProvider({ children }) {
       activeOrg,
       activeOrgId,
       incomingInvites,
+      canCreateOrganizations,
+      maxOwnedOrganizations,
       members: orgMembers,
       pendingInvites: orgInvites,
       selectOrg,
@@ -813,6 +828,8 @@ export function OrgProvider({ children }) {
       activeOrg,
       activeOrgId,
       incomingInvites,
+      canCreateOrganizations,
+      maxOwnedOrganizations,
       orgMembers,
       orgInvites,
       selectOrg,

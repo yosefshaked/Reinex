@@ -142,10 +142,37 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   phone text NULL,
   locale text NOT NULL DEFAULT 'he',
   is_system_admin boolean NOT NULL DEFAULT false,
+  can_create_organizations boolean NOT NULL DEFAULT false,
+  max_owned_organizations integer NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL
+  metadata jsonb NULL,
+  CONSTRAINT profiles_max_owned_organizations_non_negative_check CHECK (
+    max_owned_organizations IS NULL OR max_owned_organizations >= 0
+  )
 );
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS can_create_organizations boolean NOT NULL DEFAULT false;
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS max_owned_organizations integer NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'profiles_max_owned_organizations_non_negative_check'
+      AND conrelid = 'public.profiles'::regclass
+  ) THEN
+    ALTER TABLE public.profiles
+      ADD CONSTRAINT profiles_max_owned_organizations_non_negative_check
+      CHECK (max_owned_organizations IS NULL OR max_owned_organizations >= 0);
+  END IF;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
 
 
 -- -----------------------------------------------------------------
@@ -259,6 +286,94 @@ CREATE INDEX IF NOT EXISTS audit_log_expiry_idx
 
 CREATE INDEX IF NOT EXISTS audit_log_event_type_idx
   ON public.audit_log (event_type, created_at DESC);
+
+-- -----------------------------------------------------------------
+-- Control RPCs
+-- -----------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.create_organization(p_name text)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_org_id uuid;
+  v_base_slug text;
+  v_slug text;
+  v_try int := 0;
+  v_is_system_admin boolean := false;
+  v_can_create_organizations boolean := false;
+  v_max_owned_organizations integer := NULL;
+  v_owned_organizations integer := 0;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'unauthenticated';
+  END IF;
+
+  IF p_name IS NULL OR btrim(p_name) = '' THEN
+    RAISE EXCEPTION 'invalid_organization_name';
+  END IF;
+
+  SELECT
+    p.is_system_admin,
+    COALESCE(p.can_create_organizations, false),
+    p.max_owned_organizations
+  INTO
+    v_is_system_admin,
+    v_can_create_organizations,
+    v_max_owned_organizations
+  FROM public.profiles p
+  WHERE p.id = auth.uid();
+
+  IF NOT COALESCE(v_is_system_admin, false) AND NOT COALESCE(v_can_create_organizations, false) THEN
+    RAISE EXCEPTION 'not_authorized_to_create_organization';
+  END IF;
+
+  IF v_max_owned_organizations IS NOT NULL THEN
+    SELECT COUNT(*)::integer
+      INTO v_owned_organizations
+    FROM public.org_memberships om
+    WHERE om.user_id = auth.uid()
+      AND om.role = 'owner'
+      AND om.is_active = true;
+
+    IF v_owned_organizations >= v_max_owned_organizations THEN
+      RAISE EXCEPTION 'organization_quota_exceeded';
+    END IF;
+  END IF;
+
+  v_base_slug := regexp_replace(lower(btrim(p_name)), '[^a-z0-9]+', '-', 'g');
+  v_base_slug := regexp_replace(v_base_slug, '(^-+|-+$)', '', 'g');
+  IF v_base_slug = '' THEN
+    v_base_slug := 'org';
+  END IF;
+
+  v_slug := v_base_slug;
+
+  LOOP
+    BEGIN
+      INSERT INTO public.organizations (name, slug, created_by)
+      VALUES (btrim(p_name), v_slug, auth.uid())
+      RETURNING id INTO v_org_id;
+      EXIT;
+    EXCEPTION
+      WHEN unique_violation THEN
+        v_try := v_try + 1;
+        IF v_try > 10 THEN
+          RAISE;
+        END IF;
+        v_slug := left(v_base_slug, 50) || '-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 8);
+    END;
+  END LOOP;
+
+  INSERT INTO public.org_memberships (org_id, user_id, role)
+  VALUES (v_org_id, auth.uid(), 'owner')
+  ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+
+  RETURN v_org_id;
+END;
+$$;
 
 -- =================================================================
 -- Tenant Public Domain Tables (Product-Agnostic)
@@ -501,9 +616,11 @@ CREATE TABLE IF NOT EXISTS public."RateHistory" (
   "metadata" jsonb,
   CONSTRAINT "RateHistory_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "RateHistory_employee_id_fkey" FOREIGN KEY ("employee_id") REFERENCES public."Employees"("id"),
-  CONSTRAINT "RateHistory_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES public."Services"("id"),
-  CONSTRAINT RateHistory_employee_service_effective_date_key UNIQUE USING INDEX "RateHistory_employee_service_effective_date_key"
+  CONSTRAINT "RateHistory_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES public."Services"("id")
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS "RateHistory_employee_service_effective_date_key"
+  ON public."RateHistory" ("org_id", "employee_id", "service_id", "effective_date");
 
 
 
@@ -1497,9 +1614,11 @@ CREATE TABLE IF NOT EXISTS public.lesson_earnings (
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
   CONSTRAINT lesson_earnings_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public."Employees"(id),
-  CONSTRAINT lesson_earnings_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id),
-  CONSTRAINT lesson_earnings_employee_lesson_unique UNIQUE USING INDEX lesson_earnings_employee_lesson_unique
+  CONSTRAINT lesson_earnings_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS lesson_earnings_employee_lesson_unique
+  ON public.lesson_earnings (org_id, employee_id, lesson_instance_id);
 
 
 CREATE INDEX IF NOT EXISTS lesson_earnings_employee_id_idx
@@ -1579,10 +1698,12 @@ CREATE TABLE IF NOT EXISTS public.form_shared_block_links (
   schema_scope text NOT NULL DEFAULT 'draft',
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT form_shared_block_links_schema_scope_check CHECK (schema_scope IN ('draft', 'published')),
-  CONSTRAINT form_shared_block_links_unique_form_item_scope UNIQUE USING INDEX form_shared_block_links_unique_form_item_scope,
   CONSTRAINT form_shared_block_links_form_id_fkey FOREIGN KEY (form_id) REFERENCES public.forms(id) ON DELETE CASCADE,
   CONSTRAINT form_shared_block_links_shared_block_id_fkey FOREIGN KEY (shared_block_id) REFERENCES public.shared_form_blocks(id) ON DELETE CASCADE
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS form_shared_block_links_unique_form_item_scope
+  ON public.form_shared_block_links (org_id, form_id, section_id, item_id, schema_scope);
 
 
 UPDATE public.form_shared_block_links
@@ -3092,6 +3213,8 @@ CREATE POLICY "profiles_no_self_admin_upgrade"
   USING (id = auth.uid())
   WITH CHECK (
     is_system_admin = (SELECT p.is_system_admin FROM public.profiles p WHERE p.id = auth.uid())
+    AND can_create_organizations = (SELECT p.can_create_organizations FROM public.profiles p WHERE p.id = auth.uid())
+    AND max_owned_organizations IS NOT DISTINCT FROM (SELECT p.max_owned_organizations FROM public.profiles p WHERE p.id = auth.uid())
   );
 
 DROP POLICY IF EXISTS "profiles_delete" ON public.profiles;
@@ -3314,6 +3437,7 @@ END $$;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT EXECUTE ON FUNCTION public.get_active_org_id() TO authenticated, app_user;
 GRANT EXECUTE ON FUNCTION public.get_my_org_ids() TO authenticated, app_user;
+GRANT EXECUTE ON FUNCTION public.create_organization(text) TO authenticated, app_user;
 GRANT EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, uuid, integer, text) TO app_user;
 GRANT EXECUTE ON FUNCTION public.complete_lesson_instance_with_participants(uuid, uuid, uuid, integer, text) TO app_user;
 GRANT EXECUTE ON FUNCTION public.cancel_selected_scheduled_participants_and_reconcile_instance(uuid, uuid, uuid[], uuid) TO app_user;
@@ -4553,6 +4677,24 @@ GRANT EXECUTE ON FUNCTION public.batch_sync_lesson_ledger_entries(
 --   - adds HMO invoice metadata tables if missing
 -- -----------------------------------------------------------------
 
+CREATE TABLE IF NOT EXISTS public.ledger_accounts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
+  client_profile_id uuid NOT NULL REFERENCES public.client_profiles(id) ON DELETE CASCADE,
+  student_id uuid NULL REFERENCES public.students(id) ON DELETE SET NULL,
+  service_id uuid NULL REFERENCES public."Services"(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS ledger_accounts_client_profile_idx
+  ON public.ledger_accounts (org_id, client_profile_id);
+
+CREATE INDEX IF NOT EXISTS ledger_accounts_student_idx
+  ON public.ledger_accounts (org_id, student_id)
+  WHERE student_id IS NOT NULL;
+
 
 
 CREATE TABLE IF NOT EXISTS public.hmo_invoice_batches (
@@ -4591,6 +4733,7 @@ CREATE INDEX IF NOT EXISTS hmo_invoice_batch_items_batch_idx
   ON public.hmo_invoice_batch_items (org_id, batch_id);
 
 -- RLS for billing ledger tables
+ALTER TABLE public.ledger_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ledger_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hmo_invoice_batches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hmo_invoice_batch_items ENABLE ROW LEVEL SECURITY;
@@ -4603,6 +4746,7 @@ DECLARE
   pol text;
 BEGIN
   FOREACH tbl IN ARRAY ARRAY[
+    'ledger_accounts',
     'ledger_transactions',
     'hmo_invoice_batches',
     'hmo_invoice_batch_items'

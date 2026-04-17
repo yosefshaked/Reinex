@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import process from 'node:process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SETUP_SQL_SCRIPT } from '../src/lib/setup-sql.js';
 
 const sql = String(SETUP_SQL_SCRIPT || '');
@@ -17,9 +20,15 @@ const RULES = {
   ORG_ID_COLUMN: 'SQL010',
   GET_ACTIVE_ORG_ID: 'SQL011',
   FK_REFERENCE_ORDER: 'SQL012',
+  CREATE_TABLE_UNIQUE_USING_INDEX: 'SQL013',
+  TABLE_OPERATION_ORDER: 'SQL014',
+  FRONTEND_RPC_COVERAGE: 'SQL015',
   BROAD_EXCEPTION_SWALLOW: 'SQL101',
   DESTRUCTIVE_DROP_TABLE: 'SQL102',
 };
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(scriptDir, '..');
 
 function parseArgs(argv) {
   const options = {
@@ -311,6 +320,161 @@ function validateReferenceOrder() {
   }
 }
 
+// SQL013: PostgreSQL does not allow binding an existing index as a table
+// constraint within CREATE TABLE. UNIQUE USING INDEX is valid via ALTER TABLE,
+// but should never appear inside a CREATE TABLE definition block.
+function validateCreateTableUniqueUsingIndex() {
+  const createTableBlocks = Array.from(
+    sql.matchAll(/CREATE TABLE IF NOT EXISTS\s+public\.("?[\w]+"?)\s*\((.*?)\);/gis),
+  );
+
+  for (const blockMatch of createTableBlocks) {
+    const tableName = normalizeIdentifier(blockMatch[1]);
+    const blockBody = blockMatch[2] || '';
+    const localMatch = blockBody.match(/UNIQUE\s+USING\s+INDEX/gi);
+    if (!localMatch) {
+      continue;
+    }
+
+    const relativeOffset = blockBody.search(/UNIQUE\s+USING\s+INDEX/i);
+    const absoluteOffset = (blockMatch.index ?? 0) + (blockMatch[0].indexOf(blockBody) || 0) + Math.max(relativeOffset, 0);
+
+    addError(
+      RULES.CREATE_TABLE_UNIQUE_USING_INDEX,
+      `Table "${tableName}" uses UNIQUE USING INDEX inside CREATE TABLE. Define the table first, then create a UNIQUE INDEX IF NOT EXISTS or add the constraint via ALTER TABLE in a guarded block.`,
+      offsetToPosition(absoluteOffset),
+    );
+  }
+}
+
+// SQL014: Direct table operations must target tables created in this script
+// and appear after the corresponding CREATE TABLE statement.
+function validateTableOperationOrder() {
+  const tableCreateOffsets = new Map();
+  const createTableMatches = Array.from(sql.matchAll(/CREATE TABLE IF NOT EXISTS\s+public\.("?[\w]+"?)/gi));
+
+  for (const match of createTableMatches) {
+    const tableName = normalizeIdentifier(match[1]);
+    if (!tableCreateOffsets.has(tableName)) {
+      tableCreateOffsets.set(tableName, match.index ?? 0);
+    }
+  }
+
+  const operationPatterns = [
+    /ALTER TABLE\s+public\.("?[\w]+"?)/gi,
+    /GRANT\s+ALL\s+ON\s+TABLE\s+public\.("?[\w]+"?)\s+TO/gi,
+    /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?"?[\w]+"?\s+ON\s+public\.("?[\w]+"?)/gi,
+    /DROP TRIGGER\s+(?:IF\s+EXISTS\s+)?"?[\w]+"?\s+ON\s+public\.("?[\w]+"?)/gi,
+    /CREATE TRIGGER\s+"?[\w]+"?\s+(?:BEFORE|AFTER|INSTEAD OF)[\s\S]*?\s+ON\s+public\.("?[\w]+"?)/gi,
+  ];
+
+  for (const pattern of operationPatterns) {
+    const matches = Array.from(sql.matchAll(pattern));
+    for (const match of matches) {
+      const tableName = normalizeIdentifier(match[1]);
+      const operationOffset = match.index ?? 0;
+      const createOffset = tableCreateOffsets.get(tableName);
+
+      if (typeof createOffset !== 'number') {
+        addError(
+          RULES.TABLE_OPERATION_ORDER,
+          `Operation targets table "${tableName}" but no CREATE TABLE IF NOT EXISTS public.${tableName} statement was found in setup-sql.`,
+          offsetToPosition(operationOffset),
+        );
+        continue;
+      }
+
+      if (operationOffset < createOffset) {
+        addError(
+          RULES.TABLE_OPERATION_ORDER,
+          `Operation on table "${tableName}" appears before its CREATE TABLE statement. Move the operation after table creation or guard it in a safe migration block.`,
+          offsetToPosition(operationOffset),
+        );
+      }
+    }
+  }
+}
+
+function collectFilesRecursive(rootDir, predicate) {
+  const results = [];
+  const pending = [rootDir];
+
+  while (pending.length) {
+    const currentDir = pending.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const absolutePath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(absolutePath);
+        continue;
+      }
+
+      if (predicate(absolutePath)) {
+        results.push(absolutePath);
+      }
+    }
+  }
+
+  return results;
+}
+
+function collectFrontendRpcNames() {
+  const srcRoot = path.join(repoRoot, 'src');
+  const files = collectFilesRecursive(srcRoot, (filePath) => {
+    const normalized = filePath.replace(/\\/g, '/');
+    if (normalized.endsWith('/src/lib/setup-sql.js')) {
+      return false;
+    }
+    return /\.(js|jsx|ts|tsx)$/i.test(filePath);
+  });
+
+  const names = new Set();
+  const rpcPattern = /\.rpc\(\s*['\"](?:public\.)?([a-zA-Z_][a-zA-Z0-9_]*)['\"]/g;
+
+  for (const filePath of files) {
+    let content = '';
+    try {
+      content = fs.readFileSync(filePath, 'utf8');
+    } catch {
+      continue;
+    }
+
+    for (const match of content.matchAll(rpcPattern)) {
+      if (match[1]) {
+        names.add(match[1]);
+      }
+    }
+  }
+
+  return Array.from(names);
+}
+
+// SQL015: Every frontend `.rpc('<fn>')` call must map to a function declared
+// in setup-sql so missing RPCs fail fast in CI instead of runtime schema cache errors.
+function validateFrontendRpcCoverage() {
+  const rpcNames = collectFrontendRpcNames();
+
+  for (const rpcName of rpcNames) {
+    const declarationPattern = new RegExp(
+      `CREATE\\s+OR\\s+REPLACE\\s+FUNCTION\\s+public\\.${rpcName}\\s*\\(`,
+      'i',
+    );
+
+    if (!declarationPattern.test(sql)) {
+      addError(
+        RULES.FRONTEND_RPC_COVERAGE,
+        `Frontend RPC call "${rpcName}" is not declared in SETUP_SQL_SCRIPT. Add CREATE OR REPLACE FUNCTION public.${rpcName}(...) or remove the call.`,
+      );
+    }
+  }
+}
+
 function validateWarnings() {
   const broadSwallows = Array.from(sql.matchAll(/WHEN others THEN NULL;/gi));
   for (const match of broadSwallows) {
@@ -470,6 +634,9 @@ function main() {
     validateRlsEngineering();
     validateOrgIdOnTenantTables();
     validateReferenceOrder();
+    validateCreateTableUniqueUsingIndex();
+    validateTableOperationOrder();
+    validateFrontendRpcCoverage();
     validateWarnings();
   }
 

@@ -122,6 +122,30 @@ export default async function userContext(context, req) {
     ? authResult.data.user.email.toLowerCase()
     : null;
 
+  let profileResponse;
+  try {
+    profileResponse = await supabase
+      .from('profiles')
+      .select('can_create_organizations, max_owned_organizations, is_system_admin')
+      .eq('id', userId)
+      .maybeSingle();
+  } catch (error) {
+    context.log?.error?.('user-context profile query failed', { message: error?.message, userId });
+    return respond(context, 500, { message: 'failed to load profile' });
+  }
+
+  if (profileResponse.error) {
+    const status = profileResponse.error.status || 500;
+    context.log?.error?.('user-context profile query error', { status, userId });
+    return respond(context, status, { message: 'failed to load profile' });
+  }
+
+  const profile = profileResponse.data || {};
+  const canCreateOrganizations = Boolean(profile.is_system_admin || profile.can_create_organizations);
+  const maxOwnedOrganizations = Number.isInteger(profile.max_owned_organizations)
+    ? profile.max_owned_organizations
+    : null;
+
   let membershipsResponse;
   let invitesResponse;
   try {
@@ -223,5 +247,7 @@ export default async function userContext(context, req) {
   return respond(context, 200, {
     organizations: normalizedOrganizations,
     incomingInvites: normalizedInvites,
+    canCreateOrganizations,
+    maxOwnedOrganizations,
   });
 }
