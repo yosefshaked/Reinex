@@ -278,8 +278,7 @@ CREATE TABLE IF NOT EXISTS public.students (
   medical_flags jsonb NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NULL,
-  CONSTRAINT students_client_profile_id_fkey FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id)
+  metadata jsonb NULL
 );
 
 
@@ -380,6 +379,29 @@ BEGIN
     ON public.students (org_id, client_profile_id)
     WHERE client_profile_id IS NOT NULL;
 EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'students'
+  ) AND EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'client_profiles'
+  ) THEN
+    ALTER TABLE public.students
+      ADD CONSTRAINT students_client_profile_id_fkey
+      FOREIGN KEY (client_profile_id)
+      REFERENCES public.client_profiles(id);
+  END IF;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
   WHEN others THEN NULL;
 END $$;
 
@@ -893,8 +915,7 @@ CREATE TABLE IF NOT EXISTS public.lesson_participants (
   CONSTRAINT lesson_participants_lesson_instance_id_fkey FOREIGN KEY (lesson_instance_id) REFERENCES public.lesson_instances(id),
   CONSTRAINT lesson_participants_client_profile_id_fkey FOREIGN KEY (client_profile_id) REFERENCES public.client_profiles(id),
   CONSTRAINT lesson_participants_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
-  CONSTRAINT lesson_participants_participant_status_check CHECK (participant_status IN ('scheduled','attended','cancelled_student','cancelled_clinic','no_show')),
-  CONSTRAINT lesson_participants_commitment_id_fkey FOREIGN KEY (commitment_id) REFERENCES public.commitments(id)
+  CONSTRAINT lesson_participants_participant_status_check CHECK (participant_status IN ('scheduled','attended','cancelled_student','cancelled_clinic','no_show'))
 );
 
 
@@ -1284,6 +1305,29 @@ CREATE INDEX IF NOT EXISTS commitments_transfer_ref_idx ON public.commitments (o
 CREATE INDEX IF NOT EXISTS commitments_hmo_provider_id_idx ON public.commitments (org_id, hmo_provider_id) WHERE hmo_provider_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS commitments_hmo_provider_track_id_idx ON public.commitments (org_id, hmo_provider_track_id) WHERE hmo_provider_track_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS commitments_hmo_authorization_id_uidx ON public.commitments (org_id, hmo_authorization_id) WHERE hmo_authorization_id IS NOT NULL;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'lesson_participants'
+  ) AND EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'commitments'
+  ) THEN
+    ALTER TABLE public.lesson_participants
+      ADD CONSTRAINT lesson_participants_commitment_id_fkey
+      FOREIGN KEY (commitment_id)
+      REFERENCES public.commitments(id);
+  END IF;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+  WHEN others THEN NULL;
+END $$;
 
 -- -----------------------------------------------------------------
 -- public.ledger_transactions (replaces consumption_entries)

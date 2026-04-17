@@ -288,7 +288,7 @@
     2. Decodes JWT to enforce `aal2` (MFA/TOTP completed).
     3. Queries `profiles.is_system_admin` (service_role, bypasses RLS).
     4. Every attempt (success or failure) → `audit_log` with `retention_category: 'critical'`.
-  - [x] **API Endpoint:** `GET /api/admin/system-health` — gated by `ensureSystemAdmin`, returns DB status, environment, encryption key hashes, and rotation status.
+  - [x] **API Endpoint:** `GET /api/admin-system-health` — gated by `ensureSystemAdmin`, returns DB status, environment, encryption key hashes, and rotation status.
 
   **Architectural Decision:** This console will be built using the **Refine framework** (`@refinedev/core`) to accelerate development, ensure best practices, and integrate seamlessly with our existing React application and authentication context.
 
@@ -297,8 +297,23 @@
   - **Admin Route & Layout:** Create a new route (`/system-admin`) and a main `<AdminApp />` layout component that initializes Refine.
   - **Auth Integration:** Implement a Refine `authProvider` that hooks into our existing `useAuth()` context to handle permissions (`super_admin` role) and session state.
   - **Security & Health Module:** Implement the first "resource" module:
-    - An admin-only API endpoint (`/api/admin/system-health`) that returns DB status, environment, and SHA-256 hashes of the encryption keys (NO raw secrets).
+    - An admin-only API endpoint (`/api/admin-system-health`) that returns DB status, environment, and SHA-256 hashes of the encryption keys (NO raw secrets).
     - A custom UI view for this resource displaying key hashes, rotation status, and a sanity-check tool.
+
+  **Phase 2 Deliverables (Completed):**
+  - [x] **MFA (TOTP) Enrollment & Challenge UI:** Implemented dedicated `/system-admin/mfa` page with Supabase MFA flow.
+    - [x] Enrollment flow for first-time setup (`listFactors` → `enroll` → `challenge` → `verify`) with QR code + manual secret.
+    - [x] Challenge flow for existing TOTP factors at AAL1 (`challenge` → `verify`).
+    - [x] Success redirect back to `/system-admin` after AAL2 session upgrade.
+    - [x] Added loading, validation, network-error, and invalid-code UX states.
+
+  **Phase 3 Deliverables (Completed):**
+  - [x] **Security & Health Dashboard UI:** Replaced raw JSON view with card-based dashboard in admin console.
+    - [x] Status overview card (operational state, environment, Supabase connection state).
+    - [x] Encryption metadata card (current/previous hash display, rotation status badge).
+    - [x] Encryption sanity-check tool with clear success/failure feedback.
+    - [x] In-app "How to Rotate Keys" collapsible guidance for Azure rotation workflow.
+  - [x] **Backend support:** `admin-system-health` now supports sanity-check action via `POST` and `action=sanity-check`.
 
   **Future Modules (Roadmap — For Post-Refactor Work):**
   - **User & Org Management:** Tools for user search, impersonation, and org administration.
@@ -335,3 +350,5 @@
 | 22 (wave 9) | 2026-04-18 | Canonical payload cleanup: `/api/config` now emits only camelCase runtime keys, removing duplicate snake_case aliases while preserving client fallback parsing for safe transition. | `api/config/index.js` |
 | 22 (wave 10) | 2026-04-18 | Core alias removal: runtime config and Supabase client initialization parsing no longer accept snake_case keys, enforcing canonical camelCase config end-to-end. | `src/runtime/config.js`, `src/lib/supabase-manager.js` |
 | 22 (wave 11) | 2026-04-18 | Final diagnostics/test cleanup: removed snake_case runtime key fallbacks from manual error-screen diagnostics and aligned test fixtures with canonical camelCase keys. | `src/runtime/ConfigErrorScreen.jsx`, `src/runtime/config.test.js` |
+| 23 (phase 2) | 2026-04-18 | Implemented System Admin MFA UI: added `/system-admin/mfa` TOTP enrollment/challenge page using Supabase MFA methods (`listFactors`, `enroll`, `challenge`, `verify`), replaced placeholder route in admin app, and wired post-verify redirect to `/system-admin`. | `src/admin/MfaPage.jsx`, `src/admin/AdminApp.jsx`, `implementations/database/one-db-refactor/one-db-refactor.md` |
+| 23 (phase 3) | 2026-04-18 | Built Security & Health dashboard UI with status/encryption cards, key rotation instructions, and a backend-driven encryption sanity-check action (`POST`/`action=sanity-check`) for safe key rotation verification. | `src/admin/SystemHealthView.jsx`, `src/admin/AdminApp.jsx`, `api/admin-system-health/index.js`, `api/admin-system-health/function.json`, `implementations/database/one-db-refactor/one-db-refactor.md` |

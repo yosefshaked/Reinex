@@ -16,6 +16,7 @@ const RULES = {
   PUBLIC_SCHEMA_USAGE: 'SQL009',
   ORG_ID_COLUMN: 'SQL010',
   GET_ACTIVE_ORG_ID: 'SQL011',
+  FK_REFERENCE_ORDER: 'SQL012',
   BROAD_EXCEPTION_SWALLOW: 'SQL101',
   DESTRUCTIVE_DROP_TABLE: 'SQL102',
 };
@@ -281,6 +282,35 @@ function validateOrgIdOnTenantTables() {
   }
 }
 
+// SQL012: A REFERENCES public.<table> must not appear before that table's
+// CREATE TABLE statement in a fresh execution order.
+function validateReferenceOrder() {
+  const tableCreateOffsets = new Map();
+  const createTableMatches = Array.from(sql.matchAll(/CREATE TABLE IF NOT EXISTS\s+public\.("?[\w]+"?)/gi));
+
+  for (const match of createTableMatches) {
+    const tableName = normalizeIdentifier(match[1]);
+    if (!tableCreateOffsets.has(tableName)) {
+      tableCreateOffsets.set(tableName, match.index ?? 0);
+    }
+  }
+
+  const referenceMatches = Array.from(sql.matchAll(/REFERENCES\s+public\.("?[\w]+"?)/gi));
+  for (const match of referenceMatches) {
+    const referencedTable = normalizeIdentifier(match[1]);
+    const referenceOffset = match.index ?? 0;
+    const createOffset = tableCreateOffsets.get(referencedTable);
+
+    if (typeof createOffset === 'number' && referenceOffset < createOffset) {
+      addError(
+        RULES.FK_REFERENCE_ORDER,
+        `Reference to table "${referencedTable}" appears before its CREATE TABLE statement. Move the table definition earlier or defer the constraint with ALTER TABLE after creation.`,
+        offsetToPosition(referenceOffset),
+      );
+    }
+  }
+}
+
 function validateWarnings() {
   const broadSwallows = Array.from(sql.matchAll(/WHEN others THEN NULL;/gi));
   for (const match of broadSwallows) {
@@ -439,6 +469,7 @@ function main() {
     validateUniqueConstraintGuards();
     validateRlsEngineering();
     validateOrgIdOnTenantTables();
+    validateReferenceOrder();
     validateWarnings();
   }
 

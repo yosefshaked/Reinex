@@ -5,8 +5,8 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": ["get"],
-      "route": "admin/system-health"
+      "methods": ["get", "post"],
+      "route": "admin-system-health/{*segments}"
     },
     {
       "type": "http",

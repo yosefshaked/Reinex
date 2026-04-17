@@ -38,6 +38,7 @@ import FormPreviewPage from './features/forms/pages/FormPreviewPage.jsx';
 import FormBlocksPage from './features/forms/pages/FormBlocksPage.jsx';
 import SubmitFormPage from './pages/SubmitFormPage.jsx';
 import { bootstrapSupabaseCallback } from './auth/bootstrapSupabaseCallback.js';
+import AdminApp from './admin/AdminApp.jsx';
 
 bootstrapSupabaseCallback();
 
@@ -82,6 +83,7 @@ function App({ config = null }) {
                 <Route path="/submit" element={<SubmitFormPage />} />
                 <Route element={<AuthGuard />}>
                   <Route path="/select-org" element={<OrgSelection />} />
+                  <Route path="/system-admin/*" element={<AdminApp />} />
                   <Route element={<AppShell />}>
                     {/* הגדרת כל העמודים */}
                     <Route path="/dashboard" element={<DashboardPage />} />

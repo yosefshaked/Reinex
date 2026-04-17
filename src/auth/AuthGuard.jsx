@@ -52,7 +52,9 @@ export default function AuthGuard() {
     return <Outlet />;
   }
 
-  if (!requiresOrgCreation && !requiresOrgSelection && !activeOrgId && location.pathname !== '/Settings') {
+  const isSystemAdminRoute = location.pathname.startsWith('/system-admin');
+
+  if (!requiresOrgCreation && !requiresOrgSelection && !activeOrgId && location.pathname !== '/Settings' && !isSystemAdminRoute) {
     return <Navigate to="/Settings" replace />;
   }
 
