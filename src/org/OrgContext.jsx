@@ -263,6 +263,12 @@ export function OrgProvider({ children }) {
     setError(null);
 
     try {
+      const bootstrapName = user?.name || null;
+      await authClient.rpc('ensure_my_profile_exists', {
+        p_full_name: bootstrapName,
+        p_locale: 'he',
+      });
+
       const payload = await authenticatedFetch('user-context');
 
       const organizationsPayload = Array.isArray(payload?.organizations)

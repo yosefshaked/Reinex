@@ -291,6 +291,49 @@ CREATE INDEX IF NOT EXISTS audit_log_event_type_idx
 -- Control RPCs
 -- -----------------------------------------------------------------
 
+CREATE OR REPLACE FUNCTION public.ensure_my_profile_exists(
+  p_full_name text DEFAULT NULL,
+  p_locale text DEFAULT NULL
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user_id uuid;
+  v_profile_id uuid;
+  v_name text;
+  v_locale text;
+BEGIN
+  v_user_id := auth.uid();
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'unauthenticated';
+  END IF;
+
+  v_name := NULLIF(btrim(COALESCE(p_full_name, '')), '');
+  v_locale := lower(NULLIF(btrim(COALESCE(p_locale, '')), ''));
+  IF v_locale IS NULL THEN
+    v_locale := 'he';
+  END IF;
+
+  INSERT INTO public.profiles (id, full_name, locale, updated_at)
+  VALUES (v_user_id, v_name, v_locale, now())
+  ON CONFLICT (id) DO UPDATE
+  SET
+    full_name = COALESCE(public.profiles.full_name, EXCLUDED.full_name),
+    locale = COALESCE(public.profiles.locale, EXCLUDED.locale),
+    updated_at = now();
+
+  SELECT p.id
+    INTO v_profile_id
+  FROM public.profiles p
+  WHERE p.id = v_user_id;
+
+  RETURN v_profile_id;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.create_organization(p_name text)
 RETURNS uuid
 LANGUAGE plpgsql
@@ -310,6 +353,8 @@ BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'unauthenticated';
   END IF;
+
+  PERFORM public.ensure_my_profile_exists(NULL, NULL);
 
   IF p_name IS NULL OR btrim(p_name) = '' THEN
     RAISE EXCEPTION 'invalid_organization_name';
@@ -3437,6 +3482,7 @@ END $$;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT EXECUTE ON FUNCTION public.get_active_org_id() TO authenticated, app_user;
 GRANT EXECUTE ON FUNCTION public.get_my_org_ids() TO authenticated, app_user;
+GRANT EXECUTE ON FUNCTION public.ensure_my_profile_exists(text, text) TO authenticated, app_user;
 GRANT EXECUTE ON FUNCTION public.create_organization(text) TO authenticated, app_user;
 GRANT EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, uuid, integer, text) TO app_user;
 GRANT EXECUTE ON FUNCTION public.complete_lesson_instance_with_participants(uuid, uuid, uuid, integer, text) TO app_user;
