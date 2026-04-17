@@ -23,6 +23,8 @@ function splitContactName(value) {
 }
 
 function normalizeProfilePayload(payload = {}) {
+  const rawOrgId = normalizeString(payload.org_id ?? payload.orgId);
+  const orgId = rawOrgId && UUID_PATTERN.test(rawOrgId) ? rawOrgId : '';
   const firstName = normalizeString(payload.first_name ?? payload.firstName ?? payload.student_first_name ?? payload.studentFirstName);
   const middleName = normalizeString(payload.middle_name ?? payload.middleName);
   const lastName = normalizeString(payload.last_name ?? payload.lastName ?? payload.student_last_name ?? payload.studentLastName);
@@ -55,8 +57,10 @@ function normalizeProfilePayload(payload = {}) {
       && notificationMethodResult.valid
       && tagsResult.valid
       && metadataResult.valid
+      && (!rawOrgId || Boolean(orgId))
     ),
     payload: {
+      org_id: orgId || null,
       first_name: firstName,
       middle_name: middleName || null,
       last_name: lastName,
@@ -73,7 +77,8 @@ function normalizeProfilePayload(payload = {}) {
   };
 }
 
-export async function findClientProfileByIdentityNumber(tenantClient, identityNumber, { excludeId } = {}) {
+export async function findClientProfileByIdentityNumber(tenantClient, identityNumber, { excludeId, orgId } = {}) {
+  const normalizedOrgId = normalizeString(orgId);
   const normalized = coerceIdentityNumber(identityNumber);
   if (!normalized.valid || !normalized.value) {
     return { data: null, error: null };
@@ -84,6 +89,10 @@ export async function findClientProfileByIdentityNumber(tenantClient, identityNu
     .select('*')
     .eq('identity_number', normalized.value)
     .limit(1);
+
+  if (normalizedOrgId && UUID_PATTERN.test(normalizedOrgId)) {
+    query = query.eq('org_id', normalizedOrgId);
+  }
 
   if (excludeId) {
     query = query.neq('id', excludeId);
@@ -111,9 +120,11 @@ export async function createOrReuseClientProfile(tenantClient, payload = {}) {
     throw new Error('invalid_client_profile_payload');
   }
 
+  const orgId = normalizeString(normalized.payload.org_id);
+
   const identityNumber = normalized.payload.identity_number;
   if (identityNumber) {
-    const { data: existingProfile, error } = await findClientProfileByIdentityNumber(tenantClient, identityNumber);
+    const { data: existingProfile, error } = await findClientProfileByIdentityNumber(tenantClient, identityNumber, { orgId });
     if (error) throw new Error(`failed_to_lookup_client_profile:${error.message}`);
 
     if (existingProfile) {
@@ -126,12 +137,14 @@ export async function createOrReuseClientProfile(tenantClient, payload = {}) {
       }
       if (Object.keys(safeUpdates).length) {
         safeUpdates.updated_at = nowIso();
-        const { data: updatedProfile, error: updateError } = await tenantClient
+        let updateQuery = tenantClient
           .from('client_profiles')
           .update(safeUpdates)
-          .eq('id', existingProfile.id)
-          .select('*')
-          .single();
+          .eq('id', existingProfile.id);
+        if (orgId && UUID_PATTERN.test(orgId)) {
+          updateQuery = updateQuery.eq('org_id', orgId);
+        }
+        const { data: updatedProfile, error: updateError } = await updateQuery.select('*').single();
         if (updateError || !updatedProfile?.id) {
           throw new Error(`failed_to_update_client_profile:${updateError?.message || 'unknown_error'}`);
         }
@@ -156,6 +169,7 @@ export async function createOrReuseClientProfile(tenantClient, payload = {}) {
     .from('client_profiles')
     .insert({
       ...normalized.payload,
+      org_id: orgId || undefined,
       created_at: nowIso(),
       updated_at: nowIso(),
     })

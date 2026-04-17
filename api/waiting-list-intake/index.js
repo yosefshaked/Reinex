@@ -464,6 +464,7 @@ async function createOrReuseProspectStudent(client, orgId, payload) {
     throw new Error('missing_student_name');
   }
   const result = await createOrReuseClientProfile(client, {
+    org_id: orgId,
     first_name: firstName,
     last_name: lastName,
     identity_number: normalizeIdentityNumber(payload.identity_number) || null,

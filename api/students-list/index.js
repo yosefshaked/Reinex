@@ -1339,6 +1339,7 @@ export default async function handler(context, req) {
     let clientProfileResult;
     try {
       clientProfileResult = await createOrReuseClientProfile(supabase, {
+        org_id: orgId,
         ...normalized.payload,
         metadata: {
           created_by: userId,

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildHmoCoverageWarning } from '../api/calendar-generate/index.js';
+import { buildHmoCoverageWarning } from '../api/calendar-generate/hmo-warning.js';
 
 describe('calendar generate HMO coverage warnings', () => {
   it('returns no warning when active authorization covers target date', () => {

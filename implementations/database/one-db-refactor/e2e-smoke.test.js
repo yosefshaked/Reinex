@@ -278,7 +278,7 @@ describe('Flow 3: Calendar generation → lesson instances stamped', () => {
     const startDate = today.toISOString().split('T')[0];
     const endDate = new Date(today.getTime() + 7 * 86400000).toISOString().split('T')[0];
 
-    const { status, data } = await apiFetch('calendar-generate', {
+    const { status, data } = await apiFetch('calendar/generate', {
       method: 'POST',
       body: {
         org_id: state.orgId,
@@ -301,8 +301,9 @@ describe('Flow 3: Calendar generation → lesson instances stamped', () => {
       instructor_employee_id: state.employeeId,
       service_id: state.serviceId,
       status: 'scheduled',
-      created_source: 'test',
+      created_source: 'migration',
     });
+
     state.lessonInstanceId = li.id;
     assert.equal(li.org_id, state.orgId, 'lesson_instance.org_id must match');
   });
@@ -342,8 +343,16 @@ describe('Flow 5: Billing endpoint responds for org', () => {
 
   it('Commitment inserted via setup has correct org_id', async () => {
     // Quick insert + verify
+    const cp = await insertOrThrow(state.admin, 'client_profiles', {
+      org_id: state.orgId,
+      first_name: 'Commitment',
+      last_name: `Probe-${RUN_ID}`,
+      identity_number: `${Math.floor(Math.random() * 1000000000)}`.padStart(9, '0'),
+    });
+
     const student = await insertOrThrow(state.admin, 'students', {
       org_id: state.orgId,
+      client_profile_id: cp.id,
     });
     const commitment = await insertOrThrow(state.admin, 'commitments', {
       org_id: state.orgId,
@@ -357,6 +366,7 @@ describe('Flow 5: Billing endpoint responds for org', () => {
     // Cleanup
     await state.admin.from('commitments').delete().eq('id', commitment.id);
     await state.admin.from('students').delete().eq('id', student.id);
+    await state.admin.from('client_profiles').delete().eq('id', cp.id);
   });
 });
 
@@ -450,7 +460,7 @@ describe('Flow 7: Index scan verification via EXPLAIN ANALYZE', () => {
 
       if (error) {
         // If the RPC doesn't exist, fall back to a note
-        if (/does not exist|unknown/i.test(error.message)) {
+        if (error.code === 'PGRST202' || /does not exist|unknown|could not find/i.test(error.message)) {
           console.log(`  [SKIP] explain_query RPC not installed — ${name}`);
           return;
         }

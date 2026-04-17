@@ -192,7 +192,7 @@ before(async () => {
     instructor_employee_id: state.employeeA.id,
     service_id: state.serviceA.id,
     status: 'scheduled',
-    created_source: 'test',
+    created_source: 'migration',
   });
   state.lessonInstanceB = await insertOrThrow(admin, 'lesson_instances', {
     org_id: state.orgB.id,
@@ -201,7 +201,7 @@ before(async () => {
     instructor_employee_id: state.employeeB.id,
     service_id: state.serviceB.id,
     status: 'scheduled',
-    created_source: 'test',
+    created_source: 'migration',
   });
 
   // --- Commitments ---

@@ -85,7 +85,7 @@ function buildInstanceSelect(options = {}) {
     'created_by',
     'updated_by',
     'metadata',
-    'instructor:Employees(id, first_name, middle_name, last_name, name)',
+    'instructor:Employees(id, first_name, middle_name, last_name)',
     'service:Services(id, name, color, duration_minutes)',
     `participants:${participantsJoin}(id, client_profile_id, student_id, participant_status, version, reminder_sent, reminder_seen, documented_at, attendance_confirmed_at, metadata, student:students(id, client_profile_id), client_profile:client_profiles(id, first_name, middle_name, last_name))`,
   ].join(',');

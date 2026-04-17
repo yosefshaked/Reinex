@@ -368,6 +368,36 @@ ALTER TABLE public.students
   ADD COLUMN IF NOT EXISTS updated_at timestamptz,
   ADD COLUMN IF NOT EXISTS metadata jsonb;
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'students'
+      AND column_name = 'first_name'
+  ) THEN
+    ALTER TABLE public.students ALTER COLUMN first_name DROP NOT NULL;
+  END IF;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'students'
+      AND column_name = 'last_name'
+  ) THEN
+    ALTER TABLE public.students ALTER COLUMN last_name DROP NOT NULL;
+  END IF;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
 -- -----------------------------------------------------------------
 -- public.guardians
 -- -----------------------------------------------------------------
@@ -3845,21 +3875,47 @@ CREATE TABLE IF NOT EXISTS public."Settings" (
   "updated_at" timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS settings_org_key_uidx
-  ON public."Settings" ("org_id", "key");
-
 ALTER TABLE public."Settings"
+  ADD COLUMN IF NOT EXISTS "key" text,
+  ADD COLUMN IF NOT EXISTS "settings_value" jsonb,
   ADD COLUMN IF NOT EXISTS "org_id" uuid,
   ADD COLUMN IF NOT EXISTS "metadata" jsonb,
   ADD COLUMN IF NOT EXISTS "created_at" timestamptz,
   ADD COLUMN IF NOT EXISTS "updated_at" timestamptz;
 
-INSERT INTO public."Settings" ("key", "settings_value")
-VALUES
-  ('leave_policy', '{"carryover_enabled":false,"carryover_cap_days":null,"holiday_rules":[]}'::jsonb),
-  ('leave_pay_policy', '{"default_method":"legal","lookback_months":3,"legal_allow_12m_if_better":true,"fixed_rate_default":0}'::jsonb),
-  ('billing_consumption_policy', '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb),
-  ('instructor_earnings_policy', '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'Settings_key_key'
+      AND conrelid = 'public."Settings"'::regclass
+  ) THEN
+    ALTER TABLE public."Settings" DROP CONSTRAINT "Settings_key_key";
+  END IF;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DROP INDEX IF EXISTS public."Settings_key_key";
+DROP INDEX IF EXISTS public.settings_key_key;
+
+CREATE UNIQUE INDEX IF NOT EXISTS settings_org_key_uidx
+  ON public."Settings" ("org_id", "key");
+
+INSERT INTO public."Settings" ("org_id", "key", "settings_value")
+SELECT
+  org.id,
+  seed.key,
+  seed.settings_value
+FROM public.organizations org
+CROSS JOIN (
+  VALUES
+    ('leave_policy', '{"carryover_enabled":false,"carryover_cap_days":null,"holiday_rules":[]}'::jsonb),
+    ('leave_pay_policy', '{"default_method":"legal","lookback_months":3,"legal_allow_12m_if_better":true,"fixed_rate_default":0}'::jsonb),
+    ('billing_consumption_policy', '{"attended":true,"no_show":false,"cancelled_student":false,"cancelled_clinic":false}'::jsonb),
+    ('instructor_earnings_policy', '{"attended":true,"no_show":true,"cancelled_student":false,"cancelled_clinic":false}'::jsonb)
+) AS seed(key, settings_value)
 ON CONFLICT ("org_id", "key") DO NOTHING;
 
 -- -----------------------------------------------------------------
@@ -7080,6 +7136,72 @@ CREATE TABLE IF NOT EXISTS public.ledger_transactions (
   notes text NULL,
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
+
+-- Legacy compatibility: when an older ledger_transactions schema already exists,
+-- ensure all v2 columns exist before creating v2 indexes and policies.
+ALTER TABLE public.ledger_transactions
+  ADD COLUMN IF NOT EXISTS ledger_account_id uuid,
+  ADD COLUMN IF NOT EXISTS direction text,
+  ADD COLUMN IF NOT EXISTS effective_at timestamptz,
+  ADD COLUMN IF NOT EXISTS posted_at timestamptz,
+  ADD COLUMN IF NOT EXISTS source_type text,
+  ADD COLUMN IF NOT EXISTS source_id uuid,
+  ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
+  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
+  ADD COLUMN IF NOT EXISTS hmo_provider_id uuid,
+  ADD COLUMN IF NOT EXISTS hmo_authorization_id uuid,
+  ADD COLUMN IF NOT EXISTS service_id uuid,
+  ADD COLUMN IF NOT EXISTS rate_source text,
+  ADD COLUMN IF NOT EXISTS reverses_transaction_id uuid,
+  ADD COLUMN IF NOT EXISTS external_reference text,
+  ADD COLUMN IF NOT EXISTS posted_at_migrated boolean;
+
+UPDATE public.ledger_transactions
+SET direction = COALESCE(direction, CASE WHEN transaction_type = 'CREDIT' THEN 'CREDIT' ELSE 'DEBIT' END)
+WHERE direction IS NULL;
+
+UPDATE public.ledger_transactions
+SET effective_at = COALESCE(effective_at, created_at, now())
+WHERE effective_at IS NULL;
+
+UPDATE public.ledger_transactions
+SET posted_at = COALESCE(posted_at, created_at, now())
+WHERE posted_at IS NULL;
+
+UPDATE public.ledger_transactions
+SET source_type = COALESCE(source_type, 'migration')
+WHERE source_type IS NULL;
+
+DO $$
+BEGIN
+  ALTER TABLE public.ledger_transactions ALTER COLUMN direction SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.ledger_transactions ALTER COLUMN effective_at SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.ledger_transactions ALTER COLUMN posted_at SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.ledger_transactions ALTER COLUMN source_type SET NOT NULL;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+ALTER TABLE public.ledger_transactions
+  DROP COLUMN IF EXISTS posted_at_migrated;
 
 CREATE INDEX IF NOT EXISTS ledger_transactions_account_effective_idx
   ON public.ledger_transactions (org_id, ledger_account_id, effective_at);
