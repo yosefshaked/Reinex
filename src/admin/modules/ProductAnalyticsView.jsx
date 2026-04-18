@@ -18,7 +18,7 @@ export default function ProductAnalyticsView() {
       return;
     }
 
-    setStatus('PostHog is not configured yet. Add VITE_POSTHOG_KEY and reload.');
+    setStatus('PostHog is not configured yet. Set VITE_POSTHOG_KEY (or POSTHOG_KEY via /api/config), without wrapping quotes, then reload.');
   }, []);
 
   return (
@@ -51,7 +51,7 @@ export default function ProductAnalyticsView() {
           SDK configured: <strong>{hasPostHogConfigured() ? 'Yes' : 'No'}</strong>
         </p>
         <p className="mt-2 text-xs text-slate-500">
-          Expected env keys: <code>VITE_POSTHOG_KEY</code> and optional <code>VITE_POSTHOG_HOST</code>.
+          Expected env keys: <code>VITE_POSTHOG_KEY</code> (or <code>POSTHOG_KEY</code> in Function App settings) and optional <code>VITE_POSTHOG_HOST</code>/<code>POSTHOG_HOST</code>.
         </p>
         {status ? (
           <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{status}</p>

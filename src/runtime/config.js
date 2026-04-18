@@ -89,6 +89,8 @@ export async function activateConfig(rawConfig, options = {}) {
   const normalized = {
     supabaseUrl: sanitized.supabaseUrl,
     supabaseAnonKey: sanitized.supabaseAnonKey,
+    posthogKey: sanitized.posthogKey || '',
+    posthogHost: sanitized.posthogHost || '',
     source: sanitized.source || options.source || 'manual',
     orgId: options.orgId ?? null,
   };
@@ -98,6 +100,8 @@ export async function activateConfig(rawConfig, options = {}) {
   currentConfig = {
     supabaseUrl: normalized.supabaseUrl,
     supabaseAnonKey: normalized.supabaseAnonKey,
+    posthogKey: normalized.posthogKey,
+    posthogHost: normalized.posthogHost,
     source: normalized.source,
     orgId: normalized.orgId,
   };
@@ -113,6 +117,8 @@ export async function activateConfig(rawConfig, options = {}) {
     window.__RUNTIME_CONFIG__ = {
       supabaseUrl: currentConfig.supabaseUrl,
       supabaseAnonKey: currentConfig.supabaseAnonKey,
+      posthogKey: currentConfig.posthogKey,
+      posthogHost: currentConfig.posthogHost,
       source: currentConfig.source,
       orgId: currentConfig.orgId,
     };
@@ -122,6 +128,8 @@ export async function activateConfig(rawConfig, options = {}) {
   notifyListeners(activatedListeners, {
     supabaseUrl: currentConfig.supabaseUrl,
     supabaseAnonKey: currentConfig.supabaseAnonKey,
+    posthogKey: currentConfig.posthogKey,
+    posthogHost: currentConfig.posthogHost,
     source: currentConfig.source,
     orgId: currentConfig.orgId,
   });
@@ -159,6 +167,8 @@ export function getCurrentConfig() {
   return {
     supabaseUrl: currentConfig.supabaseUrl,
     supabaseAnonKey: currentConfig.supabaseAnonKey,
+    posthogKey: currentConfig.posthogKey || '',
+    posthogHost: currentConfig.posthogHost || '',
     source: currentConfig.source || null,
     orgId: currentConfig.orgId || null,
   };
@@ -196,8 +206,12 @@ function sanitizeConfig(raw, source = 'api') {
   }
   const supabaseUrl = raw.supabaseUrl;
   const supabaseAnonKey = raw.supabaseAnonKey;
+  const posthogKey = raw.posthogKey ?? raw.posthog_key ?? '';
+  const posthogHost = raw.posthogHost ?? raw.posthog_host ?? '';
   const trimmedUrl = typeof supabaseUrl === 'string' ? supabaseUrl.trim() : '';
   const trimmedKey = typeof supabaseAnonKey === 'string' ? supabaseAnonKey.trim() : '';
+  const trimmedPosthogKey = typeof posthogKey === 'string' ? posthogKey.trim() : '';
+  const trimmedPosthogHost = typeof posthogHost === 'string' ? posthogHost.trim() : '';
 
   if (!trimmedUrl || !trimmedKey) {
     return undefined;
@@ -206,6 +220,8 @@ function sanitizeConfig(raw, source = 'api') {
   return {
     supabaseUrl: trimmedUrl,
     supabaseAnonKey: trimmedKey,
+    posthogKey: trimmedPosthogKey,
+    posthogHost: trimmedPosthogHost,
     source,
   };
 }

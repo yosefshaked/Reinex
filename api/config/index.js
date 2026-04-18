@@ -8,11 +8,23 @@ function maskForLog(value) {
   return `${stringValue.slice(0, 2)}••••${stringValue.slice(-2)}`;
 }
 
+function readFirstNonEmpty(env, keys) {
+  for (const key of keys) {
+    const value = typeof env?.[key] === 'string' ? env[key].trim() : '';
+    if (value) {
+      return value;
+    }
+  }
+  return '';
+}
+
 export default async function (context) {
   const env = readEnv(context);
 
   try {
     const { supabaseUrl, anonKey } = readSupabasePublicConfig(env);
+    const posthogKey = readFirstNonEmpty(env, ['VITE_POSTHOG_KEY', 'APP_POSTHOG_KEY', 'POSTHOG_KEY']);
+    const posthogHost = readFirstNonEmpty(env, ['VITE_POSTHOG_HOST', 'APP_POSTHOG_HOST', 'POSTHOG_HOST']);
 
     if (!supabaseUrl) {
       context.log?.error?.('Base runtime config is missing Supabase URL.', {
@@ -37,16 +49,28 @@ export default async function (context) {
     context.log?.info?.('Issued base app config.', {
       supabaseUrl: maskForLog(supabaseUrl),
       anonKey: maskForLog(anonKey),
+      hasPosthogKey: Boolean(posthogKey),
+      posthogHost: posthogHost ? maskForLog(posthogHost) : '',
     });
+
+    const payload = {
+      source: 'api',
+      supabaseUrl,
+      supabaseAnonKey: anonKey,
+    };
+
+    if (posthogKey) {
+      payload.posthogKey = posthogKey;
+    }
+
+    if (posthogHost) {
+      payload.posthogHost = posthogHost;
+    }
 
     return respond(
       context,
       200,
-      {
-        source: 'api',
-        supabaseUrl,
-        supabaseAnonKey: anonKey,
-      },
+      payload,
       {
         'Cache-Control': 'no-store',
         'X-Config-Scope': 'app',

@@ -28,6 +28,43 @@ function applySearchFilter(collection, search, fields) {
   );
 }
 
+async function fetchAuthEmailsByUserId(supabase, userIds) {
+  const ids = Array.from(new Set((Array.isArray(userIds) ? userIds : []).filter(Boolean)));
+  if (ids.length === 0) {
+    return {};
+  }
+
+  const emailByUserId = {};
+  const pageSize = 200;
+  const maxPages = 10;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: pageSize });
+    if (error) {
+      throw error;
+    }
+
+    const users = Array.isArray(data?.users) ? data.users : [];
+    if (users.length === 0) {
+      break;
+    }
+
+    users.forEach((user) => {
+      const userId = String(user?.id || '');
+      if (!userId || !ids.includes(userId)) {
+        return;
+      }
+      emailByUserId[userId] = String(user?.email || '').trim();
+    });
+
+    if (ids.every((id) => Object.prototype.hasOwnProperty.call(emailByUserId, id))) {
+      break;
+    }
+  }
+
+  return emailByUserId;
+}
+
 export default async function systemAdminUsersOrgs(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
   if (method !== 'GET') {
@@ -68,7 +105,7 @@ export default async function systemAdminUsersOrgs(context, req) {
         .limit(limit),
       supabase
         .from('profiles')
-        .select('id, email, full_name, is_system_admin, updated_at')
+        .select('id, full_name, is_system_admin, updated_at, metadata')
         .eq('is_system_admin', true)
         .order('updated_at', { ascending: false })
         .limit(limit),
@@ -112,8 +149,21 @@ export default async function systemAdminUsersOrgs(context, req) {
     }));
 
     const filteredOrganizations = applySearchFilter(organizationsWithCounts, search, ['name', 'slug', 'id']);
+    const systemAdminProfiles = Array.isArray(systemAdminsResult.data) ? systemAdminsResult.data : [];
+    const authEmailByUserId = await fetchAuthEmailsByUserId(
+      supabase,
+      systemAdminProfiles.map((row) => row.id),
+    );
+    const systemAdminsWithEmail = systemAdminProfiles.map((row) => ({
+      ...row,
+      email:
+        authEmailByUserId[row.id] ||
+        normalizeString(row?.metadata?.email) ||
+        normalizeString(row?.metadata?.user_email) ||
+        '',
+    }));
     const filteredSystemAdmins = applySearchFilter(
-      Array.isArray(systemAdminsResult.data) ? systemAdminsResult.data : [],
+      systemAdminsWithEmail,
       search,
       ['email', 'full_name', 'id'],
     );
