@@ -8,7 +8,7 @@ import MfaPage from './MfaPage.jsx';
 import SystemHealthView from './SystemHealthView.jsx';
 import SupabaseConnectionView from './SupabaseConnectionView.jsx';
 
-const adminDataProvider = dataProvider('/api/admin-system-health');
+const adminDataProvider = dataProvider('/api/system-health-admin');
 
 function AdminLayout() {
   return (

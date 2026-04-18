@@ -6,7 +6,7 @@
       "direction": "in",
       "name": "req",
       "methods": ["get", "post"],
-      "route": "admin-system-health"
+      "route": "system-health-admin"
     },
     {
       "type": "http",
