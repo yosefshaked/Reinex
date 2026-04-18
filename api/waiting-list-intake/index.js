@@ -734,7 +734,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
         invite_status: 'pending',
       },
       source: deliveryMethod,
-      submitted_at: null,
+      submitted_at: nowIso,
       metadata: {
         workflow_status: 'pending',
         workflow_kind: 'waiting_list_intake',

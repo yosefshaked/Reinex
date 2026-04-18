@@ -1128,7 +1128,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
       alert_flags: { has_red_flags: false, highest_severity: null, hits: [] },
       otp_metadata: { delivery_method: deliveryMethod, otp_status: 'pending', sent_via: [deliveryMethod] },
       source: deliveryMethod,
-      submitted_at: null,
+      submitted_at: nowIso,
       metadata: submissionMetadata,
     })
     .select('id')
@@ -1775,7 +1775,8 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   }
 
   // Idempotency guard: prevent re-finalization of already-submitted forms
-  if (submission.submitted_at) {
+  const workflowStatus = normalizeString(submission?.metadata?.workflow_status).toLowerCase();
+  if (workflowStatus === 'submitted' || (!workflowStatus && submission.submitted_at)) {
     return respond(context, 409, { message: 'submission_already_finalized' });
   }
 

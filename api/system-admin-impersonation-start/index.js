@@ -38,27 +38,45 @@ function extractForensicContext(req) {
 }
 
 async function lookupTargetUser(supabase, email) {
-  // 1. Resolve the auth user. admin.listUsers supports `email` filter but is not
-  //    exposed uniformly; using a direct users lookup via RPC-compatible path.
-  //    Fallback: fetch profiles by email, then get auth user by id.
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('id, full_name, email')
-    .ilike('email', email)
-    .maybeSingle();
+  // auth.users is the source of truth for email — profiles has no email column.
+  // listUsers({ filter }) does a text search on email+phone across all pages;
+  // we scan up to 5 pages of 200 to find an exact match.
+  const normalizedEmail = email.toLowerCase();
 
-  if (profileError) {
-    throw Object.assign(new Error('target_lookup_failed'), { statusCode: 500, cause: profileError });
+  let authUser = null;
+  for (let page = 1; page <= 5 && !authUser; page += 1) {
+    const { data, error } = await supabase.auth.admin.listUsers({
+      page,
+      perPage: 200,
+      filter: normalizedEmail,
+    });
+    if (error) {
+      throw Object.assign(new Error('target_lookup_failed'), { statusCode: 500, cause: error });
+    }
+    const users = Array.isArray(data?.users) ? data.users : [];
+    if (users.length === 0) break;
+    authUser = users.find((u) => String(u.email || '').toLowerCase() === normalizedEmail) || null;
+    // Stop early if the server returned fewer results than a full page.
+    if (users.length < 200) break;
   }
 
-  if (!profile) {
-    return null;
-  }
+  if (!authUser) return null;
+
+  // Enrich with profile full_name (best-effort; failure is non-fatal).
+  let fullName = null;
+  try {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('id', authUser.id)
+      .maybeSingle();
+    fullName = profile?.full_name || null;
+  } catch { /* ignore — auth user found; name is optional */ }
 
   return {
-    id: profile.id,
-    email: profile.email || email,
-    full_name: profile.full_name || null,
+    id: authUser.id,
+    email: authUser.email,
+    full_name: fullName || authUser.user_metadata?.full_name || null,
   };
 }
 
