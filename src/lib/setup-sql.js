@@ -3653,6 +3653,7 @@ GRANT ALL ON TABLE public.instance_locks TO app_user;
 GRANT ALL ON TABLE public.participant_locks TO app_user;
 GRANT ALL ON TABLE public.calendar_instance_corrections TO app_user;
 GRANT ALL ON TABLE public.audit_log TO app_user;
+GRANT ALL ON TABLE public.impersonation_sessions TO app_user;
 GRANT ALL ON TABLE public.dashboard_tasks TO app_user;
 GRANT ALL ON TABLE public.instructor_profiles TO app_user;
 GRANT ALL ON TABLE public.instructor_service_capabilities TO app_user;

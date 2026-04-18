@@ -153,6 +153,7 @@ const TABLES_WITH_CUSTOM_RLS = new Set([
   'permission_registry',
   'active_routing',
   'audit_log',
+  'impersonation_sessions',
 ]);
 
 function validatePresenceCoverage() {
