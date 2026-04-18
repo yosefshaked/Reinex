@@ -79,6 +79,11 @@ npm run validate:api
 5. **Missing HTTP Route**
    - HTTP trigger defined but no route specified (will use Azure default)
 
+6. **Reserved Route Prefixes (Manual Review)**
+   - Avoid custom routes that start with `admin`
+   - Azure Functions reserves `/admin/*` for host management APIs
+   - A conflicting route may fail function registration and surface as SWA `404`
+
 ## Common Issues Detected
 
 ### Issue: Missing function.json
@@ -134,6 +139,20 @@ Remove trailing commas and ensure valid JSON syntax:
 ```
 api/my-endpoint/function.json: scriptFile "./main.js" not found. Expected file at api/my-endpoint/./main.js
 ```
+
+### Issue: Route conflicts with Azure built-in `/admin/*`
+**Error Message (host startup):**
+```
+The 'my-function' function is in error: The specified route conflicts with one or more built in routes.
+```
+
+**Typical Symptom:**
+- Endpoint returns `404` through SWA.
+- No matching function request is logged for that route.
+
+**Fix:**
+- Rename route to avoid `admin*` prefix.
+- Example: `admin-system-health` -> `system-health-admin`.
 
 **Fix Option 1:** Rename your file to match scriptFile:
 ```bash

@@ -61,6 +61,68 @@ function runEncryptionSanityCheck(env) {
   };
 }
 
+function normalizeHostFromRequest(req) {
+  const headers = req?.headers ?? {};
+  const rawHost =
+    headers['x-forwarded-host'] ||
+    headers['x-original-host'] ||
+    headers.host ||
+    '';
+
+  return String(rawHost).trim().toLowerCase().replace(/:\d+$/, '');
+}
+
+function classifyFromHostname(hostname) {
+  if (!hostname) {
+    return '';
+  }
+
+  if (hostname.includes('thepcrunners.com')) {
+    return 'production';
+  }
+
+  if (hostname === 'localhost' || hostname.startsWith('127.0.0.1')) {
+    return 'local';
+  }
+
+  if (hostname.includes('.azurestaticapps.net')) {
+    const firstLabel = hostname.split('.')[0] || '';
+    return /-\d+$/.test(firstLabel) ? 'preview' : 'production';
+  }
+
+  if (hostname.includes('.azurewebsites.net')) {
+    return 'cloud';
+  }
+
+  return '';
+}
+
+function resolveRuntimeEnvironment(env, req) {
+  const hostFromRequest = normalizeHostFromRequest(req);
+  const hostClassification = classifyFromHostname(hostFromRequest);
+  if (hostClassification) {
+    return hostClassification;
+  }
+
+  const configured = String(env?.AZURE_FUNCTIONS_ENVIRONMENT || '').trim();
+  if (configured) {
+    const normalized = configured.toLowerCase();
+    if (normalized === 'production') {
+      return 'production';
+    }
+    return configured;
+  }
+
+  const hasAzureRuntimeMarkers = Boolean(
+    env?.WEBSITE_HOSTNAME ||
+      env?.WEBSITE_SITE_NAME ||
+      env?.WEBSITE_INSTANCE_ID ||
+      env?.FUNCTIONS_EXTENSION_VERSION,
+  );
+
+  return hasAzureRuntimeMarkers ? 'cloud' : 'local';
+}
+
 export default async function systemHealth(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
   if (method !== 'GET' && method !== 'POST') {
@@ -131,7 +193,7 @@ export default async function systemHealth(context, req) {
 
   return respond(context, 200, {
     status: dbStatus,
-    environment: env.AZURE_FUNCTIONS_ENVIRONMENT || 'local',
+    environment: resolveRuntimeEnvironment(env, req),
     admin: { userId: admin.userId, email: admin.email },
     encryption: {
       current_hash: encryptionMeta.currentHash,

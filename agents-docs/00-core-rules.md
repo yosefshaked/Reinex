@@ -28,6 +28,7 @@
 ## Known patterns / do not reinvent
 - All tenant data is in the shared Supabase project; tenant schema is `public`.
 - API route names are domain-based; do not add `reinex` to route paths.
+- For Azure Functions HTTP routes, do not use route names that start with `admin` (reserved by Azure host management routes under `/admin/*`).
 - Instructors are self-scoped unless membership role is `admin` or `owner`.
 - Current instructor shape is split across:
   - [`Employees`](../api/instructors/index.js): base row, including `working_days`
