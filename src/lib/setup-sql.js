@@ -338,7 +338,6 @@ DO $$
 BEGIN
   ALTER TABLE public.active_routing
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
-    ALTER COLUMN user_id DROP NOT NULL,
     ALTER COLUMN category SET DEFAULT 'active_org',
     ALTER COLUMN routing_info SET DEFAULT '{}'::jsonb,
     ALTER COLUMN created_at SET DEFAULT now(),
@@ -387,6 +386,14 @@ BEGIN
     EXECUTE format('ALTER TABLE public.active_routing DROP CONSTRAINT %I', pk_name);
   END IF;
 
+  ALTER TABLE public.active_routing
+    ALTER COLUMN user_id DROP NOT NULL,
+    ALTER COLUMN id SET NOT NULL,
+    ALTER COLUMN category SET NOT NULL,
+    ALTER COLUMN routing_info SET NOT NULL,
+    ALTER COLUMN created_at SET NOT NULL,
+    ALTER COLUMN updated_at SET NOT NULL;
+
   IF NOT EXISTS (
     SELECT 1
     FROM pg_constraint
@@ -396,18 +403,6 @@ BEGIN
     ALTER TABLE public.active_routing
       ADD CONSTRAINT active_routing_pkey PRIMARY KEY (id);
   END IF;
-EXCEPTION
-  WHEN undefined_table THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE public.active_routing
-    ALTER COLUMN id SET NOT NULL,
-    ALTER COLUMN category SET NOT NULL,
-    ALTER COLUMN routing_info SET NOT NULL,
-    ALTER COLUMN created_at SET NOT NULL,
-    ALTER COLUMN updated_at SET NOT NULL;
 EXCEPTION
   WHEN undefined_table THEN NULL;
 END $$;
