@@ -160,14 +160,14 @@ export default function Login() {
       <div className="p-8 space-y-6">
           {redirectMessage ? (
             <div
-              className="bg-blue-50 border border-blue-100 text-blue-900 text-end rounded-2xl px-4 py-3 shadow-sm"
+              className="bg-blue-50 border border-blue-100 text-blue-900 rounded-2xl px-4 py-3 shadow-sm"
               role="alert"
             >
               {redirectMessage}
             </div>
           ) : null}
 
-          <p className="text-sm text-slate-600 text-end leading-relaxed">
+          <p className="text-sm text-slate-600 leading-relaxed">
             התחבר כדי להמשיך למערכת. ניתן להשתמש בחשבון גוגל, מיקרוסופט או בדוא"ל וסיסמה שסופקו לך על ידי הארגון.
           </p>
 
@@ -200,7 +200,7 @@ export default function Login() {
           </div>
 
           <form onSubmit={handleEmailSignIn} className="space-y-4">
-            <label className="block text-end">
+            <label className="block">
               <span className="text-sm font-medium text-slate-600">דוא"ל</span>
               <div className="relative mt-1">
                 <input
@@ -216,7 +216,7 @@ export default function Login() {
               </div>
             </label>
 
-            <label className="block text-end">
+            <label className="block">
               <span className="text-sm font-medium text-slate-600">סיסמה</span>
               <div className="relative mt-1">
                 <input
@@ -242,7 +242,7 @@ export default function Login() {
 
             {loginError ? (
               <div
-                className="bg-rose-50 border border-rose-200 text-rose-700 text-end rounded-2xl px-4 py-3 shadow-sm"
+                className="bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl px-4 py-3 shadow-sm"
                 role="alert"
                 aria-live="assertive"
               >

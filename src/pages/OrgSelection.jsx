@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,7 +26,7 @@ function LoadingState() {
 function EmptyState({ canCreate, onCreate }) {
   return (
     <Card className="max-w-2xl w-full">
-      <CardHeader className="space-y-2 text-end">
+      <CardHeader className="space-y-2">
         <CardTitle className="text-2xl font-bold text-slate-900">ברוך הבא!</CardTitle>
         {canCreate ? (
           <p className="text-slate-600 text-sm">
@@ -69,13 +69,13 @@ function InviteList({ invites, onAccept }) {
   if (!invites.length) return null;
   return (
     <Card className="w-full max-w-3xl">
-      <CardHeader className="text-end">
+      <CardHeader>
         <CardTitle className="text-lg font-semibold text-slate-900">הזמנות ממתינות</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {invites.map((invite) => (
           <div key={invite.id} className="border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div className="text-end">
+            <div>
               <p className="font-medium text-slate-900">{invite.organization?.name || 'ארגון ללא שם'}</p>
               <p className="text-sm text-slate-500">{invite.email}</p>
             </div>
@@ -97,7 +97,7 @@ function OrganizationList({ organizations, onSelect }) {
   if (!organizations.length) return null;
   return (
     <Card className="w-full max-w-3xl">
-      <CardHeader className="text-end">
+      <CardHeader>
         <CardTitle className="text-lg font-semibold text-slate-900">בחר ארגון</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -106,7 +106,7 @@ function OrganizationList({ organizations, onSelect }) {
             key={organization.id}
             type="button"
             onClick={() => onSelect(organization.id)}
-            className="w-full border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition rounded-xl p-4 text-end"
+            className="w-full border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition rounded-xl p-4"
           >
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -175,7 +175,7 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
           </p>
         </div>
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          <div className="space-y-2 text-end">
+          <div className="space-y-2">
             <Label htmlFor="org-name">שם הארגון</Label>
             <Input
               id="org-name"
@@ -211,14 +211,10 @@ export default function OrgSelection() {
   } = useOrg();
   const { signOut } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   const hasOrganizations = organizations.length > 0;
   const hasInvites = incomingInvites.length > 0;
-  const returnTo = useMemo(() => {
-    return location.state?.from?.pathname || '/';
-  }, [location.state]);
 
   const handleSelect = async (orgId) => {
     try {
@@ -248,7 +244,7 @@ export default function OrgSelection() {
 
   const handleCreate = async ({ name }) => {
     await createOrganization({ name });
-    navigate(returnTo, { replace: true });
+    navigate('/dashboard', { replace: true });
   };
 
   const handleLogout = async () => {

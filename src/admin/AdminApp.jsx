@@ -95,7 +95,7 @@ export default function AdminApp() {
       resources={[
         {
           name: 'system-health',
-          list: SystemHealthView,
+          list: '/system-admin/system-health',
           meta: {
             label: 'System Health',
           },
