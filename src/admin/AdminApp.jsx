@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { Refine } from '@refinedev/core';
 import routerProvider from '@refinedev/react-router';
 import dataProvider from '@refinedev/simple-rest';
@@ -11,69 +11,12 @@ import UserOrgManagementView from './modules/UserOrgManagementView.jsx';
 import GlobalSettingsView from './modules/GlobalSettingsView.jsx';
 import OperationsSupportView from './modules/OperationsSupportView.jsx';
 import ProductAnalyticsView from './modules/ProductAnalyticsView.jsx';
+import AdminShell from './ui/AdminShell.jsx';
+import DashboardView from './ui/DashboardView.jsx';
+import ComingSoon from './ui/ComingSoon.jsx';
+import { ADMIN_NAV, flattenNav } from './ui/navConfig.js';
 
 const adminDataProvider = dataProvider('/api/system-health-admin');
-
-function AdminLayout() {
-  return (
-    <div className="min-h-screen bg-slate-100 text-slate-900">
-      <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-4 p-4 md:grid-cols-[250px_1fr]">
-        <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">System Console</p>
-          <h1 className="mt-2 text-xl font-semibold">Reinex Admin</h1>
-          <nav className="mt-6 flex flex-col gap-2">
-            <Link
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-              to="/system-admin/system-health"
-            >
-              System Health
-            </Link>
-            <Link
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-              to="/system-admin/supabase-connection"
-            >
-              Supabase Connection
-            </Link>
-            <Link
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-              to="/system-admin/mfa"
-            >
-              MFA Management
-            </Link>
-            <Link
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-              to="/system-admin/user-org-management"
-            >
-              User & Org Management
-            </Link>
-            <Link
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-              to="/system-admin/global-settings"
-            >
-              Global Settings
-            </Link>
-            <Link
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-              to="/system-admin/operations-support"
-            >
-              Operations & Support
-            </Link>
-            <Link
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-              to="/system-admin/product-analytics"
-            >
-              Product Analytics
-            </Link>
-          </nav>
-        </aside>
-
-        <main className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <Outlet />
-        </main>
-      </div>
-    </div>
-  );
-}
 
 function AccessDenied() {
   return (
@@ -128,63 +71,180 @@ function AdminGate() {
   return <Outlet />;
 }
 
+// Map of path-segment -> element for live modules.
+const LIVE_ELEMENTS = {
+  'dashboard': <DashboardView />,
+  'system-health': <SystemHealthView />,
+  'supabase-connection': <SupabaseConnectionView />,
+  'mfa': <MfaPage />,
+  'global-settings': <GlobalSettingsView />,
+  'product-analytics': <ProductAnalyticsView />,
+  // Legacy aggregate views retained while their sub-modules are built out.
+  'user-org-management': <UserOrgManagementView />,
+  'operations-support': <OperationsSupportView />,
+};
+
+function ComingSoonRoute({ path }) {
+  const flat = React.useMemo(() => flattenNav(), []);
+  const item = flat.find((i) => i.to === `/system-admin/${path}`);
+  if (!item) return <ComingSoon title={path} subtitle="Not yet configured" />;
+
+  // Per-module planned features so the placeholder shows useful design intent.
+  const planned = PLANNED[path] || [];
+  return (
+    <ComingSoon
+      title={item.label}
+      subtitle={item.group}
+      description={item.description}
+      plannedFeatures={planned}
+    />
+  );
+}
+
+const PLANNED = {
+  'release-migrations': [
+    'Deploy history with commit range, deployer, duration, and outcome',
+    'Pending schema migrations with dry-run preview',
+    'One-click rollback with typed-confirm gate',
+    'Release notes pulled from PR descriptions',
+  ],
+  'encryption-keys': [
+    'List of active API / signing / JWT keys with expiry',
+    'Rotation scheduling with advance-warning window',
+    'Integration credential vault (read-only audit view)',
+    'Emergency revocation with broadcast to dependent services',
+  ],
+  'organizations': [
+    'Searchable table: name, plan, seats, activity, health score',
+    'Detail drawer: members, billing status, recent audit events, feature flags',
+    'Actions: suspend, resume, force-sync, transfer ownership (all reason-gated)',
+    'Direct "Open as this org" for impersonation',
+  ],
+  'users': [
+    'Global user search by name, email, phone, org',
+    'Detail drawer: sessions, MFA factors, roles, last activity',
+    'Real impersonation with MFA re-challenge + persistent banner + audit entry',
+    'Force sign-out across all devices; reset MFA',
+  ],
+  'onboarding-pipeline': [
+    'Kanban of new orgs by onboarding stage (signup → setup → activated)',
+    'Stuck-stage alerts with owner assignment',
+    'Checklist per org: profile, team, data, first successful action',
+    'Conversion funnel analytics via PostHog',
+  ],
+  'billing': [
+    'Internal ledger of plan assignments, overrides, credits',
+    'Per-org usage vs. plan limits with trend',
+    'Invoice history (internal only — no payment provider yet)',
+    'Hooks for future Stripe/Paddle integration',
+  ],
+  'audit-log': [
+    'Full-text + filtered search across every admin & user action',
+    'Filter by actor, org, action type, severity, outcome, time range',
+    'Row drawer: before/after snapshot, related events, replay context',
+    'CSV + JSON export with reason-gated download',
+  ],
+  'incidents': [
+    'Active incident board with severity, owner, customer impact',
+    'Post-mortem template linked from resolved incidents',
+    'Timeline synthesised from audit log + PostHog error events',
+    'Status-page publish hook',
+  ],
+  'impersonation-queue': [
+    'Pending requests, active sessions, completed sessions',
+    'Approval workflow for high-sensitivity orgs',
+    'Time-boxed sessions with auto-expiry',
+    'Live-revoke control for any active session',
+  ],
+  'email-log': [
+    'Outbound email stream: recipient, template, status, provider response',
+    'Bounce / complaint tracking with suppression list management',
+    'Resend + preview in-context',
+    'Per-org summary with delivery rate',
+  ],
+  'integration-health': [
+    'Status per 3rd-party integration (auth providers, email, storage, PostHog, etc.)',
+    'Webhook delivery success rate with recent failures',
+    'Quota usage vs. plan for each integration',
+    'Synthetic health checks run on a schedule',
+  ],
+  'data-quality': [
+    'Orphaned record detection (rows that break referential integrity)',
+    'Schema drift between environments',
+    'Row-count anomaly alerts',
+    'One-click cleanup with dry-run preview',
+  ],
+  'knowledge-base': [
+    'Markdown articles scoped to system admins',
+    'Runbook templates (incident response, customer escalation, etc.)',
+    'Full-text search with tag filtering',
+    'Versioned edits with audit trail',
+  ],
+  'announcements': [
+    'Compose system-wide banner messages with start/end schedule',
+    'Target by plan, region, or org list',
+    'Acknowledgement tracking',
+    'In-product + email channel split',
+  ],
+  'feature-flags': [
+    'Embeds PostHog Feature Flags surface (single source of truth)',
+    'Per-org override list with reason + expiry',
+    'Flag usage analytics (who is evaluating what)',
+    'Replaces anything living in permission_registry',
+  ],
+  'compliance': [
+    'Inbox of data access / deletion / export requests (intake via PostHog Survey)',
+    'SLA countdown per request type',
+    'Automated evidence gathering hooks (audit-log export, data dump)',
+    'Closure record with signed evidence bundle',
+  ],
+  'future-ideas': [
+    'Parking lot for deferred features: Background Jobs Monitor, Cost Analytics, Localisation Console, ...',
+    'Upvote / comment model so we can surface the most-wanted next',
+    'Links to related existing modules to reduce duplication',
+    'Promotes items to the roadmap when ready to build',
+  ],
+};
+
+// Routes the new nav points at that need to render something.
+const COMING_SOON_PATHS = [
+  'release-migrations',
+  'encryption-keys',
+  'organizations',
+  'users',
+  'onboarding-pipeline',
+  'billing',
+  'audit-log',
+  'incidents',
+  'impersonation-queue',
+  'email-log',
+  'integration-health',
+  'data-quality',
+  'knowledge-base',
+  'announcements',
+  'feature-flags',
+  'compliance',
+  'future-ideas',
+];
+
 export default function AdminApp() {
+  // Refine resource list — derived from ADMIN_NAV so the two never drift.
+  const resources = React.useMemo(() => {
+    return ADMIN_NAV.flatMap((group) =>
+      group.items.map((item) => ({
+        name: item.to.replace('/system-admin/', ''),
+        list: item.to,
+        meta: { label: item.label, parent: group.group },
+      })),
+    );
+  }, []);
+
   return (
     <Refine
       authProvider={adminAuthProvider}
       dataProvider={adminDataProvider}
       routerProvider={routerProvider}
-      resources={[
-        {
-          name: 'system-health',
-          list: '/system-admin/system-health',
-          meta: {
-            label: 'System Health',
-          },
-        },
-        {
-          name: 'supabase-connection',
-          list: '/system-admin/supabase-connection',
-          meta: {
-            label: 'Supabase Connection',
-          },
-        },
-        {
-          name: 'mfa-management',
-          list: '/system-admin/mfa',
-          meta: {
-            label: 'MFA Management',
-          },
-        },
-        {
-          name: 'user-org-management',
-          list: '/system-admin/user-org-management',
-          meta: {
-            label: 'User & Org Management',
-          },
-        },
-        {
-          name: 'global-settings',
-          list: '/system-admin/global-settings',
-          meta: {
-            label: 'Global Settings',
-          },
-        },
-        {
-          name: 'operations-support',
-          list: '/system-admin/operations-support',
-          meta: {
-            label: 'Operations & Support',
-          },
-        },
-        {
-          name: 'product-analytics',
-          list: '/system-admin/product-analytics',
-          meta: {
-            label: 'Product Analytics',
-          },
-        },
-      ]}
+      resources={resources}
       options={{
         syncWithLocation: true,
         warnWhenUnsavedChanges: false,
@@ -192,15 +252,24 @@ export default function AdminApp() {
     >
       <Routes>
         <Route element={<AdminGate />}>
-          <Route index element={<Navigate to="/system-admin/system-health" replace />} />
-          <Route element={<AdminLayout />}>
-            <Route path="system-health" element={<SystemHealthView />} />
-            <Route path="supabase-connection" element={<SupabaseConnectionView />} />
-            <Route path="mfa" element={<MfaPage />} />
-            <Route path="user-org-management" element={<UserOrgManagementView />} />
-            <Route path="global-settings" element={<GlobalSettingsView />} />
-            <Route path="operations-support" element={<OperationsSupportView />} />
-            <Route path="product-analytics" element={<ProductAnalyticsView />} />
+          <Route index element={<Navigate to="/system-admin/dashboard" replace />} />
+          <Route element={<AdminShell />}>
+            <Route path="dashboard" element={LIVE_ELEMENTS['dashboard']} />
+            <Route path="system-health" element={LIVE_ELEMENTS['system-health']} />
+            <Route path="supabase-connection" element={LIVE_ELEMENTS['supabase-connection']} />
+            <Route path="mfa" element={LIVE_ELEMENTS['mfa']} />
+            <Route path="global-settings" element={LIVE_ELEMENTS['global-settings']} />
+            <Route path="product-analytics" element={LIVE_ELEMENTS['product-analytics']} />
+
+            {/* Legacy aggregate views kept reachable while sub-modules are built. */}
+            <Route path="user-org-management" element={LIVE_ELEMENTS['user-org-management']} />
+            <Route path="operations-support" element={LIVE_ELEMENTS['operations-support']} />
+
+            {/* Coming-soon placeholders — designed, queued for wiring. */}
+            {COMING_SOON_PATHS.map((p) => (
+              <Route key={p} path={p} element={<ComingSoonRoute path={p} />} />
+            ))}
+
             <Route path="forbidden" element={<AccessDenied />} />
           </Route>
         </Route>
