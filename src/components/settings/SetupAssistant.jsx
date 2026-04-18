@@ -60,18 +60,37 @@ function CopyButton({ text, ariaLabel }) {
 }
 
 function CodeBlock({ title, code, ariaLabel }) {
+  const [expanded, setExpanded] = useState(false);
+
   return (
     <div className="space-y-2">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="font-medium text-slate-800">{title}</p>
-        <CopyButton text={code} ariaLabel={ariaLabel} />
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setExpanded((prev) => !prev)}
+            aria-expanded={expanded}
+            className="text-xs"
+          >
+            {expanded ? 'הסתר סקריפט' : 'הצג סקריפט'}
+          </Button>
+          <CopyButton text={code} ariaLabel={ariaLabel} />
+        </div>
       </div>
-      <pre
-        dir="ltr"
-        className="whitespace-pre overflow-x-auto text-xs leading-relaxed bg-slate-900 text-slate-100 rounded-lg p-4 border border-slate-800"
-      >
-        <code>{code}</code>
-      </pre>
+
+      {expanded ? (
+        <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
+          <pre
+            dir="ltr"
+            className="max-h-[28rem] max-w-full overflow-auto whitespace-pre text-xs leading-relaxed text-slate-100 p-4"
+          >
+            <code>{code}</code>
+          </pre>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -69,6 +69,14 @@ export const adminAuthProvider = {
       };
     }
 
+    const permission = await getSystemAdminPermission(authClient, userId);
+    if (!permission) {
+      return {
+        authenticated: false,
+        redirectTo: '/dashboard',
+      };
+    }
+
     const { data: aalData } = await getAuthenticatorAssuranceLevel(authClient);
     const currentLevel = aalData?.currentLevel || aalData?.current_level || 'aal1';
 
@@ -76,14 +84,6 @@ export const adminAuthProvider = {
       return {
         authenticated: true,
         redirectTo: '/system-admin/mfa',
-      };
-    }
-
-    const permission = await getSystemAdminPermission(authClient, userId);
-    if (!permission) {
-      return {
-        authenticated: false,
-        redirectTo: '/dashboard',
       };
     }
 

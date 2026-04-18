@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAuthClient } from '@/lib/supabase-manager.js';
+import { adminAuthProvider } from './authProvider.js';
 
 function extractErrorMessage(error, fallback) {
   if (!error) {
@@ -23,6 +24,7 @@ function getAalLevel(payload) {
 }
 
 const MFA_FRIENDLY_NAME = 'Reinex System Admin';
+const MFA_ISSUER = 'Reinex Admin';
 
 async function getAuthenticatorAssuranceLevel(authClient) {
   if (typeof authClient?.auth?.getAuthenticatorAssuranceLevel === 'function') {
@@ -96,8 +98,32 @@ export default function MfaPage() {
     error: '',
   });
 
+  const completeApprovedNavigation = React.useCallback(async () => {
+    const result = await adminAuthProvider.check();
+
+    if (result?.redirectTo) {
+      if (result.redirectTo === '/system-admin/mfa') {
+        throw new Error('MFA verification was not approved yet. Please try a fresh code.');
+      }
+      navigate(result.redirectTo, { replace: true });
+      return;
+    }
+
+    if (!result?.authenticated) {
+      throw new Error('MFA approval failed for this session. Please sign in again.');
+    }
+
+    navigate('/system-admin', { replace: true });
+  }, [navigate]);
+
   const bootstrap = React.useCallback(async ({ resetEnrollment = false } = {}) => {
     const authClient = getAuthClient();
+
+    const adminPermission = await adminAuthProvider.getPermissions();
+    if (!adminPermission) {
+      navigate('/dashboard', { replace: true });
+      return;
+    }
 
     setState((previous) => ({
       ...previous,
@@ -113,7 +139,7 @@ export default function MfaPage() {
     }
 
     if (getAalLevel(aalData) === 'aal2') {
-      navigate('/system-admin', { replace: true });
+      await completeApprovedNavigation();
       return;
     }
 
@@ -156,6 +182,7 @@ export default function MfaPage() {
     const { data: enrollData, error: enrollError } = await authClient.auth.mfa.enroll({
       factorType: 'totp',
       friendlyName: MFA_FRIENDLY_NAME,
+      issuer: MFA_ISSUER,
     });
     if (enrollError) {
       throw enrollError;
@@ -172,7 +199,7 @@ export default function MfaPage() {
       info: 'Scan the QR code, then enter the first 6-digit code to verify setup.',
       error: '',
     }));
-  }, [navigate]);
+  }, [completeApprovedNavigation, navigate]);
 
   React.useEffect(() => {
     let active = true;
@@ -264,7 +291,16 @@ export default function MfaPage() {
           throw verifyError;
         }
 
-        navigate('/system-admin', { replace: true });
+        const { data: aalData, error: aalError } = await getAuthenticatorAssuranceLevel(authClient);
+        if (aalError) {
+          throw aalError;
+        }
+
+        if (getAalLevel(aalData) !== 'aal2') {
+          throw new Error('The verification code was not approved for an AAL2 session. Please try again.');
+        }
+
+        await completeApprovedNavigation();
       } catch (error) {
         setState((previous) => ({
           ...previous,
@@ -274,7 +310,7 @@ export default function MfaPage() {
         }));
       }
     },
-    [ensureChallenge, navigate, state.challengeId, state.code, state.factorId]
+    [completeApprovedNavigation, ensureChallenge, state.challengeId, state.code, state.factorId]
   );
 
   const handleRetry = React.useCallback(async () => {

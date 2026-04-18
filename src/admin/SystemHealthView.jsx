@@ -40,6 +40,10 @@ function formatError(error, fallback) {
     return fallback;
   }
 
+  if (error?.status === 404) {
+    return 'System Health API is not available in this deployment yet (404). Deploy the backend functions and try again.';
+  }
+
   if (typeof error === 'string') {
     return error;
   }
@@ -173,7 +177,7 @@ export default function SystemHealthView() {
   const encryption = state.payload?.encryption || {};
 
   return (
-    <section className="space-y-5">
+    <section dir="ltr" className="space-y-5 text-left">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">Security & Health Dashboard</h2>
