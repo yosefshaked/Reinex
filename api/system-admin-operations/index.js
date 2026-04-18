@@ -58,12 +58,12 @@ export default async function systemAdminOperations(context, req) {
 
   let recentEventsQuery = supabase
     .from('audit_log')
-    .select('id, org_id, user_email, action_type, action_category, resource_type, resource_id, retention_category, performed_at')
-    .order('performed_at', { ascending: false })
+    .select('id, org_id, actor_email, event_type, action_category, resource_type, resource_id, retention_category, created_at')
+    .order('created_at', { ascending: false })
     .limit(limit);
 
   if (filterAction) {
-    recentEventsQuery = recentEventsQuery.eq('action_type', filterAction);
+    recentEventsQuery = recentEventsQuery.eq('event_type', filterAction);
   }
   if (filterCategory) {
     recentEventsQuery = recentEventsQuery.eq('action_category', filterCategory);
@@ -75,7 +75,7 @@ export default async function systemAdminOperations(context, req) {
     recentEventsQuery = recentEventsQuery.eq('org_id', filterOrgId);
   }
   if (filterBefore) {
-    recentEventsQuery = recentEventsQuery.lt('performed_at', filterBefore);
+    recentEventsQuery = recentEventsQuery.lt('created_at', filterBefore);
   }
 
   try {
@@ -84,12 +84,12 @@ export default async function systemAdminOperations(context, req) {
         .from('audit_log')
         .select('id', { count: 'exact', head: true })
         .eq('retention_category', 'critical')
-        .gte('performed_at', last24hStart),
+        .gte('created_at', last24hStart),
       supabase
         .from('audit_log')
         .select('id', { count: 'exact', head: true })
         .eq('retention_category', 'standard')
-        .gte('performed_at', last24hStart),
+        .gte('created_at', last24hStart),
       recentEventsQuery,
     ]);
 
@@ -97,7 +97,17 @@ export default async function systemAdminOperations(context, req) {
       throw criticalCountResult.error || standardCountResult.error || recentEventsResult.error;
     }
 
-    const recentEvents = Array.isArray(recentEventsResult.data) ? recentEventsResult.data : [];
+    const recentEvents = (Array.isArray(recentEventsResult.data) ? recentEventsResult.data : []).map((event) => ({
+      id: event.id,
+      org_id: event.org_id,
+      user_email: event.actor_email,
+      action_type: event.event_type,
+      action_category: event.action_category,
+      resource_type: event.resource_type,
+      resource_id: event.resource_id,
+      retention_category: event.retention_category,
+      performed_at: event.created_at,
+    }));
 
     const topActions = Object.entries(
       recentEvents.reduce((acc, event) => {
