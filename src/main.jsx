@@ -39,8 +39,10 @@ import FormBlocksPage from './features/forms/pages/FormBlocksPage.jsx';
 import SubmitFormPage from './pages/SubmitFormPage.jsx';
 import { bootstrapSupabaseCallback } from './auth/bootstrapSupabaseCallback.js';
 import AdminApp from './admin/AdminApp.jsx';
+import { initPostHog } from './lib/analytics/posthog.js';
 
 bootstrapSupabaseCallback();
+initPostHog();
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {

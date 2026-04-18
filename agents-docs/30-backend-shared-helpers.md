@@ -45,3 +45,4 @@
 - Use `resolveOrgId` or `parseRequestBody` instead of ad hoc request parsing.
 - Use body-size-aware parsing for write endpoints.
 - Auth/membership checks happen first; tenant reads/writes must always be org-scoped in the shared single DB.
+- System-admin cross-tenant controls must be review-first: queue action requests (for example in `permission_registry` with `system.request.*` keys) and audit with `logAuditEvent` instead of executing destructive org changes inline.

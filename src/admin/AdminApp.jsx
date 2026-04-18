@@ -7,6 +7,10 @@ import { adminAuthProvider } from './authProvider.js';
 import MfaPage from './MfaPage.jsx';
 import SystemHealthView from './SystemHealthView.jsx';
 import SupabaseConnectionView from './SupabaseConnectionView.jsx';
+import UserOrgManagementView from './modules/UserOrgManagementView.jsx';
+import GlobalSettingsView from './modules/GlobalSettingsView.jsx';
+import OperationsSupportView from './modules/OperationsSupportView.jsx';
+import ProductAnalyticsView from './modules/ProductAnalyticsView.jsx';
 
 const adminDataProvider = dataProvider('/api/system-health-admin');
 
@@ -35,6 +39,30 @@ function AdminLayout() {
               to="/system-admin/mfa"
             >
               MFA Management
+            </Link>
+            <Link
+              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              to="/system-admin/user-org-management"
+            >
+              User & Org Management
+            </Link>
+            <Link
+              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              to="/system-admin/global-settings"
+            >
+              Global Settings
+            </Link>
+            <Link
+              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              to="/system-admin/operations-support"
+            >
+              Operations & Support
+            </Link>
+            <Link
+              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              to="/system-admin/product-analytics"
+            >
+              Product Analytics
             </Link>
           </nav>
         </aside>
@@ -128,6 +156,34 @@ export default function AdminApp() {
             label: 'MFA Management',
           },
         },
+        {
+          name: 'user-org-management',
+          list: '/system-admin/user-org-management',
+          meta: {
+            label: 'User & Org Management',
+          },
+        },
+        {
+          name: 'global-settings',
+          list: '/system-admin/global-settings',
+          meta: {
+            label: 'Global Settings',
+          },
+        },
+        {
+          name: 'operations-support',
+          list: '/system-admin/operations-support',
+          meta: {
+            label: 'Operations & Support',
+          },
+        },
+        {
+          name: 'product-analytics',
+          list: '/system-admin/product-analytics',
+          meta: {
+            label: 'Product Analytics',
+          },
+        },
       ]}
       options={{
         syncWithLocation: true,
@@ -141,6 +197,10 @@ export default function AdminApp() {
             <Route path="system-health" element={<SystemHealthView />} />
             <Route path="supabase-connection" element={<SupabaseConnectionView />} />
             <Route path="mfa" element={<MfaPage />} />
+            <Route path="user-org-management" element={<UserOrgManagementView />} />
+            <Route path="global-settings" element={<GlobalSettingsView />} />
+            <Route path="operations-support" element={<OperationsSupportView />} />
+            <Route path="product-analytics" element={<ProductAnalyticsView />} />
             <Route path="forbidden" element={<AccessDenied />} />
           </Route>
         </Route>

@@ -288,7 +288,7 @@
     2. Decodes JWT to enforce `aal2` (MFA/TOTP completed).
     3. Queries `profiles.is_system_admin` (service_role, bypasses RLS).
     4. Every attempt (success or failure) → `audit_log` with `retention_category: 'critical'`.
-  - [x] **API Endpoint:** `GET /api/admin-system-health` — gated by `ensureSystemAdmin`, returns DB status, environment, encryption key hashes, and rotation status.
+  - [x] **API Endpoint:** `GET /api/system-health-admin` — gated by `ensureSystemAdmin`, returns DB status, environment, encryption key hashes, and rotation status.
 
   **Architectural Decision:** This console will be built using the **Refine framework** (`@refinedev/core`) to accelerate development, ensure best practices, and integrate seamlessly with our existing React application and authentication context.
 
@@ -297,7 +297,7 @@
   - **Admin Route & Layout:** Create a new route (`/system-admin`) and a main `<AdminApp />` layout component that initializes Refine.
   - **Auth Integration:** Implement a Refine `authProvider` that hooks into our existing `useAuth()` context to handle permissions (`super_admin` role) and session state.
   - **Security & Health Module:** Implement the first "resource" module:
-    - An admin-only API endpoint (`/api/admin-system-health`) that returns DB status, environment, and SHA-256 hashes of the encryption keys (NO raw secrets).
+    - An admin-only API endpoint (`/api/system-health-admin`) that returns DB status, environment, and SHA-256 hashes of the encryption keys (NO raw secrets).
     - A custom UI view for this resource displaying key hashes, rotation status, and a sanity-check tool.
 
   **Phase 2 Deliverables (Completed):**
@@ -313,7 +313,25 @@
     - [x] Encryption metadata card (current/previous hash display, rotation status badge).
     - [x] Encryption sanity-check tool with clear success/failure feedback.
     - [x] In-app "How to Rotate Keys" collapsible guidance for Azure rotation workflow.
-  - [x] **Backend support:** `admin-system-health` now supports sanity-check action via `POST` and `action=sanity-check`.
+  - [x] **Backend support:** `system-health-admin` now supports sanity-check action via `POST` and `action=sanity-check`.
+
+  **Phase 4 Deliverables (Started):**
+  - [x] **Module scaffolding:** Added first-class system-admin modules and routes for:
+    - User & Org Management
+    - Global Settings
+    - Operations & Support
+    - Product Analytics
+  - [x] **Platform summary API:** Added `GET /api/system-admin-overview` (system-admin + AAL2 gated) for module dashboards.
+  - [x] **Product analytics baseline:** Added PostHog client bootstrap wrapper and runtime status/test-event UI in the Product Analytics module.
+  - [ ] **Next:** Persist global settings and feature flags in backend APIs, and connect operations module to cross-tenant audit/incident queries.
+
+  **Phase 5 Plan (Active):**
+  - [x] **5a — Operations data endpoint:** add `GET /api/system-admin-operations` (super-admin + AAL2) to expose platform audit summary, top actions, and recent events.
+  - [x] **5b — User/Org data endpoint:** add `GET /api/system-admin-users-orgs` (super-admin + AAL2) for cross-tenant org listing, membership counts, and system-admin directory with search.
+  - [x] **5c — Module wiring:** connect User & Org Management + Operations & Support module UIs to backend data endpoints.
+  - [x] **5d — Global settings persistence:** implemented `GET/POST /api/system-admin-global-settings` for feature flags + announcements, and wired the module save flow.
+  - [x] **5e — Ops deep links:** added filtered cross-tenant audit drilldown (`action_type`, `action_category`, `retention_category`, `org_id`) and quick deep-link chips from top actions.
+  - [x] **5f — User/org actions:** added audited action-request workflow for org suspend/reactivate + controlled impersonation requests.
 
   **Future Modules (Roadmap — For Post-Refactor Work):**
   - **User & Org Management:** Tools for user search, impersonation, and org administration.
@@ -352,3 +370,8 @@
 | 22 (wave 11) | 2026-04-18 | Final diagnostics/test cleanup: removed snake_case runtime key fallbacks from manual error-screen diagnostics and aligned test fixtures with canonical camelCase keys. | `src/runtime/ConfigErrorScreen.jsx`, `src/runtime/config.test.js` |
 | 23 (phase 2) | 2026-04-18 | Implemented System Admin MFA UI: added `/system-admin/mfa` TOTP enrollment/challenge page using Supabase MFA methods (`listFactors`, `enroll`, `challenge`, `verify`), replaced placeholder route in admin app, and wired post-verify redirect to `/system-admin`. | `src/admin/MfaPage.jsx`, `src/admin/AdminApp.jsx`, `implementations/database/one-db-refactor/one-db-refactor.md` |
 | 23 (phase 3) | 2026-04-18 | Built Security & Health dashboard UI with status/encryption cards, key rotation instructions, and a backend-driven encryption sanity-check action (`POST`/`action=sanity-check`) for safe key rotation verification. | `src/admin/SystemHealthView.jsx`, `src/admin/AdminApp.jsx`, `api/admin-system-health/index.js`, `api/admin-system-health/function.json`, `implementations/database/one-db-refactor/one-db-refactor.md` |
+| 23 (phase 4) | 2026-04-18 | Started system-admin module expansion: added module routes/pages (User & Org Management, Global Settings, Operations & Support, Product Analytics), added secure platform summary endpoint (`/api/system-admin-overview`), and wired PostHog baseline client + analytics status/test-event UI. | `src/admin/AdminApp.jsx`, `src/admin/modules/*.jsx`, `api/system-admin-overview/index.js`, `api/system-admin-overview/function.json`, `src/lib/analytics/posthog.js`, `src/main.jsx`, `implementations/database/one-db-refactor/one-db-refactor.md` |
+| 23 (phase 5a-5c) | 2026-04-18 | Continued module implementation with backend data wiring: added secure operations endpoint (`/api/system-admin-operations`) and user/org explorer endpoint (`/api/system-admin-users-orgs`), then connected Operations & Support and User & Org Management modules to live data. | `api/system-admin-operations/index.js`, `api/system-admin-operations/function.json`, `api/system-admin-users-orgs/index.js`, `api/system-admin-users-orgs/function.json`, `src/admin/modules/OperationsSupportView.jsx`, `src/admin/modules/UserOrgManagementView.jsx`, `implementations/database/one-db-refactor/one-db-refactor.md` |
+| 23 (phase 5d) | 2026-04-18 | Implemented global settings persistence: added secure `system-admin-global-settings` API and wired Global Settings module to load/save feature flags and announcement text from backend storage. | `api/system-admin-global-settings/index.js`, `api/system-admin-global-settings/function.json`, `src/admin/modules/GlobalSettingsView.jsx`, `implementations/database/one-db-refactor/one-db-refactor.md` |
+| 23 (phase 5e) | 2026-04-18 | Added operations drilldown filters and deep-link behavior: backend supports filtered audit windows and frontend provides incident filters plus clickable top-action chips for rapid narrowing. | `api/system-admin-operations/index.js`, `src/admin/modules/OperationsSupportView.jsx`, `implementations/database/one-db-refactor/one-db-refactor.md` |
+| 23 (phase 5f) | 2026-04-18 | Added secure audited action workflow for user/org controls with `system-admin-user-org-actions` (`POST`) and connected User & Org Management action buttons for suspend/reactivate/impersonation requests (queued for review, not immediate destructive execution). | `api/system-admin-user-org-actions/index.js`, `api/system-admin-user-org-actions/function.json`, `src/admin/modules/UserOrgManagementView.jsx`, `implementations/database/one-db-refactor/one-db-refactor.md` |
