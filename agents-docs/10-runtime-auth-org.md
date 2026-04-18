@@ -28,5 +28,6 @@
 - Single-DB auth client is initialized from runtime config once; do not create extra global Supabase auth clients.
 - `SupabaseContext` exposes one runtime client for both auth and data access.
 - `OrgContext` loads memberships from the shared DB and stores `active_org_id`; no per-org credential fetch happens during org switching.
+- `organizations.setup_completed` is intentionally retained as an onboarding/readiness flag. Do not remove it as "legacy" even in single-DB mode.
 - Frontend API calls carry org context using `x-org-id` (via [`../src/lib/api-client.js`](../src/lib/api-client.js)).
 - If you need org-aware frontend data, use `useOrg()` and existing wrappers instead of rebuilding org/session lookup.

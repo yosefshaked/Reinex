@@ -5,8 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EnhancedDialogHeader } from '@/components/ui/DialogHeader';
-import { PlugZap, Sparkles, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History } from 'lucide-react';
-import SetupAssistant from '@/components/settings/SetupAssistant.jsx';
+import { Sparkles, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History } from 'lucide-react';
 import BackupManager from '@/components/settings/BackupManager.jsx';
 import LogoManager from '@/components/settings/LogoManager.jsx';
 import TagsManager from '@/components/settings/TagsManager.jsx';
@@ -41,15 +40,13 @@ const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = {
 export default function Settings() {
   const { activeOrg, activeOrgId, refreshOrganizations } = useOrg();
   const { authClient, user, loading, session } = useSupabase();
-  const hasActiveOrg = Boolean(activeOrgId);
   const orgReady = Boolean(session && activeOrgId);
   const membershipRole = activeOrg?.membership?.role ?? null;
   const normalizedRole = typeof membershipRole === 'string' ? membershipRole.trim().toLowerCase() : '';
   const canManageSessionForm = normalizedRole === 'admin' || normalizedRole === 'owner';
-  const setupDialogAutoOpenRef = useRef(!hasActiveOrg);
   const orgIdSyncCompletedRef = useRef(new Set());
   const orgIdSyncInFlightRef = useRef(new Set());
-  const [selectedModule, setSelectedModule] = useState(null); // 'setup' | 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
+  const [selectedModule, setSelectedModule] = useState(null); // 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
   const [backupEnabled, setBackupEnabled] = useState(false);
   const [logoEnabled, setLogoEnabled] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
@@ -337,25 +334,9 @@ export default function Settings() {
     };
   }, [session, activeOrgId, canManageSessionForm]);
 
-  useEffect(() => {
-    if (hasActiveOrg) {
-      setupDialogAutoOpenRef.current = false;
-  // close any open module dialog
-  setSelectedModule(null);
-      return;
-    }
-    if (!setupDialogAutoOpenRef.current) {
-      setupDialogAutoOpenRef.current = true;
-      setSelectedModule('setup');
-    }
-  }, [hasActiveOrg]);
-
   const handleModuleDialogChange = (open) => {
     if (!open) {
       setSelectedModule(null);
-      if (!hasActiveOrg) {
-        setupDialogAutoOpenRef.current = true;
-      }
     }
   };
 
@@ -548,37 +529,6 @@ export default function Settings() {
         {/* Selector grid - only visible to admin/owner */}
         {canManageSessionForm && (
         <div className="grid w-full gap-4 sm:gap-5 md:grid-cols-2 lg:grid-cols-3">
-          {/* Setup Assistant Card */}
-          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
-            <CardHeader className="space-y-2 pb-3 flex-1">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="rounded-lg bg-blue-100 p-2 text-blue-600 transition-colors group-hover:bg-blue-600 group-hover:text-white">
-                    <PlugZap className="h-5 w-5" aria-hidden="true" />
-                  </div>
-                  <CardTitle className="text-lg font-bold text-slate-900">
-                    חיבור Supabase
-                  </CardTitle>
-                </div>
-                <Badge className={hasActiveOrg ? 'bg-emerald-100 text-emerald-700 border-0' : 'bg-amber-100 text-amber-800 border-0'}>
-                  {hasActiveOrg ? 'פעיל' : 'נדרש'}
-                </Badge>
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                הגדרת מפתחות Supabase, בדיקת חיבור, והרצת סקריפט הגדרה אוטומטית
-              </p>
-            </CardHeader>
-            <CardContent className="pt-0 mt-auto">
-              <Button 
-                size="sm" 
-                className="w-full gap-2 bg-blue-600 hover:bg-blue-700" 
-                onClick={() => { setSelectedModule('setup'); }}
-              >
-                <PlugZap className="h-4 w-4" /> פתיחת אשף הגדרה
-              </Button>
-            </CardContent>
-          </Card>
-
           {/* Student Visibility Card */}
           <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
             <CardHeader className="space-y-2 pb-3 flex-1">
@@ -936,7 +886,6 @@ export default function Settings() {
           <DialogContent hideDefaultClose className="max-w-5xl max-h-[90vh] p-0 gap-0 overflow-hidden bg-white border border-slate-200 shadow-2xl">
             <EnhancedDialogHeader
               icon={
-                selectedModule === 'setup' ? <PlugZap /> :
                 selectedModule === 'backup' ? <ShieldCheck /> :
                 selectedModule === 'logo' ? <Sparkles /> :
                 selectedModule === 'tags' ? <Tag /> :
@@ -950,7 +899,6 @@ export default function Settings() {
                 null
               }
               title={
-                selectedModule === 'setup' ? 'חיבור Supabase' :
                 selectedModule === 'backup' ? 'גיבוי ושחזור' :
                 selectedModule === 'logo' ? 'לוגו מותאם אישית' :
                 selectedModule === 'tags' ? 'ניהול תגיות וסיווגים' :
@@ -974,9 +922,6 @@ export default function Settings() {
             {/* Content area with padding and scroll */}
             <div className="overflow-y-auto px-6 py-6 max-h-[calc(90vh-80px)] bg-slate-50/30">
               <div className="mx-auto max-w-4xl">
-                {selectedModule === 'setup' && (
-                  <SetupAssistant />
-                )}
                 {selectedModule === 'backup' && (
                   <BackupManager session={session} orgId={activeOrgId} />
                 )}

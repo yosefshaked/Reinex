@@ -34,6 +34,7 @@
 
 ## Known patterns / do not reinvent
 - Settings reads/writes should go through the settings API wrappers and endpoint; do not probe `Settings` directly from random components.
+- Supabase connection/setup assistant is system-admin owned and should live under `/system-admin` (not the regular Settings page).
 - The settings endpoint already diagnoses missing table/policy/metadata-column problems; keep that behavior centralized.
 - Documents are unified under `/api/documents` with `entity_type` + `entity_id`; do not add new student/instructor/org-specific file APIs.
 - Storage supports managed mode and BYOS through the driver factory; do not branch provider logic in every endpoint.

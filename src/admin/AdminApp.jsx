@@ -6,6 +6,7 @@ import dataProvider from '@refinedev/simple-rest';
 import { adminAuthProvider } from './authProvider.js';
 import MfaPage from './MfaPage.jsx';
 import SystemHealthView from './SystemHealthView.jsx';
+import SupabaseConnectionView from './SupabaseConnectionView.jsx';
 
 const adminDataProvider = dataProvider('/api/admin-system-health');
 
@@ -22,6 +23,12 @@ function AdminLayout() {
               to="/system-admin/system-health"
             >
               System Health
+            </Link>
+            <Link
+              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              to="/system-admin/supabase-connection"
+            >
+              Supabase Connection
             </Link>
           </nav>
         </aside>
@@ -100,6 +107,13 @@ export default function AdminApp() {
             label: 'System Health',
           },
         },
+        {
+          name: 'supabase-connection',
+          list: '/system-admin/supabase-connection',
+          meta: {
+            label: 'Supabase Connection',
+          },
+        },
       ]}
       options={{
         syncWithLocation: true,
@@ -112,6 +126,7 @@ export default function AdminApp() {
           <Route index element={<Navigate to="/system-admin/system-health" replace />} />
           <Route element={<AdminLayout />}>
             <Route path="system-health" element={<SystemHealthView />} />
+            <Route path="supabase-connection" element={<SupabaseConnectionView />} />
             <Route path="forbidden" element={<AccessDenied />} />
           </Route>
         </Route>
