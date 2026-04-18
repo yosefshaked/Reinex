@@ -42,7 +42,7 @@ export const adminAuthProvider = {
     };
   },
 
-  check: async () => {
+  check: async (params = {}) => {
     let authClient;
     try {
       authClient = getAuthClient();
@@ -80,7 +80,10 @@ export const adminAuthProvider = {
     const { data: aalData } = await getAuthenticatorAssuranceLevel(authClient);
     const currentLevel = aalData?.currentLevel || aalData?.current_level || 'aal1';
 
-    if (currentLevel !== 'aal2') {
+    const pathname = typeof params?.pathname === 'string' ? params.pathname : '';
+    const isMfaRoute = pathname.startsWith('/system-admin/mfa');
+
+    if (currentLevel !== 'aal2' && !isMfaRoute) {
       return {
         authenticated: true,
         redirectTo: '/system-admin/mfa',

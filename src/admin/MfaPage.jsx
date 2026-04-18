@@ -67,6 +67,31 @@ async function clearPendingTotpFactors(authClient, factorsData, keepFactorId = '
   }
 }
 
+async function clearTotpFactors(authClient, factorsData, { includeVerified = false } = {}) {
+  const factors = listAllTotpFactors(factorsData);
+  const factorsToRemove = factors.filter((factor) => {
+    if (!factor?.id) return false;
+    if (includeVerified) return true;
+    return factor?.status !== 'verified';
+  });
+
+  for (const factor of factorsToRemove) {
+    const { error } = await authClient.auth.mfa.unenroll({ factorId: factor.id });
+    if (error) {
+      throw error;
+    }
+  }
+}
+
+function normalizeFactorsForDisplay(listData) {
+  return listAllTotpFactors(listData).map((factor) => ({
+    id: factor?.id || '',
+    status: factor?.status || 'unknown',
+    friendlyName: factor?.friendly_name || factor?.friendlyName || 'Authenticator',
+    createdAt: factor?.created_at || factor?.createdAt || '',
+  }));
+}
+
 function toQrDataUri(rawQrCode) {
   if (!rawQrCode) {
     return '';
@@ -89,8 +114,10 @@ export default function MfaPage() {
     loading: true,
     submitting: false,
     mode: 'loading',
+    aalLevel: 'aal1',
     factorId: '',
     challengeId: '',
+    factors: [],
     qrCode: '',
     secret: '',
     code: '',
@@ -116,7 +143,7 @@ export default function MfaPage() {
     navigate('/system-admin', { replace: true });
   }, [navigate]);
 
-  const bootstrap = React.useCallback(async ({ resetEnrollment = false } = {}) => {
+  const bootstrap = React.useCallback(async ({ resetEnrollment = false, forceEnroll = false } = {}) => {
     const authClient = getAuthClient();
 
     const adminPermission = await adminAuthProvider.getPermissions();
@@ -138,19 +165,44 @@ export default function MfaPage() {
       throw aalError;
     }
 
-    if (getAalLevel(aalData) === 'aal2') {
-      await completeApprovedNavigation();
-      return;
-    }
+    const currentAalLevel = getAalLevel(aalData);
 
     const { data: factorsData, error: factorsError } = await authClient.auth.mfa.listFactors();
     if (factorsError) {
       throw factorsError;
     }
 
-    const totpFactors = listAllTotpFactors(factorsData);
+    if (resetEnrollment) {
+      await clearTotpFactors(authClient, factorsData, { includeVerified: true });
+    }
+
+    const { data: refreshedFactorsData, error: refreshedFactorsError } = await authClient.auth.mfa.listFactors();
+    if (refreshedFactorsError) {
+      throw refreshedFactorsError;
+    }
+
+    const factorsForDisplay = normalizeFactorsForDisplay(refreshedFactorsData);
+
+    const totpFactors = listAllTotpFactors(refreshedFactorsData);
     const verifiedTotpFactor = totpFactors.find((factor) => factor?.status === 'verified') || null;
     const pendingTotpFactor = totpFactors.find((factor) => factor?.status !== 'verified') || null;
+
+    if (currentAalLevel === 'aal2' && !forceEnroll) {
+      setState((previous) => ({
+        ...previous,
+        loading: false,
+        mode: 'manage',
+        aalLevel: currentAalLevel,
+        factors: factorsForDisplay,
+        factorId: '',
+        challengeId: '',
+        qrCode: '',
+        secret: '',
+        info: 'You are already verified. You can manage authenticator connections below.',
+        error: '',
+      }));
+      return;
+    }
 
     if (verifiedTotpFactor?.id) {
       const { data: challengeData, error: challengeError } = await authClient.auth.mfa.challenge({
@@ -165,6 +217,8 @@ export default function MfaPage() {
         ...previous,
         loading: false,
         mode: 'challenge',
+        aalLevel: currentAalLevel,
+        factors: factorsForDisplay,
         factorId: verifiedTotpFactor.id,
         challengeId: challengeData?.id || challengeData?.challengeId || challengeData?.challenge_id || '',
         qrCode: '',
@@ -175,8 +229,8 @@ export default function MfaPage() {
       return;
     }
 
-    if (resetEnrollment || pendingTotpFactor?.id) {
-      await clearPendingTotpFactors(authClient, factorsData);
+    if (pendingTotpFactor?.id) {
+      await clearPendingTotpFactors(authClient, refreshedFactorsData);
     }
 
     const { data: enrollData, error: enrollError } = await authClient.auth.mfa.enroll({
@@ -192,6 +246,8 @@ export default function MfaPage() {
       ...previous,
       loading: false,
       mode: 'enroll',
+      aalLevel: currentAalLevel,
+      factors: factorsForDisplay,
       factorId: enrollData?.id || '',
       challengeId: '',
       qrCode: enrollData?.totp?.qr_code || '',
@@ -199,7 +255,7 @@ export default function MfaPage() {
       info: 'Scan the QR code, then enter the first 6-digit code to verify setup.',
       error: '',
     }));
-  }, [completeApprovedNavigation, navigate]);
+  }, [navigate]);
 
   React.useEffect(() => {
     let active = true;
@@ -326,6 +382,23 @@ export default function MfaPage() {
     }
   }, [bootstrap, state.mode]);
 
+  const handleReconnect = React.useCallback(async () => {
+    if (!window.confirm('This will disconnect existing authenticator factors and start a fresh enrollment flow. Continue?')) {
+      return;
+    }
+
+    try {
+      await bootstrap({ resetEnrollment: true, forceEnroll: true });
+    } catch (error) {
+      setState((previous) => ({
+        ...previous,
+        loading: false,
+        mode: 'error',
+        error: extractErrorMessage(error, 'Failed to reset MFA connection. Please try again.'),
+      }));
+    }
+  }, [bootstrap]);
+
   const qrSrc = toQrDataUri(state.qrCode);
 
   return (
@@ -360,7 +433,7 @@ export default function MfaPage() {
         <p className="mt-6 text-sm text-slate-700">Enter your current 6-digit authenticator code to continue.</p>
       ) : null}
 
-      {!state.loading && state.mode !== 'error' ? (
+      {!state.loading && (state.mode === 'enroll' || state.mode === 'challenge') ? (
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Authentication code</span>
@@ -399,8 +472,59 @@ export default function MfaPage() {
             >
               Refresh challenge
             </button>
+
+            <button
+              type="button"
+              className="rounded-lg border border-amber-300 px-4 py-2 text-sm font-medium text-amber-800 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={handleReconnect}
+              disabled={state.submitting}
+            >
+              Lost authenticator? Reconnect
+            </button>
           </div>
         </form>
+      ) : null}
+
+      {!state.loading && state.mode === 'manage' ? (
+        <div className="mt-6 space-y-4">
+          {state.info ? <p className="text-sm text-slate-600">{state.info}</p> : null}
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <h3 className="text-sm font-semibold text-slate-800">Registered MFA factors</h3>
+            {Array.isArray(state.factors) && state.factors.length > 0 ? (
+              <ul className="mt-3 space-y-2">
+                {state.factors.map((factor) => (
+                  <li key={factor.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                    <p className="font-medium text-slate-900">{factor.friendlyName}</p>
+                    <p className="text-xs text-slate-600">Status: {factor.status}</p>
+                    {factor.createdAt ? (
+                      <p className="text-xs text-slate-500">Created: {new Date(factor.createdAt).toLocaleString()}</p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm text-slate-600">No MFA factors are enrolled yet.</p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              onClick={handleRetry}
+            >
+              Refresh MFA state
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-amber-300 px-4 py-2 text-sm font-medium text-amber-800 transition hover:bg-amber-50"
+              onClick={handleReconnect}
+            >
+              Reconnect authenticator
+            </button>
+          </div>
+        </div>
       ) : null}
 
       {!state.loading && state.mode === 'error' ? (

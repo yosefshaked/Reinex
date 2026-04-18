@@ -31,3 +31,4 @@
 - `organizations.setup_completed` is intentionally retained as an onboarding/readiness flag. Do not remove it as "legacy" even in single-DB mode.
 - Frontend API calls carry org context using `x-org-id` (via [`../src/lib/api-client.js`](../src/lib/api-client.js)).
 - If you need org-aware frontend data, use `useOrg()` and existing wrappers instead of rebuilding org/session lookup.
+- Keep `/system-admin/mfa` reachable as an admin recovery route even when the current session is `aal1` (lost/replaced authenticator scenario); do not redirect away from it during MFA enforcement.

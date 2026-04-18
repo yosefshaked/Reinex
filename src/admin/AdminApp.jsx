@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, Navigate, Outlet, Route, Routes } from 'react-router-dom';
+import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { Refine } from '@refinedev/core';
 import routerProvider from '@refinedev/react-router';
 import dataProvider from '@refinedev/simple-rest';
@@ -30,6 +30,12 @@ function AdminLayout() {
             >
               Supabase Connection
             </Link>
+            <Link
+              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              to="/system-admin/mfa"
+            >
+              MFA Management
+            </Link>
           </nav>
         </aside>
 
@@ -53,6 +59,7 @@ function AccessDenied() {
 }
 
 function AdminGate() {
+  const location = useLocation();
   const [state, setState] = React.useState({ loading: true, result: null });
 
   React.useEffect(() => {
@@ -60,7 +67,7 @@ function AdminGate() {
 
     async function runCheck() {
       try {
-        const result = await adminAuthProvider.check();
+        const result = await adminAuthProvider.check({ pathname: location.pathname });
         if (!active) return;
         setState({ loading: false, result });
       } catch {
@@ -76,7 +83,7 @@ function AdminGate() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [location.pathname]);
 
   if (state.loading) {
     return <p className="p-4 text-sm text-slate-500">Validating admin session...</p>;
@@ -114,6 +121,13 @@ export default function AdminApp() {
             label: 'Supabase Connection',
           },
         },
+        {
+          name: 'mfa-management',
+          list: '/system-admin/mfa',
+          meta: {
+            label: 'MFA Management',
+          },
+        },
       ]}
       options={{
         syncWithLocation: true,
@@ -121,12 +135,12 @@ export default function AdminApp() {
       }}
     >
       <Routes>
-        <Route path="mfa" element={<MfaPage />} />
         <Route element={<AdminGate />}>
           <Route index element={<Navigate to="/system-admin/system-health" replace />} />
           <Route element={<AdminLayout />}>
             <Route path="system-health" element={<SystemHealthView />} />
             <Route path="supabase-connection" element={<SupabaseConnectionView />} />
+            <Route path="mfa" element={<MfaPage />} />
             <Route path="forbidden" element={<AccessDenied />} />
           </Route>
         </Route>
