@@ -36,22 +36,35 @@ export function normalizeNullableId(value) {
 }
 
 export function parseRequestBody(req) {
-  if (req?.body && typeof req.body === 'object') {
-    return req.body;
+  // Azure Functions v3 auto-parses JSON bodies into req.body as a plain object.
+  // Guard against Buffer/Uint8Array instances which pass typeof === 'object'
+  // but are NOT already-parsed JSON (can happen with certain Node versions).
+  const body = req?.body;
+  if (
+    body &&
+    typeof body === 'object' &&
+    !Buffer.isBuffer(body) &&
+    !(body instanceof Uint8Array)
+  ) {
+    return body;
   }
 
-  const rawBody = typeof req?.body === 'string'
-    ? req.body
-    : typeof req?.rawBody === 'string'
-      ? req.rawBody
-      : null;
+  // Resolve raw string: Buffer → utf8 string, or req.rawBody as fallback.
+  let rawString = null;
+  if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
+    try { rawString = Buffer.from(body).toString('utf8'); } catch { /* noop */ }
+  } else if (typeof body === 'string') {
+    rawString = body;
+  } else if (typeof req?.rawBody === 'string') {
+    rawString = req.rawBody;
+  }
 
-  if (!rawBody) {
+  if (!rawString) {
     return {};
   }
 
   try {
-    return JSON.parse(rawBody);
+    return JSON.parse(rawString);
   } catch {
     return {};
   }
