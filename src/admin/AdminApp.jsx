@@ -18,7 +18,7 @@ import DashboardView from './ui/DashboardView.jsx';
 import ComingSoon from './ui/ComingSoon.jsx';
 import { ADMIN_NAV, flattenNav } from './ui/navConfig.js';
 
-const adminDataProvider = dataProvider('/api/system-health-admin');
+const adminDataProvider = dataProvider('/api/system-admin-health');
 
 function AccessDenied() {
   return (

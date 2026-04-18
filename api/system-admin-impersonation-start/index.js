@@ -9,7 +9,7 @@ import {
 import { ensureSystemAdmin, normalizeString, readEnv, respond } from '../_shared/org-bff.js';
 
 /**
- * POST /api/admin-impersonation-start
+ * POST /api/system-admin-impersonation-start
  *
  * Body: { target_email: string, reason: string, duration_minutes?: number,
  *         target_org_id?: string }
@@ -83,7 +83,7 @@ export default async function adminImpersonationStart(context, req) {
   const adminConfig = readSupabaseAdminConfig(env);
 
   if (!adminConfig.supabaseUrl || !adminConfig.serviceRoleKey) {
-    context.log?.error?.('admin-impersonation-start: missing supabase admin credentials');
+    context.log?.error?.('system-admin-impersonation-start: missing supabase admin credentials');
     return respond(context, 500, { message: 'server_misconfigured' });
   }
 
@@ -128,7 +128,7 @@ export default async function adminImpersonationStart(context, req) {
   try {
     targetUser = await lookupTargetUser(supabase, targetEmail);
   } catch (error) {
-    context.log?.error?.('admin-impersonation-start: lookup failed', { message: error?.message });
+    context.log?.error?.('system-admin-impersonation-start: lookup failed', { message: error?.message });
     return respond(context, 500, { message: 'target_lookup_failed' });
   }
 
@@ -148,7 +148,7 @@ export default async function adminImpersonationStart(context, req) {
     if (result.error) throw result.error;
     linkData = result.data;
   } catch (error) {
-    context.log?.error?.('admin-impersonation-start: generateLink failed', { message: error?.message });
+    context.log?.error?.('system-admin-impersonation-start: generateLink failed', { message: error?.message });
     return respond(context, 500, { message: 'generate_link_failed' });
   }
 
@@ -194,7 +194,7 @@ export default async function adminImpersonationStart(context, req) {
     }
     sessionRow = data;
   } catch (error) {
-    context.log?.error?.('admin-impersonation-start: session insert failed', { message: error?.message });
+    context.log?.error?.('system-admin-impersonation-start: session insert failed', { message: error?.message });
     return respond(context, 500, { message: 'session_insert_failed' });
   }
 
@@ -219,10 +219,10 @@ export default async function adminImpersonationStart(context, req) {
         reason,
         duration_minutes: durationMinutes,
       },
-      metadata: { source: 'admin-impersonation-start', ip, user_agent: userAgent },
+      metadata: { source: 'system-admin-impersonation-start', ip, user_agent: userAgent },
     });
   } catch (err) {
-    context.log?.warn?.('admin-impersonation-start: audit log failed', { message: err?.message });
+    context.log?.warn?.('system-admin-impersonation-start: audit log failed', { message: err?.message });
   }
 
   return respond(context, 200, {

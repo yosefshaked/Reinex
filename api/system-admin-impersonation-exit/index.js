@@ -9,7 +9,7 @@ import {
 import { ensureSystemAdmin, normalizeString, readEnv, respond } from '../_shared/org-bff.js';
 
 /**
- * POST /api/admin-impersonation-exit
+ * POST /api/system-admin-impersonation-exit
  *
  * Body: { session_id: string, reason?: string }
  *
@@ -79,7 +79,7 @@ export default async function adminImpersonationExit(context, req) {
     }
     sessionRow = data;
   } catch (error) {
-    context.log?.error?.('admin-impersonation-exit: lookup failed', { message: error?.message });
+    context.log?.error?.('system-admin-impersonation-exit: lookup failed', { message: error?.message });
     return respond(context, 500, { message: 'session_lookup_failed' });
   }
 
@@ -107,7 +107,7 @@ export default async function adminImpersonationExit(context, req) {
       .eq('status', 'active');
     if (error) throw error;
   } catch (error) {
-    context.log?.error?.('admin-impersonation-exit: update failed', { message: error?.message });
+    context.log?.error?.('system-admin-impersonation-exit: update failed', { message: error?.message });
     return respond(context, 500, { message: 'session_update_failed' });
   }
 
@@ -127,10 +127,10 @@ export default async function adminImpersonationExit(context, req) {
         target_email: sessionRow.target_email,
         ended_reason: endedReason,
       },
-      metadata: { source: 'admin-impersonation-exit' },
+      metadata: { source: 'system-admin-impersonation-exit' },
     });
   } catch (err) {
-    context.log?.warn?.('admin-impersonation-exit: audit failed', { message: err?.message });
+    context.log?.warn?.('system-admin-impersonation-exit: audit failed', { message: err?.message });
   }
 
   return respond(context, 200, { status: 'ended', session_id: sessionId });

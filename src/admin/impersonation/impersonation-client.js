@@ -69,7 +69,7 @@ export async function startImpersonation({ targetEmail, reason, durationMinutes,
     target_org_id: targetOrgId,
   };
 
-  const payload = await authenticatedFetch('admin-impersonation-start', {
+  const payload = await authenticatedFetch('system-admin-impersonation-start', {
     method: 'POST',
     body,
   });
@@ -142,7 +142,7 @@ export async function exitImpersonation({ reason = 'admin_exit' } = {}) {
   // 1. Call the exit endpoint with the stashed admin token. We pass the
   //    token explicitly so the endpoint sees the admin, not the target.
   try {
-    await authenticatedFetch('admin-impersonation-exit', {
+    await authenticatedFetch('system-admin-impersonation-exit', {
       method: 'POST',
       accessToken: stash.admin.accessToken,
       body: {
@@ -154,7 +154,7 @@ export async function exitImpersonation({ reason = 'admin_exit' } = {}) {
     // Do not block session restoration if server-side close fails — we want
     // the admin back in their own seat. The session will expire server-side.
     // eslint-disable-next-line no-console
-    console.warn('admin-impersonation-exit call failed; restoring admin session anyway.', err);
+    console.warn('system-admin-impersonation-exit call failed; restoring admin session anyway.', err);
   }
 
   // 2. Restore the admin session.
@@ -177,7 +177,7 @@ export async function exitImpersonation({ reason = 'admin_exit' } = {}) {
 export async function fetchImpersonationSessions({ status = 'all', limit = 50, targetEmail = '' } = {}) {
   const params = { status, limit };
   if (targetEmail) params.target_email = targetEmail;
-  return authenticatedFetch('admin-impersonation-list', {
+  return authenticatedFetch('system-admin-impersonation-list', {
     method: 'GET',
     params,
   });

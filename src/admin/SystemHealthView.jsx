@@ -1,7 +1,7 @@
 import React from 'react';
 import { authenticatedFetch } from '@/lib/api-client.js';
 
-const HEALTH_ROUTE_CANDIDATES = ['system-health-admin', 'system-health-admin/'];
+const HEALTH_ROUTE_CANDIDATES = ['system-admin-health', 'system-admin-health/'];
 
 function shortHash(hash) {
   if (!hash) {

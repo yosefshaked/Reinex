@@ -7,7 +7,7 @@ import {
 import { ensureSystemAdmin, normalizeString, readEnv, respond } from '../_shared/org-bff.js';
 
 /**
- * GET /api/admin-impersonation-list
+ * GET /api/system-admin-impersonation-list
  *
  * Query params:
  *   status: 'active' | 'ended' | 'all' (default 'all')
@@ -84,7 +84,7 @@ export default async function adminImpersonationList(context, req) {
     }
     sessions = Array.isArray(data) ? data : [];
   } catch (error) {
-    context.log?.error?.('admin-impersonation-list: query failed', { message: error?.message });
+    context.log?.error?.('system-admin-impersonation-list: query failed', { message: error?.message });
     return respond(context, 500, { message: 'list_failed' });
   }
 
