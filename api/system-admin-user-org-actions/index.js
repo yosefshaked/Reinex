@@ -4,10 +4,9 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { logAuditEvent } from '../_shared/audit-log.js';
 import {
   createSupabaseAdminClient,
-  parseRequestBody,
   readSupabaseAdminConfig,
 } from '../_shared/supabase-admin.js';
-import { ensureSystemAdmin, normalizeString, readEnv, respond } from '../_shared/org-bff.js';
+import { ensureSystemAdmin, normalizeString, parseRequestBody, readEnv, respond } from '../_shared/org-bff.js';
 
 const ALLOWED_ACTIONS = new Set(['org_suspend', 'org_reactivate', 'impersonation_request']);
 
