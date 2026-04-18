@@ -94,7 +94,7 @@ export const ADMIN_NAV = [
         to: '/system-admin/users',
         label: 'Users',
         icon: Users,
-        status: 'coming-soon',
+        status: 'live',
         description: 'Search, inspect, and impersonate any user.',
       },
       {
@@ -134,7 +134,7 @@ export const ADMIN_NAV = [
         to: '/system-admin/impersonation-queue',
         label: 'Impersonation Queue',
         icon: UserCheck,
-        status: 'coming-soon',
+        status: 'live',
         description: 'Approvals, active sessions, and history of impersonations.',
       },
       {

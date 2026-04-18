@@ -355,6 +355,46 @@ CREATE INDEX IF NOT EXISTS audit_log_event_type_idx
   ON public.audit_log (event_type, created_at DESC);
 
 -- -----------------------------------------------------------------
+-- public.impersonation_sessions
+-- Tracks every admin "log in as user" session for audit + live revoke.
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.impersonation_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  admin_user_id uuid NOT NULL,
+  admin_email text NOT NULL,
+  target_user_id uuid NOT NULL,
+  target_email text NOT NULL,
+  target_org_id uuid NULL REFERENCES public.organizations(id) ON DELETE SET NULL,
+  target_org_name text NULL,
+  reason text NOT NULL,
+  status text NOT NULL DEFAULT 'active',
+  started_at timestamptz NOT NULL DEFAULT now(),
+  ended_at timestamptz NULL,
+  expires_at timestamptz NOT NULL,
+  ended_reason text NULL,
+  ended_by_user_id uuid NULL,
+  ip inet NULL,
+  user_agent text NULL,
+  audit_event_id uuid NULL REFERENCES public.audit_log(id) ON DELETE SET NULL,
+  CONSTRAINT impersonation_sessions_reason_length CHECK (char_length(reason) >= 3),
+  CONSTRAINT impersonation_sessions_status_check CHECK (status IN ('active', 'ended', 'expired', 'revoked'))
+);
+
+
+CREATE INDEX IF NOT EXISTS impersonation_sessions_admin_idx
+  ON public.impersonation_sessions (admin_user_id, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS impersonation_sessions_target_idx
+  ON public.impersonation_sessions (target_user_id, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS impersonation_sessions_active_idx
+  ON public.impersonation_sessions (status, started_at DESC)
+  WHERE status = 'active';
+
+ALTER TABLE public.impersonation_sessions ENABLE ROW LEVEL SECURITY;
+
+-- -----------------------------------------------------------------
 -- Control RPCs
 -- -----------------------------------------------------------------
 
@@ -3404,24 +3444,50 @@ CREATE POLICY "active_routing_delete"
   TO authenticated, app_user
   USING (user_id = auth.uid());
 
--- audit_log: users see audit entries for their orgs (org_id is nullable for system events)
+-- audit_log: system admins can read all rows; regular users only see their org's entries.
+DROP POLICY IF EXISTS "audit_log_select_admin" ON public.audit_log;
+CREATE POLICY "audit_log_select_admin"
+  ON public.audit_log FOR SELECT
+  TO authenticated, app_user
+  USING (
+    (SELECT p.is_system_admin FROM public.profiles p WHERE p.id = auth.uid())
+  );
+
 DROP POLICY IF EXISTS "audit_log_select" ON public.audit_log;
 CREATE POLICY "audit_log_select"
   ON public.audit_log FOR SELECT
   TO authenticated, app_user
   USING (
-    org_id IN (SELECT om.org_id FROM public.org_memberships om WHERE om.user_id = auth.uid())
+    org_id IS NOT NULL
+    AND org_id IN (SELECT om.org_id FROM public.org_memberships om WHERE om.user_id = auth.uid())
   );
 
+-- audit_log INSERT: users may only write tenant-scoped entries (org_id must be non-null
+-- and must be one of their orgs). They cannot inject system-admin-scoped events
+-- (NULL org_id) or events with reserved event_type prefixes.
 DROP POLICY IF EXISTS "audit_log_insert" ON public.audit_log;
 CREATE POLICY "audit_log_insert"
   ON public.audit_log FOR INSERT
   TO authenticated, app_user
   WITH CHECK (
-    org_id IN (SELECT om.org_id FROM public.org_memberships om WHERE om.user_id = auth.uid())
+    org_id IS NOT NULL
+    AND org_id IN (SELECT om.org_id FROM public.org_memberships om WHERE om.user_id = auth.uid())
+    AND event_type NOT LIKE 'system_admin.%'
+    AND event_type NOT LIKE 'impersonation.%'
+    AND event_type NOT LIKE 'admin.%'
   );
 
--- No UPDATE/DELETE policies for audit_log (append-only via service_role)
+-- No UPDATE/DELETE policies for audit_log (append-only; service_role handles all writes)
+
+-- impersonation_sessions: only system admins may read via JWT; all writes go through
+-- service_role (which bypasses RLS). No user-facing access at all.
+DROP POLICY IF EXISTS "impersonation_sessions_select_admin" ON public.impersonation_sessions;
+CREATE POLICY "impersonation_sessions_select_admin"
+  ON public.impersonation_sessions FOR SELECT
+  TO authenticated, app_user
+  USING (
+    (SELECT p.is_system_admin FROM public.profiles p WHERE p.id = auth.uid())
+  );
 
 -- Enable RLS on all tables (both domain and payroll)
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;

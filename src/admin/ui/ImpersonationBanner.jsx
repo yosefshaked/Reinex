@@ -2,36 +2,22 @@ import React from 'react';
 import { LogOut, UserCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useImpersonation } from '../impersonation/ImpersonationContext.jsx';
 
 /**
- * Persistent banner shown across every admin page (and ideally across the
- * product surface) whenever the current session is impersonating another user.
+ * Persistent banner shown across every admin page (and ideally the product
+ * surface too, once the provider is mounted at the app root) whenever the
+ * current tab is impersonating another user.
  *
- * Reads impersonation state from window.__IMPERSONATION__ if present.
- * This is a placeholder signal — the Organizations/Users redesign will wire
- * the real state in via context once the impersonation API lands.
+ * State is sourced from ImpersonationContext. Clicking "Exit" ends the
+ * session server-side, restores the admin session via Supabase setSession,
+ * and clears the stash.
  */
-export function useImpersonationState() {
-  const [state, setState] = React.useState(() => {
-    if (typeof window === 'undefined') return null;
-    return window.__IMPERSONATION__ || null;
-  });
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    const handler = () => setState(window.__IMPERSONATION__ || null);
-    window.addEventListener('reinex:impersonation-changed', handler);
-    return () => window.removeEventListener('reinex:impersonation-changed', handler);
-  }, []);
-
-  return state;
-}
-
 export default function ImpersonationBanner({ className }) {
-  const state = useImpersonationState();
-  if (!state || !state.active) return null;
+  const { active, session, exit, refreshing } = useImpersonation();
+  if (!active || !session) return null;
 
-  const { targetEmail, targetName, orgName, startedAt, onExit } = state;
+  const { targetEmail, targetName, targetOrgName, startedAt } = session;
 
   return (
     <div
@@ -45,7 +31,7 @@ export default function ImpersonationBanner({ className }) {
       <div className="min-w-0 flex-1">
         <p className="font-medium">
           You are impersonating <span className="font-semibold">{targetName || targetEmail}</span>
-          {orgName ? <> at <span className="font-semibold">{orgName}</span></> : null}.
+          {targetOrgName ? <> at <span className="font-semibold">{targetOrgName}</span></> : null}.
         </p>
         {startedAt ? (
           <p className="text-xs text-amber-800/80">
@@ -56,17 +42,12 @@ export default function ImpersonationBanner({ className }) {
       <Button
         size="sm"
         variant="outline"
+        disabled={refreshing}
         className="border-amber-400 bg-white text-amber-900 hover:bg-amber-50"
-        onClick={() => {
-          if (typeof onExit === 'function') {
-            onExit();
-          } else if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('reinex:impersonation-exit-requested'));
-          }
-        }}
+        onClick={exit}
       >
         <LogOut className="mr-1.5 h-3.5 w-3.5" />
-        Exit impersonation
+        {refreshing ? 'Exiting…' : 'Exit impersonation'}
       </Button>
     </div>
   );

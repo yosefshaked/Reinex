@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 import { ADMIN_NAV, flattenNav } from './navConfig.js';
 import ImpersonationBanner from './ImpersonationBanner.jsx';
 import StatusBadge from './StatusBadge.jsx';
+import { ImpersonationProvider } from '../impersonation/ImpersonationContext.jsx';
 
 function AdminSidebar() {
   const location = useLocation();
@@ -131,15 +132,17 @@ export default function AdminShell({ children }) {
   }, []);
 
   return (
-    <SidebarProvider defaultOpen={defaultOpen}>
-      <AdminSidebar />
-      <SidebarInset className="bg-slate-50">
-        <ImpersonationBanner />
-        <Topbar />
-        <main className={cn('mx-auto w-full max-w-[1600px] p-5')}>
-          {children ?? <Outlet />}
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+    <ImpersonationProvider>
+      <SidebarProvider defaultOpen={defaultOpen}>
+        <AdminSidebar />
+        <SidebarInset className="bg-slate-50">
+          <ImpersonationBanner />
+          <Topbar />
+          <main className={cn('mx-auto w-full max-w-[1600px] p-5')}>
+            {children ?? <Outlet />}
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
+    </ImpersonationProvider>
   );
 }

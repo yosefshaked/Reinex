@@ -11,6 +11,8 @@ import UserOrgManagementView from './modules/UserOrgManagementView.jsx';
 import GlobalSettingsView from './modules/GlobalSettingsView.jsx';
 import OperationsSupportView from './modules/OperationsSupportView.jsx';
 import ProductAnalyticsView from './modules/ProductAnalyticsView.jsx';
+import UsersView from './modules/UsersView.jsx';
+import ImpersonationQueueView from './modules/ImpersonationQueueView.jsx';
 import AdminShell from './ui/AdminShell.jsx';
 import DashboardView from './ui/DashboardView.jsx';
 import ComingSoon from './ui/ComingSoon.jsx';
@@ -79,6 +81,8 @@ const LIVE_ELEMENTS = {
   'mfa': <MfaPage />,
   'global-settings': <GlobalSettingsView />,
   'product-analytics': <ProductAnalyticsView />,
+  'users': <UsersView />,
+  'impersonation-queue': <ImpersonationQueueView />,
   // Legacy aggregate views retained while their sub-modules are built out.
   'user-org-management': <UserOrgManagementView />,
   'operations-support': <OperationsSupportView />,
@@ -211,12 +215,10 @@ const COMING_SOON_PATHS = [
   'release-migrations',
   'encryption-keys',
   'organizations',
-  'users',
   'onboarding-pipeline',
   'billing',
   'audit-log',
   'incidents',
-  'impersonation-queue',
   'email-log',
   'integration-health',
   'data-quality',
@@ -260,6 +262,8 @@ export default function AdminApp() {
             <Route path="mfa" element={LIVE_ELEMENTS['mfa']} />
             <Route path="global-settings" element={LIVE_ELEMENTS['global-settings']} />
             <Route path="product-analytics" element={LIVE_ELEMENTS['product-analytics']} />
+            <Route path="users" element={LIVE_ELEMENTS['users']} />
+            <Route path="impersonation-queue" element={LIVE_ELEMENTS['impersonation-queue']} />
 
             {/* Legacy aggregate views kept reachable while sub-modules are built. */}
             <Route path="user-org-management" element={LIVE_ELEMENTS['user-org-management']} />

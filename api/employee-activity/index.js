@@ -37,7 +37,7 @@ function normalizeLimit(value) {
 }
 
 function getActor(entry) {
-  const email = normalizeString(entry?.user_email);
+  const email = normalizeString(entry?.actor_email);
   if (!email) {
     return 'מערכת';
   }
@@ -82,7 +82,7 @@ function mapFamily(entry) {
 
 function buildSubtitle(entry) {
   const details = entry?.details && typeof entry.details === 'object' ? entry.details : {};
-  const actionType = normalizeString(entry?.action_type).toLowerCase();
+  const actionType = normalizeString(entry?.event_type).toLowerCase();
 
   if (actionType === 'calendar.instance_created' || actionType === 'calendar.instance_updated' || actionType === 'calendar.instance_cancelled') {
     const dateTime = normalizeString(details?.datetime_start);
@@ -191,9 +191,9 @@ export default async function (context, req) {
   const limit = normalizeLimit(req?.query?.limit || body?.limit);
   const { data: auditRows, error: auditError } = await supabase
     .from('audit_log')
-    .select('id, user_email, user_role, action_type, action_category, resource_type, resource_id, details, performed_at')
+    .select('id, actor_email, actor_role, event_type, action_category, resource_type, resource_id, details, created_at')
     .eq('org_id', orgId)
-    .order('performed_at', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(limit * 4);
 
   if (auditError) {
@@ -207,9 +207,9 @@ export default async function (context, req) {
     .map((entry) => ({
       id: entry.id,
       event_family: mapFamily(entry),
-      event_type: entry.action_type,
-      occurred_at: entry.performed_at,
-      title: ACTION_TITLES[entry.action_type] || entry.action_type,
+      event_type: entry.event_type,
+      occurred_at: entry.created_at,
+      title: ACTION_TITLES[entry.event_type] || entry.event_type,
       subtitle: buildSubtitle(entry),
       actor: getActor(entry),
       metadata: {

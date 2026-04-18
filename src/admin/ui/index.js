@@ -10,10 +10,11 @@ export { default as EmptyState } from './EmptyState.jsx';
 export { default as ErrorState } from './ErrorState.jsx';
 export { default as ComingSoon } from './ComingSoon.jsx';
 export { default as DashboardView } from './DashboardView.jsx';
+export { default as ImpersonationBanner } from './ImpersonationBanner.jsx';
 export {
-  default as ImpersonationBanner,
-  useImpersonationState,
-} from './ImpersonationBanner.jsx';
+  ImpersonationProvider,
+  useImpersonation,
+} from '../impersonation/ImpersonationContext.jsx';
 export {
   TableSkeleton,
   MetricsSkeleton,
