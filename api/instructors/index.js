@@ -233,7 +233,7 @@ async function writeServiceCapabilities(client, orgId, instructorId, serviceCapa
 
     if (previousPayload.length > 0) {
       const { error: restoreError } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
-        .upsert(previousPayload, { onConflict: 'employee_id,service_id' });
+        .upsert(previousPayload, { onConflict: 'org_id,employee_id,service_id' });
       if (restoreError) {
         throw restoreError;
       }
@@ -261,7 +261,7 @@ async function writeServiceCapabilities(client, orgId, instructorId, serviceCapa
   try {
     if (nextPayload.length > 0) {
       const { error: upsertError } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
-        .upsert(nextPayload, { onConflict: 'employee_id,service_id' });
+        .upsert(nextPayload, { onConflict: 'org_id,employee_id,service_id' });
 
       if (upsertError) {
         throw upsertError;

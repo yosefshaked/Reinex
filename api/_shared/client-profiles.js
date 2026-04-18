@@ -272,16 +272,17 @@ export async function createOrReuseGuardian(tenantClient, { contactName, phone, 
   };
 }
 
-export async function upsertClientGuardianLink(tenantClient, { clientProfileId, guardianId, relationship }) {
-  if (!UUID_PATTERN.test(String(clientProfileId || '')) || !UUID_PATTERN.test(String(guardianId || ''))) return;
+export async function upsertClientGuardianLink(tenantClient, { orgId, clientProfileId, guardianId, relationship }) {
+  if (!UUID_PATTERN.test(String(orgId || '')) || !UUID_PATTERN.test(String(clientProfileId || '')) || !UUID_PATTERN.test(String(guardianId || ''))) return;
   const { error } = await tenantClient
     .from('client_guardians')
     .upsert({
+      org_id: orgId,
       client_profile_id: clientProfileId,
       guardian_id: guardianId,
       relationship,
       is_primary: true,
-    }, { onConflict: 'client_profile_id,guardian_id' });
+    }, { onConflict: 'org_id,client_profile_id,guardian_id' });
 
   if (error) throw new Error(`failed_to_link_guardian:${error.message}`);
 }

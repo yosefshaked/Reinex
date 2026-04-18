@@ -46,3 +46,4 @@
 - Use body-size-aware parsing for write endpoints.
 - Auth/membership checks happen first; tenant reads/writes must always be org-scoped in the shared single DB.
 - System-admin cross-tenant controls must be review-first: queue action requests (for example in `permission_registry` with `system.request.*` keys) and audit with `logAuditEvent` instead of executing destructive org changes inline.
+- For `withOrgScope(...).upsert(...)`, the `onConflict` target must include `org_id` whenever the table unique key includes `org_id` (for example `org_id,key` or `org_id,employee_id,service_id`).

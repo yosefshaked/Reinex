@@ -17,6 +17,7 @@
     "lint:sql:strict": "node scripts/validate-setup-sql.js --strict --format=text",
     "lint:sql:json": "node scripts/validate-setup-sql.js --format=json",
     "lint:sql:github": "node scripts/validate-setup-sql.js --format=github",
+    "lint:upsert-conflicts": "node scripts/validate-upsert-conflicts.js",
     "lint:fix": "eslint . --fix",
     "validate:api": "node scripts/validate-api-endpoints.js",
     "test:isolation-stress-test": "node --test implementations/database/one-db-refactor/isolation-stress-test.js",

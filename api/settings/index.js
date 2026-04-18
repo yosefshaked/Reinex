@@ -504,7 +504,7 @@ export default async function (context, req) {
     }
 
     const { error } = await withOrgScope(supabase, 'Settings', orgId)
-      .upsert(payload, { onConflict: 'key' });
+      .upsert(payload, { onConflict: 'org_id,key' });
 
     if (error) {
       context.log?.error?.('settings upsert failed', { message: error.message });
@@ -639,7 +639,7 @@ export default async function (context, req) {
     }
 
     const { error } = await withOrgScope(supabase, 'Settings', orgId)
-      .upsert(payload, { onConflict: 'key' });
+      .upsert(payload, { onConflict: 'org_id,key' });
 
     if (error) {
       context.log?.error?.('settings update failed', { message: error.message });

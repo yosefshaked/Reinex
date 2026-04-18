@@ -1377,6 +1377,7 @@ export default async function handler(context, req) {
     if (normalized.guardianId) {
       try {
         await upsertClientGuardianLink(supabase, {
+          orgId,
           clientProfileId: clientProfileResult.clientProfileId,
           guardianId: normalized.guardianId,
           relationship: normalized.guardianRelationship,

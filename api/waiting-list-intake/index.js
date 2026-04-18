@@ -1170,6 +1170,7 @@ async function submitPublicInvite(context, req, { controlClient }) {
       guardianId = guardianResult?.guardianId || null;
       if (guardianId) {
         await upsertClientGuardianLink(client, {
+          orgId,
           clientProfileId: submission.client_profile_id,
           guardianId,
           relationship: contactRelationship,

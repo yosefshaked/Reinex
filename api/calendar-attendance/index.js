@@ -104,7 +104,7 @@ async function recordGraceCancellationRequest(client, orgId, {
   };
 
   const { error: upsertError } = await withOrgScope(client, 'grace_cancellation_requests', orgId)
-    .upsert(payload, { onConflict: 'lesson_participant_id' });
+    .upsert(payload, { onConflict: 'org_id,lesson_participant_id' });
 
   if (!upsertError) {
     return null;

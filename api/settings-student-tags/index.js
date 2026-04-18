@@ -176,7 +176,7 @@ export default async function (context, req) {
   const updated = [...existingTags, newTag];
 
   const { error: upsertError } = await withOrgScope(supabase, 'Settings', orgId)
-    .upsert({ key: SETTINGS_KEY, settings_value: updated }, { onConflict: 'key' });
+    .upsert({ key: SETTINGS_KEY, settings_value: updated }, { onConflict: 'org_id,key' });
 
   if (upsertError) {
     context.log?.error?.('settings-student-tags: failed to save tag', { message: upsertError.message });
