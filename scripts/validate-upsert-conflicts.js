@@ -135,15 +135,39 @@ function validateClientGuardiansUpsert() {
   return errors;
 }
 
+function validateLeaveLedgerWritesAreScoped() {
+  const errors = [];
+  const file = path.join(root, 'api/_shared/employee-finance.js');
+  const text = readFile(file);
+  const relativePath = readRelative(file);
+
+  const forbiddenPatterns = [
+    /\.from\(\s*['"]employee_leave_balance_events['"]\s*\)\s*\.insert\(/g,
+    /\.from\(\s*['"]employee_leave_balance_events['"]\s*\)\s*\.delete\(/g,
+    /\.from\(\s*['"]employee_leave_days['"]\s*\)\s*\.delete\(/g,
+  ];
+
+  for (const pattern of forbiddenPatterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const line = lineNumberAt(text, match.index);
+      errors.push(`${relativePath}:${line}: leave ledger writes must use withOrgScope(..., orgId), not raw tenantClient.from(...)`);
+    }
+  }
+
+  return errors;
+}
+
 const errors = [
   ...validateWithOrgScopeUpserts(),
   ...validateClientGuardiansUpsert(),
+  ...validateLeaveLedgerWritesAreScoped(),
 ];
 
 if (errors.length > 0) {
-  console.error('Upsert conflict validation failed:');
+  console.error('Org-scope write validation failed:');
   errors.forEach((error) => console.error(`- ${error}`));
   process.exit(1);
 }
 
-console.log('Upsert conflict validation passed.');
+console.log('Org-scope write validation passed.');

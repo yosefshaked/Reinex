@@ -1,6 +1,6 @@
 // @ts-check
 /* eslint-env node */
-import { isAdminOrOffice, normalizeString } from './org-bff.js';
+import { isAdminOrOffice, normalizeString, withOrgScope } from './org-bff.js';
 import { coerceAgorot } from './currency.js';
 import { shouldParticipantTriggerInstructorCompensation } from './calendar-workflow-decisions.js';
 import { buildUtcBoundsForTimezoneDateRange } from './instructor-availability.js';
@@ -606,7 +606,14 @@ export async function assertNoOperationalConflictsForLeave(tenantClient, { emplo
   return null;
 }
 
-export async function upsertLeaveBalanceUsage(tenantClient, leaveDays, { leaveEntryId, employeeId, leaveType, notes, createdBy }) {
+export async function upsertLeaveBalanceUsage(tenantClient, leaveDays, {
+  orgId,
+  leaveEntryId,
+  employeeId,
+  leaveType,
+  notes,
+  createdBy,
+}) {
   const usageRows = (leaveDays || []).filter((row) => Number(row.balance_days_delta || 0) !== 0);
   if (usageRows.length === 0) {
     return [];
@@ -625,8 +632,7 @@ export async function upsertLeaveBalanceUsage(tenantClient, leaveDays, { leaveEn
     metadata: { pay_fraction: row.pay_fraction, day_portion: row.day_portion },
   }));
 
-  const { data, error } = await tenantClient
-    .from('employee_leave_balance_events')
+  const { data, error } = await withOrgScope(tenantClient, 'employee_leave_balance_events', orgId)
     .insert(payload)
     .select('id, employee_id, leave_entry_id, leave_day_id, event_type, leave_type, quantity_days, effective_date, notes, created_by, created_at, metadata');
 
@@ -637,15 +643,13 @@ export async function upsertLeaveBalanceUsage(tenantClient, leaveDays, { leaveEn
   return data || [];
 }
 
-export async function deleteLeaveArtifacts(tenantClient, leaveEntryId) {
+export async function deleteLeaveArtifacts(tenantClient, orgId, leaveEntryId) {
   if (!leaveEntryId) return;
-  await tenantClient
-    .from('employee_leave_balance_events')
+  await withOrgScope(tenantClient, 'employee_leave_balance_events', orgId)
     .delete()
     .eq('leave_entry_id', leaveEntryId);
 
-  await tenantClient
-    .from('employee_leave_days')
+  await withOrgScope(tenantClient, 'employee_leave_days', orgId)
     .delete()
     .eq('leave_entry_id', leaveEntryId);
 }

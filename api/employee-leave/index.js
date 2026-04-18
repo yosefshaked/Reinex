@@ -398,7 +398,7 @@ async function handleUpsert(context, client, orgId, body, userId, method) {
         throw error;
       }
 
-      await deleteLeaveArtifacts(client, leaveEntryId);
+      await deleteLeaveArtifacts(client, orgId, leaveEntryId);
     }
 
     if (status === 'approved') {
@@ -421,6 +421,7 @@ async function handleUpsert(context, client, orgId, body, userId, method) {
       }
 
       await upsertLeaveBalanceUsage(client, leaveDays || [], {
+        orgId,
         leaveEntryId,
         employeeId,
         leaveType,
@@ -456,7 +457,7 @@ async function handleDelete(context, client, orgId, body, userId) {
   }
 
   try {
-    await deleteLeaveArtifacts(client, leaveEntryId);
+    await deleteLeaveArtifacts(client, orgId, leaveEntryId);
     const { data, error } = await withOrgScope(client, 'employee_leave_entries', orgId)
       .update({
         status: 'cancelled',
