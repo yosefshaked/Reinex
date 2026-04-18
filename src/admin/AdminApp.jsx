@@ -7,12 +7,19 @@ import { adminAuthProvider } from './authProvider.js';
 import MfaPage from './MfaPage.jsx';
 import SystemHealthView from './SystemHealthView.jsx';
 import SupabaseConnectionView from './SupabaseConnectionView.jsx';
-import UserOrgManagementView from './modules/UserOrgManagementView.jsx';
 import GlobalSettingsView from './modules/GlobalSettingsView.jsx';
 import OperationsSupportView from './modules/OperationsSupportView.jsx';
 import ProductAnalyticsView from './modules/ProductAnalyticsView.jsx';
 import UsersView from './modules/UsersView.jsx';
 import ImpersonationQueueView from './modules/ImpersonationQueueView.jsx';
+import OrganizationsView from './modules/OrganizationsView.jsx';
+import AuditLogView from './modules/AuditLogView.jsx';
+import FeatureFlagsView from './modules/FeatureFlagsView.jsx';
+import FutureIdeasView from './modules/FutureIdeasView.jsx';
+import AnnouncementsView from './modules/AnnouncementsView.jsx';
+import IncidentsView from './modules/IncidentsView.jsx';
+import KnowledgeBaseView from './modules/KnowledgeBaseView.jsx';
+import ComplianceView from './modules/ComplianceView.jsx';
 import AdminShell from './ui/AdminShell.jsx';
 import DashboardView from './ui/DashboardView.jsx';
 import ComingSoon from './ui/ComingSoon.jsx';
@@ -83,8 +90,15 @@ const LIVE_ELEMENTS = {
   'product-analytics': <ProductAnalyticsView />,
   'users': <UsersView />,
   'impersonation-queue': <ImpersonationQueueView />,
-  // Legacy aggregate views retained while their sub-modules are built out.
-  'user-org-management': <UserOrgManagementView />,
+  'organizations': <OrganizationsView />,
+  'audit-log': <AuditLogView />,
+  'feature-flags': <FeatureFlagsView />,
+  'future-ideas': <FutureIdeasView />,
+  'announcements': <AnnouncementsView />,
+  'incidents': <IncidentsView />,
+  'knowledge-base': <KnowledgeBaseView />,
+  'compliance': <ComplianceView />,
+  // Legacy aggregate view retained while its sub-modules are built out.
   'operations-support': <OperationsSupportView />,
 };
 
@@ -214,19 +228,11 @@ const PLANNED = {
 const COMING_SOON_PATHS = [
   'release-migrations',
   'encryption-keys',
-  'organizations',
   'onboarding-pipeline',
   'billing',
-  'audit-log',
-  'incidents',
   'email-log',
   'integration-health',
   'data-quality',
-  'knowledge-base',
-  'announcements',
-  'feature-flags',
-  'compliance',
-  'future-ideas',
 ];
 
 export default function AdminApp() {
@@ -264,9 +270,16 @@ export default function AdminApp() {
             <Route path="product-analytics" element={LIVE_ELEMENTS['product-analytics']} />
             <Route path="users" element={LIVE_ELEMENTS['users']} />
             <Route path="impersonation-queue" element={LIVE_ELEMENTS['impersonation-queue']} />
+            <Route path="organizations" element={LIVE_ELEMENTS['organizations']} />
+            <Route path="audit-log" element={LIVE_ELEMENTS['audit-log']} />
+            <Route path="feature-flags" element={LIVE_ELEMENTS['feature-flags']} />
+            <Route path="future-ideas" element={LIVE_ELEMENTS['future-ideas']} />
+            <Route path="announcements" element={LIVE_ELEMENTS['announcements']} />
+            <Route path="incidents" element={LIVE_ELEMENTS['incidents']} />
+            <Route path="knowledge-base" element={LIVE_ELEMENTS['knowledge-base']} />
+            <Route path="compliance" element={LIVE_ELEMENTS['compliance']} />
 
-            {/* Legacy aggregate views kept reachable while sub-modules are built. */}
-            <Route path="user-org-management" element={LIVE_ELEMENTS['user-org-management']} />
+            {/* Legacy aggregate view kept reachable while sub-modules are built. */}
             <Route path="operations-support" element={LIVE_ELEMENTS['operations-support']} />
 
             {/* Coming-soon placeholders — designed, queued for wiring. */}

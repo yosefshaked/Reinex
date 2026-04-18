@@ -576,7 +576,7 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
   if (!form) return respond(context, 404, { message: 'form_not_found' });
   if (!service) return respond(context, 404, { message: 'service_not_found' });
 
-  let studentId = '';
+  let studentId = null;
   let clientProfileId = '';
   let studentResult = null;
   try {
@@ -589,8 +589,8 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
       delivery_method: deliveryMethod,
       internal_note: internalNote,
     });
-    studentId = studentResult?.studentId || '';
-    clientProfileId = studentResult?.clientProfileId || '';
+    studentId = normalizeUuid(studentResult?.studentId) || null;
+    clientProfileId = normalizeUuid(studentResult?.clientProfileId);
   } catch (error) {
     const message = String(error?.message || '');
     if (message.startsWith('failed_to_lookup_student:')) {
@@ -606,6 +606,11 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
       return respond(context, 500, { message: 'failed_to_create_student' });
     }
     throw error;
+  }
+
+  if (!clientProfileId) {
+    context.log?.error?.('waiting-list-intake failed to resolve client profile id', { orgId });
+    return respond(context, 500, { message: 'failed_to_resolve_client_profile' });
   }
 
   const nowIso = getNowIso();
