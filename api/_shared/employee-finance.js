@@ -340,7 +340,6 @@ export function resolveLeavePayMethod(employee, leavePayPolicy) {
 
 export function resolveLeaveDayValue({
   employee,
-  profile = null,
   targetDate,
   lessonEarnings = [],
   attendanceRecords = [],
