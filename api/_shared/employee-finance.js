@@ -360,7 +360,7 @@ export function resolveLeaveDayValue({
   if (payrollModel === 'monthly_salary') {
     const monthStart = startOfMonthKey(targetDate);
     const monthEnd = endOfMonthKey(targetDate);
-    const workingDays = countWorkingDaysInRange(resolveEmployeeWorkingDays(employee, profile), monthStart, monthEnd);
+    const workingDays = countWorkingDaysInRange(resolveEmployeeWorkingDays(employee), monthStart, monthEnd);
     const monthlySalary = Number(employee?.monthly_salary_amount);
     if (Number.isFinite(monthlySalary) && monthlySalary > 0 && workingDays > 0) {
       // Both values are in agorot — round to nearest agora for per-day rate

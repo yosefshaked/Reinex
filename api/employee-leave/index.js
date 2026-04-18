@@ -250,19 +250,26 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
   }
 
   const employee = employeeResult.employee;
-  const policies = await loadFinancePolicies(client);
-  const [balanceEvents, leaveEntries, leaveDays] = await Promise.all([
-    fetchBalanceEvents(client, orgId, employee.id),
-    fetchLeaveEntriesForEmployee(client, orgId, employee.id, {
-      startDate: isYmdDate(startDate) ? startDate : '',
-      endDate: isYmdDate(endDate) ? endDate : '',
-    }),
-    fetchApprovedLeaveDays(client, {
-      employeeId: employee.id,
-      startDate: isYmdDate(startDate) ? startDate : `${new Date().getFullYear()}-01-01`,
-      endDate: isYmdDate(endDate) ? endDate : `${new Date().getFullYear()}-12-31`,
-    }),
-  ]);
+
+  let policies, balanceEvents, leaveEntries, leaveDays;
+  try {
+    policies = await loadFinancePolicies(client);
+    [balanceEvents, leaveEntries, leaveDays] = await Promise.all([
+      fetchBalanceEvents(client, orgId, employee.id),
+      fetchLeaveEntriesForEmployee(client, orgId, employee.id, {
+        startDate: isYmdDate(startDate) ? startDate : '',
+        endDate: isYmdDate(endDate) ? endDate : '',
+      }),
+      fetchApprovedLeaveDays(client, {
+        employeeId: employee.id,
+        startDate: isYmdDate(startDate) ? startDate : `${new Date().getFullYear()}-01-01`,
+        endDate: isYmdDate(endDate) ? endDate : `${new Date().getFullYear()}-12-31`,
+      }),
+    ]);
+  } catch (error) {
+    context.log?.error?.('employee-leave GET failed to load data', { employeeId: employee.id, message: error?.message, code: error?.code });
+    return respond(context, 500, { message: 'failed_to_load_leave_data' });
+  }
 
   const summary = computeLeaveSummary({
     employee,
