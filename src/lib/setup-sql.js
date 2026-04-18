@@ -227,10 +227,77 @@ CREATE INDEX IF NOT EXISTS org_invitations_email_idx
 CREATE TABLE IF NOT EXISTS public.permission_registry (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   permission_key text NOT NULL UNIQUE,
+  display_name_en text NOT NULL,
+  display_name_he text NOT NULL,
+  description_en text NULL,
+  description_he text NULL,
+  default_value jsonb NOT NULL DEFAULT 'false'::jsonb,
+  category text NOT NULL,
+  requires_approval boolean NOT NULL DEFAULT true,
   description text NULL,
-  category text NULL,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE public.permission_registry
+  ADD COLUMN IF NOT EXISTS display_name_en text;
+
+ALTER TABLE public.permission_registry
+  ADD COLUMN IF NOT EXISTS display_name_he text;
+
+ALTER TABLE public.permission_registry
+  ADD COLUMN IF NOT EXISTS description_en text;
+
+ALTER TABLE public.permission_registry
+  ADD COLUMN IF NOT EXISTS description_he text;
+
+ALTER TABLE public.permission_registry
+  ADD COLUMN IF NOT EXISTS default_value jsonb;
+
+ALTER TABLE public.permission_registry
+  ADD COLUMN IF NOT EXISTS requires_approval boolean;
+
+ALTER TABLE public.permission_registry
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'permission_registry'
+      AND column_name = 'default_value'
+      AND data_type <> 'jsonb'
+  ) THEN
+    ALTER TABLE public.permission_registry ALTER COLUMN default_value DROP DEFAULT;
+    ALTER TABLE public.permission_registry ALTER COLUMN default_value TYPE jsonb USING to_jsonb(default_value);
+  END IF;
+END;
+$$;
+
+UPDATE public.permission_registry
+SET
+  display_name_en = COALESCE(NULLIF(display_name_en, ''), permission_key),
+  display_name_he = COALESCE(NULLIF(display_name_he, ''), permission_key),
+  default_value = COALESCE(default_value, 'false'::jsonb),
+  category = COALESCE(NULLIF(category, ''), 'features'),
+  requires_approval = COALESCE(requires_approval, true),
+  updated_at = COALESCE(updated_at, NOW());
+
+ALTER TABLE public.permission_registry
+  ALTER COLUMN display_name_en SET NOT NULL,
+  ALTER COLUMN display_name_he SET NOT NULL,
+  ALTER COLUMN default_value SET DEFAULT 'false'::jsonb,
+  ALTER COLUMN default_value SET NOT NULL,
+  ALTER COLUMN category SET NOT NULL,
+  ALTER COLUMN requires_approval SET DEFAULT true,
+  ALTER COLUMN requires_approval SET NOT NULL,
+  ALTER COLUMN updated_at SET DEFAULT now(),
+  ALTER COLUMN updated_at SET NOT NULL;
+
+CREATE INDEX IF NOT EXISTS permission_registry_category_idx
+  ON public.permission_registry (category);
 
 
 -- -----------------------------------------------------------------
@@ -3541,6 +3608,147 @@ GRANT ALL ON TABLE public."Settings" TO app_user;
 GRANT ALL ON TABLE public."Documents" TO app_user;
 
 GRANT app_user TO postgres, authenticated, anon;
+
+-- Canonical permission registry rows (idempotent, non-destructive)
+INSERT INTO public.permission_registry (
+  permission_key,
+  display_name_en,
+  display_name_he,
+  description_en,
+  description_he,
+  default_value,
+  category,
+  requires_approval
+) VALUES
+  (
+    'backup_cooldown_override',
+    'Backup Cooldown Override',
+    'עקיפת המתנה לגיבוי',
+    'One-time override of the 7-day backup cooldown (automatically resets after use)',
+    'עקיפה חד-פעמית של תקופת ההמתנה של 7 ימים (מתאפסת אוטומטית לאחר שימוש)',
+    'false'::jsonb,
+    'backup',
+    true
+  ),
+  (
+    'backup_local_enabled',
+    'Local Backup',
+    'גיבוי מקומי',
+    'Allow organization to create encrypted local backups',
+    'אפשר לארגון ליצור גיבויים מוצפנים מקומיים',
+    'false'::jsonb,
+    'backup',
+    true
+  ),
+  (
+    'backup_oauth_enabled',
+    'Cloud Backup (OAuth)',
+    'גיבוי ענן (Google Drive, OneDrive)',
+    'Allow organization to backup to cloud storage providers',
+    'אפשר לארגון לגבות לספקי אחסון ענן',
+    'false'::jsonb,
+    'backup',
+    true
+  ),
+  (
+    'can_export_pdf_reports',
+    'Export PDF Reports',
+    'ייצוא דוחות PDF',
+    'Allow organization to export student session records to professional PDF documents',
+    'אפשר לארגון לייצא רישומי מפגשים של תלמידים למסמכי PDF מקצועיים',
+    'false'::jsonb,
+    'features',
+    true
+  ),
+  (
+    'can_reupload_legacy_reports',
+    'Re-upload Legacy Session Reports',
+    'העלאה חוזרת של דוחות עבר',
+    'Allow organization admins/owners to upload legacy session records for a student more than once (subsequent uploads replace previous legacy data).',
+    'מאפשר למנהלי ובעלי הארגון להעלות מחדש נתוני מפגשי עבר לתלמיד יותר מפעם אחת (העלאה חדשה מחליפה נתונים קודמים).',
+    'false'::jsonb,
+    'features',
+    true
+  ),
+  (
+    'can_use_custom_logo_on_exports',
+    'Custom Logo on Exports',
+    'לוגו מותאם ביצוא',
+    'Allow organization to display their custom logo alongside TutTiud logo on PDF exports',
+    'אפשר לארגון להציג את הלוגו המותאם שלו לצד לוגו TutTiud ביצוא PDF',
+    'false'::jsonb,
+    'branding',
+    true
+  ),
+  (
+    'invitation_expiry_seconds',
+    'Invitation Expiry Seconds',
+    'שניות תוקף הזמנה',
+    'Number of seconds until invitation links expire (global). Overrides Supabase auth config if set.',
+    'מספר שניות עד פקיעת קישורי הזמנה (גלובלי). דורס את הגדרת Supabase אם מוגדר.',
+    '36399'::jsonb,
+    'features',
+    false
+  ),
+  (
+    'logo_enabled',
+    'Custom Logo',
+    'לוגו מותאם אישית',
+    'Allow organization to upload and use a custom logo',
+    'אפשר לארגון להעלות ולהשתמש בלוגו מותאם אישית',
+    'false'::jsonb,
+    'branding',
+    true
+  ),
+  (
+    'session_form_preanswers_cap',
+    'Session Form: Preanswers Cap',
+    'טופס מפגש: תקרת תשובות מוכנות',
+    'Maximum number of preconfigured answers allowed per question (text/textarea)',
+    'מספר מרבי של תשובות מוכנות לשאלה (טקסט/טקסט חופשי)',
+    '50'::jsonb,
+    'features',
+    false
+  ),
+  (
+    'session_form_preanswers_enabled',
+    'Session Form: Preconfigured Answers',
+    'טופס מפגש: תשובות מוכנות מראש',
+    'Allow organizations to configure predefined answer lists for text/textarea questions',
+    'אפשר לארגון להגדיר רשימות תשובות מוכנות לשאלות טקסט/טקסט חופשי',
+    'true'::jsonb,
+    'features',
+    false
+  ),
+  (
+    'storage_access_level',
+    'Storage Configuration Access',
+    'גישה להגדרות אחסון',
+    'Determines if the organization can configure storage and which modes are available. Options: false (locked), "byos_only" (BYOS only), "managed_only" (Managed only), "all" (both modes).',
+    'קובע האם הארגון יכול להגדיר אחסון ואילו מצבים זמינים. אפשרויות: false (נעול), "byos_only" (BYOS בלבד), "managed_only" (מנוהל בלבד), "all" (שני המצבים).',
+    'false'::jsonb,
+    'storage',
+    true
+  ),
+  (
+    'storage_grace_period_days',
+    'Storage Grace Period (Days)',
+    'תקופת חסד לאחסון (ימים)',
+    'Number of days users have to download files after storage is disconnected before permanent deletion',
+    'מספר הימים שיש למשתמשים להוריד קבצים לאחר ניתוק האחסון לפני מחיקה סופית',
+    '30'::jsonb,
+    'storage',
+    false
+  )
+ON CONFLICT (permission_key) DO UPDATE SET
+  display_name_en = COALESCE(NULLIF(public.permission_registry.display_name_en, ''), EXCLUDED.display_name_en),
+  display_name_he = COALESCE(NULLIF(public.permission_registry.display_name_he, ''), EXCLUDED.display_name_he),
+  description_en = COALESCE(public.permission_registry.description_en, EXCLUDED.description_en),
+  description_he = COALESCE(public.permission_registry.description_he, EXCLUDED.description_he),
+  default_value = COALESCE(public.permission_registry.default_value, EXCLUDED.default_value),
+  category = COALESCE(NULLIF(public.permission_registry.category, ''), EXCLUDED.category),
+  requires_approval = COALESCE(public.permission_registry.requires_approval, EXCLUDED.requires_approval),
+  updated_at = NOW();
 
 -- =================================================================
 -- Permission helpers
