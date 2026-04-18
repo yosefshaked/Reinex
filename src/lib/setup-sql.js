@@ -301,18 +301,129 @@ CREATE INDEX IF NOT EXISTS permission_registry_category_idx
 
 
 -- -----------------------------------------------------------------
--- public.active_routing (maps user → currently active org)
+-- public.active_routing
+-- Generic routing records for active-org context and anonymous invite/OTP flows.
 -- -----------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS public.active_routing (
-  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  user_id uuid NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  category text NOT NULL DEFAULT 'active_org',
+  routing_info jsonb NOT NULL DEFAULT '{}'::jsonb,
+  expires_at timestamptz NULL,
+  created_by uuid NULL,
+  metadata jsonb NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+DO $$
+BEGIN
+  ALTER TABLE public.active_routing
+    ADD COLUMN IF NOT EXISTS id uuid,
+    ADD COLUMN IF NOT EXISTS category text,
+    ADD COLUMN IF NOT EXISTS routing_info jsonb,
+    ADD COLUMN IF NOT EXISTS expires_at timestamptz,
+    ADD COLUMN IF NOT EXISTS created_by uuid,
+    ADD COLUMN IF NOT EXISTS metadata jsonb,
+    ADD COLUMN IF NOT EXISTS created_at timestamptz,
+    ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+    ADD COLUMN IF NOT EXISTS user_id uuid;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.active_routing
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN user_id DROP NOT NULL,
+    ALTER COLUMN category SET DEFAULT 'active_org',
+    ALTER COLUMN routing_info SET DEFAULT '{}'::jsonb,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN updated_at SET DEFAULT now();
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  UPDATE public.active_routing
+  SET id = gen_random_uuid()
+  WHERE id IS NULL;
+
+  UPDATE public.active_routing
+  SET category = 'active_org'
+  WHERE category IS NULL OR btrim(category) = '';
+
+  UPDATE public.active_routing
+  SET routing_info = '{}'::jsonb
+  WHERE routing_info IS NULL;
+
+  UPDATE public.active_routing
+  SET created_at = COALESCE(created_at, updated_at, now()),
+      updated_at = COALESCE(updated_at, created_at, now());
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+END $$;
+
+DO $$
+DECLARE
+  pk_name text;
+  pk_columns text[];
+BEGIN
+  SELECT con.conname, array_agg(att.attname ORDER BY att.attnum)
+  INTO pk_name, pk_columns
+  FROM pg_constraint con
+  JOIN pg_attribute att
+    ON att.attrelid = con.conrelid
+   AND att.attnum = ANY(con.conkey)
+  WHERE con.conrelid = 'public.active_routing'::regclass
+    AND con.contype = 'p'
+  GROUP BY con.conname;
+
+  IF pk_name IS NOT NULL AND pk_columns <> ARRAY['id'] THEN
+    EXECUTE format('ALTER TABLE public.active_routing DROP CONSTRAINT %I', pk_name);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.active_routing'::regclass
+      AND contype = 'p'
+  ) THEN
+    ALTER TABLE public.active_routing
+      ADD CONSTRAINT active_routing_pkey PRIMARY KEY (id);
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.active_routing
+    ALTER COLUMN id SET NOT NULL,
+    ALTER COLUMN category SET NOT NULL,
+    ALTER COLUMN routing_info SET NOT NULL,
+    ALTER COLUMN created_at SET NOT NULL,
+    ALTER COLUMN updated_at SET NOT NULL;
+EXCEPTION
+  WHEN undefined_table THEN NULL;
+END $$;
 
 CREATE INDEX IF NOT EXISTS active_routing_org_idx
   ON public.active_routing (org_id);
+
+CREATE INDEX IF NOT EXISTS active_routing_category_expires_idx
+  ON public.active_routing (category, expires_at);
+
+CREATE INDEX IF NOT EXISTS active_routing_routing_info_gin_idx
+  ON public.active_routing USING GIN (routing_info);
+
+CREATE UNIQUE INDEX IF NOT EXISTS active_routing_active_org_user_uidx
+  ON public.active_routing (user_id)
+  WHERE user_id IS NOT NULL AND category = 'active_org' AND expires_at IS NULL;
 
 -- -----------------------------------------------------------------
 -- public.audit_log (unified: replaces both control audit_log and
