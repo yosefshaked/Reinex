@@ -1168,6 +1168,7 @@ async function submitPublicInvite(context, req, { controlClient }) {
   if (contactRelationship !== 'self') {
     try {
       guardianResult = await createOrReuseGuardian(client, {
+        orgId,
         contactName,
         phone,
         email,

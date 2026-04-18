@@ -1,6 +1,6 @@
 /* eslint-env node */
 import { randomUUID } from 'node:crypto';
-import { UUID_PATTERN, normalizeString } from './org-bff.js';
+import { UUID_PATTERN, normalizeString, withOrgScope } from './org-bff.js';
 import {
   coerceEmail,
   coerceIdentityNumber,
@@ -188,7 +188,11 @@ export async function createOrReuseClientProfile(tenantClient, payload = {}) {
   };
 }
 
-export async function createOrReuseGuardian(tenantClient, { contactName, phone, email }) {
+export async function createOrReuseGuardian(tenantClient, { orgId, contactName, phone, email }) {
+  if (!UUID_PATTERN.test(String(orgId || ''))) {
+    throw new Error('invalid_org_id');
+  }
+
   const normalizedContactName = normalizeString(contactName);
   if (!normalizedContactName) return null;
 
@@ -199,8 +203,7 @@ export async function createOrReuseGuardian(tenantClient, { contactName, phone, 
   let existingGuardian = null;
 
   if (normalizedPhone.valid && normalizedPhone.value) {
-    const { data, error } = await tenantClient
-      .from('guardians')
+    const { data, error } = await withOrgScope(tenantClient, 'guardians', orgId)
       .select('id, first_name, last_name, phone, email')
       .eq('phone', normalizedPhone.value)
       .limit(1)
@@ -210,8 +213,7 @@ export async function createOrReuseGuardian(tenantClient, { contactName, phone, 
   }
 
   if (!existingGuardian && normalizedEmail.valid && normalizedEmail.value) {
-    const { data, error } = await tenantClient
-      .from('guardians')
+    const { data, error } = await withOrgScope(tenantClient, 'guardians', orgId)
       .select('id, first_name, last_name, phone, email')
       .eq('email', normalizedEmail.value)
       .limit(1)
@@ -226,8 +228,7 @@ export async function createOrReuseGuardian(tenantClient, { contactName, phone, 
     if (!normalizeString(existingGuardian.email) && normalizedEmail.value) updates.email = normalizedEmail.value;
 
     if (Object.keys(updates).length) {
-      const { data: updatedGuardian, error } = await tenantClient
-        .from('guardians')
+      const { data: updatedGuardian, error } = await withOrgScope(tenantClient, 'guardians', orgId)
         .update(updates)
         .eq('id', existingGuardian.id)
         .select('id, first_name, last_name, phone, email')
@@ -249,8 +250,7 @@ export async function createOrReuseGuardian(tenantClient, { contactName, phone, 
     };
   }
 
-  const { data, error } = await tenantClient
-    .from('guardians')
+  const { data, error } = await withOrgScope(tenantClient, 'guardians', orgId)
     .insert({
       first_name: firstName || normalizedContactName,
       last_name: lastName || null,
