@@ -22,6 +22,8 @@ function getAalLevel(payload) {
   return payload?.currentLevel || payload?.current_level || 'aal1';
 }
 
+const MFA_FRIENDLY_NAME = 'Reinex System Admin';
+
 async function getAuthenticatorAssuranceLevel(authClient) {
   if (typeof authClient?.auth?.getAuthenticatorAssuranceLevel === 'function') {
     return authClient.auth.getAuthenticatorAssuranceLevel();
@@ -34,13 +36,33 @@ async function getAuthenticatorAssuranceLevel(authClient) {
   return { data: null, error: null };
 }
 
-function resolveTotpFactor(listData) {
-  const totpFactors = listData?.totp || [];
-  return (
-    totpFactors.find((factor) => factor?.status === 'verified') ||
-    totpFactors.find(Boolean) ||
-    null
+function listAllTotpFactors(listData) {
+  const directTotp = Array.isArray(listData?.totp) ? listData.totp : [];
+  const allFactors = Array.isArray(listData?.all) ? listData.all : [];
+  const merged = [...directTotp, ...allFactors.filter((factor) => factor?.factor_type === 'totp')];
+  const unique = new Map();
+
+  for (const factor of merged) {
+    if (factor?.id && !unique.has(factor.id)) {
+      unique.set(factor.id, factor);
+    }
+  }
+
+  return Array.from(unique.values());
+}
+
+async function clearPendingTotpFactors(authClient, factorsData, keepFactorId = '') {
+  const factors = listAllTotpFactors(factorsData);
+  const pendingFactors = factors.filter(
+    (factor) => factor?.id && factor.id !== keepFactorId && factor?.status !== 'verified'
   );
+
+  for (const factor of pendingFactors) {
+    const { error } = await authClient.auth.mfa.unenroll({ factorId: factor.id });
+    if (error) {
+      throw error;
+    }
+  }
 }
 
 function toQrDataUri(rawQrCode) {
@@ -74,7 +96,7 @@ export default function MfaPage() {
     error: '',
   });
 
-  const bootstrap = React.useCallback(async () => {
+  const bootstrap = React.useCallback(async ({ resetEnrollment = false } = {}) => {
     const authClient = getAuthClient();
 
     setState((previous) => ({
@@ -100,11 +122,13 @@ export default function MfaPage() {
       throw factorsError;
     }
 
-    const existingTotpFactor = resolveTotpFactor(factorsData);
+    const totpFactors = listAllTotpFactors(factorsData);
+    const verifiedTotpFactor = totpFactors.find((factor) => factor?.status === 'verified') || null;
+    const pendingTotpFactor = totpFactors.find((factor) => factor?.status !== 'verified') || null;
 
-    if (existingTotpFactor?.id) {
+    if (verifiedTotpFactor?.id) {
       const { data: challengeData, error: challengeError } = await authClient.auth.mfa.challenge({
-        factorId: existingTotpFactor.id,
+        factorId: verifiedTotpFactor.id,
       });
 
       if (challengeError) {
@@ -115,7 +139,7 @@ export default function MfaPage() {
         ...previous,
         loading: false,
         mode: 'challenge',
-        factorId: existingTotpFactor.id,
+        factorId: verifiedTotpFactor.id,
         challengeId: challengeData?.id || challengeData?.challengeId || challengeData?.challenge_id || '',
         qrCode: '',
         secret: '',
@@ -125,7 +149,14 @@ export default function MfaPage() {
       return;
     }
 
-    const { data: enrollData, error: enrollError } = await authClient.auth.mfa.enroll({ factorType: 'totp' });
+    if (resetEnrollment || pendingTotpFactor?.id) {
+      await clearPendingTotpFactors(authClient, factorsData);
+    }
+
+    const { data: enrollData, error: enrollError } = await authClient.auth.mfa.enroll({
+      factorType: 'totp',
+      friendlyName: MFA_FRIENDLY_NAME,
+    });
     if (enrollError) {
       throw enrollError;
     }
@@ -248,7 +279,7 @@ export default function MfaPage() {
 
   const handleRetry = React.useCallback(async () => {
     try {
-      await bootstrap();
+      await bootstrap({ resetEnrollment: state.mode === 'enroll' });
     } catch (error) {
       setState((previous) => ({
         ...previous,
@@ -257,7 +288,7 @@ export default function MfaPage() {
         error: extractErrorMessage(error, 'Failed to reload MFA state. Please try again.'),
       }));
     }
-  }, [bootstrap]);
+  }, [bootstrap, state.mode]);
 
   const qrSrc = toQrDataUri(state.qrCode);
 

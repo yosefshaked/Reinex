@@ -19,6 +19,7 @@
     "lint:sql:github": "node scripts/validate-setup-sql.js --format=github",
     "lint:fix": "eslint . --fix",
     "validate:api": "node scripts/validate-api-endpoints.js",
+    "test:isolation-stress-test": "node --test implementations/database/one-db-refactor/isolation-stress-test.js",
     "test:validator": "node scripts/test-validator.js",
     "preview": "vite preview",
     "electron:dev": "concurrently -k -s first \"npm run dev\" \"wait-on http://localhost:5173 && set ELECTRON_START_URL=http://localhost:5173 && electron .\"",
