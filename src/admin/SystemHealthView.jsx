@@ -1,6 +1,8 @@
 import React from 'react';
 import { authenticatedFetch } from '@/lib/api-client.js';
 
+const HEALTH_ROUTE_CANDIDATES = ['admin-system-health', 'admin-system-health/'];
+
 function shortHash(hash) {
   if (!hash) {
     return 'Not configured';
@@ -51,6 +53,23 @@ function formatError(error, fallback) {
   return error.message || fallback;
 }
 
+async function fetchSystemHealthWithFallback(options) {
+  let lastError = null;
+
+  for (const route of HEALTH_ROUTE_CANDIDATES) {
+    try {
+      return await authenticatedFetch(route, options);
+    } catch (error) {
+      lastError = error;
+      if (error?.status !== 404) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error('Failed to reach system health endpoint.');
+}
+
 function RotationBadge({ active }) {
   if (active) {
     return (
@@ -89,7 +108,7 @@ export default function SystemHealthView() {
     }));
 
     try {
-      const payload = await authenticatedFetch('admin-system-health', { method: 'GET' });
+      const payload = await fetchSystemHealthWithFallback({ method: 'GET' });
       setState({
         loading: false,
         error: '',
@@ -111,7 +130,7 @@ export default function SystemHealthView() {
 
     (async () => {
       try {
-        const payload = await authenticatedFetch('admin-system-health', { method: 'GET' });
+        const payload = await fetchSystemHealthWithFallback({ method: 'GET' });
         if (!active) return;
         setState({
           loading: false,
@@ -144,7 +163,7 @@ export default function SystemHealthView() {
     });
 
     try {
-      const result = await authenticatedFetch('admin-system-health', {
+      const result = await fetchSystemHealthWithFallback({
         method: 'POST',
         params: { action: 'sanity-check' },
       });
