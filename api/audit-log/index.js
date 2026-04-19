@@ -131,13 +131,13 @@ export default async function auditLog(context, req) {
 
   let query = supabase
     .from('audit_log')
-    .select('id, user_email, user_role, action_type, action_category, resource_type, resource_id, details, performed_at')
+    .select('id, actor_email, actor_role, event_type, action_category, resource_type, resource_id, details, created_at')
     .eq('org_id', orgId)
-    .order('performed_at', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(limit + 1);
 
   if (before) {
-    query = query.lt('performed_at', before);
+    query = query.lt('created_at', before);
   }
 
   if (actionCategory) {
@@ -162,8 +162,15 @@ export default async function auditLog(context, req) {
   const rows = Array.isArray(data) ? data : [];
   const hasMore = rows.length > limit;
   const logs = (hasMore ? rows.slice(0, limit) : rows).map((entry) => ({
-    ...entry,
+    id: entry.id,
+    user_email: entry.actor_email || null,
+    user_role: entry.actor_role || null,
+    action_type: entry.event_type || null,
+    action_category: entry.action_category || null,
+    resource_type: entry.resource_type || null,
+    resource_id: entry.resource_id || null,
     details: sanitizeValue(entry.details),
+    performed_at: entry.created_at || null,
   }));
   const nextCursor = hasMore ? logs[logs.length - 1]?.performed_at || null : null;
 
