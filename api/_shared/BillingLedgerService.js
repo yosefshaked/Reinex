@@ -17,6 +17,17 @@ const ACCOUNT_COLUMN_BY_TYPE = {
 const MANUAL_CREDIT_SOURCE_TYPES = new Set(['manual_payment', 'hmo_invoice_payment', 'opening_balance', 'migration']);
 const MANUAL_DEBIT_SOURCE_TYPES = new Set(['manual_adjustment', 'opening_balance', 'migration']);
 const REVERSIBLE_SOURCE_TYPES = new Set(['lesson_charge', 'manual_payment', 'manual_adjustment', 'hmo_invoice_payment', 'opening_balance', 'migration']);
+const MANUAL_CREDIT_USAGE_TYPE_BY_SOURCE = {
+  manual_payment: 'manual_topup',
+  hmo_invoice_payment: 'transfer_received',
+  opening_balance: 'manual_topup',
+  migration: 'manual_topup',
+};
+const MANUAL_DEBIT_USAGE_TYPE_BY_SOURCE = {
+  manual_adjustment: 'manual_adjustment',
+  opening_balance: 'manual_adjustment',
+  migration: 'manual_adjustment',
+};
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -164,6 +175,69 @@ async function loadStudentProfileMap(tenantClient, orgId, studentIds = []) {
   }));
 }
 
+async function loadClientProfileMap(tenantClient, orgId, clientProfileIds = []) {
+  const ids = Array.from(new Set((clientProfileIds || []).map((value) => normalizeString(value)).filter(Boolean)));
+  const normalizedOrgId = normalizeString(orgId);
+  if (ids.length === 0 || !normalizedOrgId) {
+    return new Map();
+  }
+
+  const { data, error } = await tenantClient
+    .from('client_profiles')
+    .select('id')
+    .eq('org_id', normalizedOrgId)
+    .in('id', ids);
+
+  if (error) {
+    throw error;
+  }
+
+  return new Map((data || []).map((row) => [row.id, row]));
+}
+
+async function resolveHmoProviderAnchorClientProfileId(tenantClient, orgId, hmoProviderId) {
+  const normalizedOrgId = normalizeString(orgId);
+  const normalizedProviderId = normalizeString(hmoProviderId);
+  if (!normalizedOrgId || !normalizedProviderId) {
+    return null;
+  }
+
+  const { data: transactionAnchor, error: transactionAnchorError } = await tenantClient
+    .from('ledger_transactions')
+    .select('client_profile_id')
+    .eq('org_id', normalizedOrgId)
+    .eq('hmo_provider_id', normalizedProviderId)
+    .not('client_profile_id', 'is', null)
+    .order('effective_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (transactionAnchorError) {
+    throw transactionAnchorError;
+  }
+  if (transactionAnchor?.client_profile_id) {
+    return normalizeString(transactionAnchor.client_profile_id);
+  }
+
+  const { data: authorizationAnchor, error: authorizationAnchorError } = await tenantClient
+    .from('hmo_authorizations')
+    .select(`
+      student:students!inner(
+        client_profile_id
+      )
+    `)
+    .eq('org_id', normalizedOrgId)
+    .eq('provider_id', normalizedProviderId)
+    .limit(1)
+    .maybeSingle();
+
+  if (authorizationAnchorError) {
+    throw authorizationAnchorError;
+  }
+
+  return normalizeString(authorizationAnchor?.student?.client_profile_id) || null;
+}
+
 async function loadServiceMap(tenantClient, orgId, serviceIds = []) {
   const ids = Array.from(new Set((serviceIds || []).map((value) => normalizeString(value)).filter(Boolean)));
   const normalizedOrgId = normalizeString(orgId);
@@ -277,33 +351,102 @@ async function loadOpenLessonCharges(tenantClient, lessonParticipantId) {
   ));
 }
 
-async function resolveLedgerAccount(tenantClient, accountType, accountRefId) {
+async function resolveLedgerAccount(tenantClient, orgId, accountType, accountRefId) {
+  const normalizedOrgId = normalizeString(orgId);
   const normalizedType = normalizeAccountType(accountType);
   const normalizedRefId = normalizeString(accountRefId);
-  if (!normalizedType || !normalizedRefId) {
+  if (!normalizedOrgId || !normalizedType || !normalizedRefId) {
     throw new Error('invalid_ledger_account_target');
   }
 
-  const column = ACCOUNT_COLUMN_BY_TYPE[normalizedType];
-  const payload = {
-    account_type: normalizedType,
-    student_id: normalizedType === STUDENT_ACCOUNT_TYPE ? normalizedRefId : null,
-    client_profile_id: normalizedType === CLIENT_ACCOUNT_TYPE ? normalizedRefId : null,
-    hmo_provider_id: normalizedType === HMO_ACCOUNT_TYPE ? normalizedRefId : null,
-    is_active: true,
-    metadata: {},
-  };
+  if (normalizedType === HMO_ACCOUNT_TYPE) {
+    const anchorClientProfileId = await resolveHmoProviderAnchorClientProfileId(
+      tenantClient,
+      normalizedOrgId,
+      normalizedRefId,
+    );
+    if (!anchorClientProfileId) {
+      throw new Error('ledger_account_target_not_found');
+    }
+    return {
+      id: null,
+      accountType: HMO_ACCOUNT_TYPE,
+      accountRefId: normalizedRefId,
+      clientProfileId: anchorClientProfileId,
+      studentId: null,
+      hmoProviderId: normalizedRefId,
+    };
+  }
+
+  let clientProfileId = null;
+  let studentId = null;
+
+  if (normalizedType === STUDENT_ACCOUNT_TYPE) {
+    const studentMap = await loadStudentProfileMap(tenantClient, normalizedOrgId, [normalizedRefId]);
+    const student = studentMap.get(normalizedRefId) || null;
+    if (!student?.client_profile_id) {
+      throw new Error('ledger_account_target_not_found');
+    }
+    clientProfileId = normalizeString(student.client_profile_id);
+    studentId = normalizedRefId;
+  } else if (normalizedType === CLIENT_ACCOUNT_TYPE) {
+    const clientProfileMap = await loadClientProfileMap(tenantClient, normalizedOrgId, [normalizedRefId]);
+    if (!clientProfileMap.has(normalizedRefId)) {
+      throw new Error('ledger_account_target_not_found');
+    }
+    clientProfileId = normalizedRefId;
+  }
+
+  let accountQuery = tenantClient
+    .from('ledger_accounts')
+    .select('id, org_id, client_profile_id, student_id, service_id, metadata')
+    .eq('org_id', normalizedOrgId)
+    .eq('client_profile_id', clientProfileId);
+
+  accountQuery = studentId
+    ? accountQuery.eq('student_id', studentId)
+    : accountQuery.is('student_id', null);
+
+  const { data: existingAccount, error: existingAccountError } = await accountQuery.maybeSingle();
+
+  if (existingAccountError) {
+    throw existingAccountError;
+  }
+
+  if (existingAccount?.id) {
+    return {
+      id: existingAccount.id,
+      accountType: normalizedType,
+      accountRefId: normalizedRefId,
+      clientProfileId,
+      studentId,
+      hmoProviderId: null,
+    };
+  }
 
   const { data, error } = await tenantClient
     .from('ledger_accounts')
-    .upsert(payload, { onConflict: column })
-    .select('id, account_type, student_id, client_profile_id, hmo_provider_id, is_active, metadata')
+    .insert({
+      org_id: normalizedOrgId,
+      client_profile_id: clientProfileId,
+      student_id: studentId,
+      service_id: null,
+      metadata: {},
+    })
+    .select('id, org_id, client_profile_id, student_id, service_id, metadata')
     .single();
 
   if (error) {
     throw error;
   }
-  return data;
+  return {
+    id: data.id,
+    accountType: normalizedType,
+    accountRefId: normalizedRefId,
+    clientProfileId,
+    studentId,
+    hmoProviderId: null,
+  };
 }
 
 async function appendLedgerTransaction(tenantClient, payload) {
@@ -312,6 +455,12 @@ async function appendLedgerTransaction(tenantClient, payload) {
     .insert(payload)
     .select(`
       id,
+      org_id,
+      client_profile_id,
+      student_id,
+      commitment_id,
+      transaction_type,
+      usage_type,
       ledger_account_id,
       direction,
       amount,
@@ -338,6 +487,81 @@ async function appendLedgerTransaction(tenantClient, payload) {
     throw error;
   }
   return data;
+}
+
+function resolveUsageTypeForManualEntry(direction, sourceType) {
+  const normalizedDirection = normalizeDirection(direction);
+  const normalizedSourceType = normalizeString(sourceType).toLowerCase();
+  if (normalizedDirection === 'CREDIT') {
+    return MANUAL_CREDIT_USAGE_TYPE_BY_SOURCE[normalizedSourceType] || '';
+  }
+  if (normalizedDirection === 'DEBIT') {
+    return MANUAL_DEBIT_USAGE_TYPE_BY_SOURCE[normalizedSourceType] || '';
+  }
+  return '';
+}
+
+function buildManualTransactionPayload({
+  orgId,
+  target,
+  direction,
+  amount,
+  effectiveAt,
+  clock,
+  sourceType,
+  sourceId = null,
+  externalReference = null,
+  notes = null,
+  actorUserId = null,
+  metadata = {},
+}) {
+  const normalizedDirection = normalizeDirection(direction);
+  const usageType = resolveUsageTypeForManualEntry(normalizedDirection, sourceType);
+  if (!orgId || !target?.accountType || !usageType) {
+    throw new Error('invalid_manual_ledger_payload');
+  }
+
+  const normalizedSourceType = normalizeString(sourceType).toLowerCase();
+  const normalizedExternalReference = normalizeString(externalReference) || null;
+  const normalizedNotes = normalizeString(notes) || null;
+  const timestamp = toIsoOrNow(effectiveAt, clock);
+
+  return {
+    org_id: orgId,
+    client_profile_id: target.clientProfileId,
+    student_id: target.studentId,
+    commitment_id: null,
+    transaction_type: normalizedDirection,
+    usage_type: usageType,
+    amount: coerceAgorot(amount),
+    source_ref: sourceId,
+    invoice_id: null,
+    invoice_link: null,
+    notes: normalizedNotes,
+    ledger_account_id: target.id,
+    direction: normalizedDirection,
+    effective_at: timestamp,
+    posted_at: timestamp,
+    source_type: normalizedSourceType,
+    source_id: sourceId,
+    lesson_instance_id: null,
+    lesson_participant_id: null,
+    hmo_provider_id: target.hmoProviderId,
+    hmo_authorization_id: null,
+    service_id: null,
+    rate_source: normalizedSourceType === 'opening_balance'
+      ? 'opening_balance'
+      : (normalizedSourceType === 'migration' ? 'migration' : 'manual'),
+    reverses_transaction_id: null,
+    external_reference: normalizedExternalReference,
+    posted_at_migrated: false,
+    metadata: {
+      ...(isPlainObject(metadata) ? metadata : {}),
+      actor_user_id: actorUserId || null,
+      ledger_target_type: target.accountType,
+      ledger_target_ref_id: target.accountRefId,
+    },
+  };
 }
 
 function buildLessonChargeMetadata({
@@ -610,7 +834,7 @@ export default class BillingLedgerService {
     const existingOpenCharges = await loadOpenLessonCharges(this.tenantClient, lessonParticipantId);
     const desiredEntries = [];
     for (const descriptor of desiredResult.entries) {
-      const ledgerAccount = await resolveLedgerAccount(this.tenantClient, descriptor.accountType, descriptor.accountRefId);
+      const ledgerAccount = await resolveLedgerAccount(this.tenantClient, this.orgId, descriptor.accountType, descriptor.accountRefId);
       desiredEntries.push({
         ledger_account_id: ledgerAccount.id,
         direction: descriptor.direction,
@@ -853,32 +1077,21 @@ export default class BillingLedgerService {
       throw new Error('amount_must_be_positive_integer');
     }
 
-    const ledgerAccount = await resolveLedgerAccount(this.tenantClient, accountType, accountRefId);
-    const transaction = await appendLedgerTransaction(this.tenantClient, {
-      ledger_account_id: ledgerAccount.id,
+    const ledgerTarget = await resolveLedgerAccount(this.tenantClient, this.orgId, accountType, accountRefId);
+    const transaction = await appendLedgerTransaction(this.tenantClient, buildManualTransactionPayload({
+      orgId: this.orgId,
+      target: ledgerTarget,
       direction: 'CREDIT',
       amount: coercedAmount,
-      effective_at: toIsoOrNow(effectiveAt, this.clock),
-      source_type: normalizeString(sourceType),
-      source_id: sourceId,
-      lesson_instance_id: null,
-      lesson_participant_id: null,
-      student_id: accountType === STUDENT_ACCOUNT_TYPE ? accountRefId : null,
-      client_profile_id: accountType === CLIENT_ACCOUNT_TYPE ? accountRefId : null,
-      hmo_provider_id: accountType === HMO_ACCOUNT_TYPE ? accountRefId : null,
-      hmo_authorization_id: null,
-      service_id: null,
-      rate_source: normalizeString(sourceType) === 'opening_balance'
-        ? 'opening_balance'
-        : (normalizeString(sourceType) === 'migration' ? 'migration' : 'manual'),
-      reverses_transaction_id: null,
-      external_reference: normalizeString(externalReference) || null,
-      notes: normalizeString(notes) || null,
-      metadata: {
-        ...(isPlainObject(metadata) ? metadata : {}),
-        actor_user_id: actorUserId || null,
-      },
-    });
+      effectiveAt,
+      clock: this.clock,
+      sourceType,
+      sourceId,
+      externalReference,
+      notes,
+      actorUserId,
+      metadata,
+    }));
     return { transactionId: transaction.id };
   }
 
@@ -902,32 +1115,21 @@ export default class BillingLedgerService {
       throw new Error('amount_must_be_positive_integer');
     }
 
-    const ledgerAccount = await resolveLedgerAccount(this.tenantClient, accountType, accountRefId);
-    const transaction = await appendLedgerTransaction(this.tenantClient, {
-      ledger_account_id: ledgerAccount.id,
+    const ledgerTarget = await resolveLedgerAccount(this.tenantClient, this.orgId, accountType, accountRefId);
+    const transaction = await appendLedgerTransaction(this.tenantClient, buildManualTransactionPayload({
+      orgId: this.orgId,
+      target: ledgerTarget,
       direction: 'DEBIT',
       amount: coercedAmount,
-      effective_at: toIsoOrNow(effectiveAt, this.clock),
-      source_type: normalizeString(sourceType),
-      source_id: sourceId,
-      lesson_instance_id: null,
-      lesson_participant_id: null,
-      student_id: accountType === STUDENT_ACCOUNT_TYPE ? accountRefId : null,
-      client_profile_id: accountType === CLIENT_ACCOUNT_TYPE ? accountRefId : null,
-      hmo_provider_id: accountType === HMO_ACCOUNT_TYPE ? accountRefId : null,
-      hmo_authorization_id: null,
-      service_id: null,
-      rate_source: normalizeString(sourceType) === 'opening_balance'
-        ? 'opening_balance'
-        : (normalizeString(sourceType) === 'migration' ? 'migration' : 'manual'),
-      reverses_transaction_id: null,
-      external_reference: normalizeString(externalReference) || null,
-      notes: normalizeString(notes) || null,
-      metadata: {
-        ...(isPlainObject(metadata) ? metadata : {}),
-        actor_user_id: actorUserId || null,
-      },
-    });
+      effectiveAt,
+      clock: this.clock,
+      sourceType,
+      sourceId,
+      externalReference,
+      notes,
+      actorUserId,
+      metadata,
+    }));
     return { transactionId: transaction.id };
   }
 

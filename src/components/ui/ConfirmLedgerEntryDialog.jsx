@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import {
   AlertDialog,
@@ -53,10 +53,17 @@ export default function ConfirmLedgerEntryDialog({
   if (!entry) return null;
 
   const isDebit = entry.type === 'debit';
+  const confirmButtonRef = useRef(null);
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="max-w-md">
+      <AlertDialogContent
+        className="max-w-md"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          confirmButtonRef.current?.focus();
+        }}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>אישור רישום בלדר — לא ניתן לבטל</AlertDialogTitle>
           <AlertDialogDescription asChild>
@@ -111,6 +118,7 @@ export default function ConfirmLedgerEntryDialog({
 
         <AlertDialogFooter className="flex-row-reverse gap-2">
           <Button
+            ref={confirmButtonRef}
             type="button"
             variant={isDebit ? 'destructive' : 'default'}
             onClick={onConfirm}
