@@ -63,13 +63,16 @@
 - `ledger_transactions` are immutable. Fixes must be expressed as reversing rows plus replacement rows, never `UPDATE` or `DELETE`.
 - Calendar, attendance, HMO authorization, and manual billing endpoints must stay thin. They orchestrate domain changes and then call `BillingLedgerService`; they do not contain billing math or direct ledger SQL.
 - Student billing uses a `student` ledger account. One-time customers use a `client_profile` ledger account. HMO receivables use an `hmo_provider` ledger account.
-- HMO split billing for MVP is fixed:
-  student debit = `provider_track.default_customer_charge_amount` when the assigned track sets a positive fixed copay
-  student debit = `max(service.default_customer_charge_amount - hmo_authorizations.contracted_rate_amount, 0)` when the assigned track is partial-HMO and leaves copay blank or `0`
-  student debit = `0` when `provider_track.payment_mode = fully_paid_by_hmo`
-  student debit = `provider_track.default_customer_charge_amount || service.default_customer_charge_amount` when `provider_track.payment_mode = fully_paid_by_customer`
-  HMO provider debit = `hmo_authorizations.contracted_rate_amount` except when `provider_track.payment_mode = fully_paid_by_customer`, where it is `0`
-- `hmo_provider_tracks.default_insurer_claim_amount` is descriptive/defaulting data for setup and authorization UX. The live ledger charge for the insurer is driven by `hmo_authorizations.contracted_rate_amount`.
+- HMO billing now uses a canonical coverage-decision model:
+  `hmo_provider_tracks` are templates only and hold defaults for `default_customer_charge_amount`, `default_insurer_claim_amount`, `default_post_coverage_policy`, and `default_post_coverage_customer_charge_amount`
+  `hmo_authorizations` are the source of truth for live covered pricing via `covered_customer_charge_amount`, `covered_insurer_claim_amount`, `authorized_lessons`, `post_coverage_policy`, and `post_coverage_customer_charge_amount`
+  `resolveLessonCoverageDecision(...)` in [`../api/_shared/hmo.js`](../api/_shared/hmo.js) is the single resolver for `covered`, `post_coverage`, `standard_uncovered`, and `blocked`
+  `authorized_lessons` is enforced dynamically from active ledger rows carrying `hmo_authorization_id`; reversal rows restore entitlement
+  no finance path may derive customer copay from `service.default_customer_charge_amount - insurer amount`
+  `post_coverage_policy = service_default` means fall back to the service list price after entitlement exhaustion
+  `post_coverage_policy = explicit_customer_charge` means charge the stored explicit post-coverage customer amount
+  `post_coverage_policy = manual_block` means billing must stop with a clear blocked reason after entitlement exhaustion
+  overlapping matching active authorizations are treated as a data conflict and billing is blocked until resolved
 - HMO invoice batches are workflow metadata only. Balance changes happen only when explicit ledger credits or debits are appended.
 - Payroll, leave, attendance, and instructor earnings rules are still driven from `Settings` through [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js).
 - Do not add "rebuild billing" fallback buttons to student/client billing workspaces. Billing recalculation belongs to the mutation source: attendance/session changes, lesson-instance edits, and HMO authorization create/update/cancel already trigger the relevant ledger resync and should communicate that in their own UX.

@@ -17,6 +17,28 @@ function service(amount) {
   return { default_customer_charge_amount: amount };
 }
 
+function coverageDecision(overrides = {}) {
+  return {
+    status: 'covered',
+    reason: 'authorization_applies',
+    authorization_id: 'auth-1',
+    authorization: {
+      id: 'auth-1',
+      provider_id: 'hmo-1',
+      provider_track_id: 'track-1',
+      provider_track: {
+        id: 'track-1',
+        payment_mode: 'partially_paid_by_hmo',
+      },
+    },
+    covered_customer_charge_amount: 1000,
+    covered_insurer_claim_amount: 12000,
+    post_coverage_policy: 'service_default',
+    post_coverage_customer_charge_amount: null,
+    ...overrides,
+  };
+}
+
 describe('finance preview contract - billing descriptors', () => {
   it('builds billing decision from explicit preview HMO context', async () => {
     const participant = {
@@ -29,30 +51,18 @@ describe('finance preview contract - billing descriptors', () => {
       datetime_start: '2026-04-14T10:00:00.000Z',
       status: 'completed',
     };
-    const authorization = {
-      id: 'auth-1',
-      provider_id: 'hmo-1',
-      contracted_rate_amount: 12000,
-      provider_track_id: 'track-1',
-      provider_track: {
-        id: 'track-1',
-        payment_mode: 'partially_paid_by_hmo',
-        default_customer_charge_amount: 1000,
-      },
-    };
-
     const decision = await buildBillingDecision({
       participant,
       instance,
       service: service(18000),
-      authorization,
+      coverageDecision: coverageDecision(),
       policies: BASE_POLICIES,
     });
 
     assert.equal(decision.shouldCharge, true);
     assert.equal(decision.usageType, 'hmo_split');
     assert.equal(decision.chargeAmount, 1000);
-    assert.equal(decision.billingReason, 'hmo_split_charge');
+    assert.equal(decision.billingReason, 'covered_hmo_charge');
     assert.equal(decision.pricingBreakdown.hmo_authorization_id, 'auth-1');
     assert.equal(decision.pricingBreakdown.student_charge_amount, 1000);
     assert.equal(decision.pricingBreakdown.insurer_claim_amount, 12000);
@@ -64,26 +74,15 @@ describe('finance preview contract - billing descriptors', () => {
       client_profile_id: 'cp-1',
       student_id: 'st-1',
     };
-    const authorization = {
-      id: 'auth-1',
-      provider_id: 'hmo-1',
-      contracted_rate_amount: 12000,
-      provider_track: {
-        id: 'track-1',
-        payment_mode: 'partially_paid_by_hmo',
-        default_customer_charge_amount: 1000,
-      },
-    };
-
     const result = buildDesiredChargeDescriptors({
       participant,
       service: service(18000),
-      authorization,
+      coverageDecision: coverageDecision(),
       policies: BASE_POLICIES,
     });
 
     assert.equal(result.status, 'debited');
-    assert.equal(result.billingReason, 'hmo_split_charge');
+    assert.equal(result.billingReason, 'covered_hmo_charge');
     assert.equal(result.entries.length, 2);
 
     const studentEntry = result.entries.find((entry) => entry.accountType === 'student');
@@ -108,23 +107,21 @@ describe('finance preview contract - billing descriptors', () => {
       datetime_start: '2026-04-14T10:00:00.000Z',
       status: 'completed',
     };
-    const authorization = {
-      id: 'auth-2',
-      provider_id: 'hmo-2',
-      contracted_rate_amount: 9500,
-      provider_track_id: 'track-2',
-      provider_track: {
-        id: 'track-2',
-        payment_mode: 'fully_paid_by_hmo',
-        default_customer_charge_amount: 0,
-      },
-    };
-
     const decision = await buildBillingDecision({
       participant,
       instance,
       service: service(18000),
-      authorization,
+      coverageDecision: coverageDecision({
+        authorization_id: 'auth-2',
+        authorization: {
+          id: 'auth-2',
+          provider_id: 'hmo-2',
+          provider_track_id: 'track-2',
+          provider_track: { id: 'track-2', payment_mode: 'fully_paid_by_hmo' },
+        },
+        covered_customer_charge_amount: 0,
+        covered_insurer_claim_amount: 9500,
+      }),
       policies: BASE_POLICIES,
     });
 
@@ -139,21 +136,20 @@ describe('finance preview contract - billing descriptors', () => {
       client_profile_id: 'cp-1',
       student_id: 'st-1',
     };
-    const authorization = {
-      id: 'auth-2',
-      provider_id: 'hmo-2',
-      contracted_rate_amount: 9500,
-      provider_track: {
-        id: 'track-2',
-        payment_mode: 'fully_paid_by_hmo',
-        default_customer_charge_amount: 0,
-      },
-    };
-
     const result = buildDesiredChargeDescriptors({
       participant,
       service: service(18000),
-      authorization,
+      coverageDecision: coverageDecision({
+        authorization_id: 'auth-2',
+        authorization: {
+          id: 'auth-2',
+          provider_id: 'hmo-2',
+          provider_track_id: 'track-2',
+          provider_track: { id: 'track-2', payment_mode: 'fully_paid_by_hmo' },
+        },
+        covered_customer_charge_amount: 0,
+        covered_insurer_claim_amount: 9500,
+      }),
       policies: BASE_POLICIES,
     });
 
@@ -173,7 +169,7 @@ describe('finance preview contract - billing descriptors', () => {
     const result = buildDesiredChargeDescriptors({
       participant,
       service: service(18000),
-      authorization: null,
+      coverageDecision: null,
       policies: BASE_POLICIES,
     });
 
@@ -198,7 +194,7 @@ describe('finance preview contract - billing descriptors', () => {
     const result = buildDesiredChargeDescriptors({
       participant,
       service: service(18000),
-      authorization: null,
+      coverageDecision: null,
       policies,
     });
 
@@ -219,7 +215,7 @@ describe('finance preview contract - billing descriptors', () => {
     const result = buildDesiredChargeDescriptors({
       participant,
       service: service(18000),
-      authorization: null,
+      coverageDecision: null,
       policies: BASE_POLICIES,
     });
 

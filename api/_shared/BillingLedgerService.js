@@ -3,7 +3,7 @@
 import { loadFinancePolicies } from './employee-finance.js';
 import { coerceAgorot } from './currency.js';
 import { normalizeString } from './org-bff.js';
-import { loadHmoAuthorizations, resolveActiveAuthorizationForStudentService } from './hmo.js';
+import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const STUDENT_ACCOUNT_TYPE = 'student';
@@ -568,12 +568,13 @@ function buildLessonChargeMetadata({
   participant,
   instance,
   service,
-  authorization,
+  coverageDecision,
   actorUserId,
   reasonCode,
   detail,
   warnings,
 }) {
+  const authorization = coverageDecision?.authorization || null;
   return {
     reason_code: normalizeReasonCode(reasonCode),
     actor_user_id: actorUserId || null,
@@ -582,68 +583,44 @@ function buildLessonChargeMetadata({
     lesson_date: toDateKey(instance?.datetime_start) || null,
     service_name: service?.service_name || service?.name || null,
     billing_reason: detail?.billingReason || null,
+    coverage_status: coverageDecision?.status || null,
+    coverage_reason: coverageDecision?.reason || null,
+    post_coverage_policy: coverageDecision?.post_coverage_policy || null,
     warnings: warnings || [],
     authorization: authorization ? {
       id: authorization.id,
       provider_id: authorization.provider_id,
       provider_track_id: authorization.provider_track_id,
-      contracted_rate_amount: coerceAgorot(authorization.contracted_rate_amount),
+      covered_customer_charge_amount: coerceAgorot(coverageDecision?.covered_customer_charge_amount),
+      covered_insurer_claim_amount: coerceAgorot(coverageDecision?.covered_insurer_claim_amount),
+      post_coverage_customer_charge_amount: coverageDecision?.post_coverage_customer_charge_amount == null
+        ? null
+        : coerceAgorot(coverageDecision.post_coverage_customer_charge_amount),
       authorization_reference: authorization.authorization_reference || null,
     } : null,
   };
 }
 
 export function resolveHmoSplitAmounts({
-  service,
-  authorization,
+  coverageDecision,
 }) {
-  const serviceRate = coerceAgorot(service?.default_customer_charge_amount);
-  const contractedRateAmount = authorization?.contracted_rate_amount == null
-    ? null
-    : coerceAgorot(authorization.contracted_rate_amount);
-  const providerTrack = authorization?.provider_track || null;
-  const paymentMode = normalizeString(providerTrack?.payment_mode).toLowerCase() || 'partially_paid_by_hmo';
-  const trackCustomerChargeAmount = coerceAgorot(providerTrack?.default_customer_charge_amount);
-
-  if (contractedRateAmount == null) {
-    return {
-      paymentMode,
-      studentCopayAmount: 0,
-      insurerClaimAmount: null,
-      contractedRateAmount: null,
-      usesTrackPricing: Boolean(providerTrack?.id),
-    };
+  if (coverageDecision?.status !== 'covered') {
+    return null;
   }
-
-  let studentCopayAmount;
-  let insurerClaimAmount;
-
-  if (paymentMode === 'fully_paid_by_hmo') {
-    studentCopayAmount = 0;
-    insurerClaimAmount = contractedRateAmount;
-  } else if (paymentMode === 'fully_paid_by_customer') {
-    studentCopayAmount = trackCustomerChargeAmount > 0 ? trackCustomerChargeAmount : serviceRate;
-    insurerClaimAmount = 0;
-  } else {
-    studentCopayAmount = trackCustomerChargeAmount > 0
-      ? trackCustomerChargeAmount
-      : Math.max(serviceRate - contractedRateAmount, 0);
-    insurerClaimAmount = contractedRateAmount;
-  }
-
   return {
-    paymentMode,
-    studentCopayAmount: coerceAgorot(studentCopayAmount),
-    insurerClaimAmount: coerceAgorot(insurerClaimAmount),
-    contractedRateAmount,
-    usesTrackPricing: Boolean(providerTrack?.id),
+    studentCopayAmount: coerceAgorot(coverageDecision.covered_customer_charge_amount),
+    insurerClaimAmount: coerceAgorot(coverageDecision.covered_insurer_claim_amount),
+    postCoveragePolicy: coverageDecision.post_coverage_policy || null,
+    postCoverageCustomerChargeAmount: coverageDecision.post_coverage_customer_charge_amount == null
+      ? null
+      : coerceAgorot(coverageDecision.post_coverage_customer_charge_amount),
   };
 }
 
 export function buildDesiredChargeDescriptors({
   participant,
   service,
-  authorization,
+  coverageDecision = null,
   policies,
 }) {
   const participantStatus = normalizeString(participant?.participant_status).toLowerCase();
@@ -696,7 +673,26 @@ export function buildDesiredChargeDescriptors({
     };
   }
 
-  if (!authorization?.id) {
+  const effectiveCoverageDecision = coverageDecision && typeof coverageDecision === 'object'
+    ? coverageDecision
+    : {
+      status: 'standard_uncovered',
+      reason: 'no_authorization_found',
+      authorization_id: null,
+      authorization: null,
+    };
+
+  if (effectiveCoverageDecision.status === 'blocked') {
+    return {
+      status: 'blocked',
+      billingStatus: 'blocked',
+      billingReason: effectiveCoverageDecision.reason || 'billing_blocked',
+      warnings: [effectiveCoverageDecision.reason || 'billing_blocked'],
+      entries: [],
+    };
+  }
+
+  if (effectiveCoverageDecision.status === 'standard_uncovered') {
     return {
       status: 'debited',
       billingStatus: 'charged',
@@ -713,18 +709,52 @@ export function buildDesiredChargeDescriptors({
     };
   }
 
-  if (authorization.contracted_rate_amount == null) {
+  if (effectiveCoverageDecision.status === 'post_coverage') {
+    if (effectiveCoverageDecision.post_coverage_policy === 'manual_block') {
+      return {
+        status: 'blocked',
+        billingStatus: 'blocked',
+        billingReason: 'authorization_exhausted_manual_block',
+        warnings: ['authorization_exhausted_manual_block'],
+        entries: [],
+      };
+    }
+
+    const postCoverageAmount = effectiveCoverageDecision.post_coverage_policy === 'explicit_customer_charge'
+      ? effectiveCoverageDecision.post_coverage_customer_charge_amount
+      : serviceRate;
+    if (postCoverageAmount == null || !Number.isFinite(Number(postCoverageAmount))) {
+      return {
+        status: 'blocked',
+        billingStatus: 'blocked',
+        billingReason: 'missing_post_coverage_policy',
+        warnings: ['missing_post_coverage_policy'],
+        entries: [],
+      };
+    }
+
     return {
-      status: 'blocked',
-      billingStatus: 'blocked',
-      billingReason: 'missing_contracted_rate_amount',
-      warnings: ['missing_contracted_rate_amount'],
-      entries: [],
+      status: 'debited',
+      billingStatus: 'charged',
+      billingReason: effectiveCoverageDecision.post_coverage_policy === 'explicit_customer_charge'
+        ? 'post_coverage_explicit_customer_charge'
+        : 'post_coverage_service_default_charge',
+      warnings: [],
+      entries: [{
+        accountType: STUDENT_ACCOUNT_TYPE,
+        accountRefId: participant.student_id,
+        direction: 'DEBIT',
+        amount: coerceAgorot(postCoverageAmount),
+        rateSource: effectiveCoverageDecision.post_coverage_policy === 'explicit_customer_charge'
+          ? 'post_coverage_policy'
+          : 'service_rate',
+        hmoAuthorizationId: effectiveCoverageDecision.authorization_id || null,
+      }],
     };
   }
-  const splitAmounts = resolveHmoSplitAmounts({ service, authorization });
-  const studentCopay = coerceAgorot(splitAmounts.studentCopayAmount);
-  const insurerClaimAmount = coerceAgorot(splitAmounts.insurerClaimAmount);
+
+  const studentCopay = coerceAgorot(effectiveCoverageDecision.covered_customer_charge_amount);
+  const insurerClaimAmount = coerceAgorot(effectiveCoverageDecision.covered_insurer_claim_amount);
   const entries = [];
 
   if (studentCopay > 0) {
@@ -734,24 +764,24 @@ export function buildDesiredChargeDescriptors({
       direction: 'DEBIT',
       amount: studentCopay,
       rateSource: 'hmo_authorization',
-      hmoAuthorizationId: authorization.id,
+      hmoAuthorizationId: effectiveCoverageDecision.authorization_id || null,
     });
   }
   if (insurerClaimAmount > 0) {
     entries.push({
       accountType: HMO_ACCOUNT_TYPE,
-      accountRefId: authorization.provider_id,
+      accountRefId: effectiveCoverageDecision.authorization?.provider_id,
       direction: 'DEBIT',
       amount: insurerClaimAmount,
       rateSource: 'hmo_authorization',
-      hmoAuthorizationId: authorization.id,
+      hmoAuthorizationId: effectiveCoverageDecision.authorization_id || null,
     });
   }
 
   return {
     status: entries.length > 0 ? 'debited' : 'noop',
     billingStatus: entries.length > 0 ? 'charged' : 'not_chargeable',
-    billingReason: entries.length > 0 ? 'hmo_split_charge' : 'zero_charge',
+    billingReason: entries.length > 0 ? 'covered_hmo_charge' : 'zero_charge',
     warnings: [],
     entries,
   };
@@ -805,18 +835,19 @@ export default class BillingLedgerService {
     const serviceMap = await loadServiceMap(this.tenantClient, this.orgId, [instance.service_id]);
     const service = serviceMap.get(instance.service_id) || null;
     const policies = await loadFinancePolicies(this.tenantClient, this.orgId || instance.org_id);
-    const authorization = participant.student_id
-      ? await resolveActiveAuthorizationForStudentService(this.tenantClient, {
+    const coverageDecision = participant.student_id
+      ? await resolveLessonCoverageDecision(this.tenantClient, {
         orgId: this.orgId,
         studentId: participant.student_id,
         serviceId: instance.service_id,
         lessonDate: instance.datetime_start,
+        lessonParticipantId,
       })
-      : null;
+      : { status: 'standard_uncovered', reason: 'missing_student_id', authorization_id: null, authorization: null };
     const desiredResult = buildDesiredChargeDescriptors({
       participant,
       service,
-      authorization,
+      coverageDecision,
       policies,
     });
 
@@ -875,7 +906,7 @@ export default class BillingLedgerService {
       participant,
       instance,
       service,
-      authorization,
+      coverageDecision,
       actorUserId,
       reasonCode,
       detail: desiredResult,
@@ -1494,6 +1525,8 @@ export default class BillingLedgerService {
       const hmoChargeAmount = activeRows
         .filter((row) => row.hmo_provider_id && normalizeDirection(row.direction) === 'DEBIT')
         .reduce((sum, row) => sum + coerceAgorot(row.amount), 0);
+      const coverageMetadata = activeRows.find((row) => isPlainObject(row?.metadata) && row.metadata.coverage_status)?.metadata
+        || null;
       const service = serviceMap.get(participant?.lesson_instance?.service_id) || null;
       return {
         id: participant.id,
@@ -1506,6 +1539,9 @@ export default class BillingLedgerService {
         hmo_charge_amount: hmoChargeAmount,
         billed_amount: studentChargeAmount,
         billing_status: (studentChargeAmount > 0 || hmoChargeAmount > 0) ? 'charged' : 'not_chargeable',
+        coverage_status: normalizeString(coverageMetadata?.coverage_status) || null,
+        coverage_reason: normalizeString(coverageMetadata?.coverage_reason) || null,
+        post_coverage_policy: normalizeString(coverageMetadata?.post_coverage_policy) || null,
       };
     }).filter((row) => {
       const lessonDate = toDateKey(row?.lesson_instance?.datetime_start);

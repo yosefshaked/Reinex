@@ -14,7 +14,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import CurrencyInput from '@/components/ui/CurrencyInput.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { coerceAgorot, formatCurrency, isValidCurrencyInput, toAgorot, toShekel } from '@/lib/currency.js';
+import { formatCurrency, isValidCurrencyInput, toAgorot, toShekel } from '@/lib/currency.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useMedicalProviders } from '@/features/students/hooks/useMedicalProviders.js';
@@ -25,7 +25,10 @@ function buildEmptyAuthorizationForm() {
     providerTrackId: '',
     authorizationReference: '',
     authorizedLessons: '',
-    contractedRateAmount: '',
+    coveredCustomerChargeAmount: '',
+    coveredInsurerClaimAmount: '',
+    postCoveragePolicy: 'service_default',
+    postCoverageCustomerChargeAmount: '',
     validFrom: '',
     expiresAt: '',
     reminderDate: '',
@@ -54,45 +57,77 @@ function getStatusLabel(status) {
   }
 }
 
-function resolveSelectedService(services, selectedTrack) {
-  if (!selectedTrack?.service_id) return null;
-  return services.find((service) => service.id === selectedTrack.service_id) || null;
+function describePostCoverage(policy, amount) {
+  if (policy === 'explicit_customer_charge') {
+    return amount == null ? 'מחיר המשך חסר' : formatCurrency(amount);
+  }
+  if (policy === 'manual_block') {
+    return 'חסימה להחלטה ידנית';
+  }
+  return 'מחיר שירות רגיל';
 }
 
-function buildAuthorizationSplitPreview({ selectedTrack, selectedService, contractedRateAmount }) {
-  const paymentMode = selectedTrack?.payment_mode || 'partially_paid_by_hmo';
-  const serviceRate = coerceAgorot(selectedService?.default_customer_charge_amount);
-  const hmoShare = isValidCurrencyInput(contractedRateAmount) ? toAgorot(contractedRateAmount) : 0;
-
-  if (!serviceRate && paymentMode !== 'fully_paid_by_hmo') {
-    return null;
+function mapAuthorizationErrorMessage(code) {
+  switch (String(code || '').trim()) {
+    case 'missing_covered_customer_charge_amount':
+      return 'לא ניתן לשמור אישור בלי מחיר לקוח מפורש בזמן כיסוי.';
+    case 'missing_covered_insurer_claim_amount':
+      return 'לא ניתן לשמור אישור בלי סכום מפורש לגורם המממן בזמן כיסוי.';
+    case 'missing_post_coverage_customer_charge_amount':
+      return 'לא ניתן לשמור מדיניות מחיר המשך מפורש בלי סכום המשך ללקוח.';
+    case 'authorization_overlap_conflict':
+      return 'קיים כבר אישור פעיל חופף לאותו תלמיד ולאותו שירות בטווח שבחרת.';
+    case 'invalid_authorization_window':
+      return 'טווח התאריכים של האישור אינו תקין: תאריך התחלה מאוחר מתאריך הסיום.';
+    default:
+      return String(code || '').trim() || 'שמירת האישור נכשלה.';
   }
-  if (!hmoShare && paymentMode !== 'fully_paid_by_customer') {
-    return null;
-  }
+}
 
-  let studentCopay = 0;
-  let insurerClaim = 0;
+function buildPreview(form) {
+  const coveredCustomerAmount = isValidCurrencyInput(form.coveredCustomerChargeAmount)
+    ? toAgorot(form.coveredCustomerChargeAmount)
+    : null;
+  const coveredInsurerAmount = isValidCurrencyInput(form.coveredInsurerClaimAmount)
+    ? toAgorot(form.coveredInsurerClaimAmount)
+    : null;
+  const postCoverageCustomerAmount = isValidCurrencyInput(form.postCoverageCustomerChargeAmount)
+    ? toAgorot(form.postCoverageCustomerChargeAmount)
+    : null;
 
-  if (paymentMode === 'fully_paid_by_hmo') {
-    studentCopay = 0;
-    insurerClaim = hmoShare;
-  } else if (paymentMode === 'fully_paid_by_customer') {
-    studentCopay = coerceAgorot(selectedTrack?.default_customer_charge_amount) || serviceRate;
-    insurerClaim = 0;
-  } else {
-    const configuredCopay = coerceAgorot(selectedTrack?.default_customer_charge_amount);
-    studentCopay = configuredCopay > 0 ? configuredCopay : Math.max(serviceRate - hmoShare, 0);
-    insurerClaim = hmoShare;
+  let blockingReason = '';
+  if (coveredCustomerAmount == null) {
+    blockingReason = 'missing_covered_customer_charge_amount';
+  } else if (coveredInsurerAmount == null) {
+    blockingReason = 'missing_covered_insurer_claim_amount';
+  } else if (form.postCoveragePolicy === 'explicit_customer_charge' && postCoverageCustomerAmount == null) {
+    blockingReason = 'missing_post_coverage_customer_charge_amount';
   }
 
   return {
-    paymentMode,
-    serviceRate,
-    studentCopay,
-    insurerClaim,
-    hmoExceedsRate: paymentMode === 'partially_paid_by_hmo' && hmoShare > serviceRate,
-    usesDerivedCopay: paymentMode === 'partially_paid_by_hmo' && coerceAgorot(selectedTrack?.default_customer_charge_amount) <= 0,
+    coveredCustomerAmount,
+    coveredInsurerAmount,
+    postCoveragePolicy: form.postCoveragePolicy,
+    postCoverageCustomerAmount,
+    blockingReason,
+  };
+}
+
+function buildFormFromAuthorization(selected) {
+  return {
+    id: selected.id,
+    providerTrackId: selected.provider_track_id || '',
+    authorizationReference: selected.authorization_reference || '',
+    authorizedLessons: selected.authorized_lessons ?? '',
+    coveredCustomerChargeAmount: selected.covered_customer_charge_amount != null ? toShekel(selected.covered_customer_charge_amount) : '',
+    coveredInsurerClaimAmount: selected.covered_insurer_claim_amount != null ? toShekel(selected.covered_insurer_claim_amount) : '',
+    postCoveragePolicy: selected.post_coverage_policy || 'service_default',
+    postCoverageCustomerChargeAmount: selected.post_coverage_customer_charge_amount != null ? toShekel(selected.post_coverage_customer_charge_amount) : '',
+    validFrom: selected.valid_from || '',
+    expiresAt: selected.expires_at || '',
+    reminderDate: selected.reminder_date || '',
+    status: selected.status || 'active',
+    notes: selected.notes || '',
   };
 }
 
@@ -137,19 +172,7 @@ export default function HmoAuthorizationManager({
     [availableTracks, form.providerTrackId],
   );
 
-  const selectedService = useMemo(
-    () => resolveSelectedService(services, selectedTrack),
-    [services, selectedTrack],
-  );
-
-  const splitPreview = useMemo(
-    () => buildAuthorizationSplitPreview({
-      selectedTrack,
-      selectedService,
-      contractedRateAmount: form.contractedRateAmount,
-    }),
-    [form.contractedRateAmount, selectedService, selectedTrack],
-  );
+  const preview = useMemo(() => buildPreview(form), [form]);
 
   const loadAuthorizations = useCallback(async () => {
     if (!studentId || !activeOrgId) {
@@ -188,18 +211,7 @@ export default function HmoAuthorizationManager({
     if (!selectedAuthorizationId) return;
     const selected = authorizations.find((row) => row.id === selectedAuthorizationId);
     if (selected) {
-      setForm({
-        id: selected.id,
-        providerTrackId: selected.provider_track_id || '',
-        authorizationReference: selected.authorization_reference || '',
-        authorizedLessons: selected.authorized_lessons ?? '',
-        contractedRateAmount: selected.contracted_rate_amount != null ? toShekel(selected.contracted_rate_amount) : '',
-        validFrom: selected.valid_from || '',
-        expiresAt: selected.expires_at || '',
-        reminderDate: selected.reminder_date || '',
-        status: selected.status || 'active',
-        notes: selected.notes || '',
-      });
+      setForm(buildFormFromAuthorization(selected));
     }
   }, [authorizations, selectedAuthorizationId]);
 
@@ -220,8 +232,8 @@ export default function HmoAuthorizationManager({
       toast.error('יש להזין כמות מפגשים מאושרת.');
       return;
     }
-    if (!isValidCurrencyInput(form.contractedRateAmount)) {
-      toast.error('התעריף החוזי חובה ויחייב להיות גדול מאפס. ללא ערך זה, כל חיובי השיעורים ייחסמו לאישור זה.');
+    if (preview.blockingReason) {
+      toast.error(mapAuthorizationErrorMessage(preview.blockingReason));
       return;
     }
 
@@ -238,7 +250,12 @@ export default function HmoAuthorizationManager({
           provider_track_id: form.providerTrackId,
           authorization_reference: form.authorizationReference || null,
           authorized_lessons: Number(form.authorizedLessons),
-          contracted_rate_amount: form.contractedRateAmount === '' ? null : toAgorot(form.contractedRateAmount),
+          covered_customer_charge_amount: toAgorot(form.coveredCustomerChargeAmount),
+          covered_insurer_claim_amount: toAgorot(form.coveredInsurerClaimAmount),
+          post_coverage_policy: form.postCoveragePolicy,
+          post_coverage_customer_charge_amount: form.postCoveragePolicy === 'explicit_customer_charge'
+            ? toAgorot(form.postCoverageCustomerChargeAmount)
+            : null,
           valid_from: form.validFrom || null,
           expires_at: form.expiresAt || null,
           reminder_date: form.reminderDate || null,
@@ -252,7 +269,7 @@ export default function HmoAuthorizationManager({
       toast.success(form.id ? 'האישור עודכן וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.' : 'האישור נוצר וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.');
     } catch (error) {
       console.error('Failed to save HMO authorization', error);
-      toast.error(error?.message || 'שמירת האישור נכשלה.');
+      toast.error(mapAuthorizationErrorMessage(error?.data?.message || error?.message));
     } finally {
       setSaving(false);
     }
@@ -283,6 +300,29 @@ export default function HmoAuthorizationManager({
     }
   }
 
+  function handleTrackSelection(value) {
+    const nextTrackId = value === '__none__' ? '' : value;
+    const nextTrack = availableTracks.find((track) => track.id === nextTrackId) || null;
+    setForm((current) => ({
+      ...current,
+      providerTrackId: nextTrackId,
+      coveredCustomerChargeAmount: current.id
+        ? current.coveredCustomerChargeAmount
+        : (nextTrack ? toShekel(nextTrack.default_customer_charge_amount) : ''),
+      coveredInsurerClaimAmount: current.id
+        ? current.coveredInsurerClaimAmount
+        : (nextTrack ? toShekel(nextTrack.default_insurer_claim_amount) : ''),
+      postCoveragePolicy: current.id
+        ? current.postCoveragePolicy
+        : (nextTrack?.default_post_coverage_policy || 'service_default'),
+      postCoverageCustomerChargeAmount: current.id
+        ? current.postCoverageCustomerChargeAmount
+        : (nextTrack?.default_post_coverage_customer_charge_amount != null
+          ? toShekel(nextTrack.default_post_coverage_customer_charge_amount)
+          : ''),
+    }));
+  }
+
   return (
     <div className={embedded ? 'space-y-4' : 'grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]'}>
       {!embedded ? (
@@ -292,7 +332,7 @@ export default function HmoAuthorizationManager({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-zinc-800">אישורי גורם מממן</h3>
-                <p className="text-sm text-muted-foreground">האישור קובע את התעריף החוזי שמחייב את הגורם המממן עבור שיעורים עתידיים.</p>
+                <p className="text-sm text-muted-foreground">האישור שומר snapshot מפורש: מחיר לקוח בזמן כיסוי, מחיר גורם מממן בזמן כיסוי, ומה קורה אחרי שממצים את המכסה.</p>
               </div>
               {(loading || loadingProviders) ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
             </div>
@@ -334,35 +374,29 @@ export default function HmoAuthorizationManager({
                       </div>
                     </div>
 
-                    <div className="mt-3 grid gap-2 md:grid-cols-3 text-sm">
+                    <div className="mt-3 grid gap-2 md:grid-cols-4 text-sm">
                       <div className="rounded-lg bg-white p-3">
-                        <div className="text-[11px] text-muted-foreground">תעריף חוזי</div>
-                        <div className="mt-1 font-semibold">{formatCurrency(row.contracted_rate_amount)}</div>
+                        <div className="text-[11px] text-muted-foreground">לקוח בזמן כיסוי</div>
+                        <div className="mt-1 font-semibold">{formatCurrency(row.covered_customer_charge_amount)}</div>
+                      </div>
+                      <div className="rounded-lg bg-white p-3">
+                        <div className="text-[11px] text-muted-foreground">גורם מממן בזמן כיסוי</div>
+                        <div className="mt-1 font-semibold">{formatCurrency(row.covered_insurer_claim_amount)}</div>
+                      </div>
+                      <div className="rounded-lg bg-white p-3">
+                        <div className="text-[11px] text-muted-foreground">אחרי מיצוי זכאות</div>
+                        <div className="mt-1 font-semibold">{describePostCoverage(row.post_coverage_policy, row.post_coverage_customer_charge_amount)}</div>
                       </div>
                       <div className="rounded-lg bg-white p-3">
                         <div className="text-[11px] text-muted-foreground">תוקף</div>
                         <div className="mt-1 font-semibold">{formatDate(row.expires_at)}</div>
                       </div>
-                      <div className="rounded-lg bg-white p-3">
-                        <div className="text-[11px] text-muted-foreground">תזכורת</div>
-                        <div className="mt-1 font-semibold">{formatDate(row.reminder_date)}</div>
-                      </div>
                     </div>
+                    <div className="mt-2 text-xs text-muted-foreground">תזכורת: {formatDate(row.reminder_date)}</div>
 
                     {canMutateBilling ? (
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <Button type="button" size="sm" variant="outline" onClick={() => setForm({
-                          id: row.id,
-                          providerTrackId: row.provider_track_id || '',
-                          authorizationReference: row.authorization_reference || '',
-                          authorizedLessons: row.authorized_lessons ?? '',
-                          contractedRateAmount: row.contracted_rate_amount != null ? toShekel(row.contracted_rate_amount) : '',
-                          validFrom: row.valid_from || '',
-                          expiresAt: row.expires_at || '',
-                          reminderDate: row.reminder_date || '',
-                          status: row.status || 'active',
-                          notes: row.notes || '',
-                        })} disabled={saving}>
+                        <Button type="button" size="sm" variant="outline" onClick={() => setForm(buildFormFromAuthorization(row))} disabled={saving}>
                           ערוך אישור
                         </Button>
                         {row.status === 'active' ? (
@@ -394,7 +428,7 @@ export default function HmoAuthorizationManager({
               <Label className="text-xs text-slate-600">מסלול</Label>
               <Select
                 value={form.providerTrackId || '__none__'}
-                onValueChange={(value) => setForm((current) => ({ ...current, providerTrackId: value === '__none__' ? '' : value }))}
+                onValueChange={handleTrackSelection}
                 disabled={saving}
               >
                 <SelectTrigger>
@@ -424,45 +458,78 @@ export default function HmoAuthorizationManager({
 
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="contracted-rate-amount">
-                  תעריף חוזי (גורם מממן משלם לשיעור)
-                  <span className="ms-1 text-destructive">*</span>
-                </Label>
+                <Label htmlFor="covered-customer-charge-amount">חיוב לקוח בזמן כיסוי<span className="ms-1 text-destructive">*</span></Label>
                 <CurrencyInput
-                  id="contracted-rate-amount"
-                  value={form.contractedRateAmount}
-                  onChange={(value) => setForm((current) => ({ ...current, contractedRateAmount: value }))}
+                  id="covered-customer-charge-amount"
+                  value={form.coveredCustomerChargeAmount}
+                  onChange={(value) => setForm((current) => ({ ...current, coveredCustomerChargeAmount: value }))}
                   disabled={saving}
                 />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="covered-insurer-claim-amount">חיוב גורם מממן בזמן כיסוי<span className="ms-1 text-destructive">*</span></Label>
+                <CurrencyInput
+                  id="covered-insurer-claim-amount"
+                  value={form.coveredInsurerClaimAmount}
+                  onChange={(value) => setForm((current) => ({ ...current, coveredInsurerClaimAmount: value }))}
+                  disabled={saving}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
               <div className="rounded-lg border border-border bg-white p-3 text-sm">
-                <div className="text-[11px] text-muted-foreground">ברירת מחדל מהמסלול</div>
+                <div className="text-[11px] text-muted-foreground">ברירת מחדל ללקוח מהמסלול</div>
+                <div className="mt-1 font-semibold">{formatCurrency(selectedTrack?.default_customer_charge_amount)}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-white p-3 text-sm">
+                <div className="text-[11px] text-muted-foreground">ברירת מחדל לגורם מממן מהמסלול</div>
                 <div className="mt-1 font-semibold">{formatCurrency(selectedTrack?.default_insurer_claim_amount)}</div>
               </div>
             </div>
 
-            {splitPreview ? (
-              <div className={`rounded-lg border px-3 py-2 text-sm ${splitPreview.hmoExceedsRate ? 'border-amber-200 bg-amber-50' : 'border-blue-100 bg-blue-50'}`}>
-                <div className="text-xs font-medium text-zinc-700">תצוגה מקדימה לחיוב לכל שיעור</div>
-                <div className="mt-1 flex flex-wrap gap-3 text-xs">
-                  <span>שירות: <strong className="text-zinc-900">{selectedService ? formatCurrency(splitPreview.serviceRate) : 'לא נמצא תעריף שירות'}</strong></span>
-                  <span>תלמיד: <strong className="text-zinc-900">{formatCurrency(splitPreview.studentCopay)}</strong></span>
-                  <span>גורם מממן: <strong className="text-zinc-900">{formatCurrency(splitPreview.insurerClaim)}</strong></span>
-                </div>
-                {splitPreview.usesDerivedCopay ? (
-                  <p className="mt-1 text-xs text-blue-700">השתתפות הלקוח תחושב אוטומטית: תעריף השירות פחות התעריף החוזי.</p>
-                ) : null}
-                {splitPreview.paymentMode === 'fully_paid_by_hmo' ? (
-                  <p className="mt-1 text-xs text-blue-700">במסלול זה הלקוח לא מחויב. הגורם המממן מחויב לפי התעריף החוזי באישור.</p>
-                ) : null}
-                {splitPreview.paymentMode === 'fully_paid_by_customer' ? (
-                  <p className="mt-1 text-xs text-blue-700">במסלול זה אין חיוב לגורם מממן. הלקוח יחויב לפי מחיר המסלול או תעריף השירות.</p>
-                ) : null}
-                {splitPreview.hmoExceedsRate ? (
-                  <p className="mt-1 text-xs text-amber-700">התעריף החוזי עולה על תעריף השירות. ההשתתפות העצמית של התלמיד תהיה ₪0.00.</p>
-                ) : null}
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-600">אחרי מיצוי זכאות</Label>
+                <Select value={form.postCoveragePolicy} onValueChange={(value) => setForm((current) => ({ ...current, postCoveragePolicy: value }))} disabled={saving}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="service_default">מחיר שירות רגיל</SelectItem>
+                    <SelectItem value="explicit_customer_charge">מחיר המשך מפורש</SelectItem>
+                    <SelectItem value="manual_block">חסימה להחלטה ידנית</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-            ) : null}
+              <div className="space-y-2">
+                <Label htmlFor="post-coverage-customer-charge">מחיר המשך ללקוח</Label>
+                <CurrencyInput
+                  id="post-coverage-customer-charge"
+                  value={form.postCoverageCustomerChargeAmount}
+                  onChange={(value) => setForm((current) => ({ ...current, postCoverageCustomerChargeAmount: value }))}
+                  disabled={saving || form.postCoveragePolicy !== 'explicit_customer_charge'}
+                />
+              </div>
+            </div>
+
+            <div className={`rounded-lg border px-3 py-2 text-sm ${preview.blockingReason ? 'border-amber-200 bg-amber-50' : 'border-blue-100 bg-blue-50'}`}>
+              <div className="text-xs font-medium text-zinc-700">תצוגה מקדימה לכל שיעור</div>
+              <div className="mt-1 flex flex-wrap gap-3 text-xs">
+                <span>תלמיד בזמן כיסוי: <strong className="text-zinc-900">{formatCurrency(preview.coveredCustomerAmount)}</strong></span>
+                <span>גורם מממן בזמן כיסוי: <strong className="text-zinc-900">{formatCurrency(preview.coveredInsurerAmount)}</strong></span>
+              </div>
+              <p className="mt-1 text-xs text-blue-700">
+                {preview.postCoveragePolicy === 'service_default'
+                  ? 'אחרי מיצוי הזכאות, השיעור הבא יחויב במחיר השירות הרגיל.'
+                  : preview.postCoveragePolicy === 'explicit_customer_charge'
+                    ? `אחרי מיצוי הזכאות, השיעור הבא יחויב ב-${formatCurrency(preview.postCoverageCustomerAmount)}.`
+                    : 'אחרי מיצוי הזכאות, המערכת תחסום חיוב ותדרוש החלטה ידנית.'}
+              </p>
+              {preview.blockingReason ? (
+                <p className="mt-1 text-xs text-amber-700">{mapAuthorizationErrorMessage(preview.blockingReason)}</p>
+              ) : null}
+            </div>
 
             <div className="grid gap-3 md:grid-cols-3">
               <div className="space-y-2">

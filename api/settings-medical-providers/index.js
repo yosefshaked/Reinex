@@ -12,13 +12,14 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
-import { HMO_PAYMENT_MODES, loadHmoProviders } from '../_shared/hmo.js';
+import { HMO_PAYMENT_MODES, HMO_POST_COVERAGE_POLICIES, loadHmoProviders } from '../_shared/hmo.js';
 import { coerceAgorot } from '../_shared/currency.js';
 
 const MAX_BODY_BYTES = 48 * 1024;
 
 function normalizeTrackPayload(body = {}) {
   const paymentMode = normalizeString(body?.payment_mode).toLowerCase();
+  const postCoveragePolicy = normalizeString(body?.default_post_coverage_policy).toLowerCase();
   return {
     provider_id: normalizeString(body?.provider_id),
     service_id: normalizeString(body?.service_id),
@@ -26,14 +27,18 @@ function normalizeTrackPayload(body = {}) {
     payment_mode: HMO_PAYMENT_MODES.has(paymentMode) ? paymentMode : '',
     default_customer_charge_amount: coerceAgorot(body?.default_customer_charge_amount),
     default_insurer_claim_amount: coerceAgorot(body?.default_insurer_claim_amount),
+    default_post_coverage_policy: HMO_POST_COVERAGE_POLICIES.has(postCoveragePolicy) ? postCoveragePolicy : '',
+    default_post_coverage_customer_charge_amount: body?.default_post_coverage_customer_charge_amount == null || body?.default_post_coverage_customer_charge_amount === ''
+      ? null
+      : coerceAgorot(body.default_post_coverage_customer_charge_amount),
     default_workflow_notes: normalizeString(body?.default_workflow_notes) || '',
     is_active: body?.is_active !== false,
     metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
   };
 }
 
-async function respondWithProviders(context, client) {
-  const providers = await loadHmoProviders(client);
+async function respondWithProviders(context, client, orgId) {
+  const providers = await loadHmoProviders(client, { orgId });
   return respond(context, 200, { providers }, { 'Cache-Control': 'no-store' });
 }
 
@@ -90,7 +95,7 @@ export default async function (context, req) {
 
   if (method === 'GET') {
     try {
-      return await respondWithProviders(context, supabase);
+      return await respondWithProviders(context, supabase, orgId);
     } catch (error) {
       context.log?.error?.('settings-medical-providers: failed to load providers', { message: error?.message, code: error?.code });
       return respond(context, 500, { message: error?.code === '42P01' ? 'schema_upgrade_required' : 'failed_to_load_providers' });
@@ -132,7 +137,7 @@ export default async function (context, req) {
         throw error;
       }
 
-      const providers = await loadHmoProviders(supabase);
+      const providers = await loadHmoProviders(supabase, { orgId });
       return respond(context, 201, { providers, created: data });
     }
 
@@ -150,11 +155,18 @@ export default async function (context, req) {
       if (!track.payment_mode) {
         return respond(context, 400, { message: 'invalid_payment_mode' });
       }
+      if (!track.default_post_coverage_policy) {
+        return respond(context, 400, { message: 'invalid_default_post_coverage_policy' });
+      }
       if (!Number.isFinite(track.default_customer_charge_amount) || track.default_customer_charge_amount < 0) {
         return respond(context, 400, { message: 'invalid_default_customer_charge_amount' });
       }
       if (!Number.isFinite(track.default_insurer_claim_amount) || track.default_insurer_claim_amount < 0) {
         return respond(context, 400, { message: 'invalid_default_insurer_claim_amount' });
+      }
+      if (track.default_post_coverage_policy === 'explicit_customer_charge'
+        && (!Number.isFinite(track.default_post_coverage_customer_charge_amount) || track.default_post_coverage_customer_charge_amount < 0)) {
+        return respond(context, 400, { message: 'missing_default_post_coverage_customer_charge_amount' });
       }
 
       const { data, error } = await withOrgScope(supabase, 'hmo_provider_tracks', orgId)
@@ -162,7 +174,7 @@ export default async function (context, req) {
           id: normalizeString(body?.id) || randomUUID(),
           ...track,
         })
-        .select('id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
+        .select('id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_post_coverage_policy, default_post_coverage_customer_charge_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
         .maybeSingle();
 
       if (error) {
@@ -172,7 +184,7 @@ export default async function (context, req) {
         throw error;
       }
 
-      const providers = await loadHmoProviders(supabase);
+      const providers = await loadHmoProviders(supabase, { orgId });
       return respond(context, 201, { providers, created: data });
     }
 
@@ -204,7 +216,7 @@ export default async function (context, req) {
         return respond(context, 404, { message: 'provider_not_found' });
       }
 
-      const providers = await loadHmoProviders(supabase);
+      const providers = await loadHmoProviders(supabase, { orgId });
       return respond(context, 200, { providers, updated: data });
     }
 
@@ -226,6 +238,13 @@ export default async function (context, req) {
       if (!track.payment_mode) {
         return respond(context, 400, { message: 'invalid_payment_mode' });
       }
+      if (!track.default_post_coverage_policy) {
+        return respond(context, 400, { message: 'invalid_default_post_coverage_policy' });
+      }
+      if (track.default_post_coverage_policy === 'explicit_customer_charge'
+        && (!Number.isFinite(track.default_post_coverage_customer_charge_amount) || track.default_post_coverage_customer_charge_amount < 0)) {
+        return respond(context, 400, { message: 'missing_default_post_coverage_customer_charge_amount' });
+      }
 
       const { data, error } = await withOrgScope(supabase, 'hmo_provider_tracks', orgId)
         .update({
@@ -233,7 +252,7 @@ export default async function (context, req) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', id)
-        .select('id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
+        .select('id, provider_id, service_id, name, payment_mode, default_customer_charge_amount, default_insurer_claim_amount, default_post_coverage_policy, default_post_coverage_customer_charge_amount, default_workflow_notes, is_active, metadata, created_at, updated_at')
         .maybeSingle();
 
       if (error) {
@@ -243,7 +262,7 @@ export default async function (context, req) {
         return respond(context, 404, { message: 'track_not_found' });
       }
 
-      const providers = await loadHmoProviders(supabase);
+      const providers = await loadHmoProviders(supabase, { orgId });
       return respond(context, 200, { providers, updated: data });
     }
 
@@ -275,7 +294,7 @@ export default async function (context, req) {
         return respond(context, 404, { message: 'provider_not_found' });
       }
 
-      const providers = await loadHmoProviders(supabase);
+      const providers = await loadHmoProviders(supabase, { orgId });
       return respond(context, 200, { providers, deleted: { id } });
     }
 
@@ -305,7 +324,7 @@ export default async function (context, req) {
         return respond(context, 404, { message: 'track_not_found' });
       }
 
-      const providers = await loadHmoProviders(supabase);
+      const providers = await loadHmoProviders(supabase, { orgId });
       return respond(context, 200, { providers, deleted: { id } });
     }
 

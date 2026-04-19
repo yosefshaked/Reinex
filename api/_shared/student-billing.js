@@ -3,16 +3,15 @@
 import BillingLedgerService, { buildDesiredChargeDescriptors, resolveHmoSplitAmounts } from './BillingLedgerService.js';
 import { loadFinancePolicies } from './employee-finance.js';
 import { normalizeString } from './org-bff.js';
-import { loadHmoAuthorizations, resolveActiveAuthorizationForStudentService } from './hmo.js';
+import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
 
-export const BILLING_BREAKDOWN_VERSION = 3;
+export const BILLING_BREAKDOWN_VERSION = 4;
 
 function buildBreakdown({
   participant,
   instance,
   detail,
-  authorization = null,
-  splitAmounts = null,
+  coverageDecision = null,
 }) {
   const warning = Array.isArray(detail?.warnings) && detail.warnings.length > 0
     ? detail.warnings[0]
@@ -24,13 +23,20 @@ function buildBreakdown({
     lesson_date: instance?.datetime_start || null,
     billing_status: detail?.billingStatus || null,
     billing_reason: detail?.billingReason || warning || null,
-    hmo_authorization_id: authorization?.id || null,
-    hmo_provider_track_id: authorization?.provider_track_id || null,
-    hmo_payment_mode: splitAmounts?.paymentMode || null,
-    contracted_rate_amount: authorization?.contracted_rate_amount ?? null,
-    student_charge_amount: splitAmounts?.studentCopayAmount ?? null,
-    insurer_claim_amount: splitAmounts?.insurerClaimAmount ?? null,
-    uses_track_pricing: splitAmounts?.usesTrackPricing === true,
+    coverage_status: coverageDecision?.status || null,
+    coverage_reason: coverageDecision?.reason || null,
+    hmo_authorization_id: coverageDecision?.authorization_id || null,
+    hmo_provider_track_id: coverageDecision?.authorization?.provider_track_id || null,
+    covered_customer_charge_amount: coverageDecision?.covered_customer_charge_amount ?? null,
+    covered_insurer_claim_amount: coverageDecision?.covered_insurer_claim_amount ?? null,
+    post_coverage_policy: coverageDecision?.post_coverage_policy || null,
+    post_coverage_customer_charge_amount: coverageDecision?.post_coverage_customer_charge_amount ?? null,
+    student_charge_amount: detail?.entries
+      .filter((entry) => entry.accountType === 'student' || entry.accountType === 'client_profile')
+      .reduce((sum, entry) => sum + Number(entry.amount || 0), 0),
+    insurer_claim_amount: detail?.entries
+      .filter((entry) => entry.accountType === 'hmo_provider')
+      .reduce((sum, entry) => sum + Number(entry.amount || 0), 0),
   };
 }
 
@@ -66,35 +72,40 @@ export async function buildBillingDecision({
   instance,
   policies,
   tenantClient,
+  orgId = '',
   service: providedService = null,
-  authorization: providedAuthorization = null,
+  coverageDecision: providedCoverageDecision = null,
 }) {
   const service = providedService || (tenantClient ? await loadServiceForInstance(tenantClient, instance) : null);
-  const authorization = providedAuthorization || (participant?.student_id && tenantClient
-    ? await resolveActiveAuthorizationForStudentService(tenantClient, {
+  const coverageDecision = providedCoverageDecision || (participant?.student_id && tenantClient
+    ? await resolveLessonCoverageDecision(tenantClient, {
+      orgId,
       studentId: participant.student_id,
       serviceId: instance?.service_id,
       lessonDate: instance?.datetime_start,
+      lessonParticipantId: participant?.id,
     })
     : null);
   const detail = buildDesiredChargeDescriptors({
     participant,
-    instance,
     service,
-    authorization,
+    coverageDecision,
     policies,
   });
-  const splitAmounts = authorization?.id ? resolveHmoSplitAmounts({ service, authorization }) : null;
+  const splitAmounts = resolveHmoSplitAmounts({ coverageDecision });
   const studentEntry = detail.entries.find((entry) => entry.accountType === 'student' || entry.accountType === 'client_profile') || null;
   return {
     shouldCharge: detail.entries.length > 0,
-    chargeAmount: studentEntry?.amount ?? splitAmounts?.studentCopayAmount ?? null,
-    coverage: null,
+    chargeAmount: studentEntry?.amount ?? null,
+    coverage: coverageDecision,
     billingStatus: detail.billingStatus,
     billingReason: detail.billingReason,
     requiresAttention: detail.status === 'blocked',
-    usageType: authorization?.id ? 'hmo_split' : 'standard',
-    pricingBreakdown: buildBreakdown({ participant, instance, detail, authorization, splitAmounts }),
+    usageType: coverageDecision?.status === 'covered'
+      ? 'hmo_split'
+      : (coverageDecision?.status === 'post_coverage' ? 'post_coverage' : 'standard'),
+    splitAmounts,
+    pricingBreakdown: buildBreakdown({ participant, instance, detail, coverageDecision }),
   };
 }
 
@@ -108,7 +119,7 @@ export async function buildDirectClientBillingDecision({
     participant,
     instance,
     service,
-    authorization: null,
+    coverageDecision: null,
     policies,
   });
   const primaryEntry = detail.entries[0] || null;
@@ -120,6 +131,7 @@ export async function buildDirectClientBillingDecision({
     billingReason: detail.billingReason,
     requiresAttention: detail.status === 'blocked',
     usageType: 'standard',
+    splitAmounts: null,
     pricingBreakdown: buildBreakdown({ participant, instance, detail }),
   };
 }
@@ -191,7 +203,7 @@ export async function fetchBillingSnapshot(tenantClient, {
       balance: snapshot.summary?.balance ?? 0,
       lesson_charge_total: snapshot.summary?.lesson_charge_total ?? 0,
       hmo_charge_total: snapshot.summary?.hmo_charge_total ?? 0,
-      authorizations: await loadHmoAuthorizations(tenantClient, { studentId: row.id, activeOnly: true }),
+      authorizations: await loadHmoAuthorizations(tenantClient, { orgId, studentId: row.id, activeOnly: true }),
     });
   }
 

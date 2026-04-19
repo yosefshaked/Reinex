@@ -33,8 +33,8 @@ export const SETUP_SQL_SCRIPT = String.raw`-- ==================================
 --   Services (default_customer_charge_amount), RateHistory (rate),
 --   finance_corrections (amount), instructor_service_capabilities (base_rate),
 --   lesson_templates (price_override), lesson_participants (price_charged),
---   hmo_provider_tracks (default_customer_charge_amount, default_insurer_claim_amount),
---   hmo_authorizations (customer_charge_amount_override, insurer_claim_amount_override),
+--   hmo_provider_tracks (default_customer_charge_amount, default_insurer_claim_amount, default_post_coverage_policy),
+--   hmo_authorizations (covered_customer_charge_amount, covered_insurer_claim_amount, post_coverage_policy),
 --   commitments (total_amount, default_charge_amount),
 --   ledger_transactions (amount), lesson_earnings (rate_used, payout_amount).
 --   Non-currency numerics (annual_leave_days, balance_days_delta, pay_fraction,
@@ -1563,6 +1563,8 @@ CREATE TABLE IF NOT EXISTS public.hmo_provider_tracks (
   payment_mode text NOT NULL DEFAULT 'partially_paid_by_hmo',
   default_customer_charge_amount integer NOT NULL DEFAULT 0,
   default_insurer_claim_amount integer NOT NULL DEFAULT 0,
+  default_post_coverage_policy text NOT NULL DEFAULT 'service_default',
+  default_post_coverage_customer_charge_amount integer NULL,
   default_workflow_notes text NULL,
   is_active boolean NOT NULL DEFAULT true,
   metadata jsonb NULL,
@@ -1572,8 +1574,32 @@ CREATE TABLE IF NOT EXISTS public.hmo_provider_tracks (
   CONSTRAINT hmo_provider_tracks_service_id_fkey FOREIGN KEY (service_id) REFERENCES public."Services"(id),
   CONSTRAINT hmo_provider_tracks_payment_mode_check CHECK (payment_mode IN ('fully_paid_by_hmo', 'partially_paid_by_hmo', 'fully_paid_by_customer')),
   CONSTRAINT hmo_provider_tracks_customer_charge_non_negative_check CHECK (default_customer_charge_amount >= 0),
-  CONSTRAINT hmo_provider_tracks_insurer_claim_non_negative_check CHECK (default_insurer_claim_amount >= 0)
+  CONSTRAINT hmo_provider_tracks_insurer_claim_non_negative_check CHECK (default_insurer_claim_amount >= 0),
+  CONSTRAINT hmo_provider_tracks_post_coverage_policy_check CHECK (default_post_coverage_policy IN ('service_default', 'explicit_customer_charge', 'manual_block')),
+  CONSTRAINT hmo_provider_tracks_post_coverage_customer_charge_non_negative_check CHECK (default_post_coverage_customer_charge_amount IS NULL OR default_post_coverage_customer_charge_amount >= 0)
 );
+
+ALTER TABLE public.hmo_provider_tracks
+  ADD COLUMN IF NOT EXISTS default_post_coverage_policy text NOT NULL DEFAULT 'service_default',
+  ADD COLUMN IF NOT EXISTS default_post_coverage_customer_charge_amount integer NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'hmo_provider_tracks_post_coverage_policy_check'
+  ) THEN
+    ALTER TABLE public.hmo_provider_tracks
+      ADD CONSTRAINT hmo_provider_tracks_post_coverage_policy_check
+      CHECK (default_post_coverage_policy IN ('service_default', 'explicit_customer_charge', 'manual_block'));
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'hmo_provider_tracks_post_coverage_customer_charge_non_negative_check'
+  ) THEN
+    ALTER TABLE public.hmo_provider_tracks
+      ADD CONSTRAINT hmo_provider_tracks_post_coverage_customer_charge_non_negative_check
+      CHECK (default_post_coverage_customer_charge_amount IS NULL OR default_post_coverage_customer_charge_amount >= 0);
+  END IF;
+END $$;
 
 
 
@@ -1604,6 +1630,10 @@ CREATE TABLE IF NOT EXISTS public.hmo_authorizations (
   valid_from date NULL,
   expires_at date NULL,
   reminder_date date NULL,
+  covered_customer_charge_amount integer NOT NULL DEFAULT 0,
+  covered_insurer_claim_amount integer NOT NULL DEFAULT 0,
+  post_coverage_policy text NOT NULL DEFAULT 'manual_block',
+  post_coverage_customer_charge_amount integer NULL,
   customer_charge_amount_override integer NULL,
   insurer_claim_amount_override integer NULL,
   contracted_rate_amount integer NOT NULL DEFAULT 0,
@@ -1619,9 +1649,51 @@ CREATE TABLE IF NOT EXISTS public.hmo_authorizations (
   CONSTRAINT hmo_authorizations_provider_track_id_fkey FOREIGN KEY (provider_track_id) REFERENCES public.hmo_provider_tracks(id) ON DELETE RESTRICT,
   CONSTRAINT hmo_authorizations_status_check CHECK (status IN ('active', 'cancelled', 'completed', 'expired')),
   CONSTRAINT hmo_authorizations_authorized_lessons_non_negative_check CHECK (authorized_lessons >= 0),
+  CONSTRAINT hmo_authorizations_covered_customer_charge_non_negative_check CHECK (covered_customer_charge_amount >= 0),
+  CONSTRAINT hmo_authorizations_covered_insurer_claim_non_negative_check CHECK (covered_insurer_claim_amount >= 0),
+  CONSTRAINT hmo_authorizations_post_coverage_policy_check CHECK (post_coverage_policy IN ('service_default', 'explicit_customer_charge', 'manual_block')),
+  CONSTRAINT hmo_authorizations_post_coverage_customer_charge_non_negative_check CHECK (post_coverage_customer_charge_amount IS NULL OR post_coverage_customer_charge_amount >= 0),
   CONSTRAINT hmo_authorizations_customer_override_non_negative_check CHECK (customer_charge_amount_override IS NULL OR customer_charge_amount_override >= 0),
   CONSTRAINT hmo_authorizations_insurer_override_non_negative_check CHECK (insurer_claim_amount_override IS NULL OR insurer_claim_amount_override >= 0)
 );
+
+ALTER TABLE public.hmo_authorizations
+  ADD COLUMN IF NOT EXISTS covered_customer_charge_amount integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS covered_insurer_claim_amount integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS post_coverage_policy text NOT NULL DEFAULT 'manual_block',
+  ADD COLUMN IF NOT EXISTS post_coverage_customer_charge_amount integer NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'hmo_authorizations_covered_customer_charge_non_negative_check'
+  ) THEN
+    ALTER TABLE public.hmo_authorizations
+      ADD CONSTRAINT hmo_authorizations_covered_customer_charge_non_negative_check
+      CHECK (covered_customer_charge_amount >= 0);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'hmo_authorizations_covered_insurer_claim_non_negative_check'
+  ) THEN
+    ALTER TABLE public.hmo_authorizations
+      ADD CONSTRAINT hmo_authorizations_covered_insurer_claim_non_negative_check
+      CHECK (covered_insurer_claim_amount >= 0);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'hmo_authorizations_post_coverage_policy_check'
+  ) THEN
+    ALTER TABLE public.hmo_authorizations
+      ADD CONSTRAINT hmo_authorizations_post_coverage_policy_check
+      CHECK (post_coverage_policy IN ('service_default', 'explicit_customer_charge', 'manual_block'));
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'hmo_authorizations_post_coverage_customer_charge_non_negative_check'
+  ) THEN
+    ALTER TABLE public.hmo_authorizations
+      ADD CONSTRAINT hmo_authorizations_post_coverage_customer_charge_non_negative_check
+      CHECK (post_coverage_customer_charge_amount IS NULL OR post_coverage_customer_charge_amount >= 0);
+  END IF;
+END $$;
 
 
 
@@ -1637,9 +1709,10 @@ CREATE INDEX IF NOT EXISTS hmo_authorizations_provider_id_idx
 CREATE INDEX IF NOT EXISTS hmo_authorizations_provider_track_id_idx
   ON public.hmo_authorizations (org_id, provider_track_id);
 
-CREATE UNIQUE INDEX IF NOT EXISTS hmo_authorizations_active_student_service_uidx
-  ON public.hmo_authorizations (org_id, student_id, service_id)
-  WHERE status = 'active';
+DROP INDEX IF EXISTS hmo_authorizations_active_student_service_uidx;
+
+CREATE INDEX IF NOT EXISTS hmo_authorizations_student_service_status_idx
+  ON public.hmo_authorizations (org_id, student_id, service_id, status);
 
 -- -----------------------------------------------------------------
 -- public.commitments

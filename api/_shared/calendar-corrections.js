@@ -7,7 +7,6 @@ import {
 } from './employee-finance.js';
 import { normalizeEntityVersion } from './calendar-editing.js';
 import { normalizeString } from './org-bff.js';
-import { resolveActiveAuthorizationForStudentService } from './hmo.js';
 import { buildBillingDecision, buildDirectClientBillingDecision } from './student-billing.js';
 import { normalizeLessonInstanceStatus } from './lesson-instance-status.js';
 import { coerceAgorot } from './currency.js';
@@ -129,16 +128,12 @@ function computeWorkedMinutes(instance, participants, policies) {
 
 async function computeParticipantChargeDecision(tenantClient, instance, participant, serviceMap, policies) {
   if (participant?.student_id) {
-    const authorization = await resolveActiveAuthorizationForStudentService(tenantClient, {
-      studentId: participant.student_id,
-      serviceId: instance?.service_id,
-      lessonDate: instance?.datetime_start,
-    });
     return buildBillingDecision({
       participant,
       instance,
+      tenantClient,
+      orgId: normalizeString(instance?.org_id),
       service: serviceMap.get(instance?.service_id) || null,
-      authorization,
       policies,
     });
   }
@@ -183,7 +178,7 @@ function validateCorrectionEffectiveState(instance, participants) {
 async function loadCorrectionContext(tenantClient, originalInstanceId) {
   const { data: instance, error: instanceError } = await tenantClient
     .from('lesson_instances')
-    .select('id, template_id, datetime_start, duration_minutes, instructor_employee_id, service_id, status, documentation_status, version, metadata, created_at, updated_at')
+    .select('id, org_id, template_id, datetime_start, duration_minutes, instructor_employee_id, service_id, status, documentation_status, version, metadata, created_at, updated_at')
     .eq('id', originalInstanceId)
     .maybeSingle();
 

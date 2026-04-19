@@ -68,6 +68,44 @@ function getEntryTypeLabel(entry) {
   }
 }
 
+function getCoverageBadge(row) {
+  switch (row?.coverage_status) {
+    case 'covered':
+      return { label: 'כיסוי פעיל', className: 'border-indigo-200 bg-indigo-50 text-indigo-900' };
+    case 'post_coverage':
+      return { label: 'אחרי מיצוי זכאות', className: 'border-amber-200 bg-amber-50 text-amber-900' };
+    case 'standard_uncovered':
+      return { label: 'ללא כיסוי', className: 'border-slate-200 bg-slate-50 text-slate-700' };
+    default:
+      return null;
+  }
+}
+
+function getCoverageReasonLabel(reason) {
+  switch (reason) {
+    case 'authorization_applies':
+      return 'השיעור חויב לפי האישור הפעיל.';
+    case 'authorization_exhausted':
+      return 'מכסת האישור נוצלה במלואה.';
+    case 'no_authorization_found':
+      return 'לא נמצא אישור תואם לשירות.';
+    case 'no_active_authorization':
+      return 'קיימים אישורים לשירות, אבל אף אחד מהם אינו פעיל.';
+    case 'no_active_authorization_for_date':
+      return 'יש אישור פעיל, אבל טווח התוקף שלו לא מכסה את מועד השיעור.';
+    case 'authorization_conflict':
+      return 'קיימים שני אישורים חופפים ולכן החיוב נחסם.';
+    case 'missing_authorization_pricing':
+      return 'האישור חסר מחירי כיסוי מפורשים.';
+    case 'missing_post_coverage_policy':
+      return 'אחרי מיצוי הזכאות אין מדיניות המשך מלאה.';
+    case 'authorization_exhausted_manual_block':
+      return 'הזכאות נוצלה במלואה והוגדרה חסימה להחלטה ידנית.';
+    default:
+      return '';
+  }
+}
+
 function buildEntryForm() {
   return {
     mode: 'payment',
@@ -414,6 +452,8 @@ export default function StudentBillingWorkspace({
                 {ledgerEntries.map((entry) => {
                   const isReversed = reversalMap.has(entry.id);
                   const isReversal = entry.source_type === 'reversal';
+                  const coverageBadge = getCoverageBadge(entry?.metadata || {});
+                  const coverageReasonLabel = getCoverageReasonLabel(entry?.metadata?.coverage_reason);
                   return (
                     <div
                       key={entry.id}
@@ -439,6 +479,9 @@ export default function StudentBillingWorkspace({
                             {entry.notes ? ` • ${entry.notes}` : ''}
                             {entry.external_reference ? ` • ${entry.external_reference}` : ''}
                           </div>
+                          {coverageReasonLabel ? (
+                            <div className="mt-0.5 text-xs text-muted-foreground">{coverageReasonLabel}</div>
+                          ) : null}
                           {isReversal && entry.reverses_transaction_id ? (
                             <div className="mt-0.5 text-xs text-muted-foreground">
                               היפוך של תנועה #{shortId(entry.reverses_transaction_id)}
@@ -449,6 +492,11 @@ export default function StudentBillingWorkspace({
                           <Badge variant="outline" className={entry.direction === 'CREDIT' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-red-200 bg-red-50 text-red-900'}>
                             {entry.direction === 'CREDIT' ? 'זיכוי' : 'חיוב'}
                           </Badge>
+                          {coverageBadge ? (
+                            <Badge variant="outline" className={coverageBadge.className}>
+                              {coverageBadge.label}
+                            </Badge>
+                          ) : null}
                           {canMutateBilling && !isReversed && ['manual_payment', 'manual_adjustment', 'lesson_charge'].includes(entry.source_type) ? (
                             <Button type="button" size="sm" variant="outline" onClick={() => handleReverseEntry(entry.id)} disabled={saving}>
                               היפוך
@@ -489,6 +537,8 @@ export default function StudentBillingWorkspace({
                   const isUnbilled = row.billing_status === 'not_chargeable'
                     && !coerceAgorot(row.student_charge_amount)
                     && !coerceAgorot(row.hmo_charge_amount);
+                  const coverageBadge = getCoverageBadge(row);
+                  const coverageReasonLabel = getCoverageReasonLabel(row.coverage_reason || row.billing_reason);
                   return (
                     <div key={row.id} className="rounded-xl border border-border bg-slate-50/70 p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -497,6 +547,9 @@ export default function StudentBillingWorkspace({
                           <div className="mt-1 text-xs text-muted-foreground">
                             {getServiceName(services, row.lesson_instance?.service_id)} • {getParticipantStatusLabel(row.participant_status)}
                           </div>
+                          {coverageReasonLabel ? (
+                            <div className="mt-1 text-xs text-muted-foreground">{coverageReasonLabel}</div>
+                          ) : null}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {isUnbilled ? (
@@ -510,6 +563,11 @@ export default function StudentBillingWorkspace({
                                 לשיעור זה לא נוצר חיוב. סיבות אפשריות: תעריף השירות לא הוגדר, סטטוס הנוכחות אינו מחויב לפי המדיניות, או שאין אישור גורם מממן פעיל. כדי ליצור חיוב, יש לעדכן את הנתון הרלוונטי במקור שלו.
                               </TooltipContent>
                             </Tooltip>
+                          ) : null}
+                          {coverageBadge ? (
+                            <Badge variant="outline" className={coverageBadge.className}>
+                              {coverageBadge.label}
+                            </Badge>
                           ) : null}
                           <Badge variant="outline">{formatCurrency(row.student_charge_amount || 0)}</Badge>
                           {row.hmo_charge_amount ? (
@@ -534,7 +592,7 @@ export default function StudentBillingWorkspace({
 
         {authorizations.length === 0 ? null : (
           <section className="rounded-xl border border-border bg-white p-4 text-xs text-muted-foreground shadow-sm">
-            שיעורים עם אישור HMO פעיל יחויבו אוטומטית לפי התעריף החוזי של האישור ולפי תעריף השירות הכללי עבור ההשתתפות העצמית.
+            שיעורים עם אישור פעיל יחויבו לפי מחירי הכיסוי ששמורים על האישור. אחרי מיצוי הזכאות, המערכת תעבור אוטומטית למדיניות ההמשך שהוגדרה על האישור או תחסום חיוב אם כך הוגדר.
           </section>
         )}
       </div>

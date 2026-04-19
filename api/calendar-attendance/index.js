@@ -30,7 +30,7 @@ import {
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { coerceAgorot, toShekel } from '../_shared/currency.js';
 import { buildBillingDecision, buildDirectClientBillingDecision } from '../_shared/student-billing.js';
-import { resolveActiveAuthorizationForStudentService } from '../_shared/hmo.js';
+import { resolveLessonCoverageDecision } from '../_shared/hmo.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { createDashboardTask } from '../_shared/dashboard-tasks.js';
@@ -82,8 +82,14 @@ function getBillingPreviewBlockMessage(billingReason) {
       return 'לא ניתן לחשב חיוב כי לשירות אין תעריף לקוח ברירת מחדל.';
     case 'missing_client_profile_id':
       return 'לא ניתן לחשב חיוב כי למשתתף אין כרטיס לקוח מקושר.';
-    case 'missing_contracted_rate_amount':
-      return 'לא ניתן לחשב פיצול גורם מממן כי לא הוגדר תעריף חוזי לאישור.';
+    case 'authorization_conflict':
+      return 'לא ניתן לחשב חיוב כי קיימים שני אישורים חופפים לאותו שיעור.';
+    case 'missing_authorization_pricing':
+      return 'לא ניתן לחשב חיוב כי האישור חסר מחירי כיסוי מפורשים.';
+    case 'missing_post_coverage_policy':
+      return 'לא ניתן לחשב חיוב אחרי מיצוי זכאות כי לא הוגדרה מדיניות המשך מלאה.';
+    case 'authorization_exhausted_manual_block':
+      return 'הזכאות נוצלה במלואה והוגדרה חסימה להחלטה ידנית.';
     default:
       return billingReason
         ? `לא ניתן לחשב את החיוב כרגע (${billingReason}).`
@@ -710,11 +716,13 @@ async function buildParticipantStatusPreview(client, orgId, body, {
     if (row.direction === 'CREDIT') return sum - coerceAgorot(row.amount);
     return sum;
   }, 0));
-  const projectedAuthorization = targetParticipantAfter?.student_id
-    ? await resolveActiveAuthorizationForStudentService(client, {
+  const projectedCoverageDecision = targetParticipantAfter?.student_id
+    ? await resolveLessonCoverageDecision(client, {
+      orgId,
       studentId: targetParticipantAfter.student_id,
       serviceId: instanceDetail?.service_id,
       lessonDate: instanceDetail?.datetime_start,
+      lessonParticipantId: participant.id,
     })
     : null;
   const projectedBillingDecision = targetParticipantAfter?.student_id
@@ -726,7 +734,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
           status: projectedInstanceStatus,
         },
         service: serviceRow || null,
-        authorization: projectedAuthorization || null,
+        coverageDecision: projectedCoverageDecision || null,
         policies,
       })
     : await buildDirectClientBillingDecision({
@@ -739,20 +747,20 @@ async function buildParticipantStatusPreview(client, orgId, body, {
         policies,
       });
   const projectedChargeAmount = coerceAgorot(projectedBillingDecision?.chargeAmount);
-  const projectedHasHmoSplit = Boolean(projectedAuthorization?.id);
-  const projectedHmoProvider = projectedAuthorization?.provider || null;
-  const projectedHmoTrack = projectedAuthorization?.provider_track || null;
+  const projectedHasHmoSplit = projectedCoverageDecision?.status === 'covered';
+  const projectedHmoProvider = projectedCoverageDecision?.authorization?.provider || null;
+  const projectedHmoTrack = projectedCoverageDecision?.authorization?.provider_track || null;
   const projectedPricingBreakdown = projectedBillingDecision?.pricingBreakdown && typeof projectedBillingDecision.pricingBreakdown === 'object'
     ? projectedBillingDecision.pricingBreakdown
     : null;
-  const projectedContractedRateAmount = projectedHasHmoSplit
-    ? coerceAgorot(projectedPricingBreakdown?.contracted_rate_amount)
+  const projectedCoveredCustomerAmount = projectedHasHmoSplit
+    ? coerceAgorot(projectedPricingBreakdown?.covered_customer_charge_amount)
     : 0;
-  const projectedStudentCopayAmount = projectedHasHmoSplit
+  const projectedCoveredInsurerAmount = projectedHasHmoSplit
+    ? coerceAgorot(projectedPricingBreakdown?.covered_insurer_claim_amount)
+    : 0;
+  const projectedPostCoverageChargeAmount = projectedCoverageDecision?.status === 'post_coverage'
     ? coerceAgorot(projectedPricingBreakdown?.student_charge_amount)
-    : 0;
-  const projectedInsurerClaimAmount = projectedHasHmoSplit
-    ? coerceAgorot(projectedPricingBreakdown?.insurer_claim_amount)
     : 0;
 
   const instructorName = [employeeRow?.first_name, employeeRow?.middle_name, employeeRow?.last_name].filter(Boolean).join(' ').trim() || 'המדריך';
@@ -813,15 +821,24 @@ async function buildParticipantStatusPreview(client, orgId, body, {
     const providerSummary = [projectedHmoProvider?.name, projectedHmoTrack?.name].filter(Boolean).join(' - ') || 'גורם מממן';
     impacts.push({
       type: 'hmo_split_detail',
-      hmo_authorization_id: projectedAuthorization.id,
+      hmo_authorization_id: projectedCoverageDecision.authorization_id,
       hmo_provider_id: projectedHmoProvider?.id || null,
       hmo_provider_name: projectedHmoProvider?.name || null,
       hmo_provider_track_id: projectedHmoTrack?.id || null,
       hmo_provider_track_name: projectedHmoTrack?.name || null,
-      hmo_contracted_rate_amount: projectedContractedRateAmount,
-      hmo_student_copay_amount: projectedStudentCopayAmount,
-      hmo_insurer_claim_amount: projectedInsurerClaimAmount,
-      message: `פיצול גורם מממן: לקוח/ה ₪${fmtILS(projectedStudentCopayAmount)}, תביעה לגורם מממן ₪${fmtILS(projectedInsurerClaimAmount)} (${providerSummary}).`,
+      hmo_student_copay_amount: projectedCoveredCustomerAmount,
+      hmo_insurer_claim_amount: projectedCoveredInsurerAmount,
+      message: `פיצול גורם מממן: לקוח/ה ₪${fmtILS(projectedCoveredCustomerAmount)}, תביעה לגורם מממן ₪${fmtILS(projectedCoveredInsurerAmount)} (${providerSummary}).`,
+    });
+  }
+  if (projectedCoverageDecision?.status === 'post_coverage') {
+    impacts.push({
+      type: 'post_coverage_charge',
+      post_coverage_policy: projectedCoverageDecision.post_coverage_policy,
+      amount: projectedPostCoverageChargeAmount,
+      message: projectedCoverageDecision.post_coverage_policy === 'explicit_customer_charge'
+        ? `הזכאות נוצלה במלואה, ולכן השיעור הבא יחויב במחיר המשך מפורש של ₪${fmtILS(projectedPostCoverageChargeAmount)}.`
+        : `הזכאות נוצלה במלואה, ולכן השיעור הבא יחויב במחיר השירות הרגיל של ₪${fmtILS(projectedPostCoverageChargeAmount)}.`,
     });
   }
   if (projectedBillingDecision?.requiresAttention) {
@@ -891,14 +908,17 @@ async function buildParticipantStatusPreview(client, orgId, body, {
       billing_amount_reversed: ledgerAmount > 0 && projectedChargeAmount <= 0 ? ledgerAmount : 0,
       billing_amount_added: ledgerAmount <= 0 && projectedChargeAmount > 0 ? projectedChargeAmount : 0,
       hmo_split_applied: projectedHasHmoSplit,
-      hmo_authorization_id: projectedHasHmoSplit ? projectedAuthorization.id : null,
+      coverage_status: projectedCoverageDecision?.status || null,
+      coverage_reason: projectedCoverageDecision?.reason || null,
+      hmo_authorization_id: projectedHasHmoSplit ? projectedCoverageDecision.authorization_id : null,
       hmo_provider_id: projectedHasHmoSplit ? (projectedHmoProvider?.id || null) : null,
       hmo_provider_name: projectedHasHmoSplit ? (projectedHmoProvider?.name || null) : null,
       hmo_provider_track_id: projectedHasHmoSplit ? (projectedHmoTrack?.id || null) : null,
       hmo_provider_track_name: projectedHasHmoSplit ? (projectedHmoTrack?.name || null) : null,
-      hmo_contracted_rate_amount: projectedHasHmoSplit ? projectedContractedRateAmount : 0,
-      hmo_student_copay_amount: projectedHasHmoSplit ? projectedStudentCopayAmount : 0,
-      hmo_insurer_claim_amount: projectedHasHmoSplit ? projectedInsurerClaimAmount : 0,
+      hmo_student_copay_amount: projectedHasHmoSplit ? projectedCoveredCustomerAmount : 0,
+      hmo_insurer_claim_amount: projectedHasHmoSplit ? projectedCoveredInsurerAmount : 0,
+      post_coverage_policy: projectedCoverageDecision?.status === 'post_coverage' ? projectedCoverageDecision.post_coverage_policy : null,
+      post_coverage_customer_charge_amount: projectedCoverageDecision?.status === 'post_coverage' ? projectedPostCoverageChargeAmount : 0,
       instructor_earning_before: lessonEarningAmount,
       instructor_earning_after: projectedShouldInstructorEarn ? inferredLessonEarningAmount : 0,
       instructor_earning_removed: currentShouldInstructorEarn && !projectedShouldInstructorEarn && lessonEarningAmount !== 0 ? lessonEarningAmount : 0,
@@ -1431,13 +1451,14 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       ]);
 
       if (participantDetail?.student_id && instanceDetail?.service_id) {
-        const activeAuthorization = await resolveActiveAuthorizationForStudentService(client, {
+        const coverageDecision = await resolveLessonCoverageDecision(client, {
+          orgId,
           studentId: participantDetail.student_id,
           serviceId: instanceDetail.service_id,
           lessonDate: instanceDetail.datetime_start,
         });
 
-        if (activeAuthorization?.id) {
+        if (coverageDecision?.status === 'covered' && coverageDecision.authorization_id) {
           const normalizedParticipantDetailStudentId = normalizeNullableId(participantDetail.student_id);
           const { data: student } = normalizedParticipantDetailStudentId
             ? await withOrgScope(client, 'students', orgId)
@@ -1465,7 +1486,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
             metadata: {
               lesson_instance_id: body.instance_id,
               student_id: normalizedParticipantDetailStudentId,
-              hmo_authorization_id: activeAuthorization.id,
+              hmo_authorization_id: coverageDecision.authorization_id,
             },
           });
         }

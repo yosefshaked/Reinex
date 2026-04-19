@@ -50,6 +50,8 @@ function buildEmptyTrackForm(providerId = '') {
     paymentMode: 'partially_paid_by_hmo',
     defaultCustomerChargeAmount: '',
     defaultInsurerClaimAmount: '',
+    defaultPostCoveragePolicy: 'service_default',
+    defaultPostCoverageCustomerChargeAmount: '',
     defaultWorkflowNotes: '',
     is_active: true,
     suggestionId: 'custom',
@@ -87,12 +89,6 @@ function getServiceLabel(services, serviceId) {
   const service = services.find((entry) => entry.id === serviceId);
   return service?.service_name || service?.name || 'שירות';
 }
-
-function usesDerivedCustomerCharge(track) {
-  return track?.payment_mode === 'partially_paid_by_hmo' && Number(track?.default_customer_charge_amount || 0) <= 0;
-}
-
-
 
 export default function HmoSetupWorkspace({ onChanged = null }) {
   const { session } = useAuth();
@@ -146,11 +142,13 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
       name: track.name || '',
       paymentMode: track.payment_mode || 'partially_paid_by_hmo',
       defaultCustomerChargeAmount: formatTrackAmountForForm(track.default_customer_charge_amount, {
-        blankWhenZero: track.payment_mode === 'partially_paid_by_hmo',
+        blankWhenZero: false,
       }),
       defaultInsurerClaimAmount: formatTrackAmountForForm(track.default_insurer_claim_amount, {
         blankWhenZero: track.payment_mode === 'fully_paid_by_customer',
       }),
+      defaultPostCoveragePolicy: track.default_post_coverage_policy || 'service_default',
+      defaultPostCoverageCustomerChargeAmount: formatTrackAmountForForm(track.default_post_coverage_customer_charge_amount),
       defaultWorkflowNotes: track.default_workflow_notes || '',
       is_active: track.is_active !== false,
       suggestionId: 'custom',
@@ -247,12 +245,22 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
         payment_mode: trackForm.paymentMode,
         default_customer_charge_amount: defaultCustomerChargeAmount,
         default_insurer_claim_amount: defaultInsurerClaimAmount,
+        default_post_coverage_policy: trackForm.defaultPostCoveragePolicy,
+        default_post_coverage_customer_charge_amount: trackForm.defaultPostCoveragePolicy === 'explicit_customer_charge'
+          ? toAgorot(trackForm.defaultPostCoverageCustomerChargeAmount)
+          : null,
         default_workflow_notes: trackForm.defaultWorkflowNotes || '',
         is_active: trackForm.is_active,
         metadata: {
           suggestion_id: trackForm.suggestionId || 'custom',
         },
       };
+      if (trackForm.defaultPostCoveragePolicy === 'explicit_customer_charge'
+        && !trackForm.defaultPostCoverageCustomerChargeAmount) {
+        toast.error('כאשר בוחרים מחיר המשך מפורש, צריך להזין סכום המשך ללקוח.');
+        setSaving(false);
+        return;
+      }
 
       if (trackForm.id) {
         await updateTrack(payload);
@@ -299,6 +307,8 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
         payment_mode: track.payment_mode,
         default_customer_charge_amount: track.default_customer_charge_amount,
         default_insurer_claim_amount: track.default_insurer_claim_amount,
+        default_post_coverage_policy: track.default_post_coverage_policy,
+        default_post_coverage_customer_charge_amount: track.default_post_coverage_customer_charge_amount,
         default_workflow_notes: track.default_workflow_notes,
         is_active: false,
         metadata: track.metadata,
@@ -446,21 +456,26 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                       <div className="mt-3 grid gap-2 md:grid-cols-3 text-sm">
                         <div className="rounded-lg bg-slate-50 p-3">
                           <div className="text-[11px] text-muted-foreground">חיוב לקוח ברירת מחדל</div>
-                          <div className="mt-1 font-semibold text-zinc-900">
-                            {usesDerivedCustomerCharge(track)
-                              ? 'מחושב אוטומטית לפי תעריף השירות פחות התעריף החוזי'
-                              : formatCurrency(track.default_customer_charge_amount)}
-                          </div>
+                          <div className="mt-1 font-semibold text-zinc-900">{formatCurrency(track.default_customer_charge_amount)}</div>
                         </div>
                         <div className="rounded-lg bg-slate-50 p-3">
                           <div className="text-[11px] text-muted-foreground">תביעה ברירת מחדל</div>
                           <div className="mt-1 font-semibold">{formatCurrency(track.default_insurer_claim_amount)}</div>
                         </div>
                         <div className="rounded-lg bg-slate-50 p-3">
-                          <div className="text-[11px] text-muted-foreground">הערת זרימה</div>
-                          <div className="mt-1 font-semibold text-zinc-700">{track.default_workflow_notes || '—'}</div>
+                          <div className="text-[11px] text-muted-foreground">אחרי מיצוי זכאות</div>
+                          <div className="mt-1 font-semibold text-zinc-700">
+                            {track.default_post_coverage_policy === 'service_default'
+                              ? 'מחיר שירות רגיל'
+                              : track.default_post_coverage_policy === 'explicit_customer_charge'
+                                ? formatCurrency(track.default_post_coverage_customer_charge_amount)
+                                : 'חסימה להחלטה ידנית'}
+                          </div>
                         </div>
                       </div>
+                      {track.default_workflow_notes ? (
+                        <div className="mt-2 text-xs text-muted-foreground">{track.default_workflow_notes}</div>
+                      ) : null}
                     </div>
                   ))}
                   {provider.tracks.length === 0 ? (
@@ -619,9 +634,7 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                   <p className="text-xs text-muted-foreground">
                     {trackForm.paymentMode === 'fully_paid_by_hmo'
                       ? 'ננעל על ₪0.00 כי במסלול זה הלקוח לא מחויב.'
-                      : trackForm.paymentMode === 'partially_paid_by_hmo'
-                        ? 'השאירו ריק כדי לחשב אוטומטית: תעריף השירות פחות התעריף החוזי שבאישור. הזינו סכום רק אם ההשתתפות העצמית קבועה.'
-                        : 'השאירו ריק כדי לחייב את הלקוח לפי תעריף השירות המלא. הזינו סכום רק אם למסלול יש מחיר קבוע אחר.'}
+                      : 'המחיר הזה יועתק כברירת מחדל לאישורי תלמידים חדשים. החיוב בפועל נקבע מתוך האישור, לא מחישוב נגזר.'}
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -636,7 +649,42 @@ export default function HmoSetupWorkspace({ onChanged = null }) {
                   <p className="text-xs text-muted-foreground">
                     {trackForm.paymentMode === 'fully_paid_by_customer'
                       ? 'ננעל על ₪0.00 כי במסלול זה אין חיוב לגורם מממן.'
-                      : 'זהו ערך ברירת מחדל והקשר תפעולי. החיוב בפועל לגורם המממן נקבע לפי התעריף החוזי באישור התלמיד.'}
+                      : 'זהו ערך ברירת מחדל למסלול. הוא יועתק לאישור התלמיד ואפשר יהיה לחרוג ממנו שם.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-600">מדיניות אחרי מיצוי זכאות</Label>
+                  <Select
+                    value={trackForm.defaultPostCoveragePolicy}
+                    onValueChange={(value) => setTrackForm((current) => ({ ...current, defaultPostCoveragePolicy: value }))}
+                    disabled={!canManageProviders || saving}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="service_default">מחיר שירות רגיל</SelectItem>
+                      <SelectItem value="explicit_customer_charge">מחיר המשך מפורש</SelectItem>
+                      <SelectItem value="manual_block">חסימה להחלטה ידנית</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="track-post-coverage-customer-charge">מחיר המשך ללקוח</Label>
+                  <CurrencyInput
+                    id="track-post-coverage-customer-charge"
+                    value={trackForm.defaultPostCoverageCustomerChargeAmount}
+                    onChange={(value) => setTrackForm((current) => ({ ...current, defaultPostCoverageCustomerChargeAmount: value }))}
+                    disabled={!canManageProviders || saving || trackForm.defaultPostCoveragePolicy !== 'explicit_customer_charge'}
+                    allowZero
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {trackForm.defaultPostCoveragePolicy === 'explicit_customer_charge'
+                      ? 'חובה להגדיר מחיר מפורש שיחול אחרי שמסתיימת המכסה.'
+                      : 'נדרש רק כאשר המדיניות היא מחיר המשך מפורש.'}
                   </p>
                 </div>
               </div>

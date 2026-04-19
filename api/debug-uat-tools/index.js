@@ -17,7 +17,7 @@ import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { loadFinancePolicies } from '../_shared/employee-finance.js';
 import { buildDesiredChargeDescriptors, resolveHmoSplitAmounts } from '../_shared/BillingLedgerService.js';
-import { loadHmoAuthorizations, resolveActiveAuthorizationForStudentService } from '../_shared/hmo.js';
+import { loadHmoAuthorizations, resolveLessonCoverageDecision } from '../_shared/hmo.js';
 
 const MAX_BODY_BYTES = 48 * 1024;
 
@@ -190,8 +190,8 @@ async function inspectHmoChargeContext({
   }
 
   const studentId = normalizeString(selectedParticipant.student_id);
-  const activeAuthorization = studentId
-    ? await resolveActiveAuthorizationForStudentService(client, {
+  const coverageDecision = studentId
+    ? await resolveLessonCoverageDecision(client, {
       studentId,
       serviceId: instance.service_id,
       lessonDate: instance.datetime_start,
@@ -219,11 +219,11 @@ async function inspectHmoChargeContext({
   const chargeDecision = buildDesiredChargeDescriptors({
     participant: effectiveParticipant,
     service,
-    authorization: activeAuthorization,
+    coverageDecision,
     policies,
   });
-  const splitAmounts = activeAuthorization
-    ? resolveHmoSplitAmounts({ service, authorization: activeAuthorization })
+  const splitAmounts = coverageDecision
+    ? resolveHmoSplitAmounts({ coverageDecision })
     : null;
 
   const { data: ledgerRows, error: ledgerError } = await withOrgScope(client, 'ledger_transactions', orgId)
@@ -245,13 +245,13 @@ async function inspectHmoChargeContext({
       has_student_id: Boolean(studentId),
       all_active_count_for_student: (allActiveAuthorizationsForStudent || []).length,
       service_matched_active_count: serviceMatchedActiveAuthorizations.length,
-      active_authorization_id: activeAuthorization?.id || null,
-      active_authorization_service_id: activeAuthorization?.service_id || null,
-      active_authorization_provider_track_id: activeAuthorization?.provider_track_id || null,
-      active_authorization_expires_at: activeAuthorization?.expires_at || null,
+      active_authorization_id: coverageDecision?.authorization_id || null,
+      active_authorization_service_id: coverageDecision?.authorization?.service_id || null,
+      active_authorization_provider_track_id: coverageDecision?.authorization?.provider_track_id || null,
+      active_authorization_expires_at: coverageDecision?.authorization?.expires_at || null,
       possible_service_mismatch: Boolean(
         studentId
-        && !activeAuthorization
+        && !coverageDecision?.authorization_id
         && (allActiveAuthorizationsForStudent || []).length > 0
         && serviceMatchedActiveAuthorizations.length === 0
       ),

@@ -370,7 +370,7 @@ function isResolvedParticipantStatus(status) {
 }
 
 function getImpactGroupMeta(type) {
-  if (['billing_reversal', 'billing_charge', 'billing_update', 'billing_blocked'].includes(type)) {
+  if (['billing_reversal', 'billing_charge', 'billing_update', 'billing_blocked', 'post_coverage_charge'].includes(type)) {
     return { key: 'billing', label: 'חיוב כספי', borderClass: 'border-amber-200', bgClass: 'bg-amber-50/70' };
   }
   if (['instructor_earning_reversal', 'instructor_earning_add', 'instructor_earning_update'].includes(type)) {
@@ -2246,7 +2246,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                                             )}
                                             <div>השתתפות לקוח/ה: {formatAgorotPreview(impact.hmo_student_copay_amount)}</div>
                                             <div>סכום תביעה לגורם מממן: {formatAgorotPreview(impact.hmo_insurer_claim_amount)}</div>
-                                            <div>תעריף גורם מממן: {formatAgorotPreview(impact.hmo_contracted_rate_amount)}</div>
                                           </div>
                                         )}
                                       </li>
@@ -2273,7 +2272,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                                 <div>מסלול: {previewProjected?.hmo_provider_track_name || 'לא ידוע'}</div>
                                 <div>השתתפות לקוח/ה: {formatAgorotPreview(previewProjected?.hmo_student_copay_amount)}</div>
                                 <div>סכום תביעה לגורם מממן: {formatAgorotPreview(previewProjected?.hmo_insurer_claim_amount)}</div>
-                                <div>תעריף גורם מממן: {formatAgorotPreview(previewProjected?.hmo_contracted_rate_amount)}</div>
                               </div>
                             </div>
                           )}

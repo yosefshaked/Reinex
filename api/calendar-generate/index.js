@@ -15,7 +15,7 @@ import {
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { dayTokenForDate, normalizeDayToken } from '../_shared/day-of-week.js';
 import { buildUtcBoundsForTimezoneDateRange } from '../_shared/instructor-availability.js';
-import { buildHmoCoverageWarning } from './hmo-warning.js';
+import { resolveLessonCoverageDecision } from '../_shared/hmo.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 const MAX_GENERATION_DAYS = 31;
@@ -159,6 +159,46 @@ function generateRunId() {
     return crypto.randomUUID();
   }
   return `run-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function buildCoverageWarningFromDecision(candidate, coverageDecision) {
+  if (!coverageDecision || coverageDecision.status === 'covered') {
+    return null;
+  }
+
+  const targetDate = normalizeString(candidate?.target_date) || extractDatePart(candidate?.datetime_start);
+  const reason = normalizeString(coverageDecision.reason) || 'coverage_warning';
+  let message = 'קיים סיכון שהחיוב האוטומטי לא יתבצע לפי כיסוי גורם מממן.';
+  if (reason === 'no_authorization_found') {
+    message = 'לא נמצאה הרשאת גורם מממן לתלמיד/ה עבור השירות במועד זה. החיוב יתבצע כחיוב רגיל.';
+  } else if (reason === 'no_active_authorization') {
+    message = 'קיימת הרשאה לשירות אך היא אינה פעילה. החיוב יתבצע כחיוב רגיל.';
+  } else if (reason === 'no_active_authorization_for_date') {
+    message = 'קיימת הרשאה פעילה לשירות אך טווח התאריכים שלה אינו מכסה את המועד שנוצר.';
+  } else if (reason === 'authorization_conflict') {
+    message = 'נמצאו שתי הרשאות חופפות לאותו שיעור. החיוב ייחסם עד לסידור ההתנגשות.';
+  } else if (reason === 'authorization_exhausted') {
+    message = coverageDecision.post_coverage_policy === 'manual_block'
+      ? 'מכסת ההרשאה נוצלה במלואה והמסלול מוגדר לחסימה ידנית אחרי מיצוי הזכאות.'
+      : 'מכסת ההרשאה נוצלה במלואה, והשיעור הבא יעבור אוטומטית למדיניות המשך.';
+  } else if (reason === 'missing_authorization_pricing') {
+    message = 'האישור חסר מחירי כיסוי מפורשים ולכן החיוב ייחסם.';
+  } else if (reason === 'missing_post_coverage_policy') {
+    message = 'האישור חסר מדיניות המשך מלאה לאחר מיצוי הזכאות.';
+  }
+
+  return {
+    type: 'hmo_authorization_gap',
+    severity: coverageDecision.status === 'blocked' ? 'error' : 'warning',
+    reason,
+    student_id: candidate.student_id,
+    service_id: candidate.service_id,
+    template_id: candidate.template_id || null,
+    target_date: targetDate,
+    datetime_start: candidate.datetime_start,
+    authorization_id: coverageDecision.authorization_id || null,
+    message,
+  };
 }
 
 function collectCandidateConflicts(candidate, candidateIntervalValue, intervals, maxStudents) {
@@ -367,28 +407,7 @@ export default async function calendarGenerate(context, req) {
   }
 
   const templateStudentIds = Array.from(new Set(templateRows.map((row) => normalizeString(row?.student_id)).filter(Boolean)));
-  const templateServiceIds = Array.from(new Set(templateRows.map((row) => normalizeString(row?.service_id)).filter(Boolean)));
-  let hmoAuthorizationRows = [];
-  let hmoWarningsNotice = null;
-  if (templateStudentIds.length > 0 && templateServiceIds.length > 0) {
-    const { data: authorizationRows, error: authorizationError } = await withOrgScope(supabase, 'hmo_authorizations', orgId)
-      .select('id, student_id, service_id, status, valid_from, expires_at, provider_id, provider_track_id')
-      .in('student_id', templateStudentIds)
-      .in('service_id', templateServiceIds);
-
-    if (authorizationError) {
-      if (authorizationError.code === '42P01') {
-        hmoWarningsNotice = 'hmo_authorization_schema_missing';
-      } else {
-        context.log?.warn?.('calendar/generate failed to load hmo authorization coverage; proceeding without warnings', {
-          message: authorizationError?.message,
-          code: authorizationError?.code,
-        });
-      }
-    } else {
-      hmoAuthorizationRows = Array.isArray(authorizationRows) ? authorizationRows : [];
-    }
-  }
+  let hmoWarningsNotice = templateStudentIds.length > 0 ? null : null;
 
   const templateIds = templateRows.map((row) => row.id);
   const instanceRangeBounds = buildUtcBoundsForTimezoneDateRange(startDate, endDate);
@@ -449,6 +468,7 @@ export default async function calendarGenerate(context, req) {
   const proposals = [];
   const conflicts = [];
   const warnings = [];
+  const projectedCoveredUsageOffsets = new Map();
   const skippedExisting = [];
   const skippedOverrides = [];
   let candidateSlots = 0;
@@ -550,9 +570,24 @@ export default async function calendarGenerate(context, req) {
       }
 
       proposals.push(candidate);
-      const hmoWarning = buildHmoCoverageWarning(candidate, hmoAuthorizationRows);
+      const coverageDecision = candidate.student_id
+        ? await resolveLessonCoverageDecision(supabase, {
+          orgId,
+          studentId: candidate.student_id,
+          serviceId: candidate.service_id,
+          lessonDate: candidate.datetime_start,
+          usageOffsetsByAuthorizationId: projectedCoveredUsageOffsets,
+        })
+        : null;
+      const hmoWarning = buildCoverageWarningFromDecision(candidate, coverageDecision);
       if (hmoWarning) {
         warnings.push(hmoWarning);
+      }
+      if (coverageDecision?.status === 'covered' && coverageDecision.authorization_id) {
+        projectedCoveredUsageOffsets.set(
+          coverageDecision.authorization_id,
+          Number(projectedCoveredUsageOffsets.get(coverageDecision.authorization_id) || 0) + 1,
+        );
       }
       planningIntervals.push(interval);
     }

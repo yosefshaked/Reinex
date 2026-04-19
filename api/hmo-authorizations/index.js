@@ -14,7 +14,12 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
-import { HMO_AUTHORIZATION_STATUSES, loadHmoAuthorizations, loadHmoTrackMap } from '../_shared/hmo.js';
+import {
+  HMO_AUTHORIZATION_STATUSES,
+  HMO_POST_COVERAGE_POLICIES,
+  loadHmoAuthorizations,
+  loadHmoTrackMap,
+} from '../_shared/hmo.js';
 import { coerceAgorot } from '../_shared/currency.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -27,6 +32,19 @@ function normalizeStatus(value) {
 function normalizeOptionalDate(value) {
   const normalized = normalizeString(value);
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null;
+}
+
+function normalizePostCoveragePolicy(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return HMO_POST_COVERAGE_POLICIES.has(normalized) ? normalized : '';
+}
+
+function authorizationWindowsOverlap(left, right) {
+  const leftStart = normalizeOptionalDate(left?.valid_from) || '0001-01-01';
+  const leftEnd = normalizeOptionalDate(left?.expires_at) || '9999-12-31';
+  const rightStart = normalizeOptionalDate(right?.valid_from) || '0001-01-01';
+  const rightEnd = normalizeOptionalDate(right?.expires_at) || '9999-12-31';
+  return leftStart <= rightEnd && rightStart <= leftEnd;
 }
 
 export default async function (context, req) {
@@ -75,6 +93,7 @@ export default async function (context, req) {
       const serviceId = normalizeString(req?.query?.service_id);
       const activeOnly = String(req?.query?.active_only || '').toLowerCase() === 'true';
       const authorizations = await loadHmoAuthorizations(supabase, {
+        orgId,
         studentId,
         serviceId,
         activeOnly,
@@ -111,7 +130,7 @@ export default async function (context, req) {
         return respond(context, 400, { message: 'invalid_authorized_lessons' });
       }
 
-      const trackMap = await loadHmoTrackMap(supabase, [providerTrackId]);
+      const trackMap = await loadHmoTrackMap(supabase, [providerTrackId], orgId);
       const providerTrack = trackMap.get(providerTrackId) || null;
       if (!providerTrack) {
         return respond(context, 404, { message: 'provider_track_not_found' });
@@ -123,9 +142,56 @@ export default async function (context, req) {
         return respond(context, 409, { message: 'provider_track_missing_service' });
       }
 
-      const contractedRateAmount = body?.contracted_rate_amount == null || body?.contracted_rate_amount === ''
+      const coveredCustomerChargeAmount = body?.covered_customer_charge_amount == null || body?.covered_customer_charge_amount === ''
+        ? coerceAgorot(providerTrack.default_customer_charge_amount)
+        : coerceAgorot(body.covered_customer_charge_amount);
+      const coveredInsurerClaimAmount = body?.covered_insurer_claim_amount == null || body?.covered_insurer_claim_amount === ''
         ? coerceAgorot(providerTrack.default_insurer_claim_amount)
-        : coerceAgorot(body.contracted_rate_amount);
+        : coerceAgorot(body.covered_insurer_claim_amount);
+      const postCoveragePolicy = normalizePostCoveragePolicy(body?.post_coverage_policy)
+        || normalizePostCoveragePolicy(providerTrack.default_post_coverage_policy)
+        || 'service_default';
+      const postCoverageCustomerChargeAmount = body?.post_coverage_customer_charge_amount == null || body?.post_coverage_customer_charge_amount === ''
+        ? (providerTrack.default_post_coverage_customer_charge_amount == null
+          ? null
+          : coerceAgorot(providerTrack.default_post_coverage_customer_charge_amount))
+        : coerceAgorot(body.post_coverage_customer_charge_amount);
+
+      if (!Number.isFinite(coveredCustomerChargeAmount) || coveredCustomerChargeAmount < 0) {
+        return respond(context, 400, { message: 'missing_covered_customer_charge_amount' });
+      }
+      if (!Number.isFinite(coveredInsurerClaimAmount) || coveredInsurerClaimAmount < 0) {
+        return respond(context, 400, { message: 'missing_covered_insurer_claim_amount' });
+      }
+      if (postCoveragePolicy === 'explicit_customer_charge'
+        && (!Number.isFinite(postCoverageCustomerChargeAmount) || postCoverageCustomerChargeAmount < 0)) {
+        return respond(context, 400, { message: 'missing_post_coverage_customer_charge_amount' });
+      }
+
+      const authorizationId = method === 'PUT' ? normalizeString(body?.id) : '';
+      if (method === 'PUT' && !authorizationId) {
+        return respond(context, 400, { message: 'missing_authorization_id' });
+      }
+
+      const proposedWindow = {
+        valid_from: normalizeOptionalDate(body?.valid_from),
+        expires_at: normalizeOptionalDate(body?.expires_at),
+      };
+      if (proposedWindow.valid_from && proposedWindow.expires_at && proposedWindow.valid_from > proposedWindow.expires_at) {
+        return respond(context, 400, { message: 'invalid_authorization_window' });
+      }
+      const overlappingAuthorizations = (await loadHmoAuthorizations(supabase, {
+        orgId,
+        studentId,
+        serviceId: providerTrack.service_id,
+        activeOnly: false,
+      }))
+        .filter((row) => row.status === 'active')
+        .filter((row) => row.id !== authorizationId)
+        .filter((row) => authorizationWindowsOverlap(row, proposedWindow));
+      if (status === 'active' && overlappingAuthorizations.length > 0) {
+        return respond(context, 409, { message: 'authorization_overlap_conflict' });
+      }
 
       const payload = {
         student_id: studentId,
@@ -134,10 +200,15 @@ export default async function (context, req) {
         provider_track_id: providerTrackId,
         authorization_reference: normalizeString(body?.authorization_reference) || null,
         authorized_lessons: authorizedLessons,
-        valid_from: normalizeOptionalDate(body?.valid_from),
-        expires_at: normalizeOptionalDate(body?.expires_at),
+        valid_from: proposedWindow.valid_from,
+        expires_at: proposedWindow.expires_at,
         reminder_date: normalizeOptionalDate(body?.reminder_date),
-        contracted_rate_amount: contractedRateAmount,
+        covered_customer_charge_amount: coveredCustomerChargeAmount,
+        covered_insurer_claim_amount: coveredInsurerClaimAmount,
+        post_coverage_policy: postCoveragePolicy,
+        post_coverage_customer_charge_amount: postCoveragePolicy === 'explicit_customer_charge'
+          ? postCoverageCustomerChargeAmount
+          : null,
         status,
         notes: normalizeString(body?.notes) || null,
         metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
@@ -155,14 +226,9 @@ export default async function (context, req) {
         }
         savedId = data.id;
       } else {
-        const id = normalizeString(body?.id);
-        if (!id) {
-          return respond(context, 400, { message: 'missing_authorization_id' });
-        }
-
         const { data, error } = await withOrgScope(supabase, 'hmo_authorizations', orgId)
           .update(payload)
-          .eq('id', id)
+          .eq('id', authorizationId)
           .select('id')
           .maybeSingle();
         if (error) {
@@ -179,7 +245,7 @@ export default async function (context, req) {
         actorUserId: userId,
         reasonCode: method === 'POST' ? 'authorization_created' : 'authorization_updated',
       });
-      const [authorizationRow] = await loadHmoAuthorizations(supabase, { authorizationIds: [savedId] });
+      const [authorizationRow] = await loadHmoAuthorizations(supabase, { orgId, authorizationIds: [savedId] });
       return respond(context, method === 'POST' ? 201 : 200, { authorization: authorizationRow });
     }
 
@@ -210,7 +276,7 @@ export default async function (context, req) {
         actorUserId: userId,
         reasonCode: 'authorization_cancelled',
       });
-      const [authorizationRow] = await loadHmoAuthorizations(supabase, { authorizationIds: [id] });
+      const [authorizationRow] = await loadHmoAuthorizations(supabase, { orgId, authorizationIds: [id] });
       return respond(context, 200, { authorization: authorizationRow, deleted: true });
     }
   } catch (error) {

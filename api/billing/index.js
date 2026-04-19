@@ -142,7 +142,7 @@ async function buildHmoClaimsReadModel({
       : Promise.resolve({ data: [], error: null }),
     authorizationIds.length > 0
       ? withOrgScope(client, 'hmo_authorizations', orgId)
-        .select('id, provider_id, authorization_reference, status, contracted_rate_amount')
+        .select('id, provider_id, authorization_reference, status, covered_insurer_claim_amount')
         .in('id', authorizationIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
@@ -218,7 +218,7 @@ async function buildHmoClaimsReadModel({
       hmo_authorization_id: authorizationId || null,
       hmo_authorization_status: normalizeString(authorization?.status) || null,
       hmo_authorization_reference: normalizeString(authorization?.authorization_reference) || null,
-      hmo_contracted_rate_amount: authorization?.contracted_rate_amount ?? null,
+      hmo_contracted_rate_amount: authorization?.covered_insurer_claim_amount ?? null,
       hmo_provider_id: authorization?.provider_id || null,
       hmo_provider_name: normalizeString(provider?.name) || null,
       metadata: isPlainObject(task?.metadata) ? task.metadata : {},

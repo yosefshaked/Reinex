@@ -236,7 +236,10 @@ function makeAuthorization(overrides = {}) {
     authorized_lessons: 10,
     valid_from: '2025-01-01',
     expires_at: '2025-12-31',
-    contracted_rate_amount: 2000,
+    covered_customer_charge_amount: 3000,
+    covered_insurer_claim_amount: 2000,
+    post_coverage_policy: 'service_default',
+    post_coverage_customer_charge_amount: null,
     status: 'active',
     notes: null,
     metadata: {},
@@ -277,7 +280,7 @@ describe('buildDesiredChargeDescriptors', () => {
     const result = buildDesiredChargeDescriptors({
       participant: makeParticipant({ participant_status: 'scheduled' }),
       service: makeService(),
-      authorization: null,
+      coverageDecision: null,
       policies: basePolicies,
     });
     assert.equal(result.status, 'noop');
@@ -289,7 +292,7 @@ describe('buildDesiredChargeDescriptors', () => {
     const result = buildDesiredChargeDescriptors({
       participant: makeParticipant({ participant_status: 'cancelled_student' }),
       service: makeService(),
-      authorization: null,
+      coverageDecision: null,
       policies: basePolicies,
     });
     assert.equal(result.status, 'noop');
@@ -300,7 +303,7 @@ describe('buildDesiredChargeDescriptors', () => {
     const result = buildDesiredChargeDescriptors({
       participant: makeParticipant(),
       service: makeService({ default_customer_charge_amount: null }),
-      authorization: null,
+      coverageDecision: null,
       policies: basePolicies,
     });
     assert.equal(result.status, 'blocked');
@@ -311,7 +314,7 @@ describe('buildDesiredChargeDescriptors', () => {
     const result = buildDesiredChargeDescriptors({
       participant: makeParticipant({ client_profile_id: null }),
       service: makeService(),
-      authorization: null,
+      coverageDecision: null,
       policies: basePolicies,
     });
     assert.equal(result.status, 'blocked');
@@ -322,7 +325,7 @@ describe('buildDesiredChargeDescriptors', () => {
     const result = buildDesiredChargeDescriptors({
       participant: makeParticipant({ student_id: null }),
       service: makeService(),
-      authorization: null,
+      coverageDecision: null,
       policies: basePolicies,
     });
     assert.equal(result.status, 'debited');
@@ -337,7 +340,7 @@ describe('buildDesiredChargeDescriptors', () => {
     const result = buildDesiredChargeDescriptors({
       participant: makeParticipant(),
       service: makeService(),
-      authorization: null,
+      coverageDecision: null,
       policies: basePolicies,
     });
     assert.equal(result.status, 'debited');
@@ -351,11 +354,18 @@ describe('buildDesiredChargeDescriptors', () => {
     const result = buildDesiredChargeDescriptors({
       participant: makeParticipant(),
       service: makeService({ default_customer_charge_amount: 5000 }),
-      authorization: makeAuthorization({ contracted_rate_amount: 2000 }),
+      coverageDecision: {
+        status: 'covered',
+        reason: 'authorization_applies',
+        authorization_id: 'auth-1',
+        authorization: makeAuthorization(),
+        covered_customer_charge_amount: 3000,
+        covered_insurer_claim_amount: 2000,
+      },
       policies: basePolicies,
     });
     assert.equal(result.status, 'debited');
-    assert.equal(result.billingReason, 'hmo_split_charge');
+    assert.equal(result.billingReason, 'covered_hmo_charge');
     assert.equal(result.entries.length, 2);
     const studentEntry = result.entries.find((e) => e.accountType === 'student');
     const hmoEntry = result.entries.find((e) => e.accountType === 'hmo_provider');
@@ -371,7 +381,14 @@ describe('buildDesiredChargeDescriptors', () => {
     const result = buildDesiredChargeDescriptors({
       participant: makeParticipant(),
       service: makeService({ default_customer_charge_amount: 2000 }),
-      authorization: makeAuthorization({ contracted_rate_amount: 3000 }),
+      coverageDecision: {
+        status: 'covered',
+        reason: 'authorization_applies',
+        authorization_id: 'auth-1',
+        authorization: makeAuthorization(),
+        covered_customer_charge_amount: 0,
+        covered_insurer_claim_amount: 3000,
+      },
       policies: basePolicies,
     });
     assert.equal(result.entries.length, 1);
@@ -380,15 +397,24 @@ describe('buildDesiredChargeDescriptors', () => {
     assert.equal(hmoEntry.amount, 3000);
   });
 
-  it('HMO split — blocked when contracted_rate_amount is null', () => {
+  it('post coverage explicit amount charges the student only', () => {
     const result = buildDesiredChargeDescriptors({
       participant: makeParticipant(),
       service: makeService(),
-      authorization: makeAuthorization({ contracted_rate_amount: null }),
+      coverageDecision: {
+        status: 'post_coverage',
+        reason: 'authorization_exhausted',
+        authorization_id: 'auth-1',
+        authorization: makeAuthorization(),
+        post_coverage_policy: 'explicit_customer_charge',
+        post_coverage_customer_charge_amount: 13000,
+      },
       policies: basePolicies,
     });
-    assert.equal(result.status, 'blocked');
-    assert.equal(result.billingReason, 'missing_contracted_rate_amount');
+    assert.equal(result.status, 'debited');
+    assert.equal(result.billingReason, 'post_coverage_explicit_customer_charge');
+    assert.equal(result.entries.length, 1);
+    assert.equal(result.entries[0].amount, 13000);
   });
 });
 
