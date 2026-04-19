@@ -50,7 +50,7 @@ export default function ForgotPassword() {
 
   return (
     <AuthLayout>
-      <div className="bg-gradient-to-l from-blue-500 to-indigo-500 px-6 py-6 text-end text-white">
+      <div className="bg-gradient-to-l from-blue-500 to-indigo-500 px-6 py-6 text-white">
         <div className="flex items-center justify-end gap-2 text-2xl font-bold">
           <span>איפוס סיסמה</span>
           <MailCheck className="h-7 w-7" aria-hidden="true" />
@@ -84,11 +84,12 @@ export default function ForgotPassword() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               autoComplete="email"
+              dir="ltr"
               required
               disabled={isLoading || isSuccess}
             />
 
-            <div className="flex flex-col gap-3 text-sm text-end">
+            <div className="flex flex-col gap-3 text-sm">
               <Button type="submit" disabled={isLoading || isSuccess} className="w-full">
                 {isLoading ? (
                   <span className="inline-flex items-center gap-2">
