@@ -128,9 +128,10 @@ function resolveBillingRequirement(participantStatus, policies) {
   return { billable: true, reason: 'chargeable' };
 }
 
-async function loadStudentProfileMap(tenantClient, studentIds = []) {
+async function loadStudentProfileMap(tenantClient, orgId, studentIds = []) {
   const ids = Array.from(new Set((studentIds || []).map((value) => normalizeString(value)).filter(Boolean)));
-  if (ids.length === 0) {
+  const normalizedOrgId = normalizeString(orgId);
+  if (ids.length === 0 || !normalizedOrgId) {
     return new Map();
   }
 
@@ -146,6 +147,7 @@ async function loadStudentProfileMap(tenantClient, studentIds = []) {
         last_name
       )
     `)
+    .eq('org_id', normalizedOrgId)
     .in('id', ids);
 
   if (error) {
@@ -162,15 +164,17 @@ async function loadStudentProfileMap(tenantClient, studentIds = []) {
   }));
 }
 
-async function loadServiceMap(tenantClient, serviceIds = []) {
+async function loadServiceMap(tenantClient, orgId, serviceIds = []) {
   const ids = Array.from(new Set((serviceIds || []).map((value) => normalizeString(value)).filter(Boolean)));
-  if (ids.length === 0) {
+  const normalizedOrgId = normalizeString(orgId);
+  if (ids.length === 0 || !normalizedOrgId) {
     return new Map();
   }
 
   const { data, error } = await tenantClient
     .from('Services')
     .select('id, name, color, default_customer_charge_amount, is_active')
+    .eq('org_id', normalizedOrgId)
     .in('id', ids);
 
   if (error) {
@@ -574,11 +578,12 @@ export default class BillingLedgerService {
     }
 
     const instance = participant.lesson_instance;
-    const serviceMap = await loadServiceMap(this.tenantClient, [instance.service_id]);
+    const serviceMap = await loadServiceMap(this.tenantClient, this.orgId, [instance.service_id]);
     const service = serviceMap.get(instance.service_id) || null;
     const policies = await loadFinancePolicies(this.tenantClient, this.orgId || instance.org_id);
     const authorization = participant.student_id
       ? await resolveActiveAuthorizationForStudentService(this.tenantClient, {
+        orgId: this.orgId,
         studentId: participant.student_id,
         serviceId: instance.service_id,
         lessonDate: instance.datetime_start,
@@ -772,7 +777,7 @@ export default class BillingLedgerService {
     actorUserId,
     reasonCode,
   }) {
-    const [authorization] = await loadHmoAuthorizations(this.tenantClient, { authorizationIds: [hmoAuthorizationId] });
+    const [authorization] = await loadHmoAuthorizations(this.tenantClient, { orgId: this.orgId, authorizationIds: [hmoAuthorizationId] });
     if (!authorization?.id) {
       return {
         hmoAuthorizationId,
@@ -1154,11 +1159,20 @@ export default class BillingLedgerService {
     accountRefId,
     asOf = null,
   }) {
-    const ledgerAccount = await resolveLedgerAccount(this.tenantClient, accountType, accountRefId);
+    const normalizedType = normalizeAccountType(accountType);
+    const normalizedRefId = normalizeString(accountRefId);
+    if (!normalizedType || !normalizedRefId) {
+      throw new Error('invalid_ledger_account_target');
+    }
+    if (!this.orgId) {
+      throw new Error('missing_org_id');
+    }
+
     let query = this.tenantClient
       .from('ledger_transactions')
       .select('direction, amount')
-      .eq('ledger_account_id', ledgerAccount.id);
+      .eq('org_id', this.orgId)
+      .eq(ACCOUNT_COLUMN_BY_TYPE[normalizedType], normalizedRefId);
 
     if (normalizeString(asOf)) {
       const parsed = new Date(asOf);
@@ -1193,16 +1207,17 @@ export default class BillingLedgerService {
       };
     }
 
-    const studentMap = await loadStudentProfileMap(this.tenantClient, [normalizedStudentId]);
+    const studentMap = await loadStudentProfileMap(this.tenantClient, this.orgId, [normalizedStudentId]);
     const student = studentMap.get(normalizedStudentId) || null;
     const balance = await this.getAccountBalance({ accountType: STUDENT_ACCOUNT_TYPE, accountRefId: normalizedStudentId });
-    const authorizations = await loadHmoAuthorizations(this.tenantClient, { studentId: normalizedStudentId });
+    const authorizations = await loadHmoAuthorizations(this.tenantClient, { orgId: this.orgId, studentId: normalizedStudentId });
 
     const pageLimit = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Number(limit) : 500;
 
     let ledgerQuery = this.tenantClient
       .from('ledger_transactions')
       .select('*')
+      .eq('org_id', this.orgId)
       .eq('student_id', normalizedStudentId)
       .order('effective_at', { ascending: false })
       .order('posted_at', { ascending: false })
@@ -1234,6 +1249,7 @@ export default class BillingLedgerService {
           status
         )
       `)
+      .eq('org_id', this.orgId)
       .eq('student_id', normalizedStudentId)
       .order('lesson_instance(datetime_start)', { ascending: false })
       .limit(pageLimit);
@@ -1247,6 +1263,7 @@ export default class BillingLedgerService {
       ? await this.tenantClient
         .from('ledger_transactions')
         .select('*')
+        .eq('org_id', this.orgId)
         .in('lesson_participant_id', participantIds)
         .in('source_type', ['lesson_charge', 'reversal'])
         .limit(pageLimit * 4)
@@ -1259,6 +1276,7 @@ export default class BillingLedgerService {
     const lessonRowsByParticipant = groupBy(lessonLedgerRows || [], (row) => row.lesson_participant_id);
     const serviceMap = await loadServiceMap(
       this.tenantClient,
+      this.orgId,
       (participants || []).map((row) => row?.lesson_instance?.service_id).filter(Boolean),
     );
 
@@ -1336,6 +1354,7 @@ export default class BillingLedgerService {
     let ledgerQuery = this.tenantClient
       .from('ledger_transactions')
       .select('*')
+      .eq('org_id', this.orgId)
       .eq('client_profile_id', normalizedClientProfileId)
       .is('student_id', null)
       .order('effective_at', { ascending: false })
@@ -1367,6 +1386,7 @@ export default class BillingLedgerService {
           status
         )
       `)
+      .eq('org_id', this.orgId)
       .eq('client_profile_id', normalizedClientProfileId)
       .is('student_id', null)
       .order('lesson_instance(datetime_start)', { ascending: false });
@@ -1380,6 +1400,7 @@ export default class BillingLedgerService {
       ? await this.tenantClient
         .from('ledger_transactions')
         .select('*')
+        .eq('org_id', this.orgId)
         .in('lesson_participant_id', participantIds)
         .in('source_type', ['lesson_charge', 'reversal'])
       : { data: [], error: null };
@@ -1391,6 +1412,7 @@ export default class BillingLedgerService {
     const lessonRowsByParticipant = groupBy(lessonLedgerRows || [], (row) => row.lesson_participant_id);
     const serviceMap = await loadServiceMap(
       this.tenantClient,
+      this.orgId,
       (participants || []).map((row) => row?.lesson_instance?.service_id).filter(Boolean),
     );
 

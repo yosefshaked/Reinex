@@ -140,11 +140,13 @@ export async function loadHmoProviders(tenantClient, { activeOnly = false } = {}
 }
 
 export async function loadHmoAuthorizations(tenantClient, {
+  orgId = '',
   authorizationIds = [],
   studentId = '',
   serviceId = '',
   activeOnly = false,
 } = {}) {
+  const normalizedOrgId = normalizeString(orgId);
   let query = tenantClient
     .from('hmo_authorizations')
     .select(`
@@ -166,6 +168,10 @@ export async function loadHmoAuthorizations(tenantClient, {
       updated_at
     `)
     .order('created_at', { ascending: false });
+
+  if (normalizedOrgId) {
+    query = query.eq('org_id', normalizedOrgId);
+  }
 
   const ids = Array.from(new Set((authorizationIds || []).map((value) => normalizeString(value)).filter(Boolean)));
   if (ids.length > 0) {
@@ -216,6 +222,7 @@ export async function loadHmoAuthorizations(tenantClient, {
 }
 
 export async function resolveActiveAuthorizationForStudentService(tenantClient, {
+  orgId = '',
   studentId,
   serviceId,
   lessonDate = '',
@@ -228,6 +235,7 @@ export async function resolveActiveAuthorizationForStudentService(tenantClient, 
 
   const targetDate = toDateKey(lessonDate);
   const authorizations = await loadHmoAuthorizations(tenantClient, {
+    orgId,
     studentId: normalizedStudentId,
     serviceId: normalizedServiceId,
     activeOnly: true,
