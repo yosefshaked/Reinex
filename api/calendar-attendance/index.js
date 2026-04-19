@@ -241,7 +241,7 @@ function buildParticipantWorkflowPatch(
   };
 }
 
-async function getAttendanceStatusRequirements(client, participantStatus) {
+async function getAttendanceStatusRequirements(client, orgId, participantStatus) {
   const normalizedStatus = typeof participantStatus === 'string'
     ? participantStatus.trim().toLowerCase()
     : '';
@@ -549,7 +549,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
 
   const statusRequirements = resolvedTargetStatus === 'attended' || resolvedTargetStatus === 'scheduled'
     ? null
-    : await getAttendanceStatusRequirements(client, resolvedTargetStatus);
+    : await getAttendanceStatusRequirements(client, orgId, resolvedTargetStatus);
 
   const [{ data: instanceDetail, error: instanceDetailError }, { data: allParticipants, error: participantsError }, { data: lessonEarningRows, error: earningError }, { data: participantLedgerRows, error: ledgerError }, dashboardTasks] = await Promise.all([
     withOrgScope(client, 'lesson_instances', orgId)
@@ -924,7 +924,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       return respond(context, 400, { message: 'missing participant_status' });
     }
     try {
-      const requirements = await getAttendanceStatusRequirements(client, requestedStatus);
+      const requirements = await getAttendanceStatusRequirements(client, orgId, requestedStatus);
       return respond(context, 200, requirements);
     } catch (error) {
       context.log?.error?.('calendar/attendance failed to load status requirements', {
@@ -1117,7 +1117,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     );
 
     if (participantStatus !== 'scheduled' && participantStatus !== 'attended') {
-      statusRequirements = await getAttendanceStatusRequirements(client, participantStatus);
+      statusRequirements = await getAttendanceStatusRequirements(client, orgId, participantStatus);
 
       if (statusRequirements.requires_instructor_compensation_decision && !['compensated', 'not_compensated'].includes(requestedInstructorCompensationDecision)) {
         return respond(context, 400, {

@@ -104,7 +104,7 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
 
   const { data: instance, error: instanceError } = await tenantClient
     .from('lesson_instances')
-    .select('id, status, is_closed, closed_at, closed_by, datetime_start, duration_minutes, instructor_employee_id, service_id, metadata')
+    .select('id, org_id, status, is_closed, closed_at, closed_by, datetime_start, duration_minutes, instructor_employee_id, service_id, metadata')
     .eq('id', normalizedLessonInstanceId)
     .maybeSingle();
 
@@ -135,7 +135,7 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     { data: ledgerRows, error: ledgerRowsError },
     openTaskGroups,
   ] = await Promise.all([
-    loadFinancePolicies(tenantClient, orgId),
+    loadFinancePolicies(tenantClient, instance.org_id),
     tenantClient
       .from('instance_locks')
       .select('id, lesson_instance_id, lock_source_type, lock_source_id, metadata')
