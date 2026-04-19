@@ -136,40 +136,6 @@ export async function createCommitmentTransfer() {
   return { error: 'legacy_commitment_transfers_removed' };
 }
 
-export async function reconcileStudentBilling(tenantClient, {
-  studentId,
-  actorUserId = null,
-} = {}) {
-  const normalizedStudentId = normalizeString(studentId);
-  if (!normalizedStudentId) {
-    return { error: 'missing_student_id' };
-  }
-
-  const { data: participants, error } = await tenantClient
-    .from('lesson_participants')
-    .select('lesson_instance_id')
-    .eq('student_id', normalizedStudentId);
-
-  if (error) {
-    throw error;
-  }
-
-  const service = new BillingLedgerService({ tenantClient });
-  const lessonInstanceIds = Array.from(new Set((participants || []).map((row) => row.lesson_instance_id).filter(Boolean)));
-  for (const lessonInstanceId of lessonInstanceIds) {
-    await service.syncLessonInstanceCharges({
-      lessonInstanceId,
-      actorUserId,
-      reasonCode: 'manual_rebuild',
-    });
-  }
-
-  return {
-    student_id: normalizedStudentId,
-    reconciled_instances: lessonInstanceIds.length,
-  };
-}
-
 export async function fetchBillingSnapshot(tenantClient, {
   orgId = '',
   studentId = '',

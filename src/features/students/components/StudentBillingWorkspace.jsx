@@ -98,7 +98,6 @@ export default function StudentBillingWorkspace({
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [reconciling, setReconciling] = useState(false);
   const [snapshot, setSnapshot] = useState(null);
   const [entryForm, setEntryForm] = useState(() => buildEntryForm());
   const [confirmEntry, setConfirmEntry] = useState(null);
@@ -220,30 +219,6 @@ export default function StudentBillingWorkspace({
     }
   }
 
-  async function handleReconcile() {
-    if (!activeOrgId || !studentId || !canMutateBilling) return;
-    setReconciling(true);
-    try {
-      await authenticatedFetch('billing', {
-        session,
-        method: 'POST',
-        body: {
-          org_id: activeOrgId,
-          action: 'reconcile_student_billing',
-          student_id: studentId,
-        },
-      });
-      await loadData();
-      await notifyDataChanged();
-      toast.success('חיובי השיעורים נבנו מחדש מהלדר.');
-    } catch (error) {
-      console.error('Failed to reconcile student billing', error);
-      toast.error(error?.message || 'חישוב החיובים נכשל.');
-    } finally {
-      setReconciling(false);
-    }
-  }
-
   const summary = snapshot?.summary || {};
   const ledgerEntries = Array.isArray(snapshot?.ledger_entries) ? snapshot.ledger_entries : [];
   const lessonHistory = Array.isArray(snapshot?.lesson_history) ? snapshot.lesson_history : [];
@@ -344,10 +319,9 @@ export default function StudentBillingWorkspace({
                   <h3 className="text-lg font-semibold text-zinc-900">הוספת תנועה ידנית</h3>
                   <p className="text-sm text-muted-foreground">תשלום מגדיל יתרה, התאמה ידנית מקטינה אותה. כל תנועה נרשמת לצמיתות.</p>
                 </div>
-                <Button type="button" variant="outline" onClick={handleReconcile} disabled={reconciling}>
-                  {reconciling ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-                  בנה מחדש חיובי שיעורים
-                </Button>
+                <div className="max-w-sm text-xs text-muted-foreground">
+                  חיובי שיעורים מתעדכנים אוטומטית כשמשנים נוכחות, שיעור או אישור גורם מממן במקומם הטבעי.
+                </div>
               </div>
 
               <div className="grid gap-3 md:grid-cols-4">
@@ -501,7 +475,7 @@ export default function StudentBillingWorkspace({
           <div className="p-5 space-y-4">
             <div>
               <h3 className="text-lg font-semibold text-zinc-900">היסטוריית שיעורים</h3>
-              <p className="text-sm text-muted-foreground">חיוב תלמיד מוצג בנפרד מחיוב הגורם המממן.</p>
+              <p className="text-sm text-muted-foreground">חיוב תלמיד מוצג בנפרד מחיוב הגורם המממן. שינויים בנוכחות, בשיעור או באישור גורם מממן מעדכנים את החיוב אוטומטית.</p>
             </div>
 
             {loading ? (
@@ -533,7 +507,7 @@ export default function StudentBillingWorkspace({
                                 </Badge>
                               </TooltipTrigger>
                               <TooltipContent side="top" className="max-w-xs text-xs">
-                                לשיעור זה לא נוצר חיוב. סיבות אפשריות: תעריף השירות לא הוגדר, סטטוס הנוכחות אינו מחויב לפי המדיניות, או שאין אישור גורם מממן פעיל. לחץ &quot;בנה מחדש חיובי שיעורים&quot; להפעלה מחודשת.
+                                לשיעור זה לא נוצר חיוב. סיבות אפשריות: תעריף השירות לא הוגדר, סטטוס הנוכחות אינו מחויב לפי המדיניות, או שאין אישור גורם מממן פעיל. כדי ליצור חיוב, יש לעדכן את הנתון הרלוונטי במקור שלו.
                               </TooltipContent>
                             </Tooltip>
                           ) : null}

@@ -249,7 +249,7 @@ export default function HmoAuthorizationManager({
 
       setForm(buildEmptyAuthorizationForm());
       await notifyChanged();
-      toast.success(form.id ? 'האישור עודכן.' : 'האישור נוצר.');
+      toast.success(form.id ? 'האישור עודכן וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.' : 'האישור נוצר וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.');
     } catch (error) {
       console.error('Failed to save HMO authorization', error);
       toast.error(error?.message || 'שמירת האישור נכשלה.');
@@ -274,7 +274,7 @@ export default function HmoAuthorizationManager({
         setForm(buildEmptyAuthorizationForm());
       }
       await notifyChanged();
-      toast.success('האישור בוטל.');
+      toast.success('האישור בוטל וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.');
     } catch (error) {
       console.error('Failed to cancel HMO authorization', error);
       toast.error(error?.message || 'ביטול האישור נכשל.');

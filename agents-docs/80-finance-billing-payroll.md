@@ -72,3 +72,4 @@
 - `hmo_provider_tracks.default_insurer_claim_amount` is descriptive/defaulting data for setup and authorization UX. The live ledger charge for the insurer is driven by `hmo_authorizations.contracted_rate_amount`.
 - HMO invoice batches are workflow metadata only. Balance changes happen only when explicit ledger credits or debits are appended.
 - Payroll, leave, attendance, and instructor earnings rules are still driven from `Settings` through [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js).
+- Do not add "rebuild billing" fallback buttons to student/client billing workspaces. Billing recalculation belongs to the mutation source: attendance/session changes, lesson-instance edits, and HMO authorization create/update/cancel already trigger the relevant ledger resync and should communicate that in their own UX.

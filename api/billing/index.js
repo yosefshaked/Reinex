@@ -16,7 +16,6 @@ import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import {
   fetchBillingSnapshot,
-  reconcileStudentBilling,
 } from '../_shared/student-billing.js';
 import { resolveDashboardTask } from '../_shared/dashboard-tasks.js';
 
@@ -493,22 +492,6 @@ export default async function (context, req) {
   }
 
   const action = normalizeString(body?.action).toLowerCase();
-
-  if (method === 'POST' && action === 'reconcile_student_billing') {
-    const result = await reconcileStudentBilling(supabase, {
-      studentId: normalizeNullableId(body?.student_id),
-      startDate: normalizeString(body?.start_date),
-      endDate: normalizeString(body?.end_date),
-      actorUserId: userId,
-    });
-
-    if (result?.error) {
-      const mapped = mapBillingActionError(result.error);
-      return respond(context, mapped.status, mapped.body);
-    }
-
-    return respond(context, 200, result);
-  }
 
   try {
     if (method === 'POST' && action === 'append_manual_credit') {
