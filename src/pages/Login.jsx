@@ -211,6 +211,7 @@ export default function Login() {
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-end shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   placeholder="name@example.com"
                   autoComplete="email"
+                  dir="ltr"
                 />
                 <Mail className="w-4 h-4 absolute start-4 top-1/2 -translate-y-1/2 text-slate-400" />
               </div>
@@ -227,6 +228,7 @@ export default function Login() {
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-end shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   placeholder="••••••••"
                   autoComplete="current-password"
+                  dir="ltr"
                 />
               </div>
             </label>
