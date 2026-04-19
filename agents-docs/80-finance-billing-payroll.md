@@ -57,6 +57,7 @@
 
 ## Known patterns / do not reinvent
 - Money is stored and passed as agorot integers.
+- Finance policy reads from `Settings` must always be org-scoped (`org_id`) in backend code; service-role reads without `withOrgScope(..., orgId)` can silently pull another tenant's billing policy.
 - The append-only ledger is the single source of truth for balances. Do not derive balances from cached lesson fields, commitment totals, or ad-hoc SQL sums.
 - `commitments` are removed from the active billing model. Do not add new code that reads or writes commitment balances or commitment-linked lesson billing.
 - `ledger_transactions` are immutable. Fixes must be expressed as reversing rows plus replacement rows, never `UPDATE` or `DELETE`.

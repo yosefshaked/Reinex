@@ -424,7 +424,7 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const billingService = new BillingLedgerService({ tenantClient: supabase });
+  const billingService = new BillingLedgerService({ tenantClient: supabase, orgId });
 
   if (method === 'GET') {
     const view = normalizeString(req?.query?.view).toLowerCase();
@@ -478,6 +478,7 @@ export default async function (context, req) {
         periodEnd: endDate || null,
       })
       : await fetchBillingSnapshot(supabase, {
+        orgId,
         studentId,
         clientProfileId,
         startDate,

@@ -171,12 +171,13 @@ export async function reconcileStudentBilling(tenantClient, {
 }
 
 export async function fetchBillingSnapshot(tenantClient, {
+  orgId = '',
   studentId = '',
   clientProfileId = '',
   startDate = '',
   endDate = '',
 } = {}) {
-  const service = new BillingLedgerService({ tenantClient });
+  const service = new BillingLedgerService({ tenantClient, orgId });
   if (normalizeString(studentId)) {
     return service.getStudentBillingSnapshot({
       studentId,
@@ -192,7 +193,7 @@ export async function fetchBillingSnapshot(tenantClient, {
     });
   }
 
-  const policies = await loadFinancePolicies(tenantClient);
+  const policies = await loadFinancePolicies(tenantClient, orgId);
   const { data: students, error } = await tenantClient
     .from('students')
     .select(`

@@ -230,7 +230,7 @@ export default async function lessonInstances(context, req) {
   const isAdmin = isAdminRole(role);
   let actorInstructorId = '';
 
-  const billingService = new BillingLedgerService({ tenantClient: supabase });
+  const billingService = new BillingLedgerService({ tenantClient: supabase, orgId });
 
   if (!isAdmin) {
     const { instructorId, error: instructorError } = await resolveActorInstructorId(supabase, userId);

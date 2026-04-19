@@ -67,7 +67,7 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const billingService = new BillingLedgerService({ tenantClient: supabase });
+  const billingService = new BillingLedgerService({ tenantClient: supabase, orgId });
 
   if (method === 'GET') {
     try {

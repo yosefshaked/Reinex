@@ -151,14 +151,17 @@ function normalizeLeavePayPolicy(raw) {
   };
 }
 
-export async function loadSettingsMap(tenantClient, keys = []) {
+export async function loadSettingsMap(tenantClient, orgId, keys = []) {
   const normalizedKeys = Array.from(new Set((keys || []).map((key) => normalizeString(key)).filter(Boolean)));
   if (normalizedKeys.length === 0) {
     return {};
   }
+  const normalizedOrgId = normalizeString(orgId);
+  if (!normalizedOrgId) {
+    return {};
+  }
 
-  const { data, error } = await tenantClient
-    .from('Settings')
+  const { data, error } = await withOrgScope(tenantClient, 'Settings', normalizedOrgId)
     .select('key, settings_value')
     .in('key', normalizedKeys);
 
@@ -176,8 +179,8 @@ export async function loadSettingsMap(tenantClient, keys = []) {
   return map;
 }
 
-export async function loadFinancePolicies(tenantClient) {
-  const settingsMap = await loadSettingsMap(tenantClient, [
+export async function loadFinancePolicies(tenantClient, orgId) {
+  const settingsMap = await loadSettingsMap(tenantClient, orgId, [
     'leave_policy',
     'leave_pay_policy',
     'billing_consumption_policy',
@@ -814,7 +817,7 @@ export async function syncLessonInstructorEarnings(
   const hasLockedParticipants = Array.isArray(participantLockRows) && participantLockRows.length > 0;
   const lessonLocked = isLockedState(lockState) || hasLockedParticipants;
 
-  const resolvedPolicies = policies || await loadFinancePolicies(tenantClient);
+  const resolvedPolicies = policies || await loadFinancePolicies(tenantClient, resolvedInstance?.org_id);
   const shouldInstructorEarn = lessonHasInstructorCompensation(compensationParticipants, resolvedPolicies);
 
   if (!shouldInstructorEarn || !resolvedInstance.instructor_employee_id) {
@@ -913,7 +916,7 @@ export async function syncInstructorAttendanceFromLessons(
 
   const { data: instance, error: instanceError } = await tenantClient
     .from('lesson_instances')
-    .select('id, instructor_employee_id, datetime_start, duration_minutes, status')
+    .select('id, org_id, instructor_employee_id, datetime_start, duration_minutes, status')
     .eq('id', lessonInstanceId)
     .maybeSingle();
 
@@ -977,7 +980,7 @@ export async function syncInstructorAttendanceFromLessons(
   }
 
   const dayLessonIds = dayLessonRows.map((lesson) => lesson.id).filter(Boolean);
-  const policies = await loadFinancePolicies(tenantClient);
+  const policies = await loadFinancePolicies(tenantClient, instance.org_id);
   const { data: dayParticipants, error: dayParticipantsError } = dayLessonIds.length > 0
     ? await tenantClient
       .from('lesson_participants')

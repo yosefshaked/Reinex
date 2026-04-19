@@ -258,7 +258,7 @@ export default async function (context, req) {
   const defaultDate = toDateKey(new Date());
   const resolvedStart = isYmdDate(startDate) ? startDate : startOfMonthKey(defaultDate);
   const resolvedEnd = isYmdDate(endDate) ? endDate : endOfMonthKey(resolvedStart);
-  const policies = await loadFinancePolicies(supabase);
+  const policies = await loadFinancePolicies(supabase, orgId);
 
   let employees = [];
   if (canManageAll) {

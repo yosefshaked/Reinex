@@ -829,8 +829,8 @@ export default function FinancialsPage() {
       <Dialog open={isBillingPolicyOpen} onOpenChange={setIsBillingPolicyOpen}>
         <DialogContent className="w-[min(96vw,88rem)] max-w-6xl">
           <DialogHeader>
-            <DialogTitle className="text-end">הגדרות חיוב שיעורים</DialogTitle>
-            <DialogDescription className="text-end">
+            <DialogTitle>הגדרות חיוב שיעורים</DialogTitle>
+            <DialogDescription>
               המדיניות כאן מגדירה אילו סטטוסים של שיעור מייצרים חיוב ושכר. החיובים עצמם נרשמים רק דרך הלדר.
             </DialogDescription>
           </DialogHeader>

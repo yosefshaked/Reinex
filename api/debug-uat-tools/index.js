@@ -215,7 +215,7 @@ async function inspectHmoChargeContext({
     }
     : selectedParticipant;
 
-  const policies = await loadFinancePolicies(client);
+  const policies = await loadFinancePolicies(client, orgId);
   const chargeDecision = buildDesiredChargeDescriptors({
     participant: effectiveParticipant,
     service,

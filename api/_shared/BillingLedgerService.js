@@ -549,8 +549,9 @@ export function extractActiveLedgerAmounts(ledgerRows = []) {
 }
 
 export default class BillingLedgerService {
-  constructor({ tenantClient, clock = () => new Date().toISOString() }) {
+  constructor({ tenantClient, orgId = '', clock = () => new Date().toISOString() }) {
     this.tenantClient = tenantClient;
+    this.orgId = normalizeString(orgId);
     this.clock = clock;
   }
 
@@ -575,7 +576,7 @@ export default class BillingLedgerService {
     const instance = participant.lesson_instance;
     const serviceMap = await loadServiceMap(this.tenantClient, [instance.service_id]);
     const service = serviceMap.get(instance.service_id) || null;
-    const policies = await loadFinancePolicies(this.tenantClient);
+    const policies = await loadFinancePolicies(this.tenantClient, this.orgId || instance.org_id);
     const authorization = participant.student_id
       ? await resolveActiveAuthorizationForStudentService(this.tenantClient, {
         studentId: participant.student_id,

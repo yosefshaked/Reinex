@@ -369,7 +369,7 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
   const correctionMode = normalizeCorrectionMode(options?.correctionMode);
   const instancePatch = normalizePatchObject(options?.instancePatch);
   const participantPatches = asArray(options?.participantPatches).map((patch) => normalizePatchObject(patch));
-  const policies = await loadFinancePolicies(tenantClient);
+  const policies = await loadFinancePolicies(tenantClient, context.instance?.org_id || context.originalInstance?.org_id);
   const currentInstance = context.latestCorrection?.effective_state?.instance || context.instance;
   const currentParticipants = asArray(context.latestCorrection?.effective_state?.participants).length > 0
     ? context.latestCorrection.effective_state.participants

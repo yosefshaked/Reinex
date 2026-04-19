@@ -135,7 +135,7 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     { data: ledgerRows, error: ledgerRowsError },
     openTaskGroups,
   ] = await Promise.all([
-    loadFinancePolicies(tenantClient),
+    loadFinancePolicies(tenantClient, orgId),
     tenantClient
       .from('instance_locks')
       .select('id, lesson_instance_id, lock_source_type, lock_source_id, metadata')

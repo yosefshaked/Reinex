@@ -265,7 +265,7 @@ export default async function calendarCorrections(context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const billingService = new BillingLedgerService({ tenantClient: supabase });
+  const billingService = new BillingLedgerService({ tenantClient: supabase, orgId });
 
   if (method !== 'POST') {
     return respond(context, 405, { message: 'method not allowed' });

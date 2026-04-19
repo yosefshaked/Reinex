@@ -268,7 +268,7 @@ export default async function (context, req) {
 
   const canManageAll = isAdminOrOffice(role);
 
-  const billingService = new BillingLedgerService({ tenantClient: supabase });
+  const billingService = new BillingLedgerService({ tenantClient: supabase, orgId });
 
   if (method === 'GET') {
     return await handleGetInstances(context, req, { client: supabase, orgId }, userId, canManageAll);

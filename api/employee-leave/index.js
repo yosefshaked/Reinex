@@ -253,7 +253,7 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
 
   let policies, balanceEvents, leaveEntries, leaveDays;
   try {
-    policies = await loadFinancePolicies(client);
+    policies = await loadFinancePolicies(client, orgId);
     [balanceEvents, leaveEntries, leaveDays] = await Promise.all([
       fetchBalanceEvents(client, orgId, employee.id),
       fetchLeaveEntriesForEmployee(client, orgId, employee.id, {

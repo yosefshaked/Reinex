@@ -245,7 +245,7 @@ async function getAttendanceStatusRequirements(client, participantStatus) {
   const normalizedStatus = typeof participantStatus === 'string'
     ? participantStatus.trim().toLowerCase()
     : '';
-  const policies = await loadFinancePolicies(client);
+  const policies = await loadFinancePolicies(client, orgId);
   const studentBillingApplies = Boolean(policies?.billingConsumptionPolicy?.[normalizedStatus]);
   const requiresInstructorCompensationDecision = studentBillingApplies
     && (normalizedStatus === 'no_show' || normalizedStatus === 'cancelled_student' || normalizedStatus === 'cancelled_clinic');
@@ -303,7 +303,7 @@ async function validateProjectedInstructorRate(client, orgId, instance, particip
     requestedInstructorCompensationDecision,
     statusRequirements,
   );
-  const policies = await loadFinancePolicies(client);
+  const policies = await loadFinancePolicies(client, orgId);
   if (!lessonHasInstructorCompensation(projectedParticipants, policies)) {
     return null;
   }
@@ -379,7 +379,7 @@ export default async function (context, req) {
 
   const isAdmin = isAdminRole(role);
 
-  const billingService = new BillingLedgerService({ tenantClient: supabase });
+  const billingService = new BillingLedgerService({ tenantClient: supabase, orgId });
 
   return await handleMarkAttendance(context, body, { client: supabase, orgId }, userId, isAdmin, {
     supabase,
@@ -618,7 +618,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   const lessonDayBounds = lessonDateKey
     ? buildUtcBoundsForTimezoneDateRange(lessonDateKey, lessonDateKey)
     : null;
-  const policiesPromise = loadFinancePolicies(client);
+  const policiesPromise = loadFinancePolicies(client, orgId);
   const [{ data: dayLessons, error: dayLessonsError }, { data: systemAttendanceRecord, error: attendanceError }, { data: employeeRow, error: employeeError }, { data: studentRow, error: studentError }, { data: clientProfileRow, error: clientProfileError }, { data: serviceRow, error: serviceError }, { data: capabilityRow, error: capabilityError }, policies] = await Promise.all([
     withOrgScope(client, 'lesson_instances', orgId)
       .select('id, status, duration_minutes')
@@ -1320,7 +1320,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   if (participantUpdate.participant_status) {
     try {
-      const policies = await loadFinancePolicies(client);
+      const policies = await loadFinancePolicies(client, orgId);
       const currentMetadata = mutationState.instance?.metadata && typeof mutationState.instance.metadata === 'object'
         ? mutationState.instance.metadata
         : {};
