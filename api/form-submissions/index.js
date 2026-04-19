@@ -377,7 +377,7 @@ async function resolveSubmissionDestination(client, orgId, clientProfileId, deli
   if (profileError) throw profileError;
   if (!clientProfile) return '';
 
-  const { data: guardianLink, error: guardianLinkError } = await withOrgScope(client, 'client_profile_guardians', orgId)
+  const { data: guardianLink, error: guardianLinkError } = await withOrgScope(client, 'client_guardians', orgId)
     .select('guardian_id, is_primary')
     .eq('client_profile_id', clientProfileId)
     .order('is_primary', { ascending: false })
