@@ -29,12 +29,25 @@ function resolveDurationMinutes(raw) {
   return Math.min(Math.round(parsed), MAX_DURATION_MINUTES);
 }
 
+function sanitizeInet(raw) {
+  if (!raw) return null;
+  const candidate = String(raw).split(',')[0].trim();
+  // Strip IPv6 zone IDs (e.g. "fe80::1%eth0") and port suffixes (e.g. "1.2.3.4:5678")
+  const stripped = candidate.replace(/%[^\s]*$/, '').replace(/:\d+$/, '');
+  // Accept plain IPv4 (1.2.3.4) or any IPv6 (contains colons or is hex-with-dots)
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(stripped)) return stripped;
+  if (/^[0-9a-fA-F:]{2,}$/.test(stripped)) return stripped;
+  // IPv4-mapped IPv6 like ::ffff:1.2.3.4
+  if (/^::ffff:\d{1,3}(\.\d{1,3}){3}$/i.test(stripped)) return stripped;
+  return null;
+}
+
 function extractForensicContext(req) {
   const headers = req?.headers || {};
   const ipRaw = headers['x-forwarded-for'] || headers['x-real-ip'] || '';
-  const ip = typeof ipRaw === 'string' ? ipRaw.split(',')[0].trim() : null;
+  const ip = typeof ipRaw === 'string' ? sanitizeInet(ipRaw) : null;
   const userAgent = typeof headers['user-agent'] === 'string' ? headers['user-agent'] : null;
-  return { ip: ip || null, userAgent };
+  return { ip, userAgent };
 }
 
 async function lookupTargetUser(supabase, email) {
@@ -201,6 +214,12 @@ export default async function adminImpersonationStart(context, req) {
       .single();
 
     if (error) {
+      context.log?.error?.('system-admin-impersonation-start: insert error detail', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      });
       if (String(error.code) === '42P01') {
         return respond(context, 501, {
           message: 'impersonation_table_missing',
