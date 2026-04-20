@@ -32,6 +32,9 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied }
   const generationWarnings = useMemo(() => (
     Array.isArray(result?.warnings) ? result.warnings : []
   ), [result]);
+  const applyErrors = useMemo(() => (
+    Array.isArray(result?.applied?.errors) ? result.applied.errors : []
+  ), [result]);
   const warningReasonCounts = useMemo(() => {
     const counts = new Map();
     for (const warning of generationWarnings) {
@@ -97,6 +100,10 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied }
     try {
       const payload = await runGeneration(false);
       setResult(payload || null);
+      if (Array.isArray(payload?.applied?.errors) && payload.applied.errors.length > 0) {
+        console.error('Calendar generation apply errors', payload.applied.errors);
+        setError(`היצירה הושלמה חלקית. ${payload.applied.errors.length} פעולות נכשלו.`);
+      }
       onApplied?.(payload || null);
     } catch (err) {
       setError(err?.message || 'החלת היצירה נכשלה.');
@@ -214,6 +221,23 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied }
                         {Array.isArray(conflict.issues) && conflict.issues.length > 0 && (
                           <span>{' • '}{conflict.issues.map((issue) => issue.type).join(', ')}</span>
                         )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {applyErrors.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium mb-1 text-red-700">שגיאות בהחלה</p>
+                  <div className="max-h-40 overflow-y-auto space-y-1">
+                    {applyErrors.slice(0, 20).map((applyError, index) => (
+                      <div key={`${applyError.template_id || 'template'}-${applyError.datetime_start || index}`} className="text-xs bg-red-50 border border-red-200 rounded px-2 py-1 text-red-900">
+                        <span className="font-medium">תבנית:</span> {applyError.template_id || '—'}
+                        {' • '}
+                        <span className="font-medium">זמן:</span> {applyError.datetime_start || '—'}
+                        {' • '}
+                        <span className="font-medium">שגיאה:</span> {applyError.message || applyError.type || 'apply_error'}
                       </div>
                     ))}
                   </div>

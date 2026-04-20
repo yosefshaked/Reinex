@@ -407,6 +407,20 @@ export default async function calendarGenerate(context, req) {
   }
 
   const templateStudentIds = Array.from(new Set(templateRows.map((row) => normalizeString(row?.student_id)).filter(Boolean)));
+  const { data: templateStudentRows, error: templateStudentsError } = templateStudentIds.length > 0
+    ? await withOrgScope(supabase, 'students', orgId)
+      .select('id, client_profile_id')
+      .in('id', templateStudentIds)
+    : { data: [], error: null };
+
+  if (templateStudentsError) {
+    context.log?.error?.('calendar/generate failed to load template students', { message: templateStudentsError.message });
+    return respond(context, 500, { message: 'failed_to_load_students' });
+  }
+
+  const clientProfileIdByStudentId = new Map(
+    (templateStudentRows || []).map((row) => [row.id, row.client_profile_id || null]),
+  );
   let hmoWarningsNotice = templateStudentIds.length > 0 ? null : null;
 
   const templateIds = templateRows.map((row) => row.id);
@@ -506,6 +520,9 @@ export default async function calendarGenerate(context, req) {
       const finalServiceId = override?.new_service_id || template.service_id;
       const finalTime = normalizeTimeHms(override?.new_time_of_day || template.time_of_day);
       const finalDuration = Number(override?.new_duration_minutes || template.duration_minutes);
+      const participantClientProfileId = template.student_id
+        ? clientProfileIdByStudentId.get(template.student_id) || null
+        : null;
 
       if (!finalInstructorId || !finalServiceId || !finalTime || !Number.isFinite(finalDuration) || finalDuration <= 0) {
         conflicts.push({
@@ -514,6 +531,17 @@ export default async function calendarGenerate(context, req) {
           student_id: template.student_id,
           target_date: date,
           message: 'נתוני תבנית/חריגה לא תקינים ולכן הדור לא בוצע עבור המופע הזה.',
+        });
+        continue;
+      }
+
+      if (template.student_id && !participantClientProfileId) {
+        conflicts.push({
+          type: 'missing_client_profile_link',
+          template_id: template.id,
+          student_id: template.student_id,
+          target_date: date,
+          message: 'לתלמיד/ה בתבנית אין client_profile_id ולכן אי אפשר ליצור משתתף לשיעור.',
         });
         continue;
       }
@@ -533,6 +561,7 @@ export default async function calendarGenerate(context, req) {
       const candidate = {
         template_id: template.id,
         student_id: template.student_id,
+        client_profile_id: participantClientProfileId,
         instructor_employee_id: finalInstructorId,
         service_id: finalServiceId,
         datetime_start: `${date}T${finalTime}`,
@@ -639,9 +668,26 @@ export default async function calendarGenerate(context, req) {
         continue;
       }
 
+      const participantClientProfileId = proposal.client_profile_id || null;
+      if (!participantClientProfileId) {
+        await withOrgScope(supabase, 'lesson_instances', orgId)
+          .delete()
+          .eq('id', insertedInstance.id);
+
+        applied.errors.push({
+          type: 'participant_insert_failed',
+          template_id: proposal.template_id,
+          student_id: proposal.student_id,
+          datetime_start: proposal.datetime_start,
+          message: 'missing_client_profile_link',
+        });
+        continue;
+      }
+
       const { data: insertedParticipant, error: insertParticipantError } = await withOrgScope(supabase, 'lesson_participants', orgId)
         .insert({
           lesson_instance_id: insertedInstance.id,
+          client_profile_id: participantClientProfileId,
           student_id: proposal.student_id,
           participant_status: 'scheduled',
           metadata: {
