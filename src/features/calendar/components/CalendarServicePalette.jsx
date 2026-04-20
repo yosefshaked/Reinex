@@ -27,10 +27,10 @@ function toDurationString(totalMinutes) {
 }
 
 export default function CalendarServicePalette() {
-  const containerRef = useRef(null);
   const draggableRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [dragContainerEl, setDragContainerEl] = useState(null);
   const { services, isLoading, error } = useServices();
 
   const activeServices = useMemo(
@@ -61,7 +61,7 @@ export default function CalendarServicePalette() {
   }, [activeServices, search]);
 
   useEffect(() => {
-    if (!open || !containerRef.current) {
+    if (!open || !dragContainerEl) {
       if (draggableRef.current) {
         draggableRef.current.destroy();
         draggableRef.current = null;
@@ -70,7 +70,7 @@ export default function CalendarServicePalette() {
     }
 
     const initializeDraggable = () => {
-      if (!containerRef.current) {
+      if (!dragContainerEl) {
         return;
       }
 
@@ -79,7 +79,7 @@ export default function CalendarServicePalette() {
         draggableRef.current = null;
       }
 
-      draggableRef.current = new Draggable(containerRef.current, {
+      draggableRef.current = new Draggable(dragContainerEl, {
         itemSelector: '.calendar-service-drag-item',
         eventData(eventEl) {
           const durationMinutes = Number(eventEl.getAttribute('data-service-duration-minutes')) || 0;
@@ -113,7 +113,7 @@ export default function CalendarServicePalette() {
         draggableRef.current = null;
       }
     };
-  }, [open, filteredServices]);
+  }, [dragContainerEl, open, filteredServices]);
 
   return (
     <>
@@ -161,7 +161,7 @@ export default function CalendarServicePalette() {
             />
           </div>
 
-          <div ref={containerRef} className="max-h-[24rem] space-y-2 overflow-y-auto px-4 pb-4">
+          <div ref={setDragContainerEl} className="max-h-[24rem] space-y-2 overflow-y-auto px-4 pb-4">
             {isLoading ? (
               <div className="flex items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-3 py-6 text-sm text-slate-500">
                 <Loader2 className="me-2 h-4 w-4 animate-spin" />
