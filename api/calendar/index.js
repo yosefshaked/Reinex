@@ -153,6 +153,28 @@ function buildSchedulingOverrideAuditDetails(metadata) {
   };
 }
 
+function normalizePositiveDurationMinutes(value) {
+  const durationMinutes = Number(value);
+  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+    return null;
+  }
+  return Math.round(durationMinutes);
+}
+
+async function loadActiveServiceForCalendar(client, orgId, serviceId) {
+  const { data, error } = await withOrgScope(client, 'Services', orgId)
+    .select('id, default_customer_charge_amount, duration_minutes, is_active')
+    .eq('id', serviceId)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
 async function validateLessonInstanceAvailability(client, orgId, {
   instructorEmployeeId,
   serviceId,
@@ -631,9 +653,6 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
   if (!body.datetime_start) {
     return respond(context, 400, { message: 'missing datetime_start' });
   }
-  if (!body.duration_minutes || body.duration_minutes <= 0) {
-    return respond(context, 400, { message: 'missing or invalid duration_minutes' });
-  }
   if (!body.instructor_employee_id) {
     return respond(context, 400, { message: 'missing instructor_employee_id' });
   }
@@ -683,14 +702,24 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
   }
 
   // Verify service exists
-  const { data: service, error: serviceError } = await withOrgScope(client, 'Services', orgId)
-    .select('id, default_customer_charge_amount')
-    .eq('id', body.service_id)
-    .eq('is_active', true)
-    .single();
+  let service;
+  try {
+    service = await loadActiveServiceForCalendar(client, orgId, body.service_id);
+  } catch (serviceError) {
+    context.log?.error?.('calendar/instances failed to load service on create', {
+      message: serviceError.message,
+      serviceId: body.service_id,
+    });
+    return respond(context, 500, { message: 'failed_to_load_service' });
+  }
 
-  if (serviceError || !service) {
+  if (!service) {
     return respond(context, 400, { message: 'invalid service_id' });
+  }
+
+  const serviceDurationMinutes = normalizePositiveDurationMinutes(service.duration_minutes);
+  if (serviceDurationMinutes == null) {
+    return respond(context, 400, { message: 'invalid_service_duration' });
   }
 
   const hasDirectClientParticipants = clientProfileIds.length > 0;
@@ -815,7 +844,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
       instructorEmployeeId: body.instructor_employee_id,
       serviceId: body.service_id,
       datetimeStart: body.datetime_start,
-      durationMinutes: body.duration_minutes,
+      durationMinutes: serviceDurationMinutes,
       metadata: normalizedSchedulingMetadata.metadata,
     });
 
@@ -835,7 +864,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
   const instanceData = {
     template_id: body.template_id || null,
     datetime_start: body.datetime_start,
-    duration_minutes: body.duration_minutes,
+    duration_minutes: serviceDurationMinutes,
     instructor_employee_id: body.instructor_employee_id,
     service_id: body.service_id,
     status: requestedStatus,
@@ -907,7 +936,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
       details: {
         action_label_he: 'נוצר שיעור',
         datetime_start: instance.datetime_start,
-        duration_minutes: instance.duration_minutes,
+        duration_minutes: serviceDurationMinutes,
         instructor_employee_id: instance.instructor_employee_id,
         service_id: instance.service_id,
         student_ids: studentIds,
@@ -1080,18 +1109,46 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
 
   const targetInstructorId = body.instructor_employee_id || existingInstance.instructor_employee_id;
   const targetDate = toDateKey(body.datetime_start || existingInstance.datetime_start);
-  const targetServiceId = body.service_id || existingInstance.service_id;
-  const targetDurationMinutes = body.duration_minutes || existingInstance.duration_minutes;
+  const hasServiceUpdate = Object.prototype.hasOwnProperty.call(body, 'service_id');
+  const requestedServiceId = hasServiceUpdate ? body.service_id : undefined;
+  const targetServiceId = requestedServiceId || existingInstance.service_id;
+  const serviceChanged = hasServiceUpdate && String(requestedServiceId || '') !== String(existingInstance.service_id || '');
+  let targetDurationMinutes = existingInstance.duration_minutes;
+  let durationDerivedFromService = false;
+  if (serviceChanged) {
+    let nextService;
+    try {
+      nextService = await loadActiveServiceForCalendar(client, orgId, targetServiceId);
+    } catch (serviceError) {
+      context.log?.error?.('calendar/instances failed to load service on update', {
+        message: serviceError.message,
+        instanceId: body.id,
+        serviceId: targetServiceId,
+      });
+      return respond(context, 500, { message: 'failed_to_load_service' });
+    }
+
+    if (!nextService) {
+      return respond(context, 400, { message: 'invalid service_id' });
+    }
+
+    const nextServiceDurationMinutes = normalizePositiveDurationMinutes(nextService.duration_minutes);
+    if (nextServiceDurationMinutes == null) {
+      return respond(context, 400, { message: 'invalid_service_duration' });
+    }
+
+    targetDurationMinutes = nextServiceDurationMinutes;
+    durationDerivedFromService = true;
+  }
   const targetMetadata = body.metadata !== undefined
     ? normalizeSchedulingOverrideMetadata(body.metadata).metadata
     : (existingInstance.metadata || {});
   const scheduleChanged = [
     'datetime_start',
-    'duration_minutes',
     'instructor_employee_id',
     'service_id',
     'metadata',
-  ].some((field) => Object.prototype.hasOwnProperty.call(body, field));
+  ].some((field) => Object.prototype.hasOwnProperty.call(body, field)) || durationDerivedFromService;
 
   if (targetInstructorId && targetDate) {
     const leaveConflict = await assertNoLeaveForLesson(client, {
@@ -1155,7 +1212,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
   const updateData = {};
   
   if (body.datetime_start !== undefined) updateData.datetime_start = body.datetime_start;
-  if (body.duration_minutes !== undefined) updateData.duration_minutes = body.duration_minutes;
+  if (durationDerivedFromService) updateData.duration_minutes = targetDurationMinutes;
   if (body.instructor_employee_id !== undefined) updateData.instructor_employee_id = body.instructor_employee_id;
   if (body.service_id !== undefined) updateData.service_id = body.service_id;
   if (body.status !== undefined) updateData.status = body.status;
@@ -1167,7 +1224,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
   const requestedCancellation = normalizeLessonInstanceStatus(updateData.status) === 'cancelled';
   const hasNonCancellationFieldUpdates = requestedCancellation && (
     body.datetime_start !== undefined
-    || body.duration_minutes !== undefined
+    || durationDerivedFromService
     || body.instructor_employee_id !== undefined
     || body.service_id !== undefined
     || body.metadata !== undefined

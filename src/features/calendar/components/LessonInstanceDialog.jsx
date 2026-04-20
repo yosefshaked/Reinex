@@ -201,6 +201,12 @@ function resolveMutationError(error) {
   if (error?.message === 'failed_to_validate_instructor_availability') {
     return 'לא הצלחנו לבדוק את זמינות המדריך/ה כרגע. נסו שוב.';
   }
+  if (error?.message === 'invalid_service_duration') {
+    return 'לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת השיעור.';
+  }
+  if (error?.message === 'failed_to_load_service') {
+    return 'לא ניתן היה לטעון את פרטי השירות כרגע. נסו שוב.';
+  }
   if (error?.status === 423) {
     return 'השיעור נעול לשינוי ישיר. יש להשתמש בזרימת התיקון.';
   }
@@ -857,6 +863,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setError(null);
 
     try {
+      if (selectedEditService && !selectedEditServiceHasValidDuration) {
+        throw new Error('לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת השיעור.');
+      }
       if (schedulingAvailabilityState.status === 'missing_capability') {
         throw new Error('missing_instructor_service_capability');
       }
@@ -1452,6 +1461,15 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     durationMinutes: Number(formData.duration_minutes) || 0,
   }), [formData.date, formData.duration_minutes, formData.time, selectedInstructorCapability]);
   const activeServices = services?.filter(s => s.is_active) || [];
+  const selectedEditService = useMemo(
+    () => (services || []).find((service) => String(service.id) === String(formData.service_id || '')) || null,
+    [formData.service_id, services],
+  );
+  const selectedEditServiceDurationMinutes = useMemo(
+    () => Number(selectedEditService?.duration_minutes) || 0,
+    [selectedEditService?.duration_minutes],
+  );
+  const selectedEditServiceHasValidDuration = selectedEditServiceDurationMinutes > 0;
   const isReportable = displayInstance?.status === 'scheduled';
   const isOperationallyOpen = !instance?.is_locked && !displayInstance?.is_closed;
   const displayWorkflowState = displayInstance?.metadata?.workflow_state && typeof displayInstance.metadata.workflow_state === 'object'
@@ -1683,7 +1701,14 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               <Label htmlFor="service">שירות *</Label>
               <Select
                 value={formData.service_id || ''}
-                onValueChange={(value) => setFormData({ ...formData, service_id: value })}
+                onValueChange={(value) => {
+                  const nextService = (services || []).find((service) => String(service.id) === String(value)) || null;
+                  setFormData({
+                    ...formData,
+                    service_id: value,
+                    duration_minutes: Number(nextService?.duration_minutes) || formData.duration_minutes,
+                  });
+                }}
                 disabled={servicesLoading}
               >
                 <SelectTrigger id="service">
@@ -1746,17 +1771,20 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
             {/* Duration */}
             <div>
-              <Label htmlFor="duration">משך (דקות) *</Label>
-              <Input
-                id="duration"
-                type="number"
-                min="15"
-                step="15"
-                value={formData.duration_minutes}
-                onChange={(e) => setFormData({ ...formData, duration_minutes: parseInt(e.target.value) })}
-                required
-              />
+              <Label htmlFor="duration">משך (דקות)</Label>
+              <div id="duration" className="flex min-h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700">
+                {selectedEditService
+                  ? (selectedEditServiceHasValidDuration ? `${formData.duration_minutes} דקות` : 'לשירות אין משך תקין')
+                  : `${formData.duration_minutes || 0} דקות`}
+              </div>
             </div>
+
+            {selectedEditService && !selectedEditServiceHasValidDuration ? (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת השיעור.</AlertDescription>
+              </Alert>
+            ) : null}
 
             <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
               <div className="flex items-start gap-3">
@@ -1850,7 +1878,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               >
                 ביטול
               </Button>
-              <Button onClick={handleSave} disabled={isSaving}>
+              <Button onClick={handleSave} disabled={isSaving || (selectedEditService && !selectedEditServiceHasValidDuration)}>
                 {isSaving ? (
                   <>
                     <Loader2 className="me-2 h-4 w-4 animate-spin" />

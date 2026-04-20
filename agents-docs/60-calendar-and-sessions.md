@@ -44,6 +44,8 @@
 ## Known patterns / do not reinvent
 - Calendar writes must enforce membership scope and instructor self-scope for non-admin users.
 - Availability checks come from service-capability `availability_windows`; do not duplicate availability math.
+- In normal calendar lesson-instance create/edit flows, `duration_minutes` is service-derived, not free-hand. Create uses the selected service's current duration; existing instances keep their stored duration unless the user explicitly changes the service on that instance.
+- Service catalog duration changes do not retroactively mutate already-created lesson instances. They affect only future instance creation and explicit service changes during instance editing.
 - Manual template generation must resolve `lesson_participants.client_profile_id` from `students.client_profile_id` during proposal building, not only at apply time; preview and apply must follow the same participant-validity rules.
 - Manual template generation must treat template `target_date` + `time_of_day` as `Asia/Jerusalem` local time when creating or comparing `lesson_instances.datetime_start`; never compare or insert using raw naive timestamps.
 - Manual template generation apply is intentionally partial-success, not all-or-nothing. The backend must return a structured actionable issue list with student/template identifiers and retry metadata so the frontend can persist a repair review and offer retry-failed-only flows.

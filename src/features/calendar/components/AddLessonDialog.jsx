@@ -242,6 +242,11 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     () => activeServices.find((service) => String(service.id) === String(formData.service_id || '')) || null,
     [activeServices, formData.service_id],
   );
+  const selectedServiceDurationMinutes = useMemo(
+    () => Number(selectedService?.duration_minutes) || 0,
+    [selectedService?.duration_minutes],
+  );
+  const selectedServiceHasValidDuration = selectedServiceDurationMinutes > 0;
   const selectedDayToken = useMemo(() => getDayTokenForLocalDate(formData.date), [formData.date]);
   const selectedInstructor = useMemo(
     () => (instructors || []).find((instructor) => String(instructor.id) === String(formData.instructor_employee_id || '')) || null,
@@ -604,6 +609,10 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
         setError('יש לבחור מדריך/ה.');
         return;
       }
+      if (selectedService && !selectedServiceHasValidDuration) {
+        setError('לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות בהגדרות לפני יצירת שיעור.');
+        return;
+      }
       if (!useSchedulingOverride && missingCapability) {
         setError('למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.');
         return;
@@ -675,6 +684,10 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 ? 'לשירות הזה אין מחיר ברירת מחדל ללקוח/ה חד-פעמי/ת, ולכן צריך להזין מחיר עבור השיעור הזה.'
                 : apiError === 'invalid_direct_client_charge_amount'
                   ? 'המחיר שנבחר לשיעור אינו תקין.'
+                  : apiError === 'invalid_service_duration'
+                    ? 'לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני יצירת שיעור.'
+                    : apiError === 'failed_to_load_service'
+                      ? 'לא ניתן היה לטעון את פרטי השירות כרגע. נסו שוב.'
               : apiError === 'failed_to_validate_instructor_availability'
                 ? 'לא הצלחנו לבדוק את זמינות המדריך/ה כרגע. אפשר לנסות שוב.'
                 : err?.message || 'יצירת השיעור נכשלה.',
@@ -972,16 +985,12 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="duration">משך (דקות) *</Label>
-                <Input
-                  id="duration"
-                  type="number"
-                  min="15"
-                  step="15"
-                  value={formData.duration_minutes}
-                  onChange={(e) => setFormData({ ...formData, duration_minutes: parseInt(e.target.value, 10) || 60 })}
-                  required
-                />
+                <Label htmlFor="duration">משך (דקות)</Label>
+                <div id="duration" className="flex min-h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700">
+                  {selectedService
+                    ? (selectedServiceHasValidDuration ? `${selectedServiceDurationMinutes} דקות` : 'לשירות אין משך תקין')
+                    : 'המשך ייקבע אוטומטית לפי השירות'}
+                </div>
               </div>
 
               <div className="space-y-2 md:col-span-2">
@@ -1043,6 +1052,13 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
               <AlertDescription>
                 השעה שנבחרה נמצאת מחוץ לזמינות המוגדרת של המדריך/ה עבור השירות הזה. אפשר לעבור ל״שיבוץ חד-פעמי חריג״ כדי להמשיך עם סיבת חריגה.
               </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {selectedService && !selectedServiceHasValidDuration ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני יצירת שיעור.</AlertDescription>
             </Alert>
           ) : null}
 
@@ -1174,6 +1190,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
                 || !formData.instructor_employee_id
                 || !formData.date
                 || !formData.time
+                || (selectedService && !selectedServiceHasValidDuration)
                 || participantTokens.length === 0
                 || (requiresDirectClientChargeAmount && !hasValidDirectClientChargeAmount)
                 || (!useSchedulingOverride && selectedTimeOutsideAvailability)
