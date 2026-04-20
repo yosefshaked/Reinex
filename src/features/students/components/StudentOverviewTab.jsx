@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, AlertCircle, Phone, MessageCircle, CircleHelp, Mail } from 'lucide-react';
+import { Loader2, AlertCircle, Phone, MessageCircle, Mail } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { formatCurrency } from '@/lib/currency.js';
+import { coerceAgorot, formatCurrency } from '@/lib/currency.js';
+import { isAdminOrOffice, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 
 const DAY_NAMES_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 const DAY_NAME_TO_INDEX = {
@@ -146,12 +145,16 @@ export default function StudentOverviewTab({ student }) {
   const { activeOrg } = useOrg();
   
   const [lessonTemplates, setLessonTemplates] = useState([]);
-  const [lessonInstances, setLessonInstances] = useState([]);
   const [nextLesson, setNextLesson] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [billingSnapshot, setBillingSnapshot] = useState(null);
+  const [isBillingLoading, setIsBillingLoading] = useState(false);
+  const [billingError, setBillingError] = useState('');
 
   const activeOrgId = activeOrg?.id;
+  const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role);
+  const canViewBilling = isAdminOrOffice(membershipRole);
   const studentId = student?.id;
   const guardian = student?.guardian;
   const preferredContact = useMemo(() => resolvePreferredContact(student, guardian), [student, guardian]);
@@ -195,7 +198,6 @@ export default function StudentOverviewTab({ student }) {
           })
           .sort((a, b) => new Date(a.datetime_start).getTime() - new Date(b.datetime_start).getTime());
 
-        setLessonInstances(upcoming);
         setNextLesson(upcoming[0] || null);
       } catch (err) {
         console.error('Failed to load overview data', err);
@@ -207,6 +209,50 @@ export default function StudentOverviewTab({ student }) {
 
     void fetchData();
   }, [studentId, activeOrgId, session]);
+
+  useEffect(() => {
+    if (!studentId || !activeOrgId || !canViewBilling) {
+      setBillingSnapshot(null);
+      setBillingError('');
+      setIsBillingLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchBillingSummary = async () => {
+      setIsBillingLoading(true);
+      setBillingError('');
+
+      try {
+        const payload = await authenticatedFetch('billing', {
+          session,
+          params: {
+            org_id: activeOrgId,
+            student_id: studentId,
+          },
+        });
+
+        if (!isMounted) return;
+        setBillingSnapshot(payload || null);
+      } catch (err) {
+        if (!isMounted) return;
+        console.error('Failed to load student financial summary', err);
+        setBillingSnapshot(null);
+        setBillingError(err?.message || 'טעינת הסיכום הכספי נכשלה');
+      } finally {
+        if (isMounted) {
+          setIsBillingLoading(false);
+        }
+      }
+    };
+
+    void fetchBillingSummary();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeOrgId, canViewBilling, session, studentId]);
 
   if (!student) {
     return (
@@ -228,6 +274,31 @@ export default function StudentOverviewTab({ student }) {
   const tags = Array.isArray(student?.tags) ? student.tags : [];
   const internalNotes = student?.metadata?.internal_notes || '';
   const PreferredContactIcon = preferredContact?.icon || MessageCircle;
+  const financialSummary = billingSnapshot?.summary || {};
+  const balanceAgorot = coerceAgorot(financialSummary.balance);
+  const balanceTone = balanceAgorot > 0
+    ? {
+      cardClassName: 'bg-emerald-50 border-emerald-100',
+      valueClassName: 'text-emerald-700',
+      labelClassName: 'text-emerald-600',
+      badgeClassName: 'border-emerald-200 bg-emerald-100 text-emerald-800',
+      badgeLabel: 'זיכוי',
+    }
+    : balanceAgorot < 0
+      ? {
+        cardClassName: 'bg-amber-50 border-amber-100',
+        valueClassName: 'text-amber-700',
+        labelClassName: 'text-amber-600',
+        badgeClassName: 'border-amber-200 bg-amber-100 text-amber-800',
+        badgeLabel: 'חוב',
+      }
+      : {
+        cardClassName: 'bg-slate-50 border-slate-200',
+        valueClassName: 'text-slate-700',
+        labelClassName: 'text-slate-600',
+        badgeClassName: 'border-slate-200 bg-slate-100 text-slate-700',
+        badgeLabel: 'מאוזן',
+      };
 
   // Compute age
   const age = student?.date_of_birth
@@ -392,39 +463,46 @@ export default function StudentOverviewTab({ student }) {
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center text-lg">💰</div>
             <h3 className="font-semibold text-zinc-800">סיכום כספי</h3>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button type="button" className="inline-flex items-center text-muted-foreground hover:text-foreground">
-                    <CircleHelp className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  נתונים אלו הם להמחשה בלבד ויופעלו בשלב הכספים
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-center">
-              <p className="text-xl font-bold text-emerald-700">—</p>
-              <p className="text-xs text-emerald-600 mt-0.5">יתרת זכות</p>
+          {!canViewBilling ? (
+            <div className="rounded-lg border border-dashed border-border bg-slate-50 p-4 text-sm text-muted-foreground">
+              אין הרשאה לצפייה בנתונים כספיים.
             </div>
-            <div className="rounded-lg bg-amber-50 border border-amber-100 p-3 text-center">
-              <p className="text-xl font-bold text-amber-700">—</p>
-              <p className="text-xs text-amber-600 mt-0.5">חוב פתוח</p>
+          ) : isBillingLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-neutral-400" />
             </div>
-            <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-center">
-              <p className="text-xl font-bold text-blue-700">{lessonInstances.length || 0}</p>
-              <p className="text-xs text-blue-600 mt-0.5">שיעורים/חודש (הערכה)</p>
+          ) : billingError ? (
+            <div className="rounded-lg bg-amber-50 p-4 text-sm text-amber-800 flex items-start gap-2">
+              <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
+              <p>{billingError}</p>
             </div>
-            <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-center">
-              <p className="text-xl font-bold text-zinc-700">
-                {Number.isFinite(Number(student?.special_rate)) ? formatCurrency(student.special_rate) : '—'}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">תעריף לשיעור</p>
-            </div>
-          </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className={`rounded-lg border p-3 text-center ${balanceTone.cardClassName}`}>
+                  <p className={`text-xl font-bold ${balanceTone.valueClassName}`}>{formatCurrency(balanceAgorot)}</p>
+                  <p className={`text-xs mt-0.5 ${balanceTone.labelClassName}`}>יתרה נוכחית</p>
+                </div>
+                <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-center">
+                  <p className="text-xl font-bold text-blue-700">{formatCurrency(financialSummary.lesson_charge_total)}</p>
+                  <p className="text-xs text-blue-600 mt-0.5">חיובי שיעורים</p>
+                </div>
+                <div className="rounded-lg bg-indigo-50 border border-indigo-100 p-3 text-center">
+                  <p className="text-xl font-bold text-indigo-700">{formatCurrency(financialSummary.hmo_charge_total)}</p>
+                  <p className="text-xs text-indigo-600 mt-0.5">חיובי גורם מממן</p>
+                </div>
+                <div className="rounded-lg bg-amber-50 border border-amber-100 p-3 text-center">
+                  <p className="text-xl font-bold text-amber-700">{formatCurrency(financialSummary.payment_total)}</p>
+                  <p className="text-xs text-amber-600 mt-0.5">תשלומים ידניים</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-border/70 bg-slate-50 px-3 py-2">
+                <span className="text-xs text-muted-foreground">הכרטיס מבוסס על נתוני הלדר של התלמיד.</span>
+                <Badge variant="outline" className={balanceTone.badgeClassName}>{balanceTone.badgeLabel}</Badge>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
