@@ -28,6 +28,7 @@ function toDurationString(totalMinutes) {
 
 export default function CalendarServicePalette() {
   const containerRef = useRef(null);
+  const draggableRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const { services, isLoading, error } = useServices();
@@ -61,29 +62,56 @@ export default function CalendarServicePalette() {
 
   useEffect(() => {
     if (!open || !containerRef.current) {
+      if (draggableRef.current) {
+        draggableRef.current.destroy();
+        draggableRef.current = null;
+      }
       return undefined;
     }
 
-    const draggable = new Draggable(containerRef.current, {
-      itemSelector: '.calendar-service-drag-item',
-      eventData(eventEl) {
-        const durationMinutes = Number(eventEl.getAttribute('data-service-duration-minutes')) || 0;
-        return {
-          title: eventEl.getAttribute('data-service-name') || 'שירות',
-          duration: toDurationString(durationMinutes),
-          classNames: ['reinex-calendar-external-preview'],
-          extendedProps: {
-            previewKind: 'service_drop',
-            serviceDurationMinutes: durationMinutes,
-            serviceColor: eventEl.getAttribute('data-service-color') || '',
-          },
-          create: false,
-        };
-      },
+    const initializeDraggable = () => {
+      if (!containerRef.current) {
+        return;
+      }
+
+      if (draggableRef.current) {
+        draggableRef.current.destroy();
+        draggableRef.current = null;
+      }
+
+      draggableRef.current = new Draggable(containerRef.current, {
+        itemSelector: '.calendar-service-drag-item',
+        eventData(eventEl) {
+          const durationMinutes = Number(eventEl.getAttribute('data-service-duration-minutes')) || 0;
+          return {
+            title: eventEl.getAttribute('data-service-name') || 'שירות',
+            duration: toDurationString(durationMinutes),
+            classNames: ['reinex-calendar-external-preview'],
+            extendedProps: {
+              previewKind: 'service_drop',
+              serviceDurationMinutes: durationMinutes,
+              serviceColor: eventEl.getAttribute('data-service-color') || '',
+            },
+            create: false,
+          };
+        },
+      });
+    };
+
+    let nestedFrameId = 0;
+    const frameId = window.requestAnimationFrame(() => {
+      nestedFrameId = window.requestAnimationFrame(initializeDraggable);
     });
 
     return () => {
-      draggable.destroy();
+      window.cancelAnimationFrame(frameId);
+      if (nestedFrameId) {
+        window.cancelAnimationFrame(nestedFrameId);
+      }
+      if (draggableRef.current) {
+        draggableRef.current.destroy();
+        draggableRef.current = null;
+      }
     };
   }, [open, filteredServices]);
 
