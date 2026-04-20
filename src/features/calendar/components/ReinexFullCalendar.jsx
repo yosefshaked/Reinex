@@ -451,6 +451,7 @@ export default function ReinexFullCalendar({
   onEventClick,
   onDateChange,
   onEventRescheduled,
+  onExternalServiceDrop,
   onOpenInstructorWhatsApp,
 }) {
   const calendarRef = useRef(null);
@@ -796,6 +797,26 @@ export default function ReinexFullCalendar({
     clearPendingDrop();
   }, [clearPendingDrop, pendingDropInfo]);
 
+  const handleExternalDrop = useCallback((dropInfo) => {
+    const startDate = dropInfo?.date instanceof Date ? dropInfo.date : null;
+    const resourceId = dropInfo?.resource?.id || null;
+    const draggedEl = dropInfo?.draggedEl;
+    const serviceId = draggedEl?.getAttribute?.('data-service-id') || '';
+    const durationMinutes = Number(draggedEl?.getAttribute?.('data-service-duration-minutes')) || 0;
+
+    if (!serviceId || !resourceId || !startDate || Number.isNaN(startDate.getTime()) || durationMinutes <= 0) {
+      toast.error('אי אפשר ליצור שיעור מהשירות שנגרר.');
+      return;
+    }
+
+    onExternalServiceDrop?.({
+      serviceId,
+      resourceId: String(resourceId),
+      start: startDate,
+      end: new Date(startDate.getTime() + (durationMinutes * 60000)),
+    });
+  }, [onExternalServiceDrop]);
+
   const handleResourceLabelContent = useCallback((arg) => {
     const instructor = arg.resource?.extendedProps?.instructor;
     if (!instructor) {
@@ -857,10 +878,13 @@ export default function ReinexFullCalendar({
           eventStartEditable
           eventDurationEditable={false}
           eventResourceEditable
+          droppable
+          dropAccept=".calendar-service-drag-item"
           selectable
           selectMirror
           selectAllow={handleSelectAllow}
           select={handleDateSelect}
+          drop={handleExternalDrop}
           allDaySlot={false}
           slotEventOverlap={false}
           eventMinHeight={12}

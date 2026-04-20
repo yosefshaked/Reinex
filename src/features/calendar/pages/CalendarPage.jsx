@@ -57,6 +57,7 @@ export default function CalendarPage() {
   const [showGenerationDialog, setShowGenerationDialog] = useState(false);
   const [savedGenerationReview, setSavedGenerationReview] = useState(null);
   const [pendingSlotSelection, setPendingSlotSelection] = useState(null);
+  const [pendingServiceId, setPendingServiceId] = useState('');
   const [whatsAppCompose, setWhatsAppCompose] = useState(null);
   const [availabilityFixIssue, setAvailabilityFixIssue] = useState(null);
 
@@ -179,12 +180,14 @@ export default function CalendarPage() {
 
   const clearSelections = useCallback(() => {
     setPendingSlotSelection(null);
+    setPendingServiceId('');
     setSelectedInstance(null);
     setShowInstanceDialog(false);
   }, []);
 
   useEffect(() => {
     setPendingSlotSelection(null);
+    setPendingServiceId('');
     setSelectedInstance(null);
     setShowInstanceDialog(false);
   }, [currentDate, viewMode]);
@@ -206,17 +209,20 @@ export default function CalendarPage() {
   }, [selectedInstance]);
 
   const handleOpenCreateLesson = useCallback(() => {
+    setPendingServiceId('');
     setShowAddDialog(true);
   }, []);
 
   const handleOpenBlankCreateLesson = useCallback(() => {
     setPendingSlotSelection(null);
+    setPendingServiceId('');
     setShowAddDialog(true);
   }, []);
 
   const handleAddSuccess = () => {
     refetchInstances();
     setPendingSlotSelection(null);
+    setPendingServiceId('');
   };
 
   const handleUpdateSuccess = () => {
@@ -243,8 +249,28 @@ export default function CalendarPage() {
   const handleSlotSelect = (selection) => {
     setSelectedInstance(null);
     setShowInstanceDialog(false);
+    setPendingServiceId('');
     setPendingSlotSelection(selection);
   };
+
+  const handleExternalServiceDrop = useCallback(({ serviceId, start, end, resourceId }) => {
+    if (!serviceId || !(start instanceof Date) || Number.isNaN(start.getTime()) || !(end instanceof Date) || Number.isNaN(end.getTime()) || !resourceId) {
+      toast.error('לא ניתן לפתוח יצירה מהגרירה הזאת.');
+      return;
+    }
+
+    setSelectedInstance(null);
+    setShowInstanceDialog(false);
+    setPendingServiceId(String(serviceId));
+    setPendingSlotSelection({
+      start,
+      end,
+      resourceId: String(resourceId),
+      startStr: start.toISOString(),
+      endStr: end.toISOString(),
+    });
+    setShowAddDialog(true);
+  }, []);
 
   const selectedSlotSummary = useMemo(() => {
     if (!pendingSlotSelection?.start || !pendingSlotSelection?.end) {
@@ -408,8 +434,6 @@ export default function CalendarPage() {
                   selectedSlot={selectedSlotSummary}
                   onClearSelection={clearSelections}
                   onOpenCreateLesson={handleOpenCreateLesson}
-                  onOpenManualGeneration={() => setShowGenerationDialog(true)}
-                  onOpenTemplates={() => navigate('/calendar/templates')}
                   onOpenSelectedLesson={handleOpenSelectedLesson}
                   onOpenInstructorWhatsApp={openInstructorWhatsApp}
                   onFixAvailabilityIssue={handleFixAvailabilityIssue}
@@ -430,6 +454,7 @@ export default function CalendarPage() {
                   onSlotSelect={handleSlotSelect}
                   onEventClick={handleInstanceClick}
                   onEventRescheduled={handleRescheduleSuccess}
+                  onExternalServiceDrop={handleExternalServiceDrop}
                   onOpenInstructorWhatsApp={openInstructorWhatsApp}
                 />
               </div>
@@ -447,10 +472,14 @@ export default function CalendarPage() {
 
       <AddLessonDialog
         open={showAddDialog}
-        onClose={() => setShowAddDialog(false)}
+        onClose={() => {
+          setShowAddDialog(false);
+          setPendingServiceId('');
+        }}
         onSuccess={handleAddSuccess}
         defaultDate={currentDate}
         defaultSelection={pendingSlotSelection}
+        defaultServiceId={pendingServiceId}
       />
 
       <ManualGenerationDialog

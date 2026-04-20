@@ -1,9 +1,10 @@
-import { AlertTriangle, CalendarDays, Clock3, ExternalLink, FileText, MessageCircle, Plus, Sparkles, UserRound, Wand2 } from 'lucide-react';
+import { AlertTriangle, CalendarDays, Clock3, ExternalLink, FileText, MessageCircle, Plus, Sparkles, UserRound } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card.jsx';
 import { Badge } from '@/components/ui/badge.jsx';
 import { getWeekRangeDateStrings, parseLocalDateString } from '../utils/localDate.js';
 import { getParticipantDisplayNames } from '../utils/participantDisplay.js';
+import CalendarServicePalette from './CalendarServicePalette.jsx';
 
 function formatDateLabel(dateString) {
   const date = parseLocalDateString(dateString);
@@ -59,8 +60,6 @@ export default function CalendarWorkspaceDock({
   selectedSlot,
   onClearSelection,
   onOpenCreateLesson,
-  onOpenManualGeneration,
-  onOpenTemplates,
   onOpenSelectedLesson,
   onOpenInstructorWhatsApp,
   onFixAvailabilityIssue,
@@ -95,30 +94,7 @@ export default function CalendarWorkspaceDock({
               <SummaryMetric label="לא תועדו" value={summary.undocumentedCompleted.length} tone={summary.undocumentedCompleted.length ? 'warn' : 'default'} />
               <SummaryMetric label="דורש תשומת לב" value={summary.attentionCount} tone={summary.attentionCount ? 'warn' : 'default'} />
             </div>
-
-            <div className="grid gap-2">
-              <Button className="justify-between" onClick={onOpenCreateLesson}>
-                <span className="flex items-center gap-2">
-                  <Plus className="h-4 w-4" />
-                  שיעור חדש
-                </span>
-                <ExternalLink className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" className="justify-between" onClick={onOpenManualGeneration}>
-                <span className="flex items-center gap-2">
-                  <Wand2 className="h-4 w-4" />
-                  יצירה מתבניות
-                </span>
-                <ExternalLink className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" className="justify-between" onClick={onOpenTemplates}>
-                <span className="flex items-center gap-2">
-                  <CalendarDays className="h-4 w-4" />
-                  תבניות
-                </span>
-                <ExternalLink className="h-4 w-4" />
-              </Button>
-            </div>
+            <CalendarServicePalette />
           </CardContent>
         </Card>
 

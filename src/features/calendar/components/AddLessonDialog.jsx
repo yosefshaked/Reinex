@@ -116,7 +116,7 @@ function extractCreatedClientProfile(payload) {
   return null;
 }
 
-function buildInitialFormData(defaultDate, defaultSelection) {
+function buildInitialFormData(defaultDate, defaultSelection, defaultServiceId = '') {
   const baseDate = defaultSelection?.start instanceof Date
     ? toLocalDateString(defaultSelection.start)
     : (defaultDate || toLocalDateString(new Date()));
@@ -131,7 +131,7 @@ function buildInitialFormData(defaultDate, defaultSelection) {
     student_ids: [],
     client_profile_ids: [],
     instructor_employee_id: defaultSelection?.resourceId ? String(defaultSelection.resourceId) : '',
-    service_id: '',
+    service_id: defaultServiceId ? String(defaultServiceId) : '',
     date: baseDate,
     time: baseTime,
     duration_minutes: durationMinutes,
@@ -142,7 +142,7 @@ function buildInitialFormData(defaultDate, defaultSelection) {
  * AddLessonDialog - Create new lesson instance
  * Flow: Select student → Auto-fetch their service/instructor → Add more students if group session → Set date/time
  */
-export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, defaultSelection = null }) {
+export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, defaultSelection = null, defaultServiceId = '' }) {
   const { activeOrgId } = useOrg();
   const { session } = useAuth();
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
@@ -163,7 +163,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   });
   const [isGroupSession, setIsGroupSession] = useState(false);
   
-  const [formData, setFormData] = useState(() => buildInitialFormData(defaultDate, defaultSelection));
+  const [formData, setFormData] = useState(() => buildInitialFormData(defaultDate, defaultSelection, defaultServiceId));
 
   const [conflicts, setConflicts] = useState([]);
   const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
@@ -187,7 +187,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
       return;
     }
 
-    setFormData(buildInitialFormData(defaultDate, defaultSelection));
+    setFormData(buildInitialFormData(defaultDate, defaultSelection, defaultServiceId));
     setConflicts([]);
     setError(null);
     setStudentDetails(null);
@@ -197,7 +197,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
     setCustomOverrideReason('');
     setCreatedClientProfiles([]);
     setDirectClientChargeAmount('');
-  }, [open, defaultDate, defaultSelection]);
+  }, [open, defaultDate, defaultSelection, defaultServiceId]);
 
   useEffect(() => {
     if (!open || !activeOrgId || !session) return;
@@ -499,7 +499,6 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
   useEffect(() => {
     if (participantTokens.length === 0) {
       setStudentDetails(null);
-      setFormData(prev => ({ ...prev, service_id: '' }));
       return;
     }
 
@@ -526,7 +525,7 @@ export function AddLessonDialog({ open, onClose, onSuccess, defaultDate, default
 
       setFormData(prev => ({
         ...prev,
-        service_id: nextServiceId || prev.service_id,
+        service_id: prev.service_id || nextServiceId,
         instructor_employee_id: prev.instructor_employee_id || nextInstructorId || '',
       }));
     }
