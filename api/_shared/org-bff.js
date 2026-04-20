@@ -203,8 +203,9 @@ export async function ensureSystemAdmin(req, supabase, authorization, options = 
     throw Object.assign(new Error('forbidden'), { statusCode: 403 });
   }
 
-  // All checks passed
-  await logAdminAttempt(supabase, { userId, email, success: true, reason: null, context });
+  // All checks passed — do not log success here; callers log their own
+  // specific actions (impersonation_started, settings_changed, etc.).
+  // Logging every successful read would flood the audit log with noise.
   return { userId, email };
 }
 

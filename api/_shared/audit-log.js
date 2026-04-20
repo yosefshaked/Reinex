@@ -25,7 +25,7 @@
  */
 export async function logAuditEvent(supabaseClient, params) {
   const {
-    orgId,
+    orgId = null,
     userId,
     userEmail,
     userRole,
@@ -37,34 +37,42 @@ export async function logAuditEvent(supabaseClient, params) {
     metadata = null,
   } = params;
 
-  if (!orgId || !userId || !userEmail || !userRole || !actionType || !actionCategory) {
+  if (!userId || !userEmail || !userRole || !actionType || !actionCategory) {
     throw new Error('Missing required audit log parameters');
   }
 
-  // Use the RPC function for logging
-  const { data, error } = await supabaseClient.rpc('log_audit_event', {
-    p_org_id: orgId,
-    p_user_id: userId,
-    p_user_email: userEmail,
-    p_user_role: userRole,
-    p_action_type: actionType,
-    p_action_category: actionCategory,
-    p_resource_type: resourceType,
-    p_resource_id: resourceId,
-    p_details: details,
-    p_metadata: metadata,
-  });
+  // Determine retention category: system_admin and security actions are critical.
+  const retentionCategory =
+    String(actionCategory).startsWith('admin') ||
+    actionCategory === 'security' ||
+    actionCategory === 'admin_control'
+      ? 'critical'
+      : 'standard';
+
+  const { data, error } = await supabaseClient
+    .from('audit_log')
+    .insert({
+      org_id: orgId || null,
+      actor_user_id: userId,
+      actor_email: userEmail,
+      actor_role: userRole,
+      event_type: actionType,
+      action_category: actionCategory,
+      retention_category: retentionCategory,
+      resource_type: resourceType || null,
+      resource_id: resourceId ? String(resourceId) : null,
+      details: details || null,
+      metadata: metadata || null,
+    })
+    .select('id')
+    .single();
 
   if (error) {
-    // Log the error but don't fail the request
-    console.error('Failed to log audit event', {
-      actionType,
-      error: error.message,
-    });
+    console.error('Failed to log audit event', { actionType, error: error.message });
     return null;
   }
 
-  return data;
+  return data?.id ?? null;
 }
 
 /**
