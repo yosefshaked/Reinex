@@ -135,6 +135,13 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied, 
     && ((result?.summary?.to_insert_instances ?? 0) > 0),
   );
 
+  function switchMode(nextMode) {
+    setActiveMode(nextMode);
+    setResult(null);
+    setError('');
+    setLastPreviewRequestKey('');
+  }
+
   function getWarningReasonLabel(reason) {
     switch (reason) {
       case 'no_authorization_found':
@@ -306,7 +313,7 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied, 
                     type="button"
                     variant={activeMode === 'full_range' ? 'default' : 'outline'}
                     size="sm"
-                    onClick={() => setActiveMode('full_range')}
+                    onClick={() => switchMode('full_range')}
                   >
                     טווח מלא
                   </Button>
@@ -315,9 +322,9 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied, 
                     variant={activeMode === 'retry_failed' ? 'default' : 'outline'}
                     size="sm"
                     disabled={visibleRetryableFailures.length === 0}
-                    onClick={() => setActiveMode('retry_failed')}
+                    onClick={() => switchMode('retry_failed')}
                   >
-                    כשלים בלבד
+                    פריטים לטיפול בלבד
                   </Button>
                   <Button type="button" variant="ghost" size="sm" onClick={handleDismissSavedReview}>
                     נקה רשימת טיפול
@@ -354,7 +361,16 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied, 
             <Alert className="border-blue-200 bg-blue-50 text-blue-950">
               <AlertTriangle className="h-4 w-4 text-blue-700" />
               <AlertDescription>
-                מצב ניסיון חוזר פועל על {visibleRetryableFailures.length} כשלים שנשמרו, ולא מריץ מחדש את כל הטווח.
+                מצב ניסיון חוזר פועל על {visibleRetryableFailures.length} פריטים שנשמרו מהסקירה, ולא מריץ מחדש את כל הטווח.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {activeMode === 'full_range' && savedReview && (
+            <Alert className="border-slate-200 bg-slate-50 text-slate-900">
+              <AlertTriangle className="h-4 w-4 text-slate-600" />
+              <AlertDescription>
+                מצב טווח מלא יריץ שוב את כל התבניות בטווח הנבחר. כדי להפעיל יצירה צריך קודם להריץ תצוגה מקדימה חדשה לטווח הזה.
               </AlertDescription>
             </Alert>
           )}
@@ -494,11 +510,11 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied, 
           </Button>
           <Button type="button" variant="outline" onClick={() => handlePreview(activeMode)} disabled={!canPreview || isPreviewLoading || isApplyLoading}>
             {isPreviewLoading && <Loader2 className="ms-2 h-4 w-4 animate-spin" />}
-            {activeMode === 'retry_failed' ? 'תצוגה מקדימה לכשלים' : 'תצוגה מקדימה'}
+            {activeMode === 'retry_failed' ? 'תצוגה מקדימה לפריטים לטיפול' : 'תצוגה מקדימה'}
           </Button>
           <Button type="button" onClick={() => handleApply(activeMode)} disabled={!canApply || isPreviewLoading || isApplyLoading}>
             {isApplyLoading && <Loader2 className="ms-2 h-4 w-4 animate-spin" />}
-            {activeMode === 'retry_failed' ? 'נסה שוב רק את הכשלים' : 'בצע יצירה'}
+            {activeMode === 'retry_failed' ? 'נסה שוב רק את הפריטים לטיפול' : 'בצע יצירה'}
           </Button>
         </DialogFooter>
       </DialogContent>

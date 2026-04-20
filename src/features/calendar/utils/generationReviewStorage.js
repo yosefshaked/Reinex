@@ -113,17 +113,28 @@ export function getActionableGenerationIssues(result) {
 }
 
 export function getRetryableGenerationFailures(result) {
-  if (Array.isArray(result?.retryable_failures)) {
-    return result.retryable_failures
-      .map((entry) => normalizeIssue(entry, 'apply_error'))
-      .filter((entry) => entry?.retry_item?.template_id && entry?.retry_item?.target_date);
+  const issueEntries = Array.isArray(result?.retryable_failures) && result.retryable_failures.length > 0
+    ? result.retryable_failures.map((entry) => normalizeIssue(entry, entry?.source || 'apply_error'))
+    : getActionableGenerationIssues(result);
+
+  const seen = new Set();
+  const retryableEntries = [];
+
+  for (const entry of issueEntries) {
+    if (!entry?.retry_item?.template_id || !entry?.retry_item?.target_date) {
+      continue;
+    }
+
+    const key = `${entry.retry_item.template_id}|${entry.retry_item.target_date}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    retryableEntries.push(entry);
   }
 
-  return getActionableGenerationIssues(result).filter((entry) => (
-    entry.source === 'apply_error'
-    && entry?.retry_item?.template_id
-    && entry?.retry_item?.target_date
-  ));
+  return retryableEntries;
 }
 
 export function buildGenerationReview({
