@@ -288,6 +288,7 @@ function getEventDensityClass(durationMinutes) {
 
 function EventContent({ arg }) {
   const instance = arg.event.extendedProps?.instance;
+  const previewKind = arg.event.extendedProps?.previewKind;
   const rootRef = useRef(null);
   const [contentWidth, setContentWidth] = useState(null);
 
@@ -310,6 +311,27 @@ function EventContent({ arg }) {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  if (previewKind === 'service_drop') {
+    const previewTitle = arg.event.title || 'שירות';
+    const previewDurationMinutes = Number(arg.event.extendedProps?.serviceDurationMinutes) || 0;
+    const previewColor = arg.event.extendedProps?.serviceColor || '#2563eb';
+
+    return (
+      <div
+        ref={rootRef}
+        className="reinex-calendar-external-preview-card"
+        style={{ '--reinex-preview-accent': previewColor }}
+        title={`${previewTitle}${previewDurationMinutes > 0 ? ` • ${previewDurationMinutes} דקות` : ''}`}
+      >
+        <div className="reinex-calendar-external-preview-card__title">{previewTitle}</div>
+        <div className="reinex-calendar-external-preview-card__meta">
+          גרירה לשיבוץ
+          {previewDurationMinutes > 0 ? ` • ${previewDurationMinutes} דקות` : ''}
+        </div>
+      </div>
+    );
+  }
 
   if (!instance) {
     return <div className="reinex-calendar-event">פריט חסר</div>;
