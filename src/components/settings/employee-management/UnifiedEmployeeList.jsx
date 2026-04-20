@@ -476,19 +476,23 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     if (!inviteUserEmployee?.id || !inviteUserEmail.trim()) return;
     setActionState(REQUEST.loading);
     try {
-      await authenticatedFetch('instructors-link-user', {
+      const result = await authenticatedFetch('instructors-link-user', {
         session,
         method: 'POST',
         body: { org_id: orgId, instructor_id: inviteUserEmployee.id, email: inviteUserEmail.trim() },
       });
-      toast.success('ההזמנה נשלחה בהצלחה.');
+      if (result?.user_exists) {
+        toast.success('ההזמנה נוצרה. למשתמש כבר יש חשבון והוא יכול להתחבר כדי לאשר את ההזמנה.');
+      } else {
+        toast.success('ההזמנה נשלחה בהצלחה.');
+      }
       setInviteUserDialogOpen(false);
       setInviteUserEmployee(null);
       setInviteUserEmail('');
       await refetchInstructors();
     } catch (error) {
       console.error('Failed to link user', error);
-      toast.error('שליחת ההזמנה נכשלה.');
+      toast.error(error?.message || 'שליחת ההזמנה נכשלה.');
     } finally {
       setActionState(REQUEST.idle);
     }

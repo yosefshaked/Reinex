@@ -88,7 +88,7 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
 
     setIsSubmitting(true);
     try {
-      await authenticatedFetch('instructors-link-user', {
+      const result = await authenticatedFetch('instructors-link-user', {
         session,
         method: 'POST',
         body: {
@@ -97,13 +97,17 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
           email: inviteEmail.trim(),
         },
       });
-      toast.success('ההזמנה נשלחה בהצלחה.');
+      if (result?.user_exists) {
+        toast.success('ההזמנה נוצרה. למשתמש כבר יש חשבון והוא יכול להתחבר כדי לאשר אותה.');
+      } else {
+        toast.success('ההזמנה נשלחה בהצלחה.');
+      }
       onOpenChange(false);
       handleReset();
       if (onSuccess) onSuccess();
     } catch (error) {
       console.error('Failed to send invitation', error);
-      toast.error('שליחת ההזמנה נכשלה.');
+      toast.error(error?.message || 'שליחת ההזמנה נכשלה.');
     } finally {
       setIsSubmitting(false);
     }

@@ -1,4 +1,5 @@
 /* eslint-env node */
+import { randomUUID } from 'node:crypto';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
@@ -22,8 +23,127 @@ async function loadEmployee(client, orgId, employeeId) {
   return { employee: data, error };
 }
 
+function tryParseUrl(candidate) {
+  try {
+    return new URL(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function resolveInvitationRedirect(context, req, env) {
+  const envCandidates = [
+    env?.VITE_PUBLIC_APP_URL,
+    env?.VITE_APP_BASE_URL,
+    env?.VITE_SITE_URL,
+  ].filter(Boolean);
+
+  for (const candidate of envCandidates) {
+    const parsed = tryParseUrl(String(candidate));
+    if (parsed) {
+      const basePath = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/$/, '') : '';
+      return `${parsed.origin}${basePath}/#/complete-registration`;
+    }
+  }
+
+  const headers = req?.headers || {};
+  const forwardedProto = headers['x-forwarded-proto'] || headers['X-Forwarded-Proto'] || 'https';
+  const forwardedHost = headers['x-forwarded-host'] || headers['X-Forwarded-Host'] || headers.host || headers.Host || '';
+
+  if (typeof forwardedHost === 'string' && forwardedHost.trim()) {
+    return `${forwardedProto}://${forwardedHost.trim()}/#/complete-registration`;
+  }
+
+  return 'https://reinex.thepcrunners.com/#/complete-registration';
+}
+
+async function findExistingMemberByEmail(supabase, orgId, email) {
+  let profileId = null;
+
+  let profileResult = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('email', email)
+    .maybeSingle();
+
+  if (profileResult.error) {
+    return { error: profileResult.error, userId: null };
+  }
+
+  profileId = profileResult.data?.id ?? null;
+
+  if (!profileId) {
+    profileResult = await supabase
+      .from('profiles')
+      .select('id')
+      .ilike('email', email)
+      .maybeSingle();
+
+    if (profileResult.error) {
+      return { error: profileResult.error, userId: null };
+    }
+
+    profileId = profileResult.data?.id ?? null;
+  }
+
+  if (!profileId) {
+    return { error: null, userId: null };
+  }
+
+  const membershipResult = await supabase
+    .from('org_memberships')
+    .select('user_id')
+    .eq('org_id', orgId)
+    .eq('user_id', profileId)
+    .maybeSingle();
+
+  if (membershipResult.error) {
+    return { error: membershipResult.error, userId: null };
+  }
+
+  return { error: null, userId: membershipResult.data?.user_id ?? null };
+}
+
+function isExpiredTimestamp(timestamp) {
+  if (!timestamp) {
+    return false;
+  }
+
+  const expiresAt = new Date(timestamp);
+  if (Number.isNaN(expiresAt.getTime())) {
+    return false;
+  }
+
+  return expiresAt.getTime() <= Date.now();
+}
+
+async function findPendingInvitation(supabase, orgId, email) {
+  const { data, error } = await supabase
+    .from('org_invitations')
+    .select('id, status, expires_at')
+    .eq('org_id', orgId)
+    .eq('email', email)
+    .eq('status', 'pending')
+    .maybeSingle();
+
+  return { invitation: data, error };
+}
+
+async function markInvitationExpired(supabase, invitationId) {
+  if (!invitationId) {
+    return;
+  }
+
+  await supabase
+    .from('org_invitations')
+    .update({ status: 'expired' })
+    .eq('id', invitationId);
+}
+
 async function sendInvitationFlow({
   context,
+  req,
+  env,
   supabase,
   authResult,
   role,
@@ -33,33 +153,89 @@ async function sendInvitationFlow({
   employeeId,
   email,
 }) {
+  const { error: existingMemberError, userId: existingMemberUserId } = await findExistingMemberByEmail(supabase, orgId, email);
+  if (existingMemberError) {
+    throw new Error(`failed_to_verify_existing_member:${existingMemberError.message}`);
+  }
+
+  if (existingMemberUserId) {
+    return respond(context, 409, { message: 'user_already_member' });
+  }
+
+  const { invitation: pendingInvitation, error: pendingInvitationError } = await findPendingInvitation(supabase, orgId, email);
+  if (pendingInvitationError) {
+    throw new Error(`failed_to_check_pending_invitations:${pendingInvitationError.message}`);
+  }
+
+  if (pendingInvitation) {
+    if (isExpiredTimestamp(pendingInvitation.expires_at)) {
+      await markInvitationExpired(supabase, pendingInvitation.id);
+    } else {
+      return respond(context, 409, { message: 'invitation_already_pending' });
+    }
+  }
+
+  const invitationId = randomUUID();
+  const invitationToken = randomUUID();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const employeeName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
   const invitationPayload = {
+    id: invitationId,
     org_id: orgId,
     email,
     invited_by: userId,
     role: 'member',
-    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    metadata: {
-      link_to_employee_id: employeeId,
-      employee_name: `${employee.first_name || ''} ${employee.last_name || ''}`.trim(),
-    },
+    status: 'pending',
+    token: invitationToken,
+    expires_at: expiresAt,
+  };
+  const invitationMetadata = {
+    orgId,
+    org_id: orgId,
+    invitationId,
+    invitation_id: invitationId,
+    invitationToken,
+    invitation_token: invitationToken,
+    link_to_employee_id: employeeId,
+    employee_name: employeeName,
   };
 
-  const { error: inviteError } = await supabase
-    .from('invitations')
-    .insert(invitationPayload);
-
-  if (inviteError) {
-    throw new Error(inviteError.message);
-  }
-
-  const { error: authError } = await supabase.auth.admin.inviteUserByEmail(email, {
-    data: { org_id: orgId },
-    redirectTo: `${process.env.VITE_PUBLIC_APP_URL || process.env.VITE_APP_BASE_URL}/#/complete-registration`,
+  const {
+    data: authUserExists,
+    error: authUserExistsError,
+  } = await supabase.rpc('user_exists', {
+    user_email: email,
   });
 
-  if (authError) {
-    context.log?.warn?.('instructors-link-user auth invitation failed', { message: authError.message });
+  if (authUserExistsError) {
+    throw new Error(`failed_to_verify_auth_user:${authUserExistsError.message}`);
+  }
+
+  if (authUserExists) {
+    const { error: createExistingUserInvitationError } = await supabase
+      .from('org_invitations')
+      .insert(invitationPayload);
+
+    if (createExistingUserInvitationError) {
+      throw new Error(createExistingUserInvitationError.message);
+    }
+  } else {
+    const { error: authError } = await supabase.auth.admin.inviteUserByEmail(email, {
+      data: invitationMetadata,
+      redirectTo: resolveInvitationRedirect(context, req, env),
+    });
+
+    if (authError) {
+      throw new Error(authError.message);
+    }
+
+    const { error: createInvitationError } = await supabase
+      .from('org_invitations')
+      .insert(invitationPayload);
+
+    if (createInvitationError) {
+      throw new Error(createInvitationError.message);
+    }
   }
 
   const updatedMetadata = {
@@ -68,6 +244,7 @@ async function sendInvitationFlow({
       email,
       invited_at: new Date().toISOString(),
       invited_by: userId,
+      invitation_id: invitationId,
     },
   };
 
@@ -86,8 +263,10 @@ async function sendInvitationFlow({
     resourceId: employeeId,
     details: {
       employee_id: employeeId,
-      employee_name: `${employee.first_name || ''} ${employee.last_name || ''}`.trim(),
+      employee_name: employeeName,
       invited_email: email,
+      invitation_id: invitationId,
+      link_to_employee_id: employeeId,
     },
   });
 
@@ -95,6 +274,8 @@ async function sendInvitationFlow({
     message: 'invitation_sent',
     email,
     employee_id: employeeId,
+    user_exists: Boolean(authUserExists),
+    invitation_id: invitationId,
   });
 }
 
@@ -314,6 +495,8 @@ export default async function (context, req) {
   try {
     return await sendInvitationFlow({
       context,
+      req,
+      env,
       supabase,
       authResult,
       role,
