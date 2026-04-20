@@ -14,7 +14,12 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { dayTokenForDate, normalizeDayToken } from '../_shared/day-of-week.js';
-import { buildUtcBoundsForTimezoneDateRange } from '../_shared/instructor-availability.js';
+import {
+  buildUtcBoundsForTimezoneDateRange,
+  buildUtcIsoForTimezoneDateTime,
+  extractScheduleSlotFromIso,
+  getDateKeyInTimezone,
+} from '../_shared/instructor-availability.js';
 import { resolveLessonCoverageDecision } from '../_shared/hmo.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
@@ -211,6 +216,16 @@ function buildRetryItem(templateId, targetDate) {
     template_id: templateId || null,
     target_date: targetDate || null,
   };
+}
+
+function buildTemplateSlotKey(templateId, targetDate, timeOfDay) {
+  const normalizedTemplateId = normalizeString(templateId);
+  const normalizedTargetDate = normalizeString(targetDate);
+  const normalizedTime = normalizeTimeHms(timeOfDay);
+  if (!normalizedTemplateId || !normalizedTargetDate || !normalizedTime) {
+    return '';
+  }
+  return `${normalizedTemplateId}|${normalizedTargetDate}|${normalizedTime}`;
 }
 
 function buildRepairTargets(entry) {
@@ -678,8 +693,13 @@ export default async function calendarGenerate(context, req) {
 
   const existingTemplateSlotKeys = new Set(
     (Array.isArray(existingRows) ? existingRows : [])
-      .filter((row) => row?.template_id)
-      .map((row) => `${row.template_id}|${extractDatePart(row.datetime_start)}|${extractTimePart(row.datetime_start)}`),
+      .map((row) => {
+        const templateId = normalizeString(row?.template_id);
+        const targetDate = getDateKeyInTimezone(row?.datetime_start);
+        const slot = extractScheduleSlotFromIso(row?.datetime_start);
+        return buildTemplateSlotKey(templateId, targetDate, slot?.startTime || '');
+      })
+      .filter(Boolean),
   );
 
   const capabilityMap = new Map();
@@ -772,7 +792,7 @@ export default async function calendarGenerate(context, req) {
         continue;
       }
 
-      const slotKey = `${template.id}|${date}|${finalTime}`;
+      const slotKey = buildTemplateSlotKey(template.id, date, finalTime);
       if (existingTemplateSlotKeys.has(slotKey)) {
         skippedExisting.push({
           template_id: template.id,
@@ -787,6 +807,22 @@ export default async function calendarGenerate(context, req) {
         continue;
       }
 
+      const datetimeStartIso = buildUtcIsoForTimezoneDateTime(date, finalTime);
+      if (!datetimeStartIso) {
+        conflicts.push({
+          type: 'invalid_datetime',
+          template_id: template.id,
+          student_id: template.student_id,
+          student_name: studentName,
+          client_profile_id: participantClientProfileId,
+          target_date: date,
+          time_of_day: finalTime,
+          message: 'תאריך/שעה לא תקינים עבור יצירת מופע.',
+          retry_item: buildRetryItem(template.id, date),
+        });
+        continue;
+      }
+
       const candidate = {
         template_id: template.id,
         student_id: template.student_id,
@@ -794,7 +830,7 @@ export default async function calendarGenerate(context, req) {
         client_profile_id: participantClientProfileId,
         instructor_employee_id: finalInstructorId,
         service_id: finalServiceId,
-        datetime_start: `${date}T${finalTime}`,
+        datetime_start: datetimeStartIso,
         duration_minutes: finalDuration,
         target_date: date,
         time_of_day: finalTime,
