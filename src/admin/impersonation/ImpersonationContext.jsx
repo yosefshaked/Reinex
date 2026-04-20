@@ -68,6 +68,8 @@ export function ImpersonationProvider({ children }) {
     try {
       await exitImpersonation({ reason: 'admin_exit' });
       setSession(null);
+      // Return to the admin console after restoring the admin session.
+      window.location.assign('/system-admin/users');
     } finally {
       setExiting(false);
     }

@@ -21,6 +21,8 @@ import SkipLink from "@/features/accessibility/SkipLink.jsx"
 
 import Sidebar from "@/components/layout/Sidebar.jsx"
 import MobileNav from "@/components/layout/MobileNav.jsx"
+import { ImpersonationProvider } from "@/admin/impersonation/ImpersonationContext.jsx"
+import ImpersonationBanner from "@/admin/ui/ImpersonationBanner.jsx"
 
 export default function AppShell({ children }) {
   const { signOut } = useAuth()
@@ -156,6 +158,7 @@ export default function AppShell({ children }) {
   const useCustomLayout = pageLayoutMode === "dashboard" || isCalendarPage
 
   return (
+    <ImpersonationProvider>
     <SessionModalContext.Provider value={sessionModalContextValue}>
       <AccessibilityProvider>
       <div ref={shellRef} className="flex min-h-screen bg-background text-foreground overflow-x-hidden">
@@ -211,6 +214,7 @@ export default function AppShell({ children }) {
             </div>
           </header>
 
+          <ImpersonationBanner />
           <OrgSelectionBanner />
           <OrgConfigBanner />
 
@@ -245,5 +249,6 @@ export default function AppShell({ children }) {
       </div>
       </AccessibilityProvider>
     </SessionModalContext.Provider>
+    </ImpersonationProvider>
   )
 }

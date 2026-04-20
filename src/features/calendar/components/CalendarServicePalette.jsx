@@ -158,11 +158,18 @@ export default function CalendarServicePalette() {
               return (
                 <div
                   key={service.id}
-                  className={`${isDraggable ? 'calendar-service-drag-item' : ''} rounded-2xl border bg-white px-4 py-4 shadow-sm transition ${isDraggable ? 'cursor-grab border-slate-200 hover:border-slate-300 hover:shadow-md active:cursor-grabbing' : 'cursor-not-allowed border-red-200 opacity-60'}`.trim()}
+                  className={`${isDraggable ? 'calendar-service-drag-item' : ''} rounded-2xl border bg-white px-4 py-4 shadow-sm transition select-none ${isDraggable ? 'cursor-grab border-slate-200 hover:border-slate-300 hover:shadow-md active:cursor-grabbing touch-none [&_*]:pointer-events-none' : 'cursor-not-allowed border-red-200 opacity-60'}`.trim()}
                   data-service-id={String(service.id)}
                   data-service-name={service.displayName}
                   data-service-duration-minutes={service.durationMinutes || ''}
                   data-service-color={service?.color || ''}
+                  draggable="false"
+                  style={{ WebkitUserSelect: 'none', userSelect: 'none' }}
+                  onMouseDown={(event) => {
+                    if (isDraggable && event.button === 0) {
+                      event.preventDefault();
+                    }
+                  }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
