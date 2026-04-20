@@ -48,6 +48,12 @@
 - Billing is centralized. Calendar endpoints must not compute lesson prices or write `ledger_transactions` directly; they call `BillingLedgerService.syncLessonInstanceCharges(...)` or another service method after the lesson mutation succeeds.
 - Attendance changes, lesson edits, and HMO authorization changes are coupled to ledger resync. Skipping the ledger service will create billing drift even if the lesson mutation succeeds.
 - Correction flows may add manual financial adjustments, but the persisted ledger write still goes through `BillingLedgerService`.
+- Instructor earnings previews and sync must stay aligned:
+  - canonical payout rate comes from `instructor_service_capabilities.base_rate`
+  - the preserved admin input lives in `metadata.compensation_input` and is display-only
+  - payout uses lesson duration plus `Services.payment_model`
+  - `payment_model = fixed_rate` pays once per lesson
+  - `payment_model = per_student` multiplies by compensation-eligible participant count
 - Templates and date-specific overrides are separate resources; do not collapse them into one model.
 - Cancellation modal uses a server-backed preview action (`PUT /api/calendar/instances` with `action: 'preview-cancel-instance'`) before submitting cancellation, so UI impact text is based on current server state.
 - Lesson `is_closed` is a workflow-state flag and does not hard-lock edits by itself. Hard lock enforcement for mutations uses finance lock sources only (`payroll_run`, `claim_batch`).

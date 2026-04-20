@@ -75,4 +75,9 @@
   overlapping matching active authorizations are treated as a data conflict and billing is blocked until resolved
 - HMO invoice batches are workflow metadata only. Balance changes happen only when explicit ledger credits or debits are appended.
 - Payroll, leave, attendance, and instructor earnings rules are still driven from `Settings` through [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js).
+- Instructor earnings are calculated from the canonical hourly `base_rate` on `instructor_service_capabilities`.
+- The UI may preserve the admin's original pay entry in `instructor_service_capabilities.metadata.compensation_input`, but finance math must not read from that display helper field.
+- Instructor payout now also depends on `Services.payment_model`:
+  - `fixed_rate` pays once per lesson
+  - `per_student` multiplies by compensation-eligible participant count
 - Do not add "rebuild billing" fallback buttons to student/client billing workspaces. Billing recalculation belongs to the mutation source: attendance/session changes, lesson-instance edits, and HMO authorization create/update/cancel already trigger the relevant ledger resync and should communicate that in their own UX.

@@ -16,6 +16,12 @@ import { Briefcase, Calendar, Mail, Trash2, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client';
 import { toShekel, toAgorot } from '@/lib/currency.js';
+import CapabilityCompensationFields from './CapabilityCompensationFields.jsx';
+import {
+  buildCapabilityCompensationSummary,
+  hydrateCapabilityCompensationForm,
+  serializeCapabilityCompensation,
+} from '@/lib/instructor-compensation.js';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'ראשון', short: 'א' },
@@ -67,6 +73,7 @@ function buildInitialState(employee) {
           base_rate: capability.base_rate != null ? toShekel(capability.base_rate) : '',
           availability_windows: Array.isArray(capability?.availability_windows) ? capability.availability_windows : [],
           metadata: capability.metadata || {},
+          pay_config: hydrateCapabilityCompensationForm(capability),
         }))
       : [],
   };
@@ -198,13 +205,17 @@ export default function EditEmployeeDialog({
       ...prev,
       conversionCapabilities: [
         ...prev.conversionCapabilities,
-        {
+        (() => {
+          const payConfig = hydrateCapabilityCompensationForm({ base_rate: 0, metadata: {} });
+          return {
           service_id: '',
           max_students: 1,
           base_rate: 0,
           availability_windows: [],
           metadata: {},
-        },
+          pay_config: { ...payConfig, amountInput: '' },
+        };
+        })(),
       ],
     }));
   };
@@ -274,9 +285,8 @@ export default function EditEmployeeDialog({
         payload.service_capabilities = form.conversionCapabilities.map((capability) => ({
           service_id: capability.service_id,
           max_students: capability.max_students === '' ? 1 : Number(capability.max_students),
-          base_rate: capability.base_rate === '' ? 0 : toAgorot(capability.base_rate),
           availability_windows: Array.isArray(capability.availability_windows) ? capability.availability_windows : [],
-          metadata: capability.metadata || {},
+          ...serializeCapabilityCompensation(capability),
         }));
       }
 
@@ -551,7 +561,7 @@ export default function EditEmployeeDialog({
                             </SelectContent>
                           </Select>
                           <div className="text-[11px] text-slate-500">
-                            `Services` מגדיר את התקן הארגוני. כאן מגדירים את ההחרגה לעובד: כמה תלמידים יוכל ללמד ומה יהיה התעריף שלו.
+                            `Services` מגדיר את התקן הארגוני. כאן מגדירים את ההחרגה לעובד: כמה תלמידים יוכל ללמד ואיך יוגדר השכר שלו.
                           </div>
                         </div>
                         <div className="space-y-2">
@@ -564,18 +574,26 @@ export default function EditEmployeeDialog({
                             disabled={isSaving}
                           />
                         </div>
-                        <div className="space-y-2">
-                          <Label className="text-xs text-slate-600">תעריף בסיס</Label>
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={capability.base_rate}
-                            onChange={(e) => updateConversionCapability(index, 'base_rate', e.target.value)}
-                            disabled={isSaving}
-                          />
-                        </div>
                       </div>
+
+                      <CapabilityCompensationFields
+                        capability={capability}
+                        service={availableServices.find((service) => service.id === capability.service_id) || null}
+                        disabled={isSaving}
+                        onChange={(payConfig) => updateConversionCapability(index, 'pay_config', payConfig)}
+                      />
+
+                      {capability.service_id ? (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-600">
+                          {(() => {
+                            const summary = buildCapabilityCompensationSummary(
+                              capability,
+                              availableServices.find((service) => service.id === capability.service_id) || null,
+                            );
+                            return `תצוגה בכרטיס העובד: ${summary.valueLabel} • ${summary.basisLabel}`;
+                          })()}
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>

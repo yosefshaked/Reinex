@@ -122,6 +122,12 @@ Source: `api/calendar-attendance/index.js`
 	1. `billingService.syncLessonInstanceCharges(...)`
 	2. `syncLessonInstructorEarnings(...)`
 	3. `syncInstructorAttendanceFromLessons(...)`
+- Instructor earnings contract:
+	- canonical rate source is `instructor_service_capabilities.base_rate`
+	- preserved UI input may also exist at `instructor_service_capabilities.metadata.compensation_input`, but it is not the finance math source
+	- payout always scales by lesson duration
+	- `Services.payment_model = fixed_rate` pays once per lesson when any compensation-eligible participant triggers instructor compensation
+	- `Services.payment_model = per_student` multiplies payout by the number of compensation-eligible participants
 - HMO claim task workflow:
 	- when status becomes `attended` and coverage resolves to `covered`, create dashboard task type `hmo_claim_submission`
 	- when status becomes `scheduled`, open `hmo_claim_submission` task is resolved

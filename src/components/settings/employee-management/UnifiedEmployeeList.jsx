@@ -37,7 +37,7 @@ import EmployeeFinancePanel from './EmployeeFinancePanel.jsx';
 import EmployeeLeavePanel from './EmployeeLeavePanel.jsx';
 import LinkEmployeeMemberDialog from './LinkEmployeeMemberDialog.jsx';
 import { getAvailabilitySummary } from '@/lib/instructor-availability.js';
-import { formatCurrency } from '@/lib/currency.js';
+import { buildCapabilityCompensationSummary } from '@/lib/instructor-compensation.js';
 
 const REQUEST = { idle: 'idle', loading: 'loading' };
 const TAB_KEYS = {
@@ -442,8 +442,13 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const currentEmployeeServices = useMemo(() => (
     (currentEmployee?.service_capabilities || []).map((capability) => ({
       ...capability,
+      service: services.find((service) => service.id === capability.service_id) || null,
       name: getServiceName(services, capability.service_id),
       availabilitySummary: getAvailabilitySummary(capability.availability_windows),
+      compensationSummary: buildCapabilityCompensationSummary(
+        capability,
+        services.find((service) => service.id === capability.service_id) || null,
+      ),
     }))
   ), [currentEmployee, services]);
 
@@ -946,7 +951,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
 
                     <SectionCard
                       title="שירותים ויכולות"
-                      description="שירותים זמינים, קיבולת ותעריפי בסיס"
+                      description="שירותים זמינים, קיבולת ואופן תשלום"
                       action={getEmployeeType(currentEmployee) === 'instructor' ? (
                         <Button size="sm" variant="outline" onClick={() => setShowCapabilitiesDialog(true)}>
                           <Briefcase className="me-2 h-4 w-4" />
@@ -960,7 +965,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                             <div key={capability.service_id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-3">
                               <div className="text-sm font-bold text-slate-900">{capability.name}</div>
                               <div className="mt-1 text-xs text-slate-500">
-                                קיבולת {capability.max_students || 1} • תעריף בסיס {capability.base_rate != null ? formatCurrency(capability.base_rate) : 'לא הוגדר'} • {capability.setup_incomplete ? 'זמינות חסרה' : `ימי זמינות ${capability.availabilitySummary || '—'}`}
+                                קיבולת {capability.max_students || 1} • {capability.compensationSummary.valueLabel} • {capability.compensationSummary.basisLabel} • {capability.setup_incomplete ? 'זמינות חסרה' : `ימי זמינות ${capability.availabilitySummary || '—'}`}
                               </div>
                             </div>
                           ))}

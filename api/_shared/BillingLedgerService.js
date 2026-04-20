@@ -29,6 +29,40 @@ const MANUAL_DEBIT_USAGE_TYPE_BY_SOURCE = {
   migration: 'manual_adjustment',
 };
 
+function resolveLegacyUsageType(direction, sourceType) {
+  const normalizedDirection = normalizeDirection(direction);
+  const normalizedSourceType = normalizeString(sourceType).toLowerCase();
+
+  if (normalizedSourceType === 'lesson_charge') {
+    return 'standard';
+  }
+  if (normalizedSourceType === 'reversal') {
+    return normalizedDirection === 'CREDIT' ? 'manual_topup' : 'refund';
+  }
+  if (normalizedDirection === 'CREDIT') {
+    return MANUAL_CREDIT_USAGE_TYPE_BY_SOURCE[normalizedSourceType] || 'manual_topup';
+  }
+  return MANUAL_DEBIT_USAGE_TYPE_BY_SOURCE[normalizedSourceType] || 'manual_adjustment';
+}
+
+function buildLegacyLedgerCompatFields({
+  orgId,
+  direction,
+  sourceType,
+}) {
+  const normalizedOrgId = normalizeString(orgId);
+  const normalizedDirection = normalizeDirection(direction);
+  if (!normalizedOrgId || !normalizedDirection) {
+    throw new Error('invalid_legacy_ledger_compat_fields');
+  }
+
+  return {
+    org_id: normalizedOrgId,
+    transaction_type: normalizedDirection,
+    usage_type: resolveLegacyUsageType(normalizedDirection, sourceType),
+  };
+}
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -832,12 +866,16 @@ export default class BillingLedgerService {
     }
 
     const instance = participant.lesson_instance;
-    const serviceMap = await loadServiceMap(this.tenantClient, this.orgId, [instance.service_id]);
+    const effectiveOrgId = normalizeString(this.orgId || instance?.org_id);
+    if (!effectiveOrgId) {
+      throw new Error('missing_org_id');
+    }
+    const serviceMap = await loadServiceMap(this.tenantClient, effectiveOrgId, [instance.service_id]);
     const service = serviceMap.get(instance.service_id) || null;
-    const policies = await loadFinancePolicies(this.tenantClient, this.orgId || instance.org_id);
+    const policies = await loadFinancePolicies(this.tenantClient, effectiveOrgId);
     const coverageDecision = participant.student_id
       ? await resolveLessonCoverageDecision(this.tenantClient, {
-        orgId: this.orgId,
+        orgId: effectiveOrgId,
         studentId: participant.student_id,
         serviceId: instance.service_id,
         lessonDate: instance.datetime_start,
@@ -865,14 +903,14 @@ export default class BillingLedgerService {
     const existingOpenCharges = await loadOpenLessonCharges(this.tenantClient, lessonParticipantId);
     const desiredEntries = [];
     for (const descriptor of desiredResult.entries) {
-      const ledgerAccount = await resolveLedgerAccount(this.tenantClient, this.orgId, descriptor.accountType, descriptor.accountRefId);
+      const ledgerAccount = await resolveLedgerAccount(this.tenantClient, effectiveOrgId, descriptor.accountType, descriptor.accountRefId);
       desiredEntries.push({
         ledger_account_id: ledgerAccount.id,
         direction: descriptor.direction,
         amount: descriptor.amount,
-        student_id: descriptor.accountType === STUDENT_ACCOUNT_TYPE ? descriptor.accountRefId : participant.student_id || null,
-        client_profile_id: descriptor.accountType === CLIENT_ACCOUNT_TYPE ? descriptor.accountRefId : participant.client_profile_id || null,
-        hmo_provider_id: descriptor.accountType === HMO_ACCOUNT_TYPE ? descriptor.accountRefId : null,
+        student_id: ledgerAccount.studentId || null,
+        client_profile_id: ledgerAccount.clientProfileId || participant.client_profile_id || null,
+        hmo_provider_id: ledgerAccount.hmoProviderId || null,
         hmo_authorization_id: descriptor.hmoAuthorizationId || null,
         service_id: instance.service_id || null,
         rate_source: descriptor.rateSource,
@@ -914,6 +952,11 @@ export default class BillingLedgerService {
     });
 
     const reversalRows = existingOpenCharges.map((original) => ({
+      ...buildLegacyLedgerCompatFields({
+        orgId: effectiveOrgId,
+        direction: normalizeDirection(original.direction) === 'DEBIT' ? 'CREDIT' : 'DEBIT',
+        sourceType: 'reversal',
+      }),
       ledger_account_id: original.ledger_account_id,
       direction: normalizeDirection(original.direction) === 'DEBIT' ? 'CREDIT' : 'DEBIT',
       amount: coerceAgorot(original.amount),
@@ -939,6 +982,11 @@ export default class BillingLedgerService {
     }));
 
     const debitRows = desiredEntries.map((entry) => ({
+      ...buildLegacyLedgerCompatFields({
+        orgId: effectiveOrgId,
+        direction: entry.direction,
+        sourceType: 'lesson_charge',
+      }),
       ...entry,
       effective_at: effectiveTimestamp,
       source_type: 'lesson_charge',
@@ -1204,6 +1252,12 @@ export default class BillingLedgerService {
     }
 
     const reversal = await appendLedgerTransaction(this.tenantClient, {
+      ...buildLegacyLedgerCompatFields({
+        orgId: original.org_id || this.orgId,
+        direction: normalizeDirection(original.direction) === 'DEBIT' ? 'CREDIT' : 'DEBIT',
+        sourceType: normalizeString(sourceType) || 'reversal',
+      }),
+      org_id: original.org_id || this.orgId,
       ledger_account_id: original.ledger_account_id,
       direction: normalizeDirection(original.direction) === 'DEBIT' ? 'CREDIT' : 'DEBIT',
       amount: coerceAgorot(original.amount),

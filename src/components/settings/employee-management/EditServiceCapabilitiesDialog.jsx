@@ -6,24 +6,31 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { Briefcase, CalendarClock, Plus, Trash2, Users, DollarSign, AlertCircle } from 'lucide-react';
+import { Briefcase, CalendarClock, Plus, Trash2, Users, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client';
 import { DAY_OPTIONS } from '@/lib/day-of-week.js';
 import { getAvailabilitySummary, normalizeAvailabilityWindows } from '@/lib/instructor-availability.js';
-import { toShekel, toAgorot } from '@/lib/currency.js';
+import CapabilityCompensationFields from './CapabilityCompensationFields.jsx';
+import {
+  buildCapabilityCompensationSummary,
+  hydrateCapabilityCompensationForm,
+  serializeCapabilityCompensation,
+} from '@/lib/instructor-compensation.js';
 
 function createEmptyWindow() {
   return { day: '', start: '', end: '' };
 }
 
 function createEmptyCapability(serviceId = '') {
+  const payConfig = hydrateCapabilityCompensationForm({ base_rate: 0, metadata: {} });
   return {
     service_id: serviceId,
     max_students: 1,
     base_rate: 0,
     availability_windows: serviceId ? [createEmptyWindow()] : [],
     metadata: {},
+    pay_config: { ...payConfig, amountInput: '' },
   };
 }
 
@@ -65,9 +72,9 @@ export default function EditServiceCapabilitiesDialog({
       const baseCapabilities = Array.isArray(instructor.service_capabilities)
         ? instructor.service_capabilities.map((capability) => ({
             ...capability,
-            base_rate: capability.base_rate != null ? toShekel(capability.base_rate) : '',
             availability_windows: Array.isArray(capability.availability_windows) ? capability.availability_windows : [],
             metadata: capability.metadata || {},
+            pay_config: hydrateCapabilityCompensationForm(capability),
           }))
         : [];
 
@@ -206,9 +213,8 @@ export default function EditServiceCapabilitiesDialog({
           service_capabilities: capabilities.map((capability, index) => ({
             service_id: capability.service_id,
             max_students: capability.max_students || 1,
-            base_rate: capability.base_rate === '' ? 0 : toAgorot(capability.base_rate),
+            ...serializeCapabilityCompensation(capability),
             availability_windows: validationByCapability[index].value,
-            metadata: capability.metadata || {},
           })),
         },
       });
@@ -229,7 +235,7 @@ export default function EditServiceCapabilitiesDialog({
         <DialogHeader>
           <DialogTitle>שירותים וזמינות לפי שירות</DialogTitle>
           <DialogDescription>
-            לכל שירות מגדירים קיבולת, תעריף בסיס וחלונות זמינות. אלו הם נתוני התזמון הקובעים של המדריך/ה.
+            לכל שירות מגדירים קיבולת, אופן תשלום וחלונות זמינות. אלו הם נתוני התזמון הקובעים של המדריך/ה.
           </DialogDescription>
         </DialogHeader>
 
@@ -284,7 +290,7 @@ export default function EditServiceCapabilitiesDialog({
                         </Button>
                       </div>
 
-                      <div className="grid gap-3 md:grid-cols-3">
+                      <div className="grid gap-3 md:grid-cols-2">
                         <div className="space-y-1">
                           <Label className="text-xs text-end flex items-center gap-1">
                             <Briefcase className="h-3 w-3" />
@@ -324,24 +330,26 @@ export default function EditServiceCapabilitiesDialog({
                             dir="ltr"
                           />
                         </div>
-
-                        <div className="space-y-1">
-                          <Label className="text-xs text-end flex items-center gap-1">
-                            <DollarSign className="h-3 w-3" />
-                            תעריף בסיס (₪)
-                          </Label>
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={capability.base_rate}
-                            onChange={(e) => updateCapability(capabilityIndex, 'base_rate', parseFloat(e.target.value) || 0)}
-                            disabled={isSaving}
-                            className="text-end"
-                            dir="ltr"
-                          />
-                        </div>
                       </div>
+
+                      <CapabilityCompensationFields
+                        capability={capability}
+                        service={services.find((service) => service.id === capability.service_id) || null}
+                        disabled={isSaving}
+                        onChange={(payConfig) => updateCapability(capabilityIndex, 'pay_config', payConfig)}
+                      />
+
+                      {capability.service_id ? (
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                          {(() => {
+                            const summary = buildCapabilityCompensationSummary(
+                              capability,
+                              services.find((service) => service.id === capability.service_id) || null,
+                            );
+                            return `תצוגה בכרטיס העובד: ${summary.valueLabel} • ${summary.basisLabel}`;
+                          })()}
+                        </div>
+                      ) : null}
 
                       <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3">
                         <div className="flex items-center justify-between gap-2">

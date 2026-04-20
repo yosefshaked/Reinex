@@ -1,8 +1,10 @@
 /* eslint-env node */
 import {
-  computeLessonInstructorPayoutAmount,
   lessonHasInstructorCompensation,
+  loadGraceCancellationParticipantIds,
   loadFinancePolicies,
+  resolveCompensationEligibleParticipants,
+  resolveLessonInstructorPayout,
   toDateKey,
 } from './employee-finance.js';
 import { normalizeEntityVersion } from './calendar-editing.js';
@@ -105,7 +107,7 @@ async function loadServicesMap(tenantClient, serviceIds = []) {
 
   const { data, error } = await tenantClient
     .from('Services')
-    .select('id, default_customer_charge_amount')
+    .select('id, payment_model, default_customer_charge_amount')
     .in('id', ids);
 
   if (error) {
@@ -384,19 +386,42 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
     currentInstance.service_id,
     effectiveInstance.service_id,
   ]);
+  const graceParticipantIds = await loadGraceCancellationParticipantIds(
+    tenantClient,
+    currentParticipants.map((participant) => participant.id).filter(Boolean),
+  );
+  const currentCompensationParticipants = resolveCompensationEligibleParticipants(
+    context.participants,
+    policies,
+    graceParticipantIds,
+  );
+  const proposedCompensationParticipants = resolveCompensationEligibleParticipants(
+    effectiveParticipants,
+    policies,
+    graceParticipantIds,
+  );
 
   const originalRate = rateMap.get(buildRateKey(context.instance.instructor_employee_id, context.instance.service_id)) || 0;
-  const currentRate = rateMap.get(buildRateKey(currentInstance.instructor_employee_id, currentInstance.service_id)) || 0;
   const proposedRate = rateMap.get(buildRateKey(effectiveInstance.instructor_employee_id, effectiveInstance.service_id)) || 0;
   const baseCurrentPayout = shouldInstructorEarn(context.instance, context.participants, policies)
-    ? computeLessonInstructorPayoutAmount(context.instance, originalRate)
+    ? resolveLessonInstructorPayout({
+      instance: context.instance,
+      rateUsed: originalRate,
+      servicePaymentModel: serviceMap.get(context.instance.service_id)?.payment_model,
+      compensationParticipants: currentCompensationParticipants,
+    }).payoutAmount
     : 0;
   const correctionPayrollDelta = roundCurrency(
     context.financeAdjustmentRows.reduce((sum, row) => sum + coerceAgorot(row.amount), 0),
   );
   const currentPayout = roundCurrency(baseCurrentPayout + correctionPayrollDelta);
   const proposedPayout = shouldInstructorEarn(effectiveInstance, effectiveParticipants, policies)
-    ? computeLessonInstructorPayoutAmount(effectiveInstance, proposedRate)
+    ? resolveLessonInstructorPayout({
+      instance: effectiveInstance,
+      rateUsed: proposedRate,
+      servicePaymentModel: serviceMap.get(effectiveInstance.service_id)?.payment_model,
+      compensationParticipants: proposedCompensationParticipants,
+    }).payoutAmount
     : 0;
 
   const currentWorkedMinutes = computeWorkedMinutes(context.instance, context.participants, policies)
@@ -466,7 +491,7 @@ export async function buildInstanceCorrectionPreview(tenantClient, options) {
     },
     impact_snapshot: {
       payroll: {
-        current_rate: currentRate,
+        current_rate: originalRate,
         proposed_rate: proposedRate,
         current_payout: currentPayout,
         proposed_payout: proposedPayout,

@@ -35,5 +35,9 @@
 - `GET /api/instructors` manually loads and merges those tables; keep that response shape stable.
 - `working_days` currently lives on `Employees`; UI already documents that source.
 - Service capabilities include `availability_windows`; scheduling rules depend on them.
+- Instructor service capability pay setup is hybrid:
+  - `base_rate` remains the canonical hourly payout in agorot for payroll math
+  - the admin-facing original entry choice is preserved in `metadata.compensation_input`
+  - supported preserved modes are `hourly` and `duration_based`
 - User linking and invitations are handled inside employee management, not a separate team-management system.
 - Leave, attendance, and payroll rules live in [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js); do not recode them in UI panels.

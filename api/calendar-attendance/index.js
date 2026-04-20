@@ -20,9 +20,11 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import {
-  computeLessonInstructorPayoutAmount,
   lessonHasInstructorCompensation,
+  loadGraceCancellationParticipantIds,
   loadFinancePolicies,
+  resolveCompensationEligibleParticipants,
+  resolveLessonInstructorPayout,
   syncLessonInstructorEarnings,
   syncInstructorAttendanceFromLessons,
   validateInstructorRateForLesson,
@@ -586,6 +588,10 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   if (!instanceDetail) return null;
 
   const currentParticipants = allParticipants || [];
+  const graceParticipantIds = await loadGraceCancellationParticipantIds(
+    client,
+    currentParticipants.map((row) => row.id).filter(Boolean),
+  );
   const projectedParticipants = projectParticipantsForStatusChange(
     currentParticipants,
     body.participant_id,
@@ -654,7 +660,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
         .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     withOrgScope(client, 'Services', orgId)
-      .select('id, name, default_customer_charge_amount')
+      .select('id, name, payment_model, default_customer_charge_amount')
       .eq('id', instanceDetail.service_id)
       .maybeSingle(),
     withOrgScope(client, 'instructor_service_capabilities', orgId)
@@ -673,7 +679,12 @@ async function buildParticipantStatusPreview(client, orgId, body, {
   if (serviceError && serviceError.code !== 'PGRST116') throw serviceError;
   if (capabilityError && capabilityError.code !== 'PGRST116' && capabilityError.code !== '42P01') throw capabilityError;
   const currentShouldInstructorEarn = Array.isArray(lessonEarningRows) && lessonEarningRows.length > 0;
-  const projectedShouldInstructorEarn = lessonHasInstructorCompensation(projectedParticipants, policies);
+  const projectedCompensationParticipants = resolveCompensationEligibleParticipants(
+    projectedParticipants,
+    policies,
+    graceParticipantIds,
+  );
+  const projectedShouldInstructorEarn = projectedCompensationParticipants.length > 0;
 
   const allDayLessons = dayLessons || [];
   const dayLessonIds = allDayLessons.map((row) => row.id).filter(Boolean);
@@ -709,7 +720,12 @@ async function buildParticipantStatusPreview(client, orgId, body, {
 
   const openHmoTask = (dashboardTasks || []).find((task) => task.task_type === 'hmo_claim_submission' && task.status === 'open') || null;
   const storedLessonEarningAmount = coerceAgorot((lessonEarningRows || []).reduce((sum, row) => sum + coerceAgorot(row?.payout_amount), 0));
-  const inferredLessonEarningAmount = computeLessonInstructorPayoutAmount(instanceDetail, capabilityRow?.base_rate || 0);
+  const inferredLessonEarningAmount = resolveLessonInstructorPayout({
+    instance: instanceDetail,
+    rateUsed: capabilityRow?.base_rate || 0,
+    servicePaymentModel: serviceRow?.payment_model,
+    compensationParticipants: projectedCompensationParticipants,
+  }).payoutAmount;
   const lessonEarningAmount = storedLessonEarningAmount;
   const ledgerAmount = coerceAgorot((billingArtifactRows || []).reduce((sum, row) => {
     if (row.direction === 'DEBIT') return sum + coerceAgorot(row.amount);

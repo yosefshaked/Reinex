@@ -39,6 +39,7 @@ export const LEAVE_ENTRY_STATUSES = new Set(['approved', 'cancelled']);
 export const LEAVE_DURATION_MODES = new Set(['full_day', 'half_day']);
 export const HALF_DAY_PARTS = new Set(['first_half', 'second_half']);
 export const PAYROLL_MODELS = new Set(['hourly', 'monthly_salary', 'lesson_based']);
+export const SERVICE_PAYMENT_MODELS = new Set(['fixed_rate', 'per_student']);
 export const FINANCE_CORRECTION_TYPES = new Set(['bonus', 'deduction', 'adjustment', 'correction']);
 export const BILLING_SOURCE_TYPES = new Set(['lesson', 'transfer', 'adjustment']);
 export const LEAVE_PAY_METHODS = new Set(['legal', 'avg_hourly_x_avg_day_hours', 'fixed_rate']);
@@ -288,14 +289,73 @@ export function lessonHasInstructorCompensation(participants = [], policies = nu
   return (participants || []).some((participant) => shouldParticipantTriggerInstructorCompensation(participant, policies));
 }
 
+export function normalizeServicePaymentModel(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return SERVICE_PAYMENT_MODELS.has(normalized) ? normalized : 'fixed_rate';
+}
+
+export async function loadGraceCancellationParticipantIds(tenantClient, participantIds = []) {
+  const ids = Array.from(new Set((participantIds || []).map((participantId) => normalizeString(participantId)).filter(Boolean)));
+  if (ids.length === 0) {
+    return new Set();
+  }
+
+  const { data: graceRows, error: graceRowsError } = await tenantClient
+    .from('grace_cancellation_requests')
+    .select('lesson_participant_id')
+    .in('lesson_participant_id', ids);
+
+  if (graceRowsError && graceRowsError.code !== '42P01') {
+    throw graceRowsError;
+  }
+
+  return new Set((graceRows || [])
+    .map((row) => normalizeString(row?.lesson_participant_id))
+    .filter(Boolean));
+}
+
+export function resolveCompensationEligibleParticipants(participants = [], policies = null, graceParticipantIds = new Set()) {
+  return (participants || []).filter((participant) => (
+    !graceParticipantIds.has(normalizeString(participant?.id))
+    && shouldParticipantTriggerInstructorCompensation(participant, policies)
+  ));
+}
+
+export function resolveLessonInstructorPayout({
+  instance,
+  rateUsed,
+  servicePaymentModel = 'fixed_rate',
+  compensationParticipants = [],
+} = {}) {
+  const normalizedRate = coerceAgorot(rateUsed);
+  const normalizedPaymentModel = normalizeServicePaymentModel(servicePaymentModel);
+  const participantCount = Array.isArray(compensationParticipants) ? compensationParticipants.length : 0;
+  const participantMultiplier = normalizedPaymentModel === 'per_student'
+    ? participantCount
+    : (participantCount > 0 ? 1 : 0);
+  const payoutAmount = Math.round(normalizedRate * (Number(instance?.duration_minutes || 0) / 60) * participantMultiplier);
+
+  return {
+    rateUsed: normalizedRate,
+    participantMultiplier,
+    payoutAmount,
+    servicePaymentModel: normalizedPaymentModel,
+  };
+}
+
 /**
  * Compute instructor payout for a single lesson in agorot.
  * @param {object} instance - lesson instance with duration_minutes
  * @param {number} rateUsed - hourly rate in agorot
  * @returns {number} payout in agorot
  */
-export function computeLessonInstructorPayoutAmount(instance, rateUsed) {
-  return Math.round(coerceAgorot(rateUsed) * (Number(instance?.duration_minutes || 0) / 60));
+export function computeLessonInstructorPayoutAmount(instance, rateUsed, options = {}) {
+  return resolveLessonInstructorPayout({
+    instance,
+    rateUsed,
+    servicePaymentModel: options?.servicePaymentModel,
+    compensationParticipants: options?.compensationParticipants,
+  }).payoutAmount;
 }
 
 function groupRecordsByDate(records = []) {
@@ -749,7 +809,7 @@ export async function syncLessonInstructorEarnings(
   if (!resolvedInstance) {
     const { data: instanceData, error: instanceError } = await tenantClient
       .from('lesson_instances')
-      .select('id, instructor_employee_id, service_id, duration_minutes, status, datetime_start')
+      .select('id, org_id, instructor_employee_id, service_id, duration_minutes, status, datetime_start')
       .eq('id', lessonInstanceId)
       .maybeSingle();
 
@@ -778,22 +838,7 @@ export async function syncLessonInstructorEarnings(
   const participantIds = (resolvedParticipants || [])
     .map((participant) => normalizeString(participant?.id))
     .filter(Boolean);
-  const { data: graceRows, error: graceRowsError } = participantIds.length > 0
-    ? await tenantClient
-      .from('grace_cancellation_requests')
-      .select('lesson_participant_id')
-      .in('lesson_participant_id', participantIds)
-    : { data: [], error: null };
-
-  if (graceRowsError && graceRowsError.code !== '42P01') {
-    throw graceRowsError;
-  }
-
-  const graceParticipantIds = new Set((graceRows || [])
-    .map((row) => normalizeString(row?.lesson_participant_id))
-    .filter(Boolean));
-  const compensationParticipants = (resolvedParticipants || [])
-    .filter((participant) => !graceParticipantIds.has(normalizeString(participant?.id)));
+  const graceParticipantIds = await loadGraceCancellationParticipantIds(tenantClient, participantIds);
 
   const { error: lockStateError, result: lockState } = await fetchLessonMutationState(tenantClient, {
     instanceId: lessonInstanceId,
@@ -818,7 +863,12 @@ export async function syncLessonInstructorEarnings(
   const lessonLocked = isLockedState(lockState) || hasLockedParticipants;
 
   const resolvedPolicies = policies || await loadFinancePolicies(tenantClient, resolvedInstance?.org_id);
-  const shouldInstructorEarn = lessonHasInstructorCompensation(compensationParticipants, resolvedPolicies);
+  const compensationParticipants = resolveCompensationEligibleParticipants(
+    resolvedParticipants,
+    resolvedPolicies,
+    graceParticipantIds,
+  );
+  const shouldInstructorEarn = compensationParticipants.length > 0;
 
   if (!shouldInstructorEarn || !resolvedInstance.instructor_employee_id) {
     if (lessonLocked) {
@@ -852,34 +902,66 @@ export async function syncLessonInstructorEarnings(
     };
   }
 
-  const { data: capability, error: capabilityError } = await tenantClient
-    .from('instructor_service_capabilities')
-    .select('base_rate')
-    .eq('employee_id', resolvedInstance.instructor_employee_id)
-    .eq('service_id', resolvedInstance.service_id)
-    .maybeSingle();
+  const capabilityQuery = resolvedInstance?.org_id
+    ? withOrgScope(tenantClient, 'instructor_service_capabilities', resolvedInstance.org_id)
+      .select('base_rate')
+      .eq('employee_id', resolvedInstance.instructor_employee_id)
+      .eq('service_id', resolvedInstance.service_id)
+      .maybeSingle()
+    : tenantClient
+      .from('instructor_service_capabilities')
+      .select('base_rate')
+      .eq('employee_id', resolvedInstance.instructor_employee_id)
+      .eq('service_id', resolvedInstance.service_id)
+      .maybeSingle();
+
+  const serviceQuery = resolvedInstance?.org_id
+    ? withOrgScope(tenantClient, 'Services', resolvedInstance.org_id)
+      .select('payment_model')
+      .eq('id', resolvedInstance.service_id)
+      .maybeSingle()
+    : tenantClient
+      .from('Services')
+      .select('payment_model')
+      .eq('id', resolvedInstance.service_id)
+      .maybeSingle();
+
+  const [{ data: capability, error: capabilityError }, { data: serviceRow, error: serviceError }] = await Promise.all([
+    capabilityQuery,
+    serviceQuery,
+  ]);
 
   if (capabilityError && capabilityError.code !== '42P01') {
     throw capabilityError;
   }
+  if (serviceError && serviceError.code !== '42P01' && serviceError.code !== 'PGRST116') {
+    throw serviceError;
+  }
 
-  const rateUsed = Number.isFinite(Number(capability?.base_rate)) ? Number(capability.base_rate) : 0;
-  const payoutAmount = computeLessonInstructorPayoutAmount(resolvedInstance, rateUsed);
+  const payout = resolveLessonInstructorPayout({
+    instance: resolvedInstance,
+    rateUsed: Number.isFinite(Number(capability?.base_rate)) ? Number(capability.base_rate) : 0,
+    servicePaymentModel: serviceRow?.payment_model,
+    compensationParticipants,
+  });
   const { error: earningError } = await tenantClient
     .from('lesson_earnings')
     .upsert({
       employee_id: resolvedInstance.instructor_employee_id,
       lesson_instance_id: lessonInstanceId,
-      rate_used: rateUsed,
-      payout_amount: payoutAmount,
+      rate_used: payout.rateUsed,
+      payout_amount: payout.payoutAmount,
       metadata: {
         service_id: resolvedInstance.service_id,
         lesson_date: toDateKey(resolvedInstance.datetime_start),
+        service_payment_model: payout.servicePaymentModel,
         lesson_status_at_sync: resolvedInstance.status || null,
-        participant_statuses: compensationParticipants.map((participant) => ({
+        participant_statuses: resolvedParticipants.map((participant) => ({
           participant_id: participant?.id || null,
           participant_status: participant?.participant_status || null,
         })),
+        compensation_participant_count: compensationParticipants.length,
+        compensation_participant_ids: compensationParticipants.map((participant) => participant?.id).filter(Boolean),
         instructor_compensation_triggered: true,
         policy_snapshot: {
           instructor_earnings_policy: resolvedPolicies.instructorEarningsPolicy,
@@ -894,7 +976,7 @@ export async function syncLessonInstructorEarnings(
   return {
     lesson_instance_id: lessonInstanceId,
     instructor_earned: true,
-    payout_amount: payoutAmount,
+    payout_amount: payout.payoutAmount,
   };
 }
 
