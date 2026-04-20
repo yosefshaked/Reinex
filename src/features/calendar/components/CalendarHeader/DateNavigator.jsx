@@ -181,6 +181,7 @@ export function DateNavigator({ currentDate, onDateChange, onNavigate, viewMode 
 
             <div className="p-3">
               <CalendarPicker
+                dir="rtl"
                 locale={he}
                 weekStartsOn={0}
                 showOutsideDays

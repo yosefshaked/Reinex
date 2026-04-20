@@ -282,6 +282,9 @@ export default function StudentDetailPage() {
         error={updateError}
         onClose={handleCloseEdit}
         onSubmit={handleUpdateStudent}
+        orgId={activeOrgId}
+        session={session}
+        onSuspendSuccess={loadStudent}
       />
     </div>
   );

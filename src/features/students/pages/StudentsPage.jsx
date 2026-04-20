@@ -926,6 +926,9 @@ export default function StudentsPage() {
           error={updateError}
           onClose={handleEditModalClose}
           onSubmit={handleEditSubmit}
+          orgId={activeOrgId}
+          session={session}
+          onSuspendSuccess={handleMaintenanceCompleted}
         />
       )}
 

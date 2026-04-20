@@ -31,6 +31,7 @@ export default function SuspendStudentDialog({
   orgId,
   session,
   onSuccess,
+  studentUpdatePayload = null,
 }) {
   const [mode, setMode] = useState('immediate'); // 'immediate' | 'from-date'
   const [selectedDate, setSelectedDate] = useState(null);
@@ -54,12 +55,24 @@ export default function SuspendStudentDialog({
 
     setIsProcessing(true);
     try {
-      // Step 1: Suspend the student
-      await authenticatedFetch(`students-list/${student.id}`, {
-        method: 'PATCH',
-        body: { org_id: orgId, is_active: false },
-        session,
-      });
+      // Step 1: Suspend the student, optionally with a full edit payload
+      if (studentUpdatePayload && typeof studentUpdatePayload === 'object') {
+        await authenticatedFetch(`students-list/${student.id}`, {
+          method: 'PUT',
+          body: {
+            ...studentUpdatePayload,
+            org_id: orgId,
+            isActive: false,
+          },
+          session,
+        });
+      } else {
+        await authenticatedFetch(`students-list/${student.id}`, {
+          method: 'PATCH',
+          body: { org_id: orgId, is_active: false },
+          session,
+        });
+      }
 
       // Step 2: Bulk-cancel future lessons
       const cancelResult = await authenticatedFetch('lesson-instances', {
