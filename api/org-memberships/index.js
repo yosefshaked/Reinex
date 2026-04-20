@@ -3,6 +3,7 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { readEnv, respond as _respond, isAdminRole } from '../_shared/org-bff.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { getAuthUserById } from '../_shared/auth-users.js';
 function getAdminClient(context) {
   const cfg = readSupabaseAdminConfig(readEnv(context));
   if (!cfg.supabaseUrl || !cfg.serviceRoleKey) return { client: null, error: new Error('missing_admin_credentials') };
@@ -141,15 +142,13 @@ async function handlePatch(context, req, supabase, membershipId){
   if (normalizedName.provided){
     if (!target.user_id){ respond(context,400,{message:'membership missing user id'}); return; }
 
-    const profileResult = await supabase.from('profiles').select('id, email, full_name').eq('id', target.user_id).maybeSingle();
+    const profileResult = await supabase.from('profiles').select('id, full_name').eq('id', target.user_id).maybeSingle();
     if (profileResult.error){ respond(context,500,{message:'failed to load profile'}); return; }
 
     let authUserRecord = null;
     let previousMetadata = null;
     try {
-      const adminResult = await supabase.auth.admin.getUserById(target.user_id);
-      if (adminResult.error){ throw adminResult.error; }
-      authUserRecord = adminResult.data?.user ?? null;
+      authUserRecord = await getAuthUserById(supabase, target.user_id);
       previousMetadata = authUserRecord?.user_metadata ? { ...authUserRecord.user_metadata } : {};
     } catch (error){
       context.log?.error?.('org-memberships failed to load auth user for name update', { membershipId, userId: target.user_id, message: error?.message });
@@ -174,8 +173,6 @@ async function handlePatch(context, req, supabase, membershipId){
       id: target.user_id,
       full_name: normalizedName.value,
     };
-    if (profileResult.data?.email){ profilePayload.email = profileResult.data.email; }
-    else if (authUserRecord?.email){ profilePayload.email = authUserRecord.email.toLowerCase(); }
 
     const profileUpdate = await supabase
       .from('profiles')

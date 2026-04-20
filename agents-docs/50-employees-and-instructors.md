@@ -32,6 +32,7 @@
   - `Employees` is the base record
   - `instructor_profiles` adds profile-only fields
   - `instructor_service_capabilities` stores per-service capability rows
+- `employee_type` (`instructor` / `office`) is not the same thing as the organization membership role (`member` / `admin` / `owner`). Employee screens may surface both, but org-level authority changes must go through the shared org-membership flow instead of inventing a second role system.
 - `GET /api/instructors` manually loads and merges those tables; keep that response shape stable.
 - `working_days` currently lives on `Employees`; UI already documents that source.
 - Service capabilities include `availability_windows`; scheduling rules depend on them.

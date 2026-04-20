@@ -13,6 +13,7 @@ import {
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
+import { findAuthUserByEmail, getAuthUserById } from '../_shared/auth-users.js';
 
 async function loadEmployee(client, orgId, employeeId) {
   const { data, error } = await withOrgScope(client, 'Employees', orgId)
@@ -58,35 +59,14 @@ function resolveInvitationRedirect(context, req, env) {
 }
 
 async function findExistingMemberByEmail(supabase, orgId, email) {
-  let profileId = null;
-
-  let profileResult = await supabase
-    .from('profiles')
-    .select('id')
-    .eq('email', email)
-    .maybeSingle();
-
-  if (profileResult.error) {
-    return { error: profileResult.error, userId: null };
+  let authUser = null;
+  try {
+    authUser = await findAuthUserByEmail(supabase, email);
+  } catch (error) {
+    return { error, userId: null };
   }
 
-  profileId = profileResult.data?.id ?? null;
-
-  if (!profileId) {
-    profileResult = await supabase
-      .from('profiles')
-      .select('id')
-      .ilike('email', email)
-      .maybeSingle();
-
-    if (profileResult.error) {
-      return { error: profileResult.error, userId: null };
-    }
-
-    profileId = profileResult.data?.id ?? null;
-  }
-
-  if (!profileId) {
+  if (!authUser?.id) {
     return { error: null, userId: null };
   }
 
@@ -94,7 +74,7 @@ async function findExistingMemberByEmail(supabase, orgId, email) {
     .from('org_memberships')
     .select('user_id')
     .eq('org_id', orgId)
-    .eq('user_id', profileId)
+    .eq('user_id', authUser.id)
     .maybeSingle();
 
   if (membershipResult.error) {
@@ -355,9 +335,10 @@ async function directLinkFlow({
 
   const { data: memberProfile } = await supabase
     .from('profiles')
-    .select('id, email, full_name')
+    .select('id, full_name')
     .eq('id', memberUserId)
     .maybeSingle();
+  const memberAuthUser = await getAuthUserById(supabase, memberUserId).catch(() => null);
 
   await logAuditEvent(supabase, {
     orgId,
@@ -372,7 +353,7 @@ async function directLinkFlow({
       employee_id: employeeId,
       employee_name: `${employee.first_name || ''} ${employee.last_name || ''}`.trim(),
       member_user_id: memberUserId,
-      member_email: memberProfile?.email || null,
+      member_email: memberAuthUser?.email || null,
       member_name: memberProfile?.full_name || null,
     },
   });
@@ -380,7 +361,12 @@ async function directLinkFlow({
   return respond(context, 200, {
     message: 'member_linked',
     employee: updatedEmployee,
-    member: memberProfile || { id: memberUserId, role: membership.role },
+    member: memberProfile
+      ? {
+        ...memberProfile,
+        email: memberAuthUser?.email || null,
+      }
+      : { id: memberUserId, role: membership.role, email: memberAuthUser?.email || null },
   });
 }
 

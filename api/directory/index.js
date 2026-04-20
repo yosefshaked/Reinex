@@ -2,6 +2,7 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { readEnv, respond as _respond } from '../_shared/org-bff.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { getAuthUsersByIds } from '../_shared/auth-users.js';
 
 function resolveAdminConfig(context) {
   return readSupabaseAdminConfig(readEnv(context));
@@ -136,10 +137,11 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
     );
 
     let profiles = [];
+    let authUsersById = new Map();
     if (userIds.length > 0) {
       const profilesResult = await supabase
         .from('profiles')
-        .select('id, email, full_name')
+        .select('id, full_name')
         .in('id', userIds);
 
       if (profilesResult.error) {
@@ -149,13 +151,32 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
       }
 
       profiles = Array.isArray(profilesResult.data) ? profilesResult.data : [];
+
+      try {
+        authUsersById = await getAuthUsersByIds(supabase, userIds);
+      } catch (error) {
+        logSupabaseQueryFailure(context, req, userId, 'fetching member auth users', error);
+        respond(context, 500, { message: 'failed to load members' });
+        return null;
+      }
     }
 
     const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
 
     return memberships.map((membership) => ({
       ...membership,
-      profile: profileMap.get(membership.user_id) ?? null,
+      profile: (() => {
+        const profile = profileMap.get(membership.user_id) ?? null;
+        const authUser = authUsersById.get(membership.user_id) ?? null;
+        if (!profile && !authUser) {
+          return null;
+        }
+        return {
+          id: membership.user_id,
+          full_name: profile?.full_name ?? null,
+          email: typeof authUser?.email === 'string' ? authUser.email.toLowerCase() : null,
+        };
+      })(),
     }));
   } catch (error) {
     logSupabaseQueryFailure(context, req, userId, 'fetching members', error);

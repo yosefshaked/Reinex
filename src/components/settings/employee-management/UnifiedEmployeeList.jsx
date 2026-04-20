@@ -21,6 +21,7 @@ import {
   RotateCcw,
   Search,
   Settings,
+  Shield,
   UserPlus,
   UserX,
 } from 'lucide-react';
@@ -28,6 +29,7 @@ import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client';
 import { useInstructors, useServices } from '@/hooks/useOrgData.js';
 import { cn } from '@/lib/utils';
+import { useOrg } from '@/org/OrgContext.jsx';
 import EmployeeWizardDialog from './EmployeeWizardDialog.jsx';
 import EmployeeActivityTimeline from './EmployeeActivityTimeline.jsx';
 import EmployeeAttendancePanel from './EmployeeAttendancePanel.jsx';
@@ -285,6 +287,7 @@ function MonthGroup({ groups, services, emptyTitle, emptyBody }) {
 }
 
 export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
+  const { members, updateMemberRole, enableDirectory, disableDirectory } = useOrg();
   const sessionAccessToken = session?.access_token || null;
   const authSession = useMemo(() => (sessionAccessToken ? { access_token: sessionAccessToken } : null), [sessionAccessToken]);
 
@@ -295,6 +298,8 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const [inviteUserDialogOpen, setInviteUserDialogOpen] = useState(false);
   const [inviteUserEmployee, setInviteUserEmployee] = useState(null);
   const [inviteUserEmail, setInviteUserEmail] = useState('');
+  const [showRoleDialog, setShowRoleDialog] = useState(false);
+  const [targetOrgRole, setTargetOrgRole] = useState('member');
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
@@ -314,6 +319,14 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     enabled: canLoad,
   });
   const { services } = useServices({ enabled: canLoad, orgId, session });
+
+  useEffect(() => {
+    if (!canLoad) return undefined;
+    enableDirectory();
+    return () => {
+      disableDirectory();
+    };
+  }, [canLoad, disableDirectory, enableDirectory]);
 
   const filteredEmployees = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -340,11 +353,39 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     return filteredEmployees.find((employee) => employee.id === selectedEmployeeId) || filteredEmployees[0];
   }, [filteredEmployees, selectedEmployeeId]);
 
+  const membersByUserId = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(members) ? members : []).forEach((member) => {
+      if (member?.user_id) {
+        map.set(member.user_id, member);
+      }
+    });
+    return map;
+  }, [members]);
+
+  const currentEmployeeMembership = useMemo(() => {
+    if (!currentEmployee?.user_id) return null;
+    return membersByUserId.get(currentEmployee.user_id) || null;
+  }, [currentEmployee, membersByUserId]);
+
+  const currentEmployeeOrgRole = String(currentEmployeeMembership?.role || 'member').toLowerCase();
+  const currentEmployeeRoleLabel = currentEmployeeOrgRole === 'owner'
+    ? 'בעלים'
+    : currentEmployeeOrgRole === 'admin'
+      ? 'מנהל/ת ארגון'
+      : 'חבר/ת ארגון';
+  const canManageCurrentEmployeeRole = Boolean(currentEmployeeMembership?.id && currentEmployeeOrgRole !== 'owner');
+
   useEffect(() => {
     if (currentEmployee?.id && currentEmployee.id !== selectedEmployeeId) {
       setSelectedEmployeeId(currentEmployee.id);
     }
   }, [currentEmployee, selectedEmployeeId]);
+
+  useEffect(() => {
+    if (!showRoleDialog) return;
+    setTargetOrgRole(currentEmployeeOrgRole === 'admin' ? 'admin' : 'member');
+  }, [currentEmployeeOrgRole, showRoleDialog]);
 
   const openEmployeeEditor = useCallback((employee) => {
     setSelectedEmployee(employee);
@@ -555,6 +596,26 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
       setActionState(REQUEST.idle);
     }
   };
+
+  const handleSaveOrgRole = useCallback(async () => {
+    if (!currentEmployeeMembership?.id) return;
+    if (targetOrgRole === currentEmployeeOrgRole) {
+      setShowRoleDialog(false);
+      return;
+    }
+
+    setActionState(REQUEST.loading);
+    try {
+      await updateMemberRole(currentEmployeeMembership.id, targetOrgRole);
+      toast.success(targetOrgRole === 'admin' ? 'העובד קודם למנהל ארגון.' : 'הרשאת המנהל הוסרה.');
+      setShowRoleDialog(false);
+    } catch (error) {
+      console.error('Failed to update employee org role', error);
+      toast.error(error?.message || 'עדכון הרשאת הארגון נכשל.');
+    } finally {
+      setActionState(REQUEST.idle);
+    }
+  }, [currentEmployeeMembership, currentEmployeeOrgRole, targetOrgRole, updateMemberRole]);
 
   if (!canLoad) {
     return <div className="rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-600">נדרש חיבור Supabase פעיל כדי לנהל עובדים.</div>;
@@ -851,11 +912,29 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                     <SectionCard
                       title="כרטיס עובד"
                       description="זהות, קישור משתמש ופרטי העסקה בסיסיים"
-                      action={<Button size="sm" variant="outline" onClick={() => openEmployeeEditor(currentEmployee)}><Settings className="me-2 h-4 w-4" />ערוך</Button>}
+                      action={(
+                        <div className="flex flex-wrap gap-2">
+                          {canManageCurrentEmployeeRole ? (
+                            <Button size="sm" variant="outline" onClick={() => setShowRoleDialog(true)}>
+                              <Shield className="me-2 h-4 w-4" />
+                              הרשאות ארגון
+                            </Button>
+                          ) : null}
+                          <Button size="sm" variant="outline" onClick={() => openEmployeeEditor(currentEmployee)}>
+                            <Settings className="me-2 h-4 w-4" />
+                            ערוך
+                          </Button>
+                        </div>
+                      )}
                     >
                       <div className="grid gap-x-4 gap-y-0 md:grid-cols-2">
                         <Row label="שם מלא" value={getEmployeeName(currentEmployee)} />
                         <Row label="קישור משתמש" value={currentEmployee.user_id ? 'מחובר לחשבון פעיל' : 'ללא משתמש מקושר'} />
+                        <Row
+                          label="הרשאת ארגון"
+                          value={currentEmployee.user_id ? currentEmployeeRoleLabel : 'אין משתמש מקושר'}
+                          muted={!currentEmployee.user_id || !currentEmployeeMembership}
+                        />
                         <Row label="טלפון" value={currentEmployee.phone} />
                         <Row label="דוא״ל" value={currentEmployee.email} />
                         <Row label="תאריך התחלה" value={formatDate(currentEmployee.start_date)} />
@@ -913,6 +992,31 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                           {currentEmployee.notes || 'אין הערות פנימיות.'}
                         </div>
                       </SectionCard>
+
+                      {currentEmployee.user_id ? (
+                        <SectionCard title="גישה לארגון" description="סוג העובד והרשאת הארגון הם שני צירים שונים">
+                          <div className="space-y-2">
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-3">
+                              <div className="text-sm font-bold text-slate-900">{currentEmployeeRoleLabel}</div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                {currentEmployeeMembership
+                                  ? 'הרשאה זו קובעת אם למשתמש יש ניהול ארגון, בלי לשנות את סוג העובד שלו.'
+                                  : 'לעובד יש משתמש מקושר, אבל לא נמצאה לו חברות ארגונית תואמת.'}
+                              </div>
+                            </div>
+                            {canManageCurrentEmployeeRole ? (
+                              <Button size="sm" variant="outline" onClick={() => setShowRoleDialog(true)}>
+                                <Shield className="me-2 h-4 w-4" />
+                                נהל הרשאות ארגון
+                              </Button>
+                            ) : currentEmployeeOrgRole === 'owner' ? (
+                              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-3 py-3 text-xs text-amber-900">
+                                הרשאת בעלים מנוהלת מחוץ למסך זה ואינה ניתנת לשינוי מתוך עמוד העובדים.
+                              </div>
+                            ) : null}
+                          </div>
+                        </SectionCard>
+                      ) : null}
                     </div>
                   </div>
 
@@ -1129,6 +1233,86 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
         session={session}
         onLinked={handleLinkDialogSuccess}
       />
+      <Dialog
+        open={showRoleDialog}
+        onOpenChange={(open) => {
+          setShowRoleDialog(open);
+          if (!open) {
+            setTargetOrgRole(currentEmployeeOrgRole === 'admin' ? 'admin' : 'member');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>הרשאות ארגון</DialogTitle>
+            <DialogDescription>
+              פעולה זו משנה את הרשאת המשתמש בארגון, לא את סוג העובד שלו. היא נשמרת בנפרד מכרטיס העובד.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+              <div className="text-sm font-bold text-slate-900">{getEmployeeName(currentEmployee)}</div>
+              <div className="mt-1 text-xs text-slate-500">
+                מצב נוכחי: {currentEmployeeRoleLabel}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>הרשאה חדשה</Label>
+              <div className="grid gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTargetOrgRole('member')}
+                  className={cn(
+                    'rounded-2xl border px-4 py-3 text-start transition',
+                    targetOrgRole === 'member'
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300',
+                  )}
+                >
+                  <div className="text-sm font-bold">חבר/ת ארגון</div>
+                  <div className={cn('mt-1 text-xs', targetOrgRole === 'member' ? 'text-slate-200' : 'text-slate-500')}>
+                    ללא הרשאות ניהול ארגון. ההרשאה מתאימה למדריכים ולעובדי משרד רגילים.
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetOrgRole('admin')}
+                  className={cn(
+                    'rounded-2xl border px-4 py-3 text-start transition',
+                    targetOrgRole === 'admin'
+                      ? 'border-blue-600 bg-blue-600 text-white'
+                      : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300',
+                  )}
+                >
+                  <div className="text-sm font-bold">מנהל/ת ארגון</div>
+                  <div className={cn('mt-1 text-xs', targetOrgRole === 'admin' ? 'text-blue-100' : 'text-slate-500')}>
+                    הרשאה זו מאפשרת ניהול צוות, עובדים, כספים והגדרות ארגוניות. יש להעניק אותה במכוון בלבד.
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowRoleDialog(false)}
+              disabled={actionState === REQUEST.loading}
+            >
+              ביטול
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveOrgRole}
+              disabled={actionState === REQUEST.loading || !canManageCurrentEmployeeRole || targetOrgRole === currentEmployeeOrgRole}
+            >
+              {actionState === REQUEST.loading ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Shield className="me-2 h-4 w-4" />}
+              {targetOrgRole === 'admin' ? 'הענק הרשאת מנהל' : 'שמור כחבר ארגון'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={inviteUserDialogOpen}
         onOpenChange={(open) => {

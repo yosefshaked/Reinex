@@ -4,6 +4,7 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { readEnv, respond as _respond, isAdminRole } from '../_shared/org-bff.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { findAuthUserByEmail } from '../_shared/auth-users.js';
 
 const STATUS_PENDING = 'pending';
 const STATUS_ACCEPTED = 'accepted';
@@ -269,34 +270,14 @@ async function fetchOrganization(context, supabase, orgId) {
 }
 
 async function findExistingMemberByEmail(supabase, orgId, email) {
-  let profileId = null;
-  let profileResult = await supabase
-    .from('profiles')
-    .select('id')
-    .eq('email', email)
-    .maybeSingle();
-
-  if (profileResult.error) {
-    return { error: profileResult.error };
+  let authUser = null;
+  try {
+    authUser = await findAuthUserByEmail(supabase, email);
+  } catch (error) {
+    return { error };
   }
 
-  profileId = profileResult.data?.id ?? null;
-
-  if (!profileId) {
-    profileResult = await supabase
-      .from('profiles')
-      .select('id')
-      .ilike('email', email)
-      .maybeSingle();
-
-    if (profileResult.error) {
-      return { error: profileResult.error };
-    }
-
-    profileId = profileResult.data?.id ?? null;
-  }
-
-  if (!profileId) {
+  if (!authUser?.id) {
     return { userId: null };
   }
 
@@ -304,7 +285,7 @@ async function findExistingMemberByEmail(supabase, orgId, email) {
     .from('org_memberships')
     .select('user_id')
     .eq('org_id', orgId)
-    .eq('user_id', profileId)
+    .eq('user_id', authUser.id)
     .maybeSingle();
 
   if (membershipResult.error) {
@@ -312,7 +293,7 @@ async function findExistingMemberByEmail(supabase, orgId, email) {
   }
 
   if (membershipResult.data) {
-    return { userId: profileId };
+    return { userId: authUser.id };
   }
   return { userId: null };
 }

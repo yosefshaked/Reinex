@@ -16,6 +16,7 @@ import { ensureInstructorColors } from '../_shared/instructor-colors.js';
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { normalizeAvailabilityWindows, hasConfiguredAvailability } from '../_shared/instructor-availability.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { getAuthUserById } from '../_shared/auth-users.js';
 
 const EMPLOYEE_SELECT_COLUMNS = 'id, user_id, first_name, middle_name, last_name, employee_id, employee_type, payroll_model, current_rate, monthly_salary_amount, phone, email, start_date, is_active, notes, working_days, annual_leave_days, leave_pay_method, leave_fixed_day_rate, employment_scope, metadata, instructor_types';
 
@@ -532,11 +533,12 @@ export default async function (context, req) {
       try {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('id, email, full_name')
+          .select('id, full_name')
           .eq('id', validation.userId)
           .maybeSingle();
+        const authUser = await getAuthUserById(supabase, validation.userId);
         profileName = normalizeString(profile?.full_name);
-        profileEmail = normalizeString(profile?.email).toLowerCase();
+        profileEmail = normalizeString(authUser?.email).toLowerCase();
       } catch {
         // Best-effort only.
       }
