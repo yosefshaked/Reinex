@@ -4,7 +4,6 @@ import { Calendar as CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-reac
 import { Button } from '../../../../components/ui/button';
 import { Calendar as CalendarPicker } from '../../../../components/ui/calendar.jsx';
 import { Popover, PopoverContent, PopoverTrigger } from '../../../../components/ui/popover.jsx';
-import { cn } from '../../../../lib/utils.js';
 import {
   addLocalDays,
   getTodayLocalDateString,
@@ -167,24 +166,7 @@ export function DateNavigator({ currentDate, onDateChange, onNavigate, viewMode 
             className="w-[24rem] rounded-[1.6rem] border border-slate-200 bg-white p-0 shadow-2xl"
           >
             <div className="border-b border-slate-100 bg-gradient-to-b from-white to-slate-50 px-4 py-4">
-              <div className="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1 text-xs font-medium text-slate-500">
-                <span className={cn(
-                  'rounded-full px-3 py-1 transition',
-                  viewMode === 'day' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500',
-                )}
-                >
-                  יום מדויק
-                </span>
-                <span className={cn(
-                  'rounded-full px-3 py-1 transition',
-                  viewMode === 'week' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500',
-                )}
-                >
-                  שבוע סביב התאריך
-                </span>
-              </div>
-
-              <div className="mt-3">
+              <div>
                 <div className="text-sm font-semibold text-slate-900">
                   {viewMode === 'week' ? 'בחירת תאריך לשבוע' : 'בחירת תאריך ליום'}
                 </div>
@@ -195,12 +177,6 @@ export function DateNavigator({ currentDate, onDateChange, onNavigate, viewMode 
                 </p>
               </div>
 
-              {viewMode === 'week' ? (
-                <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-right">
-                  <div className="text-[11px] font-medium text-emerald-700">השבוע שיוצג</div>
-                  <div className="mt-1 text-sm font-semibold text-emerald-950">{weekPreview.label || '—'}</div>
-                </div>
-              ) : null}
             </div>
 
             <div className="p-3">
