@@ -46,6 +46,7 @@ export default function TemplateManagerPage() {
     source: 'add',
   });
   const consumedSeedRef = useRef('');
+  const consumedTemplateEditSeedRef = useRef('');
 
   const { templates, isLoading: templatesLoading, error: templatesError, refetch: refetchTemplates } = useTemplates({ showInactive });
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
@@ -93,6 +94,16 @@ export default function TemplateManagerPage() {
     };
   }, [searchParams]);
 
+  const templateEditSeed = useMemo(() => {
+    const templateId = searchParams.get('edit_template_id') || '';
+    if (!templateId) return null;
+
+    return {
+      seedKey: searchParams.toString(),
+      templateId,
+    };
+  }, [searchParams]);
+
   useEffect(() => {
     if (!waitingListSeed?.waitingListEntryId) return;
     if (consumedSeedRef.current === waitingListSeed.seedKey) return;
@@ -133,6 +144,17 @@ export default function TemplateManagerPage() {
     });
     setShowCapabilitiesDialog(true);
   }, [fixAvailabilitySeed]);
+
+  useEffect(() => {
+    if (!templateEditSeed?.templateId || templates.length === 0) return;
+    if (consumedTemplateEditSeedRef.current === templateEditSeed.seedKey) return;
+
+    const matchedTemplate = templates.find((template) => String(template.id) === String(templateEditSeed.templateId));
+    if (!matchedTemplate) return;
+
+    consumedTemplateEditSeedRef.current = templateEditSeed.seedKey;
+    setSelectedTemplate(matchedTemplate);
+  }, [templateEditSeed, templates]);
 
   const currentAvailabilityInstructor = useMemo(
     () => instructors.find((instructor) => instructor.id === availabilityContext.instructorId) || null,

@@ -45,6 +45,9 @@
 - Calendar writes must enforce membership scope and instructor self-scope for non-admin users.
 - Availability checks come from service-capability `availability_windows`; do not duplicate availability math.
 - Manual template generation must resolve `lesson_participants.client_profile_id` from `students.client_profile_id` during proposal building, not only at apply time; preview and apply must follow the same participant-validity rules.
+- Manual template generation apply is intentionally partial-success, not all-or-nothing. The backend must return a structured actionable issue list with student/template identifiers and retry metadata so the frontend can persist a repair review and offer retry-failed-only flows.
+- The manual generation UI must gate every apply behind a fresh preview for the exact same scope. If the scope changes, the previous preview is stale and apply must be disabled until preview runs again.
+- Repair/retry review state for manual generation lives in frontend session storage; users may navigate to student or template screens to fix issues and then return to the saved review without losing the issue list.
 - Version conflict and locked-state payloads already exist in [`../api/_shared/calendar-editing.js`](../api/_shared/calendar-editing.js).
 - Billing is centralized. Calendar endpoints must not compute lesson prices or write `ledger_transactions` directly; they call `BillingLedgerService.syncLessonInstanceCharges(...)` or another service method after the lesson mutation succeeds.
 - Attendance changes, lesson edits, and HMO authorization changes are coupled to ledger resync. Skipping the ledger service will create billing drift even if the lesson mutation succeeds.

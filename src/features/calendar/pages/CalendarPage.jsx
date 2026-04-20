@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge.jsx';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Plus, LayoutTemplate, Wand2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { DateNavigator } from '../components/CalendarHeader/DateNavigator.jsx';
@@ -23,6 +24,7 @@ import {
   getInstructorWeekLessons,
 } from '../utils/instructor-whatsapp.js';
 import { addLocalDays, getTodayLocalDateString, getWeekStartDate, parseLocalDateString, toLocalDateString } from '../utils/localDate.js';
+import { clearGenerationReview, readGenerationReview } from '../utils/generationReviewStorage.js';
 import { toast } from 'sonner';
 
 const CALENDAR_DATE_KEY = 'reinex_calendar_date';
@@ -53,6 +55,7 @@ export default function CalendarPage() {
   const [showInstanceDialog, setShowInstanceDialog] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showGenerationDialog, setShowGenerationDialog] = useState(false);
+  const [savedGenerationReview, setSavedGenerationReview] = useState(null);
   const [pendingSlotSelection, setPendingSlotSelection] = useState(null);
   const [whatsAppCompose, setWhatsAppCompose] = useState(null);
   const [availabilityFixIssue, setAvailabilityFixIssue] = useState(null);
@@ -68,6 +71,18 @@ export default function CalendarPage() {
       sessionStorage.setItem(CALENDAR_VIEW_KEY, viewMode);
     }
   }, [viewMode]);
+
+  const refreshGenerationReview = useCallback(() => {
+    if (!activeOrgId) {
+      setSavedGenerationReview(null);
+      return;
+    }
+    setSavedGenerationReview(readGenerationReview(activeOrgId));
+  }, [activeOrgId]);
+
+  useEffect(() => {
+    refreshGenerationReview();
+  }, [refreshGenerationReview]);
 
   const setCurrentDate = useCallback((newDate) => {
     const normalizedDate = typeof newDate === 'string'
@@ -214,7 +229,16 @@ export default function CalendarPage() {
 
   const handleGenerationApplied = () => {
     refetchInstances();
+    refreshGenerationReview();
   };
+
+  const handleDismissGenerationReview = useCallback(() => {
+    if (!activeOrgId) {
+      return;
+    }
+    clearGenerationReview(activeOrgId);
+    setSavedGenerationReview(null);
+  }, [activeOrgId]);
 
   const handleSlotSelect = (selection) => {
     setSelectedInstance(null);
@@ -347,6 +371,28 @@ export default function CalendarPage() {
         </div>
       ) : null}
 
+      {savedGenerationReview?.issues?.length > 0 ? (
+        <div className="mx-4 mt-3 flex-shrink-0">
+          <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+            <AlertTitle className="flex items-center gap-2">
+              קיימת רשימת טיפול ליצירה מתבניות
+              <Badge variant="outline">{savedGenerationReview.issues.length} פריטים</Badge>
+            </AlertTitle>
+            <AlertDescription className="flex flex-wrap items-center gap-2">
+              <span>
+                הרשימה נשמרה כדי שתוכלו לצאת לתקן תלמידים או תבניות ולחזור בדיוק לאותה סקירה.
+              </span>
+              <Button size="sm" variant="outline" onClick={() => setShowGenerationDialog(true)}>
+                פתח סקירה
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleDismissGenerationReview}>
+                נקה רשימה
+              </Button>
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+
       {/* Calendar workspace — fills remaining viewport height */}
       {!instructorsError && !instancesError ? (
         <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4 pt-3">
@@ -412,6 +458,7 @@ export default function CalendarPage() {
         onClose={() => setShowGenerationDialog(false)}
         defaultDate={currentDate}
         onApplied={handleGenerationApplied}
+        onReviewStateChange={setSavedGenerationReview}
       />
 
       <InstructorWhatsAppDialog

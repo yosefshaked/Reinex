@@ -161,6 +161,154 @@ function generateRunId() {
   return `run-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
+function buildStudentName(profile) {
+  if (!profile || typeof profile !== 'object') {
+    return '';
+  }
+  return [profile.first_name, profile.middle_name, profile.last_name].filter(Boolean).join(' ').trim();
+}
+
+function normalizeRetryItems(value) {
+  if (!Array.isArray(value)) {
+    return { items: [], valid: value == null };
+  }
+
+  const seen = new Set();
+  const items = [];
+
+  for (const entry of value) {
+    const templateId = normalizeString(entry?.template_id || entry?.templateId);
+    const targetDate = normalizeString(entry?.target_date || entry?.targetDate);
+    if (!templateId || !targetDate || !isIsoDate(targetDate)) {
+      return { items: [], valid: false };
+    }
+
+    const key = `${templateId}|${targetDate}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    items.push({ template_id: templateId, target_date: targetDate });
+  }
+
+  return { items, valid: true };
+}
+
+function buildRetryLookup(items) {
+  const map = new Map();
+  for (const item of items || []) {
+    if (!item?.template_id || !item?.target_date) continue;
+    if (!map.has(item.template_id)) {
+      map.set(item.template_id, new Set());
+    }
+    map.get(item.template_id).add(item.target_date);
+  }
+  return map;
+}
+
+function buildRetryItem(templateId, targetDate) {
+  return {
+    template_id: templateId || null,
+    target_date: targetDate || null,
+  };
+}
+
+function buildRepairTargets(entry) {
+  const targets = [];
+  const studentId = normalizeString(entry?.student_id);
+  const templateId = normalizeString(entry?.template_id);
+
+  if (studentId) {
+    targets.push({
+      type: 'student_profile',
+      label: 'student_profile',
+      student_id: studentId,
+      path: `/students/${studentId}/overview`,
+    });
+  }
+
+  if (templateId) {
+    targets.push({
+      type: 'template_edit',
+      label: 'template_edit',
+      template_id: templateId,
+      path: `/calendar/templates?edit_template_id=${templateId}`,
+    });
+  }
+
+  return targets;
+}
+
+function buildIssueMessage(entry) {
+  const directMessage = normalizeString(entry?.message);
+  if (directMessage) {
+    return directMessage;
+  }
+
+  if (Array.isArray(entry?.issues) && entry.issues.length > 0) {
+    const issueMessages = entry.issues
+      .map((issue) => normalizeString(issue?.message) || normalizeString(issue?.type))
+      .filter(Boolean);
+    if (issueMessages.length > 0) {
+      return issueMessages.join(' | ');
+    }
+  }
+
+  return normalizeString(entry?.type) || 'generation_issue';
+}
+
+function buildActionableIssues({ conflicts, applied }) {
+  const conflictIssues = Array.isArray(conflicts)
+    ? conflicts.map((entry) => ({
+      source: 'preview_conflict',
+      issue_type: normalizeString(entry?.type) || normalizeString(entry?.issues?.[0]?.type) || 'generation_conflict',
+      issue_types: Array.isArray(entry?.issues)
+        ? entry.issues.map((issue) => normalizeString(issue?.type)).filter(Boolean)
+        : [],
+      message: buildIssueMessage(entry),
+      template_id: normalizeString(entry?.template_id) || null,
+      student_id: normalizeString(entry?.student_id) || null,
+      student_name: normalizeString(entry?.student_name) || '',
+      client_profile_id: normalizeString(entry?.client_profile_id) || null,
+      datetime_start: normalizeString(entry?.datetime_start) || null,
+      target_date: normalizeString(entry?.target_date) || null,
+      time_of_day: normalizeString(entry?.time_of_day) || extractTimePart(entry?.datetime_start) || null,
+      retry_item: entry?.retry_item?.template_id && entry?.retry_item?.target_date
+        ? {
+          template_id: entry.retry_item.template_id,
+          target_date: entry.retry_item.target_date,
+        }
+        : null,
+      repair_targets: buildRepairTargets(entry),
+    }))
+    : [];
+
+  const applyIssues = Array.isArray(applied?.errors)
+    ? applied.errors.map((entry) => ({
+      source: 'apply_error',
+      issue_type: normalizeString(entry?.type) || 'apply_error',
+      issue_types: [normalizeString(entry?.type) || 'apply_error'],
+      message: buildIssueMessage(entry),
+      template_id: normalizeString(entry?.template_id) || null,
+      student_id: normalizeString(entry?.student_id) || null,
+      student_name: normalizeString(entry?.student_name) || '',
+      client_profile_id: normalizeString(entry?.client_profile_id) || null,
+      datetime_start: normalizeString(entry?.datetime_start) || null,
+      target_date: normalizeString(entry?.target_date) || null,
+      time_of_day: normalizeString(entry?.time_of_day) || extractTimePart(entry?.datetime_start) || null,
+      retry_item: entry?.retry_item?.template_id && entry?.retry_item?.target_date
+        ? {
+          template_id: entry.retry_item.template_id,
+          target_date: entry.retry_item.target_date,
+        }
+        : null,
+      repair_targets: buildRepairTargets(entry),
+    }))
+    : [];
+
+  return [...conflictIssues, ...applyIssues];
+}
+
 function buildCoverageWarningFromDecision(candidate, coverageDecision) {
   if (!coverageDecision || coverageDecision.status === 'covered') {
     return null;
@@ -258,6 +406,7 @@ function buildDiffResponse({
   generationRunId,
   startDate,
   endDate,
+  requestMode,
   templatesConsidered,
   candidateSlots,
   proposals,
@@ -268,10 +417,12 @@ function buildDiffResponse({
   skippedOverrides,
   applied,
 }) {
+  const actionableIssues = buildActionableIssues({ conflicts, applied });
   return {
     generation_run_id: generationRunId,
     start_date: startDate,
     end_date: endDate,
+    request_mode: requestMode || 'full_range',
     dry_run: !applied,
     summary: {
       templates_considered: templatesConsidered,
@@ -292,6 +443,24 @@ function buildDiffResponse({
     skipped_existing: skippedExisting,
     skipped_overrides: skippedOverrides,
     applied: applied || null,
+    actionable_issues: actionableIssues,
+    retryable_failures: applied
+      ? applied.errors
+        .filter((entry) => entry?.retry_item?.template_id && entry?.retry_item?.target_date)
+        .map((entry) => ({
+          type: entry.type,
+          message: entry.message,
+          template_id: entry.template_id || null,
+          student_id: entry.student_id || null,
+          student_name: entry.student_name || '',
+          client_profile_id: entry.client_profile_id || null,
+          datetime_start: entry.datetime_start || null,
+          target_date: entry.target_date || null,
+          time_of_day: entry.time_of_day || null,
+          retry_item: entry.retry_item,
+          repair_targets: buildRepairTargets(entry),
+        }))
+      : [],
   };
 }
 
@@ -340,9 +509,21 @@ export default async function calendarGenerate(context, req) {
     return respond(context, 400, { message: 'invalid org id' });
   }
 
-  const startDate = normalizeString(body?.start_date || body?.startDate);
-  const endDate = normalizeString(body?.end_date || body?.endDate);
+  const { items: retryItems, valid: retryItemsValid } = normalizeRetryItems(body?.retry_items || body?.retryItems);
+  if (!retryItemsValid) {
+    return respond(context, 400, { message: 'invalid_retry_items' });
+  }
+
+  let startDate = normalizeString(body?.start_date || body?.startDate);
+  let endDate = normalizeString(body?.end_date || body?.endDate);
   const dryRun = parseBoolean(body?.dry_run ?? body?.dryRun, true);
+  const requestMode = retryItems.length > 0 ? 'retry_failed' : 'full_range';
+
+  if ((!isIsoDate(startDate) || !isIsoDate(endDate)) && retryItems.length > 0) {
+    const sortedRetryDates = retryItems.map((item) => item.target_date).sort();
+    startDate = sortedRetryDates[0] || '';
+    endDate = sortedRetryDates[sortedRetryDates.length - 1] || '';
+  }
 
   if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
     return respond(context, 400, { message: 'invalid_date_range' });
@@ -374,14 +555,22 @@ export default async function calendarGenerate(context, req) {
   }
 
   const generationRunId = generateRunId();
+  const retryLookup = buildRetryLookup(retryItems);
+  const retryTemplateIds = retryItems.map((item) => item.template_id);
 
-  const { data: templates, error: templatesError } = await withOrgScope(supabase, 'lesson_templates', orgId)
+  let templatesQuery = withOrgScope(supabase, 'lesson_templates', orgId)
     .select('id, student_id, instructor_employee_id, service_id, day_of_week, time_of_day, duration_minutes, valid_from, valid_until, is_active')
     .eq('is_active', true)
     .lte('valid_from', endDate)
     .or(`valid_until.is.null,valid_until.gte.${startDate}`)
     .order('day_of_week', { ascending: true })
     .order('time_of_day', { ascending: true });
+
+  if (retryTemplateIds.length > 0) {
+    templatesQuery = templatesQuery.in('id', retryTemplateIds);
+  }
+
+  const { data: templates, error: templatesError } = await templatesQuery;
 
   if (templatesError) {
     context.log?.error?.('calendar/generate failed to load templates', { message: templatesError.message });
@@ -418,8 +607,29 @@ export default async function calendarGenerate(context, req) {
     return respond(context, 500, { message: 'failed_to_load_students' });
   }
 
+  const templateClientProfileIds = Array.from(new Set((templateStudentRows || []).map((row) => normalizeString(row?.client_profile_id)).filter(Boolean)));
+  const { data: templateClientProfiles, error: templateClientProfilesError } = templateClientProfileIds.length > 0
+    ? await withOrgScope(supabase, 'client_profiles', orgId)
+      .select('id, first_name, middle_name, last_name')
+      .in('id', templateClientProfileIds)
+    : { data: [], error: null };
+
+  if (templateClientProfilesError) {
+    context.log?.error?.('calendar/generate failed to load template client profiles', { message: templateClientProfilesError.message });
+    return respond(context, 500, { message: 'failed_to_load_students' });
+  }
+
   const clientProfileIdByStudentId = new Map(
     (templateStudentRows || []).map((row) => [row.id, row.client_profile_id || null]),
+  );
+  const clientProfileById = new Map(
+    (templateClientProfiles || []).map((row) => [row.id, row]),
+  );
+  const studentNameByStudentId = new Map(
+    (templateStudentRows || []).map((row) => [
+      row.id,
+      buildStudentName(clientProfileById.get(row.client_profile_id || '')) || '',
+    ]),
   );
   let hmoWarningsNotice = templateStudentIds.length > 0 ? null : null;
 
@@ -494,6 +704,13 @@ export default async function calendarGenerate(context, req) {
     }
 
     for (const date of dates) {
+      if (retryItems.length > 0) {
+        const allowedDates = retryLookup.get(template.id);
+        if (!allowedDates || !allowedDates.has(date)) {
+          continue;
+        }
+      }
+
       if (dayTokenForDate(date) !== normalizeDayToken(template.day_of_week)) {
         continue;
       }
@@ -523,14 +740,20 @@ export default async function calendarGenerate(context, req) {
       const participantClientProfileId = template.student_id
         ? clientProfileIdByStudentId.get(template.student_id) || null
         : null;
+      const studentName = template.student_id
+        ? studentNameByStudentId.get(template.student_id) || ''
+        : '';
 
       if (!finalInstructorId || !finalServiceId || !finalTime || !Number.isFinite(finalDuration) || finalDuration <= 0) {
         conflicts.push({
           type: 'invalid_template_data',
           template_id: template.id,
           student_id: template.student_id,
+          student_name: studentName,
+          client_profile_id: participantClientProfileId,
           target_date: date,
           message: 'נתוני תבנית/חריגה לא תקינים ולכן הדור לא בוצע עבור המופע הזה.',
+          retry_item: buildRetryItem(template.id, date),
         });
         continue;
       }
@@ -540,8 +763,11 @@ export default async function calendarGenerate(context, req) {
           type: 'missing_client_profile_link',
           template_id: template.id,
           student_id: template.student_id,
+          student_name: studentName,
+          client_profile_id: null,
           target_date: date,
           message: 'לתלמיד/ה בתבנית אין client_profile_id ולכן אי אפשר ליצור משתתף לשיעור.',
+          retry_item: buildRetryItem(template.id, date),
         });
         continue;
       }
@@ -551,9 +777,12 @@ export default async function calendarGenerate(context, req) {
         skippedExisting.push({
           template_id: template.id,
           student_id: template.student_id,
+          student_name: studentName,
+          client_profile_id: participantClientProfileId,
           target_date: date,
           time_of_day: finalTime,
           reason: 'matching_template_instance_exists',
+          retry_item: buildRetryItem(template.id, date),
         });
         continue;
       }
@@ -561,6 +790,7 @@ export default async function calendarGenerate(context, req) {
       const candidate = {
         template_id: template.id,
         student_id: template.student_id,
+        student_name: studentName,
         client_profile_id: participantClientProfileId,
         instructor_employee_id: finalInstructorId,
         service_id: finalServiceId,
@@ -570,6 +800,7 @@ export default async function calendarGenerate(context, req) {
         time_of_day: finalTime,
         override_id: override?.id || null,
         override_type: override?.override_type || null,
+        retry_item: buildRetryItem(template.id, date),
       };
 
       const interval = candidateInterval(candidate);
@@ -578,8 +809,11 @@ export default async function calendarGenerate(context, req) {
           type: 'invalid_datetime',
           template_id: template.id,
           student_id: template.student_id,
+          student_name: studentName,
+          client_profile_id: participantClientProfileId,
           target_date: date,
           message: 'תאריך/שעה לא תקינים עבור יצירת מופע.',
+          retry_item: buildRetryItem(template.id, date),
         });
         continue;
       }
@@ -591,9 +825,14 @@ export default async function calendarGenerate(context, req) {
         conflicts.push({
           template_id: template.id,
           student_id: template.student_id,
+          student_name: studentName,
+          client_profile_id: participantClientProfileId,
           datetime_start: candidate.datetime_start,
+          target_date: candidate.target_date,
+          time_of_day: candidate.time_of_day,
           duration_minutes: candidate.duration_minutes,
           issues: candidateConflicts,
+          retry_item: candidate.retry_item,
         });
         continue;
       }
@@ -657,13 +896,18 @@ export default async function calendarGenerate(context, req) {
         .select('id')
         .single();
 
-      if (insertInstanceError || !insertedInstance?.id) {
+        if (insertInstanceError || !insertedInstance?.id) {
         applied.errors.push({
           type: 'instance_insert_failed',
           template_id: proposal.template_id,
           student_id: proposal.student_id,
+          student_name: proposal.student_name || '',
+          client_profile_id: proposal.client_profile_id || null,
           datetime_start: proposal.datetime_start,
+          target_date: proposal.target_date,
+          time_of_day: proposal.time_of_day,
           message: insertInstanceError?.message || 'failed_to_insert_instance',
+          retry_item: proposal.retry_item,
         });
         continue;
       }
@@ -678,8 +922,13 @@ export default async function calendarGenerate(context, req) {
           type: 'participant_insert_failed',
           template_id: proposal.template_id,
           student_id: proposal.student_id,
+          student_name: proposal.student_name || '',
+          client_profile_id: proposal.client_profile_id || null,
           datetime_start: proposal.datetime_start,
+          target_date: proposal.target_date,
+          time_of_day: proposal.time_of_day,
           message: 'missing_client_profile_link',
+          retry_item: proposal.retry_item,
         });
         continue;
       }
@@ -707,14 +956,33 @@ export default async function calendarGenerate(context, req) {
           type: 'participant_insert_failed',
           template_id: proposal.template_id,
           student_id: proposal.student_id,
+          student_name: proposal.student_name || '',
+          client_profile_id: proposal.client_profile_id || null,
           datetime_start: proposal.datetime_start,
+          target_date: proposal.target_date,
+          time_of_day: proposal.time_of_day,
           message: insertParticipantError?.message || 'failed_to_insert_participant',
+          retry_item: proposal.retry_item,
         });
         continue;
       }
 
-      applied.createdInstances.push({ id: insertedInstance.id, template_id: proposal.template_id, datetime_start: proposal.datetime_start });
-      applied.createdParticipants.push({ id: insertedParticipant.id, lesson_instance_id: insertedInstance.id, student_id: proposal.student_id });
+      applied.createdInstances.push({
+        id: insertedInstance.id,
+        template_id: proposal.template_id,
+        student_id: proposal.student_id,
+        student_name: proposal.student_name || '',
+        datetime_start: proposal.datetime_start,
+        target_date: proposal.target_date,
+        time_of_day: proposal.time_of_day,
+      });
+      applied.createdParticipants.push({
+        id: insertedParticipant.id,
+        lesson_instance_id: insertedInstance.id,
+        student_id: proposal.student_id,
+        student_name: proposal.student_name || '',
+        client_profile_id: proposal.client_profile_id || null,
+      });
     }
   }
 
@@ -722,6 +990,7 @@ export default async function calendarGenerate(context, req) {
     generationRunId,
     startDate,
     endDate,
+    requestMode,
     templatesConsidered: templateRows.length,
     candidateSlots,
     proposals,
