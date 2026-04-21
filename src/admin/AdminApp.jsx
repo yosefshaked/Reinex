@@ -20,6 +20,9 @@ import AnnouncementsView from './modules/AnnouncementsView.jsx';
 import IncidentsView from './modules/IncidentsView.jsx';
 import KnowledgeBaseView from './modules/KnowledgeBaseView.jsx';
 import ComplianceView from './modules/ComplianceView.jsx';
+import IntegrationHealthView from './modules/IntegrationHealthView.jsx';
+import DataQualityView from './modules/DataQualityView.jsx';
+import OnboardingPipelineView from './modules/OnboardingPipelineView.jsx';
 import AdminShell from './ui/AdminShell.jsx';
 import DashboardView from './ui/DashboardView.jsx';
 import ComingSoon from './ui/ComingSoon.jsx';
@@ -98,6 +101,9 @@ const LIVE_ELEMENTS = {
   'incidents': <IncidentsView />,
   'knowledge-base': <KnowledgeBaseView />,
   'compliance': <ComplianceView />,
+  'integration-health': <IntegrationHealthView />,
+  'data-quality': <DataQualityView />,
+  'onboarding-pipeline': <OnboardingPipelineView />,
   // Legacy aggregate view retained while its sub-modules are built out.
   'operations-support': <OperationsSupportView />,
 };
@@ -228,11 +234,8 @@ const PLANNED = {
 const COMING_SOON_PATHS = [
   'release-migrations',
   'encryption-keys',
-  'onboarding-pipeline',
   'billing',
   'email-log',
-  'integration-health',
-  'data-quality',
 ];
 
 export default function AdminApp() {
@@ -278,6 +281,9 @@ export default function AdminApp() {
             <Route path="incidents" element={LIVE_ELEMENTS['incidents']} />
             <Route path="knowledge-base" element={LIVE_ELEMENTS['knowledge-base']} />
             <Route path="compliance" element={LIVE_ELEMENTS['compliance']} />
+            <Route path="integration-health" element={LIVE_ELEMENTS['integration-health']} />
+            <Route path="data-quality" element={LIVE_ELEMENTS['data-quality']} />
+            <Route path="onboarding-pipeline" element={LIVE_ELEMENTS['onboarding-pipeline']} />
 
             {/* Legacy aggregate view kept reachable while sub-modules are built. */}
             <Route path="operations-support" element={LIVE_ELEMENTS['operations-support']} />
