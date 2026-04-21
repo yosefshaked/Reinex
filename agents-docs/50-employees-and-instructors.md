@@ -45,4 +45,5 @@
   - a fresh resend should revoke the prior pending `org_invitations` row and create a new one
   - if the auth user is still unconfirmed, the resend should trigger a fresh Auth invite email
   - if the auth user already has a confirmed account, the invite remains an org-level pending approval and no Auth email is expected
+- Employee invite emails should carry the same core metadata as org invites (`inviter_name`, `organization_name`, invitation token) and default to a 3-day expiry window unless a stricter explicit expiration is supplied.
 - Leave, attendance, and payroll rules live in [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js); do not recode them in UI panels.

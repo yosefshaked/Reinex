@@ -29,6 +29,7 @@ import {
   resolvePublicFormState,
   resolveSchemaWithSharedBlocks,
 } from '../_shared/forms-runtime.js';
+import { resolvePublicAppBaseUrl } from '../_shared/public-app-url.js';
 const OTP_DIGITS = 6;
 const OTP_TTL_MINUTES = 15;
 const ROUTING_CATEGORY = 'form_submission';
@@ -120,141 +121,8 @@ function parseLimit(value, fallback = 50, max = 200) {
   return Math.min(parsed, max);
 }
 
-function readHeader(req, key) {
-  const headers = req?.headers || {};
-  return headers[key] || headers[String(key || '').toLowerCase()] || headers[String(key || '').toUpperCase()] || '';
-}
-
-function toUrlOrigin(value) {
-  const normalized = normalizeString(value);
-  if (!normalized) return '';
-
-  try {
-    const parsed = new URL(normalized);
-    return `${parsed.protocol}//${parsed.host}`;
-  } catch {
-    return '';
-  }
-}
-
-function normalizeOriginRule(rule) {
-  return String(rule || '').trim().toLowerCase().replace(/\/$/, '');
-}
-
-function parseAllowedOriginRules(env) {
-  const raw = normalizeString(
-    env?.APP_ALLOWED_PUBLIC_ORIGINS ||
-    env?.ALLOWED_PUBLIC_ORIGINS ||
-    env?.PUBLIC_APP_ALLOWED_ORIGINS,
-  );
-
-  if (!raw) return [];
-
-  return raw
-    .split(',')
-    .map((item) => normalizeOriginRule(item))
-    .filter(Boolean);
-}
-
-function isProtocolAllowedForOrigin(parsed) {
-  const protocol = String(parsed?.protocol || '').toLowerCase();
-  const hostname = String(parsed?.hostname || '').toLowerCase();
-  const isLocalhost = hostname === 'localhost' || hostname.endsWith('.localhost');
-  if (protocol === 'https:') return true;
-  return protocol === 'http:' && isLocalhost;
-}
-
-function matchesAllowedRule(origin, rule) {
-  const normalizedOrigin = normalizeOriginRule(origin);
-  const normalizedRule = normalizeOriginRule(rule);
-  if (!normalizedOrigin || !normalizedRule) return false;
-
-  if (normalizedRule.startsWith('*.')) {
-    const suffix = normalizedRule.slice(1);
-    try {
-      const parsed = new URL(normalizedOrigin);
-      return parsed.hostname.toLowerCase().endsWith(suffix);
-    } catch {
-      return false;
-    }
-  }
-
-  if (normalizedRule.includes('://')) {
-    return normalizedOrigin === normalizedRule;
-  }
-
-  try {
-    const parsed = new URL(normalizedOrigin);
-    return parsed.hostname.toLowerCase() === normalizedRule;
-  } catch {
-    return false;
-  }
-}
-
-function isAllowedSubmitOrigin(origin, env) {
-  const normalizedOrigin = normalizeOriginRule(origin);
-  if (!normalizedOrigin) return false;
-
-  let parsed;
-  try {
-    parsed = new URL(normalizedOrigin);
-  } catch {
-    return false;
-  }
-
-  if (!isProtocolAllowedForOrigin(parsed)) {
-    return false;
-  }
-
-  const rules = parseAllowedOriginRules(env);
-  if (!rules.length) {
-    // Without an explicit allow-list we accept any valid browser origin.
-    return true;
-  }
-
-  return rules.some((rule) => matchesAllowedRule(normalizedOrigin, rule));
-}
-
 function resolveSubmitBaseUrl(req, env) {
-  const origin = toUrlOrigin(readHeader(req, 'origin'));
-  if (isAllowedSubmitOrigin(origin, env)) {
-    return origin;
-  }
-
-  const referer = toUrlOrigin(readHeader(req, 'referer'));
-  if (isAllowedSubmitOrigin(referer, env)) {
-    return referer;
-  }
-
-  const originalUrl = toUrlOrigin(readHeader(req, 'x-ms-original-url'));
-  if (isAllowedSubmitOrigin(originalUrl, env)) {
-    return originalUrl;
-  }
-
-  const configuredBaseUrl = normalizeString(
-    env?.APP_PUBLIC_APP_URL ||
-    env?.PUBLIC_APP_URL ||
-    env?.VITE_PUBLIC_APP_URL ||
-    env?.VITE_APP_BASE_URL ||
-    env?.VITE_SITE_URL ||
-    env?.SITE_URL ||
-    env?.FRONTEND_URL,
-  );
-
-  if (configuredBaseUrl && isAllowedSubmitOrigin(configuredBaseUrl, env)) {
-    return configuredBaseUrl.replace(/\/$/, '');
-  }
-
-  const proto = readHeader(req, 'x-forwarded-proto') || 'https';
-  const host = readHeader(req, 'x-forwarded-host') || readHeader(req, 'host');
-  if (typeof host === 'string' && host.trim()) {
-    const forwardedOrigin = `${String(proto).trim()}://${host.trim()}`;
-    if (isAllowedSubmitOrigin(forwardedOrigin, env)) {
-      return forwardedOrigin;
-    }
-  }
-
-  return 'https://reinex.app';
+  return resolvePublicAppBaseUrl(req, env, { fallback: 'https://reinex.app' });
 }
 
 function buildSubmissionLink(req, env, { identityNumber = '', otpCode = '' } = {}) {

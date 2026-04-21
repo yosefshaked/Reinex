@@ -5,6 +5,7 @@ import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit
 import { readEnv, respond as _respond, isAdminRole } from '../_shared/org-bff.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { findAuthUserByEmail } from '../_shared/auth-users.js';
+import { buildPublicAppHashRouteUrl, normalizeAbsoluteRedirectUrl } from '../_shared/public-app-url.js';
 
 const STATUS_PENDING = 'pending';
 const STATUS_ACCEPTED = 'accepted';
@@ -12,6 +13,7 @@ const STATUS_REVOKED = 'revoked';
 const STATUS_DECLINED = 'declined';
 const STATUS_EXPIRED = 'expired';
 const STATUS_FAILED = 'failed';
+const DEFAULT_INVITATION_TTL_DAYS = 3;
 
 function resolveUserFullName(user) {
   if (!user || typeof user !== 'object') {
@@ -98,46 +100,6 @@ function normalizeRedirectUrl(value) {
   } catch {
     return null;
   }
-}
-
-function tryParseUrl(candidate) {
-  try {
-    return new URL(candidate);
-  } catch {
-    return null;
-  }
-}
-
-function resolveSiteBaseHref(context, req) {
-  // Prefer explicit env configuration for public app URL
-  const env = readEnv(context);
-  const fallbackEnv = process.env ?? {};
-  const envCandidates = [
-    env.VITE_PUBLIC_APP_URL,
-    env.VITE_APP_BASE_URL,
-    env.VITE_SITE_URL,
-    fallbackEnv.VITE_PUBLIC_APP_URL,
-    fallbackEnv.VITE_APP_BASE_URL,
-    fallbackEnv.VITE_SITE_URL,
-  ].filter(Boolean);
-
-  for (const candidate of envCandidates) {
-    const parsed = tryParseUrl(String(candidate));
-    if (parsed) {
-      const basePath = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/$/, '') : '';
-      return `${parsed.origin}${basePath}`;
-    }
-  }
-
-  // Fallback: infer from request headers (Azure Static Web Apps/Proxies usually set x-forwarded-* headers)
-  const headers = req?.headers || {};
-  const xfProto = headers['x-forwarded-proto'] || headers['X-Forwarded-Proto'] || null;
-  const xfHost = headers['x-forwarded-host'] || headers['X-Forwarded-Host'] || headers.host || headers.Host || null;
-  const proto = typeof xfProto === 'string' && xfProto ? xfProto : (headers['x-arr-ssl'] ? 'https' : 'https');
-  if (typeof xfHost === 'string' && xfHost) {
-    return `${proto}://${xfHost}`;
-  }
-  return 'https://reinex.thepcrunners.com';
 }
 
 function normalizeExpirationInput(value) {
@@ -383,9 +345,10 @@ async function handleCreateInvitation(context, req, supabase) {
   }
 
   // If client didn't provide a redirect, default to the site's complete-registration route
-  const providedRedirect = normalizeRedirectUrl(body.redirectTo ?? body.redirect_to);
-  const defaultBase = resolveSiteBaseHref(context, req);
-  const defaultRedirect = `${defaultBase}/#/complete-registration`;
+  const env = readEnv(context);
+  const providedRedirect = normalizeAbsoluteRedirectUrl(body.redirectTo ?? body.redirect_to)
+    || normalizeRedirectUrl(body.redirectTo ?? body.redirect_to);
+  const defaultRedirect = buildPublicAppHashRouteUrl(req, env, '/complete-registration', { fallback: 'https://reinex.thepcrunners.com' });
   const redirectTo = providedRedirect || defaultRedirect;
   const emailData = body.emailData && typeof body.emailData === 'object' ? { ...body.emailData } : {};
 
@@ -409,21 +372,8 @@ async function handleCreateInvitation(context, req, supabase) {
     return;
   }
 
-  // Calculate smart expiration if client didn't provide one
   if (expiresAt === null) {
-    const expiryResult = await supabase.rpc('calculate_invitation_expiry', { org_id: orgId });
-    if (expiryResult.error) {
-      context.log?.warn?.('Failed to calculate smart expiration, using 24h default', {
-        orgId,
-        message: expiryResult.error.message,
-      });
-      // Fallback: 24 hours from now
-      const fallbackDate = new Date();
-      fallbackDate.setHours(fallbackDate.getHours() + 24);
-      expiresAt = fallbackDate.toISOString();
-    } else {
-      expiresAt = expiryResult.data;
-    }
+    expiresAt = new Date(Date.now() + DEFAULT_INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   }
 
   const { error: memberLookupError, userId: existingUserId } = await findExistingMemberByEmail(supabase, orgId, email);

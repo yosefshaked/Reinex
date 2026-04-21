@@ -14,6 +14,9 @@ import {
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { findAuthUserByEmail, getAuthUserById } from '../_shared/auth-users.js';
+import { buildPublicAppHashRouteUrl } from '../_shared/public-app-url.js';
+
+const DEFAULT_INVITATION_TTL_DAYS = 3;
 
 async function loadEmployee(client, orgId, employeeId) {
   const { data, error } = await withOrgScope(client, 'Employees', orgId)
@@ -24,38 +27,18 @@ async function loadEmployee(client, orgId, employeeId) {
   return { employee: data, error };
 }
 
-function tryParseUrl(candidate) {
-  try {
-    return new URL(candidate);
-  } catch {
+async function fetchOrganizationName(supabase, orgId) {
+  if (!orgId) {
     return null;
   }
-}
 
-function resolveInvitationRedirect(context, req, env) {
-  const envCandidates = [
-    env?.VITE_PUBLIC_APP_URL,
-    env?.VITE_APP_BASE_URL,
-    env?.VITE_SITE_URL,
-  ].filter(Boolean);
+  const { data } = await supabase
+    .from('organizations')
+    .select('name')
+    .eq('id', orgId)
+    .maybeSingle();
 
-  for (const candidate of envCandidates) {
-    const parsed = tryParseUrl(String(candidate));
-    if (parsed) {
-      const basePath = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/$/, '') : '';
-      return `${parsed.origin}${basePath}/#/complete-registration`;
-    }
-  }
-
-  const headers = req?.headers || {};
-  const forwardedProto = headers['x-forwarded-proto'] || headers['X-Forwarded-Proto'] || 'https';
-  const forwardedHost = headers['x-forwarded-host'] || headers['X-Forwarded-Host'] || headers.host || headers.Host || '';
-
-  if (typeof forwardedHost === 'string' && forwardedHost.trim()) {
-    return `${forwardedProto}://${forwardedHost.trim()}/#/complete-registration`;
-  }
-
-  return 'https://reinex.thepcrunners.com/#/complete-registration';
+  return data?.name ?? null;
 }
 
 async function findExistingMemberByEmail(supabase, orgId, email) {
@@ -198,8 +181,10 @@ async function sendInvitationFlow({
 
   const invitationId = randomUUID();
   const invitationToken = randomUUID();
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + DEFAULT_INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const employeeName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
+  const inviterName = `${authResult.data.user.user_metadata?.full_name || ''}`.trim() || authResult.data.user.email || '';
+  const organizationName = await fetchOrganizationName(supabase, orgId);
   const invitationPayload = {
     id: invitationId,
     org_id: orgId,
@@ -219,6 +204,9 @@ async function sendInvitationFlow({
     invitation_token: invitationToken,
     link_to_employee_id: employeeId,
     employee_name: employeeName,
+    inviter_name: inviterName,
+    organization_name: organizationName,
+    orgName: organizationName,
   };
 
   let authUser = null;
@@ -234,7 +222,7 @@ async function sendInvitationFlow({
   if (sendAuthInviteEmail) {
     const { error: authError } = await supabase.auth.admin.inviteUserByEmail(email, {
       data: invitationMetadata,
-      redirectTo: resolveInvitationRedirect(context, req, env),
+      redirectTo: buildPublicAppHashRouteUrl(req, env, '/complete-registration', { fallback: 'https://reinex.thepcrunners.com' }),
     });
 
     if (authError) {
