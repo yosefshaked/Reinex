@@ -30,7 +30,7 @@ async function fetchUserSessions(supabaseUrl, serviceRoleKey, userId) {
 // ---------------------------------------------------------------------------
 // GET — fetch full user detail: identity, MFA factors, sessions, memberships
 // ---------------------------------------------------------------------------
-async function handleGet(context, req, supabase, adminConfig, admin) {
+async function handleGet(context, req, supabase, adminConfig) {
   const userId = normalizeString(req?.query?.user_id);
   if (!userId) {
     return respond(context, 400, { message: 'user_id_required' });
