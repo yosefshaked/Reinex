@@ -298,6 +298,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const [inviteUserDialogOpen, setInviteUserDialogOpen] = useState(false);
   const [inviteUserEmployee, setInviteUserEmployee] = useState(null);
   const [inviteUserEmail, setInviteUserEmail] = useState('');
+  const [inviteUserPendingConflict, setInviteUserPendingConflict] = useState(null);
   const [showRoleDialog, setShowRoleDialog] = useState(false);
   const [targetOrgRole, setTargetOrgRole] = useState('member');
   const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -510,30 +511,46 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const handleLinkUser = useCallback((employee) => {
     setInviteUserEmployee(employee);
     setInviteUserEmail(employee?.email || '');
+    setInviteUserPendingConflict(null);
     setInviteUserDialogOpen(true);
   }, []);
 
-  const handleInviteUserSubmit = useCallback(async () => {
+  const handleInviteUserSubmit = useCallback(async ({ resendPending = false } = {}) => {
     if (!inviteUserEmployee?.id || !inviteUserEmail.trim()) return;
     setActionState(REQUEST.loading);
     try {
       const result = await authenticatedFetch('instructors-link-user', {
         session,
         method: 'POST',
-        body: { org_id: orgId, instructor_id: inviteUserEmployee.id, email: inviteUserEmail.trim() },
+        body: {
+          org_id: orgId,
+          instructor_id: inviteUserEmployee.id,
+          email: inviteUserEmail.trim(),
+          resend_pending: resendPending,
+        },
       });
       if (result?.user_exists) {
-        toast.success('ההזמנה נוצרה. למשתמש כבר יש חשבון והוא יכול להתחבר כדי לאשר את ההזמנה.');
+        toast.success(resendPending
+          ? 'ההזמנה חודשה. למשתמש כבר יש חשבון והוא יכול להתחבר כדי לאשר את ההזמנה.'
+          : 'ההזמנה נוצרה. למשתמש כבר יש חשבון והוא יכול להתחבר כדי לאשר את ההזמנה.');
       } else {
-        toast.success('ההזמנה נשלחה בהצלחה.');
+        toast.success(resendPending ? 'ההזמנה נשלחה מחדש בהצלחה.' : 'ההזמנה נשלחה בהצלחה.');
       }
+      setInviteUserPendingConflict(null);
       setInviteUserDialogOpen(false);
       setInviteUserEmployee(null);
       setInviteUserEmail('');
       await refetchInstructors();
     } catch (error) {
       console.error('Failed to link user', error);
-      toast.error(error?.message || 'שליחת ההזמנה נכשלה.');
+      if (error?.message === 'invitation_already_pending') {
+        setInviteUserPendingConflict({
+          email: inviteUserEmail.trim(),
+          expiresAt: error?.data?.expires_at || null,
+        });
+      } else {
+        toast.error(error?.message || 'שליחת ההזמנה נכשלה.');
+      }
     } finally {
       setActionState(REQUEST.idle);
     }
@@ -1320,6 +1337,7 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
           if (!open) {
             setInviteUserEmployee(null);
             setInviteUserEmail('');
+            setInviteUserPendingConflict(null);
           }
         }}
       >
@@ -1337,10 +1355,18 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
               type="email"
               dir="ltr"
               value={inviteUserEmail}
-              onChange={(event) => setInviteUserEmail(event.target.value)}
+              onChange={(event) => {
+                setInviteUserEmail(event.target.value);
+                setInviteUserPendingConflict(null);
+              }}
               placeholder="user@example.com"
             />
           </div>
+          {inviteUserPendingConflict ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 text-end">
+              כבר קיימת הזמנה פעילה לכתובת הזו. אפשר לשלוח הזמנה חדשה שתבטל את הקישור הקודם.
+            </div>
+          ) : null}
           <DialogFooter>
             <Button
               type="button"
@@ -1349,14 +1375,26 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                 setInviteUserDialogOpen(false);
                 setInviteUserEmployee(null);
                 setInviteUserEmail('');
+                setInviteUserPendingConflict(null);
               }}
               disabled={actionState === REQUEST.loading}
             >
               ביטול
             </Button>
+            {inviteUserPendingConflict ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => handleInviteUserSubmit({ resendPending: true })}
+                disabled={actionState === REQUEST.loading || !inviteUserEmail.trim()}
+              >
+                {actionState === REQUEST.loading ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <RotateCcw className="me-2 h-4 w-4" />}
+                שלח מחדש
+              </Button>
+            ) : null}
             <Button
               type="button"
-              onClick={handleInviteUserSubmit}
+              onClick={() => handleInviteUserSubmit()}
               disabled={actionState === REQUEST.loading || !inviteUserEmail.trim()}
             >
               {actionState === REQUEST.loading ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}

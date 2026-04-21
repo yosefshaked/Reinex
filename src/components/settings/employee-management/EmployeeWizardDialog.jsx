@@ -29,12 +29,14 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
   const [inviteEmail, setInviteEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdEmployeeId, setCreatedEmployeeId] = useState(null);
+  const [pendingInviteConflict, setPendingInviteConflict] = useState(null);
 
   const handleReset = () => {
     setStep(STEPS.DETAILS);
     setFormData({ employeeId: '', employeeType: 'instructor', firstName: '', lastName: '', email: '', phone: '', startDate: '' });
     setInviteEmail('');
     setCreatedEmployeeId(null);
+    setPendingInviteConflict(null);
   };
 
   const handleChange = (field) => (e) => {
@@ -80,7 +82,7 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
     }
   };
 
-  const handleSendInvitation = async () => {
+  const handleSendInvitation = async ({ resendPending = false } = {}) => {
     if (!inviteEmail.trim()) {
       toast.error('נא להזין כתובת דוא"ל.');
       return;
@@ -95,19 +97,30 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
           org_id: orgId,
           instructor_id: createdEmployeeId,
           email: inviteEmail.trim(),
+          resend_pending: resendPending,
         },
       });
       if (result?.user_exists) {
-        toast.success('ההזמנה נוצרה. למשתמש כבר יש חשבון והוא יכול להתחבר כדי לאשר אותה.');
+        toast.success(resendPending
+          ? 'ההזמנה חודשה. למשתמש כבר יש חשבון והוא יכול להתחבר כדי לאשר אותה.'
+          : 'ההזמנה נוצרה. למשתמש כבר יש חשבון והוא יכול להתחבר כדי לאשר אותה.');
       } else {
-        toast.success('ההזמנה נשלחה בהצלחה.');
+        toast.success(resendPending ? 'ההזמנה נשלחה מחדש בהצלחה.' : 'ההזמנה נשלחה בהצלחה.');
       }
+      setPendingInviteConflict(null);
       onOpenChange(false);
       handleReset();
       if (onSuccess) onSuccess();
     } catch (error) {
       console.error('Failed to send invitation', error);
-      toast.error(error?.message || 'שליחת ההזמנה נכשלה.');
+      if (error?.message === 'invitation_already_pending') {
+        setPendingInviteConflict({
+          email: inviteEmail.trim(),
+          expiresAt: error?.data?.expires_at || null,
+        });
+      } else {
+        toast.error(error?.message || 'שליחת ההזמנה נכשלה.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -295,11 +308,19 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
                 label='כתובת דוא"ל'
                 type="email"
                 value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
+                onChange={(e) => {
+                  setInviteEmail(e.target.value);
+                  setPendingInviteConflict(null);
+                }}
                 required
                 disabled={isSubmitting}
                 dir="ltr"
               />
+              {pendingInviteConflict ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 text-end">
+                  כבר קיימת הזמנה פעילה לכתובת הזו. אפשר לשלוח הזמנה חדשה שתבטל את הקישור הקודם.
+                </div>
+              ) : null}
 
               <DialogFooter className="sm:justify-start">
                 <div className="flex flex-row-reverse gap-2 w-full">
@@ -316,6 +337,11 @@ export default function EmployeeWizardDialog({ open, onOpenChange, orgId, sessio
                       </>
                     )}
                   </Button>
+                  {pendingInviteConflict ? (
+                    <Button type="button" variant="secondary" onClick={() => handleSendInvitation({ resendPending: true })} disabled={isSubmitting}>
+                      שלח מחדש
+                    </Button>
+                  ) : null}
                   <Button type="button" variant="outline" onClick={() => setStep(STEPS.INVITE_OPTION)} disabled={isSubmitting}>
                     <ArrowRight className="ms-2 h-4 w-4" />
                     חזור

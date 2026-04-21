@@ -41,4 +41,8 @@
   - the admin-facing original entry choice is preserved in `metadata.compensation_input`
   - supported preserved modes are `hourly` and `duration_based`
 - User linking and invitations are handled inside employee management, not a separate team-management system.
+- Employee invite flows may rotate an existing pending invite instead of failing hard:
+  - a fresh resend should revoke the prior pending `org_invitations` row and create a new one
+  - if the auth user is still unconfirmed, the resend should trigger a fresh Auth invite email
+  - if the auth user already has a confirmed account, the invite remains an org-level pending approval and no Auth email is expected
 - Leave, attendance, and payroll rules live in [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js); do not recode them in UI panels.

@@ -74,7 +74,7 @@ function normalizeToken(value) {
   return value.trim();
 }
 
-export async function createInvitation(orgId, email, { session, expiresAt, redirectTo, emailData, signal } = {}) {
+export async function createInvitation(orgId, email, { session, expiresAt, redirectTo, emailData, resendPending = false, signal } = {}) {
   const activeSession = ensureSession(session);
   const normalizedOrgId = normalizeOrgId(orgId);
   const normalizedEmail = normalizeEmail(email);
@@ -92,6 +92,9 @@ export async function createInvitation(orgId, email, { session, expiresAt, redir
   }
   if (emailData && typeof emailData === 'object') {
     payload.emailData = emailData;
+  }
+  if (resendPending) {
+    payload.resendPending = true;
   }
 
   try {

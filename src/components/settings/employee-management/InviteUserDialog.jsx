@@ -10,9 +10,10 @@ import { createInvitation } from '@/api/invitations.js';
 export default function InviteUserDialog({ open, onOpenChange, activeOrgId, session, onInviteSent }) {
   const [email, setEmail] = useState('');
   const [isInviting, setIsInviting] = useState(false);
+  const [pendingConflict, setPendingConflict] = useState(null);
 
-  const handleInvite = async (event) => {
-    event.preventDefault();
+  const handleInvite = async (event, { resendPending = false } = {}) => {
+    event?.preventDefault?.();
     if (!email.trim()) {
       toast.error('נא להזין כתובת דוא"ל.');
       return;
@@ -24,12 +25,15 @@ export default function InviteUserDialog({ open, onOpenChange, activeOrgId, sess
 
     setIsInviting(true);
     try {
-      const result = await createInvitation(activeOrgId, email.trim(), { session });
+      const result = await createInvitation(activeOrgId, email.trim(), { session, resendPending });
       if (result?.userExists) {
-        toast.success('ההזמנה נוצרה בהצלחה. למשתמש זה כבר קיים חשבון, והוא יכול להתחבר כדי לאשר את ההזמנה.');
+        toast.success(resendPending
+          ? 'ההזמנה חודשה. למשתמש זה כבר קיים חשבון, והוא יכול להתחבר כדי לאשר את ההזמנה.'
+          : 'ההזמנה נוצרה בהצלחה. למשתמש זה כבר קיים חשבון, והוא יכול להתחבר כדי לאשר את ההזמנה.');
       } else {
-        toast.success('ההזמנה נשלחה בהצלחה.');
+        toast.success(resendPending ? 'ההזמנה נשלחה מחדש בהצלחה.' : 'ההזמנה נשלחה בהצלחה.');
       }
+      setPendingConflict(null);
       setEmail('');
       onOpenChange(false);
       if (onInviteSent) {
@@ -40,7 +44,10 @@ export default function InviteUserDialog({ open, onOpenChange, activeOrgId, sess
       if (error?.code === 'user already a member') {
         toast.error('לא נשלחה הזמנה. המשתמש כבר חבר בארגון.');
       } else if (error?.code === 'invitation already pending') {
-        toast.error('כבר קיימת הזמנה בתוקף למשתמש זה.');
+        setPendingConflict({
+          email: email.trim(),
+          expiresAt: error?.data?.expiresAt || null,
+        });
       } else {
         toast.error(error?.message || 'שליחת ההזמנה נכשלה. ודא שהכתובת תקינה ונסה שוב.');
       }
@@ -50,7 +57,15 @@ export default function InviteUserDialog({ open, onOpenChange, activeOrgId, sess
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          setPendingConflict(null);
+        }
+        onOpenChange(nextOpen);
+      }}
+    >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-end">הזמן משתמש חדש לארגון</DialogTitle>
@@ -69,13 +84,22 @@ export default function InviteUserDialog({ open, onOpenChange, activeOrgId, sess
                 type="email"
                 placeholder="user@example.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setPendingConflict(null);
+                }}
                 disabled={isInviting}
                 required
                 className="text-end"
                 dir="ltr"
               />
             </div>
+            {pendingConflict ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 text-end space-y-2">
+                <p className="font-medium">כבר קיימת הזמנה פעילה לכתובת הזו.</p>
+                <p>אם המשתמש לא קיבל את המייל או שהקישור אבד, אפשר לשלוח הזמנה חדשה שתבטל את הקודמת.</p>
+              </div>
+            ) : null}
           </div>
           <DialogFooter className="sm:justify-start">
             <div className="flex flex-row-reverse gap-2 w-full">
@@ -92,6 +116,11 @@ export default function InviteUserDialog({ open, onOpenChange, activeOrgId, sess
                   </>
                 )}
               </Button>
+              {pendingConflict ? (
+                <Button type="button" variant="secondary" disabled={isInviting} onClick={(event) => handleInvite(event, { resendPending: true })}>
+                  שלח מחדש
+                </Button>
+              ) : null}
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isInviting}>
                 ביטול
               </Button>

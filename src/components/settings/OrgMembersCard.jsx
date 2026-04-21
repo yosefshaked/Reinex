@@ -180,7 +180,7 @@ export default function OrgMembersCard() {
     }
     setReinvitingEmail(email);
     try {
-      const result = await createInvitation(activeOrgId, email, { session });
+      const result = await createInvitation(activeOrgId, email, { session, resendPending: true });
       if (result?.userExists) {
         toast.success('הזמנה חדשה נוצרה בהצלחה. למשתמש זה כבר קיים חשבון.');
       } else {

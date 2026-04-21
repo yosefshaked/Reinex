@@ -97,6 +97,27 @@ function isExpiredTimestamp(timestamp) {
   return expiresAt.getTime() <= Date.now();
 }
 
+function normalizeBoolean(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value === 1;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on';
+  }
+  return false;
+}
+
+function shouldSendAuthInviteEmail(authUser) {
+  if (!authUser?.id) {
+    return true;
+  }
+  return !authUser.email_confirmed_at;
+}
+
 async function findPendingInvitation(supabase, orgId, email) {
   const { data, error } = await supabase
     .from('org_invitations')
@@ -120,6 +141,17 @@ async function markInvitationExpired(supabase, invitationId) {
     .eq('id', invitationId);
 }
 
+async function markInvitationRevoked(supabase, invitationId) {
+  if (!invitationId) {
+    return;
+  }
+
+  await supabase
+    .from('org_invitations')
+    .update({ status: 'revoked' })
+    .eq('id', invitationId);
+}
+
 async function sendInvitationFlow({
   context,
   req,
@@ -132,6 +164,7 @@ async function sendInvitationFlow({
   employee,
   employeeId,
   email,
+  resendPending = false,
 }) {
   const { error: existingMemberError, userId: existingMemberUserId } = await findExistingMemberByEmail(supabase, orgId, email);
   if (existingMemberError) {
@@ -151,7 +184,15 @@ async function sendInvitationFlow({
     if (isExpiredTimestamp(pendingInvitation.expires_at)) {
       await markInvitationExpired(supabase, pendingInvitation.id);
     } else {
-      return respond(context, 409, { message: 'invitation_already_pending' });
+      if (!resendPending) {
+        return respond(context, 409, {
+          message: 'invitation_already_pending',
+          can_resend: true,
+          invitation_id: pendingInvitation.id,
+          expires_at: pendingInvitation.expires_at ?? null,
+        });
+      }
+      await markInvitationRevoked(supabase, pendingInvitation.id);
     }
   }
 
@@ -188,16 +229,9 @@ async function sendInvitationFlow({
   }
 
   const authUserExists = Boolean(authUser?.id);
+  const sendAuthInviteEmail = shouldSendAuthInviteEmail(authUser);
 
-  if (authUserExists) {
-    const { error: createExistingUserInvitationError } = await supabase
-      .from('org_invitations')
-      .insert(invitationPayload);
-
-    if (createExistingUserInvitationError) {
-      throw new Error(createExistingUserInvitationError.message);
-    }
-  } else {
+  if (sendAuthInviteEmail) {
     const { error: authError } = await supabase.auth.admin.inviteUserByEmail(email, {
       data: invitationMetadata,
       redirectTo: resolveInvitationRedirect(context, req, env),
@@ -206,14 +240,14 @@ async function sendInvitationFlow({
     if (authError) {
       throw new Error(authError.message);
     }
+  }
 
-    const { error: createInvitationError } = await supabase
-      .from('org_invitations')
-      .insert(invitationPayload);
+  const { error: createInvitationError } = await supabase
+    .from('org_invitations')
+    .insert(invitationPayload);
 
-    if (createInvitationError) {
-      throw new Error(createInvitationError.message);
-    }
+  if (createInvitationError) {
+    throw new Error(createInvitationError.message);
   }
 
   const updatedMetadata = {
@@ -249,11 +283,13 @@ async function sendInvitationFlow({
   });
 
   return respond(context, 200, {
-    message: 'invitation_sent',
+    message: resendPending ? 'invitation_resent' : 'invitation_sent',
     email,
     employee_id: employeeId,
     user_exists: Boolean(authUserExists),
     invitation_id: invitationId,
+    resent: Boolean(resendPending),
+    email_sent: sendAuthInviteEmail,
   });
 }
 
@@ -436,6 +472,7 @@ export default async function (context, req) {
   const employeeId = normalizeString(body?.employee_id || body?.instructor_id);
   const email = normalizeString(body?.email).toLowerCase();
   const memberUserId = normalizeString(body?.member_user_id || body?.memberUserId);
+  const resendPending = normalizeBoolean(body?.resend_pending ?? body?.resendPending ?? body?.resend);
 
   if (!employeeId) {
     return respond(context, 400, { message: 'missing_employee_id' });
@@ -489,6 +526,7 @@ export default async function (context, req) {
       employee,
       employeeId,
       email,
+      resendPending,
     });
   } catch (error) {
     context.log?.error?.('instructors-link-user failed to send invitation', { message: error?.message });
