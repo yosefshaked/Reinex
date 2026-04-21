@@ -427,6 +427,19 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     setShowEditDialog(true);
   }, []);
 
+  const fetchOverviewInstances = useCallback(async () => {
+    if (!canLoad || !orgId) return;
+    try {
+      const today = toLocalDateString(new Date());
+      const endDate = shiftDate(today, 6);
+      const payload = await authenticatedFetch(`calendar/instances?org_id=${orgId}&start_date=${today}&end_date=${endDate}`, { session: authSession });
+      setOverviewInstances(Array.isArray(payload) ? payload : []);
+    } catch (error) {
+      console.error('Failed to load employee overview instances', error);
+      setOverviewInstances([]);
+    }
+  }, [authSession, canLoad, orgId]);
+
   const handleSyncFromLinkedProfile = useCallback(async () => {
     if (!currentEmployee?.id || !currentEmployeeLinkedProfile) return;
 
@@ -454,19 +467,6 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
       setActionState(REQUEST.idle);
     }
   }, [currentEmployee, currentEmployeeLinkedProfile, fetchOverviewInstances, orgId, refetchInstructors, session]);
-
-  const fetchOverviewInstances = useCallback(async () => {
-    if (!canLoad || !orgId) return;
-    try {
-      const today = toLocalDateString(new Date());
-      const endDate = shiftDate(today, 6);
-      const payload = await authenticatedFetch(`calendar/instances?org_id=${orgId}&start_date=${today}&end_date=${endDate}`, { session: authSession });
-      setOverviewInstances(Array.isArray(payload) ? payload : []);
-    } catch (error) {
-      console.error('Failed to load employee overview instances', error);
-      setOverviewInstances([]);
-    }
-  }, [authSession, canLoad, orgId]);
 
   useEffect(() => {
     void fetchOverviewInstances();
