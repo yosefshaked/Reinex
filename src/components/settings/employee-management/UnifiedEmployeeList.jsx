@@ -136,6 +136,10 @@ function getEmployeeProfileDifferences(employee, profile) {
   return differences;
 }
 
+function areSameContactValue(left, right) {
+  return normalizeComparableValue(left) === normalizeComparableValue(right);
+}
+
 function getEmployeeType(employee) {
   if (employee?.employee_type) return employee.employee_type;
   if (employee?.instructor_profile || (employee?.service_capabilities || []).length > 0) return 'instructor';
@@ -402,6 +406,12 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     () => getEmployeeProfileDifferences(currentEmployee, currentEmployeeLinkedProfile),
     [currentEmployee, currentEmployeeLinkedProfile],
   );
+  const hasEmployeePhone = Boolean(String(currentEmployee?.phone || '').trim());
+  const hasLinkedProfilePhone = Boolean(String(currentEmployeeLinkedProfile?.phone || '').trim());
+  const hasEmployeeEmail = Boolean(String(currentEmployee?.email || '').trim());
+  const hasLinkedProfileEmail = Boolean(String(currentEmployeeLinkedProfile?.email || '').trim());
+  const phoneValuesMatch = areSameContactValue(currentEmployee?.phone, currentEmployeeLinkedProfile?.phone);
+  const emailValuesMatch = areSameContactValue(currentEmployee?.email, currentEmployeeLinkedProfile?.email);
 
   const currentEmployeeOrgRole = String(currentEmployeeMembership?.role || 'member').toLowerCase();
   const currentEmployeeRoleLabel = currentEmployeeOrgRole === 'owner'
@@ -1071,10 +1081,12 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
 
                       <SectionCard title="תקשורת" description="פעולות מיידיות מול העובד">
                         <div className="grid gap-2">
-                          {currentEmployee.phone ? (
+                          {hasEmployeePhone ? (
                             <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-2">
                               <div className="min-w-0">
-                                <div className="text-sm font-bold text-slate-900">טלפון</div>
+                                <div className="text-sm font-bold text-slate-900">
+                                  {phoneValuesMatch && hasLinkedProfilePhone ? 'טלפון' : 'טלפון בכרטיס העובד'}
+                                </div>
                                 <div className="text-xs text-slate-500">{currentEmployee.phone}</div>
                               </div>
                               <Button size="sm" variant="outline" asChild>
@@ -1082,22 +1094,28 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                               </Button>
                             </div>
                           ) : null}
-                          {currentEmployee.phone ? (
+                          {hasLinkedProfilePhone && (!hasEmployeePhone || !phoneValuesMatch) ? (
                             <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-2">
                               <div className="min-w-0">
-                                <div className="text-sm font-bold text-slate-900">WhatsApp</div>
-                                <div className="text-xs text-slate-500">שלח הודעה מהירה</div>
+                                <div className="text-sm font-bold text-slate-900">WhatsApp של המשתמש המקושר</div>
+                                <div className="text-xs text-slate-500">{currentEmployeeLinkedProfile.phone}</div>
                               </div>
-                              <Button size="sm" variant="outline" onClick={() => window.open(getWhatsAppLink(currentEmployee), '_blank', 'noopener,noreferrer')}>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => window.open(getWhatsAppLink({ ...currentEmployee, phone: currentEmployeeLinkedProfile.phone }), '_blank', 'noopener,noreferrer')}
+                              >
                                 <MessageCircle className="me-2 h-4 w-4" />
                                 שלח
                               </Button>
                             </div>
                           ) : null}
-                          {currentEmployee.email ? (
+                          {hasEmployeeEmail ? (
                             <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-2">
                               <div className="min-w-0">
-                                <div className="text-sm font-bold text-slate-900">דוא״ל</div>
+                                <div className="text-sm font-bold text-slate-900">
+                                  {emailValuesMatch && hasLinkedProfileEmail ? 'דוא״ל' : 'דוא״ל בכרטיס העובד'}
+                                </div>
                                 <div className="text-xs text-slate-500">{currentEmployee.email}</div>
                               </div>
                               <Button size="sm" variant="outline" asChild>
@@ -1105,7 +1123,18 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                               </Button>
                             </div>
                           ) : null}
-                          {!currentEmployee.phone && !currentEmployee.email ? (
+                          {hasLinkedProfileEmail && (!hasEmployeeEmail || !emailValuesMatch) ? (
+                            <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-2">
+                              <div className="min-w-0">
+                                <div className="text-sm font-bold text-slate-900">דוא״ל של המשתמש המקושר</div>
+                                <div className="text-xs text-slate-500">{currentEmployeeLinkedProfile.email}</div>
+                              </div>
+                              <Button size="sm" variant="outline" asChild>
+                                <a href={`mailto:${currentEmployeeLinkedProfile.email}`}>פתח</a>
+                              </Button>
+                            </div>
+                          ) : null}
+                          {!hasEmployeePhone && !hasEmployeeEmail && !hasLinkedProfilePhone && !hasLinkedProfileEmail ? (
                             <EmptyState title="אין פרטי קשר" body="השלם טלפון או דוא״ל בכרטיס העובד." />
                           ) : null}
                         </div>
