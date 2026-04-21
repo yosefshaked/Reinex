@@ -119,9 +119,13 @@ export function AuthProvider({ children }) {
     return requestPasswordReset(email);
   }, []);
 
-  const updatePassword = useCallback(async (password) => {
+  const updatePassword = useCallback(async (password, options = {}) => {
     const client = ensureAuthClient();
-    const { data, error } = await client.auth.updateUser({ password });
+    const attributes = { password };
+    if (options.currentPassword) {
+      attributes.currentPassword = options.currentPassword;
+    }
+    const { data, error } = await client.auth.updateUser(attributes);
     if (error) throw error;
     return data;
   }, [ensureAuthClient]);

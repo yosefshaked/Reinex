@@ -20,7 +20,11 @@ export default function AccountPage() {
   const navigate = useNavigate();
   const { account, saveAccount, deactivateAccount } = useAccount();
   const { updatePassword, signOut } = useAuth();
-  const [passwordForm, setPasswordForm] = React.useState({ password: '', confirmPassword: '' });
+  const [passwordForm, setPasswordForm] = React.useState({
+    currentPassword: '',
+    password: '',
+    confirmPassword: '',
+  });
   const [passwordError, setPasswordError] = React.useState('');
   const [isSavingPassword, setIsSavingPassword] = React.useState(false);
   const [reasonCode, setReasonCode] = React.useState(REASON_OPTIONS[0].value);
@@ -36,6 +40,10 @@ export default function AccountPage() {
   const handlePasswordSubmit = async (event) => {
     event.preventDefault();
     setPasswordError('');
+    if (!passwordForm.currentPassword) {
+      setPasswordError('יש להזין את הסיסמה הנוכחית.');
+      return;
+    }
     if (passwordForm.password.length < 6) {
       setPasswordError('הסיסמה חייבת להכיל לפחות 6 תווים.');
       return;
@@ -47,12 +55,19 @@ export default function AccountPage() {
 
     setIsSavingPassword(true);
     try {
-      await updatePassword(passwordForm.password);
-      setPasswordForm({ password: '', confirmPassword: '' });
+      await updatePassword(passwordForm.password, {
+        currentPassword: passwordForm.currentPassword,
+      });
+      setPasswordForm({ currentPassword: '', password: '', confirmPassword: '' });
       toast.success('הסיסמה עודכנה');
     } catch (error) {
       console.error('Failed to update password', error);
-      setPasswordError(error?.message || 'עדכון הסיסמה נכשל.');
+      const message = error?.message === 'same_password'
+        ? 'הסיסמה החדשה חייבת להיות שונה מהסיסמה הנוכחית.'
+        : error?.message === 'invalid_credentials'
+          ? 'הסיסמה הנוכחית שגויה.'
+          : error?.message || 'עדכון הסיסמה נכשל.';
+      setPasswordError(message);
     } finally {
       setIsSavingPassword(false);
     }
@@ -104,6 +119,16 @@ export default function AccountPage() {
             <p className="text-sm text-slate-600">אפשר לעדכן את סיסמת הכניסה שלך בכל רגע.</p>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="account-password-current">סיסמה נוכחית</Label>
+              <Input
+                id="account-password-current"
+                type="password"
+                value={passwordForm.currentPassword}
+                onChange={(event) => setPasswordForm((current) => ({ ...current, currentPassword: event.target.value }))}
+                dir="ltr"
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="account-password">סיסמה חדשה</Label>
               <Input

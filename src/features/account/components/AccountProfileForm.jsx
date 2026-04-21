@@ -33,6 +33,17 @@ export default function AccountProfileForm({
   description = '',
   disabled = false,
 }) {
+  const accountSnapshot = React.useMemo(() => JSON.stringify({
+    firstName: account?.firstName || '',
+    lastName: account?.lastName || '',
+    identityNumber: account?.identityNumber || '',
+    phone: account?.phone || '',
+  }), [
+    account?.firstName,
+    account?.lastName,
+    account?.identityNumber,
+    account?.phone,
+  ]);
   const [form, setForm] = React.useState({
     firstName: '',
     lastName: '',
@@ -41,17 +52,23 @@ export default function AccountProfileForm({
   });
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState('');
+  const [isDirty, setIsDirty] = React.useState(false);
+  const lastAppliedSnapshotRef = React.useRef('');
 
   React.useEffect(() => {
-    setForm({
-      firstName: account?.firstName || '',
-      lastName: account?.lastName || '',
-      identityNumber: account?.identityNumber || '',
-      phone: account?.phone || '',
-    });
-  }, [account]);
+    if (isDirty || accountSnapshot === lastAppliedSnapshotRef.current) {
+      return;
+    }
+    const nextForm = JSON.parse(accountSnapshot);
+    setForm(nextForm);
+    lastAppliedSnapshotRef.current = accountSnapshot;
+  }, [accountSnapshot, isDirty]);
 
   const updateField = (field, value) => {
+    setIsDirty(true);
+    if (error) {
+      setError('');
+    }
     setForm((current) => ({ ...current, [field]: value }));
   };
 
@@ -69,6 +86,7 @@ export default function AccountProfileForm({
         identity_number: form.identityNumber,
         phone: form.phone,
       });
+      setIsDirty(false);
     } catch (submitError) {
       console.error('Failed to save account profile', submitError);
       setError(normalizeErrorMessage(submitError));
