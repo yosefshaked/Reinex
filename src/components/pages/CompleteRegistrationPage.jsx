@@ -54,10 +54,16 @@ export default function CompleteRegistrationPage() {
           return;
         }
         if (record.status && record.status !== 'pending') {
-          const statusMessage =
-            record.status === 'accepted'
-              ? 'ההזמנה כבר אושרה והחשבון פעיל. היכנס למערכת עם הסיסמה שלך.'
-              : 'ההזמנה הזו כבר אינה זמינה. בקש מהמנהל לשלוח קישור חדש.';
+          let statusMessage = 'ההזמנה הזו כבר אינה זמינה. בקש מהמנהל לשלוח קישור חדש.';
+          if (record.status === 'accepted') {
+            statusMessage = 'ההזמנה כבר אושרה והחשבון פעיל. היכנס למערכת עם הסיסמה שלך.';
+          } else if (record.status === 'revoked') {
+            statusMessage = 'הקישור הזה בוטל כי נשלחה הזמנה חדשה יותר. יש להשתמש במייל ההזמנה האחרון שנשלח אליך.';
+          } else if (record.status === 'expired') {
+            statusMessage = 'תוקף ההזמנה פג. בקש מהמנהל לשלוח קישור חדש.';
+          } else if (record.status === 'declined') {
+            statusMessage = 'ההזמנה הזו כבר נדחתה. אם מדובר בטעות, בקש מהמנהל לשלוח הזמנה חדשה.';
+          }
           setInviteError(statusMessage);
           setInviteStatus('error');
           return;
