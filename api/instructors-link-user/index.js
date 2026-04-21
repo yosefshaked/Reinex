@@ -15,6 +15,7 @@ import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit-log.js';
 import { findAuthUserByEmail, getAuthUserById } from '../_shared/auth-users.js';
 import { buildPublicAppHashRouteUrl } from '../_shared/public-app-url.js';
+import { deliverInvitationEmail } from '../_shared/invitation-email.js';
 
 const DEFAULT_INVITATION_TTL_DAYS = 3;
 
@@ -294,6 +295,8 @@ async function sendInvitationFlow({
 
   const authUserExists = Boolean(authUser?.id);
   const sendAuthInviteEmail = shouldSendAuthInviteEmail(authUser);
+  let deliveryProvider = sendAuthInviteEmail ? null : 'none';
+  let fallbackUsed = false;
 
   if (sendAuthInviteEmail) {
     if (authUserExists) {
@@ -313,12 +316,22 @@ async function sendInvitationFlow({
       }
     }
 
-    const { error: authError } = await supabase.auth.admin.inviteUserByEmail(email, {
-      data: invitationMetadata,
-      redirectTo: buildPublicAppHashRouteUrl(req, env, '/complete-registration', { fallback: 'https://reinex.thepcrunners.com' }),
-    });
-
-    if (authError) {
+    try {
+      const deliveryResult = await deliverInvitationEmail({
+        supabase,
+        env,
+        context,
+        email,
+        redirectTo: buildPublicAppHashRouteUrl(req, env, '/complete-registration', { fallback: 'https://reinex.thepcrunners.com' }),
+        invitationToken,
+        inviteMetadata: invitationMetadata,
+        inviterName,
+        organizationName,
+        expiresAt,
+      });
+      deliveryProvider = deliveryResult.deliveryProvider;
+      fallbackUsed = Boolean(deliveryResult.fallbackUsed);
+    } catch (authError) {
       await logInvitationSendFailed(supabase, {
         orgId,
         actor: { userId, userEmail: authResult.data.user.email || '', userRole: role },
@@ -402,6 +415,8 @@ async function sendInvitationFlow({
       invitation_token_rotated: Boolean(resendPending),
       link_to_employee_id: employeeId,
       expires_at: expiresAt,
+      delivery_provider: deliveryProvider,
+      used_email_fallback: fallbackUsed,
     },
   });
 
@@ -413,6 +428,8 @@ async function sendInvitationFlow({
     invitation_id: invitationId,
     resent: Boolean(resendPending),
     email_sent: sendAuthInviteEmail,
+    delivery_provider: deliveryProvider,
+    used_email_fallback: fallbackUsed,
   });
 }
 

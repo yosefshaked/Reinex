@@ -6,6 +6,7 @@ import { readEnv, respond as _respond, isAdminRole } from '../_shared/org-bff.js
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { findAuthUserByEmail } from '../_shared/auth-users.js';
 import { buildPublicAppHashRouteUrl, normalizeAbsoluteRedirectUrl } from '../_shared/public-app-url.js';
+import { deliverInvitationEmail } from '../_shared/invitation-email.js';
 
 const STATUS_PENDING = 'pending';
 const STATUS_ACCEPTED = 'accepted';
@@ -474,6 +475,8 @@ async function handleCreateInvitation(context, req, supabase) {
 
   const authUserExists = Boolean(existingAuthUser?.id);
   const sendAuthInviteEmail = shouldSendAuthInviteEmail(existingAuthUser);
+  let deliveryProvider = sendAuthInviteEmail ? null : 'none';
+  let fallbackUsed = false;
 
   const { error: pendingError, invitation: pendingInvitation } = await findPendingInvitation(supabase, orgId, email);
   if (pendingError) {
@@ -575,17 +578,27 @@ async function handleCreateInvitation(context, req, supabase) {
       }
     }
 
-    const inviteResult = await supabase.auth.admin.inviteUserByEmail(email, {
-      redirectTo: redirectUrl || undefined,
-      data: inviteMetadata,
-    });
-
-    if (inviteResult.error) {
+    try {
+      const deliveryResult = await deliverInvitationEmail({
+        supabase,
+        env,
+        context,
+        email,
+        redirectTo: redirectUrl || undefined,
+        invitationToken,
+        inviteMetadata,
+        inviterName,
+        organizationName: organization.name ?? null,
+        expiresAt,
+      });
+      deliveryProvider = deliveryResult.deliveryProvider;
+      fallbackUsed = Boolean(deliveryResult.fallbackUsed);
+    } catch (inviteResultError) {
       context.log?.error?.('invitations failed to send email invite', {
         orgId,
         email,
         invitationId,
-        message: inviteResult.error.message,
+        message: inviteResultError.message,
       });
       await logAuditEvent(supabase, {
         orgId,
@@ -599,7 +612,7 @@ async function handleCreateInvitation(context, req, supabase) {
         details: {
           invited_email: email,
           stage: 'send_auth_email',
-          reason: inviteResult.error.message,
+          reason: inviteResultError.message,
         },
       });
       respond(context, 502, { message: 'failed to send invitation email' });
@@ -680,6 +693,8 @@ async function handleCreateInvitation(context, req, supabase) {
     userExists: authUserExists,
     resent: Boolean(resendPending),
     emailSent: sendAuthInviteEmail,
+    deliveryProvider,
+    usedEmailFallback: fallbackUsed,
   });
 
   // Audit log: invitation created
@@ -696,6 +711,8 @@ async function handleCreateInvitation(context, req, supabase) {
       invited_email: email,
       expires_at: expiresAt,
       invitation_token_rotated: Boolean(resendPending),
+      delivery_provider: deliveryProvider,
+      used_email_fallback: fallbackUsed,
     },
   });
 }
