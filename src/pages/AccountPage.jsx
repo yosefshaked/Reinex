@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { KeyRound, ShieldAlert, UserRound } from 'lucide-react';
+import { CheckCircle2, KeyRound, ShieldAlert, UserRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,6 +18,38 @@ const REASON_OPTIONS = [
   { value: 'other', label: 'אחר' },
 ];
 
+function resolvePasswordErrorMessage(error) {
+  const rawMessage = typeof error?.message === 'string' ? error.message : '';
+  const normalizedMessage = rawMessage.trim().toLowerCase();
+
+  if (
+    normalizedMessage === 'same_password'
+    || normalizedMessage.includes('should be different from the old password')
+    || normalizedMessage.includes('must be different from the old password')
+  ) {
+    return 'הסיסמה החדשה חייבת להיות שונה מהסיסמה הנוכחית.';
+  }
+
+  if (
+    normalizedMessage === 'invalid_credentials'
+    || normalizedMessage.includes('invalid login credentials')
+    || normalizedMessage.includes('current password')
+    || normalizedMessage.includes('incorrect password')
+  ) {
+    return 'הסיסמה הנוכחית שגויה.';
+  }
+
+  if (normalizedMessage.includes('at least 6 characters')) {
+    return 'הסיסמה החדשה חייבת להכיל לפחות 6 תווים.';
+  }
+
+  if (normalizedMessage.includes('password')) {
+    return 'עדכון הסיסמה נכשל. יש לבדוק את הפרטים ולנסות שוב.';
+  }
+
+  return 'עדכון הסיסמה נכשל.';
+}
+
 export default function AccountPage() {
   const navigate = useNavigate();
   const { account, saveAccount, deactivateAccount } = useAccount();
@@ -29,6 +61,7 @@ export default function AccountPage() {
     confirmPassword: '',
   });
   const [passwordError, setPasswordError] = React.useState('');
+  const [passwordSuccess, setPasswordSuccess] = React.useState('');
   const [isSavingPassword, setIsSavingPassword] = React.useState(false);
   const [reasonCode, setReasonCode] = React.useState(REASON_OPTIONS[0].value);
   const [reasonText, setReasonText] = React.useState('');
@@ -43,6 +76,7 @@ export default function AccountPage() {
   const handlePasswordSubmit = async (event) => {
     event.preventDefault();
     setPasswordError('');
+    setPasswordSuccess('');
     if (!passwordForm.currentPassword) {
       setPasswordError('יש להזין את הסיסמה הנוכחית.');
       return;
@@ -62,15 +96,11 @@ export default function AccountPage() {
         currentPassword: passwordForm.currentPassword,
       });
       setPasswordForm({ currentPassword: '', password: '', confirmPassword: '' });
-      toast.success('הסיסמה עודכנה');
+      setPasswordSuccess('הסיסמה עודכנה בהצלחה.');
+      toast.success('הסיסמה עודכנה בהצלחה.');
     } catch (error) {
       console.error('Failed to update password', error);
-      const message = error?.message === 'same_password'
-        ? 'הסיסמה החדשה חייבת להיות שונה מהסיסמה הנוכחית.'
-        : error?.message === 'invalid_credentials'
-          ? 'הסיסמה הנוכחית שגויה.'
-          : error?.message || 'עדכון הסיסמה נכשל.';
-      setPasswordError(message);
+      setPasswordError(resolvePasswordErrorMessage(error));
     } finally {
       setIsSavingPassword(false);
     }
@@ -230,7 +260,11 @@ export default function AccountPage() {
                       id="account-password-current"
                       type="password"
                       value={passwordForm.currentPassword}
-                      onChange={(event) => setPasswordForm((current) => ({ ...current, currentPassword: event.target.value }))}
+                      onChange={(event) => {
+                        setPasswordError('');
+                        setPasswordSuccess('');
+                        setPasswordForm((current) => ({ ...current, currentPassword: event.target.value }));
+                      }}
                       dir="ltr"
                     />
                   </div>
@@ -240,7 +274,11 @@ export default function AccountPage() {
                       id="account-password"
                       type="password"
                       value={passwordForm.password}
-                      onChange={(event) => setPasswordForm((current) => ({ ...current, password: event.target.value }))}
+                      onChange={(event) => {
+                        setPasswordError('');
+                        setPasswordSuccess('');
+                        setPasswordForm((current) => ({ ...current, password: event.target.value }));
+                      }}
                       dir="ltr"
                     />
                   </div>
@@ -250,11 +288,23 @@ export default function AccountPage() {
                       id="account-password-confirm"
                       type="password"
                       value={passwordForm.confirmPassword}
-                      onChange={(event) => setPasswordForm((current) => ({ ...current, confirmPassword: event.target.value }))}
+                      onChange={(event) => {
+                        setPasswordError('');
+                        setPasswordSuccess('');
+                        setPasswordForm((current) => ({ ...current, confirmPassword: event.target.value }));
+                      }}
                       dir="ltr"
                     />
                   </div>
                 </div>
+                {passwordSuccess ? (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                      <span>{passwordSuccess}</span>
+                    </div>
+                  </div>
+                ) : null}
                 {passwordError ? (
                   <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
                     {passwordError}

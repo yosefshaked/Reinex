@@ -123,7 +123,7 @@ export function AuthProvider({ children }) {
     const client = ensureAuthClient();
     const attributes = { password };
     if (options.currentPassword) {
-      attributes.currentPassword = options.currentPassword;
+      attributes.current_password = options.currentPassword;
     }
     const { data, error } = await client.auth.updateUser(attributes);
     if (error) throw error;
