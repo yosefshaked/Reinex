@@ -178,6 +178,105 @@ function sanitizeInvitation(row) {
   };
 }
 
+function stripEmployeeInvitationPending(metadata, invitationId) {
+  const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? { ...metadata }
+    : {};
+  const pending = base.invitation_pending && typeof base.invitation_pending === 'object' && !Array.isArray(base.invitation_pending)
+    ? base.invitation_pending
+    : null;
+
+  if (!pending) {
+    return base;
+  }
+
+  const matchesInvitation = !invitationId || pending.invitation_id === invitationId;
+  if (!matchesInvitation) {
+    return base;
+  }
+
+  delete base.invitation_pending;
+  return base;
+}
+
+async function findEmployeeByPendingInvitation(supabase, orgId, invitation) {
+  const invitationId = invitation?.id || null;
+  const invitationToken = invitation?.token || null;
+  if (!orgId || (!invitationId && !invitationToken)) {
+    return null;
+  }
+
+  const pendingByIdFilter = invitationId
+    ? { invitation_pending: { invitation_id: invitationId } }
+    : null;
+  const pendingByTokenFilter = invitationToken
+    ? { invitation_pending: { invitation_token: invitationToken } }
+    : null;
+
+  const attempts = [pendingByIdFilter, pendingByTokenFilter].filter(Boolean);
+  for (const filter of attempts) {
+    const result = await supabase
+      .from('Employees')
+      .select('id, org_id, user_id, email, metadata, first_name, last_name')
+      .eq('org_id', orgId)
+      .contains('metadata', filter)
+      .limit(1)
+      .maybeSingle();
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    if (result.data) {
+      return result.data;
+    }
+  }
+
+  return null;
+}
+
+async function finalizeEmployeeInvitationLink(context, supabase, invitation, authUser) {
+  const employee = await findEmployeeByPendingInvitation(supabase, invitation.org_id, invitation);
+  if (!employee?.id) {
+    return { linked: false, employeeId: null };
+  }
+
+  if (employee.user_id && employee.user_id !== authUser.id) {
+    const error = new Error('employee already linked to another user');
+    error.statusCode = 409;
+    error.code = 'employee_already_linked';
+    error.employeeId = employee.id;
+    throw error;
+  }
+
+  const nextMetadata = stripEmployeeInvitationPending(employee.metadata, invitation.id);
+  const updateResult = await supabase
+    .from('Employees')
+    .update({
+      user_id: authUser.id,
+      email: invitation.email,
+      metadata: nextMetadata,
+    })
+    .eq('org_id', invitation.org_id)
+    .eq('id', employee.id)
+    .select('id, user_id')
+    .maybeSingle();
+
+  if (updateResult.error) {
+    context.log?.error?.('invitations failed to finalize employee link', {
+      invitationId: invitation.id,
+      employeeId: employee.id,
+      message: updateResult.error.message,
+    });
+    const error = new Error('failed to link employee');
+    error.statusCode = 500;
+    error.code = 'failed_to_link_employee';
+    throw error;
+  }
+
+  return { linked: true, employeeId: employee.id };
+}
+
 async function getAuthenticatedUser(context, req, supabase) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
@@ -913,6 +1012,23 @@ async function acceptInvitation(context, req, supabase, invitationId) {
     return;
   }
 
+  let employeeLinkResult = { linked: false, employeeId: null };
+  try {
+    employeeLinkResult = await finalizeEmployeeInvitationLink(context, supabase, invitation, authUser);
+  } catch (error) {
+    if (error?.statusCode === 409) {
+      respond(context, 409, { message: error.code || 'employee already linked' });
+      return;
+    }
+    context.log?.error?.('invitations failed to finalize employee link before accept', {
+      invitationId,
+      employeeId: error?.employeeId || null,
+      message: error?.message,
+    });
+    respond(context, 500, { message: error?.code || 'failed to link employee' });
+    return;
+  }
+
   const membershipResult = await supabase
     .from('org_memberships')
     .upsert({ org_id: invitation.org_id, user_id: authUser.id, role: 'member' }, { onConflict: 'org_id,user_id' })
@@ -942,7 +1058,11 @@ async function acceptInvitation(context, req, supabase, invitationId) {
     return;
   }
 
-  respond(context, 200, { message: 'invitation accepted' });
+  respond(context, 200, {
+    message: 'invitation accepted',
+    employeeLinked: employeeLinkResult.linked,
+    employeeId: employeeLinkResult.employeeId,
+  });
   await logAuditEvent(supabase, {
     orgId: invitation.org_id,
     userId: authUser.id,
@@ -952,7 +1072,11 @@ async function acceptInvitation(context, req, supabase, invitationId) {
     actionCategory: AUDIT_CATEGORIES.MEMBERSHIP,
     resourceType: 'invitation',
     resourceId: invitation.id,
-    details: { invited_email: invitation.email },
+    details: {
+      invited_email: invitation.email,
+      employee_linked: employeeLinkResult.linked,
+      employee_id: employeeLinkResult.employeeId,
+    },
   });
 }
 
