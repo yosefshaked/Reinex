@@ -97,10 +97,12 @@ export default function AccountProfileForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      <div className="space-y-1">
-        <h2 className="text-lg font-semibold text-slate-900">{heading}</h2>
-        {description ? <p className="text-sm text-slate-600">{description}</p> : null}
-      </div>
+      {heading || description ? (
+        <div className="space-y-1">
+          {heading ? <h2 className="text-lg font-semibold text-slate-900">{heading}</h2> : null}
+          {description ? <p className="text-sm text-slate-600">{description}</p> : null}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
