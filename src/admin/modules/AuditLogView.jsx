@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download } from 'lucide-react';
+import { Download, EyeOff, Eye } from 'lucide-react';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,6 +63,9 @@ export default function AuditLogView() {
   useAdminModuleView('audit-log');
 
   const [query, setQuery] = React.useState('');
+  // Hide system_admin.* events by default — they are auth gate noise, not business actions.
+  // Toggle to reveal them for security investigations.
+  const [hideSystemAdmin, setHideSystemAdmin] = React.useState(true);
   const [filters, setFilters] = React.useState({
     event_type: '',
     category: '',
@@ -77,7 +80,7 @@ export default function AuditLogView() {
   const [error, setError] = React.useState(null);
   const [selected, setSelected] = React.useState(null);
 
-  const load = React.useCallback(async (nextQuery, nextFilters, nextPage) => {
+  const load = React.useCallback(async (nextQuery, nextFilters, nextPage, excludeSysAdmin) => {
     setLoading(true);
     setError(null);
     try {
@@ -86,6 +89,9 @@ export default function AuditLogView() {
         offset: nextPage * PAGE_SIZE,
       };
       if (nextQuery) params.q = nextQuery;
+      // When hiding system_admin events, narrow event_type filter unless the user
+      // already set one themselves (their explicit filter takes precedence).
+      if (excludeSysAdmin && !nextFilters.event_type) params.exclude_prefix = 'system_admin.';
       if (nextFilters.event_type) params.event_type = nextFilters.event_type;
       if (nextFilters.category) params.category = nextFilters.category;
       if (nextFilters.org_id) params.org_id = nextFilters.org_id;
@@ -106,7 +112,7 @@ export default function AuditLogView() {
   }, []);
 
   React.useEffect(() => {
-    load('', filters, 0);
+    load('', filters, 0, hideSystemAdmin);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -117,7 +123,7 @@ export default function AuditLogView() {
 
   const applyFilters = () => {
     setPage(0);
-    load(query, filters, 0);
+    load(query, filters, 0, hideSystemAdmin);
   };
 
   const clearAll = () => {
@@ -125,13 +131,20 @@ export default function AuditLogView() {
     const cleared = { event_type: '', category: '', org_id: '', actor_user_id: '', since: '', until: '' };
     setFilters(cleared);
     setPage(0);
-    load('', cleared, 0);
+    load('', cleared, 0, hideSystemAdmin);
   };
 
   const goToPage = (next) => {
     if (next < 0) return;
     setPage(next);
-    load(query, filters, next);
+    load(query, filters, next, hideSystemAdmin);
+  };
+
+  const toggleHideSystemAdmin = () => {
+    const next = !hideSystemAdmin;
+    setHideSystemAdmin(next);
+    setPage(0);
+    load(query, filters, 0, next);
   };
 
   const exportCsv = () => {
@@ -243,10 +256,22 @@ export default function AuditLogView() {
       subtitle="Compliance"
       description="Every admin and user action persisted to the audit_log table, including control-plane events. System admins see all rows; filters narrow the view without restricting access."
       actions={
-        <Button variant="outline" size="sm" onClick={exportCsv} disabled={rows.length === 0}>
-          <Download className="mr-1.5 h-4 w-4" />
-          Export CSV
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleHideSystemAdmin}
+            className={hideSystemAdmin ? 'text-slate-500' : 'border-violet-300 bg-violet-50 text-violet-700'}
+          >
+            {hideSystemAdmin
+              ? <><EyeOff className="mr-1.5 h-3.5 w-3.5" />Showing user actions</>
+              : <><Eye className="mr-1.5 h-3.5 w-3.5" />Showing all events</>}
+          </Button>
+          <Button variant="outline" size="sm" onClick={exportCsv} disabled={rows.length === 0}>
+            <Download className="mr-1.5 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
       }
     >
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

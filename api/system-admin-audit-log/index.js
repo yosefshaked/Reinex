@@ -76,6 +76,7 @@ export default async function systemAdminAuditLog(context, req) {
   }
 
   const q = normalizeString(req?.query?.q);
+  const excludePrefix = normalizeString(req?.query?.exclude_prefix);
   const eventType = normalizeString(req?.query?.event_type);
   const category = normalizeString(req?.query?.category);
   const actorUserId = normalizeString(req?.query?.actor_user_id);
@@ -96,6 +97,7 @@ export default async function systemAdminAuditLog(context, req) {
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
+    if (excludePrefix) query = query.not('event_type', 'ilike', `${excludePrefix}%`);
     if (eventType) query = query.eq('event_type', eventType);
     if (category) query = query.eq('action_category', category);
     if (actorUserId) query = query.eq('actor_user_id', actorUserId);

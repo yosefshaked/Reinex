@@ -12,6 +12,24 @@ import ConfirmActionDialog from '../ui/ConfirmActionDialog.jsx';
 import ImpersonateUserDialog from '../impersonation/ImpersonateUserDialog.jsx';
 import { useAdminModuleView, captureAdminEvent } from '../lib/admin-analytics.js';
 
+function useOrgDetail(orgId) {
+  const [detail, setDetail] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!orgId) { setDetail(null); return; }
+    let cancelled = false;
+    setLoading(true);
+    authenticatedFetch('system-admin-org-detail', { method: 'GET', params: { org_id: orgId } })
+      .then((data) => { if (!cancelled) setDetail(data); })
+      .catch(() => { if (!cancelled) setDetail(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [orgId]);
+
+  return { detail, loading };
+}
+
 /**
  * Organizations — canonical customer-facing module. Reads the same
  * system-admin-users-orgs endpoint the legacy aggregate view uses, but
@@ -36,6 +54,7 @@ export default function OrganizationsView() {
   const [impersonateEmail, setImpersonateEmail] = React.useState('');
 
   const [flash, setFlash] = React.useState(null);
+  const { detail: orgDetail, loading: detailLoading } = useOrgDetail(selected?.id ?? null);
 
   const load = React.useCallback(async (search = '') => {
     setLoading(true);
@@ -248,14 +267,73 @@ export default function OrganizationsView() {
               <InfoCell label="ID" value={selected.id} mono small />
             </section>
 
-            <section className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-              <div className="mb-1 font-semibold uppercase tracking-wider text-slate-500">Coming online</div>
-              <ul className="list-disc pl-4 leading-5">
-                <li>Membership roster with role breakdown</li>
-                <li>Recent audit events filtered to this org</li>
-                <li>PostHog usage & feature-flag overrides</li>
-                <li>Billing ledger (internal)</li>
-              </ul>
+            {/* Members roster */}
+            <section>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Members {orgDetail && !detailLoading ? `(${orgDetail.members?.length ?? 0})` : ''}
+              </div>
+              {detailLoading ? (
+                <div className="space-y-1.5">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-8 animate-pulse rounded-md bg-slate-100" />
+                  ))}
+                </div>
+              ) : orgDetail?.members?.length ? (
+                <div className="divide-y divide-slate-100 rounded-md border border-slate-200">
+                  {orgDetail.members.map((m) => (
+                    <div key={m.user_id} className="flex items-center justify-between px-3 py-2">
+                      <div className="flex flex-col min-w-0">
+                        <span className="truncate text-sm font-medium text-slate-900">
+                          {m.full_name || m.email || m.user_id}
+                        </span>
+                        {m.full_name && m.email ? (
+                          <span className="truncate text-xs text-slate-500">{m.email}</span>
+                        ) : null}
+                      </div>
+                      <StatusBadge
+                        tone={m.role === 'owner' ? 'accent' : m.role === 'admin' ? 'warning' : 'neutral'}
+                        size="sm"
+                      >
+                        {m.role || 'member'}
+                      </StatusBadge>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 italic">No members found.</p>
+              )}
+            </section>
+
+            {/* Recent audit events */}
+            <section>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Recent activity
+              </div>
+              {detailLoading ? (
+                <div className="space-y-1.5">
+                  {[1, 2].map((i) => (
+                    <div key={i} className="h-6 animate-pulse rounded bg-slate-100" />
+                  ))}
+                </div>
+              ) : orgDetail?.recent_audit?.length ? (
+                <div className="space-y-1">
+                  {orgDetail.recent_audit.map((ev) => (
+                    <div key={ev.id} className="flex items-start gap-2 rounded-md bg-slate-50 px-2 py-1.5">
+                      <span className="mt-0.5 shrink-0 font-mono text-[10px] text-slate-400 whitespace-nowrap">
+                        {ev.created_at ? new Date(ev.created_at).toLocaleString() : '—'}
+                      </span>
+                      <div className="min-w-0">
+                        <span className="font-mono text-[11px] text-slate-800">{ev.event_type}</span>
+                        {ev.actor_email ? (
+                          <span className="ml-1 text-[10px] text-slate-500">by {ev.actor_email}</span>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 italic">No recent activity for this org.</p>
+              )}
             </section>
           </div>
         ) : null}

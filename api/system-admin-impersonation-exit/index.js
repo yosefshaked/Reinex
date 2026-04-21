@@ -85,9 +85,14 @@ export default async function adminImpersonationExit(context, req) {
   if (!sessionRow) {
     return respond(context, 404, { message: 'session_not_found' });
   }
-  if (sessionRow.admin_user_id !== admin.userId) {
+
+  // force_revoke: any system admin can terminate any active session (e.g. from the queue).
+  // Without it, only the session's own admin can end it.
+  const forceRevoke = body?.force_revoke === true;
+  if (!forceRevoke && sessionRow.admin_user_id !== admin.userId) {
     return respond(context, 403, { message: 'session_not_owned_by_admin' });
   }
+
   if (sessionRow.status !== 'active') {
     // Idempotent: ending an already-ended session is a no-op success.
     return respond(context, 200, { status: 'already_ended', session_id: sessionId });
