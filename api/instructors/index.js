@@ -17,6 +17,7 @@ import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit
 import { normalizeAvailabilityWindows, hasConfiguredAvailability } from '../_shared/instructor-availability.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { getAuthUserById } from '../_shared/auth-users.js';
+import { buildAccountDisplayName } from '../_shared/account-profile.js';
 
 const EMPLOYEE_SELECT_COLUMNS = 'id, user_id, first_name, middle_name, last_name, employee_id, employee_type, payroll_model, current_rate, monthly_salary_amount, phone, email, start_date, is_active, notes, working_days, annual_leave_days, leave_pay_method, leave_fixed_day_rate, employment_scope, metadata, instructor_types';
 
@@ -260,7 +261,7 @@ async function fetchUnlinkedMembers({ supabase, orgId, enrichedEmployees }) {
   if (missingMembers.length > 0) {
     const { data: profileRows, error: profileError } = await supabase
       .from('profiles')
-      .select('id, full_name, email')
+      .select('id, first_name, last_name')
       .in('id', missingMembers.map((member) => member.user_id));
 
     if (!profileError) {
@@ -273,7 +274,12 @@ async function fetchUnlinkedMembers({ supabase, orgId, enrichedEmployees }) {
   return missingMembers.map((member) => ({
     user_id: member.user_id,
     role: member.role,
-    profile: profileMap.get(member.user_id) || null,
+    profile: (() => {
+      const profile = profileMap.get(member.user_id) || null;
+      return profile
+        ? { ...profile, full_name: buildAccountDisplayName({ profile }) || null }
+        : null;
+    })(),
   }));
 }
 
@@ -533,11 +539,15 @@ export default async function (context, req) {
       try {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('id, full_name')
+          .select('id, first_name, last_name')
           .eq('id', validation.userId)
           .maybeSingle();
         const authUser = await getAuthUserById(supabase, validation.userId);
-        profileName = normalizeString(profile?.full_name);
+        profileName = buildAccountDisplayName({
+          profile,
+          authUser,
+          email: authUser?.email,
+        });
         profileEmail = normalizeString(authUser?.email).toLowerCase();
       } catch {
         // Best-effort only.

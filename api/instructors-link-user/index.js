@@ -16,6 +16,7 @@ import { AUDIT_ACTIONS, AUDIT_CATEGORIES, logAuditEvent } from '../_shared/audit
 import { findAuthUserByEmail, getAuthUserById } from '../_shared/auth-users.js';
 import { buildPublicAppHashRouteUrl } from '../_shared/public-app-url.js';
 import { deliverInvitationEmail } from '../_shared/invitation-email.js';
+import { buildAccountDisplayName } from '../_shared/account-profile.js';
 
 const DEFAULT_INVITATION_TTL_DAYS = 3;
 
@@ -541,7 +542,7 @@ async function directLinkFlow({
 
   const { data: memberProfile } = await supabase
     .from('profiles')
-    .select('id, full_name')
+    .select('id, first_name, last_name')
     .eq('id', memberUserId)
     .maybeSingle();
   const memberAuthUser = await getAuthUserById(supabase, memberUserId).catch(() => null);
@@ -560,7 +561,11 @@ async function directLinkFlow({
       employee_name: `${employee.first_name || ''} ${employee.last_name || ''}`.trim(),
       member_user_id: memberUserId,
       member_email: memberAuthUser?.email || null,
-      member_name: memberProfile?.full_name || null,
+      member_name: buildAccountDisplayName({
+        profile: memberProfile,
+        authUser: memberAuthUser,
+        email: memberAuthUser?.email,
+      }) || null,
     },
   });
 
@@ -570,6 +575,11 @@ async function directLinkFlow({
     member: memberProfile
       ? {
         ...memberProfile,
+        full_name: buildAccountDisplayName({
+          profile: memberProfile,
+          authUser: memberAuthUser,
+          email: memberAuthUser?.email,
+        }) || null,
         email: memberAuthUser?.email || null,
       }
       : { id: memberUserId, role: membership.role, email: memberAuthUser?.email || null },

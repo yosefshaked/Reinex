@@ -3,6 +3,7 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { readEnv, respond as _respond } from '../_shared/org-bff.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { getAuthUsersByIds } from '../_shared/auth-users.js';
+import { buildAccountDisplayName } from '../_shared/account-profile.js';
 
 function resolveAdminConfig(context) {
   return readSupabaseAdminConfig(readEnv(context));
@@ -141,7 +142,7 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
     if (userIds.length > 0) {
       const profilesResult = await supabase
         .from('profiles')
-        .select('id, full_name')
+        .select('id, first_name, last_name')
         .in('id', userIds);
 
       if (profilesResult.error) {
@@ -173,7 +174,11 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
         }
         return {
           id: membership.user_id,
-          full_name: profile?.full_name ?? null,
+          full_name: buildAccountDisplayName({
+            profile,
+            authUser,
+            email: authUser?.email,
+          }) || null,
           email: typeof authUser?.email === 'string' ? authUser.email.toLowerCase() : null,
         };
       })(),

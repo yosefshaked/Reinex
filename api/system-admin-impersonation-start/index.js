@@ -5,6 +5,7 @@ import {
   createSupabaseAdminClient,
   readSupabaseAdminConfig,
 } from '../_shared/supabase-admin.js';
+import { buildAccountDisplayName } from '../_shared/account-profile.js';
 import { ensureSystemAdmin, normalizeString, parseRequestBody, readEnv, respond } from '../_shared/org-bff.js';
 
 /**
@@ -75,21 +76,25 @@ async function lookupTargetUser(supabase, email) {
 
   if (!authUser) return null;
 
-  // Enrich with profile full_name (best-effort; failure is non-fatal).
-  let fullName = null;
+  // Enrich with profile-derived display name (best-effort; failure is non-fatal).
+  let profile = null;
   try {
-    const { data: profile } = await supabase
+    const { data } = await supabase
       .from('profiles')
-      .select('full_name')
+      .select('first_name, last_name')
       .eq('id', authUser.id)
       .maybeSingle();
-    fullName = profile?.full_name || null;
+    profile = data || null;
   } catch { /* ignore — auth user found; name is optional */ }
 
   return {
     id: authUser.id,
     email: authUser.email,
-    full_name: fullName || authUser.user_metadata?.full_name || null,
+    full_name: buildAccountDisplayName({
+      profile,
+      authUser,
+      email: authUser.email,
+    }) || null,
   };
 }
 

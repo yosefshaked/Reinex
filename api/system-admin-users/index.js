@@ -2,6 +2,7 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { ensureSystemAdmin, normalizeString, readEnv, respond } from '../_shared/org-bff.js';
+import { buildAccountDisplayName } from '../_shared/account-profile.js';
 
 const DEFAULT_PER_PAGE = 50;
 const MAX_PER_PAGE = 100;
@@ -66,7 +67,7 @@ async function enrichUsers(supabase, authUsers) {
   const [profilesResult, membershipsResult] = await Promise.all([
     supabase
       .from('profiles')
-      .select('id, full_name, is_system_admin')
+      .select('id, first_name, last_name, is_system_admin')
       .in('id', ids),
     supabase
       .from('org_memberships')
@@ -90,7 +91,11 @@ async function enrichUsers(supabase, authUsers) {
     return {
       id: u.id,
       email: u.email || '',
-      full_name: profile.full_name || u.user_metadata?.full_name || null,
+      full_name: buildAccountDisplayName({
+        profile,
+        authUser: u,
+        email: u.email,
+      }) || null,
       is_system_admin: profile.is_system_admin || false,
       created_at: u.created_at || null,
       last_sign_in_at: u.last_sign_in_at || null,
@@ -143,7 +148,7 @@ export default async function systemAdminUsers(context, req) {
         supabase
           .from('profiles')
           .select('id')
-          .ilike('full_name', `%${q}%`)
+          .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%`)
           .limit(100),
       ]);
 

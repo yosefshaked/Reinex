@@ -1,7 +1,7 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Outlet, useLocation } from "react-router-dom"
+import { Outlet, useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
-import { Megaphone, LogOut, PanelRightOpen, PanelRightClose } from "lucide-react"
+import { Megaphone, LogOut, PanelRightOpen, PanelRightClose, UserCog } from "lucide-react"
 import { Toaster, toast } from "sonner"
 
 import OrgConfigBanner from "@/components/OrgConfigBanner.jsx"
@@ -27,6 +27,7 @@ import ImpersonationBanner from "@/admin/ui/ImpersonationBanner.jsx"
 export default function AppShell({ children }) {
   const { signOut } = useAuth()
   const { activeOrg } = useOrg()
+  const navigate = useNavigate()
   const [isChangelogOpen, setIsChangelogOpen] = useState(false)
   const [isSidebarHidden, setIsSidebarHidden] = useState(() => {
     if (typeof window === 'undefined') return false
@@ -71,10 +72,6 @@ export default function AppShell({ children }) {
     sessionModalStudentId: sessionModalState.studentId,
     sessionModalStudentStatus: sessionModalState.studentStatus,
   }), [openSessionModal, closeSessionModal, sessionModalState.isOpen, sessionModalState.studentId, sessionModalState.studentStatus])
-
-  const handleOrgClick = () => {
-    toast.info("בקרוב: בחירת ארגון נוסף")
-  }
 
   const handleSignOut = async () => {
     try {
@@ -183,17 +180,28 @@ export default function AppShell({ children }) {
                     <PanelRightClose className="h-5 w-5" aria-hidden="true" />
                   )}
                 </button>
-                <OrgLogo />
                 <button
                   type="button"
-                  onClick={handleOrgClick}
-                  className="inline-flex min-h-[44px] items-center rounded-full border border-border bg-surface px-sm py-xs text-xs font-semibold text-foreground transition hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:px-md sm:text-sm"
+                  onClick={() => navigate('/select-org')}
+                  className="rounded-2xl transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                  aria-label="בחירת ארגון"
                 >
-                  {activeOrg?.name ? `ארגון: ${activeOrg.name}` : "בחרו ארגון לעבודה"}
+                  <OrgLogo />
                 </button>
+                <div className="inline-flex min-h-[44px] items-center rounded-full border border-border bg-surface px-sm py-xs text-xs font-semibold text-foreground sm:px-md sm:text-sm">
+                  {activeOrg?.name ? `ארגון: ${activeOrg.name}` : "בחרו ארגון לעבודה"}
+                </div>
               </div>
               <div className="flex items-center gap-xs">
                 <AccessibilityButton />
+                <button
+                  type="button"
+                  onClick={() => navigate('/account')}
+                  className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-border bg-surface p-2 text-neutral-600 transition hover:bg-neutral-100"
+                  aria-label="הגדרות אישיות"
+                >
+                  <UserCog className="h-5 w-5" aria-hidden="true" />
+                </button>
                 <button
                   type="button"
                   onClick={() => setIsChangelogOpen(true)}

@@ -5,9 +5,9 @@ import { AlertTriangle, ArrowLeft, CheckCheck, Loader2 } from 'lucide-react'
 import Card from "@/components/ui/CustomCard.jsx"
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { useAccount } from '@/account/AccountContext.jsx'
 import { useAuth } from "@/auth/AuthContext.jsx"
 import { useOrg } from "@/org/OrgContext.jsx"
-import { useSupabase } from "@/context/SupabaseContext.jsx"
 import { useInstructors } from "@/hooks/useOrgData.js"
 import { ComplianceHeatmap } from "@/features/dashboard/components/ComplianceHeatmap.jsx"
 import { authenticatedFetch } from '@/lib/api-client.js'
@@ -15,7 +15,7 @@ import { authenticatedFetch } from '@/lib/api-client.js'
 /**
  * Build greeting with proper fallback chain:
  * 1. Instructor name (from tenant DB Instructors table)
- * 2. Profile full_name (from control DB profiles table)
+ * 2. Account profile name (from control DB profiles table)
  * 3. Auth metadata display name (from Supabase Auth user_metadata)
  * 4. Email address 
  */
@@ -54,11 +54,10 @@ function buildGreeting(instructorName, profileName, authName, email) {
 
 export default function DashboardPage() {
   const { user, session } = useAuth()
+  const { account } = useAccount()
   const { activeOrgId, activeOrg } = useOrg()
-  const { authClient } = useSupabase()
   const navigate = useNavigate()
   const [instructorName, setInstructorName] = useState(null)
-  const [profileName, setProfileName] = useState(null)
   const [dashboardTasks, setDashboardTasks] = useState([])
   const [isLoadingTasks, setIsLoadingTasks] = useState(false)
   const [tasksError, setTasksError] = useState(null)
@@ -84,45 +83,6 @@ export default function DashboardPage() {
       setInstructorName(instructor.name)
     }
   }, [user?.id, instructors])
-
-  // Fetch profile name from control DB profiles table
-  useEffect(() => {
-    if (!user?.id || !authClient) {
-      return
-    }
-
-    let isMounted = true
-
-    async function fetchProfileName() {
-      try {
-        const { data, error } = await authClient
-          .from('profiles')
-          .select('full_name')
-          .eq('id', user.id)
-          .maybeSingle()
-        
-        if (!isMounted) return
-
-        if (error) {
-          console.error('Failed to fetch profile name:', error)
-          return
-        }
-
-        if (data?.full_name) {
-          setProfileName(data.full_name)
-        }
-      } catch (error) {
-        console.error('Failed to fetch profile name:', error)
-        // Silently fail - will fall back to auth name or email
-      }
-    }
-
-    fetchProfileName()
-
-    return () => {
-      isMounted = false
-    }
-  }, [user?.id, authClient])
 
   useEffect(() => {
     if (!canManageAll || !activeOrgId || !session) {
@@ -250,7 +210,7 @@ export default function DashboardPage() {
     )
   }
 
-  const greeting = buildGreeting(instructorName, profileName, user?.name, user?.email)
+  const greeting = buildGreeting(instructorName, account?.displayName, user?.name, user?.email)
 
   return (
     <div

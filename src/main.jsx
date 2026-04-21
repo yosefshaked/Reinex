@@ -28,8 +28,12 @@ import CompleteRegistrationPage from './components/pages/CompleteRegistrationPag
 import AcceptInvitePage from './components/pages/AcceptInvitePage.jsx';
 import { AuthProvider } from './auth/AuthContext.jsx';
 import AuthGuard from './auth/AuthGuard.jsx';
+import { AccountProvider } from './account/AccountContext.jsx';
 import { OrgProvider } from './org/OrgContext.jsx';
 import OrgSelection from './pages/OrgSelection.jsx';
+import AccountSetupPage from './pages/AccountSetupPage.jsx';
+import AccountPage from './pages/AccountPage.jsx';
+import AccountReactivationPage from './pages/AccountReactivationPage.jsx';
 import LandingPage from './pages/LandingPage.jsx';
 import PendingReportsPage from './features/sessions/pages/PendingReportsPage.jsx';
 import FormsListPage from './features/forms/pages/FormsListPage.jsx';
@@ -72,6 +76,7 @@ function App({ config = null }) {
       <RuntimeConfigProvider config={config}>
       <SupabaseProvider>
         <AuthProvider>
+          <AccountProvider>
           <OrgProvider>
             <HashRouter>
               <Routes>
@@ -84,6 +89,8 @@ function App({ config = null }) {
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route path="/submit" element={<SubmitFormPage />} />
                 <Route element={<AuthGuard />}>
+                  <Route path="/account/setup" element={<AccountSetupPage />} />
+                  <Route path="/account/reactivate" element={<AccountReactivationPage />} />
                   <Route path="/select-org" element={<OrgSelection />} />
                   <Route path="/system-admin/*" element={<AdminApp />} />
                   <Route element={<AppShell />}>
@@ -104,6 +111,7 @@ function App({ config = null }) {
                     <Route path="/my-students" element={<Navigate to="/students-list" replace />} />
                     <Route path="/instructors" element={<Navigate to="/employees" replace />} />
                     <Route path="/financials" element={<FinancialsPage />} />
+                    <Route path="/account" element={<AccountPage />} />
                     <Route path="/forms" element={<FormsListPage />} />
                     <Route path="/forms/shared-blocks" element={<FormBlocksPage />} />
                     <Route path="/forms/shared-blocks/:blockId" element={<FormBlocksPage />} />
@@ -120,6 +128,7 @@ function App({ config = null }) {
               </Routes>
             </HashRouter>
           </OrgProvider>
+          </AccountProvider>
         </AuthProvider>
       </SupabaseProvider>
     </RuntimeConfigProvider>

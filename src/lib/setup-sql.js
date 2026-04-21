@@ -137,26 +137,102 @@ CREATE INDEX IF NOT EXISTS organizations_created_by_idx
 
 CREATE TABLE IF NOT EXISTS public.profiles (
   id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  full_name text NULL,
+  first_name text NULL,
+  last_name text NULL,
+  identity_number text NULL,
   avatar_url text NULL,
   phone text NULL,
   locale text NOT NULL DEFAULT 'he',
+  setup_completed_at timestamptz NULL,
+  account_status text NOT NULL DEFAULT 'active',
+  deactivated_at timestamptz NULL,
   is_system_admin boolean NOT NULL DEFAULT false,
   can_create_organizations boolean NOT NULL DEFAULT false,
   max_owned_organizations integer NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NULL,
+  CONSTRAINT profiles_account_status_check CHECK (account_status IN ('active', 'disabled')),
   CONSTRAINT profiles_max_owned_organizations_non_negative_check CHECK (
     max_owned_organizations IS NULL OR max_owned_organizations >= 0
   )
 );
 
 ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS first_name text NULL;
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS last_name text NULL;
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS identity_number text NULL;
+
+ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS can_create_organizations boolean NOT NULL DEFAULT false;
 
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS max_owned_organizations integer NULL;
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS setup_completed_at timestamptz NULL;
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS account_status text NOT NULL DEFAULT 'active';
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS deactivated_at timestamptz NULL;
+
+UPDATE public.profiles
+SET account_status = 'active'
+WHERE account_status IS NULL OR btrim(account_status) = '';
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'profiles'
+      AND column_name = 'full_name'
+  ) THEN
+    UPDATE public.profiles
+    SET
+      first_name = COALESCE(first_name, NULLIF(split_part(btrim(full_name), ' ', 1), '')),
+      last_name = COALESCE(
+        last_name,
+        NULLIF(
+          btrim(
+            regexp_replace(
+              btrim(full_name),
+              '^\S+\s*',
+              ''
+            )
+          ),
+          ''
+        )
+      )
+    WHERE full_name IS NOT NULL
+      AND btrim(full_name) <> '';
+  END IF;
+EXCEPTION
+  WHEN undefined_column THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'profiles_account_status_check'
+      AND conrelid = 'public.profiles'::regclass
+  ) THEN
+    ALTER TABLE public.profiles
+      ADD CONSTRAINT profiles_account_status_check
+      CHECK (account_status IN ('active', 'disabled'));
+  END IF;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
 
 DO $$
 BEGIN
@@ -173,6 +249,25 @@ BEGIN
 EXCEPTION
   WHEN others THEN NULL;
 END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'profiles'
+      AND column_name = 'full_name'
+  ) THEN
+    ALTER TABLE public.profiles DROP COLUMN full_name;
+  END IF;
+EXCEPTION
+  WHEN undefined_column THEN NULL;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS profiles_identity_number_unique_idx
+  ON public.profiles (identity_number)
+  WHERE identity_number IS NOT NULL AND identity_number <> '';
 
 
 -- -----------------------------------------------------------------
@@ -504,9 +599,13 @@ ALTER TABLE public.impersonation_sessions ENABLE ROW LEVEL SECURITY;
 -- Control RPCs
 -- -----------------------------------------------------------------
 
+DROP FUNCTION IF EXISTS public.ensure_my_profile_exists(text, text);
+
 CREATE OR REPLACE FUNCTION public.ensure_my_profile_exists(
   p_full_name text DEFAULT NULL,
-  p_locale text DEFAULT NULL
+  p_locale text DEFAULT NULL,
+  p_first_name text DEFAULT NULL,
+  p_last_name text DEFAULT NULL
 )
 RETURNS uuid
 LANGUAGE plpgsql
@@ -516,25 +615,46 @@ AS $$
 DECLARE
   v_user_id uuid;
   v_profile_id uuid;
-  v_name text;
   v_locale text;
+  v_first_name text;
+  v_last_name text;
 BEGIN
   v_user_id := auth.uid();
   IF v_user_id IS NULL THEN
     RAISE EXCEPTION 'unauthenticated';
   END IF;
 
-  v_name := NULLIF(btrim(COALESCE(p_full_name, '')), '');
   v_locale := lower(NULLIF(btrim(COALESCE(p_locale, '')), ''));
   IF v_locale IS NULL THEN
     v_locale := 'he';
   END IF;
 
-  INSERT INTO public.profiles (id, full_name, locale, updated_at)
-  VALUES (v_user_id, v_name, v_locale, now())
+  v_first_name := NULLIF(btrim(COALESCE(p_first_name, '')), '');
+  v_last_name := NULLIF(btrim(COALESCE(p_last_name, '')), '');
+
+  IF v_first_name IS NULL AND NULLIF(btrim(COALESCE(p_full_name, '')), '') IS NOT NULL THEN
+    v_first_name := NULLIF(split_part(btrim(p_full_name), ' ', 1), '');
+  END IF;
+
+  IF v_last_name IS NULL AND NULLIF(btrim(COALESCE(p_full_name, '')), '') IS NOT NULL THEN
+    v_last_name := NULLIF(
+      btrim(
+        regexp_replace(
+          btrim(p_full_name),
+          '^\S+\s*',
+          ''
+        )
+      ),
+      ''
+    );
+  END IF;
+
+  INSERT INTO public.profiles (id, first_name, last_name, locale, updated_at)
+  VALUES (v_user_id, v_first_name, v_last_name, v_locale, now())
   ON CONFLICT (id) DO UPDATE
   SET
-    full_name = COALESCE(public.profiles.full_name, EXCLUDED.full_name),
+    first_name = COALESCE(public.profiles.first_name, EXCLUDED.first_name),
+    last_name = COALESCE(public.profiles.last_name, EXCLUDED.last_name),
     locale = COALESCE(public.profiles.locale, EXCLUDED.locale),
     updated_at = now();
 
@@ -3794,7 +3914,7 @@ END $$;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT EXECUTE ON FUNCTION public.get_active_org_id() TO authenticated, app_user;
 GRANT EXECUTE ON FUNCTION public.get_my_org_ids() TO authenticated, app_user;
-GRANT EXECUTE ON FUNCTION public.ensure_my_profile_exists(text, text) TO authenticated, app_user;
+GRANT EXECUTE ON FUNCTION public.ensure_my_profile_exists(text, text, text, text) TO authenticated, app_user;
 GRANT EXECUTE ON FUNCTION public.create_organization(text) TO authenticated, app_user;
 GRANT EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, uuid, integer, text) TO app_user;
 GRANT EXECUTE ON FUNCTION public.complete_lesson_instance_with_participants(uuid, uuid, uuid, integer, text) TO app_user;

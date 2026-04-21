@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext.jsx';
+import { useAccount } from '@/account/AccountContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 
 function LoadingScreen() {
@@ -16,6 +17,7 @@ function LoadingScreen() {
 
 export default function AuthGuard() {
   const { status: authStatus, session } = useAuth();
+  const { status: accountStatus, needsSetup, isDisabled } = useAccount();
   const { status: orgStatus, activeOrgId } = useOrg();
   const location = useLocation();
 
@@ -35,6 +37,20 @@ export default function AuthGuard() {
         }}
       />
     );
+  }
+
+  if (accountStatus === 'loading' || accountStatus === 'idle') {
+    return <LoadingScreen />;
+  }
+
+  if (isDisabled && location.pathname !== '/account/reactivate') {
+    return <Navigate to="/account/reactivate" replace />;
+  }
+
+  const exemptFromSetup = location.pathname === '/account/setup' || location.pathname === '/account/reactivate';
+  if (needsSetup && !exemptFromSetup) {
+    const returnTo = `${location.pathname}${location.search || ''}`;
+    return <Navigate to={`/account/setup?returnTo=${encodeURIComponent(returnTo)}`} replace />;
   }
 
   if (orgStatus === 'loading' || orgStatus === 'idle') {

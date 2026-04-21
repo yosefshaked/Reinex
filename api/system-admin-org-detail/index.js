@@ -2,6 +2,7 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { ensureSystemAdmin, normalizeString, isValidOrgId, readEnv, respond } from '../_shared/org-bff.js';
+import { buildAccountDisplayName } from '../_shared/account-profile.js';
 
 export default async function handler(req, context) {
   const authorization = resolveBearerAuthorization(req);
@@ -86,16 +87,16 @@ export default async function handler(req, context) {
       return respond(500, { error: 'list_users_failed', message: err.message });
     }
 
-    // Fetch profiles for full_name
+    // Fetch profiles for display names
     let profilesById = {};
     try {
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('id, full_name')
+        .select('id, first_name, last_name')
         .in('id', userIds);
       if (profilesError) throw profilesError;
       for (const p of profiles ?? []) {
-        profilesById[p.id] = p.full_name ?? null;
+        profilesById[p.id] = p;
       }
     } catch (err) {
       context.log?.error('[system-admin-org-detail] profiles fetch failed', err);
@@ -106,7 +107,10 @@ export default async function handler(req, context) {
       user_id: m.user_id,
       role: m.role,
       joined_at: m.created_at,
-      full_name: profilesById[m.user_id] ?? null,
+      full_name: buildAccountDisplayName({
+        profile: profilesById[m.user_id] ?? null,
+        email: emailById[m.user_id] ?? null,
+      }) || null,
       email: emailById[m.user_id] ?? null,
     }));
   }

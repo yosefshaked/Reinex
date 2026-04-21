@@ -154,6 +154,14 @@ export const AUDIT_ACTIONS = {
   INVITATION_EXPIRED: 'invitation.expired',
   INVITATION_SEND_FAILED: 'invitation.send_failed',
   INVITATION_REVOKED: 'invitation.revoked',
+
+  // Account
+  ACCOUNT_PROFILE_UPDATED: 'account.profile_updated',
+  ACCOUNT_SETUP_COMPLETED: 'account.setup_completed',
+  ACCOUNT_DEACTIVATED: 'account.deactivated',
+  ACCOUNT_REACTIVATED: 'account.reactivated',
+  ACCOUNT_DEACTIVATION_BLOCKED: 'account.deactivation_blocked',
+  ACCOUNT_REACTIVATION_BLOCKED: 'account.reactivation_blocked',
   
   // Backup
   BACKUP_CREATED: 'backup.created',
@@ -225,6 +233,7 @@ export const AUDIT_CATEGORIES = {
   INSTRUCTORS: 'instructors',
   CALENDAR: 'calendar',
   FORMS: 'forms',
+  ACCOUNT: 'account',
 };
 
 /**

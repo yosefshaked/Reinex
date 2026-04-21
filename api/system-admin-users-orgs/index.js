@@ -2,6 +2,7 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { ensureSystemAdmin, normalizeString, readEnv, respond } from '../_shared/org-bff.js';
+import { buildAccountDisplayName } from '../_shared/account-profile.js';
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
@@ -105,7 +106,7 @@ export default async function systemAdminUsersOrgs(context, req) {
         .limit(limit),
       supabase
         .from('profiles')
-        .select('id, full_name, is_system_admin, updated_at, metadata')
+        .select('id, first_name, last_name, is_system_admin, updated_at, metadata')
         .eq('is_system_admin', true)
         .order('updated_at', { ascending: false })
         .limit(limit),
@@ -154,14 +155,21 @@ export default async function systemAdminUsersOrgs(context, req) {
       supabase,
       systemAdminProfiles.map((row) => row.id),
     );
-    const systemAdminsWithEmail = systemAdminProfiles.map((row) => ({
-      ...row,
-      email:
+    const systemAdminsWithEmail = systemAdminProfiles.map((row) => {
+      const email =
         authEmailByUserId[row.id] ||
         normalizeString(row?.metadata?.email) ||
         normalizeString(row?.metadata?.user_email) ||
-        '',
-    }));
+        '';
+      return {
+        ...row,
+        email,
+        full_name: buildAccountDisplayName({
+          profile: row,
+          email,
+        }) || null,
+      };
+    });
     const filteredSystemAdmins = applySearchFilter(
       systemAdminsWithEmail,
       search,

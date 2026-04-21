@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   XCircle,
 } from 'lucide-react';
+import { useAccount } from '@/account/AccountContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { acceptInvitation, declineInvitation, getInvitationByToken } from '@/api/invitations.js';
 import { buildInvitationSearch, extractRegistrationTokens } from '@/lib/invite-tokens.js';
@@ -26,6 +27,7 @@ export default function AcceptInvitePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { status: authStatus, session, user, signOut } = useAuth();
+  const { needsSetup, isDisabled } = useAccount();
   const { refreshOrganizations, selectOrg } = useOrg();
 
   const { invitationTokenKey, invitationTokenValue } = useMemo(
@@ -93,6 +95,20 @@ export default function AcceptInvitePage() {
       },
     });
   }, [authStatus, session, invitationTokenKey, invitationTokenValue, navigate]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    if (isDisabled) {
+      navigate('/account/reactivate', { replace: true });
+      return;
+    }
+    if (needsSetup) {
+      const returnTo = `/accept-invite${location.search || ''}`;
+      navigate(`/account/setup?returnTo=${encodeURIComponent(returnTo)}`, { replace: true });
+    }
+  }, [session, isDisabled, needsSetup, navigate, location.search]);
 
   const invitationEmail = invitation?.email || '';
   const normalizedInvitationEmail = invitationEmail.toLowerCase();

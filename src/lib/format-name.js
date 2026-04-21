@@ -34,6 +34,26 @@ export function formatName(firstName, middleName, lastName) {
   return parts.length > 0 ? parts.join(' ') : 'ללא שם';
 }
 
+export function formatUserAccountName(profile, { email = '', fallback = 'ללא שם' } = {}) {
+  const first = profile?.first_name || '';
+  const last = profile?.last_name || '';
+  const combined = [first.trim(), last.trim()].filter(Boolean).join(' ').trim();
+  if (combined) {
+    return combined;
+  }
+
+  const metadataName = profile?.name || profile?.full_name || '';
+  if (typeof metadataName === 'string' && metadataName.trim()) {
+    return metadataName.trim();
+  }
+
+  if (typeof email === 'string' && email.trim()) {
+    return email.trim();
+  }
+
+  return fallback;
+}
+
 // Convenient aliases for domain-specific usage
 export const formatStudentName = formatPersonName;
 export const formatInstructorName = formatPersonName;

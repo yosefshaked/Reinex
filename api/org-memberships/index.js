@@ -4,6 +4,7 @@ import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit
 import { readEnv, respond as _respond, isAdminRole } from '../_shared/org-bff.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { getAuthUserById } from '../_shared/auth-users.js';
+import { splitDisplayName } from '../_shared/account-profile.js';
 function getAdminClient(context) {
   const cfg = readSupabaseAdminConfig(readEnv(context));
   if (!cfg.supabaseUrl || !cfg.serviceRoleKey) return { client: null, error: new Error('missing_admin_credentials') };
@@ -142,9 +143,6 @@ async function handlePatch(context, req, supabase, membershipId){
   if (normalizedName.provided){
     if (!target.user_id){ respond(context,400,{message:'membership missing user id'}); return; }
 
-    const profileResult = await supabase.from('profiles').select('id, full_name').eq('id', target.user_id).maybeSingle();
-    if (profileResult.error){ respond(context,500,{message:'failed to load profile'}); return; }
-
     let authUserRecord = null;
     let previousMetadata = null;
     try {
@@ -169,9 +167,11 @@ async function handlePatch(context, req, supabase, membershipId){
     }
     accountUpdated = true;
 
+    const nameParts = splitDisplayName(normalizedName.value);
     const profilePayload = {
       id: target.user_id,
-      full_name: normalizedName.value,
+      first_name: nameParts.firstName,
+      last_name: nameParts.lastName,
     };
 
     const profileUpdate = await supabase
