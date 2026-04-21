@@ -262,6 +262,8 @@ async function sendInvitationFlow({
   const employeeName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
   const inviterName = `${authResult.data.user.user_metadata?.full_name || ''}`.trim() || authResult.data.user.email || '';
   const organizationName = await fetchOrganizationName(supabase, orgId);
+  const authInviteRedirect = buildPublicAppHashRouteUrl(req, env, '/complete-registration', { fallback: 'https://reinex.thepcrunners.com' });
+  const existingUserRedirect = buildPublicAppHashRouteUrl(req, env, '/accept-invite', { fallback: 'https://reinex.thepcrunners.com' });
   const invitationPayload = {
     id: invitationId,
     org_id: orgId,
@@ -322,12 +324,13 @@ async function sendInvitationFlow({
         env,
         context,
         email,
-        redirectTo: buildPublicAppHashRouteUrl(req, env, '/complete-registration', { fallback: 'https://reinex.thepcrunners.com' }),
+        redirectTo: authInviteRedirect,
         invitationToken,
         inviteMetadata: invitationMetadata,
         inviterName,
         organizationName,
         expiresAt,
+        mode: 'auth_invite',
       });
       deliveryProvider = deliveryResult.deliveryProvider;
       fallbackUsed = Boolean(deliveryResult.fallbackUsed);
@@ -342,6 +345,35 @@ async function sendInvitationFlow({
         reason: authError.message,
       });
       throw new Error(authError.message);
+    }
+  } else {
+    try {
+      const deliveryResult = await deliverInvitationEmail({
+        supabase,
+        env,
+        context,
+        email,
+        redirectTo: existingUserRedirect,
+        invitationToken,
+        inviteMetadata: invitationMetadata,
+        inviterName,
+        organizationName,
+        expiresAt,
+        mode: 'existing_user_org_invite',
+      });
+      deliveryProvider = deliveryResult.deliveryProvider;
+      fallbackUsed = Boolean(deliveryResult.fallbackUsed);
+    } catch (deliveryError) {
+      await logInvitationSendFailed(supabase, {
+        orgId,
+        actor: { userId, userEmail: authResult.data.user.email || '', userRole: role },
+        invitationId,
+        email,
+        employeeId,
+        stage: 'send_existing_user_email',
+        reason: deliveryError.message,
+      });
+      throw new Error(deliveryError.message);
     }
   }
 
@@ -427,7 +459,7 @@ async function sendInvitationFlow({
     user_exists: Boolean(authUserExists),
     invitation_id: invitationId,
     resent: Boolean(resendPending),
-    email_sent: sendAuthInviteEmail,
+    email_sent: true,
     delivery_provider: deliveryProvider,
     used_email_fallback: fallbackUsed,
   });

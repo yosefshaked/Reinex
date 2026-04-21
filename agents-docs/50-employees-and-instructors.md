@@ -43,8 +43,8 @@
 - User linking and invitations are handled inside employee management, not a separate team-management system.
 - Employee invite flows may rotate an existing pending invite instead of failing hard:
   - a fresh resend should keep the same pending `org_invitations` row and rotate its token/expiry in place
-  - if the auth user is still unconfirmed, the resend should trigger a fresh Auth invite email
-  - if the auth user already has a confirmed account, the invite remains an org-level pending approval and no Auth email is expected
+  - if the auth user is still unconfirmed, the resend should generate a fresh Auth invite link and deliver it through Brevo
+  - if the auth user already has a confirmed account, the invite remains an org-level pending approval but should still send a direct org-invite email through Brevo into the accept flow
 - Accepting an employee-originated org invitation must do more than create `org_memberships`: the accept path must also consume the pending employee invitation link and set `Employees.user_id` for that employee record, then clear the pending marker.
 - If Supabase Auth email sending fails for an employee invite, the flow should keep Supabase as the invite-token source (`generateLink`) and fall back to Brevo for actual email delivery instead of aborting the invite.
 - Employee invite emails should carry the same core metadata as org invites (`inviter_name`, `organization_name`, invitation token) and default to a 3-day expiry window unless a stricter explicit expiration is supplied.

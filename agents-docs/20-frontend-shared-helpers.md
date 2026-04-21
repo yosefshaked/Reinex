@@ -27,6 +27,7 @@
 - `authenticatedFetch`, `authenticatedFetchBlob`, `authenticatedFetchText`
 - `useStudents`, `useInstructors`, `useServices`, `useClientProfiles`
 - API wrappers in [`../src/api/`](../src/api/) and [`../src/features/settings/api/`](../src/features/settings/api/)
+- Password reset requests should use [`../src/api/password-reset.js`](../src/api/password-reset.js) instead of calling `supabase.auth.resetPasswordForEmail(...)` directly from UI/auth context
 - `toAgorot`, `toShekel`, `coerceAgorot`, `formatCurrency`
 - `parseDateStrict`, `toISODateString`, `isValidRange`, `isFullMonthRange`
 - `normalizeDayToken`, `dayLabel`, `daySortValue`
@@ -38,6 +39,7 @@
 
 ## Known patterns / do not reinvent
 - Default to [`../src/lib/api-client.js`](../src/lib/api-client.js) for authenticated requests.
+- Public auth-email initiation flows (for example password reset) should still use shared frontend API wrappers rather than direct Supabase email-sending methods, so delivery stays centralized on backend Brevo helpers.
 - `authenticatedFetch` automatically adds `x-org-id` from `active_org_id` local storage; do not hand-build this header in feature code.
 - Prefer [`../src/hooks/useOrgData.js`](../src/hooks/useOrgData.js) for org-scoped lists before writing a new fetch hook.
 - The private `authenticatedFetch` inside [`../src/org/OrgContext.jsx`](../src/org/OrgContext.jsx) is local to that provider; do not copy it elsewhere.

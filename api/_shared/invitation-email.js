@@ -42,8 +42,22 @@ function buildInvitationHashRedirect(redirectTo, invitationToken, tokenHash) {
   return url.toString();
 }
 
-function buildInvitationEmailSubject({ organizationName }) {
+function buildDirectInvitationRedirect(redirectTo, invitationToken) {
+  const url = new URL(String(redirectTo || '').trim());
+  const hashValue = String(url.hash || '#').replace(/^#/, '');
+  const [rawHashPath, rawHashQuery = ''] = hashValue.split('?');
+  const hashPath = rawHashPath || '/';
+  const params = new URLSearchParams(rawHashQuery);
+  params.set('invitation_token', invitationToken);
+  url.hash = `#${hashPath}${params.toString() ? `?${params.toString()}` : ''}`;
+  return url.toString();
+}
+
+function buildInvitationEmailSubject({ organizationName, mode = 'auth_invite' }) {
   const orgName = String(organizationName || '').trim();
+  if (mode === 'existing_user_org_invite') {
+    return orgName ? `ממתינה לך הזמנה לארגון ${orgName}` : 'ממתינה לך הזמנה חדשה ב-Reinex';
+  }
   return orgName ? `הוזמנת להצטרף ל-${orgName}` : 'הוזמנת להצטרף ל-Reinex';
 }
 
@@ -52,17 +66,21 @@ function buildInvitationEmailText({
   organizationName,
   inviteUrl,
   expiresAt,
+  mode = 'auth_invite',
 }) {
   const orgName = String(organizationName || '').trim() || 'הארגון';
   const inviter = String(inviterName || '').trim() || 'מנהל המערכת';
   const formattedExpiry = formatInvitationExpiry(expiresAt);
+  const actionCopy = mode === 'existing_user_org_invite'
+    ? 'כדי לקבל את ההזמנה ולהצטרף לארגון עם החשבון הקיים שלך, יש לפתוח את הקישור הבא:'
+    : 'כדי לקבל את ההזמנה וליצור את החשבון, יש לפתוח את הקישור הבא:';
 
   return [
     'שלום,',
     '',
     `${inviter} הזמין אותך להצטרף לארגון "${orgName}".`,
     '',
-    'כדי לקבל את ההזמנה וליצור את החשבון, יש לפתוח את הקישור הבא:',
+    actionCopy,
     inviteUrl,
     '',
     formattedExpiry ? `הקישור תקף עד ${formattedExpiry}.` : '',
@@ -78,15 +96,28 @@ function buildInvitationEmailHtml({
   organizationName,
   inviteUrl,
   expiresAt,
+  mode = 'auth_invite',
 }) {
   const orgName = escapeHtml(String(organizationName || '').trim() || 'הארגון');
   const inviter = escapeHtml(String(inviterName || '').trim() || 'מנהל המערכת');
   const safeInviteUrl = escapeHtml(inviteUrl);
   const formattedExpiry = escapeHtml(formatInvitationExpiry(expiresAt));
+  const preheader = escapeHtml(
+    mode === 'existing_user_org_invite'
+      ? `ממתינה לך הזמנה לארגון ${String(organizationName || '').trim() || 'ב-Reinex'}`
+      : `הוזמנת להצטרף לארגון ${String(organizationName || '').trim() || 'ב-Reinex'}`,
+  );
+  const intro = mode === 'existing_user_org_invite'
+    ? 'כדי לקבל את ההזמנה ולהצטרף לארגון עם החשבון הקיים שלך, יש ללחוץ על הכפתור הבא.'
+    : 'כדי לקבל את ההזמנה וליצור את החשבון, יש ללחוץ על הכפתור הבא.';
+  const buttonLabel = mode === 'existing_user_org_invite'
+    ? 'צפייה בהזמנה והצטרפות'
+    : 'קבלה והצטרפות לארגון';
 
   return `<!DOCTYPE html>
 <html lang="he" dir="rtl">
-  <body style="margin:0;padding:0;background:#f7fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1a202c;">
+  <body style="margin:0;padding:0;background:#f7fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#1a202c;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">${preheader}</div>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7fafc;padding:24px 0;">
       <tr>
         <td align="center">
@@ -95,12 +126,18 @@ function buildInvitationEmailHtml({
               <td style="padding:32px 40px 16px;text-align:right;">
                 <h1 style="margin:0 0 16px;font-size:24px;line-height:1.4;">הוזמנת להצטרף</h1>
                 <p style="margin:0 0 12px;font-size:16px;line-height:1.7;">${inviter} הזמין אותך להצטרף לארגון <strong>${orgName}</strong>.</p>
-                <p style="margin:0;font-size:16px;line-height:1.7;">כדי לקבל את ההזמנה וליצור את החשבון, יש ללחוץ על הכפתור הבא.</p>
+                <p style="margin:0;font-size:16px;line-height:1.7;">${escapeHtml(intro)}</p>
               </td>
             </tr>
             <tr>
               <td align="center" style="padding:12px 40px 24px;">
-                <a href="${safeInviteUrl}" target="_blank" style="display:inline-block;background:#2c5282;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:8px;font-size:16px;font-weight:600;">קבלה והצטרפות לארגון</a>
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td style="border-radius:8px;background:#2c5282;">
+                      <a href="${safeInviteUrl}" target="_blank" style="display:inline-block;background:#2c5282;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:8px;font-size:16px;font-weight:600;border:1px solid #2c5282;">${escapeHtml(buttonLabel)}</a>
+                    </td>
+                  </tr>
+                </table>
               </td>
             </tr>
             <tr>
@@ -148,26 +185,54 @@ export async function deliverInvitationEmail({
   inviterName = '',
   organizationName = '',
   expiresAt = '',
+  mode = 'auth_invite',
 }) {
-  const inviteOptions = {
-    redirectTo,
-    data: inviteMetadata,
-  };
+  if (!canSendBrevoInvitation(env)) {
+    throw new Error('brevo_not_configured');
+  }
 
-  const inviteResult = await supabase.auth.admin.inviteUserByEmail(email, inviteOptions);
-  if (!inviteResult.error) {
+  if (mode === 'existing_user_org_invite') {
+    const inviteUrl = buildDirectInvitationRedirect(redirectTo, invitationToken);
+    const subject = buildInvitationEmailSubject({ organizationName, mode });
+    const textContent = buildInvitationEmailText({
+      inviterName,
+      organizationName,
+      inviteUrl,
+      expiresAt,
+      mode,
+    });
+    const htmlContent = buildInvitationEmailHtml({
+      inviterName,
+      organizationName,
+      inviteUrl,
+      expiresAt,
+      mode,
+    });
+
+    await sendBrevoEmail(
+      {
+        to: email,
+        subject,
+        htmlContent,
+        textContent,
+        senderName: organizationName || 'Reinex',
+      },
+      env,
+      context,
+    );
+
     return {
-      deliveryProvider: 'supabase',
+      deliveryProvider: 'brevo_existing_user',
       emailSent: true,
       fallbackUsed: false,
       fallbackReason: null,
     };
   }
 
-  const fallbackReason = String(inviteResult.error.message || 'invite_user_by_email_failed');
-  if (!canSendBrevoInvitation(env)) {
-    throw inviteResult.error;
-  }
+  const inviteOptions = {
+    redirectTo,
+    data: inviteMetadata,
+  };
 
   const linkResult = await supabase.auth.admin.generateLink({
     type: 'invite',
@@ -185,18 +250,20 @@ export async function deliverInvitationEmail({
   }
 
   const inviteUrl = buildInvitationHashRedirect(redirectTo, invitationToken, hashedToken);
-  const subject = buildInvitationEmailSubject({ organizationName });
+  const subject = buildInvitationEmailSubject({ organizationName, mode });
   const textContent = buildInvitationEmailText({
     inviterName,
     organizationName,
     inviteUrl,
     expiresAt,
+    mode,
   });
   const htmlContent = buildInvitationEmailHtml({
     inviterName,
     organizationName,
     inviteUrl,
     expiresAt,
+    mode,
   });
 
   await sendBrevoEmail(
@@ -212,9 +279,9 @@ export async function deliverInvitationEmail({
   );
 
   return {
-    deliveryProvider: 'brevo_fallback',
+    deliveryProvider: 'brevo_auth_invite',
     emailSent: true,
-    fallbackUsed: true,
-    fallbackReason,
+    fallbackUsed: false,
+    fallbackReason: null,
   };
 }

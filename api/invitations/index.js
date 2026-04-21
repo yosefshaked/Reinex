@@ -619,34 +619,34 @@ async function handleCreateInvitation(context, req, supabase) {
   };
 
   const redirectUrl = redirectTo || null;
+  const authInviteRedirect = redirectUrl || buildPublicAppHashRouteUrl(req, env, '/complete-registration', { fallback: 'https://reinex.thepcrunners.com' });
+  const existingUserRedirect = buildPublicAppHashRouteUrl(req, env, '/accept-invite', { fallback: 'https://reinex.thepcrunners.com' });
   const invitationId = pendingInvitation?.id || randomUUID();
   const invitationToken = randomUUID();
+  const inviterResult = await supabase.auth.admin.getUserById(authUser.id);
+  if (inviterResult.error || !inviterResult.data?.user) {
+    context.log?.error?.('invitations failed to load inviter profile', {
+      orgId,
+      invitedBy: authUser.id,
+      message: inviterResult.error?.message ?? 'inviter not found',
+    });
+    respond(context, 500, { message: 'failed to personalize invitation email' });
+    return;
+  }
+  const inviterName = resolveUserFullName(inviterResult.data.user) || null;
+  const inviteMetadata = {
+    ...emailData,
+    orgId,
+    orgName: organization.name ?? null,
+    organization_name: organization.name ?? null,
+    inviter_name: inviterName,
+    invitationId,
+    invitation_id: invitationId,
+    invitationToken,
+    invitation_token: invitationToken,
+  };
 
   if (sendAuthInviteEmail) {
-    const inviterResult = await supabase.auth.admin.getUserById(authUser.id);
-    if (inviterResult.error || !inviterResult.data?.user) {
-      context.log?.error?.('invitations failed to load inviter profile', {
-        orgId,
-        invitedBy: authUser.id,
-        message: inviterResult.error?.message ?? 'inviter not found',
-      });
-      respond(context, 500, { message: 'failed to personalize invitation email' });
-      return;
-    }
-
-    const inviterName = resolveUserFullName(inviterResult.data.user) || null;
-    const inviteMetadata = {
-      ...emailData,
-      orgId,
-      orgName: organization.name ?? null,
-      organization_name: organization.name ?? null,
-      inviter_name: inviterName,
-      invitationId,
-      invitation_id: invitationId,
-      invitationToken,
-      invitation_token: invitationToken,
-    };
-
     if (authUserExists) {
       try {
         await updateAuthUserInvitationMetadata(supabase, existingAuthUser, inviteMetadata);
@@ -683,12 +683,13 @@ async function handleCreateInvitation(context, req, supabase) {
         env,
         context,
         email,
-        redirectTo: redirectUrl || undefined,
+        redirectTo: authInviteRedirect || undefined,
         invitationToken,
         inviteMetadata,
         inviterName,
         organizationName: organization.name ?? null,
         expiresAt,
+        mode: 'auth_invite',
       });
       deliveryProvider = deliveryResult.deliveryProvider;
       fallbackUsed = Boolean(deliveryResult.fallbackUsed);
@@ -711,6 +712,48 @@ async function handleCreateInvitation(context, req, supabase) {
         details: {
           invited_email: email,
           stage: 'send_auth_email',
+          reason: inviteResultError.message,
+        },
+      });
+      respond(context, 502, { message: 'failed to send invitation email' });
+      return;
+    }
+  } else {
+    try {
+      const deliveryResult = await deliverInvitationEmail({
+        supabase,
+        env,
+        context,
+        email,
+        redirectTo: existingUserRedirect,
+        invitationToken,
+        inviteMetadata,
+        inviterName,
+        organizationName: organization.name ?? null,
+        expiresAt,
+        mode: 'existing_user_org_invite',
+      });
+      deliveryProvider = deliveryResult.deliveryProvider;
+      fallbackUsed = Boolean(deliveryResult.fallbackUsed);
+    } catch (inviteResultError) {
+      context.log?.error?.('invitations failed to send existing-user invite email', {
+        orgId,
+        email,
+        invitationId,
+        message: inviteResultError.message,
+      });
+      await logAuditEvent(supabase, {
+        orgId,
+        userId: authUser.id,
+        userEmail: authUser.email || '',
+        userRole: role,
+        actionType: AUDIT_ACTIONS.INVITATION_SEND_FAILED,
+        actionCategory: AUDIT_CATEGORIES.MEMBERSHIP,
+        resourceType: 'invitation',
+        resourceId: invitationId,
+        details: {
+          invited_email: email,
+          stage: 'send_existing_user_email',
           reason: inviteResultError.message,
         },
       });
@@ -791,7 +834,7 @@ async function handleCreateInvitation(context, req, supabase) {
     invitation: sanitizeInvitation(persistedInvitation),
     userExists: authUserExists,
     resent: Boolean(resendPending),
-    emailSent: sendAuthInviteEmail,
+    emailSent: true,
     deliveryProvider,
     usedEmailFallback: fallbackUsed,
   });
