@@ -29,6 +29,7 @@ import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/
 import { mapLooseSessionError } from '@/lib/error-mapping.js';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { parseSessionFormConfig, ensureSessionFormFallback } from '@/features/sessions/utils/form-config.js';
+import { isSessionRecordsEnabled } from '@/features/sessions/config/session-records.js';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',
@@ -134,6 +135,7 @@ function buildAnswerList(content, questions) {
 }
 
 export default function PendingReportsPage() {
+  const sessionRecordsEnabled = isSessionRecordsEnabled();
   const { activeOrg } = useOrg();
   const { session } = useSupabase();
   const [state, setState] = useState(REQUEST_STATE.idle);
@@ -462,6 +464,10 @@ export default function PendingReportsPage() {
   // Guard: Admin-only access
   if (!isAdminMember) {
     return <Navigate to="/dashboard" replace />;
+  }
+
+  if (!sessionRecordsEnabled) {
+    return <Navigate to="/students-list" replace />;
   }
 
   return (

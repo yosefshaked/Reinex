@@ -36,6 +36,7 @@ import AccountPage from './pages/AccountPage.jsx';
 import AccountReactivationPage from './pages/AccountReactivationPage.jsx';
 import LandingPage from './pages/LandingPage.jsx';
 import PendingReportsPage from './features/sessions/pages/PendingReportsPage.jsx';
+import { isSessionRecordsEnabled } from './features/sessions/config/session-records.js';
 import FormsListPage from './features/forms/pages/FormsListPage.jsx';
 import FormBuilderPage from './features/forms/pages/FormBuilderPage.jsx';
 import FormPreviewPage from './features/forms/pages/FormPreviewPage.jsx';
@@ -71,6 +72,7 @@ class AppErrorBoundary extends React.Component {
 }
 
 function App({ config = null }) {
+  const sessionRecordsEnabled = isSessionRecordsEnabled();
   return (
     <DirectionProvider dir="rtl">
       <RuntimeConfigProvider config={config}>
@@ -117,8 +119,8 @@ function App({ config = null }) {
                     <Route path="/forms/shared-blocks/:blockId" element={<FormBlocksPage />} />
                     <Route path="/forms/:formId" element={<FormBuilderPage />} />
                     <Route path="/forms/:formId/preview" element={<FormPreviewPage />} />
-                    <Route path="/pending-reports" element={<PendingReportsPage />} />
-                    <Route path="/admin/pending-reports" element={<Navigate to="/pending-reports" replace />} />
+                    <Route path="/pending-reports" element={sessionRecordsEnabled ? <PendingReportsPage /> : <Navigate to="/students-list" replace />} />
+                    <Route path="/admin/pending-reports" element={<Navigate to={sessionRecordsEnabled ? "/pending-reports" : "/students-list"} replace />} />
                     <Route path="/students/:id/:tab?" element={<StudentDetailPage />} />
                     <Route path="/Settings" element={<Settings />} />
                     <Route path="/diagnostics" element={<Diagnostics />} />

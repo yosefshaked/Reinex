@@ -31,6 +31,7 @@ import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
 import MyPendingReportsCard from '@/features/sessions/components/MyPendingReportsCard.jsx';
 import { formatStudentName } from '@/features/students/utils/name-utils.js';
 import { toAgorot } from '@/lib/currency.js';
+import { isSessionRecordsEnabled } from '@/features/sessions/config/session-records.js';
 
 export default function StudentsPage() {
   const { activeOrg, activeOrgId } = useOrg();
@@ -62,6 +63,7 @@ export default function StudentsPage() {
   const [pendingReportsCount, setPendingReportsCount] = useState(0); // Count of loose reports awaiting assignment
   const [pendingReportsDialogOpen, setPendingReportsDialogOpen] = useState(false); // For instructor's pending reports dialog
   const [canViewInactive, setCanViewInactive] = useState(false); // For instructors - permission to view inactive students
+  const sessionRecordsEnabled = isSessionRecordsEnabled();
 
   // Mobile fix: prevent Dialog close when Select is open/closing
   const openSelectCountRef = useRef(0);
@@ -126,7 +128,8 @@ export default function StudentsPage() {
   }, [canFetch, isAdmin, activeOrgId, session]);
 
   const fetchPendingReportsCount = useCallback(async () => {
-    if (!canFetch) {
+    if (!canFetch || !sessionRecordsEnabled) {
+      setPendingReportsCount(0);
       return;
     }
 
@@ -142,7 +145,7 @@ export default function StudentsPage() {
       // Don't show error toast - this is supplementary data
       setPendingReportsCount(0);
     }
-  }, [canFetch, activeOrgId, session]);
+  }, [canFetch, activeOrgId, session, sessionRecordsEnabled]);
 
   const refreshRoster = useCallback(async () => {
     const promises = [
@@ -584,7 +587,7 @@ export default function StudentsPage() {
                 {isAdmin ? 'רשימת תלמידים' : 'רשימת התלמידים שלי'}
               </CardTitle>
               <div className="flex items-center gap-2">
-                {isAdmin && (
+                {isAdmin && sessionRecordsEnabled && (
                   <Button
                     type="button"
                     variant="outline"
@@ -600,7 +603,7 @@ export default function StudentsPage() {
                     )}
                   </Button>
                 )}
-                {!isAdmin && (
+                {!isAdmin && sessionRecordsEnabled && (
                   <Button
                     type="button"
                     variant="outline"
@@ -944,7 +947,7 @@ export default function StudentsPage() {
       )}
 
       {/* Instructor-only: Pending Reports Dialog */}
-      {!isAdmin && (
+      {!isAdmin && sessionRecordsEnabled && (
         <Dialog open={pendingReportsDialogOpen} onOpenChange={setPendingReportsDialogOpen}>
           <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>

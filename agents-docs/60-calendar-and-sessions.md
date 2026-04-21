@@ -66,3 +66,4 @@
 - Cancellation modal uses a server-backed preview action (`PUT /api/calendar/instances` with `action: 'preview-cancel-instance'`) before submitting cancellation, so UI impact text is based on current server state.
 - Lesson `is_closed` is a workflow-state flag and does not hard-lock edits by itself. Hard lock enforcement for mutations uses finance lock sources only (`payroll_run`, `claim_batch`).
 - Pending reports / loose sessions already have shared API wrappers and error mapping.
+- Session Records / loose-session flows are currently feature-disabled in the frontend via `src/features/sessions/config/session-records.js`. Do not remove the backend endpoints, but do not mount UI flows or fire API calls while the feature is off.

@@ -10,6 +10,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
 import ResubmitRejectedReportDialog from './ResubmitRejectedReportDialog.jsx';
+import { isSessionRecordsEnabled } from '@/features/sessions/config/session-records.js';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',
@@ -70,6 +71,7 @@ export default function MyPendingReportsCard() {
   const [dateRange, setDateRange] = useState('3months'); // Default to 3 months
 
   const activeOrgId = activeOrg?.id || null;
+  const sessionRecordsEnabled = isSessionRecordsEnabled();
   const canFetch = Boolean(session && activeOrgId);
 
   const loadReports = useCallback(async (options = {}) => {
@@ -165,6 +167,21 @@ export default function MyPendingReportsCard() {
 
   if (!canFetch) {
     return null;
+  }
+
+  if (!sessionRecordsEnabled) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-end">הדיווחים הממתינים שלי</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
+            מודול דיווחי המפגשים הושהה זמנית עד ליישום מחודש של Session Records.
+          </div>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (

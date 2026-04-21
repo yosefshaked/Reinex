@@ -879,8 +879,10 @@ export async function syncLessonInstructorEarnings(
       };
     }
 
-    const { error: deleteError } = await tenantClient
-      .from('lesson_earnings')
+    const lessonEarningsDeleteQuery = resolvedInstance?.org_id
+      ? withOrgScope(tenantClient, 'lesson_earnings', resolvedInstance.org_id)
+      : tenantClient.from('lesson_earnings');
+    const { error: deleteError } = await lessonEarningsDeleteQuery
       .delete()
       .eq('lesson_instance_id', lessonInstanceId);
 
@@ -944,9 +946,12 @@ export async function syncLessonInstructorEarnings(
     servicePaymentModel: serviceRow?.payment_model,
     compensationParticipants,
   });
-  const { error: earningError } = await tenantClient
-    .from('lesson_earnings')
+  const lessonEarningsUpsertQuery = resolvedInstance?.org_id
+    ? withOrgScope(tenantClient, 'lesson_earnings', resolvedInstance.org_id)
+    : tenantClient.from('lesson_earnings');
+  const { error: earningError } = await lessonEarningsUpsertQuery
     .upsert({
+      org_id: resolvedInstance.org_id || null,
       employee_id: resolvedInstance.instructor_employee_id,
       lesson_instance_id: lessonInstanceId,
       rate_used: payout.rateUsed,
@@ -967,7 +972,7 @@ export async function syncLessonInstructorEarnings(
           instructor_earnings_policy: resolvedPolicies.instructorEarningsPolicy,
         },
       },
-    }, { onConflict: 'employee_id,lesson_instance_id' });
+    }, { onConflict: 'org_id,employee_id,lesson_instance_id' });
 
   if (earningError) {
     throw earningError;
@@ -1016,8 +1021,11 @@ export async function syncInstructorAttendanceFromLessons(
 
   // Check if a manual/import attendance record already exists for this employee+date.
   // If so, do not overwrite — manual entries take precedence.
-  const { data: existingRecord, error: existingError } = await tenantClient
-    .from('employee_attendance_records')
+  const employeeAttendanceScope = instance?.org_id
+    ? withOrgScope(tenantClient, 'employee_attendance_records', instance.org_id)
+    : tenantClient.from('employee_attendance_records');
+
+  const { data: existingRecord, error: existingError } = await employeeAttendanceScope
     .select('id, source_type')
     .eq('employee_id', instance.instructor_employee_id)
     .eq('attendance_date', lessonDate)
@@ -1038,8 +1046,10 @@ export async function syncInstructorAttendanceFromLessons(
   if (!dayBounds?.startIso || !dayBounds?.endExclusiveIso) {
     throw new Error('invalid_lesson_date_bounds');
   }
-  const { data: dayLessons, error: dayLessonsError } = await tenantClient
-    .from('lesson_instances')
+  const dayLessonsScope = instance?.org_id
+    ? withOrgScope(tenantClient, 'lesson_instances', instance.org_id)
+    : tenantClient.from('lesson_instances');
+  const { data: dayLessons, error: dayLessonsError } = await dayLessonsScope
     .select('id, duration_minutes, status')
     .eq('instructor_employee_id', instance.instructor_employee_id)
     .gte('datetime_start', dayBounds.startIso)
@@ -1053,8 +1063,7 @@ export async function syncInstructorAttendanceFromLessons(
   if (dayLessonRows.length === 0) {
     // No lessons on that date — remove system attendance record if it exists
     if (existingRecord && existingRecord.source_type === 'system') {
-      await tenantClient
-        .from('employee_attendance_records')
+      await employeeAttendanceScope
         .delete()
         .eq('id', existingRecord.id);
     }
@@ -1063,9 +1072,11 @@ export async function syncInstructorAttendanceFromLessons(
 
   const dayLessonIds = dayLessonRows.map((lesson) => lesson.id).filter(Boolean);
   const policies = await loadFinancePolicies(tenantClient, instance.org_id);
+  const dayParticipantsScope = instance?.org_id
+    ? withOrgScope(tenantClient, 'lesson_participants', instance.org_id)
+    : tenantClient.from('lesson_participants');
   const { data: dayParticipants, error: dayParticipantsError } = dayLessonIds.length > 0
-    ? await tenantClient
-      .from('lesson_participants')
+    ? await dayParticipantsScope
       .select('lesson_instance_id, participant_status, metadata')
       .in('lesson_instance_id', dayLessonIds)
     : { data: [], error: null };
@@ -1089,8 +1100,7 @@ export async function syncInstructorAttendanceFromLessons(
 
   if (eligibleLessons.length === 0) {
     if (existingRecord && existingRecord.source_type === 'system') {
-      await tenantClient
-        .from('employee_attendance_records')
+      await employeeAttendanceScope
         .delete()
         .eq('id', existingRecord.id);
     }
@@ -1134,6 +1144,7 @@ export async function syncInstructorAttendanceFromLessons(
     : `${eligibleLessons.length} שיעורים נספרו לנוכחות`;
 
   const systemPayload = {
+    org_id: instance.org_id || null,
     employee_id: instance.instructor_employee_id,
     attendance_date: lessonDate,
     status: 'present',
@@ -1153,8 +1164,7 @@ export async function syncInstructorAttendanceFromLessons(
   };
 
   if (existingRecord?.source_type === 'system') {
-    const { error: updateError } = await tenantClient
-      .from('employee_attendance_records')
+    const { error: updateError } = await employeeAttendanceScope
       .update(systemPayload)
       .eq('id', existingRecord.id);
 
@@ -1162,8 +1172,7 @@ export async function syncInstructorAttendanceFromLessons(
       throw updateError;
     }
   } else {
-    const { error: insertError } = await tenantClient
-      .from('employee_attendance_records')
+    const { error: insertError } = await employeeAttendanceScope
       .insert({
         ...systemPayload,
         created_by: actorUserId || null,

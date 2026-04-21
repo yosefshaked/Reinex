@@ -1146,30 +1146,6 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                         </div>
                       </SectionCard>
 
-                      {currentEmployee.user_id ? (
-                        <SectionCard title="גישה לארגון" description="סוג העובד והרשאת הארגון הם שני צירים שונים">
-                          <div className="space-y-2">
-                            <div className="rounded-2xl border border-slate-200 bg-slate-50/60 px-3 py-3">
-                              <div className="text-sm font-bold text-slate-900">{currentEmployeeRoleLabel}</div>
-                              <div className="mt-1 text-xs text-slate-500">
-                                {currentEmployeeMembership
-                                  ? 'הרשאה זו קובעת אם למשתמש יש ניהול ארגון, בלי לשנות את סוג העובד שלו.'
-                                  : 'לעובד יש משתמש מקושר, אבל לא נמצאה לו חברות ארגונית תואמת.'}
-                              </div>
-                            </div>
-                            {canManageCurrentEmployeeRole ? (
-                              <Button size="sm" variant="outline" onClick={() => setShowRoleDialog(true)}>
-                                <Shield className="me-2 h-4 w-4" />
-                                נהל הרשאות ארגון
-                              </Button>
-                            ) : currentEmployeeOrgRole === 'owner' ? (
-                              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-3 py-3 text-xs text-amber-900">
-                                הרשאת בעלים מנוהלת מחוץ למסך זה ואינה ניתנת לשינוי מתוך עמוד העובדים.
-                              </div>
-                            ) : null}
-                          </div>
-                        </SectionCard>
-                      ) : null}
                     </div>
                   </div>
 
