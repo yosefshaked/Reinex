@@ -142,7 +142,7 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
     if (userIds.length > 0) {
       const profilesResult = await supabase
         .from('profiles')
-        .select('id, first_name, last_name')
+        .select('id, first_name, last_name, phone')
         .in('id', userIds);
 
       if (profilesResult.error) {
@@ -174,12 +174,15 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
         }
         return {
           id: membership.user_id,
+          first_name: profile?.first_name || null,
+          last_name: profile?.last_name || null,
           full_name: buildAccountDisplayName({
             profile,
             authUser,
             email: authUser?.email,
           }) || null,
           email: typeof authUser?.email === 'string' ? authUser.email.toLowerCase() : null,
+          phone: profile?.phone || null,
         };
       })(),
     }));

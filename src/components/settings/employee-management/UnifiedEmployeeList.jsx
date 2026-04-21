@@ -108,6 +108,34 @@ function getEmployeeName(employee) {
   return `${employee?.first_name || ''} ${employee?.last_name || ''}`.trim() || employee?.email || employee?.employee_id || 'עובד';
 }
 
+function normalizeComparableValue(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function getLinkedProfileName(profile) {
+  if (!profile) return '';
+  return [profile.first_name, profile.last_name].filter(Boolean).join(' ').trim() || profile.full_name || '';
+}
+
+function getEmployeeProfileDifferences(employee, profile) {
+  if (!employee || !profile) return [];
+
+  const differences = [];
+  const employeeName = getEmployeeName(employee);
+  const profileName = getLinkedProfileName(profile);
+  if (normalizeComparableValue(employeeName) !== normalizeComparableValue(profileName)) {
+    differences.push('name');
+  }
+  if (normalizeComparableValue(employee.phone) !== normalizeComparableValue(profile.phone)) {
+    differences.push('phone');
+  }
+  if (normalizeComparableValue(employee.email) !== normalizeComparableValue(profile.email)) {
+    differences.push('email');
+  }
+
+  return differences;
+}
+
 function getEmployeeType(employee) {
   if (employee?.employee_type) return employee.employee_type;
   if (employee?.instructor_profile || (employee?.service_capabilities || []).length > 0) return 'instructor';
@@ -369,6 +397,12 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     return membersByUserId.get(currentEmployee.user_id) || null;
   }, [currentEmployee, membersByUserId]);
 
+  const currentEmployeeLinkedProfile = currentEmployeeMembership?.profile || null;
+  const currentEmployeeProfileDifferences = useMemo(
+    () => getEmployeeProfileDifferences(currentEmployee, currentEmployeeLinkedProfile),
+    [currentEmployee, currentEmployeeLinkedProfile],
+  );
+
   const currentEmployeeOrgRole = String(currentEmployeeMembership?.role || 'member').toLowerCase();
   const currentEmployeeRoleLabel = currentEmployeeOrgRole === 'owner'
     ? 'בעלים'
@@ -392,6 +426,34 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
     setSelectedEmployee(employee);
     setShowEditDialog(true);
   }, []);
+
+  const handleSyncFromLinkedProfile = useCallback(async () => {
+    if (!currentEmployee?.id || !currentEmployeeLinkedProfile) return;
+
+    setActionState(REQUEST.loading);
+    try {
+      await authenticatedFetch('instructors', {
+        session,
+        method: 'PUT',
+        body: {
+          org_id: orgId,
+          instructor_id: currentEmployee.id,
+          first_name: currentEmployeeLinkedProfile.first_name || currentEmployee.first_name || '',
+          last_name: currentEmployeeLinkedProfile.last_name || currentEmployee.last_name || null,
+          email: currentEmployeeLinkedProfile.email || null,
+          phone: currentEmployeeLinkedProfile.phone || null,
+        },
+      });
+      toast.success('פרטי העובד סונכרנו מפרופיל המשתמש.');
+      await refetchInstructors();
+      await fetchOverviewInstances();
+    } catch (error) {
+      console.error('Failed to sync employee from linked profile', error);
+      toast.error(error?.message || 'סנכרון מפרופיל המשתמש נכשל.');
+    } finally {
+      setActionState(REQUEST.idle);
+    }
+  }, [currentEmployee, currentEmployeeLinkedProfile, fetchOverviewInstances, orgId, refetchInstructors, session]);
 
   const fetchOverviewInstances = useCallback(async () => {
     if (!canLoad || !orgId) return;
@@ -962,6 +1024,51 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                     </SectionCard>
 
                     <div className="space-y-3">
+                      {currentEmployee.user_id && currentEmployeeLinkedProfile ? (
+                        <SectionCard
+                          title="פרופיל משתמש מקושר"
+                          description="נתוני החשבון האישי של המשתמש נשמרים בנפרד מכרטיס העובד הארגוני"
+                          action={currentEmployeeProfileDifferences.length > 0 ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={handleSyncFromLinkedProfile}
+                              disabled={actionState === REQUEST.loading}
+                            >
+                              {actionState === REQUEST.loading ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <RotateCcw className="me-2 h-4 w-4" />}
+                              סנכרן לפרטי העובד
+                            </Button>
+                          ) : null}
+                        >
+                          <div className="space-y-3">
+                            <div className="grid gap-x-4 gap-y-0 md:grid-cols-2">
+                              <Row label="שם בחשבון" value={getLinkedProfileName(currentEmployeeLinkedProfile)} />
+                              <Row label="טלפון בחשבון" value={currentEmployeeLinkedProfile.phone} />
+                              <Row label="דוא״ל בחשבון" value={currentEmployeeLinkedProfile.email} />
+                              <Row
+                                label="סטטוס התאמה"
+                                value={currentEmployeeProfileDifferences.length === 0 ? 'תואם לכרטיס העובד' : 'נמצאו הבדלים מול כרטיס העובד'}
+                                muted={currentEmployeeProfileDifferences.length === 0}
+                              />
+                            </div>
+                            {currentEmployeeProfileDifferences.length > 0 ? (
+                              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-3 py-3 text-xs text-amber-900">
+                                נמצאו הבדלים ב-{currentEmployeeProfileDifferences.includes('name') ? 'שם' : ''}
+                                {currentEmployeeProfileDifferences.includes('name') && currentEmployeeProfileDifferences.length > 1 ? ', ' : ''}
+                                {currentEmployeeProfileDifferences.includes('phone') ? 'טלפון' : ''}
+                                {currentEmployeeProfileDifferences.includes('phone') && currentEmployeeProfileDifferences.includes('email') ? ', ' : ''}
+                                {currentEmployeeProfileDifferences.includes('email') ? 'דוא״ל' : ''}.
+                                אפשר לסנכרן ידנית את פרטי פרופיל המשתמש אל כרטיס העובד.
+                              </div>
+                            ) : (
+                              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-3 text-xs text-emerald-900">
+                                פרטי כרטיס העובד כבר תואמים לפרופיל המשתמש המקושר.
+                              </div>
+                            )}
+                          </div>
+                        </SectionCard>
+                      ) : null}
+
                       <SectionCard title="תקשורת" description="פעולות מיידיות מול העובד">
                         <div className="grid gap-2">
                           {currentEmployee.phone ? (
