@@ -124,15 +124,87 @@ async function markInvitationExpired(supabase, invitationId) {
     .eq('id', invitationId);
 }
 
-async function markInvitationRevoked(supabase, invitationId) {
-  if (!invitationId) {
+async function logInvitationExpired(supabase, { invitation, actor, reason = 'expired' }) {
+  if (!invitation?.id) {
     return;
   }
 
-  await supabase
+  await logAuditEvent(supabase, {
+    orgId: invitation.org_id,
+    userId: actor.userId,
+    userEmail: actor.userEmail || '',
+    userRole: actor.userRole || 'system',
+    actionType: AUDIT_ACTIONS.INVITATION_EXPIRED,
+    actionCategory: AUDIT_CATEGORIES.MEMBERSHIP,
+    resourceType: 'invitation',
+    resourceId: invitation.id,
+    details: {
+      invited_email: invitation.email ?? null,
+      expires_at: invitation.expires_at ?? null,
+      reason,
+      employee_id: invitation.employee_id ?? null,
+    },
+  });
+}
+
+async function logInvitationSendFailed(supabase, { orgId, actor, invitationId = null, email, employeeId = null, reason, stage }) {
+  await logAuditEvent(supabase, {
+    orgId,
+    userId: actor.userId,
+    userEmail: actor.userEmail || '',
+    userRole: actor.userRole || 'system',
+    actionType: AUDIT_ACTIONS.INVITATION_SEND_FAILED,
+    actionCategory: AUDIT_CATEGORIES.MEMBERSHIP,
+    resourceType: 'invitation',
+    resourceId: invitationId,
+    details: {
+      invited_email: email,
+      employee_id: employeeId,
+      stage,
+      reason,
+    },
+  });
+}
+
+async function updateAuthUserInvitationMetadata(supabase, authUser, invitationMetadata) {
+  if (!authUser?.id) {
+    return;
+  }
+
+  const previousMetadata = authUser.user_metadata && typeof authUser.user_metadata === 'object'
+    ? authUser.user_metadata
+    : {};
+  const nextMetadata = {
+    ...previousMetadata,
+    ...invitationMetadata,
+  };
+
+  const { error } = await supabase.auth.admin.updateUserById(authUser.id, {
+    user_metadata: nextMetadata,
+  });
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function rotatePendingInvitation(supabase, invitationId, updates) {
+  const { data, error } = await supabase
     .from('org_invitations')
-    .update({ status: 'revoked' })
-    .eq('id', invitationId);
+    .update({
+      ...updates,
+      status: 'pending',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', invitationId)
+    .select('id, org_id, email, status, token, invited_by, created_at, expires_at')
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
 }
 
 async function sendInvitationFlow({
@@ -166,6 +238,11 @@ async function sendInvitationFlow({
   if (pendingInvitation) {
     if (isExpiredTimestamp(pendingInvitation.expires_at)) {
       await markInvitationExpired(supabase, pendingInvitation.id);
+      await logInvitationExpired(supabase, {
+        invitation: { ...pendingInvitation, org_id: orgId, email, employee_id: employeeId },
+        actor: { userId, userEmail: authResult.data.user.email || '', userRole: role },
+        reason: 'expired_before_reinvite',
+      });
     } else {
       if (!resendPending) {
         return respond(context, 409, {
@@ -175,11 +252,10 @@ async function sendInvitationFlow({
           expires_at: pendingInvitation.expires_at ?? null,
         });
       }
-      await markInvitationRevoked(supabase, pendingInvitation.id);
     }
   }
 
-  const invitationId = randomUUID();
+  const invitationId = pendingInvitation?.id || randomUUID();
   const invitationToken = randomUUID();
   const expiresAt = new Date(Date.now() + DEFAULT_INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const employeeName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
@@ -220,22 +296,78 @@ async function sendInvitationFlow({
   const sendAuthInviteEmail = shouldSendAuthInviteEmail(authUser);
 
   if (sendAuthInviteEmail) {
+    if (authUserExists) {
+      try {
+        await updateAuthUserInvitationMetadata(supabase, authUser, invitationMetadata);
+      } catch (metadataError) {
+        await logInvitationSendFailed(supabase, {
+          orgId,
+          actor: { userId, userEmail: authResult.data.user.email || '', userRole: role },
+          invitationId,
+          email,
+          employeeId,
+          stage: 'update_auth_metadata',
+          reason: metadataError.message,
+        });
+        throw metadataError;
+      }
+    }
+
     const { error: authError } = await supabase.auth.admin.inviteUserByEmail(email, {
       data: invitationMetadata,
       redirectTo: buildPublicAppHashRouteUrl(req, env, '/complete-registration', { fallback: 'https://reinex.thepcrunners.com' }),
     });
 
     if (authError) {
+      await logInvitationSendFailed(supabase, {
+        orgId,
+        actor: { userId, userEmail: authResult.data.user.email || '', userRole: role },
+        invitationId,
+        email,
+        employeeId,
+        stage: 'send_auth_email',
+        reason: authError.message,
+      });
       throw new Error(authError.message);
     }
   }
 
-  const { error: createInvitationError } = await supabase
-    .from('org_invitations')
-    .insert(invitationPayload);
+  if (resendPending && pendingInvitation?.id) {
+    try {
+      await rotatePendingInvitation(supabase, pendingInvitation.id, {
+        invited_by: userId,
+        token: invitationToken,
+        expires_at: expiresAt,
+      });
+    } catch (rotationError) {
+      await logInvitationSendFailed(supabase, {
+        orgId,
+        actor: { userId, userEmail: authResult.data.user.email || '', userRole: role },
+        invitationId,
+        email,
+        employeeId,
+        stage: 'rotate_pending_invitation',
+        reason: rotationError.message,
+      });
+      throw rotationError;
+    }
+  } else {
+    const { error: createInvitationError } = await supabase
+      .from('org_invitations')
+      .insert(invitationPayload);
 
-  if (createInvitationError) {
-    throw new Error(createInvitationError.message);
+    if (createInvitationError) {
+      await logInvitationSendFailed(supabase, {
+        orgId,
+        actor: { userId, userEmail: authResult.data.user.email || '', userRole: role },
+        invitationId,
+        email,
+        employeeId,
+        stage: 'persist_invitation',
+        reason: createInvitationError.message,
+      });
+      throw new Error(createInvitationError.message);
+    }
   }
 
   const updatedMetadata = {
@@ -245,6 +377,7 @@ async function sendInvitationFlow({
       invited_at: new Date().toISOString(),
       invited_by: userId,
       invitation_id: invitationId,
+      invitation_token: invitationToken,
     },
   };
 
@@ -257,16 +390,18 @@ async function sendInvitationFlow({
     userId,
     userEmail: authResult.data.user.email || '',
     userRole: role,
-    actionType: AUDIT_ACTIONS.MEMBER_INVITED,
+    actionType: resendPending ? AUDIT_ACTIONS.INVITATION_RESENT : AUDIT_ACTIONS.MEMBER_INVITED,
     actionCategory: AUDIT_CATEGORIES.MEMBERSHIP,
-    resourceType: 'instructor',
-    resourceId: employeeId,
+    resourceType: 'invitation',
+    resourceId: invitationId,
     details: {
       employee_id: employeeId,
       employee_name: employeeName,
       invited_email: email,
       invitation_id: invitationId,
+      invitation_token_rotated: Boolean(resendPending),
       link_to_employee_id: employeeId,
+      expires_at: expiresAt,
     },
   });
 

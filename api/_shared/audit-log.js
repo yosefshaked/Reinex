@@ -75,6 +75,56 @@ export async function logAuditEvent(supabaseClient, params) {
   return data?.id ?? null;
 }
 
+export async function logSystemAuditEvent(supabaseClient, params) {
+  const {
+    orgId = null,
+    actionType,
+    actionCategory,
+    resourceType = null,
+    resourceId = null,
+    details = null,
+    metadata = null,
+    systemEmail = 'system@reinex.local',
+    systemRole = 'system',
+  } = params;
+
+  if (!actionType || !actionCategory) {
+    throw new Error('Missing required audit log parameters');
+  }
+
+  const retentionCategory =
+    String(actionCategory).startsWith('admin') ||
+    actionCategory === 'security' ||
+    actionCategory === 'admin_control'
+      ? 'critical'
+      : 'standard';
+
+  const { data, error } = await supabaseClient
+    .from('audit_log')
+    .insert({
+      org_id: orgId || null,
+      actor_user_id: null,
+      actor_email: systemEmail,
+      actor_role: systemRole,
+      event_type: actionType,
+      action_category: actionCategory,
+      retention_category: retentionCategory,
+      resource_type: resourceType || null,
+      resource_id: resourceId ? String(resourceId) : null,
+      details: details || null,
+      metadata: metadata || null,
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('Failed to log system audit event', { actionType, error: error.message });
+    return null;
+  }
+
+  return data?.id ?? null;
+}
+
 /**
  * Common action types for consistency
  */
@@ -98,6 +148,11 @@ export const AUDIT_ACTIONS = {
   MEMBER_LINKED_TO_EMPLOYEE: 'member.linked_to_employee',
   MEMBER_REMOVED: 'member.removed',
   MEMBER_ROLE_CHANGED: 'member.role_changed',
+  INVITATION_RESENT: 'invitation.resent',
+  INVITATION_ACCEPTED: 'invitation.accepted',
+  INVITATION_DECLINED: 'invitation.declined',
+  INVITATION_EXPIRED: 'invitation.expired',
+  INVITATION_SEND_FAILED: 'invitation.send_failed',
   INVITATION_REVOKED: 'invitation.revoked',
   
   // Backup
