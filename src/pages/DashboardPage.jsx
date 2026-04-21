@@ -9,7 +9,6 @@ import { useAccount } from '@/account/AccountContext.jsx'
 import { useAuth } from "@/auth/AuthContext.jsx"
 import { useOrg } from "@/org/OrgContext.jsx"
 import { useInstructors } from "@/hooks/useOrgData.js"
-import { ComplianceHeatmap } from "@/features/dashboard/components/ComplianceHeatmap.jsx"
 import { authenticatedFetch } from '@/lib/api-client.js'
 
 /**
@@ -233,16 +232,11 @@ export default function DashboardPage() {
 
           {renderDashboardTasks()}
 
-          {/* Weekly compliance - mobile */}
-          {activeOrgId && session ? (
-          <ComplianceHeatmap />
-          ) : (
-            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <p className="text-sm text-muted-foreground">
-                לוח מעקב התיעודים השבועי יהיה זמין לאחר בחירת ארגון והתחברות.
-              </p>
-            </Card>
-          )}
+          <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+            <p className="text-sm text-muted-foreground">
+              אזור מפת המעקב הוסר זמנית מהדשבורד עד להחזרת המודול בגרסה מעודכנת.
+            </p>
+          </Card>
         </div>
       </div>
 
@@ -260,15 +254,11 @@ export default function DashboardPage() {
 
           {renderDashboardTasks()}
 
-          {activeOrgId && session ? (
-          <ComplianceHeatmap />
-          ) : (
-            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <p className="text-sm text-muted-foreground">
-                לוח מעקב התיעודים השבועי יהיה זמין לאחר בחירת ארגון והתחברות.
-              </p>
-            </Card>
-          )}
+          <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+            <p className="text-sm text-muted-foreground">
+              אזור מפת המעקב הוסר זמנית מהדשבורד עד להחזרת המודול בגרסה מעודכנת.
+            </p>
+          </Card>
         </div>
       </div>
     </div>
