@@ -180,16 +180,14 @@ async function sendInvitationFlow({
     employee_name: employeeName,
   };
 
-  const {
-    data: authUserExists,
-    error: authUserExistsError,
-  } = await supabase.rpc('user_exists', {
-    user_email: email,
-  });
-
-  if (authUserExistsError) {
-    throw new Error(`failed_to_verify_auth_user:${authUserExistsError.message}`);
+  let authUser = null;
+  try {
+    authUser = await findAuthUserByEmail(supabase, email);
+  } catch (error) {
+    throw new Error(`failed_to_verify_auth_user:${error.message}`);
   }
+
+  const authUserExists = Boolean(authUser?.id);
 
   if (authUserExists) {
     const { error: createExistingUserInvitationError } = await supabase
