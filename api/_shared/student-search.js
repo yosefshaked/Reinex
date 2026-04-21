@@ -11,12 +11,12 @@ function escapeStudentSearchValue(value) {
 export function buildStudentSearchText(student) {
   const profile = student?.client_profile || {};
   return [
-    student?.first_name ?? profile.first_name,
-    student?.middle_name ?? profile.middle_name,
-    student?.last_name ?? profile.last_name,
-    student?.identity_number ?? profile.identity_number,
-    student?.phone ?? profile.phone,
-    student?.email ?? profile.email,
+    profile.first_name ?? student?.first_name,
+    profile.middle_name ?? student?.middle_name,
+    profile.last_name ?? student?.last_name,
+    profile.identity_number ?? student?.identity_number,
+    profile.phone ?? student?.phone,
+    profile.email ?? student?.email,
   ]
     .filter(Boolean)
     .join(' ')

@@ -77,19 +77,22 @@ function resolveParticipantDisplayName(participant) {
   const student = participant?.student && typeof participant.student === 'object'
     ? participant.student
     : null;
+  const studentProfile = student?.client_profile && typeof student.client_profile === 'object'
+    ? student.client_profile
+    : null;
   const profile = participant?.client_profile && typeof participant.client_profile === 'object'
     ? participant.client_profile
     : null;
 
-  const firstName = normalizeString(student?.first_name || profile?.first_name);
-  const lastName = normalizeString(student?.last_name || profile?.last_name);
+  const firstName = normalizeString(studentProfile?.first_name || profile?.first_name);
+  const lastName = normalizeString(studentProfile?.last_name || profile?.last_name);
   const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
   return fullName || 'לקוח/ה';
 }
 
 async function buildCancelInstancePreview(client, orgId, { instanceId } = {}) {
   const { data: rows, error } = await withOrgScope(client, 'lesson_participants', orgId)
-    .select('id, participant_status, student:students(first_name,last_name), client_profile:client_profiles(first_name,last_name)')
+    .select('id, participant_status, student:students(client_profile:client_profiles(first_name,last_name)), client_profile:client_profiles(first_name,last_name)')
     .eq('lesson_instance_id', instanceId);
 
   if (error) {
