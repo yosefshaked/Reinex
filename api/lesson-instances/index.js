@@ -650,6 +650,7 @@ export default async function lessonInstances(context, req) {
       if (nextStatus === 'cancelled') {
         try {
           const cancellationResult = await cancelLessonInstanceWithParticipants(supabase, {
+            orgId,
             instanceId: lessonInstanceId,
             userId,
             expectedVersion,
@@ -732,6 +733,7 @@ export default async function lessonInstances(context, req) {
       if (nextStatus === 'completed') {
         try {
           const completionResult = await completeLessonInstanceWithParticipants(supabase, {
+            orgId,
             instanceId: lessonInstanceId,
             userId,
             expectedVersion,
@@ -1170,6 +1172,7 @@ export default async function lessonInstances(context, req) {
       let cancellationResult;
       try {
         cancellationResult = await cancelSelectedScheduledParticipantsAndReconcileInstance(client, {
+          orgId,
           instanceId: instId,
           participantIds: targetedParticipantIds,
           userId,

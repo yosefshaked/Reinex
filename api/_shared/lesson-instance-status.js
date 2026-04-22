@@ -52,12 +52,14 @@ function normalizeBlockingParticipants(value) {
 }
 
 export async function completeLessonInstanceWithParticipants(tenantClient, {
+  orgId,
   instanceId,
   userId,
   expectedVersion = null,
   documentationStatus = null,
 }) {
   const { data, error } = await tenantClient.rpc('complete_lesson_instance_with_participants', {
+    p_org_id: orgId,
     p_instance_id: instanceId,
     p_actor_user_id: userId,
     p_expected_version: Number.isInteger(Number(expectedVersion)) ? Number(expectedVersion) : null,
@@ -89,12 +91,14 @@ export async function completeLessonInstanceWithParticipants(tenantClient, {
 }
 
 export async function cancelLessonInstanceWithParticipants(tenantClient, {
+  orgId,
   instanceId,
   userId,
   expectedVersion = null,
   documentationStatus = null,
 }) {
   const { data, error } = await tenantClient.rpc('cancel_lesson_instance_with_participants', {
+    p_org_id: orgId,
     p_instance_id: instanceId,
     p_actor_user_id: userId,
     p_expected_version: Number.isInteger(Number(expectedVersion)) ? Number(expectedVersion) : null,
@@ -127,11 +131,13 @@ export async function cancelLessonInstanceWithParticipants(tenantClient, {
 }
 
 export async function cancelSelectedScheduledParticipantsAndReconcileInstance(tenantClient, {
+  orgId,
   instanceId,
   participantIds,
   userId,
 }) {
   const { data, error } = await tenantClient.rpc('cancel_selected_scheduled_participants_and_reconcile_instance', {
+    p_org_id: orgId,
     p_instance_id: instanceId,
     p_participant_ids: Array.isArray(participantIds) ? participantIds.filter(Boolean) : [],
     p_actor_user_id: userId,

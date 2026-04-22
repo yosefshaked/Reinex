@@ -1246,6 +1246,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
   if (requestedCancellation) {
     try {
       const cancellationResult = await cancelLessonInstanceWithParticipants(client, {
+        orgId,
         instanceId: body.id,
         userId,
         expectedVersion,
@@ -1329,6 +1330,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
   if (requestedCompletion) {
     try {
       const completionResult = await completeLessonInstanceWithParticipants(client, {
+        orgId,
         instanceId: body.id,
         userId,
         expectedVersion,

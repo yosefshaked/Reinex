@@ -36,6 +36,7 @@
 - Local date and adapter helpers in [`../src/features/calendar/utils/`](../src/features/calendar/utils/)
 - `fetchLessonMutationState`, `parseExpectedVersion`, `respondWithLockedMutation`, `respondWithVersionConflict`
 - `syncLessonClosureState`, correction helpers, lesson-status helpers
+- `cancelLessonInstanceWithParticipants`, `completeLessonInstanceWithParticipants`, and `cancelSelectedScheduledParticipantsAndReconcileInstance` in [`../api/_shared/lesson-instance-status.js`](../api/_shared/lesson-instance-status.js) are RPC wrappers over org-scoped SQL functions and must always receive `orgId` alongside `instanceId`
 - `fetchLooseSessions`, `assignLooseSession`, `createAndAssignLooseSession`, `rejectLooseSession`
 - `buildSessionMetadata`, session form version helpers
 - `normalizeWorkflowDecision`, `readParticipantWorkflowMetadata`, `shouldParticipantTriggerInstructorCompensation` in [`../api/_shared/calendar-workflow-decisions.js`](../api/_shared/calendar-workflow-decisions.js)
