@@ -622,13 +622,9 @@ CREATE INDEX IF NOT EXISTS admin_data_module_created_idx
 
 ALTER TABLE public.admin_data ENABLE ROW LEVEL SECURITY;
 
--- No user-facing policies — service_role bypasses RLS entirely.
--- Deny everything from regular authenticated users.
-DROP POLICY IF EXISTS "admin_data_deny_all" ON public.admin_data;
-CREATE POLICY "admin_data_deny_all"
-  ON public.admin_data FOR ALL
-  TO authenticated, app_user
-  USING (false);
+-- No GRANT to app_user and no permissive policies — access is service_role
+-- only. Any non-service-role attempt gets a hard "permission denied" error
+-- before RLS even runs, which is the intended security boundary.
 
 -- -----------------------------------------------------------------
 -- Control RPCs

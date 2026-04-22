@@ -143,6 +143,12 @@ function extractArrayTableNames() {
   return unique(names);
 }
 
+// These tables intentionally have no GRANT to app_user — service_role access
+// only. The hard permission denial is the intended security boundary.
+const TABLES_WITHOUT_APP_USER_GRANT = new Set([
+  'admin_data',
+]);
+
 // These control-DB tables have hand-written RLS policies and are intentionally
 // excluded from the generated tenant RLS policy loop (SQL006).
 const TABLES_WITH_CUSTOM_RLS = new Set([
@@ -154,6 +160,7 @@ const TABLES_WITH_CUSTOM_RLS = new Set([
   'active_routing',
   'audit_log',
   'impersonation_sessions',
+  'admin_data',
 ]);
 
 function validatePresenceCoverage() {
@@ -170,7 +177,7 @@ function validatePresenceCoverage() {
       addError(RULES.TABLE_RLS_COVERAGE, `Table "${tableName}" is missing ENABLE ROW LEVEL SECURITY coverage.`, position);
     }
 
-    if (!grantTables.includes(tableName)) {
+    if (!grantTables.includes(tableName) && !TABLES_WITHOUT_APP_USER_GRANT.has(tableName)) {
       addError(RULES.TABLE_GRANT_COVERAGE, `Table "${tableName}" is missing GRANT ALL ... TO app_user coverage.`, position);
     }
 
