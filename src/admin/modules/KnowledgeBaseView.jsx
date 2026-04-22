@@ -20,7 +20,6 @@ import { useAdminStore } from '../lib/useAdminStore.js';
  * checklists — things you want close at hand but not user-facing.
  */
 
-const STORAGE_KEY = 'reinex.admin.knowledge.v1';
 
 const SEED = [
   {
@@ -97,7 +96,7 @@ function renderMarkdown(src) {
 export default function KnowledgeBaseView() {
   useAdminModuleView('knowledge-base');
 
-  const { items: articles, upsert, remove: removeArticle } = useAdminStore('knowledge_base', { seed: SEED, storageKey: STORAGE_KEY });
+  const { items: articles, upsert, remove: removeArticle } = useAdminStore('knowledge_base', { seed: SEED });
   const [query, setQuery] = React.useState('');
   const [tagFilter, setTagFilter] = React.useState('');
   const [selected, setSelected] = React.useState(null);

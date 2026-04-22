@@ -1,6 +1,6 @@
 # System Admin Console — Implementation Record
 
-**Completed:** 2026-04-20
+**Completed:** 2026-04-22
 **Implemented by:** Claude Sonnet 4.6 (`claude-sonnet-4-6`)
 **Branch:** `Refactor-Continue`
 **Base work started from:** Step 23 of the one-db-refactor plan (admin console stub)
@@ -17,6 +17,8 @@ The console is layered on top of the completed single-DB multi-tenant refactor a
 - Incident management, compliance request tracking, knowledge base, announcements
 - Live integration with PostHog for analytics and feature flags
 - Audit log query surface with CSV export
+- Email log: full history of every outbound platform email
+- Announcement banner: admin-authored platform-wide notice shown in the product app shell
 
 ---
 
@@ -25,10 +27,12 @@ The console is layered on top of the completed single-DB multi-tenant refactor a
 | Decision | Choice | Rationale |
 |---|---|---|
 | Framework | [Refine](https://refine.dev/) + React Router v6 | Already in the codebase; provides authProvider, resource routing, and data hooks |
-| Auth guard | AAL2 (MFA/TOTP) + `profiles.is_system_admin = true` | Two independent checks — token strength + explicit DB flag. Flag only settable via direct DB access. |
+| Auth guard | AAL2 (MFA/TOTP) + `profiles.is_system_admin = true` | Two independent checks — token strength + explicit DB flag. Flag only settable via direct DB access, not via any API. |
 | API auth | Bearer token from Supabase session, validated server-side via `supabase.auth.getUser()` | Service-role client validates and then checks profile flag |
 | Audit logging | Every system-admin action writes to `audit_log` table | Failures are non-fatal (swallowed) so they never break the primary action |
-| localStorage modules | FutureIdeas, Incidents, KnowledgeBase, Compliance | Zero-backend, immediately useful, scoped to the admin's browser; upgrade path to DB exists |
+| Admin module storage | `admin_data` table (service-role only, no GRANT to app_user) | Replaced per-browser localStorage for Incidents, Knowledge Base, Future Ideas, Compliance, Announcements — all admins share the same data regardless of browser |
+| Email log storage | `email_log` table (service-role only, no GRANT to app_user) | Immutable append-only log of every outbound Brevo email for admin visibility |
+| Announcement storage | `admin_data` module='announcements', record_id='active-banner' | Public `/api/announcement` endpoint reads it with service_role; no user auth required |
 | User source of truth | `auth.users` via admin API | `profiles` has no `email` column — email only lives in `auth.users` |
 | Impersonation mechanism | `supabase.auth.admin.generateLink` (magiclink) → client redeems `hashed_token` via `verifyOtp` | Server never sends an email; hashed_token is returned to the admin client directly for local session swap |
 
@@ -62,6 +66,7 @@ The console is layered on top of the completed single-DB multi-tenant refactor a
 | `src/admin/ui/ErrorState.jsx` | Error display with retry button |
 | `src/admin/ui/LoadingSkeleton.jsx` | Animated placeholder rows |
 | `src/admin/ui/ImpersonationBanner.jsx` | Persistent amber banner across the top of the product shell when impersonating |
+| `src/components/AnnouncementBanner.jsx` | Public banner rendered in AppShell below the header; fetches from `/api/announcement`; dismissible per session |
 
 ### Frontend — Modules
 
@@ -70,18 +75,22 @@ The console is layered on top of the completed single-DB multi-tenant refactor a
 | `src/admin/SystemHealthView.jsx` | `/system-admin/system-health` | `system-admin-health` | — |
 | `src/admin/SupabaseConnectionView.jsx` | `/system-admin/supabase-connection` | `system-admin-health` | — |
 | `src/admin/MfaPage.jsx` | `/system-admin/mfa` | Supabase Auth client | — |
-| `src/admin/modules/GlobalSettingsView.jsx` | `/system-admin/global-settings` | `system-admin-global-settings` | DB |
+| `src/admin/modules/GlobalSettingsView.jsx` | `/system-admin/global-settings` | `system-admin-global-settings` | DB (`permission_registry`) |
 | `src/admin/modules/ProductAnalyticsView.jsx` | `/system-admin/product-analytics` | PostHog iframe embed | — |
 | `src/admin/modules/FeatureFlagsView.jsx` | `/system-admin/feature-flags` | PostHog JS SDK (`featureFlags.getFlags()`) | — |
 | `src/admin/modules/OrganizationsView.jsx` | `/system-admin/organizations` | `system-admin-users-orgs` | DB |
-| `src/admin/modules/UsersView.jsx` | `/system-admin/users` | `system-admin-users` (**new**) | DB |
+| `src/admin/modules/UsersView.jsx` | `/system-admin/users` | `system-admin-users`, `system-admin-user-detail` | DB |
 | `src/admin/modules/ImpersonationQueueView.jsx` | `/system-admin/impersonation-queue` | `system-admin-impersonation-list` | DB |
-| `src/admin/modules/AuditLogView.jsx` | `/system-admin/audit-log` | `system-admin-audit-log` (**new**) | DB |
-| `src/admin/modules/AnnouncementsView.jsx` | `/system-admin/announcements` | `system-admin-global-settings` (key: `announcement_banner`) | DB |
-| `src/admin/modules/IncidentsView.jsx` | `/system-admin/incidents` | — | `localStorage` |
-| `src/admin/modules/KnowledgeBaseView.jsx` | `/system-admin/knowledge-base` | — | `localStorage` |
-| `src/admin/modules/FutureIdeasView.jsx` | `/system-admin/future-ideas` | — | `localStorage` |
-| `src/admin/modules/ComplianceView.jsx` | `/system-admin/compliance` | — | `localStorage` |
+| `src/admin/modules/AuditLogView.jsx` | `/system-admin/audit-log` | `system-admin-audit-log` | DB |
+| `src/admin/modules/AnnouncementsView.jsx` | `/system-admin/announcements` | `system-admin-store` (module=announcements) | DB (`admin_data`) |
+| `src/admin/modules/EmailLogView.jsx` | `/system-admin/email-log` | `system-admin-email-log` | DB (`email_log`) |
+| `src/admin/modules/IncidentsView.jsx` | `/system-admin/incidents` | `system-admin-store` (module=incidents) | DB (`admin_data`) |
+| `src/admin/modules/KnowledgeBaseView.jsx` | `/system-admin/knowledge-base` | `system-admin-store` (module=knowledge_base) | DB (`admin_data`) |
+| `src/admin/modules/FutureIdeasView.jsx` | `/system-admin/future-ideas` | `system-admin-store` (module=future_ideas) | DB (`admin_data`) |
+| `src/admin/modules/ComplianceView.jsx` | `/system-admin/compliance` | `system-admin-store` (module=compliance) | DB (`admin_data`) |
+| `src/admin/modules/IntegrationHealthView.jsx` | `/system-admin/integration-health` | — | — |
+| `src/admin/modules/DataQualityView.jsx` | `/system-admin/data-quality` | — | — |
+| `src/admin/modules/OnboardingPipelineView.jsx` | `/system-admin/onboarding-pipeline` | — | — |
 
 ### Frontend — Impersonation
 
@@ -93,16 +102,20 @@ The console is layered on top of the completed single-DB multi-tenant refactor a
 
 ### Backend — API Endpoints
 
-| Endpoint | Method | Purpose |
-|---|---|---|
-| `api/system-admin-health/` | GET | Platform health probes (DB ping, env checks) |
-| `api/system-admin-global-settings/` | GET / POST | Read and write named global settings via `permission_registry` or equivalent settings store |
-| `api/system-admin-users-orgs/` | GET | Organizations list + system admins (legacy, still used by OrganizationsView) |
-| `api/system-admin-users/` | GET | **New.** All platform users from `auth.users`, enriched with `profiles` + `org_memberships` count. Supports search (`?q=`) and pagination (`?page=&per_page=`) |
-| `api/system-admin-audit-log/` | GET | **New.** Query `audit_log` with filters: `q`, `event_type`, `category`, `actor_user_id`, `org_id`, `resource_type`, `since`, `until`, `limit`, `offset`. Returns rows + total |
-| `api/system-admin-impersonation-start/` | POST | Creates `impersonation_sessions` row, generates magic-link `hashed_token` via Supabase admin, returns token to client for local session swap |
-| `api/system-admin-impersonation-exit/` | POST | Marks session as `exited`, logs audit event |
-| `api/system-admin-impersonation-list/` | GET | Lists active, pending, and historical impersonation sessions |
+| Endpoint | Method | Auth | Purpose |
+|---|---|---|---|
+| `api/system-admin-health/` | GET | admin | Platform health probes (DB ping, env checks) |
+| `api/system-admin-global-settings/` | GET / POST | admin | Feature flags via `permission_registry`. Announcement removed (now in admin_data). |
+| `api/system-admin-users-orgs/` | GET | admin | Organizations list + system admins |
+| `api/system-admin-users/` | GET | admin | All platform users from `auth.users`, enriched with profiles + org count |
+| `api/system-admin-user-detail/` | GET / POST | admin | Per-user detail: MFA factors, active sessions, org memberships. POST: force sign-out |
+| `api/system-admin-audit-log/` | GET | admin | Query audit_log with filters |
+| `api/system-admin-impersonation-start/` | POST | admin | Creates session, returns `hashed_token` for client-side session swap |
+| `api/system-admin-impersonation-exit/` | POST | admin | Marks session as exited |
+| `api/system-admin-impersonation-list/` | GET | admin | Active, pending, and historical impersonation sessions |
+| `api/system-admin-store/` | GET / POST / DELETE | admin | Generic CRUD for admin_data modules (incidents, knowledge_base, future_ideas, compliance, announcements) |
+| `api/system-admin-email-log/` | GET | admin | Paginated read of email_log table. Supports filters: email_type, status, search (recipient) |
+| `api/announcement/` | GET | **none** | Public endpoint: returns `{ active, text }` from admin_data. Used by AnnouncementBanner in AppShell |
 
 ### Backend — Shared Utilities (`api/_shared/`)
 
@@ -112,6 +125,7 @@ The console is layered on top of the completed single-DB multi-tenant refactor a
 | `supabase-admin.js` | `createSupabaseAdminClient`, `readSupabaseAdminConfig` |
 | `audit-log.js` | `logAuditEvent` |
 | `http.js` | `resolveBearerAuthorization`, `json` |
+| `email-log.js` | `logEmailSent`, `sendAndLogBrevoEmail` — drop-in replacement for `sendBrevoEmail` that also writes to `email_log` |
 
 ---
 
@@ -131,6 +145,10 @@ Every system-admin endpoint calls this guard before touching any data:
 ```
 
 Failure at any step throws a structured error with `statusCode` (401/403/500). Callers catch and return the status code directly.
+
+### `admin_data` and `email_log` Tables — Security Boundary
+
+Both tables intentionally have **no GRANT to app_user**. A non-service-role connection receives a hard `permission denied` error before RLS even runs. This is a stronger boundary than GRANT + deny-all RLS policy. Both tables are in `TABLES_WITHOUT_APP_USER_GRANT` in `scripts/validate-setup-sql.js` to suppress the lint check that otherwise enforces a GRANT for every table.
 
 ### Impersonation Flow
 
@@ -157,6 +175,63 @@ ImpersonationBanner:
   Pinned across top of product shell while impersonating.
   "Exit" button → POST /api/system-admin-impersonation-exit → session marked 'exited'
 ```
+
+---
+
+## Email Log
+
+### How It Works
+
+Every outbound Brevo email is now logged to the `email_log` table via `sendAndLogBrevoEmail` in `api/_shared/email-log.js`. This is a drop-in replacement for `sendBrevoEmail` that wraps the call in a try/finally and records the outcome (sent or failed) in a fire-and-forget insert.
+
+### Call Sites Updated
+
+| File | Email type logged |
+|---|---|
+| `api/_shared/invitation-email.js` | `invitation_existing_user`, `invitation_auth_invite` |
+| `api/_shared/password-reset-email.js` | `password_reset` |
+| `api/form-submissions/index.js` | `form_submission` |
+| `api/waiting-list-intake/index.js` | `waiting_list` |
+
+### `email_log` Table Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS public.email_log (
+  id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  email_type    text        NOT NULL,
+  to_email      text        NOT NULL,
+  subject       text        NULL,
+  status        text        NOT NULL DEFAULT 'sent',  -- 'sent' | 'failed'
+  error_message text        NULL,
+  org_id        uuid        NULL,
+  actor_user_id uuid        NULL,
+  metadata      jsonb       NOT NULL DEFAULT '{}',
+  sent_at       timestamptz NOT NULL DEFAULT now()
+);
+```
+
+No GRANT to app_user — service_role only. The `system-admin-email-log` endpoint exposes a paginated, filterable read view.
+
+---
+
+## Announcements
+
+### Storage Migration
+
+Previously stored in `permission_registry` under key `system.announcement.banner`. Now stored in `admin_data` with `module='announcements', record_id='active-banner'`. The `system-admin-global-settings` endpoint no longer handles announcements.
+
+### Banner Display in Product
+
+`AnnouncementBanner.jsx` is mounted in `AppShell.jsx` below the main header. It:
+1. Fetches `/api/announcement` (public, no auth) on mount
+2. Renders an amber banner if `{ active: true, text: "..." }` is returned
+3. Allows dismissal per browser session (stored in `sessionStorage`)
+
+The public `/api/announcement` endpoint reads `admin_data` via service_role and returns `{ active, text }` — safe for anonymous callers since it only returns the sanitized banner text.
+
+### Admin UI
+
+`AnnouncementsView.jsx` uses `useAdminStore('announcements')`. The active banner is a single record with `id='active-banner'`. Publishing overwrites the record; clearing sets `active: false`.
 
 ---
 
@@ -233,6 +308,14 @@ if (body && typeof body === 'object' && !Buffer.isBuffer(body) && !(body instanc
 
 ---
 
+### 6. Admin modules persisting data only in the current admin's browser (localStorage)
+
+**Problem:** Incidents, Knowledge Base, Future Ideas, Compliance, and Announcements all used `localStorage`. Different admins on different machines had completely separate data sets — incidents opened on one machine were invisible on another.
+
+**Fix:** Migrated all five to `admin_data` (a new service-role-only Postgres table) via a shared `useAdminStore` hook and `system-admin-store` endpoint. Each module uses `upsert` with optimistic updates for instant UI response.
+
+---
+
 ## Module Detail Notes
 
 ### AuditLogView (`/system-admin/audit-log`)
@@ -242,22 +325,23 @@ if (body && typeof body === 'object' && !Buffer.isBuffer(body) && !(body instanc
 - Row drawer shows raw `details` and `metadata` JSON blocks
 - 4 MetricCards: rows in view, total matches, control-plane count, distinct categories
 
+### EmailLogView (`/system-admin/email-log`)
+- Calls `GET /api/system-admin-email-log` with filters: email_type, status, recipient search
+- PAGE_SIZE = 50 with Previous/Next pagination
+- Row drawer: type, recipient, subject, sent_at, error message (if failed), metadata JSON
+- Handles `501 table_not_found` gracefully with an instructional EmptyState
+
 ### FeatureFlagsView (`/system-admin/feature-flags`)
 - Reads live flags from `posthog.featureFlags.getFlags()` and variant values
 - Subscribes to `posthog.onFeatureFlags()` for reactive updates when PostHog finishes loading
 - "Open PostHog" deep-link uses `posthog.config.api_host`
 - Renders EmptyState when PostHog not configured (no `VITE_POSTHOG_KEY`)
 
-### localStorage modules
-
-All four use a versioned key pattern (`reinex.admin.<module>.v1`) with `JSON.parse/stringify`. Schema is simple JSON arrays. Seed data is injected once on first load (empty store check). No sync to backend — admin-browser-local only.
-
-| Module | localStorage key | Seed data |
-|---|---|---|
-| IncidentsView | `reinex.admin.incidents.v1` | — |
-| KnowledgeBaseView | `reinex.admin.knowledge.v1` | 2 runbooks (Supabase outage, impersonation escalation) |
-| FutureIdeasView | `reinex.admin.future-ideas.v1` | 4 ideas (Background Jobs Monitor, Cost Analytics, Localisation Console, AI Support Assistant) |
-| ComplianceView | `reinex.admin.compliance.v1` | — |
+### `useAdminStore` hook (`src/admin/lib/useAdminStore.js`)
+- Fetches on mount from `system-admin-store?module=<name>`
+- Exposes `{ items, loading, error, upsert, remove }`
+- Optimistic updates: `upsert`/`remove` update state immediately, fire API in background
+- No localStorage fallback — if the table doesn't exist, the UI shows loading/error state
 
 ### `system-admin-users` endpoint — search strategy
 
@@ -286,16 +370,16 @@ Platform
 Customers
   Organizations ✅
   Users ✅
-  Onboarding Pipeline (coming soon)
+  Onboarding Pipeline ✅
   Billing (coming soon)
 
 Operations
   Audit Log ✅
   Incidents ✅
   Impersonation Queue ✅
-  Email Log (coming soon)
-  Integration Health (coming soon)
-  Data Quality (coming soon)
+  Email Log ✅
+  Integration Health ✅
+  Data Quality ✅
 
 Content
   Knowledge Base ✅
@@ -322,14 +406,10 @@ Backlog
 |---|---|
 | Release & Migrations | Deploy history, pending migrations, one-click rollback |
 | Encryption & Keys | Key rotation, vault view, emergency revocation |
-| Onboarding Pipeline | Kanban of new orgs from signup → activation |
 | Billing | Internal ledger, plan assignments, invoice history |
-| Email Log | Outbound email stream with bounce/resend controls |
-| Integration Health | 3rd-party integration status and webhook delivery rates |
-| Data Quality | Orphan detection, schema drift, row-count anomaly alerts |
 | Impersonation approval workflow | High-sensitivity orgs require a second admin to approve |
-| Users — sessions & MFA factors panel | Detail drawer currently shows basic info only |
 | Organizations — detail drawer | Members, billing status, recent audit events, feature flags |
+| Announcement scheduling | Start/end windows, per-plan targeting, acknowledgement tracking |
 
 ---
 
@@ -345,9 +425,10 @@ Tables the admin console reads/writes (all via service_role, bypassing RLS):
 | `org_memberships` | UsersView (org_count per user) |
 | `impersonation_sessions` | ImpersonationQueueView; impersonation-start (INSERT); impersonation-exit (UPDATE) |
 | `auth.users` (admin API) | system-admin-users endpoint; lookupTargetUser in impersonation-start |
-
-The `impersonation_sessions` table must be created via the setup script before the impersonation flow will work. If missing, the start endpoint returns `501 impersonation_table_missing` with a hint pointing to `src/lib/setup-sql.js`.
+| `admin_data` | system-admin-store (Incidents, Knowledge Base, Future Ideas, Compliance, Announcements). Service-role only — no GRANT to app_user. |
+| `email_log` | system-admin-email-log (read); email-log.js writes on every outbound email. Service-role only — no GRANT to app_user. |
+| `permission_registry` | system-admin-global-settings (feature flags only — announcement removed) |
 
 ---
 
-*Implementation record authored by Claude Sonnet 4.6 (`claude-sonnet-4-6`) — 2026-04-20*
+*Implementation record authored by Claude Sonnet 4.6 (`claude-sonnet-4-6`) — 2026-04-22*

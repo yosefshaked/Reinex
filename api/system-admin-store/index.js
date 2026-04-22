@@ -17,7 +17,7 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { ensureSystemAdmin, normalizeString, readEnv, respond, parseRequestBody } from '../_shared/org-bff.js';
 
-const ALLOWED_MODULES = new Set(['incidents', 'knowledge_base', 'future_ideas', 'compliance']);
+const ALLOWED_MODULES = new Set(['incidents', 'knowledge_base', 'future_ideas', 'compliance', 'announcements']);
 
 function isTableMissingError(error) {
   if (!error) return false;

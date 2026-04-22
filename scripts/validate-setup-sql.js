@@ -147,6 +147,7 @@ function extractArrayTableNames() {
 // only. The hard permission denial is the intended security boundary.
 const TABLES_WITHOUT_APP_USER_GRANT = new Set([
   'admin_data',
+  'email_log',
 ]);
 
 // These control-DB tables have hand-written RLS policies and are intentionally
@@ -161,6 +162,7 @@ const TABLES_WITH_CUSTOM_RLS = new Set([
   'audit_log',
   'impersonation_sessions',
   'admin_data',
+  'email_log',
 ]);
 
 function validatePresenceCoverage() {

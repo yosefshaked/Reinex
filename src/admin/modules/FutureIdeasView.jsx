@@ -19,7 +19,6 @@ import { useAdminStore } from '../lib/useAdminStore.js';
  * it gets promoted to the roadmap and lifted out of here.
  */
 
-const STORAGE_KEY = 'reinex.admin.future-ideas.v1';
 
 const SEED_IDEAS = [
   {
@@ -63,7 +62,7 @@ const SEED_IDEAS = [
 export default function FutureIdeasView() {
   useAdminModuleView('future-ideas');
 
-  const { items: ideas, upsert, remove: removeIdea } = useAdminStore('future_ideas', { seed: SEED_IDEAS, storageKey: STORAGE_KEY });
+  const { items: ideas, upsert, remove: removeIdea } = useAdminStore('future_ideas', { seed: SEED_IDEAS });
   const [draft, setDraft] = React.useState({ title: '', description: '', tags: '' });
   const [sortKey, setSortKey] = React.useState('upvotes');
 

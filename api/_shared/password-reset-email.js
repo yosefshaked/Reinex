@@ -1,6 +1,7 @@
 /* eslint-env node */
 import { findAuthUserByEmail } from './auth-users.js';
-import { sendBrevoEmail, readBrevoConfig } from './brevo.js';
+import { readBrevoConfig } from './brevo.js';
+import { sendAndLogBrevoEmail } from './email-log.js';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -126,7 +127,8 @@ export async function deliverPasswordResetEmail({
   }
 
   const resetUrl = buildRecoveryRedirect(redirectTo, hashedToken);
-  await sendBrevoEmail(
+  await sendAndLogBrevoEmail(
+    supabase,
     {
       to: email,
       subject: 'איפוס סיסמה ב-Reinex',
@@ -136,6 +138,7 @@ export async function deliverPasswordResetEmail({
     },
     env,
     context,
+    { emailType: 'password_reset' },
   );
 
   return {

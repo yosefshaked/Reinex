@@ -23,6 +23,7 @@ import Sidebar from "@/components/layout/Sidebar.jsx"
 import MobileNav from "@/components/layout/MobileNav.jsx"
 import { ImpersonationProvider } from "@/admin/impersonation/ImpersonationContext.jsx"
 import ImpersonationBanner from "@/admin/ui/ImpersonationBanner.jsx"
+import AnnouncementBanner from "@/components/AnnouncementBanner.jsx"
 
 export default function AppShell({ children }) {
   const { signOut } = useAuth()
@@ -223,6 +224,7 @@ export default function AppShell({ children }) {
           </header>
 
           <ImpersonationBanner />
+          <AnnouncementBanner />
           <OrgSelectionBanner />
           <OrgConfigBanner />
 

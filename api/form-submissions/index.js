@@ -14,7 +14,7 @@ import {
   withOrgScope,
   respond,
 } from '../_shared/org-bff.js';
-import { sendBrevoEmail } from '../_shared/brevo.js';
+import { sendAndLogBrevoEmail } from '../_shared/email-log.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import {
@@ -694,7 +694,8 @@ async function sendSubmissionDelivery(context, {
   const text = buildSubmissionAccessText(submitLink, otpCode, identityNumber, formName, expiresAt);
   const html = buildSubmissionAccessHtml(submitLink, otpCode, identityNumber, formName, expiresAt);
 
-  await sendBrevoEmail(
+  await sendAndLogBrevoEmail(
+    controlClient,
     {
       to: destination,
       subject: `קישור למילוי טופס - ${formName || 'Reinex'}`,
@@ -704,6 +705,7 @@ async function sendSubmissionDelivery(context, {
     },
     env,
     context,
+    { emailType: 'form_submission', orgId },
   );
 }
 

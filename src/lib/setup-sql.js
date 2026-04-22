@@ -627,6 +627,40 @@ ALTER TABLE public.admin_data ENABLE ROW LEVEL SECURITY;
 -- before RLS even runs, which is the intended security boundary.
 
 -- -----------------------------------------------------------------
+-- public.email_log
+-- Immutable log of every outbound Brevo email sent by the platform.
+-- Written by service_role only; accessible via system-admin-email-log
+-- endpoint. Not visible to app_user — service_role boundary only.
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.email_log (
+  id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  email_type    text        NOT NULL,
+  to_email      text        NOT NULL,
+  subject       text        NULL,
+  status        text        NOT NULL DEFAULT 'sent',
+  error_message text        NULL,
+  org_id        uuid        NULL,
+  actor_user_id uuid        NULL,
+  metadata      jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  sent_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT email_log_status_check CHECK (status IN ('sent', 'failed'))
+);
+
+CREATE INDEX IF NOT EXISTS email_log_sent_at_idx
+  ON public.email_log (sent_at DESC);
+
+CREATE INDEX IF NOT EXISTS email_log_email_type_idx
+  ON public.email_log (email_type, sent_at DESC);
+
+CREATE INDEX IF NOT EXISTS email_log_to_email_idx
+  ON public.email_log (to_email, sent_at DESC);
+
+ALTER TABLE public.email_log ENABLE ROW LEVEL SECURITY;
+
+-- No GRANT to app_user — service_role only. Same pattern as admin_data.
+
+-- -----------------------------------------------------------------
 -- Control RPCs
 -- -----------------------------------------------------------------
 

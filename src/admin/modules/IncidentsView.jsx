@@ -14,7 +14,6 @@ import ConfirmActionDialog from '../ui/ConfirmActionDialog.jsx';
 import { useAdminModuleView, captureAdminEvent } from '../lib/admin-analytics.js';
 import { useAdminStore } from '../lib/useAdminStore.js';
 
-const STORAGE_KEY = 'reinex.admin.incidents.v1';
 
 const SEVERITY_TONE = {
   sev1: 'danger',
@@ -33,7 +32,7 @@ const SEVERITY_LABEL = {
 export default function IncidentsView() {
   useAdminModuleView('incidents');
 
-  const { items, upsert, remove: removeItem } = useAdminStore('incidents', { storageKey: STORAGE_KEY });
+  const { items, upsert, remove: removeItem } = useAdminStore('incidents');
   const [openDraft, setOpenDraft] = React.useState(false);
   const [selected, setSelected] = React.useState(null);
   const [resolveOpen, setResolveOpen] = React.useState(false);

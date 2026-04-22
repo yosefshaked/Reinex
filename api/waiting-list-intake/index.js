@@ -15,7 +15,7 @@ import {
   respond,
   withOrgScope,
 } from '../_shared/org-bff.js';
-import { sendBrevoEmail } from '../_shared/brevo.js';
+import { sendAndLogBrevoEmail } from '../_shared/email-log.js';
 import {
   buildSharedBlockMap,
   collectSharedBlockIds,
@@ -562,12 +562,12 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
 
         if (deliveryMethod === 'email') {
           try {
-            await sendBrevoEmail({
+            await sendAndLogBrevoEmail(controlClient, {
               to: email,
               subject: `${form.name || 'טופס רשימת המתנה'} - קישור למילוי`,
               textContent: buildEmailText({ formName: form.name, inviteUrl, expiresAt: existingRouting.expires_at || null }),
               htmlContent: buildEmailHtml({ formName: form.name, inviteUrl, expiresAt: existingRouting.expires_at || null }),
-            }, { env }, context);
+            }, { env }, context, { emailType: 'waiting_list', orgId });
             responseBody.delivery_status = 'sent';
           } catch (error) {
             context.log?.warn?.('waiting-list-intake email resend failed for reused invite; returning manual fallback', {
@@ -741,12 +741,12 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
 
   if (deliveryMethod === 'email') {
     try {
-      await sendBrevoEmail({
+      await sendAndLogBrevoEmail(controlClient, {
         to: email,
         subject: `${form.name || 'טופס רשימת המתנה'} - קישור למילוי`,
         textContent: buildEmailText({ formName: form.name, inviteUrl, expiresAt }),
         htmlContent: buildEmailHtml({ formName: form.name, inviteUrl, expiresAt }),
-      }, { env }, context);
+      }, { env }, context, { emailType: 'waiting_list', orgId });
       responseBody.delivery_status = 'sent';
     } catch (error) {
       context.log?.warn?.('waiting-list-intake email send failed; returning invite for manual fallback', {

@@ -23,6 +23,7 @@ import ComplianceView from './modules/ComplianceView.jsx';
 import IntegrationHealthView from './modules/IntegrationHealthView.jsx';
 import DataQualityView from './modules/DataQualityView.jsx';
 import OnboardingPipelineView from './modules/OnboardingPipelineView.jsx';
+import EmailLogView from './modules/EmailLogView.jsx';
 import AdminShell from './ui/AdminShell.jsx';
 import DashboardView from './ui/DashboardView.jsx';
 import ComingSoon from './ui/ComingSoon.jsx';
@@ -104,6 +105,7 @@ const LIVE_ELEMENTS = {
   'integration-health': <IntegrationHealthView />,
   'data-quality': <DataQualityView />,
   'onboarding-pipeline': <OnboardingPipelineView />,
+  'email-log': <EmailLogView />,
   // Legacy aggregate view retained while its sub-modules are built out.
   'operations-support': <OperationsSupportView />,
 };
@@ -235,7 +237,6 @@ const COMING_SOON_PATHS = [
   'release-migrations',
   'encryption-keys',
   'billing',
-  'email-log',
 ];
 
 export default function AdminApp() {

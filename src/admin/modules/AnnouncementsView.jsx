@@ -1,79 +1,56 @@
 import React from 'react';
 import { Megaphone, Save, Trash2 } from 'lucide-react';
-import { authenticatedFetch } from '@/lib/api-client.js';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import ModuleShell from '../ui/ModuleShell.jsx';
 import ConfirmActionDialog from '../ui/ConfirmActionDialog.jsx';
-import ErrorState from '../ui/ErrorState.jsx';
 import EmptyState from '../ui/EmptyState.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 import { useAdminModuleView, captureAdminEvent } from '../lib/admin-analytics.js';
+import { useAdminStore } from '../lib/useAdminStore.js';
 
 /**
- * Announcements — manage the single platform-wide banner persisted via
- * system-admin-global-settings. Scheduled banners, per-plan targeting, and
- * acknowledgement tracking are listed as planned follow-ups below.
+ * Announcements — manage the platform-wide banner persisted in admin_data.
+ *
+ * The active banner is stored as a single record with id='active-banner'.
+ * The public /api/announcement endpoint reads it and serves it to AppShell.
  */
+
+const BANNER_ID = 'active-banner';
 
 export default function AnnouncementsView() {
   useAdminModuleView('announcements');
 
-  const [current, setCurrent] = React.useState('');
+  const { items, upsert, loading } = useAdminStore('announcements');
   const [draft, setDraft] = React.useState('');
-  const [savedAt, setSavedAt] = React.useState('');
-  const [loading, setLoading] = React.useState(true);
-  const [saving, setSaving] = React.useState(false);
-  const [error, setError] = React.useState(null);
   const [clearOpen, setClearOpen] = React.useState(false);
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const payload = await authenticatedFetch('system-admin-global-settings', { method: 'GET' });
-      const value = typeof payload?.announcement === 'string' ? payload.announcement : '';
-      setCurrent(value);
-      setDraft(value);
-      setSavedAt(payload?.requested_at || '');
-    } catch (err) {
-      setError(err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const banner = items.find((i) => i.id === BANNER_ID);
+  const current = banner?.active ? (banner?.text || '') : '';
 
-  React.useEffect(() => { load(); }, [load]);
-
-  const save = React.useCallback(async (next) => {
-    setSaving(true);
-    try {
-      const payload = await authenticatedFetch('system-admin-global-settings', {
-        method: 'POST',
-        body: { announcement: next },
-      });
-      setCurrent(next);
-      setDraft(next);
-      setSavedAt(payload?.requested_at || new Date().toISOString());
-      captureAdminEvent('announcement_saved', { length: next.length, cleared: !next });
-    } catch (err) {
-      setError(err);
-    } finally {
-      setSaving(false);
+  // Sync draft when banner loads
+  const [seeded, setSeeded] = React.useState(false);
+  React.useEffect(() => {
+    if (!loading && !seeded) {
+      setDraft(current);
+      setSeeded(true);
     }
-  }, []);
+  }, [loading, seeded, current]);
 
   const dirty = draft !== current;
   const length = draft.length;
   const atLimit = length > 500;
 
-  if (error) {
-    return (
-      <ModuleShell title="Announcements" subtitle="Content">
-        <ErrorState error={error} onRetry={load} />
-      </ModuleShell>
-    );
-  }
+  const publish = () => {
+    upsert({ id: BANNER_ID, active: true, text: draft.trim(), updated_at: new Date().toISOString() });
+    captureAdminEvent('announcement_saved', { length: draft.length });
+  };
+
+  const clear = () => {
+    upsert({ id: BANNER_ID, active: false, text: '', updated_at: new Date().toISOString() });
+    setDraft('');
+    captureAdminEvent('announcement_saved', { length: 0, cleared: true });
+  };
 
   return (
     <ModuleShell
@@ -100,9 +77,11 @@ export default function AnnouncementsView() {
         ) : (
           <p className="text-xs text-slate-500">Nothing is currently shown to users.</p>
         )}
-        <p className="mt-2 text-[11px] text-slate-400">
-          {savedAt ? `Last saved ${new Date(savedAt).toLocaleString()}` : ''}
-        </p>
+        {banner?.updated_at ? (
+          <p className="mt-2 text-[11px] text-slate-400">
+            Last updated {new Date(banner.updated_at).toLocaleString()}
+          </p>
+        ) : null}
       </article>
 
       <article className="rounded-xl border border-slate-200 bg-white p-4">
@@ -112,7 +91,7 @@ export default function AnnouncementsView() {
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Scheduled maintenance tonight 22:00–23:00 UTC. Expect brief downtime…"
           rows={5}
-          disabled={loading || saving}
+          disabled={loading}
           className="mt-3"
         />
         <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
@@ -124,7 +103,7 @@ export default function AnnouncementsView() {
             size="sm"
             variant="ghost"
             onClick={() => setClearOpen(true)}
-            disabled={loading || saving || !current}
+            disabled={loading || !current}
             className="text-rose-700 hover:bg-rose-50 hover:text-rose-800"
           >
             <Trash2 className="mr-1.5 h-4 w-4" />
@@ -134,17 +113,17 @@ export default function AnnouncementsView() {
             size="sm"
             variant="outline"
             onClick={() => setDraft(current)}
-            disabled={loading || saving || !dirty}
+            disabled={loading || !dirty}
           >
             Revert
           </Button>
           <Button
             size="sm"
-            onClick={() => save(draft)}
-            disabled={loading || saving || !dirty || atLimit}
+            onClick={publish}
+            disabled={loading || !dirty || atLimit || !draft.trim()}
           >
             <Save className="mr-1.5 h-4 w-4" />
-            {saving ? 'Saving…' : 'Publish'}
+            Publish
           </Button>
         </div>
       </article>
@@ -161,7 +140,7 @@ export default function AnnouncementsView() {
           className="mt-4 bg-white"
           icon={<Megaphone className="h-6 w-6" />}
           title="Scheduling not wired yet"
-          description="Today the banner is a single active message. Scheduling & targeting arrive when the announcements schema lands."
+          description="Today the banner is a single active message. Scheduling & targeting arrive in a future iteration."
         />
       </article>
 
@@ -173,7 +152,7 @@ export default function AnnouncementsView() {
         description="This removes the platform-wide banner for all signed-in users immediately."
         confirmLabel="Clear banner"
         onConfirm={async () => {
-          await save('');
+          clear();
           setClearOpen(false);
         }}
       />

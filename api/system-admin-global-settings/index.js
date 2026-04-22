@@ -4,7 +4,6 @@ import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/s
 import { ensureSystemAdmin, parseRequestBody, readEnv, respond } from '../_shared/org-bff.js';
 
 const FLAG_PREFIX = 'system.flag.';
-const ANNOUNCEMENT_KEY = 'system.announcement.banner';
 
 function normalizeFlagKey(value) {
   return String(value || '')
@@ -24,13 +23,6 @@ function parseIncomingFlags(payload) {
       enabled: Boolean(rawValue),
     }))
     .filter((entry) => entry.key.length > 0);
-}
-
-function normalizeAnnouncement(value) {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  return value.trim();
 }
 
 function toRegistryRowForFlag(flagEntry) {
@@ -56,50 +48,22 @@ function toRegistryRowForFlag(flagEntry) {
   };
 }
 
-function toRegistryRowForAnnouncement(announcement) {
-  return {
-    permission_key: ANNOUNCEMENT_KEY,
-    display_name_en: 'System Announcement Banner',
-    display_name_he: 'System Announcement Banner',
-    description_en: 'Global announcement text managed by system admins.',
-    description_he: 'Global announcement text managed by system admins.',
-    default_value: { text: announcement },
-    category: 'system_settings',
-    requires_approval: false,
-    description: 'Managed by system admin console.',
-    updated_at: new Date().toISOString(),
-  };
-}
-
-function extractSettingsFromRegistry(rows) {
+function extractFlagsFromRegistry(rows) {
   const flags = {};
-  let announcement = '';
 
   for (const row of rows) {
     const permissionKey = String(row?.permission_key || '');
-    if (!permissionKey) {
-      continue;
-    }
-
-    if (permissionKey === ANNOUNCEMENT_KEY) {
-      const textCandidate = row?.default_value?.text;
-      announcement = typeof textCandidate === 'string' ? textCandidate : '';
-      continue;
-    }
-
-    if (!permissionKey.startsWith(FLAG_PREFIX)) {
+    if (!permissionKey || !permissionKey.startsWith(FLAG_PREFIX)) {
       continue;
     }
 
     const key = permissionKey.slice(FLAG_PREFIX.length);
-    if (!key) {
-      continue;
-    }
+    if (!key) continue;
 
     flags[key] = Boolean(row?.default_value);
   }
 
-  return { flags, announcement };
+  return flags;
 }
 
 export default async function systemAdminGlobalSettings(context, req) {
@@ -133,17 +97,11 @@ export default async function systemAdminGlobalSettings(context, req) {
   if (method === 'POST') {
     const body = parseRequestBody(req);
     const flags = parseIncomingFlags(body?.flags);
-    const announcement = normalizeAnnouncement(body?.announcement);
 
-    const rowsToUpsert = [
-      ...flags.map((flag) => toRegistryRowForFlag(flag)),
-      toRegistryRowForAnnouncement(announcement),
-    ];
-
-    if (rowsToUpsert.length > 0) {
+    if (flags.length > 0) {
       const { error } = await supabase
         .from('permission_registry')
-        .upsert(rowsToUpsert, { onConflict: 'permission_key' });
+        .upsert(flags.map(toRegistryRowForFlag), { onConflict: 'permission_key' });
 
       if (error) {
         context.log?.error?.('system-admin-global-settings: failed to save', {
@@ -159,7 +117,7 @@ export default async function systemAdminGlobalSettings(context, req) {
   const { data, error } = await supabase
     .from('permission_registry')
     .select('permission_key, default_value')
-    .or(`permission_key.eq.${ANNOUNCEMENT_KEY},permission_key.like.${FLAG_PREFIX}%`);
+    .like('permission_key', `${FLAG_PREFIX}%`);
 
   if (error) {
     context.log?.error?.('system-admin-global-settings: failed to fetch', {
@@ -170,10 +128,10 @@ export default async function systemAdminGlobalSettings(context, req) {
     return respond(context, 500, { message: 'failed_to_load_settings' });
   }
 
-  const settings = extractSettingsFromRegistry(Array.isArray(data) ? data : []);
+  const flags = extractFlagsFromRegistry(Array.isArray(data) ? data : []);
 
   return respond(context, 200, {
-    ...settings,
+    flags,
     requested_at: new Date().toISOString(),
     admin: {
       user_id: admin.userId,

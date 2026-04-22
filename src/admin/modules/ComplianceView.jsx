@@ -24,7 +24,6 @@ import { useAdminStore } from '../lib/useAdminStore.js';
  * Persisted in localStorage until a real compliance_requests schema lands.
  */
 
-const STORAGE_KEY = 'reinex.admin.compliance.v1';
 
 const TYPE_META = {
   access: { label: 'Data access', sla_days: 30, tone: 'info' },
@@ -51,7 +50,7 @@ function daysUntil(iso) {
 export default function ComplianceView() {
   useAdminModuleView('compliance');
 
-  const { items, upsert } = useAdminStore('compliance', { storageKey: STORAGE_KEY });
+  const { items, upsert } = useAdminStore('compliance');
   const [openDraft, setOpenDraft] = React.useState(false);
   const [selected, setSelected] = React.useState(null);
   const [closeOpen, setCloseOpen] = React.useState(false);

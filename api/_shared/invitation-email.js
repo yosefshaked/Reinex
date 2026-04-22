@@ -1,5 +1,6 @@
 /* eslint-env node */
-import { sendBrevoEmail, readBrevoConfig } from './brevo.js';
+import { readBrevoConfig } from './brevo.js';
+import { sendAndLogBrevoEmail } from './email-log.js';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -209,7 +210,8 @@ export async function deliverInvitationEmail({
       mode,
     });
 
-    await sendBrevoEmail(
+    await sendAndLogBrevoEmail(
+      supabase,
       {
         to: email,
         subject,
@@ -219,6 +221,7 @@ export async function deliverInvitationEmail({
       },
       env,
       context,
+      { emailType: 'invitation_existing_user', metadata: { organizationName, mode } },
     );
 
     return {
@@ -266,7 +269,8 @@ export async function deliverInvitationEmail({
     mode,
   });
 
-  await sendBrevoEmail(
+  await sendAndLogBrevoEmail(
+    supabase,
     {
       to: email,
       subject,
@@ -276,6 +280,7 @@ export async function deliverInvitationEmail({
     },
     env,
     context,
+    { emailType: 'invitation_auth_invite', metadata: { organizationName, mode } },
   );
 
   return {

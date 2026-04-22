@@ -141,7 +141,7 @@ export const ADMIN_NAV = [
         to: '/system-admin/email-log',
         label: 'Email Log',
         icon: Mail,
-        status: 'coming-soon',
+        status: 'live',
         description: 'Outbound email delivery, bounces, and resend controls.',
       },
       {
