@@ -12,15 +12,7 @@ import MetricCard from '../ui/MetricCard.jsx';
 import Drawer from '../ui/Drawer.jsx';
 import ConfirmActionDialog from '../ui/ConfirmActionDialog.jsx';
 import { useAdminModuleView, captureAdminEvent } from '../lib/admin-analytics.js';
-
-/**
- * Incidents — tactical tracker for active production issues.
- *
- * Persisted in localStorage until a dedicated incidents schema lands. The
- * board lets on-call capture what they are working on right now and link out
- * to the Audit Log for a synthesised timeline. Status-page publishing and
- * post-mortem templates are planned follow-ups.
- */
+import { useAdminStore } from '../lib/useAdminStore.js';
 
 const STORAGE_KEY = 'reinex.admin.incidents.v1';
 
@@ -38,36 +30,13 @@ const SEVERITY_LABEL = {
   sev4: 'Sev 4 · Internal / informational',
 };
 
-function loadIncidents() {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed;
-  } catch {
-    return [];
-  }
-}
-
-function saveIncidents(items) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  } catch { /* quota — ignore */ }
-}
-
 export default function IncidentsView() {
   useAdminModuleView('incidents');
 
-  const [items, setItems] = React.useState(loadIncidents);
+  const { items, upsert, remove: removeItem } = useAdminStore('incidents', { storageKey: STORAGE_KEY });
   const [openDraft, setOpenDraft] = React.useState(false);
   const [selected, setSelected] = React.useState(null);
   const [resolveOpen, setResolveOpen] = React.useState(false);
-
-  const persist = React.useCallback((next) => {
-    setItems(next);
-    saveIncidents(next);
-  }, []);
 
   const active = items.filter((i) => i.status !== 'resolved');
   const resolved = items.filter((i) => i.status === 'resolved');
@@ -76,30 +45,26 @@ export default function IncidentsView() {
   const withoutOwner = active.filter((i) => !i.owner).length;
 
   const createIncident = (draft) => {
-    const next = [
-      {
-        id: `inc-${Date.now().toString(36)}`,
-        title: draft.title,
-        severity: draft.severity,
-        owner: draft.owner,
-        customer_impact: draft.customer_impact,
-        summary: draft.summary,
-        status: 'active',
-        created_at: new Date().toISOString(),
-        resolved_at: null,
-        resolution_notes: '',
-      },
-      ...items,
-    ];
-    persist(next);
+    const record = {
+      id: `inc-${Date.now().toString(36)}`,
+      title: draft.title,
+      severity: draft.severity,
+      owner: draft.owner,
+      customer_impact: draft.customer_impact,
+      summary: draft.summary,
+      status: 'active',
+      created_at: new Date().toISOString(),
+      resolved_at: null,
+      resolution_notes: '',
+    };
+    upsert(record);
     captureAdminEvent('incident_opened', { severity: draft.severity });
   };
 
   const resolveIncident = (id, notes) => {
-    const next = items.map((i) =>
-      i.id === id ? { ...i, status: 'resolved', resolved_at: new Date().toISOString(), resolution_notes: notes } : i
-    );
-    persist(next);
+    const incident = items.find((i) => i.id === id);
+    if (!incident) return;
+    upsert({ ...incident, status: 'resolved', resolved_at: new Date().toISOString(), resolution_notes: notes });
     captureAdminEvent('incident_resolved', { id });
   };
 

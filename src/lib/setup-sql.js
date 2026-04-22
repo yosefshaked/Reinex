@@ -596,6 +596,41 @@ CREATE INDEX IF NOT EXISTS impersonation_sessions_active_idx
 ALTER TABLE public.impersonation_sessions ENABLE ROW LEVEL SECURITY;
 
 -- -----------------------------------------------------------------
+-- public.admin_data
+-- Shared key-value store for admin-console modules that previously
+-- used localStorage (Incidents, Knowledge Base, Future Ideas,
+-- Compliance Requests). Replaces per-browser storage with cross-admin
+-- persistence. Only accessible via the service_role key; RLS blocks
+-- all authenticated-user access.
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.admin_data (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  module      text        NOT NULL,
+  record_id   text        NOT NULL,
+  data        jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  created_by  uuid        NULL REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS admin_data_module_record_uidx
+  ON public.admin_data (module, record_id);
+
+CREATE INDEX IF NOT EXISTS admin_data_module_created_idx
+  ON public.admin_data (module, created_at DESC);
+
+ALTER TABLE public.admin_data ENABLE ROW LEVEL SECURITY;
+
+-- No user-facing policies — service_role bypasses RLS entirely.
+-- Deny everything from regular authenticated users.
+DROP POLICY IF EXISTS "admin_data_deny_all" ON public.admin_data;
+CREATE POLICY "admin_data_deny_all"
+  ON public.admin_data FOR ALL
+  TO authenticated, app_user
+  USING (false);
+
+-- -----------------------------------------------------------------
 -- Control RPCs
 -- -----------------------------------------------------------------
 

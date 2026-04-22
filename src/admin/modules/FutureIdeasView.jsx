@@ -9,6 +9,7 @@ import EmptyState from '../ui/EmptyState.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 import MetricCard from '../ui/MetricCard.jsx';
 import { useAdminModuleView, captureAdminEvent } from '../lib/admin-analytics.js';
+import { useAdminStore } from '../lib/useAdminStore.js';
 
 /**
  * Future Ideas — a parking lot for deferred modules and concepts.
@@ -59,35 +60,12 @@ const SEED_IDEAS = [
   },
 ];
 
-function loadIdeas() {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return SEED_IDEAS;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return SEED_IDEAS;
-    return parsed;
-  } catch {
-    return SEED_IDEAS;
-  }
-}
-
-function saveIdeas(ideas) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(ideas));
-  } catch { /* quota — ignore */ }
-}
-
 export default function FutureIdeasView() {
   useAdminModuleView('future-ideas');
 
-  const [ideas, setIdeas] = React.useState(loadIdeas);
+  const { items: ideas, upsert, remove: removeIdea } = useAdminStore('future_ideas', { seed: SEED_IDEAS, storageKey: STORAGE_KEY });
   const [draft, setDraft] = React.useState({ title: '', description: '', tags: '' });
   const [sortKey, setSortKey] = React.useState('upvotes');
-
-  const persist = React.useCallback((next) => {
-    setIdeas(next);
-    saveIdeas(next);
-  }, []);
 
   const sorted = React.useMemo(() => {
     const copy = [...ideas];
@@ -103,31 +81,22 @@ export default function FutureIdeasView() {
     const title = draft.title.trim();
     if (!title) return;
     const tags = draft.tags.split(',').map((t) => t.trim()).filter(Boolean);
-    const next = [
-      ...ideas,
-      {
-        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        title,
-        description: draft.description.trim(),
-        tags,
-        upvotes: 1,
-        notes: '',
-        created_at: new Date().toISOString(),
-      },
-    ];
-    persist(next);
+    upsert({
+      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      title,
+      description: draft.description.trim(),
+      tags,
+      upvotes: 1,
+      notes: '',
+      created_at: new Date().toISOString(),
+    });
     setDraft({ title: '', description: '', tags: '' });
     captureAdminEvent('future_idea_added', { title });
   };
 
   const upvote = (id) => {
-    const next = ideas.map((i) => i.id === id ? { ...i, upvotes: (i.upvotes || 0) + 1 } : i);
-    persist(next);
-  };
-
-  const removeIdea = (id) => {
-    const next = ideas.filter((i) => i.id !== id);
-    persist(next);
+    const idea = ideas.find((i) => i.id === id);
+    if (idea) upsert({ ...idea, upvotes: (idea.upvotes || 0) + 1 });
   };
 
   const totalVotes = ideas.reduce((sum, i) => sum + (i.upvotes || 0), 0);

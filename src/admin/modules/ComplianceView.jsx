@@ -12,6 +12,7 @@ import EmptyState from '../ui/EmptyState.jsx';
 import Drawer from '../ui/Drawer.jsx';
 import ConfirmActionDialog from '../ui/ConfirmActionDialog.jsx';
 import { useAdminModuleView, captureAdminEvent } from '../lib/admin-analytics.js';
+import { useAdminStore } from '../lib/useAdminStore.js';
 
 /**
  * Compliance Requests — intake tracker for DSAR / data access / deletion asks.
@@ -40,19 +41,6 @@ const STATUS_TONE = {
   closed: 'success',
 };
 
-function loadRequests() {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed;
-  } catch { return []; }
-}
-
-function saveRequests(items) {
-  try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); } catch { /* noop */ }
-}
 
 function daysUntil(iso) {
   if (!iso) return null;
@@ -63,45 +51,42 @@ function daysUntil(iso) {
 export default function ComplianceView() {
   useAdminModuleView('compliance');
 
-  const [items, setItems] = React.useState(loadRequests);
+  const { items, upsert } = useAdminStore('compliance', { storageKey: STORAGE_KEY });
   const [openDraft, setOpenDraft] = React.useState(false);
   const [selected, setSelected] = React.useState(null);
   const [closeOpen, setCloseOpen] = React.useState(false);
 
-  const persist = (next) => { setItems(next); saveRequests(next); };
-
   const create = (draft) => {
     const meta = TYPE_META[draft.request_type] || { sla_days: 30 };
     const deadline = new Date(Date.now() + meta.sla_days * 24 * 60 * 60 * 1000).toISOString();
-    const next = [
-      {
-        id: `req-${Date.now().toString(36)}`,
-        request_type: draft.request_type,
-        subject_email: draft.subject_email,
-        subject_org: draft.subject_org,
-        source: draft.source,
-        summary: draft.summary,
-        status: 'new',
-        created_at: new Date().toISOString(),
-        deadline_at: deadline,
-        closed_at: null,
-        closure_notes: '',
-      },
-      ...items,
-    ];
-    persist(next);
+    upsert({
+      id: `req-${Date.now().toString(36)}`,
+      request_type: draft.request_type,
+      subject_email: draft.subject_email,
+      subject_org: draft.subject_org,
+      source: draft.source,
+      summary: draft.summary,
+      status: 'new',
+      created_at: new Date().toISOString(),
+      deadline_at: deadline,
+      closed_at: null,
+      closure_notes: '',
+    });
     captureAdminEvent('compliance_request_created', { type: draft.request_type });
   };
 
   const advance = (id, status) => {
-    persist(items.map((r) => r.id === id ? { ...r, status } : r));
-    setSelected((prev) => prev && prev.id === id ? { ...prev, status } : prev);
+    const req = items.find((r) => r.id === id);
+    if (!req) return;
+    const updated = { ...req, status };
+    upsert(updated);
+    setSelected((prev) => prev?.id === id ? updated : prev);
   };
 
   const close = (id, notes) => {
-    persist(items.map((r) => r.id === id ? {
-      ...r, status: 'closed', closed_at: new Date().toISOString(), closure_notes: notes,
-    } : r));
+    const req = items.find((r) => r.id === id);
+    if (!req) return;
+    upsert({ ...req, status: 'closed', closed_at: new Date().toISOString(), closure_notes: notes });
   };
 
   const open = items.filter((r) => r.status !== 'closed');

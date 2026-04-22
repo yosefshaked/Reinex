@@ -10,6 +10,7 @@ import StatusBadge from '../ui/StatusBadge.jsx';
 import Drawer from '../ui/Drawer.jsx';
 import ConfirmActionDialog from '../ui/ConfirmActionDialog.jsx';
 import { useAdminModuleView, captureAdminEvent } from '../lib/admin-analytics.js';
+import { useAdminStore } from '../lib/useAdminStore.js';
 
 /**
  * Knowledge Base — admin-only markdown articles & runbooks.
@@ -60,21 +61,6 @@ Click End impersonation in the banner. The session row flips to \`ended\` and th
   },
 ];
 
-function loadArticles() {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return SEED;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return SEED;
-    return parsed;
-  } catch {
-    return SEED;
-  }
-}
-
-function saveArticles(items) {
-  try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); } catch { /* noop */ }
-}
 
 function renderMarkdown(src) {
   // Intentionally minimal — not trying to be a full markdown renderer.
@@ -111,14 +97,12 @@ function renderMarkdown(src) {
 export default function KnowledgeBaseView() {
   useAdminModuleView('knowledge-base');
 
-  const [articles, setArticles] = React.useState(loadArticles);
+  const { items: articles, upsert, remove: removeArticle } = useAdminStore('knowledge_base', { seed: SEED, storageKey: STORAGE_KEY });
   const [query, setQuery] = React.useState('');
   const [tagFilter, setTagFilter] = React.useState('');
   const [selected, setSelected] = React.useState(null);
   const [editing, setEditing] = React.useState(null); // null | {id?, title, tags, body}
   const [deleteOpen, setDeleteOpen] = React.useState(false);
-
-  const persist = (next) => { setArticles(next); saveArticles(next); };
 
   const allTags = React.useMemo(() => {
     const set = new Set();
@@ -153,21 +137,11 @@ export default function KnowledgeBaseView() {
     if (!title) return;
     const tags = editing.tags.split(',').map((t) => t.trim()).filter(Boolean);
     if (editing.id) {
-      persist(articles.map((a) =>
-        a.id === editing.id
-          ? { ...a, title, tags, body: editing.body, updated_at: new Date().toISOString() }
-          : a
-      ));
+      const existing = articles.find((a) => a.id === editing.id);
+      upsert({ ...existing, title, tags, body: editing.body, updated_at: new Date().toISOString() });
       captureAdminEvent('kb_article_updated', { id: editing.id });
     } else {
-      persist([
-        {
-          id: `kb-${Date.now().toString(36)}`,
-          title, tags, body: editing.body,
-          updated_at: new Date().toISOString(),
-        },
-        ...articles,
-      ]);
+      upsert({ id: `kb-${Date.now().toString(36)}`, title, tags, body: editing.body, updated_at: new Date().toISOString() });
       captureAdminEvent('kb_article_created', { title });
     }
     setEditing(null);
@@ -175,7 +149,7 @@ export default function KnowledgeBaseView() {
 
   const deleteSelected = () => {
     if (!selected) return;
-    persist(articles.filter((a) => a.id !== selected.id));
+    removeArticle(selected.id);
     setDeleteOpen(false);
     setSelected(null);
   };
