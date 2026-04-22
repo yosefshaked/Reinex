@@ -32,7 +32,7 @@ function isTableMissingError(error) {
 // ---------------------------------------------------------------------------
 // GET — list all records for a module
 // ---------------------------------------------------------------------------
-async function handleGet(context, req, supabase, admin) {
+async function handleGet(context, req, supabase) {
   const module = normalizeString(req?.query?.module);
   if (!module || !ALLOWED_MODULES.has(module)) {
     return respond(context, 400, { message: 'invalid_module' });
