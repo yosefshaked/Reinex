@@ -1,0 +1,8 @@
+supabase start                  # Supabase stack (Docker)
+npm run dev                     # or swa start (the Reinex app)
+
+cd test/automatic-tester
+npm install
+npm run setup:browsers          # install Playwright Chrome
+node setup.js                   # ← discovers everything, writes .env
+node runner.js --all --headed   # run tests

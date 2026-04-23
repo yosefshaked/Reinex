@@ -134,6 +134,8 @@ function formatHmoClaimError(error) {
   switch (`${error?.message || ''}`) {
     case 'hmo_claim_batch_empty':
       return 'אין שורות פתוחות שמתאימות ליצירת דרישה.';
+    case 'hmo_claim_line_not_claimable':
+      return 'אחת השורות שנבחרו כבר לא זמינה לדרישה. רענן את הנתונים ובחר שוב.';
     case 'hmo_claim_line_already_batched_or_reversed':
       return 'אחת השורות כבר שויכה לדרישה או בוטלה. רענן את המסך ונסה שוב.';
     case 'hmo_authorization_claim_limit_exceeded':
@@ -348,10 +350,18 @@ export default function FinancialsPage() {
   const claimableClaims = useMemo(() => (
     (claimsReadModel?.claims || []).filter((claim) => (
       claim?.ledger_transaction_id
+      && claim?.hmo_provider_id
+      && claim?.hmo_authorization_id
       && !claim?.hmo_invoice_batch_id
       && String(claim?.participant_status || '').toLowerCase() === 'attended'
+      && String(claim?.claim_workflow_status || 'claimable').toLowerCase() === 'claimable'
     ))
   ), [claimsReadModel]);
+
+  const claimableLedgerIds = useMemo(
+    () => new Set(claimableClaims.map((claim) => claim.ledger_transaction_id)),
+    [claimableClaims],
+  );
 
   const claimableClaimsByProvider = useMemo(() => {
     const groups = new Map();
@@ -517,12 +527,15 @@ export default function FinancialsPage() {
 
   async function handleCreateClaimBatch() {
     if (!activeOrgId || !canMutateClaims) return;
-    const ledgerTransactionIds = Array.from(selectedClaimLedgerIds);
+    const selectedClaims = claimableClaims.filter((claim) => selectedClaimLedgerIds.has(claim.ledger_transaction_id));
+    const ledgerTransactionIds = selectedClaims.map((claim) => claim.ledger_transaction_id);
     if (ledgerTransactionIds.length === 0) {
       toast.error('יש לבחור לפחות שורת תביעה אחת.');
       return;
     }
-    const selectedClaims = claimableClaims.filter((claim) => selectedClaimLedgerIds.has(claim.ledger_transaction_id));
+    if (ledgerTransactionIds.length !== selectedClaimLedgerIds.size) {
+      toast.info('חלק מהשורות שנבחרו כבר לא זמינות ולכן לא נשלחו ליצירת הדרישה.');
+    }
     const providerIds = Array.from(new Set(selectedClaims.map((claim) => claim.hmo_provider_id).filter(Boolean)));
     if (providerIds.length !== 1) {
       toast.error('יש ליצור דרישה לגורם מממן אחד בכל פעם.');
@@ -1093,7 +1106,7 @@ export default function FinancialsPage() {
                               <div key={claim.id} className="rounded-lg border border-border bg-white p-2">
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-2">
-                                    {canMutateClaims && claim.ledger_transaction_id && !claim.hmo_invoice_batch_id && (
+                                    {canMutateClaims && claimableLedgerIds.has(claim.ledger_transaction_id) && (
                                       <input
                                         type="checkbox"
                                         aria-label="בחר שורת תביעה"

@@ -29,3 +29,4 @@ settings.json
 
 /supabase/.temp
 /api/local.settings.json
+/test/automatic-tester/reports

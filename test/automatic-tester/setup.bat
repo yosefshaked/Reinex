@@ -10,20 +10,22 @@ echo Running setup in: %cd%
 echo.
 
 REM Check Node.js
-node -v >nul 2>&1
+where node >nul 2>&1
 if errorlevel 1 (
-	echo Node.js is not installed or not on PATH. Install Node LTS from https://nodejs.org/
-	pause
-	exit /b 1
+    echo Node.js is not installed or not on PATH. Install Node LTS from https://nodejs.org/
+    pause
+    goto :end
 )
+echo Node version: & node -v
 
 REM Check npm
-npm -v >nul 2>&1
+where npm >nul 2>&1
 if errorlevel 1 (
-	echo npm not found. Please ensure npm is installed with Node.js.
-	pause
-	exit /b 1
+    echo npm not found. Please ensure npm is installed with Node.js.
+    pause
+    goto :end
 )
+echo npm version: & npm -v
 
 echo.
 echo Checking for Supabase CLI and starting services (optional)...
@@ -98,3 +100,9 @@ if errorlevel 1 (
 echo.
 echo Setup finished.
 pause
+
+:end
+echo.
+echo Setup aborted or missing dependency. See messages above.
+pause
+exit /b 1
