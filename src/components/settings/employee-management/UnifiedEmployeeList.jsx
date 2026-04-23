@@ -112,6 +112,10 @@ function normalizeComparableValue(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+function hasComparableValue(value) {
+  return normalizeComparableValue(value).length > 0;
+}
+
 function getLinkedProfileName(profile) {
   if (!profile) return '';
   return [profile.first_name, profile.last_name].filter(Boolean).join(' ').trim() || profile.full_name || '';
@@ -123,13 +127,13 @@ function getEmployeeProfileDifferences(employee, profile) {
   const differences = [];
   const employeeName = getEmployeeName(employee);
   const profileName = getLinkedProfileName(profile);
-  if (normalizeComparableValue(employeeName) !== normalizeComparableValue(profileName)) {
+  if (hasComparableValue(profileName) && normalizeComparableValue(employeeName) !== normalizeComparableValue(profileName)) {
     differences.push('name');
   }
-  if (normalizeComparableValue(employee.phone) !== normalizeComparableValue(profile.phone)) {
+  if (hasComparableValue(profile.phone) && normalizeComparableValue(employee.phone) !== normalizeComparableValue(profile.phone)) {
     differences.push('phone');
   }
-  if (normalizeComparableValue(employee.email) !== normalizeComparableValue(profile.email)) {
+  if (hasComparableValue(profile.email) && normalizeComparableValue(employee.email) !== normalizeComparableValue(profile.email)) {
     differences.push('email');
   }
 
@@ -453,6 +457,11 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
   const handleSyncFromLinkedProfile = useCallback(async () => {
     if (!currentEmployee?.id || !currentEmployeeLinkedProfile) return;
 
+    const profileFirstName = String(currentEmployeeLinkedProfile.first_name || '').trim();
+    const profileLastName = String(currentEmployeeLinkedProfile.last_name || '').trim();
+    const profileEmail = String(currentEmployeeLinkedProfile.email || '').trim();
+    const profilePhone = String(currentEmployeeLinkedProfile.phone || '').trim();
+
     setActionState(REQUEST.loading);
     try {
       await authenticatedFetch('instructors', {
@@ -461,10 +470,10 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
         body: {
           org_id: orgId,
           instructor_id: currentEmployee.id,
-          first_name: currentEmployeeLinkedProfile.first_name || currentEmployee.first_name || '',
-          last_name: currentEmployeeLinkedProfile.last_name || currentEmployee.last_name || null,
-          email: currentEmployeeLinkedProfile.email || null,
-          phone: currentEmployeeLinkedProfile.phone || null,
+          first_name: profileFirstName || currentEmployee.first_name || '',
+          last_name: profileLastName || currentEmployee.last_name || null,
+          email: profileEmail || currentEmployee.email || null,
+          phone: profilePhone || currentEmployee.phone || null,
         },
       });
       toast.success('פרטי העובד סונכרנו מפרופיל המשתמש.');
