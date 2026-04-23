@@ -39,3 +39,4 @@
 - Azure Functions must return through `respond(context, ...)`, must read auth with `resolveBearerAuthorization(req)`, and must use `supabase.auth.getUser(token).data.user`.
 - Services use `is_active` for enable/disable; do not introduce delete-driven disablement.
 - Use `createDashboardTask` (from `dashboard-tasks.js`) to push inbox tasks for domain operations that require user follow-up; it is idempotent — duplicate open tasks for the same `taskType` + `resourceType` + `resourceId` are suppressed automatically.
+- Dashboard inbox UI should summarize open tasks by task kind/count rather than rendering long flat lists one row per task when volumes grow. Task rows remain the source data, but the default dashboard presentation should aggregate them.

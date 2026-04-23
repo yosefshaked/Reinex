@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react"
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, CheckCheck, Loader2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Loader2 } from 'lucide-react'
 
 import Card from "@/components/ui/CustomCard.jsx"
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +10,90 @@ import { useAuth } from "@/auth/AuthContext.jsx"
 import { useOrg } from "@/org/OrgContext.jsx"
 import { useInstructors } from "@/hooks/useOrgData.js"
 import { authenticatedFetch } from '@/lib/api-client.js'
+
+const TASK_PRIORITY_RANK = {
+  low: 1,
+  medium: 2,
+  high: 3,
+  critical: 4,
+}
+
+const TASK_PRIORITY_LABEL = {
+  low: 'נמוכה',
+  medium: 'בינונית',
+  high: 'גבוהה',
+  critical: 'קריטית',
+}
+
+function resolveTaskKindLabel(task) {
+  const taskType = typeof task?.task_type === 'string' ? task.task_type.trim().toLowerCase() : ''
+  switch (taskType) {
+    case 'hmo_claim_submission':
+      return 'הגשת תביעות HMO'
+    case 'calendar_correction_paid_claim_block':
+      return 'תיקוני יומן חסומים'
+    default:
+      return task?.title?.trim() || taskType || 'משימות מערכת'
+  }
+}
+
+function formatTaskTimestamp(value) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toLocaleString('he-IL', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
+function groupDashboardTasks(tasks = []) {
+  const groups = new Map()
+
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    const taskType = typeof task?.task_type === 'string' ? task.task_type.trim().toLowerCase() : ''
+    const groupKey = taskType || `fallback:${task?.title || task?.id || Math.random()}`
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        key: groupKey,
+        taskType,
+        label: resolveTaskKindLabel(task),
+        count: 0,
+        topPriority: 'low',
+        latestCreatedAt: null,
+        latestDescription: '',
+        actionPath: task?.action_path || '',
+      })
+    }
+
+    const group = groups.get(groupKey)
+    group.count += 1
+
+    const priority = typeof task?.priority === 'string' ? task.priority.trim().toLowerCase() : 'low'
+    if ((TASK_PRIORITY_RANK[priority] || 0) > (TASK_PRIORITY_RANK[group.topPriority] || 0)) {
+      group.topPriority = priority
+    }
+
+    const createdAt = task?.created_at || null
+    if (!group.latestCreatedAt || new Date(createdAt).getTime() > new Date(group.latestCreatedAt).getTime()) {
+      group.latestCreatedAt = createdAt
+      group.latestDescription = task?.description || ''
+    }
+
+    if (!group.actionPath && task?.action_path) {
+      group.actionPath = task.action_path
+    }
+  }
+
+  return Array.from(groups.values()).sort((left, right) => {
+    const priorityDiff = (TASK_PRIORITY_RANK[right.topPriority] || 0) - (TASK_PRIORITY_RANK[left.topPriority] || 0)
+    if (priorityDiff !== 0) return priorityDiff
+    return new Date(right.latestCreatedAt || 0).getTime() - new Date(left.latestCreatedAt || 0).getTime()
+  })
+}
 
 /**
  * Build greeting with proper fallback chain:
@@ -60,7 +144,6 @@ export default function DashboardPage() {
   const [dashboardTasks, setDashboardTasks] = useState([])
   const [isLoadingTasks, setIsLoadingTasks] = useState(false)
   const [tasksError, setTasksError] = useState(null)
-  const [resolvingTaskId, setResolvingTaskId] = useState(null)
 
   const membershipRole = typeof activeOrg?.membership?.role === 'string'
     ? activeOrg.membership.role.trim().toLowerCase()
@@ -121,26 +204,6 @@ export default function DashboardPage() {
     }
   }, [activeOrgId, canManageAll, session])
 
-  async function handleResolveTask(taskId) {
-    if (!taskId || !activeOrgId) return
-    setResolvingTaskId(taskId)
-    try {
-      await authenticatedFetch('dashboard-tasks', {
-        method: 'PUT',
-        body: {
-          id: taskId,
-          org_id: activeOrgId,
-        },
-        session,
-      })
-      setDashboardTasks((prev) => prev.filter((task) => task.id !== taskId))
-    } catch (error) {
-      setTasksError(error?.message || 'פתרון המשימה נכשל.')
-    } finally {
-      setResolvingTaskId(null)
-    }
-  }
-
   function renderDashboardTasks() {
     if (!canManageAll) {
       return null
@@ -149,6 +212,8 @@ export default function DashboardPage() {
     if (!activeOrgId || !session) {
       return null
     }
+
+    const groupedTasks = groupDashboardTasks(dashboardTasks)
 
     return (
       <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
@@ -177,28 +242,36 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="mt-4 space-y-3">
-            {dashboardTasks.map((task) => (
-              <div key={task.id} className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+            {groupedTasks.map((group) => (
+              <div key={group.key} className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 text-amber-950">
                       <AlertTriangle className="h-4 w-4" />
-                      <span className="font-medium">{task.title}</span>
-                      <Badge className="bg-white text-amber-900 border-amber-200">{task.priority}</Badge>
+                      <span className="font-medium">{group.label}</span>
+                      <Badge className="bg-white text-amber-900 border-amber-200">{TASK_PRIORITY_LABEL[group.topPriority] || group.topPriority}</Badge>
                     </div>
-                    <p className="text-sm text-amber-900/80">{task.description}</p>
+                    <p className="text-sm text-amber-900/85">
+                      יש {group.count} משימות פתוחות עבור {group.label}.
+                    </p>
+                    {group.latestDescription && (
+                      <p className="text-xs text-amber-900/75">
+                        דוגמה אחרונה: {group.latestDescription}
+                      </p>
+                    )}
+                    {group.latestCreatedAt && (
+                      <p className="text-xs text-amber-900/65">
+                        עדכון אחרון: {formatTaskTimestamp(group.latestCreatedAt)}
+                      </p>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {task.action_path && (
-                      <Button variant="outline" size="sm" onClick={() => navigate(task.action_path)}>
+                    {group.actionPath && (
+                      <Button variant="outline" size="sm" onClick={() => navigate(group.actionPath)}>
                         <ArrowLeft className="ms-1 h-4 w-4" />
                         פתח
                       </Button>
                     )}
-                    <Button size="sm" onClick={() => handleResolveTask(task.id)} disabled={resolvingTaskId === task.id}>
-                      {resolvingTaskId === task.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="ms-1 h-4 w-4" />}
-                      סמן כטופל
-                    </Button>
                   </div>
                 </div>
               </div>
