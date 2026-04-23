@@ -884,6 +884,28 @@ describe('BillingLedgerService.createHmoInvoiceBatch', () => {
     assert.equal(client._store.hmo_invoice_batch_items.length, 2); // old item + new item
   });
 
+  it('blocks explicitly selected ledger rows from another provider with a clear error', async () => {
+    const client = createMockClient({
+      hmo_providers: [
+        { id: 'hmo-1', org_id: 'org-1', name: 'Provider 1', is_active: true },
+        { id: 'hmo-2', org_id: 'org-1', name: 'Provider 2', is_active: true },
+      ],
+      ledger_transactions: [
+        { id: 'tx-1', org_id: 'org-1', hmo_provider_id: 'hmo-2', source_type: 'lesson_charge', direction: 'DEBIT', amount: 2000, effective_at: '2025-03-01T00:00:00Z', reverses_transaction_id: null },
+      ],
+    });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
+
+    await assert.rejects(
+      () => service.createHmoInvoiceBatch({
+        hmoProviderId: 'hmo-1',
+        ledgerTransactionIds: ['tx-1'],
+        actorUserId: 'u1',
+      }),
+      /hmo_claim_provider_mismatch/,
+    );
+  });
+
   it('issued HMO invoice batch — balance unchanged until payment is recorded', async () => {
     // Must seed ledger_account_id so getAccountBalance (which queries by ledger_account_id) can find the debit.
     const client = createMockClient({

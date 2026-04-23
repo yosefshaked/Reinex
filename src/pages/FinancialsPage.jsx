@@ -136,6 +136,8 @@ function formatHmoClaimError(error) {
       return 'אין שורות פתוחות שמתאימות ליצירת דרישה.';
     case 'hmo_claim_line_not_claimable':
       return 'אחת השורות שנבחרו כבר לא זמינה לדרישה. רענן את הנתונים ובחר שוב.';
+    case 'hmo_claim_provider_mismatch':
+      return 'השורות שנבחרו לא שייכות לאותו גורם מממן. בחר שורות מגורם מממן אחד בלבד.';
     case 'hmo_claim_line_already_batched_or_reversed':
       return 'אחת השורות כבר שויכה לדרישה או בוטלה. רענן את המסך ונסה שוב.';
     case 'hmo_authorization_claim_limit_exceeded':

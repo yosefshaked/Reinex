@@ -1343,11 +1343,14 @@ export default class BillingLedgerService {
       .from('ledger_transactions')
       .select('id, org_id, amount, effective_at, hmo_provider_id, hmo_authorization_id, lesson_participant_id, source_type, direction, reverses_transaction_id')
       .eq('org_id', this.orgId)
-      .eq('hmo_provider_id', normalizedProviderId)
       .eq('source_type', 'lesson_charge')
       .eq('direction', 'DEBIT')
       .is('reverses_transaction_id', null)
       .order('effective_at', { ascending: true });
+
+    if (requestedLedgerIds.length === 0) {
+      query = query.eq('hmo_provider_id', normalizedProviderId);
+    }
 
     if (dateKeyToUtcBoundary(periodStart, 'start')) {
       query = query.gte('effective_at', dateKeyToUtcBoundary(periodStart, 'start'));
@@ -1367,7 +1370,18 @@ export default class BillingLedgerService {
     const candidateRows = Array.isArray(debitRows) ? debitRows : [];
     const candidateIds = candidateRows.map((row) => row.id).filter(Boolean);
     if (requestedLedgerIds.length > 0 && candidateIds.length !== requestedLedgerIds.length) {
-      throw new Error('hmo_claim_line_not_claimable');
+      const foundIds = new Set(candidateIds);
+      const error = new Error('hmo_claim_line_not_claimable');
+      error.details = {
+        requested_ledger_transaction_ids: requestedLedgerIds,
+        found_ledger_transaction_ids: candidateIds,
+        missing_ledger_transaction_ids: requestedLedgerIds.filter((id) => !foundIds.has(id)),
+        expected_org_id: this.orgId,
+      };
+      throw error;
+    }
+    if (requestedLedgerIds.length > 0 && candidateRows.some((row) => normalizeString(row?.hmo_provider_id) !== normalizedProviderId)) {
+      throw new Error('hmo_claim_provider_mismatch');
     }
 
     const { data: reversalRows, error: reversalError } = candidateIds.length > 0

@@ -284,7 +284,9 @@ async function buildHmoClaimsReadModel({
     const participant = participantMap.get(participantId) || null;
     const authorizationId = normalizeString(ledgerRow?.hmo_authorization_id);
     const authorization = authorizationMap.get(authorizationId) || null;
-    const providerId = normalizeString(authorization?.provider_id || ledgerRow?.hmo_provider_id);
+    const ledgerProviderId = normalizeString(ledgerRow?.hmo_provider_id);
+    const authorizationProviderId = normalizeString(authorization?.provider_id);
+    const providerId = ledgerProviderId;
     const provider = providerMap.get(providerId) || null;
     const batchItem = batchItemByLedgerId.get(ledgerRow.id) || null;
     const batch = batchItem ? (batchMap.get(batchItem.batch_id) || null) : null;
@@ -316,6 +318,7 @@ async function buildHmoClaimsReadModel({
       hmo_authorization_id: authorizationId || null,
       hmo_authorization_status: normalizeString(authorization?.status) || null,
       hmo_authorization_reference: normalizeString(authorization?.authorization_reference) || null,
+      hmo_authorization_provider_id: authorizationProviderId || null,
       hmo_contracted_rate_amount: authorization?.covered_insurer_claim_amount ?? ledgerRow?.amount ?? null,
       hmo_provider_id: providerId || null,
       hmo_provider_name: normalizeString(provider?.name) || null,
@@ -430,7 +433,14 @@ function currentMonthRange() {
   };
 }
 
-function mapBillingActionError(errorCode) {
+function mapBillingActionError(errorCode, error = null) {
+  const withDetails = (status) => ({
+    status,
+    body: {
+      message: errorCode,
+      ...(error?.details && typeof error.details === 'object' ? { details: error.details } : {}),
+    },
+  });
   switch (errorCode) {
     case 'invoice_batch_not_found':
       return { status: 404, body: { message: errorCode } };
@@ -440,6 +450,7 @@ function mapBillingActionError(errorCode) {
     case 'missing_invoice_batch_id':
     case 'hmo_provider_inactive':
     case 'hmo_claim_line_not_claimable':
+    case 'hmo_claim_provider_mismatch':
     case 'hmo_claim_line_already_batched_or_reversed':
     case 'hmo_authorization_claim_limit_exceeded':
     case 'hmo_claim_batch_empty':
@@ -451,7 +462,7 @@ function mapBillingActionError(errorCode) {
     case 'hmo_payment_exceeds_batch_balance':
     case 'amount_must_be_positive_integer':
     case 'invalid_task_ids':
-      return { status: 400, body: { message: errorCode } };
+      return withDetails(400);
     case 'missing_student_id':
     case 'invalid_manual_credit_source_type':
     case 'invalid_manual_debit_source_type':
@@ -831,7 +842,13 @@ export default async function (context, req) {
       });
     }
   } catch (error) {
-    const mapped = mapBillingActionError(error?.message || error?.code);
+    context.log?.warn?.('billing action failed', {
+      action,
+      message: error?.message,
+      code: error?.code,
+      details: error?.details || null,
+    });
+    const mapped = mapBillingActionError(error?.message || error?.code, error);
     return respond(context, mapped.status, mapped.body);
   }
 
