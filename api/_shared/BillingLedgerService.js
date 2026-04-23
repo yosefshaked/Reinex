@@ -240,49 +240,6 @@ async function loadClientProfileMap(tenantClient, orgId, clientProfileIds = []) 
   return new Map((data || []).map((row) => [row.id, row]));
 }
 
-async function resolveHmoProviderAnchorClientProfileId(tenantClient, orgId, hmoProviderId) {
-  const normalizedOrgId = normalizeString(orgId);
-  const normalizedProviderId = normalizeString(hmoProviderId);
-  if (!normalizedOrgId || !normalizedProviderId) {
-    return null;
-  }
-
-  const { data: transactionAnchor, error: transactionAnchorError } = await tenantClient
-    .from('ledger_transactions')
-    .select('client_profile_id')
-    .eq('org_id', normalizedOrgId)
-    .eq('hmo_provider_id', normalizedProviderId)
-    .not('client_profile_id', 'is', null)
-    .order('effective_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (transactionAnchorError) {
-    throw transactionAnchorError;
-  }
-  if (transactionAnchor?.client_profile_id) {
-    return normalizeString(transactionAnchor.client_profile_id);
-  }
-
-  const { data: authorizationAnchor, error: authorizationAnchorError } = await tenantClient
-    .from('hmo_authorizations')
-    .select(`
-      student:students!inner(
-        client_profile_id
-      )
-    `)
-    .eq('org_id', normalizedOrgId)
-    .eq('provider_id', normalizedProviderId)
-    .limit(1)
-    .maybeSingle();
-
-  if (authorizationAnchorError) {
-    throw authorizationAnchorError;
-  }
-
-  return normalizeString(authorizationAnchor?.student?.client_profile_id) || null;
-}
-
 async function loadServiceMap(tenantClient, orgId, serviceIds = []) {
   const ids = Array.from(new Set((serviceIds || []).map((value) => normalizeString(value)).filter(Boolean)));
   const normalizedOrgId = normalizeString(orgId);
@@ -404,27 +361,9 @@ async function resolveLedgerAccount(tenantClient, orgId, accountType, accountRef
     throw new Error('invalid_ledger_account_target');
   }
 
-  if (normalizedType === HMO_ACCOUNT_TYPE) {
-    const anchorClientProfileId = await resolveHmoProviderAnchorClientProfileId(
-      tenantClient,
-      normalizedOrgId,
-      normalizedRefId,
-    );
-    if (!anchorClientProfileId) {
-      throw new Error('ledger_account_target_not_found');
-    }
-    return {
-      id: null,
-      accountType: HMO_ACCOUNT_TYPE,
-      accountRefId: normalizedRefId,
-      clientProfileId: anchorClientProfileId,
-      studentId: null,
-      hmoProviderId: normalizedRefId,
-    };
-  }
-
   let clientProfileId = null;
   let studentId = null;
+  let hmoProviderId = null;
 
   if (normalizedType === STUDENT_ACCOUNT_TYPE) {
     const studentMap = await loadStudentProfileMap(tenantClient, normalizedOrgId, [normalizedRefId]);
@@ -440,17 +379,35 @@ async function resolveLedgerAccount(tenantClient, orgId, accountType, accountRef
       throw new Error('ledger_account_target_not_found');
     }
     clientProfileId = normalizedRefId;
+  } else if (normalizedType === HMO_ACCOUNT_TYPE) {
+    const { data: provider, error: providerError } = await tenantClient
+      .from('hmo_providers')
+      .select('id')
+      .eq('org_id', normalizedOrgId)
+      .eq('id', normalizedRefId)
+      .maybeSingle();
+    if (providerError) {
+      throw providerError;
+    }
+    if (!provider?.id) {
+      throw new Error('ledger_account_target_not_found');
+    }
+    hmoProviderId = normalizedRefId;
   }
 
   let accountQuery = tenantClient
     .from('ledger_accounts')
-    .select('id, org_id, client_profile_id, student_id, service_id, metadata')
+    .select('id, org_id, account_type, client_profile_id, student_id, hmo_provider_id, service_id, metadata')
     .eq('org_id', normalizedOrgId)
-    .eq('client_profile_id', clientProfileId);
+    .eq('account_type', normalizedType);
 
-  accountQuery = studentId
-    ? accountQuery.eq('student_id', studentId)
-    : accountQuery.is('student_id', null);
+  if (normalizedType === STUDENT_ACCOUNT_TYPE) {
+    accountQuery = accountQuery.eq('student_id', studentId);
+  } else if (normalizedType === CLIENT_ACCOUNT_TYPE) {
+    accountQuery = accountQuery.eq('client_profile_id', clientProfileId).is('student_id', null);
+  } else if (normalizedType === HMO_ACCOUNT_TYPE) {
+    accountQuery = accountQuery.eq('hmo_provider_id', hmoProviderId);
+  }
 
   const { data: existingAccount, error: existingAccountError } = await accountQuery.maybeSingle();
 
@@ -463,9 +420,9 @@ async function resolveLedgerAccount(tenantClient, orgId, accountType, accountRef
       id: existingAccount.id,
       accountType: normalizedType,
       accountRefId: normalizedRefId,
-      clientProfileId,
-      studentId,
-      hmoProviderId: null,
+      clientProfileId: existingAccount.client_profile_id || clientProfileId || null,
+      studentId: existingAccount.student_id || studentId || null,
+      hmoProviderId: existingAccount.hmo_provider_id || hmoProviderId || null,
     };
   }
 
@@ -473,12 +430,14 @@ async function resolveLedgerAccount(tenantClient, orgId, accountType, accountRef
     .from('ledger_accounts')
     .insert({
       org_id: normalizedOrgId,
+      account_type: normalizedType,
       client_profile_id: clientProfileId,
       student_id: studentId,
+      hmo_provider_id: hmoProviderId,
       service_id: null,
       metadata: {},
     })
-    .select('id, org_id, client_profile_id, student_id, service_id, metadata')
+    .select('id, org_id, account_type, client_profile_id, student_id, hmo_provider_id, service_id, metadata')
     .single();
 
   if (error) {
@@ -488,9 +447,9 @@ async function resolveLedgerAccount(tenantClient, orgId, accountType, accountRef
     id: data.id,
     accountType: normalizedType,
     accountRefId: normalizedRefId,
-    clientProfileId,
-    studentId,
-    hmoProviderId: null,
+    clientProfileId: data.client_profile_id || clientProfileId || null,
+    studentId: data.student_id || studentId || null,
+    hmoProviderId: data.hmo_provider_id || hmoProviderId || null,
   };
 }
 
@@ -1299,6 +1258,126 @@ export default class BillingLedgerService {
     };
   }
 
+  async resolveRequestedHmoClaimLedgerIds({ requestedIds = [], hmoProviderId }) {
+    const normalizedProviderId = normalizeString(hmoProviderId);
+    const normalizedRequestedIds = Array.from(new Set((Array.isArray(requestedIds) ? requestedIds : [])
+      .map((id) => normalizeString(id))
+      .filter(Boolean)));
+
+    if (normalizedRequestedIds.length === 0) {
+      return {
+        ledgerTransactionIds: [],
+        resolvedDashboardTaskIds: [],
+        unresolvedClaimIds: [],
+      };
+    }
+
+    const { data: directLedgerRows, error: directLedgerError } = await this.tenantClient
+      .from('ledger_transactions')
+      .select('id')
+      .eq('org_id', this.orgId)
+      .in('id', normalizedRequestedIds);
+    if (directLedgerError) {
+      throw directLedgerError;
+    }
+
+    const directLedgerIds = new Set((directLedgerRows || []).map((row) => normalizeString(row?.id)).filter(Boolean));
+    const missingDirectIds = normalizedRequestedIds.filter((id) => !directLedgerIds.has(id));
+    if (missingDirectIds.length === 0) {
+      return {
+        ledgerTransactionIds: normalizedRequestedIds,
+        resolvedDashboardTaskIds: [],
+        unresolvedClaimIds: [],
+      };
+    }
+
+    const { data: taskRows, error: taskError } = await this.tenantClient
+      .from('dashboard_tasks')
+      .select('id, resource_id, metadata')
+      .eq('org_id', this.orgId)
+      .eq('task_type', 'hmo_claim_submission')
+      .in('id', missingDirectIds);
+    if (taskError && taskError.code !== '42P01') {
+      throw taskError;
+    }
+
+    const tasksById = new Map((taskRows || [])
+      .map((task) => [normalizeString(task?.id), task])
+      .filter(([id, task]) => id && normalizeString(task?.resource_id)));
+    const participantIds = Array.from(new Set(Array.from(tasksById.values())
+      .map((task) => normalizeString(task?.resource_id))
+      .filter(Boolean)));
+
+    const { data: participantLedgerRows, error: participantLedgerError } = participantIds.length > 0
+      ? await this.tenantClient
+        .from('ledger_transactions')
+        .select('id, lesson_participant_id, hmo_authorization_id, hmo_provider_id, effective_at')
+        .eq('org_id', this.orgId)
+        .eq('source_type', 'lesson_charge')
+        .eq('direction', 'DEBIT')
+        .eq('hmo_provider_id', normalizedProviderId)
+        .is('reverses_transaction_id', null)
+        .in('lesson_participant_id', participantIds)
+      : { data: [], error: null };
+    if (participantLedgerError) {
+      throw participantLedgerError;
+    }
+
+    const rowsByParticipantId = new Map();
+    for (const row of participantLedgerRows || []) {
+      const participantId = normalizeString(row?.lesson_participant_id);
+      if (!participantId) continue;
+      if (!rowsByParticipantId.has(participantId)) {
+        rowsByParticipantId.set(participantId, []);
+      }
+      rowsByParticipantId.get(participantId).push(row);
+    }
+
+    const resolvedTaskLedgerIds = new Map();
+    const ambiguousTaskIds = new Set();
+    for (const [taskId, task] of tasksById.entries()) {
+      const participantId = normalizeString(task?.resource_id);
+      const metadata = isPlainObject(task?.metadata) ? task.metadata : {};
+      const expectedAuthorizationId = normalizeString(metadata.hmo_authorization_id || metadata.authorization?.id);
+      const matchingRows = (rowsByParticipantId.get(participantId) || [])
+        .filter((row) => !expectedAuthorizationId || normalizeString(row?.hmo_authorization_id) === expectedAuthorizationId)
+        .sort((a, b) => String(a?.effective_at || '').localeCompare(String(b?.effective_at || '')));
+
+      if (matchingRows.length === 1) {
+        resolvedTaskLedgerIds.set(taskId, normalizeString(matchingRows[0]?.id));
+      } else if (matchingRows.length > 1) {
+        ambiguousTaskIds.add(taskId);
+      }
+    }
+
+    const ledgerTransactionIds = [];
+    const seenLedgerIds = new Set();
+    const resolvedDashboardTaskIds = [];
+    const unresolvedClaimIds = [];
+    for (const requestedId of normalizedRequestedIds) {
+      const directLedgerId = directLedgerIds.has(requestedId) ? requestedId : null;
+      const resolvedLedgerId = directLedgerId || resolvedTaskLedgerIds.get(requestedId);
+      if (resolvedLedgerId) {
+        if (!seenLedgerIds.has(resolvedLedgerId)) {
+          seenLedgerIds.add(resolvedLedgerId);
+          ledgerTransactionIds.push(resolvedLedgerId);
+        }
+        if (!directLedgerId) {
+          resolvedDashboardTaskIds.push(requestedId);
+        }
+      } else {
+        unresolvedClaimIds.push(requestedId);
+      }
+    }
+
+    return {
+      ledgerTransactionIds,
+      resolvedDashboardTaskIds,
+      unresolvedClaimIds,
+      ambiguousDashboardTaskIds: Array.from(ambiguousTaskIds),
+    };
+  }
+
   async createHmoInvoiceBatch({
     hmoProviderId,
     periodStart,
@@ -1318,7 +1397,7 @@ export default class BillingLedgerService {
       throw new Error('missing_org_id');
     }
 
-    const requestedLedgerIds = Array.from(new Set((Array.isArray(ledgerTransactionIds) ? ledgerTransactionIds : [])
+    const requestedClaimIds = Array.from(new Set((Array.isArray(ledgerTransactionIds) ? ledgerTransactionIds : [])
       .map((id) => normalizeString(id))
       .filter(Boolean)));
 
@@ -1337,6 +1416,24 @@ export default class BillingLedgerService {
     }
     if (provider.is_active === false) {
       throw new Error('hmo_provider_inactive');
+    }
+
+    const claimIdResolution = await this.resolveRequestedHmoClaimLedgerIds({
+      requestedIds: requestedClaimIds,
+      hmoProviderId: normalizedProviderId,
+    });
+    const requestedLedgerIds = claimIdResolution.ledgerTransactionIds;
+    if (requestedClaimIds.length > 0 && claimIdResolution.unresolvedClaimIds.length > 0) {
+      const error = new Error('hmo_claim_line_not_claimable');
+      error.details = {
+        requested_claim_ids: requestedClaimIds,
+        requested_ledger_transaction_ids: requestedLedgerIds,
+        found_ledger_transaction_ids: requestedLedgerIds,
+        missing_claim_ids: claimIdResolution.unresolvedClaimIds,
+        resolved_dashboard_task_ids: claimIdResolution.resolvedDashboardTaskIds,
+        expected_org_id: this.orgId,
+      };
+      throw error;
     }
 
     let query = this.tenantClient
@@ -1373,9 +1470,11 @@ export default class BillingLedgerService {
       const foundIds = new Set(candidateIds);
       const error = new Error('hmo_claim_line_not_claimable');
       error.details = {
+        requested_claim_ids: requestedClaimIds,
         requested_ledger_transaction_ids: requestedLedgerIds,
         found_ledger_transaction_ids: candidateIds,
         missing_ledger_transaction_ids: requestedLedgerIds.filter((id) => !foundIds.has(id)),
+        resolved_dashboard_task_ids: claimIdResolution.resolvedDashboardTaskIds,
         expected_org_id: this.orgId,
       };
       throw error;

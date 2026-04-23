@@ -669,6 +669,7 @@ describe('BillingLedgerService.syncLessonParticipantCharge', () => {
       lesson_participants: [makeParticipant()],
       finance_policies: makeFinancePolicies(),
       hmo_authorizations: [],
+      hmo_providers: [{ id: 'hmo-1', org_id: 'org-1', name: 'Provider', is_active: true }],
     });
     service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
   });
@@ -747,6 +748,10 @@ describe('BillingLedgerService.syncLessonParticipantCharge', () => {
     assert.equal(hmoTx.amount, 2000);
     assert.equal(studentTx.hmo_authorization_id, 'auth-1');
     assert.equal(hmoTx.hmo_authorization_id, 'auth-1');
+    assert.ok(hmoTx.ledger_account_id, 'HMO debit should reference a real ledger account');
+    const hmoAccount = client._store.ledger_accounts.find((account) => account.id === hmoTx.ledger_account_id);
+    assert.equal(hmoAccount?.account_type, 'hmo_provider');
+    assert.equal(hmoAccount?.hmo_provider_id, 'hmo-1');
   });
 
   it('attendance reversal — original rows remain, reversing credits appended, no mutation', async () => {
@@ -904,6 +909,49 @@ describe('BillingLedgerService.createHmoInvoiceBatch', () => {
       }),
       /hmo_claim_provider_mismatch/,
     );
+  });
+
+  it('accepts existing HMO dashboard task ids by resolving them to active ledger rows', async () => {
+    const client = createMockClient({
+      hmo_providers: [{ id: 'hmo-1', org_id: 'org-1', name: 'Provider', is_active: true }],
+      ledger_accounts: [{ id: 'acct-hmo', org_id: 'org-1', account_type: 'hmo_provider', student_id: null, client_profile_id: null, hmo_provider_id: 'hmo-1', is_active: true, metadata: {} }],
+      dashboard_tasks: [
+        {
+          id: 'task-1',
+          org_id: 'org-1',
+          task_type: 'hmo_claim_submission',
+          resource_id: 'part-1',
+          status: 'open',
+          metadata: { authorization: { id: 'auth-1' } },
+        },
+      ],
+      ledger_transactions: [
+        {
+          id: 'tx-1',
+          org_id: 'org-1',
+          ledger_account_id: 'acct-hmo',
+          lesson_participant_id: 'part-1',
+          hmo_provider_id: 'hmo-1',
+          hmo_authorization_id: 'auth-1',
+          source_type: 'lesson_charge',
+          direction: 'DEBIT',
+          amount: 2000,
+          effective_at: '2025-03-01T00:00:00Z',
+          reverses_transaction_id: null,
+        },
+      ],
+    });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
+
+    const result = await service.createHmoInvoiceBatch({
+      hmoProviderId: 'hmo-1',
+      ledgerTransactionIds: ['task-1'],
+      actorUserId: 'u1',
+    });
+
+    assert.equal(result.totalAmount, 2000);
+    assert.deepEqual(result.ledgerTransactionIds, ['tx-1']);
+    assert.equal(client._store.hmo_invoice_batch_items[0].ledger_transaction_id, 'tx-1');
   });
 
   it('issued HMO invoice batch — balance unchanged until payment is recorded', async () => {

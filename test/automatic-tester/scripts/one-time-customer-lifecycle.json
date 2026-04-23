@@ -4,7 +4,7 @@
     "name": "One-Time Customer Lifecycle",
     "description": "Admin creates a one-time customer, views their profile, and verifies they appear in the one-time customers list.",
     "version": "1.0.0",
-    "last_validated_at": "2026-04-23T00:00:00Z",
+    "last_validated_at": "2026-04-23T23:59:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [

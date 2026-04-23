@@ -1242,3 +1242,21 @@ Remaining work after this phase:
 - Add provider period granularity to the UI if users need non-monthly operational filtering.
 - Add explicit reopen/resubmit workflow if real operations require it; do not silently reopen cancelled batches.
 - Add release evidence in `implementations/finance/hmo-claims/release-evidence.md` before rollout.
+
+### 2026-04-23 - Pre-prod claim id and HMO ledger-account hardening
+
+Implemented compatibility and integrity fixes discovered during pre-prod testing:
+
+- `BillingLedgerService.createHmoInvoiceBatch(...)` now accepts legacy/current HMO dashboard task ids as explicit selected claim ids and resolves them to active `ledger_transactions` before creating a batch.
+- This compatibility path is intentionally not a new source of truth: `dashboard_tasks.resource_id` is used only to locate the lesson participant, and the batch is still created only from an active HMO receivable ledger row with the expected provider/authorization.
+- Error details for `hmo_claim_line_not_claimable` now include requested claim ids, resolved dashboard task ids, missing claim ids, and found ledger ids so pre-prod diagnostics identify whether the UI sent task ids or ledger ids.
+- `ledger_accounts` now supports first-class HMO provider accounts via `account_type = 'hmo_provider'` and `hmo_provider_id`.
+- `BillingLedgerService.resolveLedgerAccount(...)` now creates/reuses real HMO ledger accounts instead of returning an HMO target with `ledger_account_id = null`.
+- `ledger_transactions.client_profile_id` is no longer required for HMO-provider-only ledger activity; the validation trigger now requires either `client_profile_id` or `hmo_provider_id`.
+- `setup-sql.js` backfills HMO provider ledger accounts for existing providers and links historical HMO ledger rows that were created with `ledger_account_id = null`. This is a technical account-link repair only; it does not change ledger amounts, directions, source ids, or effective dates.
+- Unit coverage now verifies that covered HMO attendance creates an HMO debit linked to a real HMO ledger account, and that existing dashboard task ids can still be submitted after resolving to ledger rows.
+
+Verification completed:
+
+- `node --test api/_shared/BillingLedgerService.test.js`
+- `npx eslint api/_shared/BillingLedgerService.js api/_shared/BillingLedgerService.test.js src/lib/setup-sql.js`

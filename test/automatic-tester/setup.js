@@ -22,7 +22,7 @@ import { execSync, spawnSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { writeFile as writeFileAsync } from 'fs/promises';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import os from 'os';
 
 const __dirname   = dirname(fileURLToPath(import.meta.url));
@@ -255,68 +255,196 @@ async function discoverSupabaseConfig() {
 async function probeAppUrl() {
   section('── Step 2 / 5  Detect Running App');
 
+  // Detect the React app by checking that the root URL serves the Reinex HTML shell
+  // (contains <div id="root">). This works whether SWA (4280) or Vite (5173) is running,
+  // and does NOT depend on the /api proxy being configured — that's irrelevant for navigation.
+  // Try IPv6 variants because Vite on Windows often binds to [::1] only.
   const candidates = [
-    'http://localhost:4280',   // swa start (Azure Static Web Apps emulator)
-    'http://localhost:5173',   // vite dev
-    'http://localhost:3000',   // common fallback
-    'http://localhost:7071',   // Azure Functions local
+    'http://localhost:4280',   // SWA emulator — preferred (serves app + API on one port)
+    'http://127.0.0.1:4280',
+    'http://localhost:5173',   // Vite dev server
+    'http://127.0.0.1:5173',
+    'http://[::1]:5173',       // Vite on IPv6-only
+    'http://localhost:5174',   // Vite alternate port
+    'http://127.0.0.1:5174',
+    'http://[::1]:5174',
   ];
 
   for (const url of candidates) {
     try {
-      const res = await fetch(`${url}/api/config`, { signal: AbortSignal.timeout(2000) });
-      if (res.ok || res.status === 401 || res.status === 403) {
-        ok(`App is running at ${url}`);
-        return url;
+      const res = await fetch(`${url}/`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const ct = res.headers.get('content-type') || '';
+        if (ct.includes('text/html')) {
+          const body = await res.text();
+          // Confirm this is the Reinex React app shell, not some other server
+          if (body.includes('<div id="root">')) {
+            const friendly = url.replace('http://[::1]:', 'http://localhost:');
+            ok(`App is running at ${friendly}`);
+            return friendly;
+          }
+        }
       }
     } catch { /* not available */ }
   }
 
-  warn('App does not appear to be running on any common port.');
-  warn('Start it first:  npm run dev   or   swa start');
-  warn('Will write .env anyway — start the app before running tests.');
-  return 'http://localhost:4280';
+  warn('Reinex app (React shell) not found on any common port.');
+  warn('Start it:  npm run dev   (in the repo root)');
+  warn('Then re-run setup.js. Writing .env with default URL for now.');
+  return 'http://localhost:5173';
 }
 
 // ─── 3. Schema check and apply ────────────────────────────────────────────
 
-// Tables created by setup-sql.js that must exist for tests to work.
-// These are all in the tenant (public) schema.
+// Tables that must exist after setup-sql.js runs (both tenant and control tables).
 const SCHEMA_PROBE_TABLES = [
   'client_profiles',
   'lesson_instances',
   'lesson_templates',
   'commitments',
   'ledger_transactions',
+  'profiles',
+  'organizations',
+  'org_memberships',
 ];
 
-async function checkTableExists(supabaseUrl, serviceKey, table) {
+// Specific columns that were added in later versions of setup-sql.js.
+// If any are missing the SQL needs to re-run even if the table exists.
+const SCHEMA_PROBE_COLUMNS = [
+  { table: 'profiles', column: 'account_status' },
+  { table: 'profiles', column: 'setup_completed_at' },
+  { table: 'profiles', column: 'is_system_admin' },
+];
+
+// ── Direct DB probes via psql (bypasses PostgREST cache) ─────────────────
+
+function psqlQuery(dbContainer, sql) {
+  const result = spawnSync(
+    'docker',
+    ['exec', '-i', dbContainer, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc', sql],
+    { encoding: 'utf8', timeout: 10_000 }
+  );
+  if (result.status !== 0) throw new Error(result.stderr || 'psql failed');
+  return result.stdout.trim();
+}
+
+function checkTableExistsPsql(dbContainer, table) {
+  try {
+    const out = psqlQuery(
+      dbContainer,
+      `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='${table}';`
+    );
+    return out === '1';
+  } catch { return false; }
+}
+
+function checkColumnExistsPsql(dbContainer, table, column) {
+  try {
+    const out = psqlQuery(
+      dbContainer,
+      `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='${table}' AND column_name='${column}';`
+    );
+    return out === '1';
+  } catch { return false; }
+}
+
+// ── PostgREST probes (fallback when Docker is unavailable) ────────────────
+
+async function checkTableExistsREST(supabaseUrl, serviceKey, table) {
   try {
     const res = await fetch(`${supabaseUrl}/rest/v1/${table}?limit=0`, {
       headers: supabaseHeaders(serviceKey),
       signal: AbortSignal.timeout(4000),
     });
-    // 200 = table exists (even if empty), 404 = doesn't exist
     return res.status !== 404 && res.status !== 400;
   } catch {
     return false;
   }
 }
 
+async function checkColumnExistsREST(supabaseUrl, serviceKey, table, column) {
+  try {
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/${table}?select=${column}&limit=0`,
+      { headers: supabaseHeaders(serviceKey), signal: AbortSignal.timeout(4000) }
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      // PGRST204 = column not found in schema cache
+      return !(body?.code === 'PGRST204' || body?.code === 'PGRST116');
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function checkSchemaApplied(supabaseUrl, serviceKey) {
-  const results = await Promise.all(
-    SCHEMA_PROBE_TABLES.map(t => checkTableExists(supabaseUrl, serviceKey, t))
-  );
-  const missing = SCHEMA_PROBE_TABLES.filter((_, i) => !results[i]);
+  // Prefer direct psql check — immune to PostgREST cache staleness
+  const dbContainer = findDbContainer(supabaseUrl);
+
+  let missingTables, missingColumns;
+
+  if (dbContainer) {
+    missingTables = SCHEMA_PROBE_TABLES.filter(t => !checkTableExistsPsql(dbContainer, t));
+    missingColumns = SCHEMA_PROBE_COLUMNS
+      .filter(({ table, column }) => !checkColumnExistsPsql(dbContainer, table, column))
+      .map(({ table, column }) => `${table}.${column}`);
+  } else {
+    // Fallback: query PostgREST
+    const tableResults = await Promise.all(
+      SCHEMA_PROBE_TABLES.map(t => checkTableExistsREST(supabaseUrl, serviceKey, t))
+    );
+    missingTables = SCHEMA_PROBE_TABLES.filter((_, i) => !tableResults[i]);
+
+    const columnResults = await Promise.all(
+      SCHEMA_PROBE_COLUMNS.map(({ table, column }) =>
+        checkColumnExistsREST(supabaseUrl, serviceKey, table, column)
+      )
+    );
+    missingColumns = SCHEMA_PROBE_COLUMNS
+      .filter((_, i) => !columnResults[i])
+      .map(({ table, column }) => `${table}.${column}`);
+  }
+
+  const missing = [
+    ...missingTables,
+    ...missingColumns.map(c => `column:${c}`),
+  ];
   return { applied: missing.length === 0, missing };
 }
 
-function findDbContainer() {
+function findDbContainer(supabaseUrl = null) {
   try {
-    const psOut = execSync('docker ps --format "{{.Names}}"', { encoding: 'utf8', timeout: 5000 });
-    const names = psOut.split('\n').filter(Boolean);
-    // Supabase CLI names the db container  supabase_db_<project>  or  supabase_db
-    return names.find(n => /supabase.db/i.test(n)) || null;
+    // Fetch names + port bindings in one call
+    const psOut = execSync('docker ps --format "{{.Names}}\\t{{.Ports}}"', { encoding: 'utf8', timeout: 5000 });
+    const lines = psOut.split('\n').filter(Boolean);
+    const names = lines.map(l => l.split('\t')[0].trim());
+
+    // When we know the Supabase URL, match via Kong container port → project name → DB container
+    if (supabaseUrl) {
+      try {
+        const urlPort = new URL(supabaseUrl).port;
+        if (urlPort) {
+          const kongLine = lines.find(l =>
+            /supabase[_-]kong/i.test(l.split('\t')[0]) &&
+            l.includes(`:${urlPort}->`)
+          );
+          if (kongLine) {
+            const kongName = kongLine.split('\t')[0].trim();
+            // supabase_kong_<project>  →  <project>
+            const projectName = kongName.replace(/^supabase[_-]kong[_-]/i, '');
+            const dbName = names.find(n =>
+              n === `supabase_db_${projectName}` || n === `supabase-db-${projectName}`
+            );
+            if (dbName) return dbName;
+          }
+        }
+      } catch { /* URL parse failed — fall through */ }
+    }
+
+    // Fallback: first supabase_db container found
+    return names.find(n => /supabase[_-]db/i.test(n)) || null;
   } catch {
     return null;
   }
@@ -333,7 +461,7 @@ async function applySchema(supabaseUrl, serviceKey) {
   step('Loading SQL from src/lib/setup-sql.js ...');
   let sql;
   try {
-    const mod = await import(sqlModulePath);
+    const mod = await import(pathToFileURL(sqlModulePath).href);
     sql = mod.SETUP_SQL_SCRIPT;
     if (typeof sql !== 'string' || sql.length < 100) {
       throw new Error('SETUP_SQL_SCRIPT is empty or not a string');
@@ -344,7 +472,7 @@ async function applySchema(supabaseUrl, serviceKey) {
   ok(`SQL loaded (${Math.round(sql.length / 1024)} KB)`);
 
   // ── Try method 1: Docker exec into the Supabase postgres container ──────
-  const dbContainer = findDbContainer();
+  const dbContainer = findDbContainer(supabaseUrl);
   if (dbContainer) {
     step(`Applying schema via Docker container: ${dbContainer} ...`);
     try {
@@ -359,6 +487,13 @@ async function applySchema(supabaseUrl, serviceKey) {
         }
       );
       if (result.status === 0) {
+        const stdout = (result.stdout || '').trim();
+        if (stdout) {
+          // Print last few lines of psql output so errors are visible
+          const lines = stdout.split('\n').filter(Boolean);
+          const tail = lines.slice(-10).join('\n');
+          step(`psql output (last 10 lines):\n${tail}`);
+        }
         ok('Schema applied via Docker');
         return;
       }
@@ -429,11 +564,42 @@ async function checkAndApplySchema(supabaseUrl, serviceKey) {
 
   await applySchema(supabaseUrl, serviceKey);
 
-  // Verify after applying
-  const after = await checkSchemaApplied(supabaseUrl, serviceKey);
+  // Tell PostgREST to reload its schema cache so new columns are visible immediately
+  step('Reloading PostgREST schema cache...');
+  const dbContainer = findDbContainer(supabaseUrl);
+  if (dbContainer) {
+    try {
+      spawnSync(
+        'docker',
+        ['exec', '-i', dbContainer, 'psql', '-U', 'postgres', '-d', 'postgres',
+         '-c', "NOTIFY pgrst, 'reload schema';"],
+        { encoding: 'utf8', timeout: 10_000 }
+      );
+      ok('PostgREST schema cache reloaded');
+    } catch {
+      warn('Could not reload PostgREST cache via Docker — waiting 6s for auto-reload');
+    }
+  } else {
+    warn('No DB container found — waiting 6s for PostgREST auto-reload');
+  }
+
+  // Give PostgREST time to process the NOTIFY and reload its schema cache
+  step('Waiting 6s for PostgREST to reload...');
+  await new Promise(r => setTimeout(r, 6000));
+
+  // Verify after applying — retry up to 3 times in case PostgREST is slow
+  let after = { applied: false, missing: [] };
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    after = await checkSchemaApplied(supabaseUrl, serviceKey);
+    if (after.applied) break;
+    if (attempt < 3) {
+      step(`Probe attempt ${attempt}/3 — still missing: ${after.missing.join(', ')} — retrying in 3s...`);
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
   if (!after.applied) {
     throw new Error(
-      `Schema was applied but these tables are still missing: ${after.missing.join(', ')}\n` +
+      `Schema was applied but these items are still missing: ${after.missing.join(', ')}\n` +
       `Check the psql output above for SQL errors.`
     );
   }
@@ -533,8 +699,10 @@ async function createOrg(supabaseUrl, serviceKey, adminUserId) {
   }
 
   const now = new Date().toISOString();
+  const slug = TEST_ORG_NAME.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const res = await supabaseUpsert(supabaseUrl, serviceKey, '/rest/v1/organizations', {
     name: TEST_ORG_NAME,
+    slug,
     created_by: adminUserId,
     created_at: now,
     updated_at: now,
@@ -635,6 +803,20 @@ async function main() {
   // 3. Probe app URL
   const baseUrl = await probeAppUrl();
 
+  // Write .env now with what we know — so credentials are saved even if later steps fail.
+  // TEST_ORG_ID will be blank until org creation succeeds; re-running setup fills it in.
+  section('── Writing .env (early — updated again after org creation)');
+  writeEnvFile({
+    source,
+    baseUrl,
+    adminEmail:      TEST_USERS.find(u => u.key === 'admin').email,
+    officeEmail:     TEST_USERS.find(u => u.key === 'office').email,
+    instructorEmail: TEST_USERS.find(u => u.key === 'instructor').email,
+    password:        PASSWORD,
+    orgId:           '',
+    serviceRoleKey,
+  });
+
   // 4. (Optional) Reset existing test data
   if (RESET && !DRY_RUN) {
     section('── Resetting Existing Test Data');
@@ -679,8 +861,8 @@ async function main() {
     ok('[dry-run] Would create org and 3 memberships');
   }
 
-  // 8. Write .env
-  section('── Writing .env');
+  // 8. Write .env (final — now with TEST_ORG_ID)
+  section('── Writing .env (final)');
   writeEnvFile({
     source,
     baseUrl,

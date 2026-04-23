@@ -1,108 +1,139 @@
 @echo off
-title Setup - automatic-tester
-REM Ensure the script runs in its own directory (the folder where this .bat lives)
+setlocal enabledelayedexpansion
+title Reinex - Automatic Tester Setup
 cd /d "%~dp0"
 
-chcp 65001 >nul
-
 echo.
-echo Running setup in: %cd%
+echo =====================================================
+echo   Reinex Automatic Tester - Setup
+echo =====================================================
 echo.
 
-REM Check Node.js
+REM == 1. Node.js ==
 where node >nul 2>&1
 if errorlevel 1 (
-    echo Node.js is not installed or not on PATH. Install Node LTS from https://nodejs.org/
-    pause
-    goto :end
+    echo [ERROR] Node.js not found. Install from https://nodejs.org/
+    pause & exit /b 1
 )
-echo Node version: & node -v
+for /f "tokens=*" %%v in ('node -v') do echo [OK] Node %%v
 
-REM Check npm
-where npm >nul 2>&1
+REM == 2. Docker ==
+where docker >nul 2>&1
 if errorlevel 1 (
-    echo npm not found. Please ensure npm is installed with Node.js.
-    pause
-    goto :end
+    echo [ERROR] Docker not found. Install Docker Desktop from https://www.docker.com/
+    pause & exit /b 1
 )
-echo npm version: & npm -v
-
-echo.
-echo Checking for Supabase CLI and starting services (optional)...
-supabase --version >nul 2>&1
+docker info >nul 2>&1
 if errorlevel 1 (
-	echo Supabase CLI not found. Skipping 'supabase start'. If needed, install from https://supabase.com/docs/guides/cli
-) else (
-	pushd "%~dp0\..\.."
-	echo Starting Supabase (Docker) in a new window...
-	start "Supabase" /D "%CD%" cmd /k "supabase start"
-	echo Starting Reinex app (dev) in a new window...
-	start "Reinex Dev" /D "%CD%" cmd /k "npm run dev"
-	popd
-	echo Supabase and Dev server started in separate windows.
-	echo Please wait for services to initialize, then press any key to continue.
-	pause
+    echo [ERROR] Docker is not running. Start Docker Desktop and try again.
+    pause & exit /b 1
+)
+echo [OK] Docker is running
+
+REM == 3. Supabase ==
+echo.
+echo Checking Supabase...
+where supabase >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] Supabase CLI not found - assuming it is already running.
+    echo        Install CLI: https://supabase.com/docs/guides/cli
+    goto :after_supabase
 )
 
-echo.
-echo Entering test/automatic-tester folder...
-cd /d "%~dp0"
+supabase status >nul 2>&1
+if not errorlevel 1 (
+    echo [OK] Supabase already running
+    goto :after_supabase
+)
 
+echo Supabase is not running. Starting it now in a new window...
+pushd "%~dp0..\.."
+start "Supabase" cmd /k "supabase start"
+popd
+echo.
+echo Supabase is starting in that window.
+echo When you see "Started supabase local development setup" press any key here.
+pause
+
+:after_supabase
+
+REM == 4. Reinex app ==
+echo.
+echo Checking Reinex app (port 4280 or 5173)...
+curl -sf --max-time 2 http://localhost:4280/api/config >nul 2>&1
+if not errorlevel 1 (
+    echo [OK] App is running on port 4280
+    goto :after_app
+)
+curl -sf --max-time 2 http://localhost:5173/api/config >nul 2>&1
+if not errorlevel 1 (
+    echo [OK] App is running on port 5173
+    goto :after_app
+)
+
+echo App is not running. Starting it now in two new windows...
+pushd "%~dp0..\.."
+start "Reinex API" cmd /k "cd api && npm install && func start"
+start "Reinex Dev" cmd /k "npm run dev"
+popd
+echo.
+echo The app is starting in those windows.
+echo Wait until you see "Local: http://localhost:5173" in the Reinex Dev window.
+pause
+
+:after_app
+
+REM == 5. npm install ==
+echo.
 echo Installing npm dependencies...
 call npm install
 if errorlevel 1 (
-	echo npm install failed.
-	pause
-	exit /b 1
+    echo [ERROR] npm install failed.
+    pause & exit /b 1
 )
+echo [OK] Dependencies installed
 
-echo Installing Playwright browsers...
+REM == 6. Playwright browsers ==
+echo.
+echo Installing Playwright browser binaries...
 call npm run setup:browsers
 if errorlevel 1 (
-	echo npm run setup:browsers failed.
-	pause
-	exit /b 1
+    echo [ERROR] Playwright browser setup failed.
+    pause & exit /b 1
 )
+echo [OK] Playwright ready
 
-echo Running setup.js to discover configuration and write .env (if applicable)...
+REM == 7. Auto-configure (schema + users + .env) ==
+echo.
+echo Running setup.js...
 call node setup.js
 if errorlevel 1 (
-	echo node setup.js failed (non-fatal).
+    echo.
+    echo [ERROR] setup.js failed. See the output above for details.
+    if not exist ".env" (
+        echo         No .env was created. Fix the error and re-run this script.
+        pause & exit /b 1
+    )
+    echo [WARN] setup.js had errors but .env already exists - continuing.
 ) else (
-	echo node setup.js completed.
+    echo [OK] Setup complete - .env is ready
 )
 
-REM Create .env from .env.example only if .env does not exist
-if not exist ".env" (
-	if exist ".env.example" (
-		echo Creating .env from .env.example...
-		copy /Y ".env.example" ".env" >nul 2>&1
-		if errorlevel 1 (
-			echo Failed to copy .env.example to .env. Please copy manually.
-		) else (
-			echo .env created. Please edit .env with credentials if required.
-		)
-	) else (
-		echo No .env.example found. Please create a .env file manually.
-	)
-) else (
-	echo .env already exists. Skipping copy.
-)
-
-echo Starting runner (headed)...
-call node runner.js --all --headed
-if errorlevel 1 (
-	echo Runner exited with error code %errorlevel%.
-) else (
-	echo Runner completed successfully.
+REM == 8. Done ==
+echo.
+echo =====================================================
+echo   Ready!
+echo =====================================================
+echo.
+echo   Run tests:       node runner.js --all --headed
+echo   One script:      node runner.js --script student-lifecycle --headed
+echo   Validate only:   node runner.js --validate
+echo.
+set /p RUN_NOW=Run all tests now? [Y/N]:
+if /i "!RUN_NOW!"=="Y" (
+    echo.
+    call node runner.js --all --headed
 )
 
 echo.
-echo Setup finished.
 pause
-
-:end
-echo.
-echo Setup aborted or missing dependency. See messages above.
-pause
-exit /b 1

@@ -32,9 +32,14 @@ async function checkRouteExists(routePath, repoRoot) {
 
   const content = await readFile(mainJsx, 'utf8');
 
-  // Strip dynamic segments for the existence check:  /students/:id  →  /students/
+  // Try exact match first (handles routes with dynamic segments like /students/:id/:tab?)
+  if (content.includes(`"${routePath}"`) || content.includes(`'${routePath}'`)) return true;
+
+  // Fallback: strip dynamic segments and match the static prefix
+  // e.g. the script declares "/students" but the code has "/students/:id"
   const base = routePath.replace(/:[^/]*/g, '').replace(/\/$/, '');
-  return content.includes(`"${base}"`) || content.includes(`'${base}'`);
+  return content.includes(`"${base}"`) || content.includes(`'${base}'`)
+    || content.includes(`"${base}/`) || content.includes(`'${base}/`);
 }
 
 // ─── API endpoint check ───────────────────────────────────────────────────

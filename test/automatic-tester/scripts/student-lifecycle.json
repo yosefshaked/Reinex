@@ -4,7 +4,7 @@
     "name": "Student Lifecycle",
     "description": "Full lifecycle: admin creates a waiting-list intake, approves it to create a student, assigns an instructor, adds a lesson template, views the student's profile, and verifies the student appears in the roster.",
     "version": "1.0.0",
-    "last_validated_at": "2026-04-23T00:00:00Z",
+    "last_validated_at": "2026-04-23T23:59:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [

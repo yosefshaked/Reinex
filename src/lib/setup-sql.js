@@ -171,6 +171,9 @@ ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS can_create_organizations boolean NOT NULL DEFAULT false;
 
 ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS is_system_admin boolean NOT NULL DEFAULT false;
+
+ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS max_owned_organizations integer NULL;
 
 ALTER TABLE public.profiles
@@ -2010,7 +2013,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS public.ledger_transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id uuid NOT NULL REFERENCES public.organizations(id),
-  client_profile_id uuid NOT NULL,
+  client_profile_id uuid NULL,
   student_id uuid NULL,
   commitment_id uuid NULL,
   transaction_type text NOT NULL,
@@ -2050,6 +2053,9 @@ CREATE TABLE IF NOT EXISTS public.ledger_transactions (
   CONSTRAINT ledger_transactions_amount_non_negative_check CHECK (amount >= 0)
 );
 
+ALTER TABLE public.ledger_transactions
+  ALTER COLUMN client_profile_id DROP NOT NULL;
+
 
 
 
@@ -2083,8 +2089,8 @@ DECLARE
   v_commitment_student_id uuid;
   v_commitment_client_profile_id uuid;
 BEGIN
-  IF NEW.client_profile_id IS NULL THEN
-    RAISE EXCEPTION 'ledger_transactions.client_profile_id is required';
+  IF NEW.client_profile_id IS NULL AND NEW.hmo_provider_id IS NULL THEN
+    RAISE EXCEPTION 'ledger_transactions requires client_profile_id or hmo_provider_id';
   END IF;
 
   IF NEW.commitment_id IS NULL THEN
@@ -5405,13 +5411,54 @@ GRANT EXECUTE ON FUNCTION public.batch_sync_lesson_ledger_entries(
 CREATE TABLE IF NOT EXISTS public.ledger_accounts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id uuid NOT NULL REFERENCES public.organizations(id),
-  client_profile_id uuid NOT NULL REFERENCES public.client_profiles(id) ON DELETE CASCADE,
+  account_type text NOT NULL DEFAULT 'client_profile',
+  client_profile_id uuid NULL REFERENCES public.client_profiles(id) ON DELETE CASCADE,
   student_id uuid NULL REFERENCES public.students(id) ON DELETE SET NULL,
+  hmo_provider_id uuid NULL REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
   service_id uuid NULL REFERENCES public."Services"(id) ON DELETE SET NULL,
+  is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT ledger_accounts_account_type_check CHECK (account_type IN ('student', 'client_profile', 'hmo_provider')),
+  CONSTRAINT ledger_accounts_target_check CHECK (
+    (account_type = 'student' AND student_id IS NOT NULL AND client_profile_id IS NOT NULL AND hmo_provider_id IS NULL)
+    OR (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL)
+    OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL)
+  )
 );
+
+ALTER TABLE public.ledger_accounts
+  ALTER COLUMN client_profile_id DROP NOT NULL,
+  ADD COLUMN IF NOT EXISTS account_type text NOT NULL DEFAULT 'client_profile',
+  ADD COLUMN IF NOT EXISTS hmo_provider_id uuid NULL REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
+  ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+
+UPDATE public.ledger_accounts
+SET account_type = CASE
+  WHEN hmo_provider_id IS NOT NULL THEN 'hmo_provider'
+  WHEN student_id IS NOT NULL THEN 'student'
+  ELSE 'client_profile'
+END
+WHERE account_type IS NULL OR account_type NOT IN ('student', 'client_profile', 'hmo_provider');
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_accounts_account_type_check') THEN
+    ALTER TABLE public.ledger_accounts
+      ADD CONSTRAINT ledger_accounts_account_type_check
+      CHECK (account_type IN ('student', 'client_profile', 'hmo_provider'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_accounts_target_check') THEN
+    ALTER TABLE public.ledger_accounts
+      ADD CONSTRAINT ledger_accounts_target_check
+      CHECK (
+        (account_type = 'student' AND student_id IS NOT NULL AND client_profile_id IS NOT NULL AND hmo_provider_id IS NULL)
+        OR (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL)
+        OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL)
+      );
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS ledger_accounts_client_profile_idx
   ON public.ledger_accounts (org_id, client_profile_id);
@@ -5419,6 +5466,55 @@ CREATE INDEX IF NOT EXISTS ledger_accounts_client_profile_idx
 CREATE INDEX IF NOT EXISTS ledger_accounts_student_idx
   ON public.ledger_accounts (org_id, student_id)
   WHERE student_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_student_uidx
+  ON public.ledger_accounts (org_id, student_id)
+  WHERE account_type = 'student' AND student_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_client_profile_uidx
+  ON public.ledger_accounts (org_id, client_profile_id)
+  WHERE account_type = 'client_profile' AND client_profile_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_hmo_provider_uidx
+  ON public.ledger_accounts (org_id, hmo_provider_id)
+  WHERE account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL;
+
+INSERT INTO public.ledger_accounts (
+  org_id,
+  account_type,
+  client_profile_id,
+  student_id,
+  hmo_provider_id,
+  service_id,
+  is_active,
+  metadata
+)
+SELECT
+  provider.org_id,
+  'hmo_provider',
+  NULL,
+  NULL,
+  provider.id,
+  NULL,
+  COALESCE(provider.is_active, true),
+  jsonb_build_object('created_by', 'hmo_provider_account_backfill')
+FROM public.hmo_providers provider
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM public.ledger_accounts account
+  WHERE account.org_id = provider.org_id
+    AND account.account_type = 'hmo_provider'
+    AND account.hmo_provider_id = provider.id
+);
+
+UPDATE public.ledger_transactions tx
+SET ledger_account_id = account.id
+FROM public.ledger_accounts account
+WHERE tx.org_id = account.org_id
+  AND tx.hmo_provider_id = account.hmo_provider_id
+  AND account.account_type = 'hmo_provider'
+  AND tx.hmo_provider_id IS NOT NULL
+  AND tx.ledger_account_id IS NULL;
 
 
 

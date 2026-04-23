@@ -64,6 +64,8 @@
 - `ledger_transactions` are immutable. Fixes must be expressed as reversing rows plus replacement rows, never `UPDATE` or `DELETE`.
 - Calendar, attendance, HMO authorization, and manual billing endpoints must stay thin. They orchestrate domain changes and then call `BillingLedgerService`; they do not contain billing math or direct ledger SQL.
 - Student billing uses a `student` ledger account. One-time customers use a `client_profile` ledger account. HMO receivables use an `hmo_provider` ledger account.
+- `ledger_accounts` must hold first-class HMO provider accounts (`account_type = 'hmo_provider'`, `hmo_provider_id = provider id`). Do not represent HMO receivables as ledger rows with `ledger_account_id = null`.
+- Schema backfills may repair missing HMO `ledger_account_id` links on historical rows, but must not alter financial facts such as amount, direction, source, effective date, or reversal linkage.
 - HMO billing now uses a canonical coverage-decision model:
   `hmo_provider_tracks` are templates only and hold defaults for `default_customer_charge_amount`, `default_insurer_claim_amount`, `default_post_coverage_policy`, and `default_post_coverage_customer_charge_amount`
   `hmo_authorizations` are the source of truth for live covered pricing via `covered_customer_charge_amount`, `covered_insurer_claim_amount`, `authorized_lessons`, `post_coverage_policy`, and `post_coverage_customer_charge_amount`
@@ -77,6 +79,7 @@
 - HMO invoice batches are workflow metadata only. Balance changes happen only when explicit ledger credits or debits are appended.
 - HMO claim lifecycle v2 uses `hmo_invoice_batches` / `hmo_invoice_batch_items` as the operational submission model. New batches are created as `draft`, submitted via `BillingLedgerService.submitHmoInvoiceBatch(...)`, and payments must be recorded against submitted batches via `recordHmoInvoiceBatchPayment(...)`.
 - HMO claim batch creation must select active HMO receivable ledger rows, exclude reversed/already-batched rows, include `org_id` on both batch and item inserts, and enforce `hmo_authorizations.authorized_lessons` by selected/submitted claim count, not by paid claim count.
+- For pre-prod/backward compatibility, HMO batch creation may accept `dashboard_tasks.id` values from older UI/read-model payloads, but it must resolve them to active `ledger_transactions` before validation. `dashboard_tasks` remain workflow prompts only and must never be treated as financial claim-line truth.
 - Submitted HMO invoice batches create `participant_locks` with `lock_source_type = 'claim_batch'`; workflow readers must resolve those locks against both legacy `claim_batches` and current `hmo_invoice_batches`.
 - Payroll, leave, attendance, and instructor earnings rules are still driven from `Settings` through [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js).
 - Instructor earnings are calculated from the canonical hourly `base_rate` on `instructor_service_capabilities`.
