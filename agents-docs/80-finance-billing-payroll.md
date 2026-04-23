@@ -59,6 +59,7 @@
 - Money is stored and passed as agorot integers.
 - Finance policy reads from `Settings` must always be org-scoped (`org_id`) in backend code; service-role reads without `withOrgScope(..., orgId)` can silently pull another tenant's billing policy.
 - The append-only ledger is the single source of truth for balances. Do not derive balances from cached lesson fields, commitment totals, or ad-hoc SQL sums.
+- The Financials HMO claims read model must be ledger-backed. `ledger_transactions` with active HMO `lesson_charge` rows determine whether a claim exists; `dashboard_tasks` may overlay workflow state (`open` / `resolved`) but must not be the only source used to decide if an HMO claim row should appear.
 - `commitments` are removed from the active billing model. Do not add new code that reads or writes commitment balances or commitment-linked lesson billing.
 - `ledger_transactions` are immutable. Fixes must be expressed as reversing rows plus replacement rows, never `UPDATE` or `DELETE`.
 - Calendar, attendance, HMO authorization, and manual billing endpoints must stay thin. They orchestrate domain changes and then call `BillingLedgerService`; they do not contain billing math or direct ledger SQL.

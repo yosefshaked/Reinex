@@ -64,6 +64,15 @@ function dedupeHmoClaimTasks(tasks = []) {
   return Array.from(latestByFlow.values());
 }
 
+function buildHmoClaimKey({ lessonParticipantId, hmoAuthorizationId } = {}) {
+  const participantId = normalizeString(lessonParticipantId);
+  const authorizationId = normalizeString(hmoAuthorizationId);
+  if (!participantId) {
+    return '';
+  }
+  return `${participantId}:${authorizationId || '_'}`;
+}
+
 async function buildHmoClaimsReadModel({
   client,
   orgId,
@@ -75,45 +84,100 @@ async function buildHmoClaimsReadModel({
   const normalizedStartDate = normalizeDateKey(startDate);
   const normalizedEndDate = normalizeDateKey(endDate);
 
-  let taskQuery = withOrgScope(client, 'dashboard_tasks', orgId)
-    .select('id, task_type, title, description, status, priority, resource_type, resource_id, metadata, created_at, resolved_at')
-    .eq('task_type', 'hmo_claim_submission')
-    .order('created_at', { ascending: false });
+  let ledgerQuery = withOrgScope(client, 'ledger_transactions', orgId)
+    .select(`
+      id,
+      amount,
+      direction,
+      effective_at,
+      posted_at,
+      source_type,
+      metadata,
+      lesson_participant_id,
+      hmo_provider_id,
+      hmo_authorization_id,
+      reverses_transaction_id
+    `)
+    .not('lesson_participant_id', 'is', null)
+    .not('hmo_provider_id', 'is', null)
+    .in('source_type', ['lesson_charge', 'reversal'])
+    .order('effective_at', { ascending: false })
+    .order('posted_at', { ascending: false });
 
   if (normalizedStartDate) {
-    taskQuery = taskQuery.gte('created_at', `${normalizedStartDate}T00:00:00.000Z`);
+    ledgerQuery = ledgerQuery.gte('effective_at', `${normalizedStartDate}T00:00:00.000Z`);
   }
   if (normalizedEndDate) {
-    taskQuery = taskQuery.lte('created_at', `${normalizedEndDate}T23:59:59.999Z`);
+    ledgerQuery = ledgerQuery.lte('effective_at', `${normalizedEndDate}T23:59:59.999Z`);
   }
 
-  const { data: tasks, error: tasksError } = await taskQuery;
-  if (tasksError) {
-    if (tasksError.code === '42P01') {
-      return {
-        summary: {
-          total_claim_tasks: 0,
-          open_claim_tasks: 0,
-          resolved_claim_tasks: 0,
-          unique_students: 0,
-          provider_count: 0,
-        },
-        claims: [],
-        provider_receivables: [],
-        notices: ['dashboard_tasks_schema_missing'],
-      };
+  const { data: ledgerRows, error: ledgerError } = await ledgerQuery;
+  if (ledgerError) {
+    throw ledgerError;
+  }
+
+  const ledgerEntries = Array.isArray(ledgerRows) ? ledgerRows : [];
+  const reversedTransactionIds = new Set(ledgerEntries
+    .filter((row) => normalizeString(row?.source_type) === 'reversal' && row?.reverses_transaction_id)
+    .map((row) => row.reverses_transaction_id));
+  const activeClaimRows = ledgerEntries.filter((row) => (
+    normalizeString(row?.source_type) === 'lesson_charge'
+    && !reversedTransactionIds.has(row.id)
+    && normalizeString(row?.direction) === 'DEBIT'
+    && normalizeString(row?.lesson_participant_id)
+    && normalizeString(row?.hmo_provider_id)
+  ));
+
+  const latestLedgerByClaim = new Map();
+  for (const row of activeClaimRows) {
+    const claimKey = buildHmoClaimKey({
+      lessonParticipantId: row.lesson_participant_id,
+      hmoAuthorizationId: row.hmo_authorization_id,
+    });
+    if (!claimKey || latestLedgerByClaim.has(claimKey)) {
+      continue;
     }
-    throw tasksError;
+    latestLedgerByClaim.set(claimKey, row);
   }
 
-  const rawTaskRows = Array.isArray(tasks) ? tasks : [];
-  const taskRows = dedupeHmoClaimTasks(rawTaskRows);
-  const participantIds = Array.from(new Set(taskRows
-    .map((task) => normalizeString(task?.resource_id))
+  const claimSeedRows = Array.from(latestLedgerByClaim.values());
+  const participantIds = Array.from(new Set(claimSeedRows
+    .map((row) => normalizeString(row?.lesson_participant_id))
     .filter((value) => isUuidLike(value))));
-  const authorizationIds = Array.from(new Set(taskRows
-    .map((task) => normalizeString(task?.metadata?.hmo_authorization_id))
+  const authorizationIds = Array.from(new Set(claimSeedRows
+    .map((row) => normalizeString(row?.hmo_authorization_id))
     .filter((value) => isUuidLike(value))));
+  const receivableProviderIds = Array.from(new Set(claimSeedRows
+    .map((row) => normalizeString(row?.hmo_provider_id))
+    .filter(Boolean)));
+
+  let taskRows = [];
+  if (participantIds.length > 0) {
+    let taskQuery = withOrgScope(client, 'dashboard_tasks', orgId)
+      .select('id, task_type, title, description, status, priority, resource_type, resource_id, metadata, created_at, resolved_at')
+      .eq('task_type', 'hmo_claim_submission')
+      .in('resource_id', participantIds)
+      .order('created_at', { ascending: false });
+
+    const { data: tasks, error: tasksError } = await taskQuery;
+    if (tasksError) {
+      if (tasksError.code === '42P01') {
+        notices.push('dashboard_tasks_schema_missing');
+      } else {
+        throw tasksError;
+      }
+    } else {
+      taskRows = dedupeHmoClaimTasks(tasks || []);
+    }
+  }
+
+  const taskMap = new Map(taskRows.map((task) => [
+    buildHmoClaimKey({
+      lessonParticipantId: task?.resource_id,
+      hmoAuthorizationId: task?.metadata?.hmo_authorization_id,
+    }),
+    task,
+  ]).filter(([key]) => Boolean(key)));
 
   const [{ data: participants, error: participantsError }, { data: authorizations, error: authorizationsError }] = await Promise.all([
     participantIds.length > 0
@@ -162,9 +226,10 @@ async function buildHmoClaimsReadModel({
   const serviceIds = Array.from(new Set(participantRows
     .map((row) => normalizeString(row?.lesson_instance?.service_id))
     .filter(Boolean)));
-  const providerIds = Array.from(new Set(authorizationRows
-    .map((row) => normalizeString(row?.provider_id))
-    .filter(Boolean)));
+  const providerIds = Array.from(new Set([
+    ...receivableProviderIds,
+    ...authorizationRows.map((row) => normalizeString(row?.provider_id)).filter(Boolean),
+  ]));
 
   const [{ data: services, error: servicesError }, { data: providers, error: providersError }] = await Promise.all([
     serviceIds.length > 0
@@ -189,26 +254,31 @@ async function buildHmoClaimsReadModel({
   const serviceMap = new Map((services || []).map((row) => [row.id, row]));
   const providerMap = new Map((providers || []).map((row) => [row.id, row]));
 
-  const claims = taskRows.map((task) => {
-    const participantId = normalizeString(task?.resource_id);
+  const claims = claimSeedRows.map((ledgerRow) => {
+    const participantId = normalizeString(ledgerRow?.lesson_participant_id);
     const participant = participantMap.get(participantId) || null;
-    const authorizationId = normalizeString(task?.metadata?.hmo_authorization_id);
+    const authorizationId = normalizeString(ledgerRow?.hmo_authorization_id);
     const authorization = authorizationMap.get(authorizationId) || null;
-    const provider = providerMap.get(authorization?.provider_id || '') || null;
+    const providerId = normalizeString(authorization?.provider_id || ledgerRow?.hmo_provider_id);
+    const provider = providerMap.get(providerId) || null;
     const service = serviceMap.get(participant?.lesson_instance?.service_id || '') || null;
+    const task = taskMap.get(buildHmoClaimKey({
+      lessonParticipantId: participantId,
+      hmoAuthorizationId: authorizationId,
+    })) || null;
     const studentName = buildPersonName(participant?.student?.client_profile);
 
     return {
-      id: task.id,
-      status: normalizeString(task.status),
-      priority: normalizeString(task.priority) || 'medium',
-      title: normalizeString(task.title) || 'תביעת גורם מממן',
-      description: normalizeString(task.description) || '',
-      created_at: task.created_at || null,
-      resolved_at: task.resolved_at || null,
+      id: task?.id || ledgerRow.id,
+      status: normalizeString(task?.status) || 'open',
+      priority: normalizeString(task?.priority) || 'medium',
+      title: normalizeString(task?.title) || 'תביעת גורם מממן',
+      description: normalizeString(task?.description) || '',
+      created_at: task?.created_at || ledgerRow?.posted_at || ledgerRow?.effective_at || null,
+      resolved_at: task?.resolved_at || null,
       lesson_participant_id: participantId || null,
       lesson_instance_id: participant?.lesson_instance_id || null,
-      lesson_date: participant?.lesson_instance?.datetime_start || null,
+      lesson_date: participant?.lesson_instance?.datetime_start || ledgerRow?.effective_at || null,
       lesson_duration_minutes: Number(participant?.lesson_instance?.duration_minutes) || 0,
       student_id: participant?.student_id || null,
       student_name: studentName,
@@ -218,16 +288,15 @@ async function buildHmoClaimsReadModel({
       hmo_authorization_id: authorizationId || null,
       hmo_authorization_status: normalizeString(authorization?.status) || null,
       hmo_authorization_reference: normalizeString(authorization?.authorization_reference) || null,
-      hmo_contracted_rate_amount: authorization?.covered_insurer_claim_amount ?? null,
-      hmo_provider_id: authorization?.provider_id || null,
+      hmo_contracted_rate_amount: authorization?.covered_insurer_claim_amount ?? ledgerRow?.amount ?? null,
+      hmo_provider_id: providerId || null,
       hmo_provider_name: normalizeString(provider?.name) || null,
-      metadata: isPlainObject(task?.metadata) ? task.metadata : {},
+      metadata: {
+        ...(isPlainObject(ledgerRow?.metadata) ? ledgerRow.metadata : {}),
+        ...(isPlainObject(task?.metadata) ? { task: task.metadata } : {}),
+      },
     };
   });
-
-  const receivableProviderIds = Array.from(new Set(claims
-    .map((row) => normalizeString(row?.hmo_provider_id))
-    .filter(Boolean)));
 
   const providerReceivables = await Promise.all(receivableProviderIds.map(async (hmoProviderId) => {
     try {
