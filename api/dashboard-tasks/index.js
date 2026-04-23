@@ -73,6 +73,7 @@ export default async function dashboardTasks(context, req) {
   if (method === 'GET') {
     try {
       const entries = await listDashboardTasks(supabase, {
+        orgId,
         status: normalizeString(req?.query?.status) || 'open',
         resourceType: normalizeString(req?.query?.resource_type),
         resourceId: normalizeString(req?.query?.resource_id),
@@ -92,6 +93,7 @@ export default async function dashboardTasks(context, req) {
 
     try {
       const resolvedTask = await resolveDashboardTask(supabase, {
+        orgId,
         taskId,
         resolvedBy: userId,
         metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},

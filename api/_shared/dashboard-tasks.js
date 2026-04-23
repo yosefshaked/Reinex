@@ -2,10 +2,14 @@
 import { normalizeString } from './org-bff.js';
 
 export async function createDashboardTask(tenantClient, params) {
+  const orgId = normalizeString(params?.orgId);
   const taskType = normalizeString(params?.taskType);
   const resourceType = normalizeString(params?.resourceType) || null;
   const resourceId = normalizeString(params?.resourceId) || null;
 
+  if (!orgId) {
+    throw new Error('missing_org_id');
+  }
   if (!taskType) {
     throw new Error('missing_task_type');
   }
@@ -13,6 +17,7 @@ export async function createDashboardTask(tenantClient, params) {
   let existingQuery = tenantClient
     .from('dashboard_tasks')
     .select('id, status')
+    .eq('org_id', orgId)
     .eq('task_type', taskType)
     .eq('status', 'open');
 
@@ -34,6 +39,7 @@ export async function createDashboardTask(tenantClient, params) {
   }
 
   const payload = {
+    org_id: orgId,
     task_type: taskType,
     title: normalizeString(params?.title) || taskType,
     description: normalizeString(params?.description) || taskType,
@@ -61,9 +67,15 @@ export async function createDashboardTask(tenantClient, params) {
 }
 
 export async function listDashboardTasks(tenantClient, options = {}) {
+  const orgId = normalizeString(options?.orgId);
+  if (!orgId) {
+    throw new Error('missing_org_id');
+  }
+
   let query = tenantClient
     .from('dashboard_tasks')
     .select('*')
+    .eq('org_id', orgId)
     .order('created_at', { ascending: false });
 
   const status = normalizeString(options?.status);
@@ -89,7 +101,11 @@ export async function listDashboardTasks(tenantClient, options = {}) {
 }
 
 export async function resolveDashboardTask(tenantClient, params) {
+  const orgId = normalizeString(params?.orgId);
   const taskId = normalizeString(params?.taskId);
+  if (!orgId) {
+    throw new Error('missing_org_id');
+  }
   if (!taskId) {
     throw new Error('missing_task_id');
   }
@@ -107,6 +123,7 @@ export async function resolveDashboardTask(tenantClient, params) {
   const { data, error } = await tenantClient
     .from('dashboard_tasks')
     .update(updatePayload)
+    .eq('org_id', orgId)
     .eq('id', taskId)
     .eq('status', 'open')
     .select('*')

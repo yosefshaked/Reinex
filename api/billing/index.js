@@ -668,6 +668,7 @@ export default async function (context, req) {
 
         for (const taskId of taskIds) {
           const resolved = await resolveDashboardTask(supabase, {
+            orgId,
             taskId,
             resolvedBy: userId,
             metadata: {

@@ -576,6 +576,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
       .eq('lesson_participant_id', body.participant_id)
       .in('source_type', ['lesson_charge', 'reversal']),
     listDashboardTasks(client, {
+      orgId,
       status: 'open',
       resourceType: 'lesson_participant',
       resourceId: body.participant_id,
@@ -1495,6 +1496,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
             : `שיעור של ${studentName} דורש הגשת תביעה.`;
 
           await createDashboardTask(client, {
+            orgId,
             taskType: 'hmo_claim_submission',
             title: 'הגשת תביעה לביטוח לאומי',
             description,
@@ -1521,6 +1523,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
   if (participantUpdate.participant_status === 'scheduled') {
     try {
       const openTasks = await listDashboardTasks(client, {
+        orgId,
         status: 'open',
         resourceType: 'lesson_participant',
         resourceId: body.participant_id,
@@ -1528,6 +1531,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       const hmoTask = (openTasks || []).find((task) => task.task_type === 'hmo_claim_submission');
       if (hmoTask?.id) {
         await resolveDashboardTask(client, {
+          orgId,
           taskId: hmoTask.id,
           resolvedBy: userId,
           metadata: {

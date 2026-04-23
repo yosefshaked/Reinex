@@ -31,7 +31,7 @@ import StudentBillingWorkspace from '@/features/students/components/StudentBilli
 import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 import { toast } from 'sonner';
-import { formatCurrency } from '@/lib/currency.js';
+import { formatCurrency, toAgorot } from '@/lib/currency.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -416,7 +416,7 @@ export default function FinancialsPage() {
           org_id: activeOrgId,
           action: 'record_hmo_claim_payment',
           hmo_provider_id: claimPaymentForm.hmoProviderId,
-          amount: Math.round(amount * 100),
+          amount: toAgorot(amount),
           effective_at: claimPaymentForm.effectiveAt || null,
           notes: claimPaymentForm.notes || null,
           resolve_open_claim_tasks: claimPaymentForm.resolveOpenTasks === true,

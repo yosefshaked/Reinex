@@ -72,6 +72,7 @@ async function createBlockedCorrectionArtifacts({ client, orgId, userId, preview
   }
 
   const task = await createDashboardTask(client, {
+    orgId,
     taskType: 'calendar_correction_paid_claim_block',
     title: 'נדרשת בדיקה ידנית לתיקון שיעור חסום',
     description: 'התיקון נחסם כי השיעור קשור לאצוות תביעה שסומנה כשולמה. נדרשת בדיקה ידנית לפני המשך טיפול.',
@@ -337,6 +338,7 @@ export default async function calendarCorrections(context, req) {
 
     try {
       const task = await createDashboardTask(supabase, {
+        orgId,
         taskType: 'calendar_correction_paid_claim_block',
         title: 'נדרשת בדיקה ידנית לתיקון שיעור חסום',
         description: 'ניסיון תיקון נחסם כי השיעור קשור לאצוות תביעה שסומנה כשולמה. נדרשת בדיקה ידנית.',

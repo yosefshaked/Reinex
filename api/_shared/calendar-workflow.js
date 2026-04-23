@@ -159,6 +159,7 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
       : Promise.resolve({ data: [], error: null }),
     participantIds.length > 0
       ? Promise.all(participantIds.map((participantId) => listDashboardTasks(tenantClient, {
+        orgId: instance.org_id,
         status: 'open',
         resourceType: 'lesson_participant',
         resourceId: participantId,
