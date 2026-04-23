@@ -4,6 +4,7 @@ import { loadFinancePolicies } from './employee-finance.js';
 import { coerceAgorot } from './currency.js';
 import { normalizeString } from './org-bff.js';
 import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
+import { resolveDashboardTask } from './dashboard-tasks.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const STUDENT_ACCOUNT_TYPE = 'student';
@@ -17,6 +18,8 @@ const ACCOUNT_COLUMN_BY_TYPE = {
 const MANUAL_CREDIT_SOURCE_TYPES = new Set(['manual_payment', 'hmo_invoice_payment', 'opening_balance', 'migration']);
 const MANUAL_DEBIT_SOURCE_TYPES = new Set(['manual_adjustment', 'opening_balance', 'migration']);
 const REVERSIBLE_SOURCE_TYPES = new Set(['lesson_charge', 'manual_payment', 'manual_adjustment', 'hmo_invoice_payment', 'opening_balance', 'migration']);
+const ACTIVE_HMO_BATCH_STATUSES = new Set(['draft', 'issued', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'closed']);
+const SUBMITTED_HMO_BATCH_STATUSES = new Set(['issued', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'closed']);
 const MANUAL_CREDIT_USAGE_TYPE_BY_SOURCE = {
   manual_payment: 'manual_topup',
   hmo_invoice_payment: 'transfer_received',
@@ -125,6 +128,14 @@ function toDateKey(value) {
     return '';
   }
   return parsed.toISOString().slice(0, 10);
+}
+
+function dateKeyToUtcBoundary(value, boundary) {
+  const normalized = toDateKey(value);
+  if (!normalized) return '';
+  return boundary === 'end'
+    ? `${normalized}T23:59:59.999Z`
+    : `${normalized}T00:00:00.000Z`;
 }
 
 function signedAmount(direction, amount) {
@@ -1293,6 +1304,7 @@ export default class BillingLedgerService {
     periodStart,
     periodEnd,
     actorUserId,
+    ledgerTransactionIds = [],
     externalReference = null,
     externalLink = null,
     notes = null,
@@ -1302,20 +1314,49 @@ export default class BillingLedgerService {
       throw new Error('missing_hmo_provider_id');
     }
 
+    if (!this.orgId) {
+      throw new Error('missing_org_id');
+    }
+
+    const requestedLedgerIds = Array.from(new Set((Array.isArray(ledgerTransactionIds) ? ledgerTransactionIds : [])
+      .map((id) => normalizeString(id))
+      .filter(Boolean)));
+
+    const { data: provider, error: providerError } = await this.tenantClient
+      .from('hmo_providers')
+      .select('id, name, is_active')
+      .eq('org_id', this.orgId)
+      .eq('id', normalizedProviderId)
+      .maybeSingle();
+
+    if (providerError) {
+      throw providerError;
+    }
+    if (!provider?.id) {
+      throw new Error('hmo_provider_not_found');
+    }
+    if (provider.is_active === false) {
+      throw new Error('hmo_provider_inactive');
+    }
+
     let query = this.tenantClient
       .from('ledger_transactions')
-      .select('id, amount, effective_at')
+      .select('id, org_id, amount, effective_at, hmo_provider_id, hmo_authorization_id, lesson_participant_id, source_type, direction, reverses_transaction_id')
+      .eq('org_id', this.orgId)
       .eq('hmo_provider_id', normalizedProviderId)
       .eq('source_type', 'lesson_charge')
       .eq('direction', 'DEBIT')
       .is('reverses_transaction_id', null)
       .order('effective_at', { ascending: true });
 
-    if (normalizeString(periodStart)) {
-      query = query.gte('effective_at', `${periodStart}T00:00:00.000Z`);
+    if (dateKeyToUtcBoundary(periodStart, 'start')) {
+      query = query.gte('effective_at', dateKeyToUtcBoundary(periodStart, 'start'));
     }
-    if (normalizeString(periodEnd)) {
-      query = query.lte('effective_at', `${periodEnd}T23:59:59.999Z`);
+    if (dateKeyToUtcBoundary(periodEnd, 'end')) {
+      query = query.lte('effective_at', dateKeyToUtcBoundary(periodEnd, 'end'));
+    }
+    if (requestedLedgerIds.length > 0) {
+      query = query.in('id', requestedLedgerIds);
     }
 
     const { data: debitRows, error: debitError } = await query;
@@ -1323,11 +1364,31 @@ export default class BillingLedgerService {
       throw debitError;
     }
 
-    const candidateIds = (debitRows || []).map((row) => row.id);
+    const candidateRows = Array.isArray(debitRows) ? debitRows : [];
+    const candidateIds = candidateRows.map((row) => row.id).filter(Boolean);
+    if (requestedLedgerIds.length > 0 && candidateIds.length !== requestedLedgerIds.length) {
+      throw new Error('hmo_claim_line_not_claimable');
+    }
+
+    const { data: reversalRows, error: reversalError } = candidateIds.length > 0
+      ? await this.tenantClient
+        .from('ledger_transactions')
+        .select('id, reverses_transaction_id')
+        .eq('org_id', this.orgId)
+        .in('reverses_transaction_id', candidateIds)
+      : { data: [], error: null };
+
+    if (reversalError) {
+      throw reversalError;
+    }
+
+    const reversedLedgerIds = new Set((reversalRows || []).map((row) => row.reverses_transaction_id).filter(Boolean));
+
     const { data: existingItems, error: itemsError } = candidateIds.length > 0
       ? await this.tenantClient
         .from('hmo_invoice_batch_items')
-        .select('ledger_transaction_id')
+        .select('ledger_transaction_id, batch_id')
+        .eq('org_id', this.orgId)
         .in('ledger_transaction_id', candidateIds)
       : { data: [], error: null };
 
@@ -1335,26 +1396,58 @@ export default class BillingLedgerService {
       throw itemsError;
     }
 
-    const usedLedgerIds = new Set((existingItems || []).map((row) => row.ledger_transaction_id));
-    const eligibleRows = (debitRows || []).filter((row) => !usedLedgerIds.has(row.id));
+    const existingBatchIds = Array.from(new Set((existingItems || []).map((row) => row.batch_id).filter(Boolean)));
+    const { data: existingBatches, error: existingBatchesError } = existingBatchIds.length > 0
+      ? await this.tenantClient
+        .from('hmo_invoice_batches')
+        .select('id, status')
+        .eq('org_id', this.orgId)
+        .in('id', existingBatchIds)
+      : { data: [], error: null };
+
+    if (existingBatchesError) {
+      throw existingBatchesError;
+    }
+
+    const activeBatchIds = new Set((existingBatches || [])
+      .filter((batch) => ACTIVE_HMO_BATCH_STATUSES.has(normalizeString(batch?.status).toLowerCase()))
+      .map((batch) => batch.id));
+    const usedLedgerIds = new Set((existingItems || [])
+      .filter((item) => activeBatchIds.has(item.batch_id))
+      .map((row) => row.ledger_transaction_id));
+    const eligibleRows = candidateRows.filter((row) => !reversedLedgerIds.has(row.id) && !usedLedgerIds.has(row.id));
+    if (requestedLedgerIds.length > 0 && eligibleRows.length !== requestedLedgerIds.length) {
+      throw new Error('hmo_claim_line_already_batched_or_reversed');
+    }
+
+    await this.assertHmoAuthorizationClaimCapacity(eligibleRows);
+
     const totalAmount = eligibleRows.reduce((sum, row) => sum + coerceAgorot(row.amount), 0);
+    if (eligibleRows.length === 0 || totalAmount <= 0) {
+      throw new Error('hmo_claim_batch_empty');
+    }
 
     const { data: batch, error: batchError } = await this.tenantClient
       .from('hmo_invoice_batches')
       .insert({
+        org_id: this.orgId,
         hmo_provider_id: normalizedProviderId,
-        period_start: normalizeString(periodStart) || null,
-        period_end: normalizeString(periodEnd) || null,
-        status: 'issued',
+        period_start: toDateKey(periodStart) || null,
+        period_end: toDateKey(periodEnd) || null,
+        status: 'draft',
         total_amount: totalAmount,
+        paid_amount: 0,
         external_reference: normalizeString(externalReference) || null,
         external_link: normalizeString(externalLink) || null,
         notes: normalizeString(notes) || null,
+        issued_at: null,
         metadata: {
           actor_user_id: actorUserId || null,
+          claim_count: eligibleRows.length,
+          created_from: requestedLedgerIds.length > 0 ? 'selected_claim_lines' : 'provider_period',
         },
       })
-      .select('id')
+      .select('id, status')
       .single();
 
     if (batchError) {
@@ -1365,22 +1458,263 @@ export default class BillingLedgerService {
       const { error: insertItemsError } = await this.tenantClient
         .from('hmo_invoice_batch_items')
         .insert(eligibleRows.map((row) => ({
+          org_id: this.orgId,
           batch_id: batch.id,
           ledger_transaction_id: row.id,
           amount: coerceAgorot(row.amount),
+          expected_amount: coerceAgorot(row.amount),
+          expected_unit_count: 1,
+          paid_amount: 0,
+          status: 'draft',
+          lesson_participant_id: row.lesson_participant_id || null,
+          hmo_authorization_id: row.hmo_authorization_id || null,
+          hmo_provider_id: normalizedProviderId,
+          metadata: {
+            actor_user_id: actorUserId || null,
+          },
         })));
 
       if (insertItemsError) {
         // Best-effort cleanup of the orphaned batch header before re-throwing.
-        await this.tenantClient.from('hmo_invoice_batches').delete().eq('id', batch.id);
+        await this.tenantClient.from('hmo_invoice_batches').delete().eq('org_id', this.orgId).eq('id', batch.id);
         throw insertItemsError;
       }
     }
 
     return {
       batchId: batch.id,
+      status: batch.status,
       ledgerTransactionIds: eligibleRows.map((row) => row.id),
+      claimCount: eligibleRows.length,
       totalAmount,
+    };
+  }
+
+  async assertHmoAuthorizationClaimCapacity(selectedRows = [], { addSelectedCount = true } = {}) {
+    const selectedByAuthorization = new Map();
+    for (const row of Array.isArray(selectedRows) ? selectedRows : []) {
+      const authorizationId = normalizeString(row?.hmo_authorization_id);
+      if (!authorizationId) continue;
+      selectedByAuthorization.set(authorizationId, (selectedByAuthorization.get(authorizationId) || 0) + 1);
+    }
+    const authorizationIds = Array.from(selectedByAuthorization.keys());
+    if (authorizationIds.length === 0) return;
+
+    const { data: authorizations, error: authorizationError } = await this.tenantClient
+      .from('hmo_authorizations')
+      .select('id, authorized_lessons')
+      .eq('org_id', this.orgId)
+      .in('id', authorizationIds);
+    if (authorizationError) {
+      throw authorizationError;
+    }
+
+    const authorizationMap = new Map((authorizations || []).map((row) => [row.id, row]));
+    const { data: authorizationLedgerRows, error: ledgerError } = await this.tenantClient
+      .from('ledger_transactions')
+      .select('id, hmo_authorization_id')
+      .eq('org_id', this.orgId)
+      .in('hmo_authorization_id', authorizationIds)
+      .eq('source_type', 'lesson_charge')
+      .eq('direction', 'DEBIT')
+      .is('reverses_transaction_id', null);
+    if (ledgerError) {
+      throw ledgerError;
+    }
+
+    const ledgerAuthorizationMap = new Map((authorizationLedgerRows || []).map((row) => [row.id, row.hmo_authorization_id]));
+    const ledgerIds = Array.from(ledgerAuthorizationMap.keys());
+    if (ledgerIds.length === 0) return;
+
+    const { data: items, error: itemsError } = await this.tenantClient
+      .from('hmo_invoice_batch_items')
+      .select('ledger_transaction_id, batch_id')
+      .eq('org_id', this.orgId)
+      .in('ledger_transaction_id', ledgerIds);
+    if (itemsError) {
+      throw itemsError;
+    }
+
+    const batchIds = Array.from(new Set((items || []).map((item) => item.batch_id).filter(Boolean)));
+    const { data: batches, error: batchError } = batchIds.length > 0
+      ? await this.tenantClient
+        .from('hmo_invoice_batches')
+        .select('id, status')
+        .eq('org_id', this.orgId)
+        .in('id', batchIds)
+      : { data: [], error: null };
+    if (batchError) {
+      throw batchError;
+    }
+
+    const activeBatchIds = new Set((batches || [])
+      .filter((batch) => ACTIVE_HMO_BATCH_STATUSES.has(normalizeString(batch?.status).toLowerCase()))
+      .map((batch) => batch.id));
+    const existingCounts = new Map();
+    for (const item of items || []) {
+      if (!activeBatchIds.has(item.batch_id)) continue;
+      const authorizationId = ledgerAuthorizationMap.get(item.ledger_transaction_id);
+      if (!authorizationId) continue;
+      existingCounts.set(authorizationId, (existingCounts.get(authorizationId) || 0) + 1);
+    }
+
+    for (const [authorizationId, selectedCount] of selectedByAuthorization.entries()) {
+      const authorization = authorizationMap.get(authorizationId);
+      const limit = Number(authorization?.authorized_lessons || 0);
+      const attemptedTotal = (existingCounts.get(authorizationId) || 0) + (addSelectedCount ? selectedCount : 0);
+      if (limit > 0 && attemptedTotal > limit) {
+        const error = new Error('hmo_authorization_claim_limit_exceeded');
+        error.details = {
+          hmo_authorization_id: authorizationId,
+          authorized_lessons: limit,
+          already_selected_claims: existingCounts.get(authorizationId) || 0,
+          attempted_claims: addSelectedCount ? selectedCount : 0,
+        };
+        throw error;
+      }
+    }
+  }
+
+  async submitHmoInvoiceBatch({
+    batchId,
+    actorUserId,
+    externalReference = null,
+    externalLink = null,
+    notes = null,
+  }) {
+    const normalizedBatchId = normalizeString(batchId);
+    if (!this.orgId) {
+      throw new Error('missing_org_id');
+    }
+    if (!normalizedBatchId) {
+      throw new Error('missing_invoice_batch_id');
+    }
+
+    const { data: batch, error: batchError } = await this.tenantClient
+      .from('hmo_invoice_batches')
+      .select('id, org_id, hmo_provider_id, status, total_amount, metadata')
+      .eq('org_id', this.orgId)
+      .eq('id', normalizedBatchId)
+      .maybeSingle();
+    if (batchError) {
+      throw batchError;
+    }
+    if (!batch?.id) {
+      throw new Error('invoice_batch_not_found');
+    }
+    const status = normalizeString(batch.status).toLowerCase();
+    if (status !== 'draft') {
+      throw new Error('invoice_batch_not_draft');
+    }
+
+    const { data: items, error: itemsError } = await this.tenantClient
+      .from('hmo_invoice_batch_items')
+      .select('id, ledger_transaction_id, amount, lesson_participant_id, hmo_authorization_id')
+      .eq('org_id', this.orgId)
+      .eq('batch_id', normalizedBatchId);
+    if (itemsError) {
+      throw itemsError;
+    }
+    const itemRows = Array.isArray(items) ? items : [];
+    if (itemRows.length === 0) {
+      throw new Error('invoice_batch_empty');
+    }
+
+    const ledgerIds = itemRows.map((item) => item.ledger_transaction_id).filter(Boolean);
+    const { data: ledgerRows, error: ledgerError } = await this.tenantClient
+      .from('ledger_transactions')
+      .select('id, amount, hmo_authorization_id, lesson_participant_id')
+      .eq('org_id', this.orgId)
+      .in('id', ledgerIds);
+    if (ledgerError) {
+      throw ledgerError;
+    }
+    await this.assertHmoAuthorizationClaimCapacity(ledgerRows || [], { addSelectedCount: false });
+
+    const submittedAt = this.clock();
+    const { error: updateError } = await this.tenantClient
+      .from('hmo_invoice_batches')
+      .update({
+        status: 'submitted',
+        external_reference: normalizeString(externalReference) || null,
+        external_link: normalizeString(externalLink) || null,
+        notes: normalizeString(notes) || null,
+        issued_at: submittedAt,
+        submitted_at: submittedAt,
+        submitted_by: actorUserId || null,
+        updated_at: submittedAt,
+        metadata: {
+          ...(isPlainObject(batch.metadata) ? batch.metadata : {}),
+          submitted_by: actorUserId || null,
+          submitted_at: submittedAt,
+        },
+      })
+      .eq('org_id', this.orgId)
+      .eq('id', normalizedBatchId)
+      .eq('status', 'draft');
+    if (updateError) {
+      throw updateError;
+    }
+
+    const { error: itemUpdateError } = await this.tenantClient
+      .from('hmo_invoice_batch_items')
+      .update({ status: 'submitted' })
+      .eq('org_id', this.orgId)
+      .eq('batch_id', normalizedBatchId);
+    if (itemUpdateError) {
+      throw itemUpdateError;
+    }
+
+    const participantIds = Array.from(new Set(itemRows.map((item) => normalizeString(item.lesson_participant_id)).filter(Boolean)));
+    if (participantIds.length > 0) {
+      const lockRows = participantIds.map((participantId) => ({
+        org_id: this.orgId,
+        lesson_participant_id: participantId,
+        lock_source_type: 'claim_batch',
+        lock_source_id: normalizedBatchId,
+        lock_reason: 'hmo_claim_submitted',
+        created_by: actorUserId || null,
+        metadata: {
+          hmo_invoice_batch_id: normalizedBatchId,
+          hmo_provider_id: batch.hmo_provider_id,
+        },
+      }));
+      const { error: lockError } = await this.tenantClient
+        .from('participant_locks')
+        .upsert(lockRows, { onConflict: 'org_id,lesson_participant_id,lock_source_type,lock_source_id' });
+      if (lockError) {
+        throw lockError;
+      }
+
+      const { data: tasks, error: taskError } = await this.tenantClient
+        .from('dashboard_tasks')
+        .select('id, resource_id')
+        .eq('org_id', this.orgId)
+        .eq('task_type', 'hmo_claim_submission')
+        .eq('status', 'open')
+        .in('resource_id', participantIds);
+      if (taskError && taskError.code !== '42P01') {
+        throw taskError;
+      }
+      for (const task of tasks || []) {
+        await resolveDashboardTask(this.tenantClient, {
+          orgId: this.orgId,
+          taskId: task.id,
+          resolvedBy: actorUserId || null,
+          metadata: {
+            resolved_by_hmo_invoice_batch: true,
+            hmo_invoice_batch_id: normalizedBatchId,
+          },
+        });
+      }
+    }
+
+    return {
+      batchId: normalizedBatchId,
+      status: 'submitted',
+      submittedAt,
+      claimCount: itemRows.length,
+      totalAmount: coerceAgorot(batch.total_amount),
     };
   }
 
@@ -1393,10 +1727,18 @@ export default class BillingLedgerService {
     notes = null,
     metadata = {},
   }) {
+    if (!this.orgId) {
+      throw new Error('missing_org_id');
+    }
+    const normalizedBatchId = normalizeString(batchId);
+    if (!normalizedBatchId) {
+      throw new Error('missing_invoice_batch_id');
+    }
     const { data: batch, error } = await this.tenantClient
       .from('hmo_invoice_batches')
-      .select('id, hmo_provider_id, total_amount, paid_amount')
-      .eq('id', batchId)
+      .select('id, hmo_provider_id, total_amount, paid_amount, status')
+      .eq('org_id', this.orgId)
+      .eq('id', normalizedBatchId)
       .maybeSingle();
 
     if (error) {
@@ -1405,11 +1747,36 @@ export default class BillingLedgerService {
     if (!batch?.id || !batch?.hmo_provider_id) {
       throw new Error('invoice_batch_not_found');
     }
+    if (!SUBMITTED_HMO_BATCH_STATUSES.has(normalizeString(batch.status).toLowerCase())) {
+      throw new Error('invoice_batch_not_submitted');
+    }
+    const amountAgorot = coerceAgorot(amount);
+    if (amountAgorot <= 0) {
+      throw new Error('amount_must_be_positive_integer');
+    }
+
+    const { data: provider, error: providerError } = await this.tenantClient
+      .from('hmo_providers')
+      .select('id, claim_reference_required')
+      .eq('org_id', this.orgId)
+      .eq('id', batch.hmo_provider_id)
+      .maybeSingle();
+    if (providerError) {
+      throw providerError;
+    }
+    if (provider?.claim_reference_required === true && !normalizeString(externalReference)) {
+      throw new Error('hmo_payment_reference_required');
+    }
+
+    const nextPaidAmount = coerceAgorot(batch.paid_amount) + amountAgorot;
+    if (nextPaidAmount > coerceAgorot(batch.total_amount)) {
+      throw new Error('hmo_payment_exceeds_batch_balance');
+    }
 
     const result = await this.appendManualCredit({
       accountType: HMO_ACCOUNT_TYPE,
       accountRefId: batch.hmo_provider_id,
-      amount,
+      amount: amountAgorot,
       effectiveAt,
       actorUserId,
       sourceType: 'hmo_invoice_payment',
@@ -1419,26 +1786,113 @@ export default class BillingLedgerService {
       metadata,
     });
 
-    const nextPaidAmount = coerceAgorot(batch.paid_amount) + coerceAgorot(amount);
     const nextStatus = nextPaidAmount >= coerceAgorot(batch.total_amount) ? 'paid' : 'partially_paid';
+    const paymentAt = toIsoOrNow(effectiveAt, this.clock);
     const { error: updateError } = await this.tenantClient
       .from('hmo_invoice_batches')
       .update({
         paid_amount: nextPaidAmount,
         status: nextStatus,
-        paid_at: toIsoOrNow(effectiveAt, this.clock),
+        paid_at: nextStatus === 'paid' ? paymentAt : null,
+        received_at: paymentAt,
         updated_at: this.clock(),
       })
+      .eq('org_id', this.orgId)
       .eq('id', batch.id);
 
     if (updateError) {
       throw updateError;
     }
 
+    const { error: itemsUpdateError } = await this.tenantClient
+      .from('hmo_invoice_batch_items')
+      .update({ status: nextStatus === 'paid' ? 'paid' : 'partially_paid' })
+      .eq('org_id', this.orgId)
+      .eq('batch_id', batch.id);
+    if (itemsUpdateError) {
+      throw itemsUpdateError;
+    }
+
     return {
       transactionId: result.transactionId,
       hmoProviderId: batch.hmo_provider_id,
+      batchId: batch.id,
+      status: nextStatus,
+      paidAmount: nextPaidAmount,
     };
+  }
+
+  async cancelHmoInvoiceBatch({
+    batchId,
+    actorUserId,
+    reason = null,
+  }) {
+    if (!this.orgId) {
+      throw new Error('missing_org_id');
+    }
+    const normalizedBatchId = normalizeString(batchId);
+    if (!normalizedBatchId) {
+      throw new Error('missing_invoice_batch_id');
+    }
+
+    const { data: batch, error: batchError } = await this.tenantClient
+      .from('hmo_invoice_batches')
+      .select('id, status, paid_amount, metadata')
+      .eq('org_id', this.orgId)
+      .eq('id', normalizedBatchId)
+      .maybeSingle();
+    if (batchError) {
+      throw batchError;
+    }
+    if (!batch?.id) {
+      throw new Error('invoice_batch_not_found');
+    }
+    if (coerceAgorot(batch.paid_amount) > 0 || normalizeString(batch.status).toLowerCase() === 'paid') {
+      throw new Error('paid_invoice_batch_cannot_be_cancelled');
+    }
+    if (normalizeString(batch.status).toLowerCase() === 'cancelled') {
+      return { batchId: normalizedBatchId, status: 'cancelled' };
+    }
+
+    const cancelledAt = this.clock();
+    const { error: updateError } = await this.tenantClient
+      .from('hmo_invoice_batches')
+      .update({
+        status: 'cancelled',
+        updated_at: cancelledAt,
+        metadata: {
+          ...(isPlainObject(batch.metadata) ? batch.metadata : {}),
+          cancelled_by: actorUserId || null,
+          cancelled_at: cancelledAt,
+          cancel_reason: normalizeString(reason) || null,
+        },
+      })
+      .eq('org_id', this.orgId)
+      .eq('id', normalizedBatchId);
+    if (updateError) {
+      throw updateError;
+    }
+
+    const { error: itemsUpdateError } = await this.tenantClient
+      .from('hmo_invoice_batch_items')
+      .update({ status: 'cancelled' })
+      .eq('org_id', this.orgId)
+      .eq('batch_id', normalizedBatchId);
+    if (itemsUpdateError) {
+      throw itemsUpdateError;
+    }
+
+    const { error: lockDeleteError } = await this.tenantClient
+      .from('participant_locks')
+      .delete()
+      .eq('org_id', this.orgId)
+      .eq('lock_source_type', 'claim_batch')
+      .eq('lock_source_id', normalizedBatchId);
+    if (lockDeleteError && lockDeleteError.code !== '42P01') {
+      throw lockDeleteError;
+    }
+
+    return { batchId: normalizedBatchId, status: 'cancelled' };
   }
 
   async getAccountBalance({
@@ -1769,6 +2223,7 @@ export default class BillingLedgerService {
     let ledgerQuery = this.tenantClient
       .from('ledger_transactions')
       .select('*')
+      .eq('org_id', this.orgId)
       .eq('hmo_provider_id', normalizedProviderId)
       .order('effective_at', { ascending: false })
       .order('posted_at', { ascending: false });
@@ -1785,6 +2240,7 @@ export default class BillingLedgerService {
       this.tenantClient
         .from('hmo_invoice_batches')
         .select('*')
+        .eq('org_id', this.orgId)
         .eq('hmo_provider_id', normalizedProviderId)
         .order('created_at', { ascending: false }),
     ]);

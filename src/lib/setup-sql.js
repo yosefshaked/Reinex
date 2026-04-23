@@ -1726,10 +1726,50 @@ CREATE TABLE IF NOT EXISTS public.hmo_providers (
   org_id uuid NOT NULL REFERENCES public.organizations(id),
   name text NOT NULL,
   is_active boolean NOT NULL DEFAULT true,
+  claim_submission_mode text NOT NULL DEFAULT 'amount',
+  claim_payment_timing text NOT NULL DEFAULT 'after_submission',
+  claim_reference_required boolean NOT NULL DEFAULT false,
+  claim_period_granularity text NOT NULL DEFAULT 'monthly',
+  claim_payment_matching_mode text NOT NULL DEFAULT 'batch_amount',
   metadata jsonb NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT hmo_providers_claim_submission_mode_check CHECK (claim_submission_mode IN ('amount', 'unit_count', 'hybrid')),
+  CONSTRAINT hmo_providers_claim_payment_timing_check CHECK (claim_payment_timing IN ('after_submission', 'monthly', 'quarterly', 'custom')),
+  CONSTRAINT hmo_providers_claim_period_granularity_check CHECK (claim_period_granularity IN ('monthly', 'quarterly', 'custom')),
+  CONSTRAINT hmo_providers_claim_payment_matching_mode_check CHECK (claim_payment_matching_mode IN ('batch_amount', 'line_amount', 'unit_count', 'manual_reconciliation'))
 );
+
+ALTER TABLE public.hmo_providers
+  ADD COLUMN IF NOT EXISTS claim_submission_mode text NOT NULL DEFAULT 'amount',
+  ADD COLUMN IF NOT EXISTS claim_payment_timing text NOT NULL DEFAULT 'after_submission',
+  ADD COLUMN IF NOT EXISTS claim_reference_required boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS claim_period_granularity text NOT NULL DEFAULT 'monthly',
+  ADD COLUMN IF NOT EXISTS claim_payment_matching_mode text NOT NULL DEFAULT 'batch_amount';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hmo_providers_claim_submission_mode_check') THEN
+    ALTER TABLE public.hmo_providers
+      ADD CONSTRAINT hmo_providers_claim_submission_mode_check
+      CHECK (claim_submission_mode IN ('amount', 'unit_count', 'hybrid'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hmo_providers_claim_payment_timing_check') THEN
+    ALTER TABLE public.hmo_providers
+      ADD CONSTRAINT hmo_providers_claim_payment_timing_check
+      CHECK (claim_payment_timing IN ('after_submission', 'monthly', 'quarterly', 'custom'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hmo_providers_claim_period_granularity_check') THEN
+    ALTER TABLE public.hmo_providers
+      ADD CONSTRAINT hmo_providers_claim_period_granularity_check
+      CHECK (claim_period_granularity IN ('monthly', 'quarterly', 'custom'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hmo_providers_claim_payment_matching_mode_check') THEN
+    ALTER TABLE public.hmo_providers
+      ADD CONSTRAINT hmo_providers_claim_payment_matching_mode_check
+      CHECK (claim_payment_matching_mode IN ('batch_amount', 'line_amount', 'unit_count', 'manual_reconciliation'));
+  END IF;
+END $$;
 
 
 CREATE UNIQUE INDEX IF NOT EXISTS hmo_providers_name_uidx
@@ -5388,18 +5428,35 @@ CREATE TABLE IF NOT EXISTS public.hmo_invoice_batches (
   hmo_provider_id uuid NOT NULL REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
   period_start date NULL,
   period_end date NULL,
-  status text NOT NULL DEFAULT 'issued' CHECK (status IN ('draft', 'issued', 'partially_paid', 'paid', 'cancelled')),
+  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'issued', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'closed', 'cancelled')),
   total_amount integer NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
   paid_amount integer NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
   external_reference text NULL,
   external_link text NULL,
   notes text NULL,
-  issued_at timestamptz NOT NULL DEFAULT now(),
+  issued_at timestamptz NULL,
+  submitted_at timestamptz NULL,
+  submitted_by uuid NULL,
+  received_at timestamptz NULL,
   paid_at timestamptz NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
+
+ALTER TABLE public.hmo_invoice_batches
+  ALTER COLUMN status SET DEFAULT 'draft',
+  ALTER COLUMN issued_at DROP NOT NULL,
+  ADD COLUMN IF NOT EXISTS submitted_at timestamptz NULL,
+  ADD COLUMN IF NOT EXISTS submitted_by uuid NULL,
+  ADD COLUMN IF NOT EXISTS received_at timestamptz NULL;
+
+ALTER TABLE public.hmo_invoice_batches
+  DROP CONSTRAINT IF EXISTS hmo_invoice_batches_status_check;
+
+ALTER TABLE public.hmo_invoice_batches
+  ADD CONSTRAINT hmo_invoice_batches_status_check
+  CHECK (status IN ('draft', 'issued', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'closed', 'cancelled'));
 
 CREATE INDEX IF NOT EXISTS hmo_invoice_batches_provider_idx
   ON public.hmo_invoice_batches (org_id, hmo_provider_id, created_at DESC);
@@ -5410,12 +5467,43 @@ CREATE TABLE IF NOT EXISTS public.hmo_invoice_batch_items (
   batch_id uuid NOT NULL REFERENCES public.hmo_invoice_batches(id) ON DELETE CASCADE,
   ledger_transaction_id uuid NOT NULL UNIQUE REFERENCES public.ledger_transactions(id) ON DELETE RESTRICT,
   amount integer NOT NULL CHECK (amount > 0),
+  expected_amount integer NOT NULL DEFAULT 0 CHECK (expected_amount >= 0),
+  expected_unit_count integer NOT NULL DEFAULT 1 CHECK (expected_unit_count > 0),
+  paid_amount integer NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
+  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'cancelled')),
+  lesson_participant_id uuid NULL REFERENCES public.lesson_participants(id) ON DELETE SET NULL,
+  hmo_authorization_id uuid NULL REFERENCES public.hmo_authorizations(id) ON DELETE SET NULL,
+  hmo_provider_id uuid NULL REFERENCES public.hmo_providers(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
+ALTER TABLE public.hmo_invoice_batch_items
+  ADD COLUMN IF NOT EXISTS expected_amount integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS expected_unit_count integer NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS paid_amount integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'draft',
+  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid NULL REFERENCES public.lesson_participants(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS hmo_authorization_id uuid NULL REFERENCES public.hmo_authorizations(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS hmo_provider_id uuid NULL REFERENCES public.hmo_providers(id) ON DELETE SET NULL;
+
+ALTER TABLE public.hmo_invoice_batch_items
+  DROP CONSTRAINT IF EXISTS hmo_invoice_batch_items_status_check;
+
+ALTER TABLE public.hmo_invoice_batch_items
+  ADD CONSTRAINT hmo_invoice_batch_items_status_check
+  CHECK (status IN ('draft', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'cancelled'));
+
 CREATE INDEX IF NOT EXISTS hmo_invoice_batch_items_batch_idx
   ON public.hmo_invoice_batch_items (org_id, batch_id);
+
+CREATE INDEX IF NOT EXISTS hmo_invoice_batch_items_authorization_idx
+  ON public.hmo_invoice_batch_items (org_id, hmo_authorization_id, status)
+  WHERE hmo_authorization_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS hmo_invoice_batch_items_provider_idx
+  ON public.hmo_invoice_batch_items (org_id, hmo_provider_id, status)
+  WHERE hmo_provider_id IS NOT NULL;
 
 -- RLS for billing ledger tables
 ALTER TABLE public.ledger_accounts ENABLE ROW LEVEL SECURITY;

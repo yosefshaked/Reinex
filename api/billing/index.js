@@ -179,6 +179,31 @@ async function buildHmoClaimsReadModel({
     task,
   ]).filter(([key]) => Boolean(key)));
 
+  const claimLedgerIds = claimSeedRows.map((row) => normalizeString(row?.id)).filter(Boolean);
+  const { data: batchItems, error: batchItemsError } = claimLedgerIds.length > 0
+    ? await withOrgScope(client, 'hmo_invoice_batch_items', orgId)
+      .select('id, batch_id, ledger_transaction_id, amount, expected_amount, paid_amount, status')
+      .in('ledger_transaction_id', claimLedgerIds)
+    : { data: [], error: null };
+  if (batchItemsError && batchItemsError.code !== '42P01') {
+    throw batchItemsError;
+  }
+
+  const batchIds = Array.from(new Set((batchItems || []).map((item) => normalizeString(item?.batch_id)).filter(Boolean)));
+  const { data: batches, error: batchesError } = batchIds.length > 0
+    ? await withOrgScope(client, 'hmo_invoice_batches', orgId)
+      .select('id, hmo_provider_id, status, total_amount, paid_amount, external_reference, period_start, period_end, issued_at, submitted_at, paid_at')
+      .in('id', batchIds)
+    : { data: [], error: null };
+  if (batchesError && batchesError.code !== '42P01') {
+    throw batchesError;
+  }
+
+  const batchMap = new Map((batches || []).map((batch) => [batch.id, batch]));
+  const batchItemByLedgerId = new Map((batchItems || [])
+    .filter((item) => normalizeString(batchMap.get(item.batch_id)?.status).toLowerCase() !== 'cancelled')
+    .map((item) => [item.ledger_transaction_id, item]));
+
   const [{ data: participants, error: participantsError }, { data: authorizations, error: authorizationsError }] = await Promise.all([
     participantIds.length > 0
       ? withOrgScope(client, 'lesson_participants', orgId)
@@ -239,7 +264,7 @@ async function buildHmoClaimsReadModel({
       : Promise.resolve({ data: [], error: null }),
     providerIds.length > 0
       ? withOrgScope(client, 'hmo_providers', orgId)
-        .select('id, name, is_active')
+        .select('id, name, is_active, claim_submission_mode, claim_payment_timing, claim_reference_required, claim_period_granularity, claim_payment_matching_mode')
         .in('id', providerIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
@@ -261,6 +286,8 @@ async function buildHmoClaimsReadModel({
     const authorization = authorizationMap.get(authorizationId) || null;
     const providerId = normalizeString(authorization?.provider_id || ledgerRow?.hmo_provider_id);
     const provider = providerMap.get(providerId) || null;
+    const batchItem = batchItemByLedgerId.get(ledgerRow.id) || null;
+    const batch = batchItem ? (batchMap.get(batchItem.batch_id) || null) : null;
     const service = serviceMap.get(participant?.lesson_instance?.service_id || '') || null;
     const task = taskMap.get(buildHmoClaimKey({
       lessonParticipantId: participantId,
@@ -270,6 +297,7 @@ async function buildHmoClaimsReadModel({
 
     return {
       id: task?.id || ledgerRow.id,
+      ledger_transaction_id: ledgerRow.id,
       status: normalizeString(task?.status) || 'open',
       priority: normalizeString(task?.priority) || 'medium',
       title: normalizeString(task?.title) || 'תביעת גורם מממן',
@@ -291,6 +319,19 @@ async function buildHmoClaimsReadModel({
       hmo_contracted_rate_amount: authorization?.covered_insurer_claim_amount ?? ledgerRow?.amount ?? null,
       hmo_provider_id: providerId || null,
       hmo_provider_name: normalizeString(provider?.name) || null,
+      claim_workflow_status: normalizeString(batch?.status) || (batchItem ? 'batched' : 'claimable'),
+      hmo_invoice_batch_id: batch?.id || null,
+      hmo_invoice_batch_item_id: batchItem?.id || null,
+      hmo_invoice_batch_status: normalizeString(batch?.status) || null,
+      hmo_invoice_batch_external_reference: normalizeString(batch?.external_reference) || null,
+      hmo_invoice_batch_paid_amount: batch?.paid_amount ?? null,
+      provider_claim_policy: provider ? {
+        submission_mode: normalizeString(provider.claim_submission_mode) || 'amount',
+        payment_timing: normalizeString(provider.claim_payment_timing) || 'after_submission',
+        reference_required: provider.claim_reference_required === true,
+        period_granularity: normalizeString(provider.claim_period_granularity) || 'monthly',
+        payment_matching_mode: normalizeString(provider.claim_payment_matching_mode) || 'batch_amount',
+      } : null,
       metadata: {
         ...(isPlainObject(ledgerRow?.metadata) ? ledgerRow.metadata : {}),
         ...(isPlainObject(task?.metadata) ? { task: task.metadata } : {}),
@@ -311,9 +352,16 @@ async function buildHmoClaimsReadModel({
         hmo_provider_name: normalizeString(provider?.name) || null,
         is_active: provider?.is_active !== false,
         summary: snapshot?.summary || { balance: 0, receivable_total: 0, payment_total: 0 },
+        claim_policy: provider ? {
+          submission_mode: normalizeString(provider.claim_submission_mode) || 'amount',
+          payment_timing: normalizeString(provider.claim_payment_timing) || 'after_submission',
+          reference_required: provider.claim_reference_required === true,
+          period_granularity: normalizeString(provider.claim_period_granularity) || 'monthly',
+          payment_matching_mode: normalizeString(provider.claim_payment_matching_mode) || 'batch_amount',
+        } : null,
         invoice_batch_count: Array.isArray(snapshot?.invoice_batches) ? snapshot.invoice_batches.length : 0,
         open_invoice_batch_count: Array.isArray(snapshot?.invoice_batches)
-          ? snapshot.invoice_batches.filter((batch) => normalizeString(batch?.status) === 'open').length
+          ? snapshot.invoice_batches.filter((batch) => ['draft', 'issued', 'submitted', 'acknowledged', 'partially_paid', 'disputed'].includes(normalizeString(batch?.status).toLowerCase())).length
           : 0,
       };
     } catch {
@@ -323,6 +371,7 @@ async function buildHmoClaimsReadModel({
         hmo_provider_name: normalizeString((providerMap.get(hmoProviderId) || null)?.name) || null,
         is_active: (providerMap.get(hmoProviderId) || null)?.is_active !== false,
         summary: { balance: 0, receivable_total: 0, payment_total: 0 },
+        claim_policy: null,
         invoice_batch_count: 0,
         open_invoice_batch_count: 0,
       };
@@ -351,6 +400,20 @@ async function buildHmoClaimsReadModel({
     },
     claims,
     provider_receivables: providerReceivables,
+    invoice_batches: Array.from(batchMap.values()).map((batch) => ({
+      id: batch.id,
+      hmo_provider_id: batch.hmo_provider_id,
+      hmo_provider_name: normalizeString((providerMap.get(batch.hmo_provider_id) || null)?.name) || null,
+      status: normalizeString(batch.status) || 'draft',
+      total_amount: batch.total_amount ?? 0,
+      paid_amount: batch.paid_amount ?? 0,
+      external_reference: normalizeString(batch.external_reference) || null,
+      period_start: batch.period_start || null,
+      period_end: batch.period_end || null,
+      submitted_at: batch.submitted_at || batch.issued_at || null,
+      paid_at: batch.paid_at || null,
+      item_count: (batchItems || []).filter((item) => item.batch_id === batch.id).length,
+    })),
     notices,
     generated_at: new Date().toISOString(),
   };
@@ -371,7 +434,21 @@ function mapBillingActionError(errorCode) {
   switch (errorCode) {
     case 'invoice_batch_not_found':
       return { status: 404, body: { message: errorCode } };
+    case 'hmo_provider_not_found':
+      return { status: 404, body: { message: errorCode } };
     case 'missing_hmo_provider_id':
+    case 'missing_invoice_batch_id':
+    case 'hmo_provider_inactive':
+    case 'hmo_claim_line_not_claimable':
+    case 'hmo_claim_line_already_batched_or_reversed':
+    case 'hmo_authorization_claim_limit_exceeded':
+    case 'hmo_claim_batch_empty':
+    case 'invoice_batch_not_draft':
+    case 'invoice_batch_empty':
+    case 'invoice_batch_not_submitted':
+    case 'paid_invoice_batch_cannot_be_cancelled':
+    case 'hmo_payment_reference_required':
+    case 'hmo_payment_exceeds_batch_balance':
     case 'amount_must_be_positive_integer':
     case 'invalid_task_ids':
       return { status: 400, body: { message: errorCode } };
@@ -607,12 +684,15 @@ export default async function (context, req) {
       return respond(context, 201, result);
     }
 
-    if (method === 'POST' && action === 'create_hmo_invoice_batch') {
+    if (method === 'POST' && (action === 'create_hmo_invoice_batch' || action === 'create_hmo_claim_batch')) {
       const result = await billingService.createHmoInvoiceBatch({
         hmoProviderId: normalizeString(body?.hmo_provider_id),
         periodStart: normalizeString(body?.period_start) || null,
         periodEnd: normalizeString(body?.period_end) || null,
         actorUserId: userId,
+        ledgerTransactionIds: Array.isArray(body?.ledger_transaction_ids)
+          ? body.ledger_transaction_ids
+          : (Array.isArray(body?.ledgerTransactionIds) ? body.ledgerTransactionIds : []),
         externalReference: normalizeString(body?.external_reference) || null,
         externalLink: normalizeString(body?.external_link) || null,
         notes: normalizeString(body?.notes) || null,
@@ -620,9 +700,29 @@ export default async function (context, req) {
       return respond(context, 201, result);
     }
 
-    if (method === 'POST' && action === 'record_hmo_invoice_batch_payment') {
+    if (method === 'POST' && action === 'submit_hmo_claim_batch') {
+      const result = await billingService.submitHmoInvoiceBatch({
+        batchId: normalizeString(body?.batch_id || body?.batchId),
+        actorUserId: userId,
+        externalReference: normalizeString(body?.external_reference || body?.externalReference) || null,
+        externalLink: normalizeString(body?.external_link || body?.externalLink) || null,
+        notes: normalizeString(body?.notes) || null,
+      });
+      return respond(context, 200, result);
+    }
+
+    if (method === 'POST' && action === 'cancel_hmo_claim_batch') {
+      const result = await billingService.cancelHmoInvoiceBatch({
+        batchId: normalizeString(body?.batch_id || body?.batchId),
+        actorUserId: userId,
+        reason: normalizeString(body?.reason) || null,
+      });
+      return respond(context, 200, result);
+    }
+
+    if (method === 'POST' && (action === 'record_hmo_invoice_batch_payment' || action === 'record_hmo_batch_payment')) {
       const result = await billingService.recordHmoInvoiceBatchPayment({
-        batchId: normalizeString(body?.batch_id),
+        batchId: normalizeString(body?.batch_id || body?.batchId),
         amount: body?.amount,
         effectiveAt: normalizeString(body?.effective_at) || null,
         actorUserId: userId,
@@ -631,6 +731,45 @@ export default async function (context, req) {
         metadata: body?.metadata && typeof body.metadata === 'object' ? body.metadata : {},
       });
       return respond(context, 201, result);
+    }
+
+    if (method === 'POST' && action === 'update_hmo_provider_claim_policy') {
+      const hmoProviderId = normalizeString(body?.hmo_provider_id || body?.hmoProviderId);
+      if (!hmoProviderId) {
+        throw new Error('missing_hmo_provider_id');
+      }
+
+      const submissionMode = normalizeString(body?.claim_submission_mode).toLowerCase();
+      const paymentTiming = normalizeString(body?.claim_payment_timing).toLowerCase();
+      const periodGranularity = normalizeString(body?.claim_period_granularity).toLowerCase();
+      const matchingMode = normalizeString(body?.claim_payment_matching_mode).toLowerCase();
+      const allowedSubmissionModes = new Set(['amount', 'unit_count', 'hybrid']);
+      const allowedPaymentTimings = new Set(['after_submission', 'monthly', 'quarterly', 'custom']);
+      const allowedPeriodGranularities = new Set(['monthly', 'quarterly', 'custom']);
+      const allowedMatchingModes = new Set(['batch_amount', 'line_amount', 'unit_count', 'manual_reconciliation']);
+
+      const payload = {
+        claim_submission_mode: allowedSubmissionModes.has(submissionMode) ? submissionMode : 'amount',
+        claim_payment_timing: allowedPaymentTimings.has(paymentTiming) ? paymentTiming : 'after_submission',
+        claim_reference_required: body?.claim_reference_required === true,
+        claim_period_granularity: allowedPeriodGranularities.has(periodGranularity) ? periodGranularity : 'monthly',
+        claim_payment_matching_mode: allowedMatchingModes.has(matchingMode) ? matchingMode : 'batch_amount',
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data, error } = await withOrgScope(supabase, 'hmo_providers', orgId)
+        .update(payload)
+        .eq('id', hmoProviderId)
+        .select('id, name, is_active, claim_submission_mode, claim_payment_timing, claim_reference_required, claim_period_granularity, claim_payment_matching_mode')
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+      if (!data?.id) {
+        throw new Error('hmo_provider_not_found');
+      }
+      return respond(context, 200, { provider: data });
     }
 
     if (method === 'POST' && action === 'record_hmo_claim_payment') {

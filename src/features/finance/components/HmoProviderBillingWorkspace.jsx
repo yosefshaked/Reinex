@@ -51,9 +51,13 @@ function getEntryTypeLabel(sourceType) {
 function getBatchStatusLabel(status) {
   switch (status) {
     case 'draft': return 'טיוטה';
-    case 'issued': return 'הופקה';
+    case 'issued':
+    case 'submitted': return 'נשלחה';
+    case 'acknowledged': return 'אושרה קבלה';
     case 'partially_paid': return 'שולמה חלקית';
     case 'paid': return 'שולמה';
+    case 'disputed': return 'במחלוקת';
+    case 'closed': return 'סגורה';
     case 'cancelled': return 'בוטלה';
     default: return status || 'לא ידוע';
   }
@@ -63,10 +67,31 @@ function getBatchStatusClass(status) {
   switch (status) {
     case 'draft': return 'border-slate-200 bg-slate-50 text-slate-700';
     case 'issued': return 'border-amber-200 bg-amber-50 text-amber-800';
+    case 'submitted': return 'border-amber-200 bg-amber-50 text-amber-800';
+    case 'acknowledged': return 'border-blue-200 bg-blue-50 text-blue-800';
     case 'partially_paid': return 'border-indigo-200 bg-indigo-50 text-indigo-800';
     case 'paid': return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+    case 'disputed': return 'border-red-200 bg-red-50 text-red-800';
+    case 'closed': return 'border-emerald-200 bg-emerald-50 text-emerald-800';
     case 'cancelled': return 'border-slate-200 bg-slate-100 text-slate-500';
     default: return 'border-slate-200 bg-slate-50 text-slate-700';
+  }
+}
+
+function formatHmoBillingError(error) {
+  switch (`${error?.message || ''}`) {
+    case 'invoice_batch_not_submitted':
+      return 'אפשר לרשום תשלום רק לדרישה שנשלחה.';
+    case 'hmo_payment_reference_required':
+      return 'הגורם המממן הזה מחייב אסמכתת תשלום.';
+    case 'hmo_payment_exceeds_batch_balance':
+      return 'סכום התשלום גבוה מהיתרה הפתוחה של הדרישה.';
+    case 'paid_invoice_batch_cannot_be_cancelled':
+      return 'לא ניתן לבטל דרישה שכבר נרשם עבורה תשלום.';
+    case 'hmo_claim_batch_empty':
+      return 'אין חיובים פתוחים שמתאימים ליצירת דרישה.';
+    default:
+      return error?.message || 'פעולת הגורם המממן נכשלה.';
   }
 }
 
@@ -181,10 +206,59 @@ export default function HmoProviderBillingWorkspace() {
       await loadSnapshot();
       const total = formatCurrency(result?.totalAmount);
       const count = result?.ledgerTransactionIds?.length ?? 0;
-      toast.success(`חשבונית נוצרה: ${total} עבור ${count} תנועות.`);
+      toast.success(`טיוטת דרישה נוצרה: ${total} עבור ${count} תנועות.`);
     } catch (error) {
       console.error('Failed to create HMO invoice batch', error);
-      toast.error(error?.message || 'יצירת החשבונית נכשלה.');
+      toast.error(formatHmoBillingError(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSubmitBatch(batch) {
+    if (!activeOrgId || !batch?.id || !canMutate) return;
+    setSaving(true);
+    try {
+      await authenticatedFetch('billing', {
+        session,
+        method: 'POST',
+        body: {
+          org_id: activeOrgId,
+          action: 'submit_hmo_claim_batch',
+          batch_id: batch.id,
+        },
+      });
+      await loadSnapshot();
+      toast.success('הדרישה סומנה כנשלחה.');
+    } catch (error) {
+      console.error('Failed to submit HMO invoice batch', error);
+      toast.error(formatHmoBillingError(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCancelBatch(batch) {
+    if (!activeOrgId || !batch?.id || !canMutate) return;
+    const approved = window.confirm('לבטל את הדרישה? השורות יחזרו להיות זמינות ליצירת דרישה חדשה.');
+    if (!approved) return;
+    setSaving(true);
+    try {
+      await authenticatedFetch('billing', {
+        session,
+        method: 'POST',
+        body: {
+          org_id: activeOrgId,
+          action: 'cancel_hmo_claim_batch',
+          batch_id: batch.id,
+          reason: 'cancelled_from_provider_billing_workspace',
+        },
+      });
+      await loadSnapshot();
+      toast.success('הדרישה בוטלה.');
+    } catch (error) {
+      console.error('Failed to cancel HMO invoice batch', error);
+      toast.error(formatHmoBillingError(error));
     } finally {
       setSaving(false);
     }
@@ -198,6 +272,13 @@ export default function HmoProviderBillingWorkspace() {
   function handleConfirmPayment() {
     if (!isValidCurrencyInput(paymentForm.amount)) {
       toast.error('יש להזין סכום חוקי.');
+      return;
+    }
+    const targetBatch = invoiceBatches.find((batch) => batch.id === paymentTarget?.batchId) || null;
+    const amount = toAgorot(paymentForm.amount);
+    const remaining = Math.max(0, coerceAgorot(targetBatch?.total_amount) - coerceAgorot(targetBatch?.paid_amount));
+    if (amount > remaining) {
+      toast.error('סכום התשלום גבוה מהיתרה הפתוחה של הדרישה.');
       return;
     }
     setConfirmPayment({
@@ -236,7 +317,7 @@ export default function HmoProviderBillingWorkspace() {
       toast.success(`תשלום של ${formatCurrency(confirmPayment.amount)} נרשם.`);
     } catch (error) {
       console.error('Failed to record HMO invoice batch payment', error);
-      toast.error(error?.message || 'רישום התשלום נכשל.');
+      toast.error(formatHmoBillingError(error));
     } finally {
       setSaving(false);
     }
@@ -352,12 +433,12 @@ export default function HmoProviderBillingWorkspace() {
               <div className="p-5 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h4 className="text-lg font-semibold text-zinc-900">חשבוניות</h4>
-                    <p className="text-sm text-muted-foreground">חשבוניות הם מטא-דאטה בלבד — היתרה זזה רק עם רישום תשלום.</p>
+                    <h4 className="text-lg font-semibold text-zinc-900">דרישות ותשלומים</h4>
+                    <p className="text-sm text-muted-foreground">דרישה היא רשימת שיעורים לשליחה לגורם מממן. היתרה זזה רק עם רישום תשלום.</p>
                   </div>
                   {canMutate ? (
                     <Button type="button" variant="outline" onClick={() => setShowBatchForm((v) => !v)} disabled={saving}>
-                      {showBatchForm ? 'סגור' : 'צור חשבונית חדשה'}
+                      {showBatchForm ? 'סגור' : 'צור טיוטת דרישה'}
                     </Button>
                   ) : null}
                 </div>
@@ -366,7 +447,7 @@ export default function HmoProviderBillingWorkspace() {
                 {showBatchForm && canMutate ? (
                   <div className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/50 p-4 space-y-3">
                     <p className="text-sm text-muted-foreground">
-                      יוצר חשבונית עבור כל חיובי השיעורים שטרם שויכו לחשבונית בתקופה הנבחרת.
+                      יוצר טיוטת דרישה עבור כל חיובי השיעורים שטרם שויכו לדרישה בתקופה הנבחרת.
                     </p>
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="space-y-2">
@@ -380,11 +461,11 @@ export default function HmoProviderBillingWorkspace() {
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="space-y-2">
-                        <Label>מספר חשבונית / אסמכתא</Label>
+                        <Label>אסמכתא חיצונית</Label>
                         <Input value={batchForm.externalReference} onChange={(e) => setBatchForm((f) => ({ ...f, externalReference: e.target.value }))} />
                       </div>
                       <div className="space-y-2">
-                        <Label>קישור לחשבונית</Label>
+                        <Label>קישור חיצוני</Label>
                         <Input dir="ltr" type="url" placeholder="https://" value={batchForm.externalLink} onChange={(e) => setBatchForm((f) => ({ ...f, externalLink: e.target.value }))} />
                       </div>
                     </div>
@@ -395,7 +476,7 @@ export default function HmoProviderBillingWorkspace() {
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" onClick={handleCreateBatch} disabled={saving}>
                         {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-                        צור חשבונית
+                        צור טיוטה
                       </Button>
                       <Button type="button" variant="outline" onClick={() => setShowBatchForm(false)} disabled={saving}>ביטול</Button>
                     </div>
@@ -406,7 +487,10 @@ export default function HmoProviderBillingWorkspace() {
                 <div className="space-y-3">
                   {invoiceBatches.map((batch) => {
                     const isOpen = paymentTarget?.batchId === batch.id;
-                    const canPay = canMutate && !['paid', 'cancelled'].includes(batch.status);
+                    const remainingAmount = Math.max(0, coerceAgorot(batch.total_amount) - coerceAgorot(batch.paid_amount));
+                    const canPay = canMutate
+                      && ['issued', 'submitted', 'acknowledged', 'partially_paid'].includes(batch.status)
+                      && remainingAmount > 0;
                     return (
                       <div key={batch.id} className="rounded-xl border border-border bg-slate-50/70 p-4 space-y-3">
                         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -424,11 +508,23 @@ export default function HmoProviderBillingWorkspace() {
                               {batch.external_reference ? ` • ${batch.external_reference}` : ''}
                             </div>
                           </div>
-                          {canPay ? (
-                            <Button type="button" size="sm" variant="outline" onClick={() => handleOpenPayment(batch)} disabled={saving}>
-                              רשום תשלום
-                            </Button>
-                          ) : null}
+                          <div className="flex flex-wrap gap-2">
+                            {batch.status === 'draft' ? (
+                              <Button type="button" size="sm" onClick={() => handleSubmitBatch(batch)} disabled={saving}>
+                                סמן כנשלח
+                              </Button>
+                            ) : null}
+                            {canPay ? (
+                              <Button type="button" size="sm" variant="outline" onClick={() => handleOpenPayment(batch)} disabled={saving}>
+                                רשום תשלום
+                              </Button>
+                            ) : null}
+                            {['draft', 'issued', 'submitted', 'acknowledged'].includes(batch.status) && coerceAgorot(batch.paid_amount) === 0 ? (
+                              <Button type="button" size="sm" variant="outline" onClick={() => handleCancelBatch(batch)} disabled={saving}>
+                                בטל
+                              </Button>
+                            ) : null}
+                          </div>
                         </div>
 
                         {/* Inline payment form */}
@@ -470,7 +566,7 @@ export default function HmoProviderBillingWorkspace() {
                   })}
                   {invoiceBatches.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
-                      עדיין לא הופקו חשבוניות לגורם מממן זה.
+                      עדיין לא נוצרו דרישות לגורם מממן זה.
                     </div>
                   ) : null}
                 </div>

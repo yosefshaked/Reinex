@@ -1,0 +1,215 @@
+{
+  "meta": {
+    "id": "one-time-customer-lifecycle",
+    "name": "One-Time Customer Lifecycle",
+    "description": "Admin creates a one-time customer, views their profile, and verifies they appear in the one-time customers list.",
+    "version": "1.0.0",
+    "last_validated_at": "2026-04-23T00:00:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/one-time-customers",
+        "/one-time-customers/:clientProfileId"
+      ],
+      "api_endpoints": [
+        "GET /api/client-profiles"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 15000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
+  },
+  "variables": {
+    "OTC_FIRST":  "לקוח",
+    "OTC_LAST":   "חד פעמי",
+    "OTC_PHONE":  "0509876543",
+    "OTC_ID":     "999000002"
+  },
+
+  "workflows": [
+
+    {
+      "id": "login-as-admin",
+      "name": "Login as Admin",
+      "description": "Authenticate with admin credentials.",
+      "steps": [
+        {
+          "id": "do-login",
+          "description": "Sign in as admin",
+          "action": "login",
+          "role": "admin"
+        },
+        {
+          "id": "assert-dashboard",
+          "description": "Verify we landed on the dashboard",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/dashboard"
+        }
+      ]
+    },
+
+    {
+      "id": "navigate-to-otc-page",
+      "name": "Navigate to One-Time Customers Page",
+      "description": "Open the one-time customers section and confirm it loads correctly.",
+      "steps": [
+        {
+          "id": "navigate",
+          "description": "Go to one-time customers page",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/one-time-customers"
+        },
+        {
+          "id": "wait-for-page",
+          "description": "Wait for the page content to load",
+          "action": "waitForSelector",
+          "selector": "main, [role='main'], .page-content"
+        },
+        {
+          "id": "screenshot-otc-list",
+          "description": "Capture one-time customers list",
+          "action": "screenshot",
+          "name": "01-otc-list"
+        }
+      ]
+    },
+
+    {
+      "id": "create-one-time-customer",
+      "name": "Create New One-Time Customer",
+      "description": "Open the new-customer form, fill in details, and save.",
+      "steps": [
+        {
+          "id": "click-add",
+          "description": "Click add / new customer button",
+          "action": "click",
+          "selector": "button:has-text('הוסף'), button:has-text('חדש'), button:has-text('לקוח חדש'), button:has-text('+'), [aria-label*='הוסף']"
+        },
+        {
+          "id": "wait-for-form",
+          "description": "Wait for the add-customer form or dialog to appear",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'], form, .drawer, .modal",
+          "state": "visible"
+        },
+        {
+          "id": "fill-first-name",
+          "description": "Enter customer first name",
+          "action": "fill",
+          "selector": "input[name='firstName'], input[name='first_name'], input[placeholder*='שם פרטי'], input[placeholder*='שם']",
+          "value": "{{OTC_FIRST}}"
+        },
+        {
+          "id": "fill-last-name",
+          "description": "Enter customer last name",
+          "action": "fill",
+          "selector": "input[name='lastName'], input[name='last_name'], input[placeholder*='שם משפחה']",
+          "value": "{{OTC_LAST}}"
+        },
+        {
+          "id": "fill-phone",
+          "description": "Enter customer phone number",
+          "action": "fill",
+          "selector": "input[name='phone'], input[type='tel'], input[placeholder*='טלפון']",
+          "value": "{{OTC_PHONE}}"
+        },
+        {
+          "id": "screenshot-form-filled",
+          "description": "Capture filled form before submission",
+          "action": "screenshot",
+          "name": "02-otc-form-filled"
+        },
+        {
+          "id": "submit-form",
+          "description": "Submit the new customer form",
+          "action": "click",
+          "selector": "button[type='submit'], button:has-text('שמור'), button:has-text('צור'), button:has-text('הוסף')"
+        },
+        {
+          "id": "wait-for-confirm",
+          "description": "Wait for a success toast or the dialog to close",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "screenshot-after-create",
+          "description": "Capture state after customer was created",
+          "action": "screenshot",
+          "name": "03-after-create"
+        }
+      ]
+    },
+
+    {
+      "id": "verify-customer-in-list",
+      "name": "Verify Customer Appears in List",
+      "description": "Refresh the list and confirm the new customer record is visible.",
+      "steps": [
+        {
+          "id": "navigate-back",
+          "description": "Navigate to the one-time customers list",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/one-time-customers"
+        },
+        {
+          "id": "wait-for-list",
+          "description": "Wait for the list to render",
+          "action": "waitForSelector",
+          "selector": "table, ul, [role='list'], .customer-list"
+        },
+        {
+          "id": "assert-customer-present",
+          "description": "Confirm customer name appears",
+          "action": "assert",
+          "type": "visible",
+          "selector": "tr:has-text('{{OTC_FIRST}}'), li:has-text('{{OTC_FIRST}}'), [class*='row']:has-text('{{OTC_FIRST}}')"
+        },
+        {
+          "id": "screenshot-customer-in-list",
+          "description": "Capture customer in the list",
+          "action": "screenshot",
+          "name": "04-customer-in-list"
+        }
+      ]
+    },
+
+    {
+      "id": "view-customer-profile",
+      "name": "View Customer Profile",
+      "description": "Click into the customer profile and verify it loads correctly.",
+      "steps": [
+        {
+          "id": "click-customer-row",
+          "description": "Open the customer profile",
+          "action": "click",
+          "selector": "tr:has-text('{{OTC_FIRST}}') a, tr:has-text('{{OTC_FIRST}}') td:first-child, li:has-text('{{OTC_FIRST}}')"
+        },
+        {
+          "id": "wait-for-profile",
+          "description": "Wait for the profile route",
+          "action": "waitForURL",
+          "pattern": "#/one-time-customers/"
+        },
+        {
+          "id": "assert-profile-heading",
+          "description": "Confirm customer name shows in the profile heading",
+          "action": "assert",
+          "type": "visible",
+          "selector": "h1:has-text('{{OTC_FIRST}}'), h2:has-text('{{OTC_FIRST}}'), [class*='title']:has-text('{{OTC_FIRST}}')"
+        },
+        {
+          "id": "screenshot-profile",
+          "description": "Capture customer profile",
+          "action": "screenshot",
+          "name": "05-customer-profile"
+        }
+      ]
+    }
+
+  ]
+}

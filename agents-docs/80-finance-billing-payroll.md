@@ -75,6 +75,9 @@
   `post_coverage_policy = manual_block` means billing must stop with a clear blocked reason after entitlement exhaustion
   overlapping matching active authorizations are treated as a data conflict and billing is blocked until resolved
 - HMO invoice batches are workflow metadata only. Balance changes happen only when explicit ledger credits or debits are appended.
+- HMO claim lifecycle v2 uses `hmo_invoice_batches` / `hmo_invoice_batch_items` as the operational submission model. New batches are created as `draft`, submitted via `BillingLedgerService.submitHmoInvoiceBatch(...)`, and payments must be recorded against submitted batches via `recordHmoInvoiceBatchPayment(...)`.
+- HMO claim batch creation must select active HMO receivable ledger rows, exclude reversed/already-batched rows, include `org_id` on both batch and item inserts, and enforce `hmo_authorizations.authorized_lessons` by selected/submitted claim count, not by paid claim count.
+- Submitted HMO invoice batches create `participant_locks` with `lock_source_type = 'claim_batch'`; workflow readers must resolve those locks against both legacy `claim_batches` and current `hmo_invoice_batches`.
 - Payroll, leave, attendance, and instructor earnings rules are still driven from `Settings` through [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js).
 - Instructor earnings are calculated from the canonical hourly `base_rate` on `instructor_service_capabilities`.
 - The UI may preserve the admin's original pay entry in `instructor_service_capabilities.metadata.compensation_input`, but finance math must not read from that display helper field.

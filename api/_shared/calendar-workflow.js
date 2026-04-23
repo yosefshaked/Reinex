@@ -8,7 +8,7 @@ import { coerceAgorot } from './currency.js';
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const LESSON_BILLING_USAGE_TYPES = ['lesson_charge', 'reversal'];
 const PAYROLL_SETTLED_STATUSES = new Set(['finalized']);
-const CLAIM_SETTLED_STATUSES = new Set(['submitted', 'paid']);
+const CLAIM_SETTLED_STATUSES = new Set(['issued', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'closed']);
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -183,7 +183,7 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     ...participantLockRows.filter((lock) => normalizeString(lock?.lock_source_type) === 'claim_batch').map((lock) => lock.lock_source_id),
   ].filter(Boolean)));
 
-  const [{ data: payrollRuns, error: payrollRunsError }, { data: claimBatches, error: claimBatchesError }] = await Promise.all([
+  const [{ data: payrollRuns, error: payrollRunsError }, { data: claimBatches, error: claimBatchesError }, { data: hmoInvoiceBatches, error: hmoInvoiceBatchesError }] = await Promise.all([
     payrollRunIds.length > 0
       ? tenantClient
         .from('payroll_runs')
@@ -196,10 +196,17 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
         .select('id, status, submitted_at, paid_at')
         .in('id', claimBatchIds)
       : Promise.resolve({ data: [], error: null }),
+    claimBatchIds.length > 0
+      ? tenantClient
+        .from('hmo_invoice_batches')
+        .select('id, status, submitted_at, issued_at, paid_at')
+        .in('id', claimBatchIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (payrollRunsError && payrollRunsError.code !== '42P01') throw payrollRunsError;
   if (claimBatchesError && claimBatchesError.code !== '42P01') throw claimBatchesError;
+  if (hmoInvoiceBatchesError && hmoInvoiceBatchesError.code !== '42P01') throw hmoInvoiceBatchesError;
 
   const ledgerRowsByParticipant = new Map();
   for (const row of asArray(ledgerRows)) {
@@ -241,7 +248,10 @@ export async function loadLessonWorkflowState(tenantClient, lessonInstanceId) {
     ledgerRowsByParticipant,
     openHmoTaskByParticipant,
     payrollRunById: new Map(asArray(payrollRuns).map((row) => [row.id, row])),
-    claimBatchById: new Map(asArray(claimBatches).map((row) => [row.id, row])),
+    claimBatchById: new Map([
+      ...asArray(claimBatches).map((row) => [row.id, row]),
+      ...asArray(hmoInvoiceBatches).map((row) => [row.id, row]),
+    ]),
   };
 }
 

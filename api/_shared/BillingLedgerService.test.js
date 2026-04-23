@@ -31,6 +31,7 @@ class MockTable {
     this._isFilters = [];
     this._gteFilters = [];
     this._lteFilters = [];
+    this._notFilters = [];
   }
 
   select(cols) { this._selectedColumns = cols; return this; }
@@ -45,6 +46,7 @@ class MockTable {
   is(col, val) { this._isFilters.push({ col, val }); return this; }
   gte(col, val) { this._gteFilters.push({ col, val }); return this; }
   lte(col, val) { this._lteFilters.push({ col, val }); return this; }
+  not(col, op, val) { this._notFilters.push({ col, op, val }); return this; }
   order() { return this; }
   limit(n) { this._limitN = n; return this; }
   filter(col, op, val) { this._filters.push({ col, val, op }); return this; }
@@ -140,6 +142,11 @@ class MockTable {
     for (const { col, val } of this._lteFilters) {
       result = result.filter((r) => String(r[col] ?? '') <= String(val));
     }
+    for (const { col, op, val } of this._notFilters) {
+      if (op === 'is' && val === null) {
+        result = result.filter((r) => r[col] != null);
+      }
+    }
     return result;
   }
 }
@@ -150,16 +157,28 @@ function createMockClient(initialStore = {}) {
     ledger_transactions: [],
     hmo_invoice_batches: [],
     hmo_invoice_batch_items: [],
-    students: [],
+    students: [makeStudent()],
     lesson_participants: [],
     lesson_instances: [],
     Services: [],
     hmo_authorizations: [],
     hmo_providers: [],
-    client_profiles: [],
+    client_profiles: [{ id: 'client-1', first_name: 'Avi', middle_name: null, last_name: 'Cohen' }],
     finance_policies: [],
+    participant_locks: [],
+    dashboard_tasks: [],
     ...initialStore,
   };
+
+  for (const [tableName, rows] of Object.entries(store)) {
+    if (!Array.isArray(rows)) continue;
+    store[tableName] = rows.map((row) => {
+      if (row && typeof row === 'object' && !Object.prototype.hasOwnProperty.call(row, 'org_id')) {
+        return { org_id: 'org-1', ...row };
+      }
+      return row;
+    });
+  }
 
   return {
     _store: store,
@@ -182,6 +201,7 @@ const FIXED_DATE = '2025-06-01T09:00:00.000Z';
 function makeService(overrides = {}) {
   return {
     id: 'svc-1',
+    org_id: 'org-1',
     name: 'Physio',
     color: '#fff',
     default_customer_charge_amount: 5000,
@@ -193,6 +213,7 @@ function makeService(overrides = {}) {
 function makeStudent(overrides = {}) {
   return {
     id: 'student-1',
+    org_id: 'org-1',
     client_profile_id: 'client-1',
     client_profile: { id: 'client-1', first_name: 'Avi', middle_name: null, last_name: 'Cohen' },
     ...overrides,
@@ -202,6 +223,7 @@ function makeStudent(overrides = {}) {
 function makeInstance(overrides = {}) {
   return {
     id: 'instance-1',
+    org_id: 'org-1',
     service_id: 'svc-1',
     datetime_start: FIXED_DATE,
     status: 'completed',
@@ -214,6 +236,7 @@ function makeInstance(overrides = {}) {
 function makeParticipant(overrides = {}) {
   return {
     id: 'part-1',
+    org_id: 'org-1',
     lesson_instance_id: 'instance-1',
     client_profile_id: 'client-1',
     student_id: 'student-1',
@@ -228,6 +251,7 @@ function makeParticipant(overrides = {}) {
 function makeAuthorization(overrides = {}) {
   return {
     id: 'auth-1',
+    org_id: 'org-1',
     student_id: 'student-1',
     service_id: 'svc-1',
     provider_id: 'hmo-1',
@@ -246,6 +270,7 @@ function makeAuthorization(overrides = {}) {
     created_at: '2025-01-01T00:00:00Z',
     updated_at: '2025-01-01T00:00:00Z',
     reminder_date: null,
+    student: { client_profile_id: 'client-1' },
     ...overrides,
   };
 }
@@ -452,7 +477,7 @@ describe('extractActiveLedgerAmounts', () => {
 describe('BillingLedgerService.getAccountBalance', () => {
   it('throws on invalid asOf', async () => {
     const client = createMockClient();
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     await assert.rejects(
       () => service.getAccountBalance({ accountType: 'student', accountRefId: 'student-1', asOf: 'not-a-date' }),
       /invalid_asOf_date/,
@@ -463,11 +488,11 @@ describe('BillingLedgerService.getAccountBalance', () => {
     const client = createMockClient({
       ledger_accounts: [{ id: 'acct-1', account_type: 'student', student_id: 'student-1', client_profile_id: null, hmo_provider_id: null, is_active: true, metadata: {} }],
       ledger_transactions: [
-        { id: 't1', ledger_account_id: 'acct-1', direction: 'CREDIT', amount: 10000, effective_at: '2025-01-01T00:00:00Z' },
-        { id: 't2', ledger_account_id: 'acct-1', direction: 'DEBIT', amount: 3000, effective_at: '2025-02-01T00:00:00Z' },
+        { id: 't1', ledger_account_id: 'acct-1', student_id: 'student-1', direction: 'CREDIT', amount: 10000, effective_at: '2025-01-01T00:00:00Z' },
+        { id: 't2', ledger_account_id: 'acct-1', student_id: 'student-1', direction: 'DEBIT', amount: 3000, effective_at: '2025-02-01T00:00:00Z' },
       ],
     });
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     const { balance } = await service.getAccountBalance({ accountType: 'student', accountRefId: 'student-1' });
     assert.equal(balance, 7000); // 10000 - 3000
   });
@@ -480,7 +505,7 @@ describe('BillingLedgerService.getAccountBalance', () => {
 describe('BillingLedgerService.appendManualCredit', () => {
   it('throws on invalid source type', async () => {
     const client = createMockClient();
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     await assert.rejects(
       () => service.appendManualCredit({ accountType: 'student', accountRefId: 's1', amount: 1000, effectiveAt: FIXED_DATE, actorUserId: 'u1', sourceType: 'manual_adjustment' }),
       /invalid_manual_credit_source_type/,
@@ -489,7 +514,7 @@ describe('BillingLedgerService.appendManualCredit', () => {
 
   it('throws on zero amount', async () => {
     const client = createMockClient();
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     await assert.rejects(
       () => service.appendManualCredit({ accountType: 'student', accountRefId: 's1', amount: 0, effectiveAt: FIXED_DATE, actorUserId: 'u1', sourceType: 'manual_payment' }),
       /amount_must_be_positive_integer/,
@@ -498,7 +523,7 @@ describe('BillingLedgerService.appendManualCredit', () => {
 
   it('throws on negative amount', async () => {
     const client = createMockClient();
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     await assert.rejects(
       () => service.appendManualCredit({ accountType: 'student', accountRefId: 's1', amount: -100, effectiveAt: FIXED_DATE, actorUserId: 'u1', sourceType: 'manual_payment' }),
       /amount_must_be_positive_integer/,
@@ -507,7 +532,7 @@ describe('BillingLedgerService.appendManualCredit', () => {
 
   it('student prepaid: credit → debit → balance decreases correctly', async () => {
     const client = createMockClient();
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
 
     // Manual payment credit of 10,000
     await service.appendManualCredit({
@@ -540,7 +565,7 @@ describe('BillingLedgerService.appendManualCredit', () => {
 describe('BillingLedgerService.appendManualDebit', () => {
   it('throws on invalid source type', async () => {
     const client = createMockClient();
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     await assert.rejects(
       () => service.appendManualDebit({ accountType: 'student', accountRefId: 's1', amount: 1000, effectiveAt: FIXED_DATE, actorUserId: 'u1', sourceType: 'manual_payment' }),
       /invalid_manual_debit_source_type/,
@@ -549,7 +574,7 @@ describe('BillingLedgerService.appendManualDebit', () => {
 
   it('student postpaid: debit first → balance goes negative → credit restores it', async () => {
     const client = createMockClient();
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
 
     await service.appendManualDebit({
       accountType: 'student',
@@ -584,7 +609,7 @@ describe('BillingLedgerService.appendManualDebit', () => {
 describe('BillingLedgerService.reverseTransaction', () => {
   it('throws when transaction does not exist', async () => {
     const client = createMockClient();
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     await assert.rejects(
       () => service.reverseTransaction({ transactionId: 'nonexistent', actorUserId: 'u1', reasonCode: 'test' }),
       /transaction_not_reversible/,
@@ -599,7 +624,7 @@ describe('BillingLedgerService.reverseTransaction', () => {
         { id: 'rev-1', ledger_account_id: 'acct-1', direction: 'CREDIT', amount: 5000, source_type: 'reversal', effective_at: FIXED_DATE, student_id: 's1', client_profile_id: null, hmo_provider_id: null, hmo_authorization_id: null, service_id: null, rate_source: 'manual', reverses_transaction_id: 'orig-1' },
       ],
     });
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     const result = await service.reverseTransaction({ transactionId: 'orig-1', actorUserId: 'u1', reasonCode: 'test' });
     assert.equal(result.originalTransactionId, 'orig-1');
     assert.equal(result.reversalTransactionId, 'rev-1');
@@ -614,7 +639,7 @@ describe('BillingLedgerService.reverseTransaction', () => {
         { id: 'orig-1', ledger_account_id: 'acct-1', direction: 'DEBIT', amount: 5000, source_type: 'manual_payment', effective_at: FIXED_DATE, student_id: 's1', client_profile_id: null, hmo_provider_id: null, hmo_authorization_id: null, service_id: null, rate_source: 'manual', reverses_transaction_id: null },
       ],
     });
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     const result = await service.reverseTransaction({ transactionId: 'orig-1', actorUserId: 'u1', reasonCode: 'attendance_changed' });
     assert.ok(result.reversalTransactionId);
     const reversal = client._store.ledger_transactions.find((r) => r.id === result.reversalTransactionId);
@@ -634,14 +659,18 @@ describe('BillingLedgerService.syncLessonParticipantCharge', () => {
 
   beforeEach(() => {
     client = createMockClient({
-      students: [makeStudent()],
+      students: [makeStudent(), makeStudent({ id: 'student-2', client_profile_id: 'client-2', client_profile: { id: 'client-2', first_name: 'Dana', middle_name: null, last_name: 'Levi' } })],
+      client_profiles: [
+        { id: 'client-1', first_name: 'Avi', middle_name: null, last_name: 'Cohen' },
+        { id: 'client-2', first_name: 'Dana', middle_name: null, last_name: 'Levi' },
+      ],
       Services: [makeService()],
       lesson_instances: [makeInstance()],
       lesson_participants: [makeParticipant()],
       finance_policies: makeFinancePolicies(),
       hmo_authorizations: [],
     });
-    service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
   });
 
   it('returns blocked when participant not found', async () => {
@@ -785,7 +814,14 @@ describe('BillingLedgerService.syncLessonParticipantCharge', () => {
 describe('BillingLedgerService.syncLessonInstanceCharges', () => {
   it('processes all participants in an instance', async () => {
     const client = createMockClient({
-      students: [makeStudent()],
+      students: [
+        makeStudent(),
+        makeStudent({ id: 'student-2', client_profile_id: 'client-2', client_profile: { id: 'client-2', first_name: 'Dana', middle_name: null, last_name: 'Levi' } }),
+      ],
+      client_profiles: [
+        { id: 'client-1', org_id: 'org-1', first_name: 'Avi', middle_name: null, last_name: 'Cohen' },
+        { id: 'client-2', org_id: 'org-1', first_name: 'Dana', middle_name: null, last_name: 'Levi' },
+      ],
       Services: [makeService()],
       lesson_instances: [makeInstance()],
       lesson_participants: [
@@ -795,7 +831,7 @@ describe('BillingLedgerService.syncLessonInstanceCharges', () => {
       finance_policies: makeFinancePolicies(),
       hmo_authorizations: [],
     });
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
 
     const result = await service.syncLessonInstanceCharges({
       lessonInstanceId: 'instance-1',
@@ -815,7 +851,7 @@ describe('BillingLedgerService.syncLessonInstanceCharges', () => {
 describe('BillingLedgerService.createHmoInvoiceBatch', () => {
   it('throws when hmoProviderId is missing', async () => {
     const client = createMockClient();
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     await assert.rejects(
       () => service.createHmoInvoiceBatch({ hmoProviderId: '', actorUserId: 'u1' }),
       /missing_hmo_provider_id/,
@@ -824,17 +860,21 @@ describe('BillingLedgerService.createHmoInvoiceBatch', () => {
 
   it('creates batch with only eligible (unbatched) debit transactions', async () => {
     const client = createMockClient({
-      ledger_accounts: [{ id: 'acct-hmo', account_type: 'hmo_provider', student_id: null, client_profile_id: null, hmo_provider_id: 'hmo-1', is_active: true, metadata: {} }],
+      hmo_providers: [{ id: 'hmo-1', org_id: 'org-1', name: 'Provider', is_active: true }],
+      ledger_accounts: [{ id: 'acct-hmo', org_id: 'org-1', account_type: 'hmo_provider', student_id: null, client_profile_id: null, hmo_provider_id: 'hmo-1', is_active: true, metadata: {} }],
       ledger_transactions: [
-        { id: 'tx-1', hmo_provider_id: 'hmo-1', source_type: 'lesson_charge', direction: 'DEBIT', amount: 2000, effective_at: '2025-03-01T00:00:00Z', reverses_transaction_id: null },
-        { id: 'tx-2', hmo_provider_id: 'hmo-1', source_type: 'lesson_charge', direction: 'DEBIT', amount: 2000, effective_at: '2025-04-01T00:00:00Z', reverses_transaction_id: null },
+        { id: 'tx-1', org_id: 'org-1', hmo_provider_id: 'hmo-1', source_type: 'lesson_charge', direction: 'DEBIT', amount: 2000, effective_at: '2025-03-01T00:00:00Z', reverses_transaction_id: null },
+        { id: 'tx-2', org_id: 'org-1', hmo_provider_id: 'hmo-1', source_type: 'lesson_charge', direction: 'DEBIT', amount: 2000, effective_at: '2025-04-01T00:00:00Z', reverses_transaction_id: null },
+      ],
+      hmo_invoice_batches: [
+        { id: 'old-batch', org_id: 'org-1', hmo_provider_id: 'hmo-1', status: 'submitted', total_amount: 2000, paid_amount: 0 },
       ],
       hmo_invoice_batch_items: [
         // tx-1 already batched
-        { id: 'item-1', batch_id: 'old-batch', ledger_transaction_id: 'tx-1', amount: 2000 },
+        { id: 'item-1', org_id: 'org-1', batch_id: 'old-batch', ledger_transaction_id: 'tx-1', amount: 2000 },
       ],
     });
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     const result = await service.createHmoInvoiceBatch({
       hmoProviderId: 'hmo-1',
       actorUserId: 'u1',
@@ -847,14 +887,16 @@ describe('BillingLedgerService.createHmoInvoiceBatch', () => {
   it('issued HMO invoice batch — balance unchanged until payment is recorded', async () => {
     // Must seed ledger_account_id so getAccountBalance (which queries by ledger_account_id) can find the debit.
     const client = createMockClient({
-      ledger_accounts: [{ id: 'acct-hmo', account_type: 'hmo_provider', student_id: null, client_profile_id: null, hmo_provider_id: 'hmo-1', is_active: true, metadata: {} }],
+      hmo_providers: [{ id: 'hmo-1', org_id: 'org-1', name: 'Provider', is_active: true }],
+      ledger_accounts: [{ id: 'acct-hmo', org_id: 'org-1', account_type: 'hmo_provider', student_id: null, client_profile_id: null, hmo_provider_id: 'hmo-1', is_active: true, metadata: {} }],
       ledger_transactions: [
-        { id: 'tx-1', ledger_account_id: 'acct-hmo', hmo_provider_id: 'hmo-1', source_type: 'lesson_charge', direction: 'DEBIT', amount: 2000, effective_at: '2025-03-01T00:00:00Z', reverses_transaction_id: null },
+        { id: 'tx-1', org_id: 'org-1', ledger_account_id: 'acct-hmo', client_profile_id: 'anchor-client', hmo_provider_id: 'hmo-1', source_type: 'lesson_charge', direction: 'DEBIT', amount: 2000, effective_at: '2025-03-01T00:00:00Z', reverses_transaction_id: null },
       ],
     });
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
 
     const { batchId } = await service.createHmoInvoiceBatch({ hmoProviderId: 'hmo-1', actorUserId: 'u1' });
+    await service.submitHmoInvoiceBatch({ batchId, actorUserId: 'u1' });
 
     // Balance still -2000 (only debit, no payment yet)
     const { balance: balanceBefore } = await service.getAccountBalance({ accountType: 'hmo_provider', accountRefId: 'hmo-1' });
@@ -875,6 +917,75 @@ describe('BillingLedgerService.createHmoInvoiceBatch', () => {
     assert.equal(batch.status, 'paid');
     assert.equal(batch.paid_amount, 2000);
   });
+
+  it('requires payment reference when provider policy requires it', async () => {
+    const client = createMockClient({
+      hmo_providers: [{ id: 'hmo-1', org_id: 'org-1', name: 'Provider', is_active: true, claim_reference_required: true }],
+      ledger_accounts: [{ id: 'acct-hmo', org_id: 'org-1', account_type: 'hmo_provider', student_id: null, client_profile_id: null, hmo_provider_id: 'hmo-1', is_active: true, metadata: {} }],
+      ledger_transactions: [
+        { id: 'tx-1', org_id: 'org-1', ledger_account_id: 'acct-hmo', client_profile_id: 'anchor-client', hmo_provider_id: 'hmo-1', source_type: 'lesson_charge', direction: 'DEBIT', amount: 2000, effective_at: '2025-03-01T00:00:00Z', reverses_transaction_id: null },
+      ],
+    });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
+    const { batchId } = await service.createHmoInvoiceBatch({ hmoProviderId: 'hmo-1', actorUserId: 'u1' });
+    await service.submitHmoInvoiceBatch({ batchId, actorUserId: 'u1' });
+
+    await assert.rejects(
+      () => service.recordHmoInvoiceBatchPayment({
+        batchId,
+        amount: 2000,
+        effectiveAt: FIXED_DATE,
+        actorUserId: 'u1',
+      }),
+      /hmo_payment_reference_required/,
+    );
+  });
+
+  it('blocks payment above open batch balance', async () => {
+    const client = createMockClient({
+      hmo_providers: [{ id: 'hmo-1', org_id: 'org-1', name: 'Provider', is_active: true }],
+      ledger_accounts: [{ id: 'acct-hmo', org_id: 'org-1', account_type: 'hmo_provider', student_id: null, client_profile_id: null, hmo_provider_id: 'hmo-1', is_active: true, metadata: {} }],
+      ledger_transactions: [
+        { id: 'tx-1', org_id: 'org-1', ledger_account_id: 'acct-hmo', client_profile_id: 'anchor-client', hmo_provider_id: 'hmo-1', source_type: 'lesson_charge', direction: 'DEBIT', amount: 2000, effective_at: '2025-03-01T00:00:00Z', reverses_transaction_id: null },
+      ],
+    });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
+    const { batchId } = await service.createHmoInvoiceBatch({ hmoProviderId: 'hmo-1', actorUserId: 'u1' });
+    await service.submitHmoInvoiceBatch({ batchId, actorUserId: 'u1' });
+
+    await assert.rejects(
+      () => service.recordHmoInvoiceBatchPayment({
+        batchId,
+        amount: 2001,
+        effectiveAt: FIXED_DATE,
+        actorUserId: 'u1',
+      }),
+      /hmo_payment_exceeds_batch_balance/,
+    );
+  });
+
+  it('cancels unpaid batch and releases participant locks', async () => {
+    const client = createMockClient({
+      hmo_providers: [{ id: 'hmo-1', org_id: 'org-1', name: 'Provider', is_active: true }],
+      ledger_accounts: [{ id: 'acct-hmo', org_id: 'org-1', account_type: 'hmo_provider', student_id: null, client_profile_id: null, hmo_provider_id: 'hmo-1', is_active: true, metadata: {} }],
+      ledger_transactions: [
+        { id: 'tx-1', org_id: 'org-1', ledger_account_id: 'acct-hmo', client_profile_id: 'anchor-client', lesson_participant_id: 'part-1', hmo_provider_id: 'hmo-1', source_type: 'lesson_charge', direction: 'DEBIT', amount: 2000, effective_at: '2025-03-01T00:00:00Z', reverses_transaction_id: null },
+      ],
+      participant_locks: [],
+      dashboard_tasks: [],
+    });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
+    const { batchId } = await service.createHmoInvoiceBatch({ hmoProviderId: 'hmo-1', actorUserId: 'u1' });
+    await service.submitHmoInvoiceBatch({ batchId, actorUserId: 'u1' });
+    assert.equal(client._store.participant_locks.length, 1);
+
+    await service.cancelHmoInvoiceBatch({ batchId, actorUserId: 'u1', reason: 'test' });
+    const batch = client._store.hmo_invoice_batches.find((row) => row.id === batchId);
+    const item = client._store.hmo_invoice_batch_items.find((row) => row.batch_id === batchId);
+    assert.equal(batch.status, 'cancelled');
+    assert.equal(item.status, 'cancelled');
+    assert.equal(client._store.participant_locks.length, 0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -884,7 +995,7 @@ describe('BillingLedgerService.createHmoInvoiceBatch', () => {
 describe('resolveLedgerAccount (via appendManualCredit)', () => {
   it('does not create duplicate accounts on repeated calls', async () => {
     const client = createMockClient();
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
 
     await service.appendManualCredit({ accountType: 'student', accountRefId: 'student-1', amount: 1000, effectiveAt: FIXED_DATE, actorUserId: 'u1', sourceType: 'manual_payment' });
     await service.appendManualCredit({ accountType: 'student', accountRefId: 'student-1', amount: 2000, effectiveAt: FIXED_DATE, actorUserId: 'u1', sourceType: 'manual_payment' });
@@ -915,7 +1026,7 @@ describe('Regression guards', () => {
   it('manual_adjustment is not in MANUAL_CREDIT_SOURCE_TYPES', async () => {
     // appendManualCredit with manual_adjustment should throw
     const client = createMockClient();
-    const service = new BillingLedgerService({ tenantClient: client, clock: FIXED_CLOCK });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     await assert.rejects(
       () => service.appendManualCredit({ accountType: 'student', accountRefId: 's1', amount: 100, effectiveAt: FIXED_DATE, actorUserId: 'u1', sourceType: 'manual_adjustment' }),
       /invalid_manual_credit_source_type/,
