@@ -285,6 +285,7 @@ export default function AdminApp() {
             <Route path="integration-health" element={LIVE_ELEMENTS['integration-health']} />
             <Route path="data-quality" element={LIVE_ELEMENTS['data-quality']} />
             <Route path="onboarding-pipeline" element={LIVE_ELEMENTS['onboarding-pipeline']} />
+            <Route path="email-log" element={LIVE_ELEMENTS['email-log']} />
 
             {/* Legacy aggregate view kept reachable while sub-modules are built. */}
             <Route path="operations-support" element={LIVE_ELEMENTS['operations-support']} />

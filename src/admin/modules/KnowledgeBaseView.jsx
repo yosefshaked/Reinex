@@ -15,50 +15,10 @@ import { useAdminStore } from '../lib/useAdminStore.js';
 /**
  * Knowledge Base — admin-only markdown articles & runbooks.
  *
- * Persisted in localStorage until a shared knowledge_base schema lands. Keep
- * the tone internal: incident runbooks, customer-escalation scripts, on-call
- * checklists — things you want close at hand but not user-facing.
+ * Persisted in admin_data (service-role only). Keep the tone internal:
+ * incident runbooks, customer-escalation scripts, on-call checklists —
+ * things you want close at hand but not user-facing.
  */
-
-
-const SEED = [
-  {
-    id: 'runbook-supabase-outage',
-    title: 'Supabase control-plane outage',
-    tags: ['runbook', 'infra'],
-    body: `## Symptoms
-- Auth failures across orgs
-- System Health shows Supabase probe red
-
-## First 5 minutes
-1. Check status.supabase.com for incidents
-2. Open Audit Log filtered to \`error.*\` events
-3. Post Sev 1 incident from Incidents module
-
-## Mitigation
-- Flip the \`read_only_mode\` flag in PostHog
-- Broadcast the active banner from Announcements
-`,
-    updated_at: '2026-04-02T10:00:00.000Z',
-  },
-  {
-    id: 'runbook-impersonation-escalation',
-    title: 'Customer-requested impersonation',
-    tags: ['support', 'security'],
-    body: `## Never ask for a password
-Use the Users module → Open as user flow. This produces an auditable session with forensic metadata.
-
-## Required context before starting
-- Written customer approval (ticket or email)
-- Reason string (≥3 chars, stored in audit log)
-- Bounded duration (default 30m, max 240m)
-
-## Exiting
-Click End impersonation in the banner. The session row flips to \`ended\` and the admin session resumes automatically.
-`,
-    updated_at: '2026-04-08T10:00:00.000Z',
-  },
-];
 
 
 function renderMarkdown(src) {
@@ -96,7 +56,7 @@ function renderMarkdown(src) {
 export default function KnowledgeBaseView() {
   useAdminModuleView('knowledge-base');
 
-  const { items: articles, upsert, remove: removeArticle } = useAdminStore('knowledge_base', { seed: SEED });
+  const { items: articles, upsert, remove: removeArticle } = useAdminStore('knowledge_base');
   const [query, setQuery] = React.useState('');
   const [tagFilter, setTagFilter] = React.useState('');
   const [selected, setSelected] = React.useState(null);
@@ -157,7 +117,7 @@ export default function KnowledgeBaseView() {
     <ModuleShell
       title="Knowledge Base"
       subtitle="Content"
-      description="Admin-only runbooks and reference articles. Persisted per browser while a shared schema is pending — treat as scratch until then."
+      description="Admin-only runbooks and reference articles. Incident runbooks, customer-escalation scripts, on-call checklists — internal only."
       actions={
         <Button size="sm" onClick={startNew}>
           <Plus className="mr-1.5 h-4 w-4" />
@@ -301,7 +261,7 @@ export default function KnowledgeBaseView() {
         onOpenChange={setDeleteOpen}
         severity="danger"
         title={`Delete "${selected?.title || 'article'}"?`}
-        description="The article is stored per-browser so the delete is local. If you have shared it with teammates they still have their copy."
+        description="This will permanently delete the article from the shared database."
         confirmLabel="Delete article"
         onConfirm={async () => deleteSelected()}
       />
