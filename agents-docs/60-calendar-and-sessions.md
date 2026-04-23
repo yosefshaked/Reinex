@@ -56,6 +56,7 @@
 - Version conflict and locked-state payloads already exist in [`../api/_shared/calendar-editing.js`](../api/_shared/calendar-editing.js).
 - Billing is centralized. Calendar endpoints must not compute lesson prices or write `ledger_transactions` directly; they call `BillingLedgerService.syncLessonInstanceCharges(...)` or another service method after the lesson mutation succeeds.
 - Attendance changes, lesson edits, and HMO authorization changes are coupled to ledger resync. Skipping the ledger service will create billing drift even if the lesson mutation succeeds.
+- HMO dashboard task creation on attendance must key off the synced billing result / active HMO ledger impact for that participant, not by re-running coverage resolution after the sync. Coverage entitlement is enforced from active ledger rows, so resolving again after the debit may incorrectly hide the just-created covered lesson.
 - Correction flows may add manual financial adjustments, but the persisted ledger write still goes through `BillingLedgerService`.
 - Instructor earnings previews and sync must stay aligned:
   - canonical payout rate comes from `instructor_service_capabilities.base_rate`

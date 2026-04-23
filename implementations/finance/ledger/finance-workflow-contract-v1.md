@@ -129,7 +129,8 @@ Source: `api/calendar-attendance/index.js`
 	- `Services.payment_model = fixed_rate` pays once per lesson when any compensation-eligible participant triggers instructor compensation
 	- `Services.payment_model = per_student` multiplies payout by the number of compensation-eligible participants
 - HMO claim task workflow:
-	- when status becomes `attended` and coverage resolves to `covered`, create dashboard task type `hmo_claim_submission`
+	- when status becomes `attended` and the billing sync produces an active HMO receivable for that participant, create dashboard task type `hmo_claim_submission`
+	- do not re-run coverage resolution after sync to decide task creation; entitlement is enforced from active ledger rows and the second resolution can misclassify the just-synced covered lesson as exhausted/post-coverage
 	- when status becomes `scheduled`, open `hmo_claim_submission` task is resolved
 
 ### 4) HMO authorization coupling rules (current behavior)

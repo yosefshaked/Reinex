@@ -13,6 +13,7 @@ import {
   ensureMembership,
   isAdminRole,
   normalizeNullableId,
+  normalizeString,
   readEnv,
   respond,
   resolveOrgId,
@@ -1428,8 +1429,9 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
   }
 
   let billingWarnings = [];
+  let billingResult = null;
   try {
-    const billingResult = await auditContext?.billingService?.syncLessonInstanceCharges({
+    billingResult = await auditContext?.billingService?.syncLessonInstanceCharges({
       lessonInstanceId: body.instance_id,
       actorUserId: userId,
       reasonCode: 'attendance_changed',
@@ -1467,14 +1469,15 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       ]);
 
       if (participantDetail?.student_id && instanceDetail?.service_id) {
-        const coverageDecision = await resolveLessonCoverageDecision(client, {
-          orgId,
-          studentId: participantDetail.student_id,
-          serviceId: instanceDetail.service_id,
-          lessonDate: instanceDetail.datetime_start,
-        });
+        const syncedParticipantResult = (billingResult?.participantResults || [])
+          .find((row) => row?.lessonParticipantId === body.participant_id) || null;
+        const hmoAccountImpact = (syncedParticipantResult?.accountImpacts || []).find((impact) => (
+          normalizeString(impact?.accountType) === 'hmo_provider'
+          && normalizeString(impact?.direction) === 'DEBIT'
+          && normalizeString(impact?.hmoAuthorizationId)
+        )) || null;
 
-        if (coverageDecision?.status === 'covered' && coverageDecision.authorization_id) {
+        if (hmoAccountImpact?.hmoAuthorizationId) {
           const normalizedParticipantDetailStudentId = normalizeNullableId(participantDetail.student_id);
           const { data: student } = normalizedParticipantDetailStudentId
             ? await withOrgScope(client, 'students', orgId)
@@ -1502,7 +1505,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
             metadata: {
               lesson_instance_id: body.instance_id,
               student_id: normalizedParticipantDetailStudentId,
-              hmo_authorization_id: coverageDecision.authorization_id,
+              hmo_authorization_id: hmoAccountImpact.hmoAuthorizationId,
             },
           });
         }
