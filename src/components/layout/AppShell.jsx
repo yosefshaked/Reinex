@@ -167,8 +167,8 @@ export default function AppShell({ children }) {
             ref={headerRef}
             className="sticky top-0 z-20 border-b border-border bg-surface/80 px-sm py-sm backdrop-blur md:border-none md:bg-transparent md:px-md md:py-sm"
           >
-            <div className="flex items-center justify-between gap-xs">
-              <div className="flex items-center gap-xs sm:gap-sm">
+            <div className="flex items-center gap-xs">
+              <div className="flex shrink-0 items-center gap-xs sm:gap-sm">
                 <button
                   type="button"
                   onClick={() => setIsSidebarHidden((prev) => !prev)}
@@ -193,7 +193,10 @@ export default function AppShell({ children }) {
                   {activeOrg?.name ? `ארגון: ${activeOrg.name}` : "בחרו ארגון לעבודה"}
                 </div>
               </div>
-              <div className="flex items-center gap-xs">
+              <div className="flex min-w-0 flex-1 items-center justify-center px-xs">
+                <AnnouncementBanner />
+              </div>
+              <div className="flex shrink-0 items-center gap-xs">
                 <AccessibilityButton />
                 <button
                   type="button"
@@ -224,7 +227,6 @@ export default function AppShell({ children }) {
           </header>
 
           <ImpersonationBanner />
-          <AnnouncementBanner />
           <OrgSelectionBanner />
           <OrgConfigBanner />
 

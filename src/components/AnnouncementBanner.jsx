@@ -1,12 +1,13 @@
 import React from 'react';
-import { X, Megaphone } from 'lucide-react';
+import { Megaphone } from 'lucide-react';
 
 /**
  * AnnouncementBanner — fetches the active platform banner from the public
- * /api/announcement endpoint and renders it below the app shell header.
+ * /api/announcement endpoint.
  *
- * Dismissed banners are remembered in sessionStorage so they don't re-appear
- * on every page navigation within the same browser tab.
+ * variant="header"  → compact inline chip shown inside the app header.
+ *                     Renders nothing when no banner is active, so the
+ *                     header layout is unaffected.
  */
 
 function useBanner() {
@@ -35,50 +36,19 @@ function useBanner() {
   return state;
 }
 
-function getDismissKey(text) {
-  return `banner:dismissed:${text.slice(0, 80)}`;
-}
-
 export default function AnnouncementBanner() {
-  const { active, text, loaded } = useBanner();
-  const [dismissed, setDismissed] = React.useState(false);
+  const { active, text } = useBanner();
 
-  React.useEffect(() => {
-    if (!loaded || !active || !text) return;
-    try {
-      if (sessionStorage.getItem(getDismissKey(text)) === '1') {
-        setDismissed(true);
-      } else {
-        setDismissed(false);
-      }
-    } catch {
-      // sessionStorage unavailable
-    }
-  }, [active, text, loaded]);
-
-  if (!active || !text || dismissed) return null;
-
-  const handleDismiss = () => {
-    try { sessionStorage.setItem(getDismissKey(text), '1'); } catch { /* ignore */ }
-    setDismissed(true);
-  };
+  if (!active || !text) return null;
 
   return (
     <div
       role="status"
       aria-live="polite"
-      className="flex items-center gap-3 border-b border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900"
+      className="flex min-w-0 max-w-sm items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1"
     >
-      <Megaphone className="h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
-      <p className="flex-1 leading-5">{text}</p>
-      <button
-        type="button"
-        onClick={handleDismiss}
-        className="rounded p-1 hover:bg-amber-100"
-        aria-label="Dismiss announcement"
-      >
-        <X className="h-3.5 w-3.5 text-amber-700" />
-      </button>
+      <Megaphone className="h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+      <span className="truncate text-xs font-medium text-amber-800">{text}</span>
     </div>
   );
 }
