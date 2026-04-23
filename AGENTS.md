@@ -34,6 +34,7 @@ Read this first. Detailed task docs live in [`./agents-docs`](agents-docs/).
 - Finance workflow baseline contract (must read before finance behavior changes): [`implementations/finance/ledger/finance-workflow-contract-v1.md`](implementations/finance/ledger/finance-workflow-contract-v1.md)
 - Finance workflow release hardening protocol (must read before finance rollout): [`implementations/finance/ledger/finance-workflow-release-hardening-v1.md`](implementations/finance/ledger/finance-workflow-release-hardening-v1.md)
 - Settings, documents, storage, backup, audit: [`agents-docs/90-settings-documents-storage.md`](agents-docs/90-settings-documents-storage.md)
+- System-admin console (`/system-admin/*`), admin_data, email_log, announcement banner: [`agents-docs/95-system-admin-console.md`](agents-docs/95-system-admin-console.md)
 
 ## Before Writing Code
 - Read the matching `agents-docs` file first; if the task spans domains, read more than one.

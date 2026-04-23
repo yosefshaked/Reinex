@@ -66,7 +66,7 @@ The console is layered on top of the completed single-DB multi-tenant refactor a
 | `src/admin/ui/ErrorState.jsx` | Error display with retry button |
 | `src/admin/ui/LoadingSkeleton.jsx` | Animated placeholder rows |
 | `src/admin/ui/ImpersonationBanner.jsx` | Persistent amber banner across the top of the product shell when impersonating |
-| `src/components/AnnouncementBanner.jsx` | Public banner rendered in AppShell below the header; fetches from `/api/announcement`; dismissible per session |
+| `src/components/AnnouncementBanner.jsx` | Compact chip rendered in the center of the AppShell header (flex-1 area between org name and accessibility button); fetches from `/api/announcement`; renders nothing when no banner is active |
 
 ### Frontend — Modules
 
@@ -222,10 +222,10 @@ Previously stored in `permission_registry` under key `system.announcement.banner
 
 ### Banner Display in Product
 
-`AnnouncementBanner.jsx` is mounted in `AppShell.jsx` below the main header. It:
+`AnnouncementBanner.jsx` is mounted in `AppShell.jsx` inside the header (center flex-1 area, between the org name chip on the left and the accessibility button on the right). It:
 1. Fetches `/api/announcement` (public, no auth) on mount
-2. Renders an amber banner if `{ active: true, text: "..." }` is returned
-3. Allows dismissal per browser session (stored in `sessionStorage`)
+2. Renders a compact amber chip if `{ active: true, text: "..." }` is returned
+3. Renders nothing when `active` is false — the header layout is unaffected
 
 The public `/api/announcement` endpoint reads `admin_data` via service_role and returns `{ active, text }` — safe for anonymous callers since it only returns the sanitized banner text.
 
@@ -313,6 +313,18 @@ if (body && typeof body === 'object' && !Buffer.isBuffer(body) && !(body instanc
 **Problem:** Incidents, Knowledge Base, Future Ideas, Compliance, and Announcements all used `localStorage`. Different admins on different machines had completely separate data sets — incidents opened on one machine were invisible on another.
 
 **Fix:** Migrated all five to `admin_data` (a new service-role-only Postgres table) via a shared `useAdminStore` hook and `system-admin-store` endpoint. Each module uses `upsert` with optimistic updates for instant UI response.
+
+---
+
+### 7. Knowledge Base flashing seed articles on every mount
+
+**Symptom:** Entering `/system-admin/knowledge-base` briefly showed two hardcoded articles (a Supabase-outage runbook and an impersonation-escalation runbook) for one render frame before they disappeared.
+
+**Root cause:** `useAdminStore` accepts an optional `seed` array that is passed directly to `React.useState(seed)` as the initial value. `KnowledgeBaseView` was calling `useAdminStore('knowledge_base', { seed: SEED })` with two hardcoded articles. They rendered immediately, then the API fetch completed with an empty response (empty DB) and replaced them with `[]`.
+
+**Fix:** Removed the `SEED` constant and the `{ seed: SEED }` option. The module now starts empty and populates only from the database. Also removed stale comments mentioning localStorage and updated the `ModuleShell` description and `ConfirmActionDialog` copy.
+
+**File:** `src/admin/modules/KnowledgeBaseView.jsx`
 
 ---
 
@@ -431,4 +443,4 @@ Tables the admin console reads/writes (all via service_role, bypassing RLS):
 
 ---
 
-*Implementation record authored by Claude Sonnet 4.6 (`claude-sonnet-4-6`) — 2026-04-22*
+*Implementation record authored by Claude Sonnet 4.6 (`claude-sonnet-4-6`) — last updated 2026-04-23*
