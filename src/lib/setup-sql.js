@@ -5429,16 +5429,27 @@ CREATE TABLE IF NOT EXISTS public.ledger_accounts (
 );
 
 ALTER TABLE public.ledger_accounts
-  ALTER COLUMN client_profile_id DROP NOT NULL,
-  ADD COLUMN IF NOT EXISTS account_type text NOT NULL DEFAULT 'client_profile',
+  ADD COLUMN IF NOT EXISTS account_type text NULL,
   ADD COLUMN IF NOT EXISTS hmo_provider_id uuid NULL REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
   ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+
+ALTER TABLE public.ledger_accounts
+  ALTER COLUMN client_profile_id DROP NOT NULL,
+  ALTER COLUMN account_type DROP DEFAULT,
+  ALTER COLUMN account_type DROP NOT NULL,
+  ALTER COLUMN is_active SET DEFAULT true;
+
+UPDATE public.ledger_accounts
+SET hmo_provider_id = NULL
+WHERE hmo_provider_id IS NOT NULL
+  AND student_id IS NOT NULL;
 
 UPDATE public.ledger_accounts
 SET account_type = CASE
   WHEN hmo_provider_id IS NOT NULL THEN 'hmo_provider'
   WHEN student_id IS NOT NULL THEN 'student'
-  ELSE 'client_profile'
+  WHEN client_profile_id IS NOT NULL THEN 'client_profile'
+  ELSE account_type
 END
 WHERE account_type IS NULL OR account_type NOT IN ('student', 'client_profile', 'hmo_provider');
 
@@ -5450,43 +5461,6 @@ WHERE account.org_id = student.org_id
   AND account.account_type = 'student'
   AND account.client_profile_id IS NULL
   AND student.client_profile_id IS NOT NULL;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_accounts_account_type_check') THEN
-    ALTER TABLE public.ledger_accounts
-      ADD CONSTRAINT ledger_accounts_account_type_check
-      CHECK (account_type IN ('student', 'client_profile', 'hmo_provider'));
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_accounts_target_check') THEN
-    ALTER TABLE public.ledger_accounts
-      ADD CONSTRAINT ledger_accounts_target_check
-      CHECK (
-        (account_type = 'student' AND student_id IS NOT NULL AND hmo_provider_id IS NULL)
-        OR (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL)
-        OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL)
-      );
-  END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS ledger_accounts_client_profile_idx
-  ON public.ledger_accounts (org_id, client_profile_id);
-
-CREATE INDEX IF NOT EXISTS ledger_accounts_student_idx
-  ON public.ledger_accounts (org_id, student_id)
-  WHERE student_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_student_uidx
-  ON public.ledger_accounts (org_id, student_id)
-  WHERE account_type = 'student' AND student_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_client_profile_uidx
-  ON public.ledger_accounts (org_id, client_profile_id)
-  WHERE account_type = 'client_profile' AND client_profile_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_hmo_provider_uidx
-  ON public.ledger_accounts (org_id, hmo_provider_id)
-  WHERE account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL;
 
 INSERT INTO public.ledger_accounts (
   org_id,
@@ -5524,6 +5498,69 @@ WHERE tx.org_id = account.org_id
   AND account.account_type = 'hmo_provider'
   AND tx.hmo_provider_id IS NOT NULL
   AND tx.ledger_account_id IS NULL;
+
+DO $$
+DECLARE
+  v_invalid_count integer := 0;
+BEGIN
+  SELECT COUNT(*)
+    INTO v_invalid_count
+  FROM public.ledger_accounts account
+  WHERE NOT (
+    (account.account_type = 'student' AND account.student_id IS NOT NULL AND account.client_profile_id IS NOT NULL AND account.hmo_provider_id IS NULL)
+    OR (account.account_type = 'client_profile' AND account.client_profile_id IS NOT NULL AND account.student_id IS NULL AND account.hmo_provider_id IS NULL)
+    OR (account.account_type = 'hmo_provider' AND account.hmo_provider_id IS NOT NULL AND account.student_id IS NULL AND account.client_profile_id IS NULL)
+  );
+
+  IF v_invalid_count > 0 THEN
+    RAISE EXCEPTION 'ledger_accounts migration blocked: % invalid rows remain; inspect public.ledger_accounts before applying strict constraints', v_invalid_count;
+  END IF;
+END $$;
+
+ALTER TABLE public.ledger_accounts
+  ALTER COLUMN account_type SET NOT NULL,
+  ALTER COLUMN account_type SET DEFAULT 'client_profile';
+
+DO $$
+BEGIN
+  ALTER TABLE public.ledger_accounts
+    DROP CONSTRAINT IF EXISTS ledger_accounts_account_type_check;
+  ALTER TABLE public.ledger_accounts
+    DROP CONSTRAINT IF EXISTS ledger_accounts_target_check;
+EXCEPTION
+  WHEN undefined_object THEN NULL;
+END $$;
+
+ALTER TABLE public.ledger_accounts
+  ADD CONSTRAINT ledger_accounts_account_type_check
+  CHECK (account_type IN ('student', 'client_profile', 'hmo_provider'));
+
+ALTER TABLE public.ledger_accounts
+  ADD CONSTRAINT ledger_accounts_target_check
+  CHECK (
+    (account_type = 'student' AND student_id IS NOT NULL AND client_profile_id IS NOT NULL AND hmo_provider_id IS NULL)
+    OR (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL)
+    OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL AND client_profile_id IS NULL)
+  );
+
+CREATE INDEX IF NOT EXISTS ledger_accounts_client_profile_idx
+  ON public.ledger_accounts (org_id, client_profile_id);
+
+CREATE INDEX IF NOT EXISTS ledger_accounts_student_idx
+  ON public.ledger_accounts (org_id, student_id)
+  WHERE student_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_student_uidx
+  ON public.ledger_accounts (org_id, student_id)
+  WHERE account_type = 'student' AND student_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_client_profile_uidx
+  ON public.ledger_accounts (org_id, client_profile_id)
+  WHERE account_type = 'client_profile' AND client_profile_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_hmo_provider_uidx
+  ON public.ledger_accounts (org_id, hmo_provider_id)
+  WHERE account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL;
 
 
 
