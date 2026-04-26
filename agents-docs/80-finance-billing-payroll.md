@@ -44,6 +44,7 @@
 - HMO authorization loaders in [`../api/_shared/hmo.js`](../api/_shared/hmo.js)
 - Currency helpers (frontend): [`../src/lib/currency.js`](../src/lib/currency.js) — `formatCurrency`, `toShekel`, `toAgorot`, `coerceAgorot`
 - Currency helpers (backend): [`../api/_shared/currency.js`](../api/_shared/currency.js) — `coerceAgorot`, `toShekel`, `assertAgorot`, `assertAgorotNullable`, `FINANCE_LIMITS`, `BILLING_THRESHOLDS`
+- HMO claims UI feedback helper: [`../src/features/finance/lib/hmo-claim-feedback.js`](../src/features/finance/lib/hmo-claim-feedback.js) — maps HMO claim/payment errors to user-facing next-step guidance
 
 ## Currency helpers — mandatory usage
 - **All monetary values in the DB and API layer are integers (agorot). 1 ₪ = 100 agorot.**

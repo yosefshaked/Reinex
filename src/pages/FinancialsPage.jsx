@@ -32,6 +32,7 @@ import BillingSettingsWorkspace from '@/features/finance/components/BillingSetti
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 import { toast } from 'sonner';
 import { formatCurrency, toAgorot } from '@/lib/currency.js';
+import { getHmoClaimFeedback, getHmoClaimValidationFeedback } from '@/features/finance/lib/hmo-claim-feedback.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -130,37 +131,20 @@ function formatBatchStatus(status) {
   }
 }
 
-function formatHmoClaimError(error) {
-  switch (`${error?.message || ''}`) {
-    case 'hmo_claim_batch_empty':
-      return 'אין שורות פתוחות שמתאימות ליצירת דרישה.';
-    case 'hmo_claim_line_not_claimable':
-      return 'אחת השורות שנבחרו כבר לא זמינה לדרישה. רענן את הנתונים ובחר שוב.';
-    case 'hmo_claim_provider_mismatch':
-      return 'השורות שנבחרו לא שייכות לאותו גורם מממן. בחר שורות מגורם מממן אחד בלבד.';
-    case 'hmo_claim_line_already_batched_or_reversed':
-      return 'אחת השורות כבר שויכה לדרישה או בוטלה. רענן את המסך ונסה שוב.';
-    case 'hmo_authorization_claim_limit_exceeded':
-      return 'לא ניתן ליצור דרישה: מספר השיעורים המאושרים באישור ה־HMO נוצל.';
-    case 'invoice_batch_not_draft':
-      return 'רק דרישה בסטטוס טיוטה ניתנת לשליחה.';
-    case 'invoice_batch_empty':
-      return 'הדרישה ריקה ולא ניתן לשלוח אותה.';
-    case 'invoice_batch_not_found':
-      return 'הדרישה לא נמצאה. רענן את המסך ונסה שוב.';
-    case 'invoice_batch_not_submitted':
-      return 'אפשר לרשום תשלום רק לדרישה שנשלחה.';
-    case 'paid_invoice_batch_cannot_be_cancelled':
-      return 'לא ניתן לבטל דרישה שכבר נרשם עבורה תשלום.';
-    case 'hmo_payment_reference_required':
-      return 'הגורם המממן הזה מחייב אסמכתת תשלום.';
-    case 'hmo_payment_exceeds_batch_balance':
-      return 'סכום התשלום גבוה מהיתרה הפתוחה של הדרישה.';
-    case 'hmo_provider_inactive':
-      return 'הגורם המממן אינו פעיל ולכן לא ניתן ליצור עבורו דרישה.';
-    default:
-      return error?.message || 'פעולת תביעת HMO נכשלה.';
-  }
+function showHmoClaimToast(error, options = {}) {
+  const feedback = getHmoClaimFeedback(error, options);
+  toast.error(feedback.title, {
+    description: feedback.description,
+    duration: 7000,
+  });
+}
+
+function showHmoClaimValidationToast(kind) {
+  const feedback = getHmoClaimValidationFeedback(kind);
+  toast.error(feedback.title, {
+    description: feedback.description,
+    duration: 7000,
+  });
 }
 
 function groupClaimsByStudent(claims = []) {
@@ -532,15 +516,16 @@ export default function FinancialsPage() {
     const selectedClaims = claimableClaims.filter((claim) => selectedClaimLedgerIds.has(claim.ledger_transaction_id));
     const ledgerTransactionIds = selectedClaims.map((claim) => claim.ledger_transaction_id);
     if (ledgerTransactionIds.length === 0) {
-      toast.error('יש לבחור לפחות שורת תביעה אחת.');
+      showHmoClaimValidationToast('no_selection');
       return;
     }
     if (ledgerTransactionIds.length !== selectedClaimLedgerIds.size) {
-      toast.info('חלק מהשורות שנבחרו כבר לא זמינות ולכן לא נשלחו ליצירת הדרישה.');
+      const feedback = getHmoClaimValidationFeedback('stale_selection');
+      toast.info(feedback.title, { description: feedback.description, duration: 7000 });
     }
     const providerIds = Array.from(new Set(selectedClaims.map((claim) => claim.hmo_provider_id).filter(Boolean)));
     if (providerIds.length !== 1) {
-      toast.error('יש ליצור דרישה לגורם מממן אחד בכל פעם.');
+      showHmoClaimValidationToast('mixed_providers');
       return;
     }
 
@@ -561,7 +546,7 @@ export default function FinancialsPage() {
       toast.success(`נוצרה טיוטת דרישה עם ${result?.claimCount || ledgerTransactionIds.length} שורות.`);
     } catch (error) {
       console.error('Failed to create HMO claim batch', error);
-      toast.error(formatHmoClaimError(error));
+      showHmoClaimToast(error, { scope: 'claim' });
     } finally {
       setProcessingClaimBatch(false);
     }
@@ -584,7 +569,7 @@ export default function FinancialsPage() {
       toast.success('הדרישה סומנה כנשלחה וננעלה לעריכה רגילה.');
     } catch (error) {
       console.error('Failed to submit HMO claim batch', error);
-      toast.error(formatHmoClaimError(error));
+      showHmoClaimToast(error, { scope: 'submit' });
     } finally {
       setProcessingClaimBatch(false);
     }
@@ -611,7 +596,7 @@ export default function FinancialsPage() {
       toast.success('הדרישה בוטלה והשורות שוחררו.');
     } catch (error) {
       console.error('Failed to cancel HMO claim batch', error);
-      toast.error(formatHmoClaimError(error));
+      showHmoClaimToast(error, { scope: 'cancel' });
     } finally {
       setProcessingClaimBatch(false);
     }
@@ -626,15 +611,15 @@ export default function FinancialsPage() {
     const requiresReference = provider?.claim_policy?.reference_required === true;
 
     if (!Number.isFinite(amountAgorot) || amountAgorot <= 0) {
-      toast.error('יש להזין סכום תשלום חיובי.');
+      showHmoClaimValidationToast('invalid_payment_amount');
       return;
     }
     if (amountAgorot > remainingAmount) {
-      toast.error('סכום התשלום גבוה מהיתרה הפתוחה של הדרישה.');
+      showHmoClaimValidationToast('payment_above_balance');
       return;
     }
     if (requiresReference && !String(form.externalReference || '').trim()) {
-      toast.error('הגורם המממן הזה מחייב אסמכתת תשלום.');
+      showHmoClaimValidationToast('missing_payment_reference');
       return;
     }
 
@@ -661,7 +646,7 @@ export default function FinancialsPage() {
       toast.success('התשלום נרשם מול הדרישה.');
     } catch (error) {
       console.error('Failed to record HMO batch payment', error);
-      toast.error(formatHmoClaimError(error));
+      showHmoClaimToast(error, { scope: 'payment' });
     } finally {
       setProcessingClaimBatch(false);
     }

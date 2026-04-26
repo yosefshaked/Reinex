@@ -21,6 +21,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { useMedicalProviders } from '@/features/students/hooks/useMedicalProviders.js';
 import { isAdminRole } from '@/features/students/utils/endpoints.js';
 import { coerceAgorot, formatCurrency, isValidCurrencyInput, toAgorot } from '@/lib/currency.js';
+import { getHmoClaimFeedback, getHmoClaimValidationFeedback } from '@/features/finance/lib/hmo-claim-feedback.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -78,21 +79,20 @@ function getBatchStatusClass(status) {
   }
 }
 
-function formatHmoBillingError(error) {
-  switch (`${error?.message || ''}`) {
-    case 'invoice_batch_not_submitted':
-      return 'אפשר לרשום תשלום רק לדרישה שנשלחה.';
-    case 'hmo_payment_reference_required':
-      return 'הגורם המממן הזה מחייב אסמכתת תשלום.';
-    case 'hmo_payment_exceeds_batch_balance':
-      return 'סכום התשלום גבוה מהיתרה הפתוחה של הדרישה.';
-    case 'paid_invoice_batch_cannot_be_cancelled':
-      return 'לא ניתן לבטל דרישה שכבר נרשם עבורה תשלום.';
-    case 'hmo_claim_batch_empty':
-      return 'אין חיובים פתוחים שמתאימים ליצירת דרישה.';
-    default:
-      return error?.message || 'פעולת הגורם המממן נכשלה.';
-  }
+function showHmoBillingError(error, options = {}) {
+  const feedback = getHmoClaimFeedback(error, options);
+  toast.error(feedback.title, {
+    description: feedback.description,
+    duration: 7000,
+  });
+}
+
+function showHmoBillingValidation(kind) {
+  const feedback = getHmoClaimValidationFeedback(kind);
+  toast.error(feedback.title, {
+    description: feedback.description,
+    duration: 7000,
+  });
 }
 
 function buildBatchForm() {
@@ -209,7 +209,7 @@ export default function HmoProviderBillingWorkspace() {
       toast.success(`טיוטת דרישה נוצרה: ${total} עבור ${count} תנועות.`);
     } catch (error) {
       console.error('Failed to create HMO invoice batch', error);
-      toast.error(formatHmoBillingError(error));
+      showHmoBillingError(error, { scope: 'claim' });
     } finally {
       setSaving(false);
     }
@@ -232,7 +232,7 @@ export default function HmoProviderBillingWorkspace() {
       toast.success('הדרישה סומנה כנשלחה.');
     } catch (error) {
       console.error('Failed to submit HMO invoice batch', error);
-      toast.error(formatHmoBillingError(error));
+      showHmoBillingError(error, { scope: 'submit' });
     } finally {
       setSaving(false);
     }
@@ -258,7 +258,7 @@ export default function HmoProviderBillingWorkspace() {
       toast.success('הדרישה בוטלה.');
     } catch (error) {
       console.error('Failed to cancel HMO invoice batch', error);
-      toast.error(formatHmoBillingError(error));
+      showHmoBillingError(error, { scope: 'cancel' });
     } finally {
       setSaving(false);
     }
@@ -271,14 +271,14 @@ export default function HmoProviderBillingWorkspace() {
 
   function handleConfirmPayment() {
     if (!isValidCurrencyInput(paymentForm.amount)) {
-      toast.error('יש להזין סכום חוקי.');
+      showHmoBillingValidation('invalid_payment_amount');
       return;
     }
     const targetBatch = invoiceBatches.find((batch) => batch.id === paymentTarget?.batchId) || null;
     const amount = toAgorot(paymentForm.amount);
     const remaining = Math.max(0, coerceAgorot(targetBatch?.total_amount) - coerceAgorot(targetBatch?.paid_amount));
     if (amount > remaining) {
-      toast.error('סכום התשלום גבוה מהיתרה הפתוחה של הדרישה.');
+      showHmoBillingValidation('payment_above_balance');
       return;
     }
     setConfirmPayment({
@@ -317,7 +317,7 @@ export default function HmoProviderBillingWorkspace() {
       toast.success(`תשלום של ${formatCurrency(confirmPayment.amount)} נרשם.`);
     } catch (error) {
       console.error('Failed to record HMO invoice batch payment', error);
-      toast.error(formatHmoBillingError(error));
+      showHmoBillingError(error, { scope: 'payment' });
     } finally {
       setSaving(false);
     }
