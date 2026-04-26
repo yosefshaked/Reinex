@@ -42,9 +42,9 @@ const PASSWORD = PW_IDX !== -1 && args[PW_IDX + 1]
 const TEST_ORG_NAME    = 'Reinex Test Org (auto)';
 const TEST_USER_SUFFIX = '@reinex-test.local';
 const TEST_USERS = [
-  { key: 'admin',      email: `admin-test${TEST_USER_SUFFIX}`,      role: 'admin',  firstName: 'Admin',  lastName: 'Test' },
-  { key: 'office',     email: `office-test${TEST_USER_SUFFIX}`,     role: 'office', firstName: 'Office', lastName: 'Test' },
-  { key: 'instructor', email: `instructor-test${TEST_USER_SUFFIX}`, role: 'member', firstName: 'Instructor', lastName: 'Test' },
+  { key: 'admin',      email: `admin-test${TEST_USER_SUFFIX}`,      role: 'admin',  firstName: 'Admin',      lastName: 'Test', phone: '0500000001', identityNumber: '000000001' },
+  { key: 'office',     email: `office-test${TEST_USER_SUFFIX}`,     role: 'office', firstName: 'Office',     lastName: 'Test', phone: '0500000002', identityNumber: '000000002' },
+  { key: 'instructor', email: `instructor-test${TEST_USER_SUFFIX}`, role: 'member', firstName: 'Instructor', lastName: 'Test', phone: '0500000003', identityNumber: '000000003' },
 ];
 
 // ─── Colours ──────────────────────────────────────────────────────────────
@@ -545,7 +545,7 @@ async function applySchema(supabaseUrl, serviceKey) {
 }
 
 async function checkAndApplySchema(supabaseUrl, serviceKey) {
-  section('── Step 2 / 6  Verify Tenant Database Schema');
+  section('── Step 2 / 7  Verify Tenant Database Schema');
 
   const { applied, missing } = await checkSchemaApplied(supabaseUrl, serviceKey);
 
@@ -663,12 +663,14 @@ async function deleteTestUsers(supabaseUrl, serviceKey) {
 
 // ─── 4. Ensure profile rows are marked setup-complete ─────────────────────
 
-async function ensureProfileComplete(supabaseUrl, serviceKey, userId, firstName, lastName) {
+async function ensureProfileComplete(supabaseUrl, serviceKey, userId, { firstName, lastName, phone, identityNumber }) {
   const now = new Date().toISOString();
   await supabaseUpsert(supabaseUrl, serviceKey, '/rest/v1/profiles', {
     id: userId,
     first_name: firstName,
     last_name: lastName,
+    phone,
+    identity_number: identityNumber,
     setup_completed_at: now,
     account_status: 'active',
     updated_at: now,
@@ -691,10 +693,26 @@ async function findExistingTestOrg(supabaseUrl, serviceKey) {
   }
 }
 
+async function ensureOrgSetupComplete(supabaseUrl, serviceKey, orgId) {
+  const now = new Date().toISOString();
+  const res = await fetch(`${supabaseUrl}/rest/v1/organizations?id=eq.${orgId}`, {
+    method: 'PATCH',
+    headers: supabaseHeaders(serviceKey, { 'Prefer': 'return=minimal' }),
+    body: JSON.stringify({ setup_completed: true, updated_at: now }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    warn(`Could not set setup_completed=true on org: ${res.status} ${text.slice(0, 200)}`);
+  } else {
+    ok('Organisation setup_completed = true');
+  }
+}
+
 async function createOrg(supabaseUrl, serviceKey, adminUserId) {
   const existing = await findExistingTestOrg(supabaseUrl, serviceKey);
   if (existing) {
     ok(`Organisation already exists  ${C.grey('(id: ' + existing.slice(0, 8) + '...)')}`);
+    await ensureOrgSetupComplete(supabaseUrl, serviceKey, existing);
     return existing;
   }
 
@@ -703,6 +721,7 @@ async function createOrg(supabaseUrl, serviceKey, adminUserId) {
   const res = await supabaseUpsert(supabaseUrl, serviceKey, '/rest/v1/organizations', {
     name: TEST_ORG_NAME,
     slug,
+    setup_completed: true,
     created_by: adminUserId,
     created_at: now,
     updated_at: now,
@@ -745,7 +764,71 @@ async function deleteTestOrg(supabaseUrl, serviceKey) {
   ok(`Deleted test organisation`);
 }
 
-// ─── 6. Write .env ────────────────────────────────────────────────────────
+// ─── 6. Ensure test service exists ────────────────────────────────────────
+
+async function ensureTestService(supabaseUrl, serviceKey, orgId) {
+  let data;
+  try {
+    data = await supabaseGet(supabaseUrl, serviceKey, '/rest/v1/Services', {
+      org_id: `eq.${orgId}`,
+      is_active: 'eq.true',
+      select: 'id,name',
+      limit: '1',
+    });
+  } catch {
+    warn('Could not check for existing services — skipping service creation');
+    return;
+  }
+
+  if (Array.isArray(data) && data.length > 0) {
+    ok(`Service already exists: "${data[0].name}"`);
+    return;
+  }
+
+  await supabaseUpsert(supabaseUrl, serviceKey, '/rest/v1/Services', {
+    org_id: orgId,
+    name: 'שיעור ניסיון',
+    duration_minutes: 45,
+    is_active: true,
+  });
+  ok('Created test service: "שיעור ניסיון"');
+}
+
+// ─── 7. Clean up test student data ────────────────────────────────────────
+
+// Ensures that students with the test identity numbers are removed before each
+// test run so that the deduplication guard in AddStudentForm does not block.
+async function ensureTestStudentClean(supabaseUrl, serviceKey, orgId) {
+  const testIdentityNumbers = ['999000001'];
+
+  for (const identityNumber of testIdentityNumbers) {
+    let students;
+    try {
+      students = await supabaseGet(supabaseUrl, serviceKey, '/rest/v1/students', {
+        org_id: `eq.${orgId}`,
+        identity_number: `eq.${identityNumber}`,
+        select: 'id',
+      });
+    } catch {
+      continue;
+    }
+
+    if (!Array.isArray(students) || students.length === 0) continue;
+
+    for (const student of students) {
+      const sid = student.id;
+      await supabaseDelete(supabaseUrl, serviceKey, '/rest/v1/waiting_list_entries', `student_id=eq.${sid}`).catch(() => {});
+      await supabaseDelete(supabaseUrl, serviceKey, '/rest/v1/form_submissions',     `student_id=eq.${sid}`).catch(() => {});
+      await supabaseDelete(supabaseUrl, serviceKey, '/rest/v1/hmo_authorizations',   `student_id=eq.${sid}`).catch(() => {});
+      await supabaseDelete(supabaseUrl, serviceKey, '/rest/v1/commitments',          `student_id=eq.${sid}`).catch(() => {});
+      await supabaseDelete(supabaseUrl, serviceKey, '/rest/v1/lesson_templates',     `student_id=eq.${sid}`).catch(() => {});
+      await supabaseDelete(supabaseUrl, serviceKey, '/rest/v1/students',             `id=eq.${sid}`).catch(() => {});
+    }
+    ok(`Cleaned up test student (identity_number: ${identityNumber})`);
+  }
+}
+
+// ─── 8. Write .env ────────────────────────────────────────────────────────
 
 function writeEnvFile(config) {
   const lines = [
@@ -842,7 +925,7 @@ async function main() {
     if (DRY_RUN) {
       ok(`[dry-run] Would mark profile complete: ${user.email}`);
     } else {
-      await ensureProfileComplete(supabaseUrl, serviceRoleKey, userIds[user.key], user.firstName, user.lastName);
+      await ensureProfileComplete(supabaseUrl, serviceRoleKey, userIds[user.key], user);
       ok(`Profile ready: ${user.email}`);
     }
   }
@@ -857,6 +940,8 @@ async function main() {
       await ensureMembership(supabaseUrl, serviceRoleKey, orgId, userIds[user.key], user.role);
       ok(`${user.role.padEnd(12)} membership: ${user.email}`);
     }
+    await ensureTestService(supabaseUrl, serviceRoleKey, orgId);
+    await ensureTestStudentClean(supabaseUrl, serviceRoleKey, orgId);
   } else {
     ok('[dry-run] Would create org and 3 memberships');
   }

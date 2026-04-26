@@ -39,11 +39,11 @@ function interpolateDeep(obj, vars) {
 
 async function performLogin(page, role, ctx) {
   const roleMap = {
-    admin:      { email: ctx.vars.ADMIN_EMAIL,      password: ctx.vars.ADMIN_PASSWORD },
-    owner:      { email: ctx.vars.ADMIN_EMAIL,      password: ctx.vars.ADMIN_PASSWORD },
-    office:     { email: ctx.vars.OFFICE_EMAIL,     password: ctx.vars.OFFICE_PASSWORD },
-    instructor: { email: ctx.vars.INSTRUCTOR_EMAIL, password: ctx.vars.INSTRUCTOR_PASSWORD },
-    member:     { email: ctx.vars.INSTRUCTOR_EMAIL, password: ctx.vars.INSTRUCTOR_PASSWORD },
+    admin:      { email: ctx.vars.ADMIN_EMAIL,      password: ctx.vars.ADMIN_PASSWORD,      firstName: 'Admin',      lastName: 'Test', phone: '0500000001', identityNumber: '000000001' },
+    owner:      { email: ctx.vars.ADMIN_EMAIL,      password: ctx.vars.ADMIN_PASSWORD,      firstName: 'Admin',      lastName: 'Test', phone: '0500000001', identityNumber: '000000001' },
+    office:     { email: ctx.vars.OFFICE_EMAIL,     password: ctx.vars.OFFICE_PASSWORD,     firstName: 'Office',     lastName: 'Test', phone: '0500000002', identityNumber: '000000002' },
+    instructor: { email: ctx.vars.INSTRUCTOR_EMAIL, password: ctx.vars.INSTRUCTOR_PASSWORD, firstName: 'Instructor', lastName: 'Test', phone: '0500000003', identityNumber: '000000003' },
+    member:     { email: ctx.vars.INSTRUCTOR_EMAIL, password: ctx.vars.INSTRUCTOR_PASSWORD, firstName: 'Instructor', lastName: 'Test', phone: '0500000003', identityNumber: '000000003' },
   };
 
   const creds = roleMap[role] || roleMap.admin;
@@ -91,12 +91,25 @@ async function performLogin(page, role, ctx) {
     );
   }
 
-  // If account setup is required, skip it (tests assume already-configured accounts)
+  // If account setup is required, fill in the form automatically
   const hashAfter = await page.evaluate(() => window.location.hash);
   if (hashAfter.startsWith('#/account/setup')) {
-    throw new Error(
-      `User "${creds.email}" must complete account setup first. ` +
-      `Run through the setup wizard manually before using this account for tests.`
+    // Fill in required profile fields using test defaults
+    const firstName = creds.firstName || 'Test';
+    const lastName  = creds.lastName  || 'User';
+    const phone     = creds.phone     || '0500000001';
+    const idNumber  = creds.identityNumber || '000000001';
+
+    await page.waitForSelector('#account-first-name', { timeout: ctx.timeout });
+    await page.fill('#account-first-name', firstName);
+    await page.fill('#account-last-name', lastName);
+    await page.fill('#account-identity-number', idNumber);
+    await page.fill('#account-phone', phone);
+    await page.click('button[type="submit"]');
+    // Wait until redirected away from setup
+    await page.waitForFunction(
+      () => !window.location.hash.startsWith('#/account/setup'),
+      { timeout: ctx.timeout }
     );
   }
 }
@@ -186,20 +199,29 @@ async function runAssert(page, params, ctx) {
 // ─── API call helper ───────────────────────────────────────────────────────
 
 async function runApiCall(page, params, ctx) {
-  const { method = 'GET', endpoint, body, headers: extraHeaders = {}, store, storeField } = params;
+  const { method = 'GET', endpoint, body, headers: extraHeaders = {}, store, storeField, ignoreStatus = [] } = params;
 
   // Try to pull the Supabase auth token from localStorage (works when logged in)
   let authToken = null;
   try {
     authToken = await page.evaluate(() => {
+      // Try known Reinex storage key first, then fall back to any key containing auth
+      const KNOWN_KEYS = ['app-main-auth-session'];
+      const allKeys = [];
       for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.includes('auth-token')) {
-          try {
-            const parsed = JSON.parse(localStorage.getItem(key) || '{}');
-            return parsed.access_token || null;
-          } catch { return null; }
-        }
+        const k = localStorage.key(i);
+        if (k) allKeys.push(k);
+      }
+      const candidates = [
+        ...KNOWN_KEYS.filter(k => allKeys.includes(k)),
+        ...allKeys.filter(k => !KNOWN_KEYS.includes(k) && (k.includes('auth-token') || k.includes('auth-session'))),
+      ];
+      for (const key of candidates) {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(key) || '{}');
+          const token = parsed.access_token || parsed.currentSession?.access_token || null;
+          if (token) return token;
+        } catch { /* continue */ }
       }
       return null;
     });
@@ -223,7 +245,7 @@ async function runApiCall(page, params, ctx) {
     data: resolvedBody ? JSON.stringify(resolvedBody) : undefined,
   });
 
-  if (!response.ok()) {
+  if (!response.ok() && !ignoreStatus.includes(response.status())) {
     const text = await response.text();
     throw new Error(
       `API call ${method} ${endpoint} returned ${response.status()}\n  Body: ${text.slice(0, 500)}`
@@ -309,8 +331,14 @@ async function executeStep(page, rawStep, ctx) {
 
     // ── Click / Hover / Keyboard ──────────────────────────────────────────
     case 'click': {
-      await page.waitForSelector(selector, { state: 'visible', timeout: t });
-      await page.click(selector);
+      if (step.first) {
+        // Use locator().first() when multiple elements may match (e.g. dropdown options)
+        await page.locator(selector).first().waitFor({ state: 'visible', timeout: t });
+        await page.locator(selector).first().click();
+      } else {
+        await page.waitForSelector(selector, { state: 'visible', timeout: t });
+        await page.click(selector);
+      }
       break;
     }
     case 'hover': {
@@ -378,7 +406,7 @@ async function executeStep(page, rawStep, ctx) {
     case 'screenshot': {
       const path = await takeScreenshot(page, step.name, ctx);
       ctx.screenshots.push({ name: step.name || 'manual', path });
-      break;
+      return path;
     }
 
     // ── API calls ─────────────────────────────────────────────────────────
@@ -393,12 +421,17 @@ async function executeStep(page, rawStep, ctx) {
       break;
     }
     case 'logout': {
-      // Navigate to login page; AuthGuard will clear the session
+      // Clear storage, then force a full page reload to reinitialise the Supabase client
+      // (clearing localStorage alone does not invalidate the in-memory session)
       await page.evaluate(() => {
         try { window.localStorage.clear(); } catch {}
+        try { window.sessionStorage.clear(); } catch {}
       });
-      await page.goto(`${ctx.vars.BASE_URL}/#/login`);
-      await page.waitForSelector('input[type="email"]', { timeout: t });
+      // Navigate to root (no hash) to guarantee a full document + JS reload
+      await page.goto(ctx.vars.BASE_URL + '/', { waitUntil: 'load' });
+      // Then change the hash to /login so the SPA shows the login route
+      await page.evaluate(() => { window.location.hash = '/login'; });
+      await page.waitForSelector('input[type="email"]', { state: 'visible', timeout: t });
       break;
     }
     case 'clearStorage': {
@@ -476,7 +509,8 @@ export async function runWorkflow(page, workflow, script, sharedVars, reportDir,
     let stepScreenshot = null;
 
     try {
-      await executeStep(page, step, ctx);
+      const stepResult = await executeStep(page, step, ctx);
+      if (typeof stepResult === 'string') stepScreenshot = stepResult;
     } catch (err) {
       stepStatus = 'fail';
       stepError = err.message || String(err);

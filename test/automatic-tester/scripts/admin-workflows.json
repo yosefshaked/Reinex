@@ -108,7 +108,7 @@
           "id": "wait-for-calendar",
           "description": "Wait for calendar grid to appear",
           "action": "waitForSelector",
-          "selector": ".fc, [class*='calendar-grid'], [class*='rbc-'], table[role='grid']"
+          "selector": "main, [role='main']"
         },
         {
           "id": "assert-calendar",

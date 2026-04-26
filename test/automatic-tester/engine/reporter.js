@@ -75,9 +75,7 @@ function renderStepRow(step) {
     : '';
 
   const screenshotHtml = step.screenshot
-    ? `<a href="${escHtml(step.screenshot)}" target="_blank" class="screenshot-link">
-         <img src="${escHtml(step.screenshot)}" alt="Screenshot" class="thumb" />
-       </a>`
+    ? `<img src="${escHtml(step.screenshot)}" alt="Screenshot" class="thumb" onclick="openLightbox(this.src)" />`
     : '';
 
   return `
@@ -319,7 +317,23 @@ const CSS = `
   }
   .duration { color: #94a3b8; font-size: 12px; white-space: nowrap; }
   .thumb { max-width: 80px; max-height: 60px; border-radius: 4px; border: 1px solid #e2e8f0; cursor: zoom-in; }
-  .screenshot-link { display: inline-block; }
+  .lightbox {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.85);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .lightbox.open { display: flex; }
+  .lightbox img { max-width: 100%; max-height: 100%; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,.6); }
+  .lightbox-close {
+    position: absolute; top: 16px; right: 20px;
+    color: white; font-size: 28px; font-weight: 300; cursor: pointer; line-height: 1;
+    background: none; border: none; padding: 4px 8px;
+  }
+  .lightbox-close:hover { opacity: .7; }
 
   code { font-family: 'SFMono-Regular', Consolas, monospace; }
 `;
@@ -363,6 +377,24 @@ export function generateReport(runResults, validationResults, reportDir, timesta
       ${scriptsHtml || '<p>No scripts were run.</p>'}
     </section>
   </main>
+  <div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
+    <button class="lightbox-close" onclick="closeLightbox()">&#x2715;</button>
+    <img id="lightbox-img" src="" alt="Screenshot" />
+  </div>
+  <script>
+    function openLightbox(src) {
+      document.getElementById('lightbox-img').src = src;
+      document.getElementById('lightbox').classList.add('open');
+    }
+    function closeLightbox(e) {
+      if (!e || e.target !== document.getElementById('lightbox-img')) {
+        document.getElementById('lightbox').classList.remove('open');
+      }
+    }
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeLightbox();
+    });
+  </script>
 </body>
 </html>`;
 

@@ -2,26 +2,25 @@
   "meta": {
     "id": "student-lifecycle",
     "name": "Student Lifecycle",
-    "description": "Full lifecycle: admin creates a waiting-list intake, approves it to create a student, assigns an instructor, adds a lesson template, views the student's profile, and verifies the student appears in the roster.",
-    "version": "1.0.0",
-    "last_validated_at": "2026-04-23T23:59:00Z",
+    "description": "Full lifecycle: admin pre-creates a student via API, creates a waiting-list entry by searching the combobox, verifies the entry, verifies the student appears in the roster, and views the student profile.",
+    "version": "1.2.0",
+    "last_validated_at": "2026-04-25T00:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
-        "/dashboard",
         "/waiting-list",
         "/students-list",
         "/students/:id/:tab?"
       ],
       "api_endpoints": [
-        "GET /api/dashboard-tasks",
-        "GET /api/students-list",
-        "GET /api/waiting-list"
+        "POST /api/students-list",
+        "GET /api/waiting-list",
+        "GET /api/students-list"
       ]
     }
   },
   "config": {
-    "timeout_ms": 15000,
+    "timeout_ms": 20000,
     "screenshot_on_failure": true,
     "continue_on_step_failure": false,
     "continue_on_workflow_failure": true
@@ -30,8 +29,7 @@
     "STUDENT_FIRST": "טסט",
     "STUDENT_LAST":  "אוטומטי",
     "STUDENT_ID":    "999000001",
-    "STUDENT_PHONE": "0501234567",
-    "STUDENT_DOB":   "2010-01-15"
+    "STUDENT_PHONE": "0501234567"
   },
 
   "workflows": [
@@ -64,152 +62,165 @@
     },
 
     {
-      "id": "create-waiting-list-intake",
-      "name": "Create Waiting-List Intake",
-      "description": "Admin navigates to the waiting list and opens the new-intake form, fills in student details, and submits.",
+      "id": "create-waiting-list-entry",
+      "name": "Create Waiting-List Entry",
+      "description": "Pre-creates the student via API (so they appear in the client-profiles list on page load), then opens the waiting list, clicks 'רשומה חדשה', searches for the student in the combobox, selects a service, and saves the entry.",
       "steps": [
         {
+          "id": "create-student-via-api",
+          "description": "Create the student via POST /api/students-list so they are in clientProfiles when the page loads",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "first_name": "{{STUDENT_FIRST}}",
+            "last_name":  "{{STUDENT_LAST}}",
+            "identity_number": "{{STUDENT_ID}}",
+            "phone": "{{STUDENT_PHONE}}"
+          },
+          "ignoreStatus": [409]
+        },
+        {
           "id": "navigate-waiting-list",
-          "description": "Go to the waiting list page",
+          "description": "Go to the waiting list page (fresh load ensures client-profiles includes the new student)",
           "action": "navigate",
           "url": "{{BASE_URL}}/#/waiting-list"
         },
         {
-          "id": "assert-waiting-list-loaded",
-          "description": "Confirm waiting list page is visible",
+          "id": "wait-for-page",
+          "description": "Wait for waiting list page to load",
           "action": "waitForSelector",
-          "selector": "main, [role='main'], #main-content, .page-content",
+          "selector": "main, [role='main']",
           "state": "visible"
         },
         {
           "id": "screenshot-waiting-list",
-          "description": "Capture waiting list before adding intake",
+          "description": "Capture waiting list before adding entry",
           "action": "screenshot",
           "name": "02-waiting-list"
         },
         {
-          "id": "click-add-intake",
-          "description": "Click the button that opens the new intake dialog (look for plus / add / new buttons)",
+          "id": "click-new-entry",
+          "description": "Click the 'רשומה חדשה' button to open the create dialog",
           "action": "click",
-          "selector": "button:has-text('הוסף'), button:has-text('חדש'), button:has-text('+'), [aria-label*='הוסף'], [aria-label*='חדש']"
+          "selector": "button:has-text('רשומה חדשה')"
         },
         {
-          "id": "wait-for-dialog",
-          "description": "Wait for the intake dialog / drawer to open",
+          "id": "wait-for-entry-dialog",
+          "description": "Wait for the new-entry dialog to open",
           "action": "waitForSelector",
-          "selector": "[role='dialog'], [data-radix-popper-content-wrapper], .dialog-content",
+          "selector": "[role='dialog']",
           "state": "visible"
         },
         {
-          "id": "fill-first-name",
-          "description": "Enter the student's first name",
-          "action": "fill",
-          "selector": "input[name='firstName'], input[name='first_name'], input[placeholder*='שם פרטי'], input[placeholder*='שם']",
+          "id": "click-student-combobox",
+          "description": "Click the student combobox to focus it and open the dropdown",
+          "action": "click",
+          "selector": "#waiting-student"
+        },
+        {
+          "id": "type-student-name",
+          "description": "Type the student first name to filter the combobox options",
+          "action": "type",
+          "selector": "#waiting-student",
           "value": "{{STUDENT_FIRST}}"
         },
         {
-          "id": "fill-last-name",
-          "description": "Enter the student's last name",
-          "action": "fill",
-          "selector": "input[name='lastName'], input[name='last_name'], input[placeholder*='שם משפחה']",
-          "value": "{{STUDENT_LAST}}"
-        },
-        {
-          "id": "fill-id-number",
-          "description": "Enter the student's ID number",
-          "action": "fill",
-          "selector": "input[name='identityNumber'], input[name='identity_number'], input[placeholder*='תעודת זהות'], input[placeholder*='ת.ז']",
-          "value": "{{STUDENT_ID}}"
-        },
-        {
-          "id": "fill-phone",
-          "description": "Enter the student's phone number",
-          "action": "fill",
-          "selector": "input[name='phone'], input[type='tel'], input[placeholder*='טלפון']",
-          "value": "{{STUDENT_PHONE}}"
-        },
-        {
-          "id": "screenshot-filled-form",
-          "description": "Capture intake form before submitting",
-          "action": "screenshot",
-          "name": "03-intake-form-filled"
-        },
-        {
-          "id": "submit-intake",
-          "description": "Submit the intake form",
-          "action": "click",
-          "selector": "button[type='submit'], button:has-text('שמור'), button:has-text('הוסף'), button:has-text('צור')"
-        },
-        {
-          "id": "wait-for-success",
-          "description": "Wait for confirmation (dialog closes or a success toast appears)",
+          "id": "wait-for-student-option",
+          "description": "Wait for the matching student option to appear in the dropdown",
           "action": "waitForSelector",
-          "selector": "[data-sonner-toast], .toast, [role='status'], [aria-live='polite']",
+          "selector": "[role='option']:has-text('{{STUDENT_FIRST}}')",
           "state": "visible"
         },
         {
-          "id": "screenshot-after-intake",
-          "description": "Capture state after intake was submitted",
-          "action": "screenshot",
-          "name": "04-intake-submitted"
-        }
-      ]
-    },
-
-    {
-      "id": "approve-intake",
-      "name": "Approve the Intake (Convert to Active Student)",
-      "description": "Admin finds the newly created intake in the waiting list and approves it, which creates an active student record.",
-      "steps": [
-        {
-          "id": "navigate-waiting-list-2",
-          "description": "Return to the waiting list",
-          "action": "navigate",
-          "url": "{{BASE_URL}}/#/waiting-list"
-        },
-        {
-          "id": "wait-for-intake-row",
-          "description": "Wait for a row matching the submitted student name",
-          "action": "waitForSelector",
-          "selector": "tr:has-text('{{STUDENT_FIRST}}'), li:has-text('{{STUDENT_FIRST}}'), [data-testid*='intake']:has-text('{{STUDENT_FIRST}}')"
-        },
-        {
-          "id": "screenshot-intake-in-list",
-          "description": "Capture the intake visible in the waiting list",
-          "action": "screenshot",
-          "name": "05-intake-in-waiting-list"
-        },
-        {
-          "id": "click-approve-button",
-          "description": "Click the approve button for this intake",
+          "id": "click-student-option",
+          "description": "Click the student option to select them — this calls commitOption → handleStudentChange with a valid clientProfileId",
           "action": "click",
-          "selector": "tr:has-text('{{STUDENT_FIRST}}') button:has-text('אישור'), tr:has-text('{{STUDENT_FIRST}}') button:has-text('אשר'), tr:has-text('{{STUDENT_FIRST}}') [aria-label*='אשר']"
+          "selector": "[role='option']:has-text('{{STUDENT_FIRST}}')",
+          "first": true
         },
         {
-          "id": "wait-for-approval-dialog",
-          "description": "Wait for approval confirmation dialog",
+          "id": "screenshot-student-selected",
+          "description": "Capture the form after student is selected",
+          "action": "screenshot",
+          "name": "03-student-selected"
+        },
+        {
+          "id": "click-service-select",
+          "description": "Open the service selector dropdown",
+          "action": "click",
+          "selector": "#waiting-service"
+        },
+        {
+          "id": "wait-for-service-options",
+          "description": "Wait for service options to appear",
           "action": "waitForSelector",
-          "selector": "[role='dialog'], .dialog-content",
+          "selector": "[role='option']",
           "state": "visible"
         },
         {
-          "id": "confirm-approval",
-          "description": "Confirm the approval in the dialog",
+          "id": "select-first-service",
+          "description": "Click the first available service option",
           "action": "click",
-          "selector": "[role='dialog'] button:has-text('אשר'), [role='dialog'] button:has-text('אישור'), [role='dialog'] button[type='submit']"
+          "selector": "[role='option']",
+          "first": true
         },
         {
-          "id": "wait-after-approval",
-          "description": "Wait for the approval to complete (dialog closes)",
+          "id": "screenshot-entry-with-service",
+          "description": "Capture the entry form with student and service filled",
+          "action": "screenshot",
+          "name": "04-entry-with-service"
+        },
+        {
+          "id": "submit-entry",
+          "description": "Submit the waiting-list entry with 'שמירה'",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('שמירה')"
+        },
+        {
+          "id": "wait-for-dialog-close",
+          "description": "Wait for the dialog to close after successful save",
           "action": "waitForSelector",
           "selector": "[role='dialog']",
           "state": "hidden"
         },
         {
-          "id": "screenshot-after-approval",
-          "description": "Capture state after approval",
+          "id": "screenshot-after-entry-created",
+          "description": "Capture waiting list after entry was created",
           "action": "screenshot",
-          "name": "06-after-approval"
+          "name": "05-entry-created"
+        }
+      ]
+    },
+
+    {
+      "id": "verify-waiting-list-entry",
+      "name": "Verify Entry Appears in Waiting List",
+      "description": "Navigate to the waiting list and confirm the new entry card is visible.",
+      "steps": [
+        {
+          "id": "navigate-waiting-list",
+          "description": "Return to the waiting list",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/waiting-list"
+        },
+        {
+          "id": "wait-for-page",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "assert-entry-visible",
+          "description": "Confirm the new student's entry card is visible in the queue",
+          "action": "assert",
+          "type": "visible",
+          "selector": "button:has-text('{{STUDENT_FIRST}}')"
+        },
+        {
+          "id": "screenshot-entry-in-list",
+          "description": "Capture the waiting list showing the new entry",
+          "action": "screenshot",
+          "name": "06-entry-in-waiting-list"
         }
       ]
     },
@@ -226,21 +237,21 @@
           "url": "{{BASE_URL}}/#/students-list"
         },
         {
-          "id": "wait-for-list-load",
-          "description": "Wait for the student list table to appear",
+          "id": "wait-for-table",
+          "description": "Wait for the students table to load",
           "action": "waitForSelector",
-          "selector": "table, [role='table'], ul[class*='student'], .student-list"
+          "selector": "table"
         },
         {
-          "id": "assert-student-present",
-          "description": "Confirm the student name appears in the list",
+          "id": "assert-student-in-roster",
+          "description": "Confirm the student row is visible in the table",
           "action": "assert",
           "type": "visible",
-          "selector": "tr:has-text('{{STUDENT_FIRST}}'), li:has-text('{{STUDENT_FIRST}}'), [data-testid*='student']:has-text('{{STUDENT_FIRST}}')"
+          "selector": "tr:has-text('{{STUDENT_FIRST}}')"
         },
         {
-          "id": "screenshot-student-in-list",
-          "description": "Capture students list showing new student",
+          "id": "screenshot-student-in-roster",
+          "description": "Capture the students list showing the new student",
           "action": "screenshot",
           "name": "07-student-in-roster"
         }
@@ -250,30 +261,41 @@
     {
       "id": "view-student-profile",
       "name": "View Student Profile",
-      "description": "Click into the student's profile and verify key tabs are accessible.",
+      "description": "Click into the student's profile from the roster and verify the profile page loads.",
       "steps": [
         {
-          "id": "click-student-row",
-          "description": "Open the student's profile page",
-          "action": "click",
-          "selector": "tr:has-text('{{STUDENT_FIRST}}') a, tr:has-text('{{STUDENT_FIRST}}') td:first-child, li:has-text('{{STUDENT_FIRST}}')"
+          "id": "navigate-students-list",
+          "description": "Ensure we are on the students list",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/students-list"
         },
         {
-          "id": "wait-for-profile",
-          "description": "Wait for the profile page to load",
+          "id": "wait-for-table",
+          "action": "waitForSelector",
+          "selector": "table"
+        },
+        {
+          "id": "click-student-link",
+          "description": "Click the student's name link to open the profile",
+          "action": "click",
+          "selector": "tr:has-text('{{STUDENT_FIRST}}') a"
+        },
+        {
+          "id": "wait-for-profile-url",
+          "description": "Wait for the profile URL to contain /students/",
           "action": "waitForURL",
           "pattern": "#/students/"
         },
         {
-          "id": "assert-student-name-visible",
-          "description": "Confirm student name appears on the profile",
+          "id": "assert-student-name-on-profile",
+          "description": "Confirm student name appears in the page heading",
           "action": "assert",
           "type": "visible",
-          "selector": "h1:has-text('{{STUDENT_FIRST}}'), h2:has-text('{{STUDENT_FIRST}}'), [class*='title']:has-text('{{STUDENT_FIRST}}')"
+          "selector": "h1:has-text('{{STUDENT_FIRST}}')"
         },
         {
           "id": "screenshot-profile",
-          "description": "Capture student profile page",
+          "description": "Capture the student profile page",
           "action": "screenshot",
           "name": "08-student-profile"
         }

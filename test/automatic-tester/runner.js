@@ -249,7 +249,11 @@ async function main() {
         await browserCtx.clearCookies();
         await page.evaluate(() => {
           try { localStorage.clear(); } catch {}
+          try { sessionStorage.clear(); } catch {}
         }).catch(() => {});
+        // Force a full page reload so the Supabase client reinitialises without a session
+        const baseUrl = sharedVars.BASE_URL || opts.baseUrl || 'http://localhost:5173';
+        await page.goto(baseUrl + '/', { waitUntil: 'load' }).catch(() => {});
       }
 
       process.stdout.write(`  ${workflow.name.padEnd(50, ' ')}`);
