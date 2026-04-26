@@ -1409,6 +1409,419 @@ export default class BillingLedgerService {
     return ledgerAccount;
   }
 
+  async inspectHmoClaimReadiness({
+    lessonParticipantId,
+    hmoProviderId = '',
+    requestedClaimIds = [],
+  }) {
+    const normalizedParticipantId = normalizeString(lessonParticipantId);
+    const normalizedProviderId = normalizeString(hmoProviderId);
+    const normalizedRequestedClaimIds = Array.from(new Set((Array.isArray(requestedClaimIds) ? requestedClaimIds : [])
+      .map((value) => normalizeString(value))
+      .filter(Boolean)));
+
+    if (!this.orgId) {
+      throw new Error('missing_org_id');
+    }
+    if (!normalizedParticipantId && !normalizedProviderId && normalizedRequestedClaimIds.length === 0) {
+      throw new Error('missing_hmo_claim_inspection_target');
+    }
+
+    const checks = [];
+    const addCheck = (name, status, title, details = null) => {
+      checks.push({ name, status, title, details });
+    };
+
+    const participant = normalizedParticipantId
+      ? await loadParticipantContext(this.tenantClient, normalizedParticipantId)
+      : null;
+    const instance = participant?.lesson_instance || null;
+    const effectiveProviderId = normalizeString(
+      normalizedProviderId
+      || participant?.metadata?.hmo_provider_id
+      || participant?.metadata?.authorization?.provider_id,
+    );
+
+    if (normalizedParticipantId) {
+      if (!participant?.id || !instance?.id) {
+        addCheck('participant_found', 'error', 'Lesson participant was not found.', { lesson_participant_id: normalizedParticipantId });
+        return {
+          summary: {
+            claim_ready: false,
+            primary_reason: 'lesson_participant_not_found',
+          },
+          checks,
+          participant: null,
+          claim_request: null,
+        };
+      }
+      addCheck('participant_found', 'ok', 'Lesson participant exists.', {
+        lesson_participant_id: participant.id,
+        lesson_instance_id: instance.id,
+      });
+    }
+
+    const serviceMap = instance?.service_id
+      ? await loadServiceMap(this.tenantClient, this.orgId, [instance.service_id])
+      : new Map();
+    const service = serviceMap.get(instance?.service_id) || null;
+    const policies = participant?.id
+      ? await loadFinancePolicies(this.tenantClient, this.orgId)
+      : null;
+    const coverageDecision = participant?.student_id
+      ? await resolveLessonCoverageDecision(this.tenantClient, {
+        orgId: this.orgId,
+        studentId: participant.student_id,
+        serviceId: instance?.service_id,
+        lessonDate: instance?.datetime_start,
+        lessonParticipantId: participant.id,
+      })
+      : null;
+    const desiredResult = participant?.id
+      ? buildDesiredChargeDescriptors({
+        participant,
+        service,
+        coverageDecision,
+        policies,
+      })
+      : null;
+    const openLessonCharges = participant?.id
+      ? await loadOpenLessonCharges(this.tenantClient, participant.id)
+      : [];
+    const hmoChargeRows = openLessonCharges.filter((row) => normalizeString(row?.hmo_provider_id));
+    const activeHmoProviderId = normalizeString(
+      hmoChargeRows[0]?.hmo_provider_id
+      || coverageDecision?.authorization?.provider_id
+      || effectiveProviderId,
+    );
+
+    const { data: provider, error: providerError } = activeHmoProviderId
+      ? await this.tenantClient
+        .from('hmo_providers')
+        .select('id, name, is_active')
+        .eq('org_id', this.orgId)
+        .eq('id', activeHmoProviderId)
+        .maybeSingle()
+      : { data: null, error: null };
+    if (providerError) {
+      throw providerError;
+    }
+
+    const { data: hmoLedgerAccount, error: hmoLedgerAccountError } = activeHmoProviderId
+      ? await this.tenantClient
+        .from('ledger_accounts')
+        .select('id, account_type, hmo_provider_id')
+        .eq('org_id', this.orgId)
+        .eq('account_type', HMO_ACCOUNT_TYPE)
+        .eq('hmo_provider_id', activeHmoProviderId)
+        .maybeSingle()
+      : { data: null, error: null };
+    if (hmoLedgerAccountError) {
+      throw hmoLedgerAccountError;
+    }
+
+    const hmoChargeIds = hmoChargeRows.map((row) => row.id).filter(Boolean);
+    const { data: reversalRows, error: reversalError } = hmoChargeIds.length > 0
+      ? await this.tenantClient
+        .from('ledger_transactions')
+        .select('id, reverses_transaction_id')
+        .eq('org_id', this.orgId)
+        .in('reverses_transaction_id', hmoChargeIds)
+      : { data: [], error: null };
+    if (reversalError) {
+      throw reversalError;
+    }
+    const reversedLedgerIds = new Set((reversalRows || []).map((row) => normalizeString(row?.reverses_transaction_id)).filter(Boolean));
+
+    const { data: batchItems, error: batchItemsError } = hmoChargeIds.length > 0
+      ? await this.tenantClient
+        .from('hmo_invoice_batch_items')
+        .select('id, batch_id, ledger_transaction_id, status, amount, expected_amount, paid_amount')
+        .eq('org_id', this.orgId)
+        .in('ledger_transaction_id', hmoChargeIds)
+      : { data: [], error: null };
+    if (batchItemsError && batchItemsError.code !== '42P01') {
+      throw batchItemsError;
+    }
+
+    const batchIds = Array.from(new Set((batchItems || []).map((row) => normalizeString(row?.batch_id)).filter(Boolean)));
+    const { data: batches, error: batchesError } = batchIds.length > 0
+      ? await this.tenantClient
+        .from('hmo_invoice_batches')
+        .select('id, status, hmo_provider_id, external_reference, submitted_at, paid_at')
+        .eq('org_id', this.orgId)
+        .in('id', batchIds)
+      : { data: [], error: null };
+    if (batchesError && batchesError.code !== '42P01') {
+      throw batchesError;
+    }
+
+    const batchMap = new Map((batches || []).map((row) => [row.id, row]));
+    const activeBatchItems = (batchItems || []).filter((item) => (
+      ACTIVE_HMO_BATCH_STATUSES.has(normalizeString(batchMap.get(item.batch_id)?.status).toLowerCase())
+    ));
+    const activeBatchLedgerIds = new Set(activeBatchItems.map((row) => normalizeString(row?.ledger_transaction_id)).filter(Boolean));
+
+    const { data: participantLocks, error: participantLocksError } = participant?.id
+      ? await this.tenantClient
+        .from('participant_locks')
+        .select('id, lock_source_type, lock_source_id, status, metadata, created_at')
+        .eq('org_id', this.orgId)
+        .eq('lesson_participant_id', participant.id)
+      : { data: [], error: null };
+    if (participantLocksError && participantLocksError.code !== '42P01') {
+      throw participantLocksError;
+    }
+
+    const { data: dashboardTasks, error: dashboardTasksError } = participant?.id
+      ? await this.tenantClient
+        .from('dashboard_tasks')
+        .select('id, task_type, title, status, priority, resource_type, resource_id, metadata, created_at, resolved_at')
+        .eq('org_id', this.orgId)
+        .eq('task_type', 'hmo_claim_submission')
+        .eq('resource_id', participant.id)
+        .order('created_at', { ascending: false })
+      : { data: [], error: null };
+    if (dashboardTasksError && dashboardTasksError.code !== '42P01') {
+      throw dashboardTasksError;
+    }
+
+    const missingLinkedLedgerAccountIds = hmoChargeRows
+      .filter((row) => !normalizeString(row?.ledger_account_id))
+      .map((row) => row.id);
+
+    if (!participant?.id) {
+      addCheck('participant_context', 'warning', 'No participant context was provided; batch checks are request-based only.');
+    } else if (!participant?.student_id) {
+      addCheck('student_context', 'warning', 'Participant is not linked to a student, so no HMO claim is expected.', {
+        client_profile_id: participant.client_profile_id || null,
+      });
+    } else if (coverageDecision?.status === 'covered') {
+      addCheck('coverage', 'ok', 'Coverage resolver marked the lesson as HMO-covered.', {
+        authorization_id: coverageDecision?.authorization?.id || null,
+        provider_id: coverageDecision?.authorization?.provider_id || null,
+      });
+    } else {
+      addCheck('coverage', 'warning', 'Coverage resolver did not mark the lesson as HMO-covered.', {
+        status: coverageDecision?.status || null,
+        reason: coverageDecision?.reason || null,
+      });
+    }
+
+    if (desiredResult?.entries?.some((entry) => normalizeAccountType(entry?.accountType) === HMO_ACCOUNT_TYPE)) {
+      addCheck('desired_hmo_entry', 'ok', 'Billing rules expect an HMO receivable for this participant.', {
+        desired_entries: desiredResult.entries,
+      });
+    } else if (desiredResult) {
+      addCheck('desired_hmo_entry', 'warning', 'Billing rules do not currently expect an HMO receivable for this participant.', {
+        desired_status: desiredResult.status,
+        billing_reason: desiredResult.billingReason,
+        warnings: desiredResult.warnings,
+      });
+    }
+
+    if (provider?.id) {
+      addCheck('provider', provider.is_active === false ? 'warning' : 'ok', 'HMO provider record exists.', {
+        provider_id: provider.id,
+        provider_name: provider.name || null,
+        is_active: provider.is_active !== false,
+      });
+    } else if (activeHmoProviderId) {
+      addCheck('provider', 'error', 'The expected HMO provider record was not found.', {
+        provider_id: activeHmoProviderId,
+      });
+    }
+
+    if (hmoLedgerAccount?.id) {
+      addCheck('ledger_account', 'ok', 'HMO provider ledger account exists.', {
+        ledger_account_id: hmoLedgerAccount.id,
+      });
+    } else if (activeHmoProviderId) {
+      addCheck('ledger_account', 'error', 'HMO provider ledger account is missing.', {
+        provider_id: activeHmoProviderId,
+      });
+    }
+
+    if (missingLinkedLedgerAccountIds.length === 0) {
+      if (hmoChargeRows.length > 0) {
+        addCheck('ledger_linkage', 'ok', 'All active HMO receivable rows are linked to a ledger account.');
+      }
+    } else {
+      addCheck('ledger_linkage', 'error', 'Some HMO receivable rows are missing ledger_account_id linkage.', {
+        ledger_transaction_ids: missingLinkedLedgerAccountIds,
+      });
+    }
+
+    if (hmoChargeRows.length > 0) {
+      addCheck('receivable_rows', 'ok', 'Active HMO receivable rows exist for this participant.', {
+        ledger_transaction_ids: hmoChargeRows.map((row) => row.id),
+      });
+    } else if (participant?.id) {
+      addCheck('receivable_rows', 'warning', 'No active HMO receivable ledger rows exist for this participant.', {
+        open_lesson_charge_count: openLessonCharges.length,
+      });
+    }
+
+    if (activeBatchItems.length > 0) {
+      addCheck('batch_state', 'warning', 'This participant already has HMO receivable rows tied to an active claim batch.', {
+        batch_item_ids: activeBatchItems.map((row) => row.id),
+        batch_ids: Array.from(new Set(activeBatchItems.map((row) => row.batch_id))).filter(Boolean),
+      });
+    }
+
+    const claimRequestProviderId = normalizeString(normalizedProviderId || activeHmoProviderId);
+    const claimIdResolution = claimRequestProviderId && normalizedRequestedClaimIds.length > 0
+      ? await this.resolveRequestedHmoClaimLedgerIds({
+        requestedIds: normalizedRequestedClaimIds,
+        hmoProviderId: claimRequestProviderId,
+      })
+      : {
+        ledgerTransactionIds: [],
+        resolvedDashboardTaskIds: [],
+        unresolvedClaimIds: [],
+        ambiguousDashboardTaskIds: [],
+      };
+
+    let requestedCandidateRows = [];
+    let requestedEligibleRows = [];
+    let claimRequestBlockingReason = '';
+    let claimCapacity = { ok: true, details: null };
+
+    if (claimRequestProviderId && normalizedRequestedClaimIds.length > 0) {
+      const requestedLedgerIds = claimIdResolution.ledgerTransactionIds;
+      const { data: requestedDebitRows, error: requestedDebitError } = requestedLedgerIds.length > 0
+        ? await this.tenantClient
+          .from('ledger_transactions')
+          .select('id, org_id, amount, effective_at, hmo_provider_id, hmo_authorization_id, lesson_participant_id, source_type, direction, reverses_transaction_id')
+          .eq('org_id', this.orgId)
+          .eq('source_type', 'lesson_charge')
+          .eq('direction', 'DEBIT')
+          .is('reverses_transaction_id', null)
+          .in('id', requestedLedgerIds)
+        : { data: [], error: null };
+      if (requestedDebitError) {
+        throw requestedDebitError;
+      }
+
+      requestedCandidateRows = Array.isArray(requestedDebitRows) ? requestedDebitRows : [];
+      requestedEligibleRows = requestedCandidateRows.filter((row) => (
+        !reversedLedgerIds.has(normalizeString(row?.id))
+        && !activeBatchLedgerIds.has(normalizeString(row?.id))
+        && normalizeString(row?.hmo_provider_id) === claimRequestProviderId
+      ));
+
+      if (claimIdResolution.unresolvedClaimIds.length > 0) {
+        claimRequestBlockingReason = 'unresolved_claim_ids';
+      } else if ((claimIdResolution.ambiguousDashboardTaskIds || []).length > 0) {
+        claimRequestBlockingReason = 'ambiguous_dashboard_task_ids';
+      } else if (requestedCandidateRows.length !== requestedLedgerIds.length) {
+        claimRequestBlockingReason = 'missing_ledger_transactions';
+      } else if (requestedEligibleRows.length !== requestedLedgerIds.length) {
+        claimRequestBlockingReason = 'already_batched_or_reversed_or_provider_mismatch';
+      } else {
+        try {
+          await this.assertHmoAuthorizationClaimCapacity(requestedEligibleRows);
+        } catch (error) {
+          if (normalizeString(error?.message) === 'hmo_authorization_claim_limit_exceeded') {
+            claimCapacity = { ok: false, details: error.details || null };
+            claimRequestBlockingReason = 'authorization_claim_limit_exceeded';
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      addCheck(
+        'claim_request',
+        claimRequestBlockingReason ? 'error' : 'ok',
+        claimRequestBlockingReason
+          ? 'The provided claim request would currently fail.'
+          : 'The provided claim request passes the current batchability checks.',
+        {
+          provider_id: claimRequestProviderId,
+          requested_claim_ids: normalizedRequestedClaimIds,
+          resolved_ledger_transaction_ids: requestedLedgerIds,
+          unresolved_claim_ids: claimIdResolution.unresolvedClaimIds,
+          ambiguous_dashboard_task_ids: claimIdResolution.ambiguousDashboardTaskIds || [],
+          capacity: claimCapacity,
+        },
+      );
+    }
+
+    const defaultClaimReady = Boolean(
+      participant?.id
+      && coverageDecision?.status === 'covered'
+      && hmoChargeRows.length > 0
+      && missingLinkedLedgerAccountIds.length === 0
+      && provider?.id
+      && provider?.is_active !== false
+      && hmoLedgerAccount?.id
+      && activeBatchItems.length === 0,
+    );
+
+    const claimReady = normalizedRequestedClaimIds.length > 0
+      ? !claimRequestBlockingReason
+      : defaultClaimReady;
+
+    const primaryReason = claimReady
+      ? 'claim_ready'
+      : (
+        claimRequestBlockingReason
+        || checks.find((entry) => entry.status === 'error')?.name
+        || checks.find((entry) => entry.status === 'warning')?.name
+        || 'claim_not_ready'
+      );
+
+    return {
+      summary: {
+        claim_ready: claimReady,
+        primary_reason: primaryReason,
+      },
+      checks,
+      participant: participant ? {
+        id: participant.id,
+        student_id: participant.student_id || null,
+        client_profile_id: participant.client_profile_id || null,
+        participant_status: participant.participant_status || null,
+        lesson_instance_id: instance?.id || null,
+        lesson_datetime_start: instance?.datetime_start || null,
+        lesson_status: instance?.status || null,
+        service_id: instance?.service_id || null,
+        service_name: service?.service_name || service?.name || null,
+      } : null,
+      coverage_decision: coverageDecision || null,
+      desired_result: desiredResult || null,
+      hmo_provider: {
+        provider_id: provider?.id || activeHmoProviderId || null,
+        provider_name: provider?.name || null,
+        is_active: provider?.id ? provider.is_active !== false : null,
+        ledger_account_id: hmoLedgerAccount?.id || null,
+        missing_ledger_account: Boolean(activeHmoProviderId && !hmoLedgerAccount?.id),
+      },
+      ledger: {
+        open_lesson_charges: openLessonCharges,
+        hmo_charge_rows: hmoChargeRows,
+        reversed_ledger_transaction_ids: Array.from(reversedLedgerIds),
+        missing_linked_ledger_account_ids: missingLinkedLedgerAccountIds,
+      },
+      workflow: {
+        dashboard_tasks: dashboardTasks || [],
+        participant_locks: participantLocks || [],
+        active_batch_items: activeBatchItems,
+        batches: batches || [],
+      },
+      claim_request: {
+        provider_id: claimRequestProviderId || null,
+        requested_claim_ids: normalizedRequestedClaimIds,
+        resolution: claimIdResolution,
+        candidate_rows: requestedCandidateRows,
+        eligible_rows: requestedEligibleRows,
+        blocking_reason: claimRequestBlockingReason || null,
+        capacity: claimCapacity,
+      },
+    };
+  }
+
   async createHmoInvoiceBatch({
     hmoProviderId,
     periodStart,

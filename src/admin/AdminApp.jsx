@@ -22,6 +22,7 @@ import KnowledgeBaseView from './modules/KnowledgeBaseView.jsx';
 import ComplianceView from './modules/ComplianceView.jsx';
 import IntegrationHealthView from './modules/IntegrationHealthView.jsx';
 import DataQualityView from './modules/DataQualityView.jsx';
+import AdminToolsView from './modules/AdminToolsView.jsx';
 import OnboardingPipelineView from './modules/OnboardingPipelineView.jsx';
 import EmailLogView from './modules/EmailLogView.jsx';
 import AdminShell from './ui/AdminShell.jsx';
@@ -104,6 +105,7 @@ const LIVE_ELEMENTS = {
   'compliance': <ComplianceView />,
   'integration-health': <IntegrationHealthView />,
   'data-quality': <DataQualityView />,
+  'admin-tools': <AdminToolsView />,
   'onboarding-pipeline': <OnboardingPipelineView />,
   'email-log': <EmailLogView />,
   // Legacy aggregate view retained while its sub-modules are built out.
@@ -284,6 +286,7 @@ export default function AdminApp() {
             <Route path="compliance" element={LIVE_ELEMENTS['compliance']} />
             <Route path="integration-health" element={LIVE_ELEMENTS['integration-health']} />
             <Route path="data-quality" element={LIVE_ELEMENTS['data-quality']} />
+            <Route path="admin-tools" element={LIVE_ELEMENTS['admin-tools']} />
             <Route path="onboarding-pipeline" element={LIVE_ELEMENTS['onboarding-pipeline']} />
             <Route path="email-log" element={LIVE_ELEMENTS['email-log']} />
 

@@ -41,6 +41,8 @@ The one exception is the public announcement endpoint (`api/announcement/`) whic
 3. In `navConfig.js`: set `status: 'live'` for the nav item
 4. In `AdminApp.jsx`: add import, add to `LIVE_ELEMENTS`, add `<Route path="<name>" element={...} />`
 
+Current example: `Admin Tools` lives at `/system-admin/admin-tools` and is backed by `api/system-admin-admin-tools/`.
+
 If you only add to `LIVE_ELEMENTS` but forget the `<Route>`, navigation will hit the catch-all `path="*"` and redirect loop (triggers repeated `is_system_admin` checks visible as network spam).
 
 ## `admin_data` Table — Generic Module Storage

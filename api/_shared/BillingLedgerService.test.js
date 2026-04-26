@@ -1095,6 +1095,72 @@ describe('BillingLedgerService.createHmoInvoiceBatch', () => {
 });
 
 // ---------------------------------------------------------------------------
+// BillingLedgerService.inspectHmoClaimReadiness
+// ---------------------------------------------------------------------------
+
+describe('BillingLedgerService.inspectHmoClaimReadiness', () => {
+  it('reports missing HMO ledger account and missing linkage for a participant', async () => {
+    const client = createMockClient({
+      Services: [makeService()],
+      lesson_instances: [makeInstance()],
+      lesson_participants: [makeParticipant()],
+      finance_policies: makeFinancePolicies(),
+      hmo_authorizations: [makeAuthorization()],
+      hmo_providers: [{ id: 'hmo-1', org_id: 'org-1', name: 'Provider', is_active: true }],
+      ledger_accounts: [
+        { id: 'acct-student', org_id: 'org-1', account_type: 'student', student_id: 'student-1', client_profile_id: 'client-1', hmo_provider_id: null, is_active: true, metadata: {} },
+      ],
+      ledger_transactions: [
+        {
+          id: 'tx-hmo',
+          org_id: 'org-1',
+          ledger_account_id: null,
+          lesson_participant_id: 'part-1',
+          client_profile_id: 'client-1',
+          student_id: null,
+          hmo_provider_id: 'hmo-1',
+          hmo_authorization_id: 'auth-1',
+          service_id: 'svc-1',
+          source_type: 'lesson_charge',
+          direction: 'DEBIT',
+          amount: 2000,
+          effective_at: FIXED_DATE,
+          posted_at: FIXED_DATE,
+          reverses_transaction_id: null,
+          metadata: {},
+        },
+      ],
+      dashboard_tasks: [
+        {
+          id: 'task-1',
+          org_id: 'org-1',
+          task_type: 'hmo_claim_submission',
+          title: 'Submit claim',
+          status: 'open',
+          priority: 'medium',
+          resource_type: 'lesson_participant',
+          resource_id: 'part-1',
+          metadata: { authorization: { id: 'auth-1' } },
+          created_at: FIXED_DATE,
+          resolved_at: null,
+        },
+      ],
+    });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
+
+    const result = await service.inspectHmoClaimReadiness({
+      lessonParticipantId: 'part-1',
+      hmoProviderId: 'hmo-1',
+    });
+
+    assert.equal(result.summary.claim_ready, false);
+    assert.equal(result.hmo_provider.missing_ledger_account, true);
+    assert.deepEqual(result.ledger.missing_linked_ledger_account_ids, ['tx-hmo']);
+    assert.ok(result.checks.some((check) => check.name === 'ledger_account' && check.status === 'error'));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // resolveLedgerAccount — upsert idempotency
 // ---------------------------------------------------------------------------
 
