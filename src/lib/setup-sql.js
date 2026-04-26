@@ -5422,7 +5422,7 @@ CREATE TABLE IF NOT EXISTS public.ledger_accounts (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   CONSTRAINT ledger_accounts_account_type_check CHECK (account_type IN ('student', 'client_profile', 'hmo_provider')),
   CONSTRAINT ledger_accounts_target_check CHECK (
-    (account_type = 'student' AND student_id IS NOT NULL AND client_profile_id IS NOT NULL AND hmo_provider_id IS NULL)
+    (account_type = 'student' AND student_id IS NOT NULL AND hmo_provider_id IS NULL)
     OR (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL)
     OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL)
   )
@@ -5442,6 +5442,15 @@ SET account_type = CASE
 END
 WHERE account_type IS NULL OR account_type NOT IN ('student', 'client_profile', 'hmo_provider');
 
+UPDATE public.ledger_accounts account
+SET client_profile_id = student.client_profile_id
+FROM public.students student
+WHERE account.org_id = student.org_id
+  AND account.student_id = student.id
+  AND account.account_type = 'student'
+  AND account.client_profile_id IS NULL
+  AND student.client_profile_id IS NOT NULL;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_accounts_account_type_check') THEN
@@ -5453,7 +5462,7 @@ BEGIN
     ALTER TABLE public.ledger_accounts
       ADD CONSTRAINT ledger_accounts_target_check
       CHECK (
-        (account_type = 'student' AND student_id IS NOT NULL AND client_profile_id IS NOT NULL AND hmo_provider_id IS NULL)
+        (account_type = 'student' AND student_id IS NOT NULL AND hmo_provider_id IS NULL)
         OR (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL)
         OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL)
       );

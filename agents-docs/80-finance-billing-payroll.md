@@ -65,6 +65,7 @@
 - Calendar, attendance, HMO authorization, and manual billing endpoints must stay thin. They orchestrate domain changes and then call `BillingLedgerService`; they do not contain billing math or direct ledger SQL.
 - Student billing uses a `student` ledger account. One-time customers use a `client_profile` ledger account. HMO receivables use an `hmo_provider` ledger account.
 - `ledger_accounts` must hold first-class HMO provider accounts (`account_type = 'hmo_provider'`, `hmo_provider_id = provider id`). Do not represent HMO receivables as ledger rows with `ledger_account_id = null`.
+- Legacy student `ledger_accounts` rows may exist without `client_profile_id`. Migrations should backfill that link when possible, but schema constraints must not fail solely because a historical student account is missing that column.
 - Schema backfills may repair missing HMO `ledger_account_id` links on historical rows, but must not alter financial facts such as amount, direction, source, effective date, or reversal linkage.
 - HMO billing now uses a canonical coverage-decision model:
   `hmo_provider_tracks` are templates only and hold defaults for `default_customer_charge_amount`, `default_insurer_claim_amount`, `default_post_coverage_policy`, and `default_post_coverage_customer_charge_amount`
