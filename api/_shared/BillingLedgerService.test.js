@@ -954,6 +954,42 @@ describe('BillingLedgerService.createHmoInvoiceBatch', () => {
     assert.equal(client._store.hmo_invoice_batch_items[0].ledger_transaction_id, 'tx-1');
   });
 
+  it('creates missing HMO ledger account and backfills historical HMO rows before batching', async () => {
+    const client = createMockClient({
+      hmo_providers: [{ id: 'hmo-1', org_id: 'org-1', name: 'Provider', is_active: true }],
+      ledger_accounts: [],
+      ledger_transactions: [
+        {
+          id: 'tx-1',
+          org_id: 'org-1',
+          ledger_account_id: null,
+          client_profile_id: 'anchor-client',
+          lesson_participant_id: 'part-1',
+          hmo_provider_id: 'hmo-1',
+          hmo_authorization_id: 'auth-1',
+          source_type: 'lesson_charge',
+          direction: 'DEBIT',
+          amount: 2000,
+          effective_at: '2025-03-01T00:00:00Z',
+          reverses_transaction_id: null,
+        },
+      ],
+    });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
+
+    const result = await service.createHmoInvoiceBatch({
+      hmoProviderId: 'hmo-1',
+      ledgerTransactionIds: ['tx-1'],
+      actorUserId: 'u1',
+    });
+
+    assert.deepEqual(result.ledgerTransactionIds, ['tx-1']);
+    const hmoAccount = client._store.ledger_accounts.find((account) => account.account_type === 'hmo_provider' && account.hmo_provider_id === 'hmo-1');
+    assert.ok(hmoAccount?.id, 'expected HMO ledger account to be created');
+    const transaction = client._store.ledger_transactions.find((row) => row.id === 'tx-1');
+    assert.equal(transaction?.ledger_account_id, hmoAccount.id);
+  });
+
   it('issued HMO invoice batch — balance unchanged until payment is recorded', async () => {
     // Must seed ledger_account_id so getAccountBalance (which queries by ledger_account_id) can find the debit.
     const client = createMockClient({

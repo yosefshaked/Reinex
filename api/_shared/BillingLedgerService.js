@@ -1378,6 +1378,37 @@ export default class BillingLedgerService {
     };
   }
 
+  async ensureHmoProviderLedgerAccount({ hmoProviderId }) {
+    const normalizedProviderId = normalizeString(hmoProviderId);
+    if (!this.orgId || !normalizedProviderId) {
+      throw new Error('invalid_ledger_account_target');
+    }
+
+    const ledgerAccount = await resolveLedgerAccount(
+      this.tenantClient,
+      this.orgId,
+      HMO_ACCOUNT_TYPE,
+      normalizedProviderId,
+    );
+
+    if (!ledgerAccount?.id) {
+      throw new Error('ledger_account_target_not_found');
+    }
+
+    const { error: backfillError } = await this.tenantClient
+      .from('ledger_transactions')
+      .update({ ledger_account_id: ledgerAccount.id })
+      .eq('org_id', this.orgId)
+      .eq('hmo_provider_id', normalizedProviderId)
+      .is('ledger_account_id', null);
+
+    if (backfillError) {
+      throw backfillError;
+    }
+
+    return ledgerAccount;
+  }
+
   async createHmoInvoiceBatch({
     hmoProviderId,
     periodStart,
@@ -1417,6 +1448,8 @@ export default class BillingLedgerService {
     if (provider.is_active === false) {
       throw new Error('hmo_provider_inactive');
     }
+
+    await this.ensureHmoProviderLedgerAccount({ hmoProviderId: normalizedProviderId });
 
     const claimIdResolution = await this.resolveRequestedHmoClaimLedgerIds({
       requestedIds: requestedClaimIds,

@@ -1254,6 +1254,7 @@ Implemented compatibility and integrity fixes discovered during pre-prod testing
 - `BillingLedgerService.resolveLedgerAccount(...)` now creates/reuses real HMO ledger accounts instead of returning an HMO target with `ledger_account_id = null`.
 - `ledger_transactions.client_profile_id` is no longer required for HMO-provider-only ledger activity; the validation trigger now requires either `client_profile_id` or `hmo_provider_id`.
 - `setup-sql.js` backfills HMO provider ledger accounts for existing providers and links historical HMO ledger rows that were created with `ledger_account_id = null`. This is a technical account-link repair only; it does not change ledger amounts, directions, source ids, or effective dates.
+- `BillingLedgerService.createHmoInvoiceBatch(...)` now also self-heals this at runtime for the selected provider: it ensures a real HMO `ledger_accounts` row exists and backfills `ledger_transactions.ledger_account_id` for historical HMO rows before claim-line validation. This keeps claim creation resilient in pre-prod environments where old receivable rows exist before the schema backfill was applied.
 - Unit coverage now verifies that covered HMO attendance creates an HMO debit linked to a real HMO ledger account, and that existing dashboard task ids can still be submitted after resolving to ledger rows.
 
 Verification completed:

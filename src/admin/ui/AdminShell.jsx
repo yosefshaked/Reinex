@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { Home } from 'lucide-react';
+import { ArrowLeft, Home } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -82,6 +82,16 @@ function AdminSidebar() {
       </SidebarContent>
 
       <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild tooltip="Back to app">
+              <Link to="/dashboard">
+                <ArrowLeft />
+                <span>Back to app</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
         <div className="px-2 py-1 text-[11px] text-slate-500 group-data-[collapsible=icon]:hidden">
           Press <kbd className="rounded border border-slate-300 bg-white px-1 font-mono text-[10px]">⌘B</kbd> to toggle
         </div>
@@ -113,6 +123,14 @@ function Topbar() {
         ) : null}
       </div>
       <div className="ml-auto flex items-center gap-2">
+        <Link
+          to="/dashboard"
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          <span>Back to app</span>
+        </Link>
+        <Separator orientation="vertical" className="h-5" />
         <StatusBadge tone="success" dot size="sm">Live</StatusBadge>
       </div>
     </header>
