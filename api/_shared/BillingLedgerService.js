@@ -1565,7 +1565,7 @@ export default class BillingLedgerService {
     const { data: participantLocks, error: participantLocksError } = participant?.id
       ? await this.tenantClient
         .from('participant_locks')
-        .select('id, lock_source_type, lock_source_id, status, metadata, created_at')
+        .select('id, lock_source_type, lock_source_id, lock_reason, created_by, metadata, created_at')
         .eq('org_id', this.orgId)
         .eq('lesson_participant_id', participant.id)
       : { data: [], error: null };
