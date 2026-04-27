@@ -1911,34 +1911,56 @@ export default class BillingLedgerService {
       throw error;
     }
 
-    let query = this.tenantClient
-      .from('ledger_transactions')
-      .select('id, org_id, amount, effective_at, hmo_provider_id, hmo_authorization_id, lesson_participant_id, source_type, direction, reverses_transaction_id')
-      .eq('org_id', this.orgId)
-      .eq('source_type', 'lesson_charge')
-      .eq('direction', 'DEBIT')
-      .is('reverses_transaction_id', null)
-      .order('effective_at', { ascending: true });
-
-    if (requestedLedgerIds.length === 0) {
-      query = query.eq('hmo_provider_id', normalizedProviderId);
-    }
-
-    if (dateKeyToUtcBoundary(periodStart, 'start')) {
-      query = query.gte('effective_at', dateKeyToUtcBoundary(periodStart, 'start'));
-    }
-    if (dateKeyToUtcBoundary(periodEnd, 'end')) {
-      query = query.lte('effective_at', dateKeyToUtcBoundary(periodEnd, 'end'));
-    }
+    let debitRows = [];
     if (requestedLedgerIds.length > 0) {
-      query = query.in('id', requestedLedgerIds);
-    }
+      const { data: requestedRows, error: requestedRowsError } = await this.tenantClient
+        .from('ledger_transactions')
+        .select('id, org_id, amount, effective_at, hmo_provider_id, hmo_authorization_id, lesson_participant_id, source_type, direction, reverses_transaction_id')
+        .eq('org_id', this.orgId)
+        .in('id', requestedLedgerIds)
+        .order('effective_at', { ascending: true });
 
-    const { data: debitRows, error: debitError } = await query;
-    if (debitError) {
-      throw debitError;
-    }
+      if (requestedRowsError) {
+        throw requestedRowsError;
+      }
 
+      // Temporary Debugging: explicit selected claim ids are fetched directly and filtered in code.
+      this.logger.info('Temporary Debugging:createHmoInvoiceBatch:requested-direct-fetch', {
+        orgId: this.orgId,
+        hmoProviderId: normalizedProviderId,
+        requestedLedgerIds,
+        fetchedRowIds: Array.isArray(requestedRows) ? requestedRows.map((row) => row.id) : [],
+      });
+
+      debitRows = (Array.isArray(requestedRows) ? requestedRows : []).filter((row) => (
+        normalizeString(row?.source_type) === 'lesson_charge'
+        && normalizeDirection(row?.direction) === 'DEBIT'
+        && !normalizeString(row?.reverses_transaction_id)
+      ));
+    } else {
+      let query = this.tenantClient
+        .from('ledger_transactions')
+        .select('id, org_id, amount, effective_at, hmo_provider_id, hmo_authorization_id, lesson_participant_id, source_type, direction, reverses_transaction_id')
+        .eq('org_id', this.orgId)
+        .eq('source_type', 'lesson_charge')
+        .eq('direction', 'DEBIT')
+        .is('reverses_transaction_id', null)
+        .eq('hmo_provider_id', normalizedProviderId)
+        .order('effective_at', { ascending: true });
+
+      if (dateKeyToUtcBoundary(periodStart, 'start')) {
+        query = query.gte('effective_at', dateKeyToUtcBoundary(periodStart, 'start'));
+      }
+      if (dateKeyToUtcBoundary(periodEnd, 'end')) {
+        query = query.lte('effective_at', dateKeyToUtcBoundary(periodEnd, 'end'));
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        throw error;
+      }
+      debitRows = Array.isArray(data) ? data : [];
+    }
     const candidateRows = Array.isArray(debitRows) ? debitRows : [];
     const candidateIds = candidateRows.map((row) => row.id).filter(Boolean);
 
