@@ -876,7 +876,7 @@ describe('BillingLedgerService.createHmoInvoiceBatch', () => {
       ],
       hmo_invoice_batch_items: [
         // tx-1 already batched
-        { id: 'item-1', org_id: 'org-1', batch_id: 'old-batch', ledger_transaction_id: 'tx-1', amount: 2000 },
+        { id: 'item-1', org_id: 'org-1', batch_id: 'old-batch', ledger_transaction_id: 'tx-1', amount: 2000, status: 'submitted' },
       ],
     });
     const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
@@ -1087,10 +1087,44 @@ describe('BillingLedgerService.createHmoInvoiceBatch', () => {
 
     await service.cancelHmoInvoiceBatch({ batchId, actorUserId: 'u1', reason: 'test' });
     const batch = client._store.hmo_invoice_batches.find((row) => row.id === batchId);
-    const item = client._store.hmo_invoice_batch_items.find((row) => row.batch_id === batchId);
     assert.equal(batch.status, 'cancelled');
-    assert.equal(item.status, 'cancelled');
+    assert.equal(batch.metadata?.cancelled_item_count, 1);
+    assert.equal(client._store.hmo_invoice_batch_items.length, 1);
+    assert.equal(client._store.hmo_invoice_batch_items[0].status, 'cancelled');
     assert.equal(client._store.participant_locks.length, 0);
+    const restoredTask = client._store.dashboard_tasks.find((row) => row.task_type === 'hmo_claim_submission' && row.resource_id === 'part-1' && row.status === 'open');
+    assert.ok(restoredTask?.id);
+  });
+
+  it('allows creating a new batch again after cancelling an unpaid batch', async () => {
+    const client = createMockClient({
+      hmo_providers: [{ id: 'hmo-1', org_id: 'org-1', name: 'Provider', is_active: true }],
+      ledger_accounts: [{ id: 'acct-hmo', org_id: 'org-1', account_type: 'hmo_provider', student_id: null, client_profile_id: null, hmo_provider_id: 'hmo-1', is_active: true, metadata: {} }],
+      ledger_transactions: [
+        { id: 'tx-1', org_id: 'org-1', ledger_account_id: 'acct-hmo', lesson_participant_id: 'part-1', client_profile_id: 'anchor-client', hmo_provider_id: 'hmo-1', hmo_authorization_id: 'auth-1', source_type: 'lesson_charge', direction: 'DEBIT', amount: 2000, effective_at: '2025-03-01T00:00:00Z', reverses_transaction_id: null },
+      ],
+      participant_locks: [],
+      dashboard_tasks: [],
+    });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
+
+    const firstBatch = await service.createHmoInvoiceBatch({ hmoProviderId: 'hmo-1', actorUserId: 'u1' });
+    await service.cancelHmoInvoiceBatch({ batchId: firstBatch.batchId, actorUserId: 'u1', reason: 'retry' });
+
+    const secondBatch = await service.createHmoInvoiceBatch({
+      hmoProviderId: 'hmo-1',
+      actorUserId: 'u1',
+      ledgerTransactionIds: ['tx-1'],
+    });
+
+    assert.ok(secondBatch.batchId);
+    assert.notEqual(secondBatch.batchId, firstBatch.batchId);
+    assert.deepEqual(secondBatch.ledgerTransactionIds, ['tx-1']);
+    assert.equal(client._store.hmo_invoice_batch_items.length, 2);
+    const cancelledItem = client._store.hmo_invoice_batch_items.find((row) => row.batch_id === firstBatch.batchId);
+    const replacementItem = client._store.hmo_invoice_batch_items.find((row) => row.batch_id === secondBatch.batchId);
+    assert.equal(cancelledItem?.status, 'cancelled');
+    assert.equal(replacementItem?.status, 'draft');
   });
 });
 

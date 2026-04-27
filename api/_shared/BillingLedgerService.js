@@ -4,7 +4,7 @@ import { loadFinancePolicies } from './employee-finance.js';
 import { coerceAgorot } from './currency.js';
 import { normalizeString } from './org-bff.js';
 import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
-import { resolveDashboardTask } from './dashboard-tasks.js';
+import { createDashboardTask, resolveDashboardTask } from './dashboard-tasks.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const STUDENT_ACCOUNT_TYPE = 'student';
@@ -20,6 +20,7 @@ const MANUAL_DEBIT_SOURCE_TYPES = new Set(['manual_adjustment', 'opening_balance
 const REVERSIBLE_SOURCE_TYPES = new Set(['lesson_charge', 'manual_payment', 'manual_adjustment', 'hmo_invoice_payment', 'opening_balance', 'migration']);
 const ACTIVE_HMO_BATCH_STATUSES = new Set(['draft', 'issued', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'closed']);
 const SUBMITTED_HMO_BATCH_STATUSES = new Set(['issued', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'closed']);
+const ACTIVE_HMO_BATCH_ITEM_STATUSES = new Set(['draft', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed']);
 const MANUAL_CREDIT_USAGE_TYPE_BY_SOURCE = {
   manual_payment: 'manual_topup',
   hmo_invoice_payment: 'transfer_received',
@@ -1566,6 +1567,7 @@ export default class BillingLedgerService {
     const batchMap = new Map((batches || []).map((row) => [row.id, row]));
     const activeBatchItems = (batchItems || []).filter((item) => (
       ACTIVE_HMO_BATCH_STATUSES.has(normalizeString(batchMap.get(item.batch_id)?.status).toLowerCase())
+      && ACTIVE_HMO_BATCH_ITEM_STATUSES.has(normalizeString(item?.status).toLowerCase())
     ));
     const activeBatchLedgerIds = new Set(activeBatchItems.map((row) => normalizeString(row?.ledger_transaction_id)).filter(Boolean));
 
@@ -2024,7 +2026,7 @@ export default class BillingLedgerService {
     const { data: existingItems, error: itemsError } = candidateIds.length > 0
       ? await this.tenantClient
         .from('hmo_invoice_batch_items')
-        .select('ledger_transaction_id, batch_id')
+        .select('ledger_transaction_id, batch_id, status')
         .eq('org_id', this.orgId)
         .in('ledger_transaction_id', candidateIds)
       : { data: [], error: null };
@@ -2050,7 +2052,8 @@ export default class BillingLedgerService {
       .filter((batch) => ACTIVE_HMO_BATCH_STATUSES.has(normalizeString(batch?.status).toLowerCase()))
       .map((batch) => batch.id));
     const usedLedgerIds = new Set((existingItems || [])
-      .filter((item) => activeBatchIds.has(item.batch_id))
+      .filter((item) => activeBatchIds.has(item.batch_id)
+        && ACTIVE_HMO_BATCH_ITEM_STATUSES.has(normalizeString(item.status).toLowerCase()))
       .map((row) => row.ledger_transaction_id));
     const eligibleRows = candidateRows.filter((row) => !reversedLedgerIds.has(row.id) && !usedLedgerIds.has(row.id));
 
@@ -2176,7 +2179,7 @@ export default class BillingLedgerService {
 
     const { data: items, error: itemsError } = await this.tenantClient
       .from('hmo_invoice_batch_items')
-      .select('ledger_transaction_id, batch_id')
+      .select('ledger_transaction_id, batch_id, status')
       .eq('org_id', this.orgId)
       .in('ledger_transaction_id', ledgerIds);
     if (itemsError) {
@@ -2201,6 +2204,7 @@ export default class BillingLedgerService {
     const existingCounts = new Map();
     for (const item of items || []) {
       if (!activeBatchIds.has(item.batch_id)) continue;
+      if (!ACTIVE_HMO_BATCH_ITEM_STATUSES.has(normalizeString(item.status).toLowerCase())) continue;
       const authorizationId = ledgerAuthorizationMap.get(item.ledger_transaction_id);
       if (!authorizationId) continue;
       existingCounts.set(authorizationId, (existingCounts.get(authorizationId) || 0) + 1);
@@ -2502,6 +2506,17 @@ export default class BillingLedgerService {
       return { batchId: normalizedBatchId, status: 'cancelled' };
     }
 
+    const { data: items, error: itemsError } = await this.tenantClient
+      .from('hmo_invoice_batch_items')
+      .select('id, ledger_transaction_id, lesson_participant_id, hmo_authorization_id, hmo_provider_id, amount, expected_amount, expected_unit_count, paid_amount, status, metadata')
+      .eq('org_id', this.orgId)
+      .eq('batch_id', normalizedBatchId);
+    if (itemsError) {
+      throw itemsError;
+    }
+
+    const itemRows = Array.isArray(items) ? items : [];
+
     const cancelledAt = this.clock();
     const { error: updateError } = await this.tenantClient
       .from('hmo_invoice_batches')
@@ -2513,6 +2528,7 @@ export default class BillingLedgerService {
           cancelled_by: actorUserId || null,
           cancelled_at: cancelledAt,
           cancel_reason: normalizeString(reason) || null,
+          cancelled_item_count: itemRows.length,
         },
       })
       .eq('org_id', this.orgId)
@@ -2538,6 +2554,28 @@ export default class BillingLedgerService {
       .eq('lock_source_id', normalizedBatchId);
     if (lockDeleteError && lockDeleteError.code !== '42P01') {
       throw lockDeleteError;
+    }
+
+    for (const item of itemRows) {
+      const participantId = normalizeString(item.lesson_participant_id);
+      if (!participantId) continue;
+      await createDashboardTask(this.tenantClient, {
+        orgId: this.orgId,
+        taskType: 'hmo_claim_submission',
+        title: 'תביעת גורם מממן',
+        description: '',
+        priority: 'medium',
+        resourceType: 'lesson_participant',
+        resourceId: participantId,
+        createdBy: actorUserId || null,
+        metadata: {
+          hmo_authorization_id: normalizeString(item.hmo_authorization_id) || null,
+          hmo_provider_id: normalizeString(item.hmo_provider_id) || null,
+          ledger_transaction_id: normalizeString(item.ledger_transaction_id) || null,
+          restored_from_cancelled_hmo_invoice_batch: true,
+          cancelled_hmo_invoice_batch_id: normalizedBatchId,
+        },
+      });
     }
 
     return { batchId: normalizedBatchId, status: 'cancelled' };

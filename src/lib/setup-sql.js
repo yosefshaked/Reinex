@@ -5607,7 +5607,7 @@ CREATE TABLE IF NOT EXISTS public.hmo_invoice_batch_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id uuid NOT NULL REFERENCES public.organizations(id),
   batch_id uuid NOT NULL REFERENCES public.hmo_invoice_batches(id) ON DELETE CASCADE,
-  ledger_transaction_id uuid NOT NULL UNIQUE REFERENCES public.ledger_transactions(id) ON DELETE RESTRICT,
+  ledger_transaction_id uuid NOT NULL REFERENCES public.ledger_transactions(id) ON DELETE RESTRICT,
   amount integer NOT NULL CHECK (amount > 0),
   expected_amount integer NOT NULL DEFAULT 0 CHECK (expected_amount >= 0),
   expected_unit_count integer NOT NULL DEFAULT 1 CHECK (expected_unit_count > 0),
@@ -5633,11 +5633,21 @@ ALTER TABLE public.hmo_invoice_batch_items
   DROP CONSTRAINT IF EXISTS hmo_invoice_batch_items_status_check;
 
 ALTER TABLE public.hmo_invoice_batch_items
+  DROP CONSTRAINT IF EXISTS hmo_invoice_batch_items_ledger_transaction_id_key;
+
+ALTER TABLE public.hmo_invoice_batch_items
   ADD CONSTRAINT hmo_invoice_batch_items_status_check
   CHECK (status IN ('draft', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'cancelled'));
 
 CREATE INDEX IF NOT EXISTS hmo_invoice_batch_items_batch_idx
   ON public.hmo_invoice_batch_items (org_id, batch_id);
+
+CREATE INDEX IF NOT EXISTS hmo_invoice_batch_items_ledger_idx
+  ON public.hmo_invoice_batch_items (org_id, ledger_transaction_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS hmo_invoice_batch_items_active_ledger_uidx
+  ON public.hmo_invoice_batch_items (org_id, ledger_transaction_id)
+  WHERE status IN ('draft', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed');
 
 CREATE INDEX IF NOT EXISTS hmo_invoice_batch_items_authorization_idx
   ON public.hmo_invoice_batch_items (org_id, hmo_authorization_id, status)
