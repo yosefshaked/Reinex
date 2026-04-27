@@ -9,7 +9,11 @@
  * Supported step actions:
  *   navigate, fill, type, click, check, uncheck, hover, select, pressKey,
  *   waitForSelector, waitForURL, waitForNetwork, screenshot, sleep,
- *   store, assert, apiCall, login, logout, clearStorage, scrollTo, focusAndFill
+ *   store, storeFromUrl, assert, apiCall, login, logout, clearStorage, scrollTo, focusAndFill
+ *
+ * click extras:   first (boolean), nth (0-based index)
+ * apiCall extras: storeField supports dot-notation (e.g. "created.id", "participants.0.id")
+ *                 stores: [{ variable, field }] to capture multiple fields from one response
  */
 
 import { mkdirSync, existsSync } from 'fs';
@@ -254,13 +258,31 @@ async function runApiCall(page, params, ctx) {
 
   const data = await response.json().catch(() => ({}));
 
+  function resolveField(obj, fieldPath) {
+    if (!fieldPath) return obj;
+    const parts = String(fieldPath).split('.');
+    const value = parts.reduce(
+      (o, key) => (o !== null && o !== undefined ? o[key] : undefined),
+      obj
+    );
+    return value === undefined ? obj : value;
+  }
+
   if (store) {
-    const storedValue = storeField
-      ? (data[storeField] ?? data)
-      : data;
+    const storedValue = resolveField(data, storeField);
     ctx.vars[store] = typeof storedValue === 'string'
       ? storedValue
       : JSON.stringify(storedValue);
+  }
+
+  if (Array.isArray(params.stores)) {
+    for (const entry of params.stores) {
+      if (!entry?.variable) continue;
+      const storedValue = resolveField(data, entry.field);
+      ctx.vars[entry.variable] = typeof storedValue === 'string'
+        ? storedValue
+        : JSON.stringify(storedValue);
+    }
   }
 
   return data;
@@ -331,7 +353,10 @@ async function executeStep(page, rawStep, ctx) {
 
     // ── Click / Hover / Keyboard ──────────────────────────────────────────
     case 'click': {
-      if (step.first) {
+      if (step.nth != null) {
+        await page.locator(selector).nth(step.nth).waitFor({ state: 'visible', timeout: t });
+        await page.locator(selector).nth(step.nth).click();
+      } else if (step.first) {
         // Use locator().first() when multiple elements may match (e.g. dropdown options)
         await page.locator(selector).first().waitFor({ state: 'visible', timeout: t });
         await page.locator(selector).first().click();
@@ -407,6 +432,21 @@ async function executeStep(page, rawStep, ctx) {
       const path = await takeScreenshot(page, step.name, ctx);
       ctx.screenshots.push({ name: step.name || 'manual', path });
       return path;
+    }
+
+    // ── URL capture ───────────────────────────────────────────────────────
+    case 'storeFromUrl': {
+      const currentUrl = page.url();
+      if (step.pattern) {
+        const rx = new RegExp(step.pattern);
+        const match = currentUrl.match(rx);
+        ctx.vars[step.variable] = match
+          ? (match[step.group != null ? step.group : 1] || '')
+          : '';
+      } else {
+        ctx.vars[step.variable] = currentUrl;
+      }
+      break;
     }
 
     // ── API calls ─────────────────────────────────────────────────────────

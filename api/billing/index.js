@@ -192,7 +192,7 @@ async function buildHmoClaimsReadModel({
   const batchIds = Array.from(new Set((batchItems || []).map((item) => normalizeString(item?.batch_id)).filter(Boolean)));
   const { data: batches, error: batchesError } = batchIds.length > 0
     ? await withOrgScope(client, 'hmo_invoice_batches', orgId)
-      .select('id, hmo_provider_id, status, total_amount, paid_amount, external_reference, period_start, period_end, issued_at, submitted_at, paid_at')
+      .select('id, hmo_provider_id, status, total_amount, paid_amount, external_reference, external_link, notes, period_start, period_end, issued_at, submitted_at, paid_at')
       .in('id', batchIds)
     : { data: [], error: null };
   if (batchesError && batchesError.code !== '42P01') {
@@ -411,6 +411,8 @@ async function buildHmoClaimsReadModel({
       total_amount: batch.total_amount ?? 0,
       paid_amount: batch.paid_amount ?? 0,
       external_reference: normalizeString(batch.external_reference) || null,
+      external_link: normalizeString(batch.external_link) || null,
+      notes: normalizeString(batch.notes) || null,
       period_start: batch.period_start || null,
       period_end: batch.period_end || null,
       submitted_at: batch.submitted_at || batch.issued_at || null,

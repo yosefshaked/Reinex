@@ -1,0 +1,361 @@
+{
+  "id": "form-sending",
+  "name": "Form Sending",
+  "description": "Tests sending forms from every entry point in the app: student header (WhatsApp), student forms tab (email), and one-time customers (WhatsApp).",
+  "config": {
+    "timeout_ms": 20000,
+    "continue_on_step_failure": false
+  },
+  "variables": {
+    "STUDENT_FIRST": "טסט",
+    "STUDENT_LAST": "אוטומטי",
+    "STUDENT_ID": "999000001",
+    "STUDENT_PHONE": "0501234500",
+    "FORM_NAME": "טופס בדיקה אוטומטי",
+    "CLIENT_FIRST": "לקוח",
+    "CLIENT_LAST": "חד פעמי",
+    "CLIENT_PHONE": "0501234599",
+    "CLIENT_ID": "999000005"
+  },
+  "workflows": [
+    {
+      "id": "login",
+      "name": "Login",
+      "steps": [
+        {
+          "id": "login-admin",
+          "action": "login",
+          "role": "admin",
+          "description": "Log in as admin"
+        }
+      ]
+    },
+    {
+      "id": "api-setup-form",
+      "name": "API – Create and publish a test form",
+      "steps": [
+        {
+          "id": "create-form",
+          "action": "apiCall",
+          "description": "Create a test form template",
+          "method": "POST",
+          "endpoint": "/api/forms",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "name": "{{FORM_NAME}}",
+            "blocks": []
+          },
+          "store": "FORM_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "publish-form",
+          "action": "apiCall",
+          "description": "Publish the form so it appears in the SendFormDialog template list",
+          "method": "PUT",
+          "endpoint": "/api/forms/{{FORM_ID}}",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "action": "publish"
+          }
+        }
+      ]
+    },
+    {
+      "id": "api-setup-student",
+      "name": "API – Create or fetch the test student",
+      "steps": [
+        {
+          "id": "create-student",
+          "action": "apiCall",
+          "description": "Create test student – ignore 409 if they already exist",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "{{STUDENT_FIRST}}",
+            "last_name": "{{STUDENT_LAST}}",
+            "identity_number": "{{STUDENT_ID}}",
+            "phone": "{{STUDENT_PHONE}}"
+          },
+          "ignoreStatus": [409]
+        },
+        {
+          "id": "get-student-id",
+          "action": "apiCall",
+          "description": "GET student list to resolve UUID (works regardless of 201 or 409 above)",
+          "method": "GET",
+          "endpoint": "/api/students-list?org_id={{TEST_ORG_ID}}&q={{STUDENT_ID}}",
+          "store": "STUDENT_UUID",
+          "storeField": "0.id"
+        }
+      ]
+    },
+    {
+      "id": "api-setup-client",
+      "name": "API – Create a one-time customer for the third send test",
+      "steps": [
+        {
+          "id": "create-client",
+          "action": "apiCall",
+          "description": "Create a one-time customer (client profile)",
+          "method": "POST",
+          "endpoint": "/api/client-profiles",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "{{CLIENT_FIRST}}",
+            "last_name": "{{CLIENT_LAST}}",
+            "identity_number": "{{CLIENT_ID}}",
+            "phone": "{{CLIENT_PHONE}}"
+          },
+          "store": "CLIENT_PROFILE_ID",
+          "storeField": "id",
+          "ignoreStatus": [409, 422]
+        }
+      ]
+    },
+    {
+      "id": "send-from-student-header",
+      "name": "Send form from student header (WhatsApp)",
+      "steps": [
+        {
+          "id": "navigate-to-student",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/students/{{STUDENT_UUID}}/overview",
+          "description": "Navigate to student overview"
+        },
+        {
+          "id": "wait-student-loaded",
+          "action": "waitForSelector",
+          "selector": "button:has-text('שלח טופס')",
+          "description": "Wait for the student header send button to appear"
+        },
+        {
+          "id": "click-send-form-header",
+          "action": "click",
+          "selector": "button:has-text('שלח טופס')",
+          "first": true,
+          "description": "Click the 'שלח טופס' button in the student header"
+        },
+        {
+          "id": "wait-dialog-open",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "description": "Wait for SendFormDialog to open"
+        },
+        {
+          "id": "wait-templates-loaded",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'] button[role='combobox']",
+          "description": "Wait for the template selector to appear in the dialog"
+        },
+        {
+          "id": "open-template-dropdown",
+          "action": "click",
+          "selector": "[role='dialog'] button[role='combobox']",
+          "first": true,
+          "description": "Open the form template dropdown"
+        },
+        {
+          "id": "select-test-form",
+          "action": "click",
+          "selector": "[role='option']:has-text('{{FORM_NAME}}')",
+          "first": true,
+          "description": "Select our published test form template"
+        },
+        {
+          "id": "delivery-already-whatsapp",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog'] button[role='combobox']:has-text('וואטסאפ')",
+          "description": "Delivery method defaults to WhatsApp – assert it's selected"
+        },
+        {
+          "id": "click-send",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('שלח טופס')",
+          "description": "Click the send button"
+        },
+        {
+          "id": "assert-otp-appears",
+          "action": "assert",
+          "type": "text",
+          "selector": "[role='dialog']",
+          "value": "קוד אימות:",
+          "description": "Verify that an OTP code is shown – confirms WhatsApp routing succeeded"
+        },
+        {
+          "id": "screenshot-whatsapp-otp",
+          "action": "screenshot",
+          "name": "form-send-whatsapp-otp"
+        },
+        {
+          "id": "close-dialog",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('סגור')",
+          "description": "Close the dialog"
+        }
+      ]
+    },
+    {
+      "id": "send-from-student-forms-tab",
+      "name": "Send form from student forms tab (email)",
+      "steps": [
+        {
+          "id": "navigate-to-forms-tab",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/students/{{STUDENT_UUID}}/forms",
+          "description": "Navigate directly to the student forms tab"
+        },
+        {
+          "id": "wait-forms-tab-loaded",
+          "action": "waitForSelector",
+          "selector": "button:has-text('שלח טופס')",
+          "description": "Wait for the forms tab send button to appear"
+        },
+        {
+          "id": "click-send-form-in-tab",
+          "action": "click",
+          "selector": "button:has-text('שלח טופס')",
+          "nth": 1,
+          "description": "Click the 'שלח טופס' button inside the forms tab (nth=1 skips the header button)"
+        },
+        {
+          "id": "wait-dialog-open",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "description": "Wait for SendFormDialog to open"
+        },
+        {
+          "id": "open-template-dropdown",
+          "action": "click",
+          "selector": "[role='dialog'] button[role='combobox']",
+          "first": true,
+          "description": "Open the form template dropdown"
+        },
+        {
+          "id": "select-test-form",
+          "action": "click",
+          "selector": "[role='option']:has-text('{{FORM_NAME}}')",
+          "first": true,
+          "description": "Select our published test form"
+        },
+        {
+          "id": "open-delivery-dropdown",
+          "action": "click",
+          "selector": "[role='dialog'] button[role='combobox']:has-text('וואטסאפ')",
+          "description": "Open the delivery method dropdown (currently WhatsApp)"
+        },
+        {
+          "id": "select-email",
+          "action": "click",
+          "selector": "[role='option']:has-text('אימייל')",
+          "first": true,
+          "description": "Switch delivery method to email"
+        },
+        {
+          "id": "click-send",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('שלח טופס')",
+          "description": "Click the send button"
+        },
+        {
+          "id": "assert-email-success",
+          "action": "assert",
+          "type": "text",
+          "selector": "[role='dialog']",
+          "value": "נשלח בהצלחה למייל",
+          "description": "Verify that the email success message appears in the dialog"
+        },
+        {
+          "id": "screenshot-email-success",
+          "action": "screenshot",
+          "name": "form-send-email-success"
+        },
+        {
+          "id": "close-dialog",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('סגור')",
+          "description": "Close the dialog"
+        }
+      ]
+    },
+    {
+      "id": "send-from-one-time-customer",
+      "name": "Send form from one-time customer page (WhatsApp)",
+      "steps": [
+        {
+          "id": "navigate-to-client",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/one-time-customers/{{CLIENT_PROFILE_ID}}",
+          "description": "Navigate directly to the one-time customer detail page"
+        },
+        {
+          "id": "wait-client-page-loaded",
+          "action": "waitForSelector",
+          "selector": "button:has-text('שלח טופס')",
+          "description": "Wait for the send form button on the client page"
+        },
+        {
+          "id": "click-send-form",
+          "action": "click",
+          "selector": "button:has-text('שלח טופס')",
+          "first": true,
+          "description": "Click the 'שלח טופס' button on the one-time customer page"
+        },
+        {
+          "id": "wait-dialog-open",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "description": "Wait for SendFormDialog to open"
+        },
+        {
+          "id": "open-template-dropdown",
+          "action": "click",
+          "selector": "[role='dialog'] button[role='combobox']",
+          "first": true,
+          "description": "Open the form template dropdown"
+        },
+        {
+          "id": "select-test-form",
+          "action": "click",
+          "selector": "[role='option']:has-text('{{FORM_NAME}}')",
+          "first": true,
+          "description": "Select our published test form"
+        },
+        {
+          "id": "delivery-already-whatsapp",
+          "action": "assert",
+          "type": "visible",
+          "selector": "[role='dialog'] button[role='combobox']:has-text('וואטסאפ')",
+          "description": "Delivery defaults to WhatsApp"
+        },
+        {
+          "id": "click-send",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('שלח טופס')",
+          "description": "Click the send button"
+        },
+        {
+          "id": "assert-otp-appears",
+          "action": "assert",
+          "type": "text",
+          "selector": "[role='dialog']",
+          "value": "קוד אימות:",
+          "description": "Verify OTP code appears – confirms WhatsApp routing succeeded"
+        },
+        {
+          "id": "screenshot-client-whatsapp",
+          "action": "screenshot",
+          "name": "form-send-client-whatsapp-otp"
+        },
+        {
+          "id": "close-dialog",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('סגור')",
+          "description": "Close the dialog"
+        }
+      ]
+    }
+  ]
+}

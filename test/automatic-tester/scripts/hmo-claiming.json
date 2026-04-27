@@ -1,0 +1,332 @@
+{
+  "id": "hmo-claiming",
+  "name": "HMO Claiming – End to End",
+  "description": "Full HMO claiming flow: create provider + track → assign authorization to student → create lesson → mark attended → open financials claims tab → create draft batch → submit batch.",
+  "config": {
+    "timeout_ms": 25000,
+    "continue_on_step_failure": false
+  },
+  "variables": {
+    "HMO_STUDENT_FIRST": "תלמיד",
+    "HMO_STUDENT_LAST": "קופת חולים",
+    "HMO_STUDENT_ID": "999000002",
+    "HMO_STUDENT_PHONE": "0501234502",
+    "HMO_PROVIDER_NAME": "קופת חולים בדיקה",
+    "HMO_TRACK_NAME": "מסלול בדיקה",
+    "LESSON_DATETIME": "2026-04-01T08:00:00.000Z",
+    "LESSON_DURATION": "45"
+  },
+  "workflows": [
+    {
+      "id": "login",
+      "name": "Login",
+      "steps": [
+        {
+          "id": "login-admin",
+          "action": "login",
+          "role": "admin",
+          "description": "Log in as admin"
+        }
+      ]
+    },
+    {
+      "id": "api-setup-instructor",
+      "name": "API – Create a test instructor employee",
+      "steps": [
+        {
+          "id": "create-instructor",
+          "action": "apiCall",
+          "description": "Create a standalone instructor employee for use in the test lesson",
+          "method": "POST",
+          "endpoint": "/api/instructors",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "מדריך",
+            "last_name": "בדיקה",
+            "employee_type": "instructor",
+            "payroll_model": "lesson_based",
+            "current_rate": 20000
+          },
+          "store": "INSTRUCTOR_ID",
+          "storeField": "id"
+        }
+      ]
+    },
+    {
+      "id": "api-setup-service",
+      "name": "API – Resolve service ID",
+      "steps": [
+        {
+          "id": "get-service",
+          "action": "apiCall",
+          "description": "Fetch the first available service to use for the HMO track and lesson",
+          "method": "GET",
+          "endpoint": "/api/services?org_id={{TEST_ORG_ID}}",
+          "store": "SERVICE_ID",
+          "storeField": "0.id"
+        }
+      ]
+    },
+    {
+      "id": "api-setup-student",
+      "name": "API – Create or fetch the HMO test student",
+      "steps": [
+        {
+          "id": "create-student",
+          "action": "apiCall",
+          "description": "Create HMO test student – ignore 409 if already exists",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "first_name": "{{HMO_STUDENT_FIRST}}",
+            "last_name": "{{HMO_STUDENT_LAST}}",
+            "identity_number": "{{HMO_STUDENT_ID}}",
+            "phone": "{{HMO_STUDENT_PHONE}}"
+          },
+          "ignoreStatus": [409]
+        },
+        {
+          "id": "get-student-id",
+          "action": "apiCall",
+          "description": "GET student list to resolve UUID (handles both 201 and 409 above)",
+          "method": "GET",
+          "endpoint": "/api/students-list?org_id={{TEST_ORG_ID}}&q={{HMO_STUDENT_ID}}",
+          "store": "HMO_STUDENT_UUID",
+          "storeField": "0.id"
+        }
+      ]
+    },
+    {
+      "id": "api-setup-provider-track",
+      "name": "API – Create HMO provider and track",
+      "steps": [
+        {
+          "id": "create-provider",
+          "action": "apiCall",
+          "description": "Create a new HMO provider",
+          "method": "POST",
+          "endpoint": "/api/settings-medical-providers",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "entity": "provider",
+            "name": "{{HMO_PROVIDER_NAME}}",
+            "is_active": true
+          },
+          "store": "HMO_PROVIDER_ID",
+          "storeField": "created.id"
+        },
+        {
+          "id": "create-track",
+          "action": "apiCall",
+          "description": "Create a track under the new HMO provider",
+          "method": "POST",
+          "endpoint": "/api/settings-medical-providers",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "entity": "track",
+            "provider_id": "{{HMO_PROVIDER_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "name": "{{HMO_TRACK_NAME}}",
+            "payment_mode": "fully_paid_by_hmo",
+            "default_customer_charge_amount": 0,
+            "default_insurer_claim_amount": 10000,
+            "default_post_coverage_policy": "service_default"
+          },
+          "store": "HMO_TRACK_ID",
+          "storeField": "created.id"
+        }
+      ]
+    },
+    {
+      "id": "api-setup-authorization",
+      "name": "API – Assign HMO authorization to the student",
+      "steps": [
+        {
+          "id": "create-authorization",
+          "action": "apiCall",
+          "description": "Create an active HMO authorization for the student on this track",
+          "method": "POST",
+          "endpoint": "/api/hmo-authorizations",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "student_id": "{{HMO_STUDENT_UUID}}",
+            "provider_id": "{{HMO_PROVIDER_ID}}",
+            "provider_track_id": "{{HMO_TRACK_ID}}",
+            "authorized_lessons": 10,
+            "status": "active"
+          },
+          "store": "AUTHORIZATION_ID",
+          "storeField": "authorization.id"
+        }
+      ]
+    },
+    {
+      "id": "api-setup-lesson",
+      "name": "API – Create lesson instance and mark student as attended",
+      "steps": [
+        {
+          "id": "create-lesson",
+          "action": "apiCall",
+          "description": "Create a lesson instance with the HMO student as participant",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{LESSON_DATETIME}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": ["{{HMO_STUDENT_UUID}}"]
+          },
+          "stores": [
+            { "variable": "LESSON_INSTANCE_ID", "field": "id" },
+            { "variable": "LESSON_PARTICIPANT_ID", "field": "participants.0.id" }
+          ]
+        },
+        {
+          "id": "mark-attended",
+          "action": "apiCall",
+          "description": "Mark the student as attended – triggers HMO billing ledger entry creation",
+          "method": "PUT",
+          "endpoint": "/api/calendar-attendance",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instance_id": "{{LESSON_INSTANCE_ID}}",
+            "participant_id": "{{LESSON_PARTICIPANT_ID}}",
+            "participant_status": "attended"
+          }
+        },
+        {
+          "id": "wait-for-ledger",
+          "action": "sleep",
+          "ms": 2000,
+          "description": "Allow billing sync to complete before checking the claims UI"
+        }
+      ]
+    },
+    {
+      "id": "ui-claims-navigate",
+      "name": "UI – Open financials claims tab",
+      "steps": [
+        {
+          "id": "navigate-to-financials",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/financials",
+          "description": "Navigate to the financials page"
+        },
+        {
+          "id": "click-claims-tab",
+          "action": "click",
+          "selector": "button[role='tab']:has-text('תביעות HMO')",
+          "description": "Switch to the HMO claims tab"
+        },
+        {
+          "id": "wait-claims-loaded",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('יצירת דרישת HMO')",
+          "description": "Wait for the claim creation panel to appear"
+        },
+        {
+          "id": "screenshot-claims-tab",
+          "action": "screenshot",
+          "name": "hmo-claims-tab"
+        }
+      ]
+    },
+    {
+      "id": "ui-claims-create-batch",
+      "name": "UI – Select claimable rows and create draft batch",
+      "steps": [
+        {
+          "id": "click-provider-rows",
+          "action": "click",
+          "selector": "button:has-text('{{HMO_PROVIDER_NAME}}')",
+          "first": true,
+          "description": "Click the provider card to select all claimable rows for our test provider"
+        },
+        {
+          "id": "wait-rows-selected",
+          "action": "waitForSelector",
+          "selector": "button:has-text('צור טיוטה מ')",
+          "description": "Wait for the 'create draft' button to show selected row count"
+        },
+        {
+          "id": "click-create-batch",
+          "action": "click",
+          "selector": "button:has-text('צור טיוטה מ')",
+          "description": "Click to create the draft batch"
+        },
+        {
+          "id": "wait-batch-created",
+          "action": "waitForSelector",
+          "selector": "h3:has-text('טיוטות ודרישות שנוצרו')",
+          "description": "Wait for the batches section to be visible (it was already there)"
+        },
+        {
+          "id": "sleep-after-create",
+          "action": "sleep",
+          "ms": 1500,
+          "description": "Wait for the batch to appear in the list after creation"
+        },
+        {
+          "id": "assert-batch-visible",
+          "action": "assert",
+          "type": "visible",
+          "selector": "button:has-text('סמן כנשלח')",
+          "description": "Assert that the newly created draft batch shows the submit button"
+        },
+        {
+          "id": "screenshot-batch-created",
+          "action": "screenshot",
+          "name": "hmo-batch-created"
+        }
+      ]
+    },
+    {
+      "id": "ui-claims-submit-batch",
+      "name": "UI – Submit the draft batch",
+      "steps": [
+        {
+          "id": "click-submit-batch",
+          "action": "click",
+          "selector": "button:has-text('סמן כנשלח')",
+          "first": true,
+          "description": "Click 'סמן כנשלח' on the draft batch to open the submit dialog"
+        },
+        {
+          "id": "wait-submit-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "description": "Wait for the submit dialog to open"
+        },
+        {
+          "id": "confirm-submit",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('סמן כנשלח')",
+          "description": "Confirm submission in the dialog"
+        },
+        {
+          "id": "wait-dialog-closed",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden",
+          "description": "Wait for the dialog to close after successful submission"
+        },
+        {
+          "id": "assert-no-draft-button",
+          "action": "assert",
+          "type": "visible",
+          "selector": "button:has-text('סמן כנשלח')",
+          "not": true,
+          "description": "After submission, no more draft batches remain with the submit button"
+        },
+        {
+          "id": "screenshot-batch-submitted",
+          "action": "screenshot",
+          "name": "hmo-batch-submitted"
+        }
+      ]
+    }
+  ]
+}

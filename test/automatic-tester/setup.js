@@ -799,7 +799,7 @@ async function ensureTestService(supabaseUrl, serviceKey, orgId) {
 // Ensures that students with the test identity numbers are removed before each
 // test run so that the deduplication guard in AddStudentForm does not block.
 async function ensureTestStudentClean(supabaseUrl, serviceKey, orgId) {
-  const testIdentityNumbers = ['999000001'];
+  const testIdentityNumbers = ['999000001', '999000002', '999000005'];
 
   for (const identityNumber of testIdentityNumbers) {
     let students;
