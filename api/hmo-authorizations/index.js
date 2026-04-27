@@ -98,7 +98,18 @@ export default async function (context, req) {
         serviceId,
         activeOnly,
       });
-      return respond(context, 200, { authorizations });
+      const authorizationLessonCounts = studentId
+        ? await billingService.getStudentAuthorizationLessonCounts({
+          studentId,
+          authorizations,
+        })
+        : new Map();
+      return respond(context, 200, {
+        authorizations: authorizations.map((authorization) => ({
+          ...authorization,
+          lesson_counts: authorizationLessonCounts.get(authorization.id) || null,
+        })),
+      });
     } catch (error) {
       context.log?.error?.('hmo-authorizations failed to load records', { message: error?.message, code: error?.code });
       return respond(context, 500, { message: error?.code === '42P01' ? 'schema_upgrade_required' : 'failed_to_load_hmo_authorizations' });

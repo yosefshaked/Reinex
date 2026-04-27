@@ -7,6 +7,11 @@ import BillingLedgerService, {
   buildDesiredChargeDescriptors,
   extractActiveLedgerAmounts,
 } from './BillingLedgerService.js';
+import {
+  buildLessonCountBuckets,
+  buildLiveCommitmentLessonCounts,
+  resolveEntitlementUsageDelta,
+} from './commitment-behavior.js';
 
 // ---------------------------------------------------------------------------
 // In-memory Supabase client mock
@@ -470,6 +475,158 @@ describe('extractActiveLedgerAmounts', () => {
   });
 });
 
+describe('lesson count helpers', () => {
+  it('builds consumed / reserved / available buckets safely', () => {
+    const result = buildLessonCountBuckets({
+      totalAuthorizedLessons: 10,
+      consumedLessons: 3,
+      reservedLessons: 2,
+    });
+    assert.deepEqual(result, {
+      total_authorized_lessons: 10,
+      consumed_lessons: 3,
+      reserved_lessons: 2,
+      available_lessons_to_book: 5,
+      remaining_lessons: 5,
+    });
+  });
+
+  it('treats HMO no-show as non-consuming even if billable', () => {
+    const result = resolveEntitlementUsageDelta({
+      entitlementType: 'hmo',
+      participantStatus: 'no_show',
+      isFutureLesson: false,
+      isBillable: true,
+      coverageStatus: 'covered',
+    });
+    assert.deepEqual(result, { consumed_lessons: 0, reserved_lessons: 0 });
+  });
+
+  it('treats HMO cancelled_student as non-consuming and non-reserving', () => {
+    const result = resolveEntitlementUsageDelta({
+      entitlementType: 'hmo',
+      participantStatus: 'cancelled_student',
+      isFutureLesson: false,
+      isBillable: true,
+      coverageStatus: 'covered',
+    });
+    assert.deepEqual(result, { consumed_lessons: 0, reserved_lessons: 0 });
+  });
+
+  it('treats HMO cancelled_clinic as non-consuming and non-reserving', () => {
+    const result = resolveEntitlementUsageDelta({
+      entitlementType: 'hmo',
+      participantStatus: 'cancelled_clinic',
+      isFutureLesson: false,
+      isBillable: false,
+      coverageStatus: 'covered',
+    });
+    assert.deepEqual(result, { consumed_lessons: 0, reserved_lessons: 0 });
+  });
+
+  it('treats billable package no-show as consumed', () => {
+    const result = resolveEntitlementUsageDelta({
+      entitlementType: 'package',
+      participantStatus: 'no_show',
+      isFutureLesson: false,
+      isBillable: true,
+      coverageStatus: '',
+    });
+    assert.deepEqual(result, { consumed_lessons: 1, reserved_lessons: 0 });
+  });
+
+  it('treats non-billable package cancelled_student as non-consuming', () => {
+    const result = resolveEntitlementUsageDelta({
+      entitlementType: 'package',
+      participantStatus: 'cancelled_student',
+      isFutureLesson: false,
+      isBillable: false,
+      coverageStatus: '',
+    });
+    assert.deepEqual(result, { consumed_lessons: 0, reserved_lessons: 0 });
+  });
+
+  it('builds live package counts per service line', () => {
+    const result = buildLiveCommitmentLessonCounts({
+      commitment: {
+        commitment_type: 'package',
+        metadata: {
+          package_items: [
+            { service_id: 'svc-1', lessons_count: 5, charge_amount: 5000 },
+            { service_id: 'svc-2', lessons_count: 3, charge_amount: 4000 },
+          ],
+        },
+      },
+      billingConsumptionPolicy: {
+        attended: true,
+        no_show: true,
+        cancelled_student: false,
+        cancelled_clinic: false,
+      },
+      lessons: [
+        { service_id: 'svc-1', participant_status: 'attended', is_future_lesson: false },
+        { service_id: 'svc-1', participant_status: 'scheduled', is_future_lesson: true },
+        { service_id: 'svc-2', participant_status: 'no_show', is_future_lesson: false },
+      ],
+    });
+
+    assert.deepEqual(result.package_items_by_service['svc-1'], {
+      service_id: 'svc-1',
+      total_authorized_lessons: 5,
+      consumed_lessons: 1,
+      reserved_lessons: 1,
+      available_lessons_to_book: 3,
+      remaining_lessons: 3,
+    });
+    assert.deepEqual(result.package_items_by_service['svc-2'], {
+      service_id: 'svc-2',
+      total_authorized_lessons: 3,
+      consumed_lessons: 1,
+      reserved_lessons: 0,
+      available_lessons_to_book: 2,
+      remaining_lessons: 2,
+    });
+    assert.deepEqual(result.totals, {
+      total_authorized_lessons: 8,
+      consumed_lessons: 2,
+      reserved_lessons: 1,
+      available_lessons_to_book: 5,
+      remaining_lessons: 5,
+    });
+  });
+
+  it('builds live subscription counts from real lesson statuses', () => {
+    const result = buildLiveCommitmentLessonCounts({
+      commitment: {
+        commitment_type: 'subscription',
+        service_id: 'svc-1',
+        metadata: {
+          subscription: { lessons_count: 6, charge_amount: 5000 },
+        },
+      },
+      billingConsumptionPolicy: {
+        attended: true,
+        no_show: false,
+        cancelled_student: true,
+        cancelled_clinic: false,
+      },
+      lessons: [
+        { service_id: 'svc-1', participant_status: 'attended', is_future_lesson: false },
+        { service_id: 'svc-1', participant_status: 'scheduled', is_future_lesson: true },
+        { service_id: 'svc-1', participant_status: 'cancelled_student', is_future_lesson: false },
+      ],
+    });
+
+    assert.deepEqual(result, {
+      total_authorized_lessons: 6,
+      consumed_lessons: 2,
+      reserved_lessons: 1,
+      available_lessons_to_book: 3,
+      remaining_lessons: 3,
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // BillingLedgerService.getAccountBalance
 // ---------------------------------------------------------------------------
@@ -495,6 +652,70 @@ describe('BillingLedgerService.getAccountBalance', () => {
     const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
     const { balance } = await service.getAccountBalance({ accountType: 'student', accountRefId: 'student-1' });
     assert.equal(balance, 7000); // 10000 - 3000
+  });
+});
+
+describe('BillingLedgerService.getStudentAuthorizationLessonCounts', () => {
+  it('returns consumed, reserved and available buckets for HMO authorization flow', async () => {
+    const client = createMockClient({
+      hmo_authorizations: [makeAuthorization({ authorized_lessons: 10 })],
+    });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: () => '2025-04-10T08:00:00.000Z' });
+
+    const attendedParticipant = makeParticipant({
+      id: 'part-attended',
+      participant_status: 'attended',
+      lesson_instance: makeInstance({ id: 'instance-attended', datetime_start: '2025-04-01T10:00:00.000Z' }),
+    });
+    const scheduledParticipant = makeParticipant({
+      id: 'part-scheduled',
+      participant_status: 'scheduled',
+      lesson_instance: makeInstance({ id: 'instance-scheduled', datetime_start: '2025-04-20T10:00:00.000Z' }),
+    });
+    const noShowParticipant = makeParticipant({
+      id: 'part-no-show',
+      participant_status: 'no_show',
+      lesson_instance: makeInstance({ id: 'instance-no-show', datetime_start: '2025-04-05T10:00:00.000Z' }),
+    });
+
+    const counts = await service.getStudentAuthorizationLessonCounts({
+      studentId: 'student-1',
+      authorizations: [makeAuthorization({ authorized_lessons: 10 })],
+      participants: [attendedParticipant, scheduledParticipant, noShowParticipant],
+      lessonLedgerRows: [
+        {
+          id: 'tx-attended-hmo',
+          org_id: 'org-1',
+          lesson_participant_id: 'part-attended',
+          hmo_provider_id: 'hmo-1',
+          hmo_authorization_id: 'auth-1',
+          source_type: 'lesson_charge',
+          direction: 'DEBIT',
+          amount: 2000,
+          reverses_transaction_id: null,
+        },
+        {
+          id: 'tx-no-show-student',
+          org_id: 'org-1',
+          lesson_participant_id: 'part-no-show',
+          hmo_provider_id: null,
+          hmo_authorization_id: 'auth-1',
+          source_type: 'lesson_charge',
+          direction: 'DEBIT',
+          amount: 5000,
+          reverses_transaction_id: null,
+          student_id: 'student-1',
+        },
+      ],
+    });
+
+    assert.deepEqual(counts.get('auth-1'), {
+      total_authorized_lessons: 10,
+      consumed_lessons: 1,
+      reserved_lessons: 1,
+      available_lessons_to_book: 8,
+      remaining_lessons: 8,
+    });
   });
 });
 

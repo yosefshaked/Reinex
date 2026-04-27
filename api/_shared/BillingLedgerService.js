@@ -5,6 +5,7 @@ import { coerceAgorot } from './currency.js';
 import { normalizeString } from './org-bff.js';
 import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
 import { createDashboardTask, resolveDashboardTask } from './dashboard-tasks.js';
+import { buildLessonCountBuckets, resolveEntitlementUsageDelta } from './commitment-behavior.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
 const STUDENT_ACCOUNT_TYPE = 'student';
@@ -156,6 +157,29 @@ function groupBy(rows, keyResolver) {
     grouped.get(key).push(row);
   }
   return grouped;
+}
+
+function extractActiveLessonChargeRows(rows = []) {
+  const reversedIds = new Set((Array.isArray(rows) ? rows : [])
+    .filter((entry) => normalizeString(entry?.source_type) === 'reversal' && entry?.reverses_transaction_id)
+    .map((entry) => entry.reverses_transaction_id));
+
+  return (Array.isArray(rows) ? rows : []).filter((row) => (
+    normalizeString(row?.source_type) === 'lesson_charge'
+    && !reversedIds.has(row.id)
+  ));
+}
+
+function isFutureScheduledParticipant(participant, nowIso) {
+  const participantStatus = normalizeString(participant?.participant_status).toLowerCase();
+  if (participantStatus !== 'scheduled') {
+    return false;
+  }
+  const lessonStart = normalizeString(participant?.lesson_instance?.datetime_start);
+  if (!lessonStart) {
+    return false;
+  }
+  return lessonStart > nowIso;
 }
 
 function buildLedgerEntrySignature(row) {
@@ -343,15 +367,7 @@ async function loadOpenLessonCharges(tenantClient, lessonParticipantId) {
     throw error;
   }
 
-  const rows = data || [];
-  const reversedIds = new Set(rows
-    .filter((row) => normalizeString(row?.source_type) === 'reversal' && row?.reverses_transaction_id)
-    .map((row) => row.reverses_transaction_id));
-
-  return rows.filter((row) => (
-    normalizeString(row?.source_type) === 'lesson_charge'
-    && !reversedIds.has(row.id)
-  ));
+  return extractActiveLessonChargeRows(data || []);
 }
 
 async function resolveLedgerAccount(tenantClient, orgId, accountType, accountRefId) {
@@ -2618,6 +2634,161 @@ export default class BillingLedgerService {
     return { balance };
   }
 
+  async getStudentAuthorizationLessonCounts({
+    studentId,
+    authorizations = null,
+    participants = null,
+    lessonLedgerRows = null,
+    referenceNow = null,
+  }) {
+    const normalizedStudentId = normalizeString(studentId);
+    if (!normalizedStudentId) {
+      return new Map();
+    }
+
+    const resolvedAuthorizations = Array.isArray(authorizations)
+      ? authorizations
+      : await loadHmoAuthorizations(this.tenantClient, { orgId: this.orgId, studentId: normalizedStudentId });
+    if (resolvedAuthorizations.length === 0) {
+      return new Map();
+    }
+
+    const relevantServiceIds = Array.from(new Set(resolvedAuthorizations
+      .map((authorization) => normalizeString(authorization?.service_id))
+      .filter(Boolean)));
+
+    const resolvedParticipants = Array.isArray(participants)
+      ? participants
+      : await (async () => {
+        const { data, error } = await this.tenantClient
+          .from('lesson_participants')
+          .select(`
+            id,
+            participant_status,
+            client_profile_id,
+            student_id,
+            lesson_instance:lesson_instances!inner(
+              id,
+              datetime_start,
+              service_id,
+              status
+            )
+          `)
+          .eq('org_id', this.orgId)
+          .eq('student_id', normalizedStudentId)
+          .order('lesson_instance(datetime_start)', { ascending: true })
+          .limit(1000);
+
+        if (error) {
+          throw error;
+        }
+        return (data || []).filter((row) => relevantServiceIds.includes(normalizeString(row?.lesson_instance?.service_id)));
+      })();
+
+    const participantIds = resolvedParticipants.map((row) => normalizeString(row?.id)).filter(Boolean);
+    const resolvedLessonLedgerRows = Array.isArray(lessonLedgerRows)
+      ? lessonLedgerRows
+      : await (async () => {
+        if (participantIds.length === 0) {
+          return [];
+        }
+        const { data, error } = await this.tenantClient
+          .from('ledger_transactions')
+          .select('*')
+          .eq('org_id', this.orgId)
+          .in('lesson_participant_id', participantIds)
+          .in('source_type', ['lesson_charge', 'reversal'])
+          .limit(Math.max(4000, participantIds.length * 4));
+
+        if (error) {
+          throw error;
+        }
+        return data || [];
+      })();
+
+    const lessonRowsByParticipant = groupBy(resolvedLessonLedgerRows, (row) => normalizeString(row?.lesson_participant_id));
+    const usageOffsetsByAuthorizationId = new Map();
+    const nowIso = toIsoOrNow(referenceNow, this.clock);
+    const countsByAuthorization = new Map(resolvedAuthorizations.map((authorization) => [
+      authorization.id,
+      { consumed_lessons: 0, reserved_lessons: 0, total_authorized_lessons: Math.max(0, Number(authorization?.authorized_lessons || 0)) },
+    ]));
+
+    for (const participant of resolvedParticipants) {
+      const participantId = normalizeString(participant?.id);
+      const serviceId = normalizeString(participant?.lesson_instance?.service_id);
+      if (!participantId || !serviceId) {
+        continue;
+      }
+
+      const activeChargeRows = extractActiveLessonChargeRows(lessonRowsByParticipant.get(participantId) || []);
+      const activeCoveredAuthorizationIds = Array.from(new Set(activeChargeRows
+        .filter((row) => normalizeString(row?.hmo_provider_id) && normalizeString(row?.hmo_authorization_id))
+        .map((row) => normalizeString(row?.hmo_authorization_id))
+        .filter((authorizationId) => countsByAuthorization.has(authorizationId))));
+
+      if (activeCoveredAuthorizationIds.length > 0) {
+        for (const authorizationId of activeCoveredAuthorizationIds) {
+          const currentCounts = countsByAuthorization.get(authorizationId);
+          if (!currentCounts) continue;
+          const delta = resolveEntitlementUsageDelta({
+            entitlementType: 'hmo',
+            participantStatus: participant?.participant_status,
+            isFutureLesson: false,
+            isBillable: false,
+            coverageStatus: 'covered',
+          });
+          currentCounts.consumed_lessons += delta.consumed_lessons;
+          currentCounts.reserved_lessons += delta.reserved_lessons;
+        }
+        continue;
+      }
+
+      if (!isFutureScheduledParticipant(participant, nowIso)) {
+        continue;
+      }
+
+      const coverageDecision = await resolveLessonCoverageDecision(this.tenantClient, {
+        orgId: this.orgId,
+        studentId: normalizedStudentId,
+        serviceId,
+        lessonDate: participant?.lesson_instance?.datetime_start,
+        lessonParticipantId: participantId,
+        usageOffsetsByAuthorizationId,
+      });
+      const authorizationId = normalizeString(coverageDecision?.authorization_id);
+      if (!authorizationId || !countsByAuthorization.has(authorizationId)) {
+        continue;
+      }
+
+      const currentCounts = countsByAuthorization.get(authorizationId);
+      const delta = resolveEntitlementUsageDelta({
+        entitlementType: 'hmo',
+        participantStatus: participant?.participant_status,
+        isFutureLesson: true,
+        isBillable: false,
+        coverageStatus: coverageDecision?.status,
+      });
+      currentCounts.consumed_lessons += delta.consumed_lessons;
+      currentCounts.reserved_lessons += delta.reserved_lessons;
+      if (delta.reserved_lessons > 0) {
+        usageOffsetsByAuthorizationId.set(
+          authorizationId,
+          Number(usageOffsetsByAuthorizationId.get(authorizationId) || 0) + delta.reserved_lessons,
+        );
+      }
+    }
+
+    return new Map(Array.from(countsByAuthorization.entries()).map(([authorizationId, counts]) => [
+      authorizationId,
+      buildLessonCountBuckets({
+        totalAuthorizedLessons: counts.total_authorized_lessons,
+        consumedLessons: counts.consumed_lessons,
+        reservedLessons: counts.reserved_lessons,
+      }),
+    ]));
+  }
+
   async getStudentBillingSnapshot({
     studentId,
     startDate = null,
@@ -2708,11 +2879,7 @@ export default class BillingLedgerService {
     );
 
     const lessonHistory = (participants || []).map((participant) => {
-      const rows = lessonRowsByParticipant.get(participant.id) || [];
-      const reversedIds = new Set(rows
-        .filter((entry) => normalizeString(entry.source_type) === 'reversal' && entry.reverses_transaction_id)
-        .map((entry) => entry.reverses_transaction_id));
-      const activeRows = rows.filter((row) => normalizeString(row.source_type) === 'lesson_charge' && !reversedIds.has(row.id));
+      const activeRows = extractActiveLessonChargeRows(lessonRowsByParticipant.get(participant.id) || []);
       const studentChargeAmount = activeRows
         .filter((row) => row.student_id === normalizedStudentId && normalizeDirection(row.direction) === 'DEBIT')
         .reduce((sum, row) => sum + coerceAgorot(row.amount), 0);
@@ -2747,6 +2914,12 @@ export default class BillingLedgerService {
       }
       return true;
     });
+    const authorizationLessonCounts = await this.getStudentAuthorizationLessonCounts({
+      studentId: normalizedStudentId,
+      authorizations,
+      participants,
+      lessonLedgerRows,
+    });
 
     return {
       student,
@@ -2763,7 +2936,14 @@ export default class BillingLedgerService {
       },
       ledger_entries: ledgerEntries || [],
       lesson_history: lessonHistory,
-      authorizations,
+      authorizations: authorizations.map((authorization) => ({
+        ...authorization,
+        lesson_counts: authorizationLessonCounts.get(authorization.id) || buildLessonCountBuckets({
+          totalAuthorizedLessons: authorization?.authorized_lessons ?? 0,
+          consumedLessons: 0,
+          reservedLessons: 0,
+        }),
+      })),
     };
   }
 

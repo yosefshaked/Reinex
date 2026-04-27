@@ -67,6 +67,15 @@ function describePostCoverage(policy, amount) {
   return 'מחיר שירות רגיל';
 }
 
+function getLessonCountDisplay(row) {
+  const counts = row?.lesson_counts || null;
+  return {
+    consumed: Number(counts?.consumed_lessons || 0),
+    reserved: Number(counts?.reserved_lessons || 0),
+    available: Number(counts?.available_lessons_to_book || 0),
+  };
+}
+
 function mapAuthorizationErrorMessage(code) {
   switch (String(code || '').trim()) {
     case 'missing_covered_customer_charge_amount':
@@ -359,6 +368,7 @@ export default function HmoAuthorizationManager({
                 const serviceName = services.find((service) => service.id === row.service_id)?.service_name
                   || services.find((service) => service.id === row.service_id)?.name
                   || 'שירות';
+                const lessonCountDisplay = getLessonCountDisplay(row);
                 return (
                   <div key={row.id} className="rounded-xl border border-border bg-slate-50/70 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -374,7 +384,19 @@ export default function HmoAuthorizationManager({
                       </div>
                     </div>
 
-                    <div className="mt-3 grid gap-2 md:grid-cols-4 text-sm">
+                    <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-7 text-sm">
+                      <div className="rounded-lg bg-white p-3">
+                        <div className="text-[11px] text-muted-foreground">נוצלו</div>
+                        <div className="mt-1 font-semibold">{lessonCountDisplay.consumed}</div>
+                      </div>
+                      <div className="rounded-lg bg-white p-3">
+                        <div className="text-[11px] text-muted-foreground">מתוכננים</div>
+                        <div className="mt-1 font-semibold">{lessonCountDisplay.reserved}</div>
+                      </div>
+                      <div className="rounded-lg bg-white p-3">
+                        <div className="text-[11px] text-muted-foreground">זמינים לקביעת תור</div>
+                        <div className="mt-1 font-semibold">{lessonCountDisplay.available}</div>
+                      </div>
                       <div className="rounded-lg bg-white p-3">
                         <div className="text-[11px] text-muted-foreground">לקוח בזמן כיסוי</div>
                         <div className="mt-1 font-semibold">{formatCurrency(row.covered_customer_charge_amount)}</div>
@@ -392,7 +414,10 @@ export default function HmoAuthorizationManager({
                         <div className="mt-1 font-semibold">{formatDate(row.expires_at)}</div>
                       </div>
                     </div>
-                    <div className="mt-2 text-xs text-muted-foreground">תזכורת: {formatDate(row.reminder_date)}</div>
+                    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                      <div>תזכורת: {formatDate(row.reminder_date)}</div>
+                      <div>שיעורים מתוכננים כבר שומרים מקום במכסה, גם לפני שהתקיימו בפועל.</div>
+                    </div>
 
                     {canMutateBilling ? (
                       <div className="mt-3 flex flex-wrap gap-2">

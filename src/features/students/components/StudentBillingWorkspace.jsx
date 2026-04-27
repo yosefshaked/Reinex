@@ -113,6 +113,8 @@ function buildEntryForm() {
     effectiveAt: new Date().toISOString().slice(0, 10),
     notes: '',
     externalReference: '',
+    calculatorServiceId: '',
+    calculatorLessonCount: '1',
   };
 }
 
@@ -258,9 +260,47 @@ export default function StudentBillingWorkspace({
   }
 
   const summary = snapshot?.summary || {};
-  const ledgerEntries = Array.isArray(snapshot?.ledger_entries) ? snapshot.ledger_entries : [];
-  const lessonHistory = Array.isArray(snapshot?.lesson_history) ? snapshot.lesson_history : [];
-  const authorizations = Array.isArray(snapshot?.authorizations) ? snapshot.authorizations : [];
+  const ledgerEntries = useMemo(
+    () => (Array.isArray(snapshot?.ledger_entries) ? snapshot.ledger_entries : []),
+    [snapshot?.ledger_entries],
+  );
+  const lessonHistory = useMemo(
+    () => (Array.isArray(snapshot?.lesson_history) ? snapshot.lesson_history : []),
+    [snapshot?.lesson_history],
+  );
+  const authorizations = useMemo(
+    () => (Array.isArray(snapshot?.authorizations) ? snapshot.authorizations : []),
+    [snapshot?.authorizations],
+  );
+
+  const calculatorServices = useMemo(() => (
+    Array.isArray(services)
+      ? services
+        .filter((service) => service?.is_active !== false)
+        .filter((service) => Number.isFinite(Number(service?.default_customer_charge_amount)))
+        .sort((left, right) => getServiceName(services, left?.id).localeCompare(getServiceName(services, right?.id), 'he'))
+      : []
+  ), [services]);
+
+  const selectedCalculatorService = useMemo(
+    () => calculatorServices.find((service) => service.id === entryForm.calculatorServiceId) || null,
+    [calculatorServices, entryForm.calculatorServiceId],
+  );
+
+  const calculatorLessonCount = useMemo(() => {
+    const parsed = Number.parseInt(entryForm.calculatorLessonCount, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }, [entryForm.calculatorLessonCount]);
+
+  const calculatorAmountAgorot = useMemo(() => {
+    const serviceRate = Number.isFinite(Number(selectedCalculatorService?.default_customer_charge_amount))
+      ? coerceAgorot(selectedCalculatorService.default_customer_charge_amount)
+      : null;
+    if (!serviceRate || !calculatorLessonCount) {
+      return 0;
+    }
+    return serviceRate * calculatorLessonCount;
+  }, [calculatorLessonCount, selectedCalculatorService]);
 
   const studentName = useMemo(() => {
     const source = snapshot?.student || student;
@@ -282,6 +322,22 @@ export default function StudentBillingWorkspace({
   const balanceAgorot = coerceAgorot(summary.balance);
   const balanceIsPositive = balanceAgorot > 0;
   const balanceIsNegative = balanceAgorot < 0;
+
+  function applyCalculatorAmount() {
+    if (!selectedCalculatorService || !calculatorLessonCount || !calculatorAmountAgorot) {
+      toast.error('יש לבחור שירות וכמות שיעורים חוקית.');
+      return;
+    }
+
+    const serviceLabel = getServiceName(services, selectedCalculatorService.id);
+    const suggestedNote = `זיכוי ידני לפי ${calculatorLessonCount} שיעורים של ${serviceLabel}`;
+
+    setEntryForm((current) => ({
+      ...current,
+      amount: (calculatorAmountAgorot / 100).toFixed(2),
+      notes: current.notes.trim() ? current.notes : suggestedNote,
+    }));
+  }
 
   if (!canViewBilling) {
     return (
@@ -405,6 +461,81 @@ export default function StudentBillingWorkspace({
                   <p className="text-xs text-muted-foreground">הסבר לחיוב חובה — הלדר לא ניתן למחיקה.</p>
                 ) : null}
               </div>
+
+              {entryForm.mode === 'payment' ? (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-indigo-950">מחשבון זיכוי מהיר לפי שיעורים</h4>
+                      <p className="text-xs text-indigo-800">
+                        בחרו שירות וכמות שיעורים. המערכת תחשב את הזיכוי לפי מחיר השירות ותעביר אותו לשדה הסכום.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="border-indigo-200 bg-white text-indigo-900">
+                      עדיין נשמר כזיכוי רגיל בלדר
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-4">
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>שירות לחישוב</Label>
+                      <Select
+                        value={entryForm.calculatorServiceId}
+                        onValueChange={(value) => setEntryForm((current) => ({ ...current, calculatorServiceId: value }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="בחירת שירות" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {calculatorServices.map((service) => (
+                            <SelectItem key={service.id} value={service.id}>
+                              {getServiceName(services, service.id)} • {formatCurrency(service.default_customer_charge_amount)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>כמות שיעורים</Label>
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min="1"
+                        step="1"
+                        value={entryForm.calculatorLessonCount}
+                        onChange={(event) => setEntryForm((current) => ({ ...current, calculatorLessonCount: event.target.value }))}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>זיכוי מחושב</Label>
+                      <div className="flex h-10 items-center rounded-md border border-indigo-200 bg-white px-3 text-sm font-semibold text-indigo-950">
+                        {calculatorAmountAgorot > 0 ? formatCurrency(calculatorAmountAgorot) : '—'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs text-indigo-900">
+                      {selectedCalculatorService ? (
+                        <>
+                          מחיר שירות: {formatCurrency(selectedCalculatorService.default_customer_charge_amount)} לכל שיעור
+                        </>
+                      ) : 'יש לבחור שירות פעיל עם מחיר מוגדר.'}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-indigo-300 bg-white text-indigo-950 hover:bg-indigo-100"
+                      onClick={applyCalculatorAmount}
+                      disabled={!selectedCalculatorService || calculatorLessonCount <= 0 || saving}
+                    >
+                      העבר לסכום
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="flex flex-wrap gap-2">
                 <Button onClick={handleAppendEntry} disabled={saving}>

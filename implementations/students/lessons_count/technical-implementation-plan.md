@@ -551,16 +551,16 @@ Update this table during implementation.
 
 | Step | Title | Status | Owner | Last Updated | Notes |
 |---|---|---|---|---|---|
-| 0 | Baseline audit | pending | AI dev team | - | - |
-| 1 | Introduce lesson-count rule helpers | pending | AI dev team | - | - |
+| 0 | Baseline audit | completed | AI dev team | 2026-04-27 | Verified active student UI currently exposes lesson-count semantics only through HMO authorization surfaces; legacy commitment runtime still computes stale remaining/consumed counts from entry usage instead of live lesson lifecycle. |
+| 1 | Introduce lesson-count rule helpers | completed | AI dev team | 2026-04-27 | Added shared bucket + usage-delta helpers in `api/_shared/commitment-behavior.js`; `remaining_lessons` is now a compatibility alias for `available_lessons_to_book`. |
 | 2 | Build live lesson-usage loaders from calendar data | pending | AI dev team | - | - |
-| 3 | Implement package/subscription semantics | pending | AI dev team | - | - |
-| 4 | Implement HMO semantics | pending | AI dev team | - | - |
-| 5 | Expose new count fields in backend read models | pending | AI dev team | - | - |
-| 6 | Update student UI | pending | AI dev team | - | - |
+| 3 | Implement package/subscription semantics | completed | AI dev team | 2026-04-27 | Shared runtime now supports live package/subscription consumed/reserved/available semantics and regression coverage for attended, scheduled, no-show, and cancelled-student policy cases. |
+| 4 | Implement HMO semantics | completed | AI dev team | 2026-04-27 | Live HMO consumed/reserved/available counts now derive from active covered ledger rows plus future scheduled covered lessons resolved through `resolveLessonCoverageDecision(...)`. |
+| 5 | Expose new count fields in backend read models | completed | AI dev team | 2026-04-27 | `api/hmo-authorizations` and `BillingLedgerService.getStudentBillingSnapshot()` now expose `lesson_counts` per authorization. |
+| 6 | Update student UI | completed | AI dev team | 2026-04-27 | `HmoAuthorizationManager` now renders `נוצלו`, `מתוכננים`, `זמינים לקביעת תור` per authorization. |
 | 7 | Correct edge-case behavior and reversals | pending | AI dev team | - | - |
-| 8 | Tests | pending | AI dev team | - | - |
-| 9 | Documentation update | pending | AI dev team | - | - |
+| 8 | Tests | completed | AI dev team | 2026-04-27 | Added helper and service regression tests covering HMO consumed/reserved/available semantics and HMO no-show non-consumption. |
+| 9 | Documentation update | completed | AI dev team | 2026-04-27 | Updated finance/student docs to require backend-provided lesson-count buckets and the 3-bucket HMO display model. |
 
 Status values:
 
@@ -579,6 +579,10 @@ Every plan correction must be recorded here.
 | Date | Step | Type | Summary | Reason | Files proving the change |
 |---|---|---|---|---|---|
 | 2026-04-27 | initial | created | Initial plan created | Planning baseline | `api/_shared/commitment-behavior.js`, `api/_shared/hmo.js`, `src/features/students/components/StudentBillingWorkspace.jsx` |
+| 2026-04-27 | 0 | implementation_discovery | Confirmed the currently active student billing surfaces do not yet render package/subscription lesson buckets, while `HmoAuthorizationManager` shows only `authorized_lessons`. Live entitlement counting therefore must be introduced in backend shared helpers first and then exposed explicitly to the HMO/student pages. | Repo audit of the active student pages and billing endpoints showed package/subscription counts are not surfaced in the modern UI, but stale commitment runtime logic still exists and must be corrected for future/current consumers. | `src/features/students/components/HmoAuthorizationManager.jsx`, `src/features/students/components/StudentBillingWorkspace.jsx`, `src/features/students/components/StudentOverviewTab.jsx`, `api\hmo-authorizations\index.js`, `api\_shared\commitment-behavior.js`, `api\_shared\BillingLedgerService.js` |
+| 2026-04-27 | 4/5/6/8/9 | implementation_discovery | Implemented HMO lesson-count buckets end-to-end first because that is the only active student detail surface currently exposing lesson-balance semantics. Package/subscription runtime helpers were upgraded for future/current compatibility, but no active package UI surface was found in the modern student pages during this batch. | The repo's active student pages load HMO authorization data directly and do not currently render package/subscription entitlement cards, so HMO needed the first end-to-end correction while commitment runtime was prepared as shared infrastructure. | `api\_shared\commitment-behavior.js`, `api\_shared\BillingLedgerService.js`, `api\hmo-authorizations\index.js`, `src\features\students\components\HmoAuthorizationManager.jsx`, `api\_shared\BillingLedgerService.test.js`, `agents-docs\80-finance-billing-payroll.md`, `agents-docs\40-students-and-clients.md` |
+| 2026-04-27 | 7/8 | clarification | Locked the cancellation edge-case behavior for HMO to match the approved rule set: `cancelled_student` and `cancelled_clinic` do not consume or reserve HMO entitlement, even if the student-side billing policy later charges privately. Added regression coverage and explanatory UI copy. | Human review clarified that HMOs should not lose entitlement on student/clinic cancellations, matching the existing approved no-show rule. | `api\_shared\BillingLedgerService.test.js`, `src\features\students\components\HmoAuthorizationManager.jsx` |
+| 2026-04-27 | 3/8 | implementation_discovery | Implemented and tested live package/subscription lesson-count semantics in the shared commitment runtime even though no active modern commitment entitlement card was found in the current student pages. This keeps future/current compatibility consumers from staying on stale entry-based counting. | The legacy `buildCommitmentRuntime(...)` path still existed and could otherwise continue returning stale `remaining_lessons` values for package/subscription consumers. | `api\_shared\commitment-behavior.js`, `api\_shared\BillingLedgerService.test.js` |
 
 Type values:
 
@@ -613,4 +617,3 @@ This implementation is complete only when:
 5. Automated tests cover the rule matrix and reversals
 6. Docs are updated
 7. The Step Status Tracker and Change Log in this file are updated to match reality
-

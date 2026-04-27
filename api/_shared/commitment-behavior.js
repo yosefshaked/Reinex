@@ -150,6 +150,172 @@ export function normalizeCommitmentBehavior(commitment) {
 }
 
 const LESSON_USAGE_TYPES = new Set(['standard', 'double', 'cross_service']);
+const COMMITMENT_LESSON_TYPES = new Set(['package', 'subscription']);
+
+export function buildLessonCountBuckets({
+  totalAuthorizedLessons = null,
+  consumedLessons = 0,
+  reservedLessons = 0,
+} = {}) {
+  const normalizedTotal = Number.isFinite(Number(totalAuthorizedLessons))
+    ? Math.max(0, Math.round(Number(totalAuthorizedLessons)))
+    : null;
+  const normalizedConsumed = Math.max(0, Math.round(coerceCount(consumedLessons, 0)));
+  const normalizedReserved = Math.max(0, Math.round(coerceCount(reservedLessons, 0)));
+  const availableLessonsToBook = normalizedTotal == null
+    ? null
+    : Math.max(0, normalizedTotal - normalizedConsumed - normalizedReserved);
+
+  return {
+    total_authorized_lessons: normalizedTotal,
+    consumed_lessons: normalizedConsumed,
+    reserved_lessons: normalizedReserved,
+    available_lessons_to_book: availableLessonsToBook,
+    remaining_lessons: availableLessonsToBook,
+  };
+}
+
+export function resolveEntitlementUsageDelta({
+  entitlementType = '',
+  participantStatus = '',
+  isFutureLesson = false,
+  isBillable = false,
+  coverageStatus = '',
+} = {}) {
+  const normalizedEntitlementType = normalizeString(entitlementType).toLowerCase();
+  const normalizedStatus = normalizeString(participantStatus).toLowerCase();
+  const normalizedCoverageStatus = normalizeString(coverageStatus).toLowerCase();
+
+  if (normalizedEntitlementType === 'hmo') {
+    if (normalizedStatus === 'scheduled' && isFutureLesson) {
+      return normalizedCoverageStatus === 'covered'
+        ? { consumed_lessons: 0, reserved_lessons: 1 }
+        : { consumed_lessons: 0, reserved_lessons: 0 };
+    }
+    if (normalizedStatus === 'attended' && normalizedCoverageStatus === 'covered') {
+      return { consumed_lessons: 1, reserved_lessons: 0 };
+    }
+    return { consumed_lessons: 0, reserved_lessons: 0 };
+  }
+
+  if (COMMITMENT_LESSON_TYPES.has(normalizedEntitlementType)) {
+    if (normalizedStatus === 'scheduled' && isFutureLesson) {
+      return { consumed_lessons: 0, reserved_lessons: 1 };
+    }
+    if (normalizedStatus === 'attended') {
+      return { consumed_lessons: 1, reserved_lessons: 0 };
+    }
+    if (normalizedStatus === 'no_show' && isBillable) {
+      return { consumed_lessons: 1, reserved_lessons: 0 };
+    }
+    if (normalizedStatus === 'cancelled_student' && isBillable && !isFutureLesson) {
+      return { consumed_lessons: 1, reserved_lessons: 0 };
+    }
+  }
+
+  return { consumed_lessons: 0, reserved_lessons: 0 };
+}
+
+export function buildLiveCommitmentLessonCounts({
+  commitment,
+  lessons = [],
+  billingConsumptionPolicy = {},
+} = {}) {
+  const behavior = normalizeCommitmentBehavior(commitment);
+  const normalizedLessons = Array.isArray(lessons) ? lessons : [];
+
+  if (behavior.type === 'package') {
+    const packageItems = behavior.package_items.map((line) => {
+      const lineLessons = normalizedLessons.filter((lesson) => normalizeId(lesson?.service_id) === line.service_id);
+      const totals = lineLessons.reduce((accumulator, lesson) => {
+        const participantStatus = normalizeString(lesson?.participant_status).toLowerCase();
+        const delta = resolveEntitlementUsageDelta({
+          entitlementType: 'package',
+          participantStatus,
+          isFutureLesson: Boolean(lesson?.is_future_lesson),
+          isBillable: Boolean(billingConsumptionPolicy?.[participantStatus]),
+          coverageStatus: normalizeString(lesson?.coverage_status).toLowerCase(),
+        });
+        accumulator.consumed_lessons += delta.consumed_lessons;
+        accumulator.reserved_lessons += delta.reserved_lessons;
+        return accumulator;
+      }, { consumed_lessons: 0, reserved_lessons: 0 });
+
+      return {
+        service_id: line.service_id,
+        ...buildLessonCountBuckets({
+          totalAuthorizedLessons: line.lessons_count,
+          consumedLessons: totals.consumed_lessons,
+          reservedLessons: totals.reserved_lessons,
+        }),
+      };
+    });
+
+    return {
+      package_items_by_service: Object.fromEntries(packageItems.map((item) => [item.service_id, item])),
+      totals: buildLessonCountBuckets({
+        totalAuthorizedLessons: packageItems.reduce((sum, item) => sum + Number(item.total_authorized_lessons || 0), 0),
+        consumedLessons: packageItems.reduce((sum, item) => sum + Number(item.consumed_lessons || 0), 0),
+        reservedLessons: packageItems.reduce((sum, item) => sum + Number(item.reserved_lessons || 0), 0),
+      }),
+    };
+  }
+
+  if (behavior.type === 'subscription') {
+    const matchingLessons = normalizedLessons.filter((lesson) => (
+      normalizeId(lesson?.service_id) === normalizeId(commitment?.service_id)
+    ));
+    const totals = matchingLessons.reduce((accumulator, lesson) => {
+      const participantStatus = normalizeString(lesson?.participant_status).toLowerCase();
+      const delta = resolveEntitlementUsageDelta({
+        entitlementType: 'subscription',
+        participantStatus,
+        isFutureLesson: Boolean(lesson?.is_future_lesson),
+        isBillable: Boolean(billingConsumptionPolicy?.[participantStatus]),
+        coverageStatus: normalizeString(lesson?.coverage_status).toLowerCase(),
+      });
+      accumulator.consumed_lessons += delta.consumed_lessons;
+      accumulator.reserved_lessons += delta.reserved_lessons;
+      return accumulator;
+    }, { consumed_lessons: 0, reserved_lessons: 0 });
+
+    return buildLessonCountBuckets({
+      totalAuthorizedLessons: behavior.subscription?.lessons_count ?? 0,
+      consumedLessons: totals.consumed_lessons,
+      reservedLessons: totals.reserved_lessons,
+    });
+  }
+
+  if (behavior.type === 'hmo') {
+    const matchingLessons = normalizedLessons.filter((lesson) => (
+      normalizeId(lesson?.service_id) === normalizeId(commitment?.service_id)
+    ));
+    const totals = matchingLessons.reduce((accumulator, lesson) => {
+      const delta = resolveEntitlementUsageDelta({
+        entitlementType: 'hmo',
+        participantStatus: normalizeString(lesson?.participant_status).toLowerCase(),
+        isFutureLesson: Boolean(lesson?.is_future_lesson),
+        isBillable: Boolean(billingConsumptionPolicy?.[normalizeString(lesson?.participant_status).toLowerCase()]),
+        coverageStatus: normalizeString(lesson?.coverage_status).toLowerCase(),
+      });
+      accumulator.consumed_lessons += delta.consumed_lessons;
+      accumulator.reserved_lessons += delta.reserved_lessons;
+      return accumulator;
+    }, { consumed_lessons: 0, reserved_lessons: 0 });
+
+    return buildLessonCountBuckets({
+      totalAuthorizedLessons: behavior.hmo?.authorized_lessons ?? 0,
+      consumedLessons: totals.consumed_lessons,
+      reservedLessons: totals.reserved_lessons,
+    });
+  }
+
+  return buildLessonCountBuckets({
+    totalAuthorizedLessons: null,
+    consumedLessons: 0,
+    reservedLessons: 0,
+  });
+}
 
 function groupLessonUsage(entries = []) {
   const usageByService = new Map();
@@ -195,7 +361,7 @@ function groupLessonUsage(entries = []) {
   };
 }
 
-export function buildCommitmentRuntime(commitment, entries = []) {
+export function buildCommitmentRuntime(commitment, entries = [], liveLessonCounts = null) {
   const behavior = normalizeCommitmentBehavior(commitment);
   const usage = groupLessonUsage(entries);
   const ledgerBalance = Math.round(usage.total_credits - usage.total_debits);
@@ -205,16 +371,27 @@ export function buildCommitmentRuntime(commitment, entries = []) {
 
   if (behavior.type === 'package') {
     const packageItems = behavior.package_items.map((line) => {
-      const consumedLessons = usage.usage_by_service.get(line.service_id) || 0;
-      const remainingLessons = Math.max(0, line.lessons_count - consumedLessons);
+      const liveLineCounts = liveLessonCounts?.package_items_by_service?.[line.service_id] || null;
+      const lineBuckets = buildLessonCountBuckets({
+        totalAuthorizedLessons: line.lessons_count,
+        consumedLessons: liveLineCounts?.consumed_lessons ?? usage.usage_by_service.get(line.service_id) ?? 0,
+        reservedLessons: liveLineCounts?.reserved_lessons ?? 0,
+      });
       return {
         ...line,
-        consumed_lessons: consumedLessons,
-        remaining_lessons: remainingLessons,
+        consumed_lessons: lineBuckets.consumed_lessons,
+        reserved_lessons: lineBuckets.reserved_lessons,
+        available_lessons_to_book: lineBuckets.available_lessons_to_book,
+        remaining_lessons: lineBuckets.remaining_lessons,
         total_amount: line.lessons_count * coerceAgorot(line.charge_amount),
-        consumed_amount: consumedLessons * coerceAgorot(line.charge_amount),
-        remaining_amount: remainingLessons * coerceAgorot(line.charge_amount),
+        consumed_amount: lineBuckets.consumed_lessons * coerceAgorot(line.charge_amount),
+        remaining_amount: lineBuckets.remaining_lessons * coerceAgorot(line.charge_amount),
       };
+    });
+    const totals = buildLessonCountBuckets({
+      totalAuthorizedLessons: packageItems.reduce((sum, item) => sum + item.lessons_count, 0),
+      consumedLessons: packageItems.reduce((sum, item) => sum + item.consumed_lessons, 0),
+      reservedLessons: packageItems.reduce((sum, item) => sum + item.reserved_lessons, 0),
     });
 
     return {
@@ -223,9 +400,11 @@ export function buildCommitmentRuntime(commitment, entries = []) {
       package_items: packageItems,
       subscription: null,
       hmo: null,
-      remaining_lessons: packageItems.reduce((sum, item) => sum + item.remaining_lessons, 0),
-      consumed_lessons: usage.consumed_lessons,
-      total_authorized_lessons: packageItems.reduce((sum, item) => sum + item.lessons_count, 0),
+      remaining_lessons: totals.remaining_lessons,
+      consumed_lessons: totals.consumed_lessons,
+      reserved_lessons: totals.reserved_lessons,
+      available_lessons_to_book: totals.available_lessons_to_book,
+      total_authorized_lessons: totals.total_authorized_lessons,
       consumed_amount: usage.consumed_amount,
       remaining_amount: ledgerBalance,
       reminder: null,
@@ -233,22 +412,28 @@ export function buildCommitmentRuntime(commitment, entries = []) {
   }
 
   if (behavior.type === 'subscription') {
-    const totalLessons = Math.max(0, behavior.subscription?.lessons_count || 0);
-    const consumedLessons = usage.consumed_lessons;
-    const remainingLessons = Math.max(0, totalLessons - consumedLessons);
+    const lessonBuckets = buildLessonCountBuckets({
+      totalAuthorizedLessons: Math.max(0, behavior.subscription?.lessons_count || 0),
+      consumedLessons: liveLessonCounts?.consumed_lessons ?? usage.consumed_lessons,
+      reservedLessons: liveLessonCounts?.reserved_lessons ?? 0,
+    });
     return {
       type: behavior.type,
       default_charge_amount: behavior.subscription?.charge_amount ?? defaultChargeAmount,
       package_items: [],
       subscription: {
         ...behavior.subscription,
-        consumed_lessons: consumedLessons,
-        remaining_lessons: remainingLessons,
+        consumed_lessons: lessonBuckets.consumed_lessons,
+        reserved_lessons: lessonBuckets.reserved_lessons,
+        available_lessons_to_book: lessonBuckets.available_lessons_to_book,
+        remaining_lessons: lessonBuckets.remaining_lessons,
       },
       hmo: null,
-      remaining_lessons: remainingLessons,
-      consumed_lessons: consumedLessons,
-      total_authorized_lessons: totalLessons,
+      remaining_lessons: lessonBuckets.remaining_lessons,
+      consumed_lessons: lessonBuckets.consumed_lessons,
+      reserved_lessons: lessonBuckets.reserved_lessons,
+      available_lessons_to_book: lessonBuckets.available_lessons_to_book,
+      total_authorized_lessons: lessonBuckets.total_authorized_lessons,
       consumed_amount: usage.consumed_amount,
       remaining_amount: ledgerBalance,
       reminder: null,
@@ -256,10 +441,12 @@ export function buildCommitmentRuntime(commitment, entries = []) {
   }
 
   if (behavior.type === 'hmo') {
-    const totalLessons = Math.max(0, behavior.hmo?.authorized_lessons || 0);
-    const consumedLessons = usage.consumed_lessons;
-    const remainingLessons = Math.max(0, totalLessons - consumedLessons);
-    const pendingClaimAmount = consumedLessons * coerceAgorot(behavior.hmo?.insurer_claim_amount);
+    const lessonBuckets = buildLessonCountBuckets({
+      totalAuthorizedLessons: Math.max(0, behavior.hmo?.authorized_lessons || 0),
+      consumedLessons: liveLessonCounts?.consumed_lessons ?? usage.consumed_lessons,
+      reservedLessons: liveLessonCounts?.reserved_lessons ?? 0,
+    });
+    const pendingClaimAmount = lessonBuckets.consumed_lessons * coerceAgorot(behavior.hmo?.insurer_claim_amount);
 
     return {
       type: behavior.type,
@@ -268,13 +455,17 @@ export function buildCommitmentRuntime(commitment, entries = []) {
       subscription: null,
       hmo: {
         ...behavior.hmo,
-        consumed_lessons: consumedLessons,
-        remaining_lessons: remainingLessons,
+        consumed_lessons: lessonBuckets.consumed_lessons,
+        reserved_lessons: lessonBuckets.reserved_lessons,
+        available_lessons_to_book: lessonBuckets.available_lessons_to_book,
+        remaining_lessons: lessonBuckets.remaining_lessons,
         pending_claim_amount: pendingClaimAmount,
       },
-      remaining_lessons: remainingLessons,
-      consumed_lessons: consumedLessons,
-      total_authorized_lessons: totalLessons,
+      remaining_lessons: lessonBuckets.remaining_lessons,
+      consumed_lessons: lessonBuckets.consumed_lessons,
+      reserved_lessons: lessonBuckets.reserved_lessons,
+      available_lessons_to_book: lessonBuckets.available_lessons_to_book,
+      total_authorized_lessons: lessonBuckets.total_authorized_lessons,
       consumed_amount: usage.consumed_amount,
       remaining_amount: ledgerBalance,
       reminder: {
@@ -294,6 +485,8 @@ export function buildCommitmentRuntime(commitment, entries = []) {
     hmo: null,
     remaining_lessons: null,
     consumed_lessons: usage.consumed_lessons,
+    reserved_lessons: 0,
+    available_lessons_to_book: null,
     total_authorized_lessons: null,
     consumed_amount: usage.consumed_amount,
     remaining_amount: ledgerBalance,

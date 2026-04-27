@@ -33,3 +33,4 @@
 - One-time customers stay in `client_profiles` and may remain non-students.
 - Instructors are scoped to their own students via lesson-template-derived IDs in [`../api/_shared/instructor-student-scope.js`](../api/_shared/instructor-student-scope.js).
 - Roster pages persist filter state and reuse shared role helpers in [`../src/features/students/utils/endpoints.js`](../src/features/students/utils/endpoints.js).
+- Student detail lesson-balance displays must reuse backend-provided lesson-count buckets (`consumed_lessons`, `reserved_lessons`, `available_lessons_to_book`) rather than recomputing "lessons left" inside React components.

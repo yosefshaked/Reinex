@@ -1,10 +1,33 @@
 {
-  "id": "hmo-claiming",
-  "name": "HMO Claiming – End to End",
-  "description": "Full HMO claiming flow: create provider + track → assign authorization to student → create lesson → mark attended → open financials claims tab → create draft batch → submit batch.",
+  "meta": {
+    "id": "hmo-claiming",
+    "name": "HMO Claiming – End to End",
+    "description": "Full HMO claiming flow: create provider + track → assign authorization to student → create lesson → mark attended → open financials claims tab → create draft batch → submit batch.",
+    "version": "1.0.0",
+    "last_validated_at": "2026-04-27T00:00:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/financials"
+      ],
+      "api_endpoints": [
+        "POST /api/instructors",
+        "GET /api/services",
+        "POST /api/students-list",
+        "GET /api/students-list",
+        "POST /api/settings-medical-providers",
+        "POST /api/hmo-authorizations",
+        "POST /api/lesson-instances",
+        "PUT /api/calendar-attendance",
+        "POST /api/billing"
+      ]
+    }
+  },
   "config": {
     "timeout_ms": 25000,
-    "continue_on_step_failure": false
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
   },
   "variables": {
     "HMO_STUDENT_FIRST": "תלמיד",
@@ -20,6 +43,7 @@
     {
       "id": "login",
       "name": "Login",
+      "description": "Sign in as admin.",
       "steps": [
         {
           "id": "login-admin",
@@ -32,6 +56,7 @@
     {
       "id": "api-setup-instructor",
       "name": "API – Create a test instructor employee",
+      "description": "Creates a standalone instructor employee record to attach to the test lesson.",
       "steps": [
         {
           "id": "create-instructor",
@@ -55,6 +80,7 @@
     {
       "id": "api-setup-service",
       "name": "API – Resolve service ID",
+      "description": "Fetches the first available service to use for the HMO track and lesson instance.",
       "steps": [
         {
           "id": "get-service",
@@ -70,6 +96,7 @@
     {
       "id": "api-setup-student",
       "name": "API – Create or fetch the HMO test student",
+      "description": "Ensures the HMO test student exists and resolves their UUID.",
       "steps": [
         {
           "id": "create-student",
@@ -100,6 +127,7 @@
     {
       "id": "api-setup-provider-track",
       "name": "API – Create HMO provider and track",
+      "description": "Creates a new HMO provider and a track linked to the first available service.",
       "steps": [
         {
           "id": "create-provider",
@@ -141,6 +169,7 @@
     {
       "id": "api-setup-authorization",
       "name": "API – Assign HMO authorization to the student",
+      "description": "Creates an active HMO authorization tying the student to the provider track.",
       "steps": [
         {
           "id": "create-authorization",
@@ -164,6 +193,7 @@
     {
       "id": "api-setup-lesson",
       "name": "API – Create lesson instance and mark student as attended",
+      "description": "Creates a past lesson with the HMO student, marks them attended, which triggers the billing ledger entry that will be claimed.",
       "steps": [
         {
           "id": "create-lesson",
@@ -208,6 +238,7 @@
     {
       "id": "ui-claims-navigate",
       "name": "UI – Open financials claims tab",
+      "description": "Navigates to the financials page and switches to the HMO claims tab.",
       "steps": [
         {
           "id": "navigate-to-financials",
@@ -237,6 +268,7 @@
     {
       "id": "ui-claims-create-batch",
       "name": "UI – Select claimable rows and create draft batch",
+      "description": "Clicks the provider card to select its claimable rows, then creates a draft batch.",
       "steps": [
         {
           "id": "click-provider-rows",
@@ -256,12 +288,6 @@
           "action": "click",
           "selector": "button:has-text('צור טיוטה מ')",
           "description": "Click to create the draft batch"
-        },
-        {
-          "id": "wait-batch-created",
-          "action": "waitForSelector",
-          "selector": "h3:has-text('טיוטות ודרישות שנוצרו')",
-          "description": "Wait for the batches section to be visible (it was already there)"
         },
         {
           "id": "sleep-after-create",
@@ -286,6 +312,7 @@
     {
       "id": "ui-claims-submit-batch",
       "name": "UI – Submit the draft batch",
+      "description": "Opens the submit dialog, confirms, and verifies the batch is no longer in draft state.",
       "steps": [
         {
           "id": "click-submit-batch",

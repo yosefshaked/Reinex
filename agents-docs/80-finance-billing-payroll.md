@@ -42,6 +42,7 @@
 - `fetchBillingSnapshot`, `buildBillingDecision`, `buildDirectClientBillingDecision`, `reconcileStudentBilling` in [`../api/_shared/student-billing.js`](../api/_shared/student-billing.js) are compatibility/read helpers over the ledger service.
 - Finance policy helpers in [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js)
 - HMO authorization loaders in [`../api/_shared/hmo.js`](../api/_shared/hmo.js)
+- Lesson-entitlement helpers in [`../api/_shared/commitment-behavior.js`](../api/_shared/commitment-behavior.js) — shared bucket semantics for `consumed`, `reserved`, and `available_to_book`
 - Currency helpers (frontend): [`../src/lib/currency.js`](../src/lib/currency.js) — `formatCurrency`, `toShekel`, `toAgorot`, `coerceAgorot`
 - Currency helpers (backend): [`../api/_shared/currency.js`](../api/_shared/currency.js) — `coerceAgorot`, `toShekel`, `assertAgorot`, `assertAgorotNullable`, `FINANCE_LIMITS`, `BILLING_THRESHOLDS`
 - HMO claims UI feedback helper: [`../src/features/finance/lib/hmo-claim-feedback.js`](../src/features/finance/lib/hmo-claim-feedback.js) — maps HMO claim/payment errors to user-facing next-step guidance
@@ -79,6 +80,16 @@
   `post_coverage_policy = explicit_customer_charge` means charge the stored explicit post-coverage customer amount
   `post_coverage_policy = manual_block` means billing must stop with a clear blocked reason after entitlement exhaustion
   overlapping matching active authorizations are treated as a data conflict and billing is blocked until resolved
+- Student/HMO lesson-balance UI must not expose only a single ambiguous "lessons left" number when operational counting matters. Preferred output is the 3-bucket model:
+  `consumed_lessons` (`נוצלו`),
+  `reserved_lessons` (`מתוכננים`),
+  `available_lessons_to_book` (`זמינים לקביעת תור`).
+- Student balance top-ups are credit-ledger operations, not package creation. If the UI offers a "lessons × service price" calculator, it must use `Services.default_customer_charge_amount` only as a user convenience and still submit a normal `append_manual_credit` ledger action.
+- For HMO authorizations:
+  attended covered lessons consume entitlement,
+  future scheduled covered lessons reserve entitlement,
+  HMO `no_show` never consumes entitlement even if the org bills the lesson privately,
+  claim submission/payment status must never change entitlement counts.
 - HMO invoice batches are workflow metadata only. Balance changes happen only when explicit ledger credits or debits are appended.
 - HMO claim lifecycle v2 uses `hmo_invoice_batches` / `hmo_invoice_batch_items` as the operational submission model. New batches are created as `draft`, submitted via `BillingLedgerService.submitHmoInvoiceBatch(...)`, and payments must be recorded against submitted batches via `recordHmoInvoiceBatchPayment(...)`.
 - HMO claim batch creation must select active HMO receivable ledger rows, exclude reversed/already-batched rows, include `org_id` on both batch and item inserts, and enforce `hmo_authorizations.authorized_lessons` by selected/submitted claim count, not by paid claim count.

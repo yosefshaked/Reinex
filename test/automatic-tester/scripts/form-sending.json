@@ -1,10 +1,30 @@
 {
-  "id": "form-sending",
-  "name": "Form Sending",
-  "description": "Tests sending forms from every entry point in the app: student header (WhatsApp), student forms tab (email), and one-time customers (WhatsApp).",
+  "meta": {
+    "id": "form-sending",
+    "name": "Form Sending",
+    "description": "Tests sending forms from every entry point in the app: student header (WhatsApp), student forms tab (email), and one-time customers (WhatsApp).",
+    "version": "1.0.0",
+    "last_validated_at": "2026-04-27T00:00:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/students/:id/:tab?",
+        "/one-time-customers/:clientProfileId"
+      ],
+      "api_endpoints": [
+        "POST /api/forms",
+        "PUT /api/forms/:id",
+        "POST /api/students-list",
+        "GET /api/students-list",
+        "POST /api/client-profiles"
+      ]
+    }
+  },
   "config": {
     "timeout_ms": 20000,
-    "continue_on_step_failure": false
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
   },
   "variables": {
     "STUDENT_FIRST": "טסט",
@@ -21,6 +41,7 @@
     {
       "id": "login",
       "name": "Login",
+      "description": "Sign in as admin.",
       "steps": [
         {
           "id": "login-admin",
@@ -33,6 +54,7 @@
     {
       "id": "api-setup-form",
       "name": "API – Create and publish a test form",
+      "description": "Creates a form template and publishes it so it appears in the SendFormDialog template list.",
       "steps": [
         {
           "id": "create-form",
@@ -64,6 +86,7 @@
     {
       "id": "api-setup-student",
       "name": "API – Create or fetch the test student",
+      "description": "Ensures the standard test student exists and resolves their UUID.",
       "steps": [
         {
           "id": "create-student",
@@ -93,7 +116,8 @@
     },
     {
       "id": "api-setup-client",
-      "name": "API – Create a one-time customer for the third send test",
+      "name": "API – Create a one-time customer",
+      "description": "Creates a client profile for use in the one-time customer send test.",
       "steps": [
         {
           "id": "create-client",
@@ -110,13 +134,14 @@
           },
           "store": "CLIENT_PROFILE_ID",
           "storeField": "id",
-          "ignoreStatus": [409, 422]
+          "ignoreStatus": [409]
         }
       ]
     },
     {
       "id": "send-from-student-header",
       "name": "Send form from student header (WhatsApp)",
+      "description": "Opens the SendFormDialog via the student header button, selects the test form, chooses WhatsApp, and verifies an OTP code appears.",
       "steps": [
         {
           "id": "navigate-to-student",
@@ -200,6 +225,7 @@
     {
       "id": "send-from-student-forms-tab",
       "name": "Send form from student forms tab (email)",
+      "description": "Navigates to the forms tab, opens SendFormDialog via the tab-level button, switches to email, and verifies the success message.",
       "steps": [
         {
           "id": "navigate-to-forms-tab",
@@ -283,6 +309,7 @@
     {
       "id": "send-from-one-time-customer",
       "name": "Send form from one-time customer page (WhatsApp)",
+      "description": "Navigates to the one-time customer detail page, opens SendFormDialog, and verifies OTP code appears for WhatsApp delivery.",
       "steps": [
         {
           "id": "navigate-to-client",
