@@ -811,10 +811,17 @@ export function extractActiveLedgerAmounts(ledgerRows = []) {
 }
 
 export default class BillingLedgerService {
-  constructor({ tenantClient, orgId = '', clock = () => new Date().toISOString() }) {
+  constructor({ tenantClient, orgId = '', clock = () => new Date().toISOString(), logger = null }) {
     this.tenantClient = tenantClient;
     this.orgId = normalizeString(orgId);
     this.clock = clock;
+    this.logger = logger && typeof logger.info === 'function'
+      ? logger
+      : {
+        info: (...args) => console.info(...args),
+        warn: (...args) => console.warn(...args),
+        error: (...args) => console.error(...args),
+      };
   }
 
   async syncLessonParticipantCharge({
@@ -1845,6 +1852,16 @@ export default class BillingLedgerService {
       .map((id) => normalizeString(id))
       .filter(Boolean)));
 
+    // Temporary Debugging: trace the exact request shape reaching the billing service.
+    this.logger.info('Temporary Debugging:createHmoInvoiceBatch:start', {
+      orgId: this.orgId,
+      hmoProviderId: normalizedProviderId,
+      periodStart: normalizeString(periodStart) || null,
+      periodEnd: normalizeString(periodEnd) || null,
+      actorUserId: actorUserId || null,
+      requestedClaimIds,
+    });
+
     const { data: provider, error: providerError } = await this.tenantClient
       .from('hmo_providers')
       .select('id, name, is_active')
@@ -1869,6 +1886,18 @@ export default class BillingLedgerService {
       hmoProviderId: normalizedProviderId,
     });
     const requestedLedgerIds = claimIdResolution.ledgerTransactionIds;
+
+    // Temporary Debugging: capture the requested-ID resolution stage before any claim-row filtering.
+    this.logger.info('Temporary Debugging:createHmoInvoiceBatch:claim-id-resolution', {
+      orgId: this.orgId,
+      hmoProviderId: normalizedProviderId,
+      requestedClaimIds,
+      requestedLedgerIds,
+      resolvedDashboardTaskIds: claimIdResolution.resolvedDashboardTaskIds || [],
+      unresolvedClaimIds: claimIdResolution.unresolvedClaimIds || [],
+      ambiguousDashboardTaskIds: claimIdResolution.ambiguousDashboardTaskIds || [],
+    });
+
     if (requestedClaimIds.length > 0 && claimIdResolution.unresolvedClaimIds.length > 0) {
       const error = new Error('hmo_claim_line_not_claimable');
       error.details = {
@@ -1912,7 +1941,34 @@ export default class BillingLedgerService {
 
     const candidateRows = Array.isArray(debitRows) ? debitRows : [];
     const candidateIds = candidateRows.map((row) => row.id).filter(Boolean);
+
+    // Temporary Debugging: show the filtered candidate rows returned by the batchability query.
+    this.logger.info('Temporary Debugging:createHmoInvoiceBatch:filtered-candidates', {
+      orgId: this.orgId,
+      hmoProviderId: normalizedProviderId,
+      requestedLedgerIds,
+      candidateIds,
+      candidateCount: candidateIds.length,
+    });
+
     if (requestedLedgerIds.length > 0 && candidateIds.length !== requestedLedgerIds.length) {
+      const { data: directDebugRows, error: directDebugError } = await this.tenantClient
+        .from('ledger_transactions')
+        .select('id, org_id, source_type, direction, amount, lesson_participant_id, hmo_provider_id, hmo_authorization_id, effective_at, posted_at, reverses_transaction_id')
+        .eq('org_id', this.orgId)
+        .in('id', requestedLedgerIds);
+
+      // Temporary Debugging: if the filtered query found fewer rows than expected, dump the raw ledger rows by ID.
+      this.logger.warn('Temporary Debugging:createHmoInvoiceBatch:candidate-mismatch', {
+        orgId: this.orgId,
+        hmoProviderId: normalizedProviderId,
+        requestedClaimIds,
+        requestedLedgerIds,
+        candidateIds,
+        directDebugError: directDebugError?.message || null,
+        directDebugRows: Array.isArray(directDebugRows) ? directDebugRows : [],
+      });
+
       const foundIds = new Set(candidateIds);
       const error = new Error('hmo_claim_line_not_claimable');
       error.details = {
@@ -1975,6 +2031,17 @@ export default class BillingLedgerService {
       .filter((item) => activeBatchIds.has(item.batch_id))
       .map((row) => row.ledger_transaction_id));
     const eligibleRows = candidateRows.filter((row) => !reversedLedgerIds.has(row.id) && !usedLedgerIds.has(row.id));
+
+    // Temporary Debugging: show which rows were excluded after reversal / existing-batch checks.
+    this.logger.info('Temporary Debugging:createHmoInvoiceBatch:eligibility', {
+      orgId: this.orgId,
+      hmoProviderId: normalizedProviderId,
+      candidateIds,
+      reversedLedgerIds: Array.from(reversedLedgerIds),
+      usedLedgerIds: Array.from(usedLedgerIds),
+      eligibleRowIds: eligibleRows.map((row) => row.id),
+    });
+
     if (requestedLedgerIds.length > 0 && eligibleRows.length !== requestedLedgerIds.length) {
       throw new Error('hmo_claim_line_already_batched_or_reversed');
     }

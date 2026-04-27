@@ -579,7 +579,15 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const billingService = new BillingLedgerService({ tenantClient: supabase, orgId });
+  const billingService = new BillingLedgerService({
+    tenantClient: supabase,
+    orgId,
+    logger: {
+      info: (message, details) => context.log?.info?.(message, details),
+      warn: (message, details) => context.log?.warn?.(message, details),
+      error: (message, details) => context.log?.error?.(message, details),
+    },
+  });
 
   if (method === 'GET') {
     const view = normalizeString(req?.query?.view).toLowerCase();
@@ -696,6 +704,19 @@ export default async function (context, req) {
     }
 
     if (method === 'POST' && (action === 'create_hmo_invoice_batch' || action === 'create_hmo_claim_batch')) {
+      // Temporary Debugging: trace the raw billing action payload at the API boundary.
+      context.log?.info?.('Temporary Debugging:billing:create_hmo_claim_batch:request', {
+        orgId,
+        userId,
+        action,
+        hmoProviderId: normalizeString(body?.hmo_provider_id),
+        ledgerTransactionIds: Array.isArray(body?.ledger_transaction_ids)
+          ? body.ledger_transaction_ids
+          : (Array.isArray(body?.ledgerTransactionIds) ? body.ledgerTransactionIds : []),
+        periodStart: normalizeString(body?.period_start) || null,
+        periodEnd: normalizeString(body?.period_end) || null,
+      });
+
       const result = await billingService.createHmoInvoiceBatch({
         hmoProviderId: normalizeString(body?.hmo_provider_id),
         periodStart: normalizeString(body?.period_start) || null,
