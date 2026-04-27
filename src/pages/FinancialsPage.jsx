@@ -9,6 +9,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -170,6 +171,14 @@ function groupClaimsByStudent(claims = []) {
     .sort((left, right) => left.studentName.localeCompare(right.studentName, 'he'));
 }
 
+function buildClaimSubmitForm() {
+  return {
+    externalReference: '',
+    externalLink: '',
+    notes: '',
+  };
+}
+
 function buildStudentName(student) {
   const explicitName = typeof student?.full_name === 'string' ? student.full_name.trim() : '';
   if (explicitName) return explicitName;
@@ -218,6 +227,8 @@ export default function FinancialsPage() {
   const [selectedClaimLedgerIds, setSelectedClaimLedgerIds] = useState(() => new Set());
   const [batchPaymentForms, setBatchPaymentForms] = useState({});
   const [providerPolicyForms, setProviderPolicyForms] = useState({});
+  const [submitClaimBatchDialog, setSubmitClaimBatchDialog] = useState(null);
+  const [submitClaimBatchForm, setSubmitClaimBatchForm] = useState(() => buildClaimSubmitForm());
   const [isBillingPolicyOpen, setIsBillingPolicyOpen] = useState(false);
   const [confirmPolicySave, setConfirmPolicySave] = useState(false);
 
@@ -552,8 +563,18 @@ export default function FinancialsPage() {
     }
   }
 
-  async function handleSubmitClaimBatch(batchId) {
-    if (!activeOrgId || !canMutateClaims || !batchId) return;
+  function handleOpenSubmitClaimBatch(batch) {
+    if (!batch?.id || !canMutateClaims) return;
+    setSubmitClaimBatchDialog(batch);
+    setSubmitClaimBatchForm({
+      externalReference: batch?.external_reference || '',
+      externalLink: batch?.external_link || '',
+      notes: batch?.notes || '',
+    });
+  }
+
+  async function handleSubmitClaimBatch() {
+    if (!activeOrgId || !canMutateClaims || !submitClaimBatchDialog?.id) return;
     setProcessingClaimBatch(true);
     try {
       await authenticatedFetch('billing', {
@@ -562,9 +583,14 @@ export default function FinancialsPage() {
         body: {
           org_id: activeOrgId,
           action: 'submit_hmo_claim_batch',
-          batch_id: batchId,
+          batch_id: submitClaimBatchDialog.id,
+          external_reference: submitClaimBatchForm.externalReference || null,
+          external_link: submitClaimBatchForm.externalLink || null,
+          notes: submitClaimBatchForm.notes || null,
         },
       });
+      setSubmitClaimBatchDialog(null);
+      setSubmitClaimBatchForm(buildClaimSubmitForm());
       await loadHmoClaimsOverview();
       toast.success('הדרישה סומנה כנשלחה וננעלה לעריכה רגילה.');
     } catch (error) {
@@ -692,6 +718,83 @@ export default function FinancialsPage() {
 
   return (
     <PageLayout title="כספים" description="שכר עובדים וחיובי תלמידים">
+      <Dialog
+        open={Boolean(submitClaimBatchDialog)}
+        onOpenChange={(open) => {
+          if (processingClaimBatch) return;
+          if (!open) {
+            setSubmitClaimBatchDialog(null);
+            setSubmitClaimBatchForm(buildClaimSubmitForm());
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>שליחת דרישת HMO</DialogTitle>
+            <DialogDescription>
+              משלימים את פרטי השליחה לדרישה ורק אז מסמנים אותה כנשלחה. לאחר מכן הדרישה ננעלת לשימוש רגיל.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-slate-50 p-3 text-sm">
+              <div className="font-semibold text-zinc-900">{submitClaimBatchDialog?.hmo_provider_name || 'גורם מממן'}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {submitClaimBatchDialog ? `${submitClaimBatchDialog.item_count || 0} שורות • ${formatCurrency(submitClaimBatchDialog.total_amount)}` : ''}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-900" htmlFor="submit-claim-reference">אסמכתא חיצונית</label>
+              <Input
+                id="submit-claim-reference"
+                value={submitClaimBatchForm.externalReference}
+                onChange={(event) => setSubmitClaimBatchForm((prev) => ({ ...prev, externalReference: event.target.value }))}
+                placeholder="מספר דרישה / אסמכתא"
+                disabled={processingClaimBatch}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-900" htmlFor="submit-claim-link">קישור חיצוני</label>
+              <Input
+                id="submit-claim-link"
+                dir="ltr"
+                type="url"
+                placeholder="https://"
+                value={submitClaimBatchForm.externalLink}
+                onChange={(event) => setSubmitClaimBatchForm((prev) => ({ ...prev, externalLink: event.target.value }))}
+                disabled={processingClaimBatch}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-900" htmlFor="submit-claim-notes">הערות</label>
+              <Input
+                id="submit-claim-notes"
+                value={submitClaimBatchForm.notes}
+                onChange={(event) => setSubmitClaimBatchForm((prev) => ({ ...prev, notes: event.target.value }))}
+                placeholder="הערה פנימית או תיעוד אופציונלי"
+                disabled={processingClaimBatch}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:justify-start">
+            <Button type="button" onClick={handleSubmitClaimBatch} disabled={processingClaimBatch}>
+              {processingClaimBatch && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
+              סמן כנשלח
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setSubmitClaimBatchDialog(null);
+                setSubmitClaimBatchForm(buildClaimSubmitForm());
+              }}
+              disabled={processingClaimBatch}
+            >
+              ביטול
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, -1))}>הקודם</Button>
@@ -1000,7 +1103,7 @@ export default function FinancialsPage() {
                                 <Button
                                   type="button"
                                   size="sm"
-                                  onClick={() => handleSubmitClaimBatch(batch.id)}
+                                  onClick={() => handleOpenSubmitClaimBatch(batch)}
                                   disabled={processingClaimBatch}
                                 >
                                   <Send className="me-2 h-4 w-4" />
