@@ -31,3 +31,4 @@ settings.json
 /api/local.settings.json
 /test/automatic-tester/reports
 /.aider-env
+.aider*
