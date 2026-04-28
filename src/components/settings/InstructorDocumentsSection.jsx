@@ -1,6 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useAuth } from '@/auth/AuthContext.jsx';
-import { useOrg } from '@/org/OrgContext.jsx';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -403,21 +401,8 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
   );
 }
 
-export default function InstructorDocumentsSection({ instructor, session, orgId, onRefresh, isOwnDocuments = false }) {
-  // Trust boundary: Non-admin users can only view their own documents
-  // When isOwnDocuments=true, enforce that instructor.id matches authenticated user
-  const { session: authSession } = useAuth();
-  const { activeOrg } = useOrg();
-  const isAdmin = ['admin', 'owner'].includes(activeOrg?.membership?.role);
-  
-  // Security check: If not admin and isOwnDocuments=true, verify instructor.id matches user.id
-  const effectiveInstructorId = React.useMemo(() => {
-    if (isOwnDocuments && !isAdmin && authSession?.user?.id) {
-      // Force use of authenticated user's ID for non-admin self-service
-      return authSession.user.id;
-    }
-    return instructor.id;
-  }, [isOwnDocuments, isAdmin, authSession?.user?.id, instructor.id]);
+export default function InstructorDocumentsSection({ instructor, session, orgId, onRefresh }) {
+  const effectiveInstructorId = React.useMemo(() => instructor.id, [instructor.id]);
   
   // Use polymorphic Documents table hook for fetching documents
   const {

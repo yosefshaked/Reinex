@@ -33,6 +33,7 @@
   - `instructor_profiles` adds profile-only fields
   - `instructor_service_capabilities` stores per-service capability rows
 - `employee_type` (`instructor` / `office`) is not the same thing as the organization membership role (`member` / `admin` / `owner`). Employee screens may surface both, but org-level authority changes must go through the shared org-membership flow instead of inventing a second role system.
+- Employee documents now live directly inside the unified employee profile UI (`UnifiedEmployeeList` documents tab) and reuse `InstructorDocumentsSection`; do not rebuild a separate employee-files surface.
 - `GET /api/instructors` manually loads and merges those tables; keep that response shape stable.
 - `working_days` currently lives on `Employees`; UI already documents that source.
 - Service capabilities include `availability_windows`; scheduling rules depend on them.
@@ -50,4 +51,5 @@
 - Employee invite emails should carry the same core metadata as org invites (`inviter_name`, `organization_name`, invitation token) and default to a 3-day expiry window unless a stricter explicit expiration is supplied.
 - Employee invite lifecycle events should be audited against the invitation resource itself, not only the employee record. Send/resend/failure/expiry events belong under `resourceType: 'invitation'`, with employee context kept inside audit details.
 - Manual employee sync from linked user profile is merge-safe, not destructive: copy only profile fields that actually have values, never blank out existing org employee fields because the linked profile is missing data, and do not flag "not synced" solely because the org employee record contains extra information beyond the user profile.
+- Unified documents treat employee/instructor files as `entity_type='instructor'` with `entity_id = Employees.id` (not `auth.users.id`). Self-service access must be validated through `Employees.user_id` on the backend, not by swapping frontend entity IDs.
 - Leave, attendance, and payroll rules live in [`../api/_shared/employee-finance.js`](../api/_shared/employee-finance.js); do not recode them in UI panels.

@@ -38,6 +38,7 @@ import EditServiceCapabilitiesDialog from './EditServiceCapabilitiesDialog.jsx';
 import EmployeeFinancePanel from './EmployeeFinancePanel.jsx';
 import EmployeeLeavePanel from './EmployeeLeavePanel.jsx';
 import LinkEmployeeMemberDialog from './LinkEmployeeMemberDialog.jsx';
+import InstructorDocumentsSection from '../InstructorDocumentsSection.jsx';
 import { getAvailabilitySummary } from '@/lib/instructor-availability.js';
 import { buildCapabilityCompensationSummary } from '@/lib/instructor-compensation.js';
 
@@ -1308,8 +1309,16 @@ export default function UnifiedEmployeeList({ session, orgId, canLoad }) {
                 </TabsContent>
 
                 <TabsContent value={TAB_KEYS.documents} className="space-y-3">
-                  <SectionCard title="מסמכים" description="תשתית למסמכי עובד, חוזים ואישורים">
-                    <EmptyState title="מרכז מסמכים לעובד עדיין לא חובר" body="הטאב נשאר יציב במבנה החדש, אבל מסמכים אישיים עדיין לא משויכים לכרטיס העובד הנוכחי." />
+                  <SectionCard title="מסמכים" description="חוזים, אישורים ומסמכי עובד מתוך מרכז המסמכים המאוחד">
+                    <InstructorDocumentsSection
+                      instructor={currentEmployee}
+                      session={session}
+                      orgId={orgId}
+                      onRefresh={async () => {
+                        await refetchInstructors();
+                        await fetchOverviewInstances();
+                      }}
+                    />
                   </SectionCard>
                 </TabsContent>
 

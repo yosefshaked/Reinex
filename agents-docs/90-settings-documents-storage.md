@@ -37,6 +37,7 @@
 - Supabase connection/setup assistant is system-admin owned and should live under `/system-admin` (not the regular Settings page).
 - The settings endpoint already diagnoses missing table/policy/metadata-column problems; keep that behavior centralized.
 - Documents are unified under `/api/documents` with `entity_type` + `entity_id`; do not add new student/instructor/org-specific file APIs.
+- For employee/instructor documents, `entity_type='instructor'` is historical naming only; the canonical entity id is the `Employees.id` row, and self-service permission checks must resolve through `Employees.user_id`.
 - Storage supports managed mode and BYOS through the driver factory; do not branch provider logic in every endpoint.
 - Backup permissions and cooldown live in control DB `org_settings` and are enforced server-side.
 - Audit logs redact sensitive values before returning them.

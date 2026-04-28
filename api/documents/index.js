@@ -64,6 +64,32 @@ function validateEntityAccess(entityType, userRole, userId, entityId, isAdmin, o
   return { valid: true };
 }
 
+async function validateEntityAccessForRequest(client, orgId, entityType, userId, entityId, isAdmin, operation = null) {
+  const baseValidation = validateEntityAccess(entityType, null, userId, entityId, isAdmin, operation);
+  if (!baseValidation.valid) {
+    return baseValidation;
+  }
+
+  if (entityType !== 'instructor' || isAdmin) {
+    return { valid: true };
+  }
+
+  const { data: employee, error } = await withOrgScope(client, 'Employees', orgId)
+    .select('id, user_id')
+    .eq('id', entityId)
+    .maybeSingle();
+
+  if (error) {
+    return { valid: false, error: 'failed_to_verify_entity_access', details: error.message };
+  }
+
+  if (!employee || employee.user_id !== userId) {
+    return { valid: false, error: 'permission_denied' };
+  }
+
+  return { valid: true };
+}
+
 /**
  * GET - List documents for an entity
  */
@@ -74,7 +100,7 @@ async function handleGet(req, supabase, client, orgId, userId, userRole, isAdmin
     return { status: 400, body: { error: 'entity_type and entity_id required' } };
   }
 
-  const validation = validateEntityAccess(entity_type, userRole, userId, entity_id, isAdmin, 'GET');
+  const validation = await validateEntityAccessForRequest(client, orgId, entity_type, userId, entity_id, isAdmin, 'GET');
   if (!validation.valid) {
     return { status: 403, body: { error: validation.error } };
   }
@@ -167,7 +193,7 @@ async function handlePost(req, supabase, client, orgId, userId, userEmail, userR
   const entityId = entityIdPart.data.toString('utf8');
 
   // Validate permissions once (applies to all files)
-  const validation = validateEntityAccess(entityType, userRole, userId, entityId, isAdmin, 'POST');
+  const validation = await validateEntityAccessForRequest(client, orgId, entityType, userId, entityId, isAdmin, 'POST');
   if (!validation.valid) {
     return { status: 403, body: { error: validation.error } };
   }
@@ -239,17 +265,13 @@ async function handlePost(req, supabase, client, orgId, userId, userEmail, userR
           ].filter(Boolean).join(' ') || 'Unknown';
         } else if (entityType === 'instructor') {
           const { data: instructor, error: instructorError } = await withOrgScope(client, 'Employees', orgId)
-            .select('name, employee_type')
+            .select('first_name, last_name')
             .eq('id', entityId)
             .maybeSingle();
           if (instructorError) {
             console.error('Failed to fetch instructor name:', { entityId, error: instructorError.message });
           }
-          if (!instructor || (instructor.employee_type && instructor.employee_type !== 'instructor')) {
-            entityName = 'Unknown';
-          } else {
-            entityName = instructor?.name || 'Unknown';
-          }
+          entityName = [instructor?.first_name, instructor?.last_name].filter(Boolean).join(' ') || 'Unknown';
         } else {
           entityName = '';
         }
@@ -491,7 +513,15 @@ async function handlePut(req, supabase, client, orgId, userId, userEmail, userRo
   }
 
   // Validate permissions
-  const validation = validateEntityAccess(existingDoc.entity_type, userRole, userId, existingDoc.entity_id, isAdmin, 'DELETE');
+  const validation = await validateEntityAccessForRequest(
+    client,
+    orgId,
+    existingDoc.entity_type,
+    userId,
+    existingDoc.entity_id,
+    isAdmin,
+    'PUT',
+  );
   if (!validation.valid) {
     return { status: 403, body: { error: validation.error } };
   }
@@ -593,7 +623,15 @@ async function handleDelete(req, supabase, client, orgId, userId, userEmail, use
     return { status: 403, body: { error: 'admin_required' } };
   }
 
-  const validation = validateEntityAccess(existingDoc.entity_type, userRole, userId, existingDoc.entity_id, isAdmin);
+  const validation = await validateEntityAccessForRequest(
+    client,
+    orgId,
+    existingDoc.entity_type,
+    userId,
+    existingDoc.entity_id,
+    isAdmin,
+    'DELETE',
+  );
   if (!validation.valid) {
     return { status: 403, body: { error: validation.error } };
   }

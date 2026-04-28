@@ -18,6 +18,19 @@ import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { decryptStorageProfile } from '../_shared/storage-encryption.js';
 
+async function canAccessInstructorDocument(supabase, orgId, employeeId, userId) {
+  const { data: employee, error } = await withOrgScope(supabase, 'Employees', orgId)
+    .select('id, user_id')
+    .eq('id', employeeId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || 'failed_to_verify_entity_access');
+  }
+
+  return Boolean(employee && employee.user_id === userId);
+}
+
 export default async function handler(context, req) {
   context.log?.info?.('[DOCUMENTS-DOWNLOAD] Request started', {
     method: req.method,
@@ -155,8 +168,24 @@ export default async function handler(context, req) {
       }
     }
 
-    if (document.entity_type === 'instructor' && !isAdmin && userId !== document.entity_id) {
-      return respond(context, 403, { error: 'permission_denied' });
+    if (document.entity_type === 'instructor' && !isAdmin) {
+      let canAccess = false;
+      try {
+        canAccess = await canAccessInstructorDocument(supabase, org_id, document.entity_id, userId);
+      } catch (error) {
+        context.log?.error?.('documents-download failed to verify instructor document access', {
+          message: error.message,
+          org_id,
+          document_id,
+          entity_id: document.entity_id,
+          userId,
+        });
+        return respond(context, 500, { error: 'failed_to_verify_entity_access' });
+      }
+
+      if (!canAccess) {
+        return respond(context, 403, { error: 'permission_denied' });
+      }
     }
 
     // Load storage profile
