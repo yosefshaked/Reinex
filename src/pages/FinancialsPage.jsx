@@ -1179,25 +1179,25 @@ export default function FinancialsPage() {
           ) : (
             <>
               <div className="grid gap-3 md:grid-cols-5">
-                <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-                  <div className="text-xs text-slate-600">סה״כ משימות תביעה</div>
-                  <div className="mt-1 text-2xl font-bold text-zinc-900">{claimsReadModel?.summary?.total_claim_tasks ?? 0}</div>
-                </Card>
                 <Card className="rounded-2xl border border-amber-200 bg-amber-50 p-lg shadow-sm">
                   <div className="text-xs text-amber-700">משימות פתוחות</div>
                   <div className="mt-1 text-2xl font-bold text-amber-950">{claimsReadModel?.summary?.open_claim_tasks ?? 0}</div>
                 </Card>
                 <Card className="rounded-2xl border border-emerald-200 bg-emerald-50 p-lg shadow-sm">
-                  <div className="text-xs text-emerald-700">משימות שטופלו</div>
-                  <div className="mt-1 text-2xl font-bold text-emerald-950">{claimsReadModel?.summary?.resolved_claim_tasks ?? 0}</div>
+                  <div className="text-xs text-emerald-700">משימות שמחכות לאישור קבלת תשלום</div>
+                  <div className="mt-1 text-2xl font-bold text-emerald-950">{claimsReadModel?.summary?.pending_payment_followup_batches ?? 0}</div>
                 </Card>
                 <Card className="rounded-2xl border border-indigo-200 bg-indigo-50 p-lg shadow-sm">
-                  <div className="text-xs text-indigo-700">תלמידים עם תביעות</div>
-                  <div className="mt-1 text-2xl font-bold text-indigo-950">{claimsReadModel?.summary?.unique_students ?? 0}</div>
+                  <div className="text-xs text-indigo-700">תשלום צפוי מדרישות שנשלחו</div>
+                  <div className="mt-1 text-2xl font-bold text-indigo-950">{formatCurrency(claimsReadModel?.summary?.expected_payment_from_submitted_batches ?? 0)}</div>
                 </Card>
                 <Card className="rounded-2xl border border-blue-200 bg-blue-50 p-lg shadow-sm">
-                  <div className="text-xs text-blue-700">גורמים מממנים בתצוגה</div>
-                  <div className="mt-1 text-2xl font-bold text-blue-950">{claimsReadModel?.summary?.provider_count ?? 0}</div>
+                  <div className="text-xs text-blue-700">תשלום שהתקבל</div>
+                  <div className="mt-1 text-2xl font-bold text-blue-950">{formatCurrency(claimsReadModel?.summary?.payment_received_total ?? 0)}</div>
+                </Card>
+                <Card className="rounded-2xl border border-violet-200 bg-violet-50 p-lg shadow-sm">
+                  <div className="text-xs text-violet-700">תלמידים פעילים עם זכאות קופת חולים</div>
+                  <div className="mt-1 text-2xl font-bold text-violet-950">{claimsReadModel?.summary?.active_students_with_hmo_eligibility ?? 0}</div>
                 </Card>
               </div>
 

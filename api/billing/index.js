@@ -41,6 +41,20 @@ function normalizeDateKey(value) {
   return normalized;
 }
 
+function isDateWithinAuthorizationWindow({ validFrom = '', expiresAt = '', referenceDateKey = '' } = {}) {
+  const normalizedReferenceDate = normalizeDateKey(referenceDateKey);
+  if (!normalizedReferenceDate) return false;
+  const normalizedValidFrom = normalizeDateKey(validFrom);
+  const normalizedExpiresAt = normalizeDateKey(expiresAt);
+  if (normalizedValidFrom && normalizedReferenceDate < normalizedValidFrom) {
+    return false;
+  }
+  if (normalizedExpiresAt && normalizedReferenceDate > normalizedExpiresAt) {
+    return false;
+  }
+  return true;
+}
+
 function buildPersonName(profile) {
   if (!profile || !isPlainObject(profile)) return 'לקוח/ה';
   return [profile.first_name, profile.middle_name, profile.last_name].filter(Boolean).join(' ').trim() || 'לקוח/ה';
@@ -278,6 +292,33 @@ async function buildHmoClaimsReadModel({
 
   const serviceMap = new Map((services || []).map((row) => [row.id, row]));
   const providerMap = new Map((providers || []).map((row) => [row.id, row]));
+  const todayKey = normalizeDateKey(new Date().toISOString().slice(0, 10));
+
+  const { data: activeAuthorizationStudents, error: activeAuthorizationStudentsError } = await withOrgScope(client, 'hmo_authorizations', orgId)
+    .select(`
+      student_id,
+      valid_from,
+      expires_at,
+      student:students(
+        id,
+        is_active
+      )
+    `)
+    .eq('status', 'active');
+
+  if (activeAuthorizationStudentsError && activeAuthorizationStudentsError.code !== '42P01') {
+    throw activeAuthorizationStudentsError;
+  }
+
+  const studentsWithActiveHmoEligibility = new Set((activeAuthorizationStudents || [])
+    .filter((row) => normalizeString(row?.student_id))
+    .filter((row) => row?.student?.is_active !== false)
+    .filter((row) => isDateWithinAuthorizationWindow({
+      validFrom: row?.valid_from,
+      expiresAt: row?.expires_at,
+      referenceDateKey: todayKey,
+    }))
+    .map((row) => normalizeString(row?.student_id)));
 
   const claims = claimSeedRows.map((ledgerRow) => {
     const participantId = normalizeString(ledgerRow?.lesson_participant_id);
@@ -386,11 +427,28 @@ async function buildHmoClaimsReadModel({
   const openClaimTasks = claims.filter((row) => (
     normalizeString(row?.status) === 'open'
     && normalizeString(row?.participant_status) !== 'scheduled'
+    && !normalizeString(row?.hmo_invoice_batch_status)
   )).length;
   const resolvedClaimTasks = claims.filter((row) => (
     normalizeString(row?.status) === 'resolved'
     || normalizeString(row?.participant_status) === 'scheduled'
   )).length;
+  const pendingPaymentFollowupBatches = Array.from(batchMap.values()).filter((batch) => (
+    ['submitted', 'issued', 'acknowledged', 'partially_paid', 'disputed'].includes(normalizeString(batch?.status).toLowerCase())
+    && Number(batch?.paid_amount || 0) < Number(batch?.total_amount || 0)
+  )).length;
+  const expectedPaymentFromSubmittedBatches = Array.from(batchMap.values()).reduce((sum, batch) => {
+    const status = normalizeString(batch?.status).toLowerCase();
+    if (!['submitted', 'issued', 'acknowledged', 'partially_paid', 'disputed'].includes(status)) {
+      return sum;
+    }
+    const remainingAmount = Math.max(0, Number(batch?.total_amount || 0) - Number(batch?.paid_amount || 0));
+    return sum + remainingAmount;
+  }, 0);
+  const paymentReceivedTotal = providerReceivables.reduce(
+    (sum, provider) => sum + Number(provider?.summary?.payment_total || 0),
+    0,
+  );
 
   return {
     summary: {
@@ -398,6 +456,10 @@ async function buildHmoClaimsReadModel({
       open_claim_tasks: openClaimTasks,
       resolved_claim_tasks: resolvedClaimTasks,
       cancelled_claim_tasks: cancelledClaimTasks,
+      pending_payment_followup_batches: pendingPaymentFollowupBatches,
+      expected_payment_from_submitted_batches: expectedPaymentFromSubmittedBatches,
+      payment_received_total: paymentReceivedTotal,
+      active_students_with_hmo_eligibility: studentsWithActiveHmoEligibility.size,
       unique_students: uniqueStudents.size,
       provider_count: providerReceivables.length,
     },
@@ -619,6 +681,10 @@ export default async function (context, req) {
             total_claim_tasks: 0,
             open_claim_tasks: 0,
             resolved_claim_tasks: 0,
+            pending_payment_followup_batches: 0,
+            expected_payment_from_submitted_batches: 0,
+            payment_received_total: 0,
+            active_students_with_hmo_eligibility: 0,
             unique_students: 0,
             provider_count: 0,
           },
