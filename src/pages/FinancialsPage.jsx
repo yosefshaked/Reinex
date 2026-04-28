@@ -258,6 +258,43 @@ function buildStudentName(student) {
   return [student?.first_name, student?.middle_name, student?.last_name].filter(Boolean).join(' ').trim() || 'תלמיד';
 }
 
+function BatchMetaTags({ externalReference = '', externalLink = '', notes = '' }) {
+  const hasExternalReference = Boolean(String(externalReference || '').trim());
+  const hasExternalLink = Boolean(String(externalLink || '').trim());
+  const hasNotes = Boolean(String(notes || '').trim());
+  if (!hasExternalReference && !hasExternalLink && !hasNotes) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {hasExternalReference ? (
+        <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700">
+          אסמכתא: {externalReference}
+        </span>
+      ) : null}
+      {hasExternalLink ? (
+        <a
+          href={externalLink}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] text-sky-800 hover:bg-sky-100"
+        >
+          קישור חיצוני
+        </a>
+      ) : null}
+      {hasNotes ? (
+        <span
+          className="inline-flex max-w-full items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800"
+          title={notes}
+        >
+          הערה: {notes}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function buildOverview(snapshot) {
   const summaries = Array.isArray(snapshot?.student_summaries) ? snapshot.student_summaries : [];
   return summaries.reduce((accumulator, row) => ({
@@ -1278,6 +1315,11 @@ export default function FinancialsPage() {
                               <div className="text-xs text-muted-foreground">
                                 {batch.item_count || 0} שורות • {formatCurrency(batch.total_amount)} • סטטוס: {formatBatchStatus(batch.status)}
                               </div>
+                              <BatchMetaTags
+                                externalReference={batch.external_reference}
+                                externalLink={batch.external_link}
+                                notes={batch.notes}
+                              />
                             </div>
                             <div className="flex flex-wrap gap-2">
                               {batch.status === 'draft' && (
