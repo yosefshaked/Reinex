@@ -94,6 +94,11 @@ function useOrgDataResource({
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const sessionRef = useRef(session);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   // Memoize mapResponse if provided as inline function
   const stableMapResponse = useCallback(
@@ -150,7 +155,7 @@ function useOrgDataResource({
 
     try {
       const url = `${path}${queryString ? `?${queryString}` : ''}`;
-      const payload = await authenticatedFetch(url, { session });
+      const payload = await authenticatedFetch(url, { session: sessionRef.current });
       const mapped = stableMapResponse(payload);
       // Keep objects as-is (e.g., { employees, unlinked_members }); normalize only primitives
       const normalized = Array.isArray(mapped) ? mapped : (typeof mapped === 'object' && mapped !== null ? mapped : []);
@@ -164,7 +169,7 @@ function useOrgDataResource({
     } finally {
       setLoading(false);
     }
-  }, [enabled, orgId, resetOnDisable, queryString, session, stableMapResponse, path]);
+  }, [enabled, orgId, resetOnDisable, queryString, stableMapResponse, path]);
 
   // Auto-fetch when dependencies change
   useEffect(() => {

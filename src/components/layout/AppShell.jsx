@@ -1,7 +1,7 @@
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
-import { Megaphone, LogOut, PanelRightOpen, PanelRightClose, UserCog } from "lucide-react"
+import { Megaphone, LogOut, PanelRightOpen, PanelRightClose, RefreshCw, UserCog, X } from "lucide-react"
 import { Toaster, toast } from "sonner"
 
 import OrgConfigBanner from "@/components/OrgConfigBanner.jsx"
@@ -25,6 +25,8 @@ import { ImpersonationProvider } from "@/admin/impersonation/ImpersonationContex
 import ImpersonationBanner from "@/admin/ui/ImpersonationBanner.jsx"
 import AnnouncementBanner from "@/components/AnnouncementBanner.jsx"
 
+const INACTIVE_REFRESH_PROMPT_MS = 5 * 60 * 1000
+
 export default function AppShell({ children }) {
   const { signOut } = useAuth()
   const { activeOrg } = useOrg()
@@ -40,6 +42,8 @@ export default function AppShell({ children }) {
     studentStatus: 'active',
     onCreated: null,
   })
+  const [showRefreshSuggestion, setShowRefreshSuggestion] = useState(false)
+  const hiddenAtRef = useRef(null)
 
   useLayoutEffect(() => {
     if (typeof window === 'undefined') return
@@ -151,6 +155,45 @@ export default function AppShell({ children }) {
   const location = useLocation()
   const isCalendarPage = location.pathname === '/calendar'
 
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return undefined
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAtRef.current = Date.now()
+        return
+      }
+
+      if (document.visibilityState !== 'visible') {
+        return
+      }
+
+      if (!hiddenAtRef.current) {
+        return
+      }
+
+      const hiddenDuration = Date.now() - hiddenAtRef.current
+      hiddenAtRef.current = null
+
+      if (hiddenDuration >= INACTIVE_REFRESH_PROMPT_MS) {
+        setShowRefreshSuggestion(true)
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
+
+  const handleRefreshSuggestion = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.location.reload()
+    }
+  }, [])
+
   const content = children ?? <Outlet />
   const pageLayoutMode = React.isValidElement(content) ? content.props?.["data-page-layout"] : null
   const useCustomLayout = pageLayoutMode === "dashboard" || isCalendarPage
@@ -229,6 +272,33 @@ export default function AppShell({ children }) {
           <ImpersonationBanner />
           <OrgSelectionBanner />
           <OrgConfigBanner />
+          {showRefreshSuggestion ? (
+            <div className="mx-sm mt-2 rounded-2xl border border-blue-200 bg-blue-50 px-sm py-sm text-sm text-blue-950 md:mx-md">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  חזרתם אחרי כמה דקות. כדי לראות את השינויים האחרונים במערכת, מומלץ לרענן את המסך.
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRefreshSuggestion}
+                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-blue-300 bg-white px-3 py-2 text-xs font-semibold text-blue-900 transition hover:bg-blue-100"
+                  >
+                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                    רענון עכשיו
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowRefreshSuggestion(false)}
+                    className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-full border border-blue-200 bg-blue-100 text-blue-800 transition hover:bg-blue-200"
+                    aria-label="סגור הצעת רענון"
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <main id="main-content" role="main" className={cn("flex-1", isCalendarPage ? "overflow-hidden flex flex-col" : "overflow-y-auto")}>
             {useCustomLayout ? (

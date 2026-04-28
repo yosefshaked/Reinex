@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { deactivateMyAccount, fetchMyAccount, reactivateMyAccount, updateMyAccount } from '@/api/me.js';
 
@@ -6,12 +6,18 @@ const AccountContext = createContext(null);
 
 export function AccountProvider({ children }) {
   const { status: authStatus, session } = useAuth();
+  const sessionUserId = session?.user?.id || null;
+  const sessionRef = useRef(session);
   const [status, setStatus] = useState('idle');
   const [account, setAccount] = useState(null);
   const [error, setError] = useState(null);
 
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+
   const refreshAccount = useCallback(async () => {
-    if (!session) {
+    if (!sessionRef.current) {
       setAccount(null);
       setStatus(authStatus === 'loading' ? 'loading' : 'idle');
       return null;
@@ -20,7 +26,7 @@ export function AccountProvider({ children }) {
     setStatus('loading');
     setError(null);
     try {
-      const nextAccount = await fetchMyAccount({ session });
+      const nextAccount = await fetchMyAccount({ session: sessionRef.current });
       setAccount(nextAccount);
       setStatus('ready');
       return nextAccount;
@@ -29,7 +35,7 @@ export function AccountProvider({ children }) {
       setStatus('error');
       throw loadError;
     }
-  }, [authStatus, session]);
+  }, [authStatus]);
 
   useEffect(() => {
     if (authStatus === 'loading') {
@@ -37,7 +43,7 @@ export function AccountProvider({ children }) {
       return;
     }
 
-    if (!session) {
+    if (!sessionUserId) {
       setAccount(null);
       setError(null);
       setStatus('idle');
@@ -52,31 +58,31 @@ export function AccountProvider({ children }) {
     return () => {
       active = false;
     };
-  }, [authStatus, session, refreshAccount]);
+  }, [authStatus, sessionUserId, refreshAccount]);
 
   const saveAccount = useCallback(async (payload) => {
-    const nextAccount = await updateMyAccount(payload, { session });
+    const nextAccount = await updateMyAccount(payload, { session: sessionRef.current });
     setAccount(nextAccount);
     setStatus('ready');
     setError(null);
     return nextAccount;
-  }, [session]);
+  }, []);
 
   const deactivateAccount = useCallback(async (payload) => {
-    const nextAccount = await deactivateMyAccount(payload, { session });
+    const nextAccount = await deactivateMyAccount(payload, { session: sessionRef.current });
     setAccount(nextAccount);
     setStatus('ready');
     setError(null);
     return nextAccount;
-  }, [session]);
+  }, []);
 
   const reactivateAccount = useCallback(async () => {
-    const nextAccount = await reactivateMyAccount({ session });
+    const nextAccount = await reactivateMyAccount({ session: sessionRef.current });
     setAccount(nextAccount);
     setStatus('ready');
     setError(null);
     return nextAccount;
-  }, [session]);
+  }, []);
 
   const value = useMemo(() => ({
     status,

@@ -32,6 +32,7 @@
 - `SupabaseContext` exposes one runtime client for both auth and data access.
 - `AccountProvider` is the canonical runtime source for the signed-in user's personal profile/setup state; load personal-account state through it instead of duplicating `/api/me` calls inside layout code.
 - `OrgContext` loads memberships from the shared DB and stores `active_org_id`; no per-org credential fetch happens during org switching.
+- Access-token rotation and short tab switches must not be treated as a signal to reload account/org/page data. React to meaningful auth identity changes (login/logout/user switch), not every session object refresh.
 - Account setup gating happens before org selection. Authenticated users with incomplete personal profile data must be redirected to `/account/setup` before entering the app shell or org picker.
 - Setup gating must preserve continuation context. If setup interrupts `/accept-invite` or another authenticated flow, route through `/account/setup?returnTo=...` and send the user back to the interrupted path after save.
 - Disabled accounts are enforced at the app-account layer: authenticated disabled users are redirected to `/account/reactivate` until they reactivate themselves.
@@ -41,4 +42,5 @@
 - If you need org-aware frontend data, use `useOrg()` and existing wrappers instead of rebuilding org/session lookup.
 - Personal account management is a first-class header action under `/account`; org switching moved to the logo click target rather than living in org settings.
 - The top-header account button is user-scoped, not org-scoped. Keep personal settings separate from organization settings and org switching.
+- App-shell stale-data UX should prefer an explicit refresh prompt after meaningful inactivity (currently 5 minutes hidden) instead of forcing automatic refresh on every quick return to the tab.
 - Keep `/system-admin/mfa` reachable as an admin recovery route even when the current session is `aal1` (lost/replaced authenticator scenario); do not redirect away from it during MFA enforcement.
