@@ -179,6 +179,15 @@ function buildClaimSubmitForm() {
   };
 }
 
+function buildBatchPaymentForm() {
+  return {
+    amount: '',
+    effectiveAt: '',
+    externalReference: '',
+    notes: '',
+  };
+}
+
 function buildStudentName(student) {
   const explicitName = typeof student?.full_name === 'string' ? student.full_name.trim() : '';
   if (explicitName) return explicitName;
@@ -229,6 +238,8 @@ export default function FinancialsPage() {
   const [providerPolicyForms, setProviderPolicyForms] = useState({});
   const [submitClaimBatchDialog, setSubmitClaimBatchDialog] = useState(null);
   const [submitClaimBatchForm, setSubmitClaimBatchForm] = useState(() => buildClaimSubmitForm());
+  const [recordBatchPaymentDialog, setRecordBatchPaymentDialog] = useState(null);
+  const [recordBatchPaymentForm, setRecordBatchPaymentForm] = useState(() => buildBatchPaymentForm());
   const [isBillingPolicyOpen, setIsBillingPolicyOpen] = useState(false);
   const [confirmPolicySave, setConfirmPolicySave] = useState(false);
 
@@ -497,10 +508,7 @@ export default function FinancialsPage() {
     setBatchPaymentForms((prev) => ({
       ...prev,
       [batchId]: {
-        amount: '',
-        effectiveAt: '',
-        externalReference: '',
-        notes: '',
+        ...buildBatchPaymentForm(),
         ...(prev[batchId] || {}),
         ...patch,
       },
@@ -628,9 +636,9 @@ export default function FinancialsPage() {
     }
   }
 
-  async function handleRecordBatchPayment(batch) {
+  async function handleRecordBatchPayment(batch, formOverride = null) {
     if (!activeOrgId || !canMutateClaims || !batch?.id) return;
-    const form = batchPaymentForms[batch.id] || {};
+    const form = formOverride || batchPaymentForms[batch.id] || buildBatchPaymentForm();
     const amountAgorot = toAgorot(form.amount);
     const remainingAmount = Math.max(0, Number(batch.total_amount || 0) - Number(batch.paid_amount || 0));
     const provider = providerReceivableById.get(batch.hmo_provider_id);
@@ -676,6 +684,25 @@ export default function FinancialsPage() {
     } finally {
       setProcessingClaimBatch(false);
     }
+  }
+
+  function handleOpenRecordBatchPayment(batch) {
+    if (!batch?.id || !canMutateClaims) return;
+    const existingForm = batchPaymentForms[batch.id] || buildBatchPaymentForm();
+    setRecordBatchPaymentDialog(batch);
+    setRecordBatchPaymentForm(existingForm);
+  }
+
+  async function handleConfirmRecordBatchPayment() {
+    if (!recordBatchPaymentDialog?.id) return;
+    const batchId = recordBatchPaymentDialog.id;
+    updateBatchPaymentForm(batchId, recordBatchPaymentForm);
+    await handleRecordBatchPayment({
+      ...recordBatchPaymentDialog,
+      id: batchId,
+    }, recordBatchPaymentForm);
+    setRecordBatchPaymentDialog(null);
+    setRecordBatchPaymentForm(buildBatchPaymentForm());
   }
 
   async function handleSaveProviderPolicy(providerId) {
@@ -786,6 +813,96 @@ export default function FinancialsPage() {
               onClick={() => {
                 setSubmitClaimBatchDialog(null);
                 setSubmitClaimBatchForm(buildClaimSubmitForm());
+              }}
+              disabled={processingClaimBatch}
+            >
+              ביטול
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(recordBatchPaymentDialog)}
+        onOpenChange={(open) => {
+          if (processingClaimBatch) return;
+          if (!open) {
+            setRecordBatchPaymentDialog(null);
+            setRecordBatchPaymentForm(buildBatchPaymentForm());
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>רישום תשלום לדרישה</DialogTitle>
+            <DialogDescription>
+              רושמים תשלום מול הדרישה שנשלחה, בלי להעמיס את טופס התשלום על כרטיס הסיכום.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-slate-50 p-3 text-sm">
+              <div className="font-semibold text-zinc-900">{recordBatchPaymentDialog?.hmo_provider_name || 'גורם מממן'}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {recordBatchPaymentDialog ? `יתרה פתוחה: ${formatCurrency(Math.max(0, Number(recordBatchPaymentDialog.total_amount || 0) - Number(recordBatchPaymentDialog.paid_amount || 0)))}` : ''}
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-zinc-900" htmlFor="record-batch-payment-amount">סכום</label>
+                <Input
+                  id="record-batch-payment-amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={recordBatchPaymentForm.amount}
+                  onChange={(event) => setRecordBatchPaymentForm((prev) => ({ ...prev, amount: event.target.value }))}
+                  placeholder="סכום בש״ח"
+                  disabled={processingClaimBatch}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-zinc-900" htmlFor="record-batch-payment-date">תאריך</label>
+                <Input
+                  id="record-batch-payment-date"
+                  type="date"
+                  value={recordBatchPaymentForm.effectiveAt}
+                  onChange={(event) => setRecordBatchPaymentForm((prev) => ({ ...prev, effectiveAt: event.target.value }))}
+                  disabled={processingClaimBatch}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-zinc-900" htmlFor="record-batch-payment-reference">אסמכתא</label>
+                <Input
+                  id="record-batch-payment-reference"
+                  value={recordBatchPaymentForm.externalReference}
+                  onChange={(event) => setRecordBatchPaymentForm((prev) => ({ ...prev, externalReference: event.target.value }))}
+                  placeholder="אסמכתא"
+                  disabled={processingClaimBatch}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-900" htmlFor="record-batch-payment-notes">הערות</label>
+              <Input
+                id="record-batch-payment-notes"
+                value={recordBatchPaymentForm.notes}
+                onChange={(event) => setRecordBatchPaymentForm((prev) => ({ ...prev, notes: event.target.value }))}
+                placeholder="הערת תשלום (אופציונלי)"
+                disabled={processingClaimBatch}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:justify-start">
+            <Button type="button" onClick={handleConfirmRecordBatchPayment} disabled={processingClaimBatch}>
+              {processingClaimBatch && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
+              רשום תשלום
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setRecordBatchPaymentDialog(null);
+                setRecordBatchPaymentForm(buildBatchPaymentForm());
               }}
               disabled={processingClaimBatch}
             >
@@ -1124,46 +1241,21 @@ export default function FinancialsPage() {
                             </div>
                           </div>
                           {['submitted', 'issued', 'acknowledged', 'partially_paid'].includes(batch.status) && Number(batch.paid_amount || 0) < Number(batch.total_amount || 0) && (
-                            <div className="mt-3 rounded-lg border border-blue-100 bg-white p-3">
-                              <div className="text-xs font-semibold text-zinc-900">
-                                רישום תשלום לדרישה הזאת בלבד
+                            <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-white p-3">
+                              <div>
+                                <div className="text-xs font-semibold text-zinc-900">רישום תשלום לדרישה הזאת בלבד</div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  יתרה פתוחה: {formatCurrency(Math.max(0, Number(batch.total_amount || 0) - Number(batch.paid_amount || 0)))}
+                                </div>
                               </div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                יתרה פתוחה: {formatCurrency(Math.max(0, Number(batch.total_amount || 0) - Number(batch.paid_amount || 0)))}
-                              </div>
-                              <div className="mt-2 grid gap-2 md:grid-cols-4">
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={batchPaymentForms[batch.id]?.amount || ''}
-                                  onChange={(event) => updateBatchPaymentForm(batch.id, { amount: event.target.value })}
-                                  placeholder="סכום בש״ח"
-                                />
-                                <Input
-                                  type="date"
-                                  value={batchPaymentForms[batch.id]?.effectiveAt || ''}
-                                  onChange={(event) => updateBatchPaymentForm(batch.id, { effectiveAt: event.target.value })}
-                                />
-                                <Input
-                                  value={batchPaymentForms[batch.id]?.externalReference || ''}
-                                  onChange={(event) => updateBatchPaymentForm(batch.id, { externalReference: event.target.value })}
-                                  placeholder="אסמכתא"
-                                />
-                                <Button
-                                  type="button"
-                                  onClick={() => handleRecordBatchPayment(batch)}
-                                  disabled={processingClaimBatch}
-                                >
-                                  רשום תשלום
-                                </Button>
-                              </div>
-                              <Input
-                                className="mt-2"
-                                value={batchPaymentForms[batch.id]?.notes || ''}
-                                onChange={(event) => updateBatchPaymentForm(batch.id, { notes: event.target.value })}
-                                placeholder="הערת תשלום (אופציונלי)"
-                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => handleOpenRecordBatchPayment(batch)}
+                                disabled={processingClaimBatch}
+                              >
+                                רשום תשלום
+                              </Button>
                             </div>
                           )}
                         </div>

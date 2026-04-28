@@ -31,6 +31,7 @@
     "STUDENT_LAST": "אוטומטי",
     "STUDENT_ID": "999000001",
     "STUDENT_PHONE": "0501234500",
+    "STUDENT_EMAIL": "autotest.student@reinex-test.local",
     "FORM_NAME": "טופס בדיקה אוטומטי",
     "CLIENT_FIRST": "לקוח",
     "CLIENT_LAST": "חד פעמי",
@@ -99,7 +100,8 @@
             "first_name": "{{STUDENT_FIRST}}",
             "last_name": "{{STUDENT_LAST}}",
             "identity_number": "{{STUDENT_ID}}",
-            "phone": "{{STUDENT_PHONE}}"
+            "phone": "{{STUDENT_PHONE}}",
+            "email": "{{STUDENT_EMAIL}}"
           },
           "ignoreStatus": [409]
         },
@@ -111,6 +113,17 @@
           "endpoint": "/api/students-list?org_id={{TEST_ORG_ID}}&q={{STUDENT_ID}}",
           "store": "STUDENT_UUID",
           "storeField": "0.id"
+        },
+        {
+          "id": "ensure-student-email",
+          "action": "apiCall",
+          "description": "PUT to ensure the test student has an email (handles pre-existing students created without one)",
+          "method": "PUT",
+          "endpoint": "/api/students-list/{{STUDENT_UUID}}",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "email": "{{STUDENT_EMAIL}}"
+          }
         }
       ]
     },
@@ -122,7 +135,7 @@
         {
           "id": "create-client",
           "action": "apiCall",
-          "description": "Create a one-time customer (client profile)",
+          "description": "Create or reuse a one-time customer (client profile) – API always returns the profile",
           "method": "POST",
           "endpoint": "/api/client-profiles",
           "body": {
@@ -133,8 +146,7 @@
             "phone": "{{CLIENT_PHONE}}"
           },
           "store": "CLIENT_PROFILE_ID",
-          "storeField": "id",
-          "ignoreStatus": [409]
+          "storeField": "id"
         }
       ]
     },
@@ -202,6 +214,13 @@
           "description": "Click the send button"
         },
         {
+          "id": "wait-for-send-api",
+          "action": "waitForNetwork",
+          "pattern": "/api/form-submissions",
+          "description": "Wait for the form-submissions API to respond before asserting the result",
+          "timeout": 15000
+        },
+        {
           "id": "assert-otp-appears",
           "action": "assert",
           "type": "text",
@@ -236,15 +255,15 @@
         {
           "id": "wait-forms-tab-loaded",
           "action": "waitForSelector",
-          "selector": "button:has-text('שלח טופס')",
-          "description": "Wait for the forms tab send button to appear"
+          "selector": "[role='tabpanel'] button:has-text('שלח טופס')",
+          "description": "Wait for the forms tab send button to appear inside the tab panel"
         },
         {
           "id": "click-send-form-in-tab",
           "action": "click",
-          "selector": "button:has-text('שלח טופס')",
-          "nth": 1,
-          "description": "Click the 'שלח טופס' button inside the forms tab (nth=1 skips the header button)"
+          "selector": "[role='tabpanel'] button:has-text('שלח טופס')",
+          "first": true,
+          "description": "Click the 'שלח טופס' button inside the forms tab panel"
         },
         {
           "id": "wait-dialog-open",
@@ -284,6 +303,13 @@
           "action": "click",
           "selector": "[role='dialog'] button:has-text('שלח טופס')",
           "description": "Click the send button"
+        },
+        {
+          "id": "wait-for-send-api",
+          "action": "waitForNetwork",
+          "pattern": "/api/form-submissions",
+          "description": "Wait for the form-submissions API to respond",
+          "timeout": 15000
         },
         {
           "id": "assert-email-success",
@@ -362,6 +388,13 @@
           "action": "click",
           "selector": "[role='dialog'] button:has-text('שלח טופס')",
           "description": "Click the send button"
+        },
+        {
+          "id": "wait-for-send-api",
+          "action": "waitForNetwork",
+          "pattern": "/api/form-submissions",
+          "description": "Wait for the form-submissions API to respond",
+          "timeout": 15000
         },
         {
           "id": "assert-otp-appears",
