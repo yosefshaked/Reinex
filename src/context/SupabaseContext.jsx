@@ -6,6 +6,27 @@ import { useRuntimeConfig } from '../runtime/RuntimeConfigContext.jsx';
 
 const SupabaseContext = createContext(undefined);
 
+function mergeSessionReference(previousSession, nextSession) {
+  if (!previousSession || !nextSession) {
+    return nextSession ?? null;
+  }
+
+  const previousUserId = previousSession?.user?.id || null;
+  const nextUserId = nextSession?.user?.id || null;
+  if (!previousUserId || !nextUserId || previousUserId !== nextUserId) {
+    return nextSession;
+  }
+
+  Object.keys(previousSession).forEach((key) => {
+    if (!(key in nextSession)) {
+      delete previousSession[key];
+    }
+  });
+
+  Object.assign(previousSession, nextSession);
+  return previousSession;
+}
+
 export const SupabaseProvider = ({ children }) => {
   const runtimeConfig = useRuntimeConfig();
   const [authClient, setAuthClient] = useState(null);
@@ -116,7 +137,7 @@ export const SupabaseProvider = ({ children }) => {
 
     const { data } = authClient.auth.onAuthStateChange((_event, nextSession) => {
       if (isMounted) {
-        setSession(nextSession);
+        setSession((previousSession) => mergeSessionReference(previousSession, nextSession));
       }
     });
 
