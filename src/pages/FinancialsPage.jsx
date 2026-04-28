@@ -117,6 +117,70 @@ function resolveClaimWorkflowState(claim) {
   };
 }
 
+function resolveClaimBatchState(batchStatus) {
+  switch (`${batchStatus || ''}`.toLowerCase()) {
+    case 'draft':
+      return {
+        key: 'draft',
+        label: 'דרישה: טיוטה',
+        className: 'bg-sky-100 text-sky-900',
+      };
+    case 'issued':
+    case 'submitted':
+      return {
+        key: 'submitted',
+        label: 'דרישה: נשלח',
+        className: 'bg-amber-100 text-amber-900',
+      };
+    case 'acknowledged':
+      return {
+        key: 'acknowledged',
+        label: 'דרישה: אושר קבלה',
+        className: 'bg-indigo-100 text-indigo-900',
+      };
+    case 'partially_paid':
+      return {
+        key: 'partially_paid',
+        label: 'דרישה: שולם חלקית',
+        className: 'bg-emerald-100 text-emerald-900',
+      };
+    case 'paid':
+      return {
+        key: 'paid',
+        label: 'דרישה: שולם',
+        className: 'bg-emerald-100 text-emerald-900',
+      };
+    case 'disputed':
+      return {
+        key: 'disputed',
+        label: 'דרישה: במחלוקת',
+        className: 'bg-rose-100 text-rose-900',
+      };
+    case 'closed':
+      return {
+        key: 'closed',
+        label: 'דרישה: סגור',
+        className: 'bg-slate-200 text-slate-800',
+      };
+    case 'cancelled':
+      return {
+        key: 'cancelled',
+        label: 'דרישה: בוטל',
+        className: 'bg-slate-200 text-slate-800',
+      };
+    default:
+      return null;
+  }
+}
+
+function resolveClaimBadgeState(claim) {
+  const batchState = resolveClaimBatchState(claim?.hmo_invoice_batch_status);
+  if (batchState) {
+    return batchState;
+  }
+  return resolveClaimWorkflowState(claim);
+}
+
 function formatBatchStatus(status) {
   switch (`${status || ''}`.toLowerCase()) {
     case 'draft': return 'טיוטה';
@@ -1283,7 +1347,7 @@ export default function FinancialsPage() {
                         </div>
                         <div className="mt-2 space-y-2">
                           {group.claims.map((claim) => {
-                            const workflowState = resolveClaimWorkflowState(claim);
+                            const workflowState = resolveClaimBadgeState(claim);
                             return (
                               <div key={claim.id} className="rounded-lg border border-border bg-white p-2">
                                 <div className="flex items-center justify-between gap-2">
@@ -1299,7 +1363,7 @@ export default function FinancialsPage() {
                                     <div className="text-xs font-medium text-zinc-900">{claim.service_name || 'שירות'}</div>
                                   </div>
                                   <div className={`rounded-full px-2 py-0.5 text-xs ${workflowState.className}`}>
-                                    {claim.hmo_invoice_batch_status ? `דרישה: ${formatBatchStatus(claim.hmo_invoice_batch_status)}` : workflowState.label}
+                                    {workflowState.label}
                                   </div>
                                 </div>
                                 <div className="mt-1 text-xs text-muted-foreground">
