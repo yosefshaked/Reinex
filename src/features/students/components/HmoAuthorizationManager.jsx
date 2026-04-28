@@ -375,6 +375,17 @@ export default function HmoAuthorizationManager({
                       <div>
                         <div className="text-sm font-semibold text-zinc-900">{serviceName} • {row.provider?.name || 'גורם מממן'}</div>
                         <div className="mt-1 text-xs text-muted-foreground">{row.provider_track?.name || 'ללא מסלול'} • {getStatusLabel(row.status)}</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Badge variant="secondary" className="bg-white text-slate-700 hover:bg-white">
+                            נוצלו: {lessonCountDisplay.consumed}
+                          </Badge>
+                          <Badge variant="secondary" className="bg-white text-slate-700 hover:bg-white">
+                            מתוכננים: {lessonCountDisplay.reserved}
+                          </Badge>
+                          <Badge variant="secondary" className="bg-emerald-50 text-emerald-800 hover:bg-emerald-50 border border-emerald-200">
+                            זמינים לקביעת תור: {lessonCountDisplay.available}
+                          </Badge>
+                        </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline">{row.authorization_reference || 'ללא מספר אישור'}</Badge>
@@ -384,19 +395,7 @@ export default function HmoAuthorizationManager({
                       </div>
                     </div>
 
-                    <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-7 text-sm">
-                      <div className="rounded-lg bg-white p-3">
-                        <div className="text-[11px] text-muted-foreground">נוצלו</div>
-                        <div className="mt-1 font-semibold">{lessonCountDisplay.consumed}</div>
-                      </div>
-                      <div className="rounded-lg bg-white p-3">
-                        <div className="text-[11px] text-muted-foreground">מתוכננים</div>
-                        <div className="mt-1 font-semibold">{lessonCountDisplay.reserved}</div>
-                      </div>
-                      <div className="rounded-lg bg-white p-3">
-                        <div className="text-[11px] text-muted-foreground">זמינים לקביעת תור</div>
-                        <div className="mt-1 font-semibold">{lessonCountDisplay.available}</div>
-                      </div>
+                    <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4 text-sm">
                       <div className="rounded-lg bg-white p-3">
                         <div className="text-[11px] text-muted-foreground">לקוח בזמן כיסוי</div>
                         <div className="mt-1 font-semibold">{formatCurrency(row.covered_customer_charge_amount)}</div>
