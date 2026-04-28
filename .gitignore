@@ -32,3 +32,5 @@ settings.json
 /test/automatic-tester/reports
 /.aider-env
 .aider*
+/.cache
+/.pki
