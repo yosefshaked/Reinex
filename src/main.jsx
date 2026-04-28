@@ -107,7 +107,7 @@ function App({ config = null }) {
                     <Route path="/services/:id" element={<ServiceProfilePage />} />
                     <Route path="/waiting-list" element={<WaitingListPage />} />
                     <Route path="/one-time-customers" element={<OneTimeCustomersPage />} />
-                    <Route path="/one-time-customers/:clientProfileId" element={<OneTimeCustomersPage />} />
+                    <Route path="/one-time-customers/:clientProfileId/:tab?" element={<OneTimeCustomersPage />} />
                     <Route path="/students-list" element={<StudentsPage />} />
                     <Route path="/admin/students" element={<Navigate to="/students-list" replace />} />
                     <Route path="/my-students" element={<Navigate to="/students-list" replace />} />

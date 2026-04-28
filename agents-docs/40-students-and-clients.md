@@ -34,3 +34,5 @@
 - Instructors are scoped to their own students via lesson-template-derived IDs in [`../api/_shared/instructor-student-scope.js`](../api/_shared/instructor-student-scope.js).
 - Roster pages persist filter state and reuse shared role helpers in [`../src/features/students/utils/endpoints.js`](../src/features/students/utils/endpoints.js).
 - Student detail lesson-balance displays must reuse backend-provided lesson-count buckets (`consumed_lessons`, `reserved_lessons`, `available_lessons_to_book`) rather than recomputing "lessons left" inside React components.
+- Student detail and one-time-customer detail should share the same tabs-shell layout source where possible; differ by tab set/capabilities, not by inventing a separate page framework for each profile type.
+- One-time customers use `client_profiles` as their canonical subject record and should reuse form-submission flows by `client_profile_id` rather than inventing a second forms-delivery path.

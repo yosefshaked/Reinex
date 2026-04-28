@@ -39,3 +39,4 @@
 - Waiting-list intake depends on built-in field IDs and writes into routing/client/guardian flows; keep those identifiers stable.
 - Anonymous invite and OTP flows rely on `active_routing` as a generic routing table keyed by route `id` with `category`, `routing_info`, and `expires_at`; do not regress it back to a user-only active-org pointer table.
 - Visibility rules and alert rules are runtime-evaluated by shared helpers, not by ad hoc component logic.
+- Delivery/status/resend UI should reuse the shared forms-submission tab/component for both students and one-time customers; the canonical selector is `client_profile_id`, with `student_id` only when a real student record exists.

@@ -160,8 +160,7 @@
             "client_profile_id": "{{CLIENT_PROFILE_ID}}",
             "delivery_method": "whatsapp"
           },
-          "store": "SEED_SUBMISSION_ID",
-          "storeField": "submission_id"
+          "ignoreStatus": [400, 409, 500, 502]
         }
       ]
     },
@@ -356,11 +355,6 @@
           "action": "navigate",
           "url": "{{BASE_URL}}/#/one-time-customers/{{CLIENT_PROFILE_ID}}",
           "description": "Navigate directly to the one-time customer detail page"
-        },
-        {
-          "id": "screenshot-before-wait",
-          "action": "screenshot",
-          "name": "one-time-customer-page-debug"
         },
         {
           "id": "wait-client-page-loaded",

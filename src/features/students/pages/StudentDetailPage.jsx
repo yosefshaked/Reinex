@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -16,6 +15,7 @@ import StudentHistoryTab from '@/features/students/components/StudentHistoryTab.
 import StudentDocumentsTab from '@/features/students/components/StudentDocumentsTab.jsx';
 import StudentFinancialTab from '@/features/students/components/StudentFinancialTab.jsx';
 import StudentFormsTab from '@/features/students/components/StudentFormsTab.jsx';
+import DetailTabsShell from '@/components/ui/DetailTabsShell.jsx';
 import { toAgorot } from '@/lib/currency.js';
 
 const REQUEST_STATE = {
@@ -171,6 +171,26 @@ export default function StudentDetailPage() {
     navigate(`/students/${studentId}/${newTab}`);
   };
 
+  const tabs = [
+    { key: 'overview', label: 'סקירה', content: <StudentOverviewTab student={student} /> },
+    { key: 'schedule', label: 'לוח שיעורים', content: <StudentScheduleTab studentId={studentId} /> },
+    { key: 'history', label: 'היסטוריה', content: <StudentHistoryTab studentId={studentId} student={student} /> },
+    {
+      key: 'documents',
+      label: 'מסמכים',
+      content: (
+        <StudentDocumentsTab
+          student={student}
+          session={session}
+          orgId={activeOrgId}
+          onRefresh={loadStudent}
+        />
+      ),
+    },
+    { key: 'financial', label: 'כספים', content: <StudentFinancialTab studentId={studentId} student={student} /> },
+    { key: 'forms', label: 'טפסים', content: <StudentFormsTab studentId={studentId} student={student} canEdit={canEdit} /> },
+  ];
+
   // Loading states
   if (!studentId) {
     return <div className="text-sm text-neutral-600">לא נבחר תלמיד להצגה.</div>;
@@ -217,62 +237,21 @@ export default function StudentDetailPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      {/* Header with actions */}
-      <StudentHeader
-        student={student}
-        canEdit={canEdit}
-        isUpdating={isUpdatingStudent}
-        onEdit={handleOpenEdit}
-        onSuspend={loadStudent}
-      />
-
-      {/* Tabbed content */}
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <div className="border-b border-border">
-          <TabsList className="bg-transparent h-auto p-0 gap-1">
-            <TabsTrigger value="overview" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">סקירה</TabsTrigger>
-            <TabsTrigger value="schedule" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">לוח שיעורים</TabsTrigger>
-            <TabsTrigger value="history" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">היסטוריה</TabsTrigger>
-            <TabsTrigger value="documents" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">מסמכים</TabsTrigger>
-            <TabsTrigger value="financial" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">כספים</TabsTrigger>
-            <TabsTrigger value="forms" className="rounded-none border-b-2 border-transparent data-[state=active]:border-zinc-900 data-[state=active]:shadow-none px-4 py-2.5 font-medium">טפסים</TabsTrigger>
-          </TabsList>
-        </div>
-
-        <TabsContent value="overview" className="space-y-4">
-          <StudentOverviewTab student={student} />
-        </TabsContent>
-
-        <TabsContent value="schedule" className="space-y-4">
-          <StudentScheduleTab studentId={studentId} />
-        </TabsContent>
-
-        <TabsContent value="history" className="space-y-4">
-          <StudentHistoryTab studentId={studentId} student={student} />
-        </TabsContent>
-
-        <TabsContent value="documents" className="space-y-4">
-          <StudentDocumentsTab
-            student={student}
-            session={session}
-            orgId={activeOrgId}
-            onRefresh={loadStudent}
-          />
-        </TabsContent>
-
-        <TabsContent value="financial" className="space-y-4">
-          <StudentFinancialTab studentId={studentId} student={student} />
-        </TabsContent>
-
-        <TabsContent value="forms" className="space-y-4">
-          <StudentFormsTab
-            studentId={studentId}
+    <>
+      <DetailTabsShell
+        header={(
+          <StudentHeader
             student={student}
             canEdit={canEdit}
+            isUpdating={isUpdatingStudent}
+            onEdit={handleOpenEdit}
+            onSuspend={loadStudent}
           />
-        </TabsContent>
-      </Tabs>
+        )}
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        tabs={tabs}
+      />
 
       {/* Edit modal */}
       <EditStudentModal
@@ -286,6 +265,6 @@ export default function StudentDetailPage() {
         session={session}
         onSuspendSuccess={loadStudent}
       />
-    </div>
+    </>
   );
 }

@@ -15,7 +15,7 @@
         "GET /api/services",
         "POST /api/students-list",
         "GET /api/students-list",
-        "POST /api/settings-medical-providers",
+        "POST /api/settings/medical-providers",
         "POST /api/hmo-authorizations",
         "POST /api/lesson-instances",
         "PUT /api/calendar-attendance",
@@ -68,6 +68,7 @@
             "org_id": "{{TEST_ORG_ID}}",
             "first_name": "מדריך",
             "last_name": "בדיקה",
+            "employee_id": "TEST-INST-99",
             "employee_type": "instructor",
             "payroll_model": "lesson_based",
             "current_rate": 20000
@@ -134,7 +135,7 @@
           "action": "apiCall",
           "description": "Create a new HMO provider",
           "method": "POST",
-          "endpoint": "/api/settings-medical-providers",
+          "endpoint": "/api/settings/medical-providers",
           "body": {
             "org_id": "{{TEST_ORG_ID}}",
             "entity": "provider",
@@ -149,7 +150,7 @@
           "action": "apiCall",
           "description": "Create a track under the new HMO provider",
           "method": "POST",
-          "endpoint": "/api/settings-medical-providers",
+          "endpoint": "/api/settings/medical-providers",
           "body": {
             "org_id": "{{TEST_ORG_ID}}",
             "entity": "track",

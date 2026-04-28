@@ -1,35 +1,42 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card.jsx';
 import { Input } from '@/components/ui/input.jsx';
 import { Badge } from '@/components/ui/badge.jsx';
 import { Button } from '@/components/ui/button.jsx';
-import { Phone, Mail, Search, UserRound, ArrowLeft, FileText } from 'lucide-react';
+import { Loader2, Search, UserRound, Phone, Mail } from 'lucide-react';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useClientProfiles } from '@/hooks/useOrgData.js';
+import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminOrOffice } from '@/features/students/utils/endpoints.js';
-import SendFormDialog from '@/features/students/components/SendFormDialog.jsx';
 import CreateClientProfileDialog from '@/features/clients/components/CreateClientProfileDialog.jsx';
 import ClientBillingWorkspace from '@/features/clients/components/ClientBillingWorkspace.jsx';
+import DetailTabsShell from '@/components/ui/DetailTabsShell.jsx';
+import OneTimeCustomerHeader from '@/features/clients/components/OneTimeCustomerHeader.jsx';
+import OneTimeCustomerOverviewTab from '@/features/clients/components/OneTimeCustomerOverviewTab.jsx';
+import SubjectFormsTab from '@/features/students/components/SubjectFormsTab.jsx';
 
 function renderDisplayName(profile) {
   return profile?.full_name || [profile?.first_name, profile?.middle_name, profile?.last_name].filter(Boolean).join(' ').trim() || 'ללא שם';
 }
 
 export default function OneTimeCustomersPage() {
-  const { clientProfileId } = useParams();
+  const { clientProfileId, tab: tabParam } = useParams();
   const navigate = useNavigate();
   const { activeOrg, activeOrgId } = useOrg();
   const { session } = useSupabase();
   const [search, setSearch] = useState('');
-  const [sendFormOpen, setSendFormOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [detailState, setDetailState] = useState('idle');
+  const [detailProfile, setDetailProfile] = useState(null);
+  const [detailError, setDetailError] = useState('');
 
   const membershipRole = normalizeMembershipRole(activeOrg?.membership?.role || '');
   const canManage = isAdminOrOffice(membershipRole);
   const canFetch = Boolean(session && activeOrgId && canManage);
+  const activeTab = tabParam || 'overview';
 
   const { clientProfiles, loadingClientProfiles, clientProfilesError, refetchClientProfiles } = useClientProfiles({
     enabled: canFetch,
@@ -44,10 +51,34 @@ export default function OneTimeCustomersPage() {
     [...clientProfiles].sort((left, right) => renderDisplayName(left).localeCompare(renderDisplayName(right), 'he'))
   ), [clientProfiles]);
 
-  const selectedProfile = useMemo(
-    () => (clientProfileId ? sortedProfiles.find((profile) => profile.id === clientProfileId) || null : null),
-    [clientProfileId, sortedProfiles],
-  );
+  const loadDetailProfile = useCallback(async () => {
+    if (!clientProfileId || !canFetch) return;
+    setDetailState('loading');
+    setDetailError('');
+    try {
+      const profile = await authenticatedFetch(`client-profiles/${clientProfileId}`, {
+        session,
+        params: { org_id: activeOrgId },
+      });
+      setDetailProfile(profile || null);
+      setDetailState('idle');
+    } catch (error) {
+      console.error('Failed to load one-time customer profile', error);
+      setDetailProfile(null);
+      setDetailState('error');
+      setDetailError(error?.message || 'טעינת כרטיס הלקוח/ה נכשלה.');
+    }
+  }, [activeOrgId, canFetch, clientProfileId, session]);
+
+  useEffect(() => {
+    if (clientProfileId && canFetch) {
+      void loadDetailProfile();
+    } else {
+      setDetailProfile(null);
+      setDetailState('idle');
+      setDetailError('');
+    }
+  }, [canFetch, clientProfileId, loadDetailProfile]);
 
   if (!canManage) {
     return (
@@ -62,37 +93,56 @@ export default function OneTimeCustomersPage() {
   }
 
   if (clientProfileId) {
+    const tabs = [
+      {
+        key: 'overview',
+        label: 'סקירה',
+        content: <OneTimeCustomerOverviewTab clientProfile={detailProfile} />,
+      },
+      {
+        key: 'financial',
+        label: 'כספים',
+        content: <ClientBillingWorkspace clientProfile={detailProfile} />,
+      },
+      {
+        key: 'forms',
+        label: 'טפסים',
+        content: (
+          <SubjectFormsTab
+            clientProfileId={detailProfile?.id || clientProfileId}
+            clientProfile={detailProfile}
+            canEdit={canManage}
+          />
+        ),
+      },
+    ];
+
     return (
       <PageLayout
         title="כרטיס לקוח/ה חד-פעמי/ת"
         subtitle="פרופיל לקוח/ה שאינו/ה תלמיד/ה פעיל/ה, עם גישה לטפסים, לשיעורים חד-פעמיים ולמעקב כספי."
-        actions={(
-          <Button asChild variant="outline" size="sm" className="gap-2">
-            <Link to="/one-time-customers">
-              <ArrowLeft className="h-4 w-4" />
-              חזרה לרשימה
-            </Link>
-          </Button>
-        )}
       >
         <div className="space-y-6">
-          {loadingClientProfiles ? (
+          {detailState === 'loading' ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
-                טוענים את כרטיס הלקוח/ה...
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span>טוענים את כרטיס הלקוח/ה...</span>
+                </div>
               </CardContent>
             </Card>
           ) : null}
 
-          {!loadingClientProfiles && clientProfilesError ? (
+          {detailState !== 'loading' && (detailError || clientProfilesError) ? (
             <Card className="border-destructive/30">
               <CardContent className="py-12 text-center text-destructive">
-                {clientProfilesError}
+                {detailError || clientProfilesError}
               </CardContent>
             </Card>
           ) : null}
 
-          {!loadingClientProfiles && !clientProfilesError && !selectedProfile ? (
+          {detailState !== 'loading' && !detailError && !detailProfile ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
                 כרטיס הלקוח/ה לא נמצא.
@@ -100,66 +150,13 @@ export default function OneTimeCustomersPage() {
             </Card>
           ) : null}
 
-          {!loadingClientProfiles && !clientProfilesError && selectedProfile ? (
-            <>
-              <Card className="border-border/70 shadow-sm">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <CardTitle className="text-xl">{renderDisplayName(selectedProfile)}</CardTitle>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <Badge variant="secondary">לקוח/ה חד-פעמי/ת</Badge>
-                        <Badge variant="outline">ללא כרטיס תלמיד/ה</Badge>
-                      </div>
-                    </div>
-                    <Button type="button" size="sm" className="gap-2" onClick={() => setSendFormOpen(true)}>
-                      <FileText className="h-4 w-4" />
-                      שלח טופס
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-3 text-sm">
-                    <div className="flex items-center gap-2">
-                      <UserRound className="h-4 w-4 text-muted-foreground" />
-                      <span>{selectedProfile.identity_number || 'ללא תעודת זהות'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                      <span>{selectedProfile.phone || 'ללא טלפון'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                      <span>{selectedProfile.email || 'ללא אימייל'}</span>
-                    </div>
-                  </div>
-                  <div className="space-y-3 text-sm">
-                    <div>סטטוס תהליך: <span className="font-medium">{selectedProfile.onboarding_status || 'not_started'}</span></div>
-                    {selectedProfile.guardian ? (
-                      <div>איש קשר: <span className="font-medium">{renderDisplayName(selectedProfile.guardian)}</span></div>
-                    ) : null}
-                    {Array.isArray(selectedProfile.tags) && selectedProfile.tags.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {selectedProfile.tags.map((tag) => (
-                          <Badge key={`${selectedProfile.id}-${tag}`} variant="outline">{tag}</Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <SendFormDialog
-                open={sendFormOpen}
-                onOpenChange={setSendFormOpen}
-                clientProfile={selectedProfile}
-                onSent={() => {
-                  void refetchClientProfiles();
-                }}
-              />
-
-              <ClientBillingWorkspace clientProfile={selectedProfile} />
-            </>
+          {detailState !== 'loading' && !detailError && detailProfile ? (
+            <DetailTabsShell
+              header={<OneTimeCustomerHeader clientProfile={detailProfile} canManage={canManage} />}
+              activeTab={activeTab}
+              onTabChange={(nextTab) => navigate(`/one-time-customers/${clientProfileId}/${nextTab}`)}
+              tabs={tabs}
+            />
           ) : null}
         </div>
       </PageLayout>
@@ -258,7 +255,7 @@ export default function OneTimeCustomersPage() {
                 ) : null}
                 <div className="flex items-center justify-between gap-2">
                   <Button asChild variant="outline" size="sm">
-                    <Link to={`/one-time-customers/${profile.id}`}>פתח כרטיס</Link>
+                    <Link to={`/one-time-customers/${profile.id}/overview`}>פתח כרטיס</Link>
                   </Button>
                   {Array.isArray(profile.tags) && profile.tags.length > 0 ? (
                     <div className="flex flex-wrap justify-end gap-2">
@@ -281,7 +278,7 @@ export default function OneTimeCustomersPage() {
           onSuccess={(profile) => {
             void refetchClientProfiles();
             if (profile?.id) {
-              navigate(`/one-time-customers/${profile.id}`);
+              navigate(`/one-time-customers/${profile.id}/overview`);
             }
           }}
         />
