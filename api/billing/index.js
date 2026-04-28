@@ -298,11 +298,7 @@ async function buildHmoClaimsReadModel({
     .select(`
       student_id,
       valid_from,
-      expires_at,
-      student:students(
-        id,
-        is_active
-      )
+      expires_at
     `)
     .eq('status', 'active');
 
@@ -312,7 +308,6 @@ async function buildHmoClaimsReadModel({
 
   const studentsWithActiveHmoEligibility = new Set((activeAuthorizationStudents || [])
     .filter((row) => normalizeString(row?.student_id))
-    .filter((row) => row?.student?.is_active !== false)
     .filter((row) => isDateWithinAuthorizationWindow({
       validFrom: row?.valid_from,
       expiresAt: row?.expires_at,
