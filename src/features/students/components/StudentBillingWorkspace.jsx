@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Info, Loader2 } from 'lucide-react';
+import { Copy, CornerUpLeft, Info, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import CurrencyInput from '@/components/ui/CurrencyInput.jsx';
 import ConfirmLedgerEntryDialog from '@/components/ui/ConfirmLedgerEntryDialog.jsx';
+import LedgerEntriesTable from '@/features/finance/components/LedgerEntriesTable.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -120,6 +121,21 @@ function buildEntryForm() {
 
 function shortId(id) {
   return id ? String(id).slice(-8) : '';
+}
+
+function computeDisplayedRowBalances(entries, currentBalanceAgorot) {
+  let rollingBalance = coerceAgorot(currentBalanceAgorot);
+  return entries.map((entry) => {
+    const balanceAtRow = rollingBalance;
+    const direction = String(entry?.direction || '').toUpperCase();
+    const amount = coerceAgorot(entry?.amount);
+    if (direction === 'CREDIT') {
+      rollingBalance -= amount;
+    } else if (direction === 'DEBIT') {
+      rollingBalance += amount;
+    }
+    return balanceAtRow;
+  });
 }
 
 export default function StudentBillingWorkspace({
@@ -322,6 +338,64 @@ export default function StudentBillingWorkspace({
   const balanceAgorot = coerceAgorot(summary.balance);
   const balanceIsPositive = balanceAgorot > 0;
   const balanceIsNegative = balanceAgorot < 0;
+  const displayedBalances = useMemo(
+    () => computeDisplayedRowBalances(ledgerEntries, balanceAgorot),
+    [balanceAgorot, ledgerEntries],
+  );
+  const ledgerRows = useMemo(() => ledgerEntries.map((entry, index) => {
+    const isReversed = reversalMap.has(entry.id);
+    const isReversal = entry.source_type === 'reversal';
+    const coverageBadge = getCoverageBadge(entry?.metadata || {});
+    const coverageReasonLabel = getCoverageReasonLabel(entry?.metadata?.coverage_reason);
+    const direction = String(entry?.direction || '').toUpperCase();
+    const descriptionLines = [
+      entry.notes ? `הערות: ${entry.notes}` : '',
+      entry.external_reference ? `אסמכתא: ${entry.external_reference}` : '',
+      coverageReasonLabel || '',
+      isReversal && entry.reverses_transaction_id ? `היפוך של תנועה #${shortId(entry.reverses_transaction_id)}` : '',
+    ].filter(Boolean);
+
+    return {
+      key: entry.id,
+      date: formatDateTime(entry.effective_at || entry.posted_at),
+      primaryText: getEntryTypeLabel(entry),
+      detailLines: descriptionLines,
+      statusBadges: [
+        {
+          label: direction === 'CREDIT' ? 'זיכוי' : 'חיוב',
+          className: direction === 'CREDIT'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            : 'border-red-200 bg-red-50 text-red-700',
+        },
+        ...(isReversed ? [{
+          label: 'הופך',
+          className: 'border-amber-200 bg-amber-50 text-amber-800',
+        }] : []),
+        ...(coverageBadge ? [coverageBadge] : []),
+      ],
+      debit: direction === 'DEBIT' ? formatCurrency(entry.amount) : '—',
+      credit: direction === 'CREDIT' ? formatCurrency(entry.amount) : '—',
+      balance: formatCurrency(displayedBalances[index] || 0),
+      dimmed: isReversed,
+      actions: [
+        {
+          label: 'העתק מזהה תנועה',
+          icon: <Copy className="h-4 w-4" />,
+          onSelect: () => {
+            navigator.clipboard.writeText(entry.id);
+            toast.success('מזהה תנועה הועתק');
+          },
+        },
+        ...(canMutateBilling && !isReversed && ['manual_payment', 'manual_adjustment', 'lesson_charge'].includes(entry.source_type) ? [{
+          label: 'בצע היפוך',
+          icon: <CornerUpLeft className="h-4 w-4" />,
+          onSelect: () => handleReverseEntry(entry.id),
+          disabled: saving,
+          className: 'text-amber-700 focus:text-amber-700',
+        }] : []),
+      ],
+    };
+  }), [canMutateBilling, displayedBalances, ledgerEntries, reversalMap, saving]);
 
   function applyCalculatorAmount() {
     if (!selectedCalculatorService || !calculatorLessonCount || !calculatorAmountAgorot) {
@@ -565,88 +639,21 @@ export default function StudentBillingWorkspace({
         </section>
 
         {/* ── Ledger entries ── */}
-        <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
-          <div className="h-1.5 bg-violet-500" />
-          <div className="p-5 space-y-4">
-            <div>
-              <h3 className="text-lg font-semibold text-zinc-900">פנקס תנועות</h3>
-              <p className="text-sm text-muted-foreground">{studentName} • הלדר הוא מקור האמת היחיד — תנועות לא נמחקות, רק מהופכות.</p>
+        {loading ? (
+          <section className="rounded-3xl border border-slate-200 bg-white px-5 py-10 text-center text-sm text-slate-500 shadow-sm shadow-slate-200/70 sm:px-6">
+            <div className="flex items-center justify-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              טוען תנועות...
             </div>
-
-            {loading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                טוען תנועות...
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {ledgerEntries.map((entry) => {
-                  const isReversed = reversalMap.has(entry.id);
-                  const isReversal = entry.source_type === 'reversal';
-                  const coverageBadge = getCoverageBadge(entry?.metadata || {});
-                  const coverageReasonLabel = getCoverageReasonLabel(entry?.metadata?.coverage_reason);
-                  return (
-                    <div
-                      key={entry.id}
-                      className={[
-                        'rounded-xl border border-border bg-slate-50/70 p-4',
-                        isReversed ? 'opacity-55' : '',
-                      ].join(' ')}
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-semibold text-zinc-900">
-                              {getEntryTypeLabel(entry)} • {entry.direction === 'CREDIT' ? '+' : '-'}{formatCurrency(entry.amount)}
-                            </span>
-                            {isReversed ? (
-                              <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800 text-[10px]">
-                                הופך
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {formatDateTime(entry.effective_at || entry.posted_at)}
-                            {entry.notes ? ` • ${entry.notes}` : ''}
-                            {entry.external_reference ? ` • ${entry.external_reference}` : ''}
-                          </div>
-                          {coverageReasonLabel ? (
-                            <div className="mt-0.5 text-xs text-muted-foreground">{coverageReasonLabel}</div>
-                          ) : null}
-                          {isReversal && entry.reverses_transaction_id ? (
-                            <div className="mt-0.5 text-xs text-muted-foreground">
-                              היפוך של תנועה #{shortId(entry.reverses_transaction_id)}
-                            </div>
-                          ) : null}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline" className={entry.direction === 'CREDIT' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-red-200 bg-red-50 text-red-900'}>
-                            {entry.direction === 'CREDIT' ? 'זיכוי' : 'חיוב'}
-                          </Badge>
-                          {coverageBadge ? (
-                            <Badge variant="outline" className={coverageBadge.className}>
-                              {coverageBadge.label}
-                            </Badge>
-                          ) : null}
-                          {canMutateBilling && !isReversed && ['manual_payment', 'manual_adjustment', 'lesson_charge'].includes(entry.source_type) ? (
-                            <Button type="button" size="sm" variant="outline" onClick={() => handleReverseEntry(entry.id)} disabled={saving}>
-                              היפוך
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                {ledgerEntries.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
-                    אין תנועות להצגה בטווח הנבחר.
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </div>
-        </section>
+          </section>
+        ) : (
+          <LedgerEntriesTable
+            title="פנקס תנועות"
+            description={`${studentName} • הלדר הוא מקור האמת היחיד. תנועות לא נמחקות, רק נרשמות מולן פעולות היפוך.`}
+            rows={ledgerRows}
+            emptyLabel="אין תנועות להצגה בטווח הנבחר."
+          />
+        )}
 
         {/* ── Lesson history ── */}
         <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
