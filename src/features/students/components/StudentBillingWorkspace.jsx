@@ -435,16 +435,16 @@ export default function StudentBillingWorkspace({
             setManualEntrySheetOpen(open);
           }}
         >
-          <SheetContent side="left" showOverlay={false} className="w-[92vw] border-slate-200 p-0 sm:max-w-[460px]">
+          <SheetContent side="left" showOverlay={false} className="w-[92vw] overflow-hidden border-slate-200 p-0 sm:max-w-[460px]">
             <div className="flex h-full flex-col p-6">
-              <SheetHeader className="text-right">
+              <SheetHeader className="shrink-0 text-right">
                 <SheetTitle>הוספת תנועה ידנית</SheetTitle>
                 <SheetDescription>
                   רושמים תשלום או התאמה ידנית בלדר, ואז מאשרים את הפעולה לפני השמירה הסופית.
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="mt-6 flex-1 overflow-y-auto pe-1">
+              <div className="mt-6 min-h-0 flex-1 overflow-y-auto pe-1">
                 <ManualEntryForm
                   open={manualEntrySheetOpen}
                   resetVersion={manualEntryResetVersion}

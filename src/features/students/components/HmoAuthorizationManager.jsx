@@ -554,16 +554,16 @@ export default function HmoAuthorizationManager({
 
       {canMutateBilling ? (
         <Sheet open={sheetOpen} modal={false} onOpenChange={handleCloseSheet}>
-          <SheetContent side="left" showOverlay={false} className="w-[92vw] border-slate-200 p-0 sm:max-w-[520px]">
+          <SheetContent side="left" showOverlay={false} className="w-[92vw] overflow-hidden border-slate-200 p-0 sm:max-w-[520px]">
             <div className="flex h-full flex-col p-6">
-              <SheetHeader className="text-right">
+              <SheetHeader className="shrink-0 text-right">
                 <SheetTitle>{form.id ? 'עריכת אישור גורם מממן' : 'הוספת אישור גורם מממן'}</SheetTitle>
                 <SheetDescription>
                   הגדירו את מסלול הכיסוי, המכסה והמחירים. לאחר השמירה החיובים הרלוונטיים יתעדכנו אוטומטית.
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="mt-6 flex-1 space-y-4 overflow-y-auto pe-1">
+              <div className="mt-6 min-h-0 flex-1 space-y-4 overflow-y-auto pe-1">
                 <div className="space-y-2">
                   <Label className="text-xs text-slate-600">מסלול</Label>
                   <Select
