@@ -38,6 +38,7 @@ const MAX_VERIFY_FAILURES = 5;
 const INVALID_VERIFY_MESSAGE = 'מזהה או קוד אימות שגויים';
 const OTP_INVALID_OR_EXPIRED_MESSAGE = 'קוד האימות שגוי או שפג תוקפו';
 const VERIFY_LOCKDOWN_MESSAGE = 'מטעמי אבטחה, כל הקישורים הפעילים עבור תלמיד זה בוטלו עקב יותר מדי נסיונות כושלים. יש ליצור קשר עם המרפאה לקבלת קוד חדש.';
+const WAITING_LIST_ROUTING_CATEGORY = 'waiting_list_intake';
 
 function normalizeDeliveryMethod(value) {
   const normalized = normalizeString(value).toLowerCase();
@@ -673,6 +674,36 @@ function buildSubmissionAccessHtml(submitLink, otpCode, identityNumber, formName
   return `<p>שלום,</p><p>שם הטופס למילוי: <strong>${formName || 'טופס'}</strong></p><p>מצורף קישור למילוי טופס: <a href="${submitLink}">${submitLink}</a></p><p>מזהה גישה: <strong>${identityNumber}</strong></p><p>קוד אימות: <strong>${otpCode}</strong></p>${expiresText ? `<p>תוקף הקישור עד: <strong>${expiresText}</strong></p>` : ''}`;
 }
 
+function buildWaitingListInviteText(inviteUrl, formName, expiresAt) {
+  const expiresText = formatExpirationForDelivery(expiresAt);
+  return [
+    'שלום,',
+    '',
+    'שמחים שיצרתם איתנו קשר.',
+    '',
+    `כדי שנוכל לקדם את ההצטרפות, נשמח שתמלאו את ${formName || 'טופס רשימת המתנה'} בקישור הבא:`,
+    inviteUrl,
+    '',
+    ...(expiresText ? [`הקישור זמין עד ${expiresText}.`] : []),
+    '',
+    'אם יש שאלות, אפשר להשיב להודעה הזו ונשמח לעזור.',
+  ].join('\n');
+}
+
+function buildWaitingListInviteHtml(inviteUrl, formName, expiresAt) {
+  const expiresText = formatExpirationForDelivery(expiresAt);
+  return [
+    '<div dir="rtl" style="font-family:Arial,sans-serif;line-height:1.7;color:#0f172a">',
+    '<p>שלום,</p>',
+    '<p>שמחים שיצרתם איתנו קשר.</p>',
+    `<p>כדי שנוכל לקדם את ההצטרפות, נשמח שתמלאו את <strong>${formName || 'טופס רשימת המתנה'}</strong> בקישור הבא:</p>`,
+    `<p><a href="${inviteUrl}" style="color:#2563eb">${inviteUrl}</a></p>`,
+    expiresText ? `<p>הקישור זמין עד <strong>${expiresText}</strong>.</p>` : '',
+    '<p>אם יש שאלות, אפשר להשיב להודעה הזו ונשמח לעזור.</p>',
+    '</div>',
+  ].filter(Boolean).join('');
+}
+
 async function sendSubmissionDelivery(context, {
   controlClient,
   env,
@@ -707,6 +738,250 @@ async function sendSubmissionDelivery(context, {
     context,
     { emailType: 'form_submission', orgId },
   );
+}
+
+function buildWaitingListInviteLink(req, env, inviteToken) {
+  const baseUrl = resolveSubmitBaseUrl(req, env);
+  const params = new URLSearchParams();
+  params.set('invite', inviteToken);
+  return `${baseUrl}/#/submit?${params.toString()}`;
+}
+
+async function findActiveWaitingListInviteRoutingBySubmission(controlClient, submissionId) {
+  if (!UUID_PATTERN.test(String(submissionId || ''))) return null;
+  const nowIso = getNowIso();
+  const { data, error } = await controlClient
+    .from('active_routing')
+    .select('id, org_id, routing_info, expires_at, metadata')
+    .eq('category', WAITING_LIST_ROUTING_CATEGORY)
+    .contains('routing_info', { submission_id: submissionId })
+    .gt('expires_at', nowIso)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+async function replaceWaitingListInviteRouting(controlClient, {
+  orgId,
+  userId,
+  submissionId,
+  clientProfileId,
+  studentId,
+  metadata,
+  expiresAt,
+}) {
+  const { error: deleteError } = await controlClient
+    .from('active_routing')
+    .delete()
+    .eq('category', WAITING_LIST_ROUTING_CATEGORY)
+    .contains('routing_info', { submission_id: submissionId });
+
+  if (deleteError) {
+    throw new Error(`failed_to_replace_waiting_list_routing:${deleteError.message}`);
+  }
+
+  const { data, error } = await controlClient
+    .from('active_routing')
+    .insert({
+      org_id: orgId,
+      category: WAITING_LIST_ROUTING_CATEGORY,
+      expires_at: expiresAt,
+      created_by: userId,
+      routing_info: {
+        submission_id: submissionId,
+        client_profile_id: clientProfileId,
+      },
+      metadata: {
+        ...(metadata || {}),
+        client_profile_id: clientProfileId,
+        student_id: studentId || null,
+      },
+    })
+    .select('id')
+    .single();
+
+  if (error || !data?.id) {
+    throw new Error(`failed_to_create_waiting_list_routing:${error?.message || 'missing_routing_id'}`);
+  }
+
+  return data.id;
+}
+
+async function resendWaitingListIntakeSubmission(context, req, {
+  controlClient,
+  env,
+  orgId,
+  userId,
+  userEmail,
+  role,
+  submission,
+  form,
+  subject,
+  deliveryMethod,
+  destination,
+  ttlMinutes,
+}) {
+  const currentMetadata = normalizeJsonObject(submission.metadata, {});
+  const existingOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
+  const nowIso = getNowIso();
+  const priorResendCount = Number(existingOtpMetadata.resend_count || currentMetadata.resend_count || 0);
+  const nextResendCount = priorResendCount + 1;
+  let routingId = '';
+  let expiresAt = '';
+  let reusedExistingInvite = false;
+
+  try {
+    const existingRouting = await findActiveWaitingListInviteRoutingBySubmission(controlClient, submission.id);
+    if (existingRouting?.id) {
+      routingId = existingRouting.id;
+      expiresAt = normalizeString(existingRouting.expires_at);
+      reusedExistingInvite = true;
+    }
+  } catch (routingLookupError) {
+    context.log?.error?.('form-submissions failed checking reusable waiting-list invite during resend', {
+      message: routingLookupError?.message,
+      submissionId: submission.id,
+    });
+    return respond(context, 500, { message: 'failed_to_prepare_resend' });
+  }
+
+  if (!reusedExistingInvite) {
+    expiresAt = getFutureIso(ttlMinutes);
+    try {
+      routingId = await replaceWaitingListInviteRouting(controlClient, {
+        orgId,
+        userId,
+        submissionId: submission.id,
+        clientProfileId: subject.clientProfileId,
+        studentId: submission.student_id,
+        metadata: {
+          form_id: submission.form_id,
+          student_first_name: normalizeString(currentMetadata.student_first_name || subject.profile?.first_name),
+          student_last_name: normalizeString(currentMetadata.student_last_name || subject.profile?.last_name),
+          primary_service_id: normalizeString(currentMetadata.primary_service_id),
+          allow_additional_services: Boolean(currentMetadata.allow_additional_services),
+        },
+        expiresAt,
+      });
+    } catch (routingError) {
+      const message = String(routingError?.message || '');
+      context.log?.error?.('form-submissions failed creating waiting-list routing during resend', {
+        message,
+        submissionId: submission.id,
+      });
+      return respond(context, 500, { message: 'failed_to_create_active_routing' });
+    }
+  }
+
+  const inviteUrl = buildWaitingListInviteLink(req, env, routingId);
+  const sentVia = appendDeliveryMethod(
+    existingOtpMetadata.sent_via || currentMetadata.sent_via,
+    deliveryMethod,
+  );
+
+  const { error: updateSubmissionError } = await withOrgScope(controlClient, 'form_submissions', orgId)
+    .update({
+      source: deliveryMethod,
+      otp_metadata: {
+        ...existingOtpMetadata,
+        access_mode: 'invite_token',
+        delivery_method: deliveryMethod,
+        invite_status: 'pending',
+        sent_via: sentVia,
+        expires_at: expiresAt,
+        resent_at: nowIso,
+        resend_count: nextResendCount,
+      },
+      metadata: {
+        ...currentMetadata,
+        workflow_kind: 'waiting_list_intake',
+        workflow_status: 'pending',
+        delivery_method: deliveryMethod,
+        sent_via: sentVia,
+        otp_expires_at: expiresAt,
+        resent_at: nowIso,
+        resent_by: userId,
+        resend_count: nextResendCount,
+      },
+    })
+    .eq('id', submission.id);
+
+  if (updateSubmissionError) {
+    context.log?.error?.('form-submissions failed updating waiting-list submission during resend', {
+      message: updateSubmissionError?.message,
+      submissionId: submission.id,
+    });
+    return respond(context, 500, { message: 'failed_to_update_submission' });
+  }
+
+  if (deliveryMethod === 'email') {
+    const organizationSenderName = await resolveOrganizationSenderName(controlClient, orgId, context);
+    try {
+      await sendAndLogBrevoEmail(
+        controlClient,
+        {
+          to: destination,
+          subject: `${form.name || 'טופס רשימת המתנה'} - קישור למילוי`,
+          textContent: buildWaitingListInviteText(inviteUrl, form.name, expiresAt),
+          htmlContent: buildWaitingListInviteHtml(inviteUrl, form.name, expiresAt),
+          senderName: organizationSenderName || undefined,
+        },
+        env,
+        context,
+        { emailType: 'waiting_list', orgId },
+      );
+    } catch (emailError) {
+      context.log?.error?.('form-submissions failed sending waiting-list resend email', {
+        message: emailError?.message,
+        submissionId: submission.id,
+      });
+      return respond(context, 502, { message: 'failed_to_send_email' });
+    }
+  }
+
+  await logAuditEvent(controlClient, {
+    orgId,
+    userId,
+    userEmail,
+    userRole: role,
+    actionType: AUDIT_ACTIONS.FORM_SUBMISSION_RESENT,
+    actionCategory: AUDIT_CATEGORIES.FORMS,
+    resourceType: 'form_submission',
+    resourceId: submission.id,
+    details: {
+      client_profile_id: subject.clientProfileId,
+      student_id: submission.student_id,
+      form_id: submission.form_id,
+      delivery_method: deliveryMethod,
+      source: deliveryMethod,
+      workflow_kind: 'waiting_list_intake',
+      reused_existing_invite: reusedExistingInvite,
+    },
+  });
+
+  return respond(context, 200, {
+    mode: 'waiting_list_intake',
+    access_mode: 'invite_token',
+    submission_id: submission.id,
+    invite_token: routingId,
+    invite_url: inviteUrl,
+    expires_at: expiresAt,
+    expires_at_display: formatExpirationForDelivery(expiresAt),
+    client_profile_id: subject.clientProfileId,
+    student_id: submission.student_id || null,
+    student_first_name: normalizeString(currentMetadata.student_first_name || subject.profile?.first_name),
+    student_last_name: normalizeString(currentMetadata.student_last_name || subject.profile?.last_name),
+    desired_service_id: normalizeString(currentMetadata.primary_service_id),
+    desired_service_name: normalizeString(currentMetadata.primary_service_name),
+    form_name: form.name || '',
+    reused_existing_invite: reusedExistingInvite,
+    delivery_method: deliveryMethod,
+    phone: deliveryMethod === 'whatsapp' ? destination : '',
+    email: deliveryMethod === 'email' ? destination : '',
+  });
 }
 
 async function createSubmissionAccessArtifacts({
@@ -1193,7 +1468,10 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   if (!subject.profile) return respond(context, 404, { message: 'client_profile_not_found' });
 
   const identityNumber = subject.identityNumber;
-  if (!identityNumber) {
+  const workflowKind = normalizeString(currentMetadata.workflow_kind).toLowerCase();
+  const isWaitingListIntake = workflowKind === 'waiting_list_intake';
+
+  if (!isWaitingListIntake && !identityNumber) {
     return respond(context, 400, { message: 'client_profile_identity_number_missing' });
   }
 
@@ -1210,6 +1488,41 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
       clientProfileId: subject.clientProfileId,
     });
     return respond(context, 500, { message: 'failed_to_resolve_destination' });
+  }
+
+  if (isWaitingListIntake) {
+    const primaryServiceId = normalizeString(currentMetadata.primary_service_id);
+    if (primaryServiceId && !currentMetadata.primary_service_name) {
+      const { data: primaryService, error: primaryServiceError } = await withOrgScope(controlClient, 'Services', orgId)
+        .select('id, name')
+        .eq('id', primaryServiceId)
+        .maybeSingle();
+
+      if (primaryServiceError) {
+        context.log?.warn?.('form-submissions failed loading waiting-list service name during resend', {
+          message: primaryServiceError?.message,
+          submissionId,
+          primaryServiceId,
+        });
+      } else if (primaryService?.name) {
+        currentMetadata.primary_service_name = primaryService.name;
+      }
+    }
+
+    return resendWaitingListIntakeSubmission(context, req, {
+      controlClient,
+      env,
+      orgId,
+      userId,
+      userEmail,
+      role,
+      submission,
+      form,
+      subject,
+      deliveryMethod,
+      destination,
+      ttlMinutes,
+    });
   }
 
   try {

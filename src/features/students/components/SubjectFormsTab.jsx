@@ -87,6 +87,28 @@ function buildWhatsAppLink(phone, otp, submitLink, accessIdentifier, formName, e
   };
 }
 
+function buildWaitingListInviteWhatsAppLink(phone, inviteUrl, formName, expiresAt, studentName = '', serviceName = '') {
+  const normalizedPhone = normalizeWaPhone(phone);
+  const expiryText = formatDateTime(expiresAt);
+  const message = [
+    `שלום${studentName ? ` ${studentName}` : ''},`,
+    '',
+    'שמחים שיצרתם קשר איתנו.',
+    serviceName
+      ? `כדי שנוכל לקדם את הבקשה להצטרפות לשירות ${serviceName}, נשמח שתמלאו את טופס ההצטרפות בקישור הבא:`
+      : `כדי שנוכל לקדם את ההצטרפות, נשמח שתמלאו את ${formName || 'טופס רשימת המתנה'} בקישור הבא:`,
+    inviteUrl,
+    '',
+    expiryText ? `הקישור זמין עד ${expiryText}.` : '',
+    'אם יש שאלות, אפשר לחזור אלינו בהודעה חוזרת.',
+  ].filter(Boolean).join('\n');
+
+  return {
+    normalizedPhone,
+    url: `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`,
+  };
+}
+
 function formatDateTime(value) {
   if (!value) return '—';
   try {
@@ -448,8 +470,33 @@ export default function SubjectFormsTab({
         },
       });
 
+      const isWaitingListInvite = String(response?.access_mode || '').toLowerCase() === 'invite_token'
+        || String(response?.mode || '').toLowerCase() === 'waiting_list_intake';
+
       if (deliveryMethod === 'email') {
-        toast.success('OTP נשלח מחדש במייל');
+        toast.success(isWaitingListInvite ? 'קישור רשימת ההמתנה נשלח מחדש במייל' : 'OTP נשלח מחדש במייל');
+      } else if (isWaitingListInvite) {
+        const inviteUrl = String(response?.invite_url || '');
+        const phone = String(response?.phone || '');
+        const expiresAt = String(response?.expires_at || '');
+        if (!inviteUrl || !phone) {
+          throw new Error('response_missing_waiting_list_invite_payload');
+        }
+
+        const studentName = [
+          response?.student_first_name,
+          response?.student_last_name,
+        ].filter(Boolean).join(' ').trim();
+        const wa = buildWaitingListInviteWhatsAppLink(
+          phone,
+          inviteUrl,
+          response?.form_name || submission?.form_name || 'טופס רשימת המתנה',
+          expiresAt,
+          studentName,
+          String(response?.desired_service_name || ''),
+        );
+        window.open(wa.url, '_blank', 'noopener,noreferrer');
+        toast.success('קישור רשימת ההמתנה נוצר מחדש ונפתחה הודעת וואטסאפ');
       } else {
         const otp = String(response?.otp || '');
         const phone = String(response?.phone || '');

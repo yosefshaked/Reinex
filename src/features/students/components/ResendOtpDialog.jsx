@@ -42,12 +42,13 @@ export default function ResendOtpDialog({ open, onOpenChange, submission, delive
       : Number(validityOption) || 10080;
 
   const channelLabel = deliveryMethod === 'email' ? 'במייל' : 'בוואטסאפ';
+  const isWaitingListInvite = String(submission?.metadata?.workflow_kind || '').toLowerCase() === 'waiting_list_intake';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>שלח OTP מחדש</DialogTitle>
+          <DialogTitle>{isWaitingListInvite ? 'שלח קישור מחדש' : 'שלח OTP מחדש'}</DialogTitle>
           <DialogDescription>
             {`בחר תוקף לקישור החדש עבור ${submission?.form_name || 'הטופס'} — שליחה ${channelLabel}.`}
           </DialogDescription>
