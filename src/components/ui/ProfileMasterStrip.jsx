@@ -53,27 +53,27 @@ export default function ProfileMasterStrip({
   moreActions = [],
 }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 font-['Nunito',system-ui,sans-serif]">
       {renderBackControl({ backHref, onBack, backLabel })}
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5 lg:p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
-          <div className="flex min-w-0 items-center gap-4 lg:pe-8 lg:border-e lg:border-slate-200">
-            <Avatar className="h-16 w-16 shrink-0 rounded-2xl border border-slate-200 bg-slate-100 lg:h-20 lg:w-20">
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70 sm:p-6">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:gap-8">
+          <div className="flex min-w-0 items-center gap-4 text-right lg:pe-8 lg:border-e lg:border-slate-200">
+            <Avatar className="h-[4.5rem] w-[4.5rem] shrink-0 rounded-[1.5rem] border border-violet-200/80 bg-violet-50 shadow-sm shadow-violet-100 lg:h-20 lg:w-20">
               {avatarImage ? <AvatarImage src={avatarImage} alt={name} /> : null}
-              <AvatarFallback className="rounded-2xl bg-slate-100 text-xl font-bold text-slate-700 lg:text-2xl">
+              <AvatarFallback className="rounded-[1.5rem] bg-violet-100 text-xl font-extrabold text-violet-700 lg:text-2xl">
                 {avatarFallback}
               </AvatarFallback>
             </Avatar>
 
-            <div className="min-w-0 space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <h1 className="truncate text-2xl font-bold tracking-tight text-slate-950">{name}</h1>
                 {status ? (
                   <Badge
                     variant="secondary"
                     className={cn(
-                      'border px-2.5 py-0.5 text-xs font-medium',
+                      'rounded-full border px-2.5 py-1 text-xs font-semibold',
                       status.className || 'border-emerald-200 bg-emerald-50 text-emerald-700',
                     )}
                   >
@@ -83,7 +83,7 @@ export default function ProfileMasterStrip({
               </div>
 
               {subtitle ? (
-                <p className="text-sm text-slate-500">{subtitle}</p>
+                <p className="text-sm font-medium text-slate-500">{subtitle}</p>
               ) : null}
 
               {alertPills.length > 0 ? (
@@ -102,10 +102,10 @@ export default function ProfileMasterStrip({
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-5 lg:flex-1 lg:items-center lg:justify-start lg:ps-2">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:flex sm:flex-wrap sm:gap-6 lg:flex-1 lg:items-center lg:justify-start lg:ps-2">
             {kpis.map((kpi) => (
               <div key={kpi.label} className="min-w-[92px]">
-                <div className="text-xs text-slate-500">{kpi.label}</div>
+                <div className="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">{kpi.label}</div>
                 <div className={cn('mt-1 text-lg font-semibold text-slate-900', kpi.className)}>
                   {kpi.value}
                 </div>
@@ -122,7 +122,10 @@ export default function ProfileMasterStrip({
                 size="sm"
                 onClick={action.onClick}
                 disabled={action.disabled}
-                className={cn('gap-2', action.className)}
+                className={cn(
+                  'gap-2 rounded-xl border-slate-200 bg-white px-3.5 text-slate-700 shadow-sm shadow-slate-100/80 hover:border-slate-300 hover:bg-slate-50',
+                  action.className,
+                )}
               >
                 {action.icon}
                 <span>{action.label}</span>
@@ -132,12 +135,17 @@ export default function ProfileMasterStrip({
             {moreActions.length > 0 ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-slate-600">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-11 w-11 rounded-xl text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                  >
                     <MoreVertical className="h-4 w-4" />
                     <span className="sr-only">פעולות נוספות</span>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" className="min-w-[12rem] rounded-xl border-slate-200 p-1.5 shadow-lg shadow-slate-200/70">
                   {moreActions.map((action, index) => (
                     action.separator ? (
                       <DropdownMenuSeparator key={`separator-${index}`} />
@@ -146,7 +154,7 @@ export default function ProfileMasterStrip({
                         key={action.label}
                         onClick={action.onClick}
                         disabled={action.disabled}
-                        className={action.className}
+                        className={cn('rounded-lg px-3 py-2 text-sm text-slate-700', action.className)}
                       >
                         {action.icon ? <span className="ms-2 inline-flex h-4 w-4 items-center justify-center">{action.icon}</span> : null}
                         <span>{action.label}</span>
