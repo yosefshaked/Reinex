@@ -1,27 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Copy, CornerUpLeft, Info, Loader2 } from 'lucide-react';
+import { Copy, CornerUpLeft, Info, Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card.jsx';
-import { Input } from '@/components/ui/input.jsx';
-import { Label } from '@/components/ui/label.jsx';
 import { Badge } from '@/components/ui/badge.jsx';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select.jsx';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet.jsx';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import CurrencyInput from '@/components/ui/CurrencyInput.jsx';
 import ConfirmLedgerEntryDialog from '@/components/ui/ConfirmLedgerEntryDialog.jsx';
 import LedgerEntriesTable from '@/features/finance/components/LedgerEntriesTable.jsx';
+import ManualEntryForm from '@/features/finance/components/ManualEntryForm.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useServices } from '@/hooks/useOrgData.js';
-import { coerceAgorot, formatCurrency, isValidCurrencyInput, toAgorot } from '@/lib/currency.js';
+import { coerceAgorot, formatCurrency, toAgorot } from '@/lib/currency.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -72,16 +64,6 @@ function getEntryTypeLabel(entry) {
   }
 }
 
-function buildEntryForm() {
-  return {
-    mode: 'payment',
-    amount: '',
-    effectiveAt: new Date().toISOString().slice(0, 10),
-    notes: '',
-    externalReference: '',
-  };
-}
-
 function shortId(id) {
   return id ? String(id).slice(-8) : '';
 }
@@ -109,7 +91,8 @@ export default function ClientBillingWorkspace({ clientProfile }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [snapshot, setSnapshot] = useState(null);
-  const [entryForm, setEntryForm] = useState(() => buildEntryForm());
+  const [manualEntrySheetOpen, setManualEntrySheetOpen] = useState(false);
+  const [manualEntryResetVersion, setManualEntryResetVersion] = useState(0);
   const [confirmEntry, setConfirmEntry] = useState(null);
 
   const clientProfileId = clientProfile?.id || '';
@@ -139,27 +122,14 @@ export default function ClientBillingWorkspace({ clientProfile }) {
     void loadData();
   }, [loadData]);
 
-  // Step 1: validate and open confirmation dialog.
-  function handleAppendEntry() {
-    if (!activeOrgId || !clientProfileId) return;
-
-    if (!isValidCurrencyInput(entryForm.amount)) {
-      toast.error('יש להזין סכום חוקי וחיובי.');
-      return;
-    }
-
-    if (entryForm.mode === 'adjustment' && !entryForm.notes.trim()) {
-      toast.error('יש להוסיף הערה לתנועת חיוב ידני — הלדר הוא מסמך קבוע.');
-      return;
-    }
-
+  function handleRequestAppendEntry(formData) {
     setConfirmEntry({
-      type: entryForm.mode === 'adjustment' ? 'debit' : 'credit',
-      amount: toAgorot(entryForm.amount),
+      type: formData.mode === 'adjustment' ? 'debit' : 'credit',
+      amount: toAgorot(formData.amount),
       accountName: clientName,
-      effectiveAt: entryForm.effectiveAt,
-      notes: entryForm.notes,
-      _formData: { ...entryForm },
+      effectiveAt: formData.effectiveAt,
+      notes: formData.notes,
+      _formData: { ...formData },
     });
   }
 
@@ -185,8 +155,9 @@ export default function ClientBillingWorkspace({ clientProfile }) {
         },
       });
       setConfirmEntry(null);
-      setEntryForm(buildEntryForm());
       await loadData();
+      setManualEntryResetVersion((current) => current + 1);
+      setManualEntrySheetOpen(false);
       toast.success(confirmEntry.type === 'debit' ? 'ההתאמה נשמרה.' : 'התשלום נשמר.');
     } catch (error) {
       console.error('Failed to append manual client ledger entry', error);
@@ -365,68 +336,48 @@ export default function ClientBillingWorkspace({ clientProfile }) {
           </Card>
         </div>
 
-        {/* ── Manual entry form ── */}
-        <Card className="border-border/70 shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">הוספת תנועה ידנית</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-4">
-              <div className="space-y-2">
-                <Label>סוג תנועה</Label>
-                <Select value={entryForm.mode} onValueChange={(value) => setEntryForm((current) => ({ ...current, mode: value }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="payment">תשלום ידני</SelectItem>
-                    <SelectItem value="adjustment">התאמה ידנית</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>סכום</Label>
-                <CurrencyInput
-                  value={entryForm.amount}
-                  onChange={(value) => setEntryForm((current) => ({ ...current, amount: value }))}
-                  disabled={saving}
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-950">תנועות ידניות</h3>
+              <p className="text-sm text-slate-500">תשלום מגדיל יתרה, התאמה ידנית מקטינה אותה. כל תנועה נרשמת לצמיתות.</p>
+            </div>
+            <Button type="button" onClick={() => setManualEntrySheetOpen(true)} className="gap-2">
+              <Plus className="h-4 w-4" />
+              <span>תנועה ידנית</span>
+            </Button>
+          </div>
+        </section>
+
+        <Sheet
+          open={manualEntrySheetOpen}
+          onOpenChange={(open) => {
+            if (saving) return;
+            setManualEntrySheetOpen(open);
+          }}
+        >
+          <SheetContent side="left" className="w-[92vw] border-slate-200 p-0 sm:max-w-[460px]">
+            <div className="flex h-full flex-col p-6">
+              <SheetHeader className="text-right">
+                <SheetTitle>הוספת תנועה ידנית</SheetTitle>
+                <SheetDescription>
+                  רושמים תשלום או התאמה ידנית בלדר, ואז מאשרים את הפעולה לפני השמירה הסופית.
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="mt-6 flex-1 overflow-hidden">
+                <ManualEntryForm
+                  open={manualEntrySheetOpen}
+                  resetVersion={manualEntryResetVersion}
+                  saving={saving}
+                  availableServices={services}
+                  onSubmit={handleRequestAppendEntry}
+                  onCancel={() => setManualEntrySheetOpen(false)}
                 />
               </div>
-              <div className="space-y-2">
-                <Label>תאריך</Label>
-                <Input type="date" value={entryForm.effectiveAt} onChange={(event) => setEntryForm((current) => ({ ...current, effectiveAt: event.target.value }))} disabled={saving} />
-              </div>
-              <div className="space-y-2">
-                <Label>אסמכתא</Label>
-                <Input value={entryForm.externalReference} onChange={(event) => setEntryForm((current) => ({ ...current, externalReference: event.target.value }))} disabled={saving} />
-              </div>
             </div>
-
-            <div className="space-y-2">
-              <Label>
-                הערות
-                {entryForm.mode === 'adjustment' ? <span className="ms-1 text-destructive">*</span> : null}
-              </Label>
-              <Input
-                value={entryForm.notes}
-                onChange={(event) => setEntryForm((current) => ({ ...current, notes: event.target.value }))}
-                disabled={saving}
-                placeholder={entryForm.mode === 'adjustment' ? 'חובה לציין סיבה לחיוב ידני' : ''}
-              />
-              {entryForm.mode === 'adjustment' ? (
-                <p className="text-xs text-muted-foreground">הסבר לחיוב חובה — הלדר לא ניתן למחיקה.</p>
-              ) : null}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={handleAppendEntry} disabled={saving}>
-                {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-                שמור תנועה
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setEntryForm(buildEntryForm())} disabled={saving}>
-                נקה
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+          </SheetContent>
+        </Sheet>
 
         {/* ── Ledger entries ── */}
         {loading ? (

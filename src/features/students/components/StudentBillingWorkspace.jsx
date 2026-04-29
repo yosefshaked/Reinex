@@ -1,22 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Copy, CornerUpLeft, Info, Loader2 } from 'lucide-react';
+import { Copy, CornerUpLeft, Info, Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet.jsx';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import CurrencyInput from '@/components/ui/CurrencyInput.jsx';
 import ConfirmLedgerEntryDialog from '@/components/ui/ConfirmLedgerEntryDialog.jsx';
 import LedgerEntriesTable from '@/features/finance/components/LedgerEntriesTable.jsx';
+import ManualEntryForm from '@/features/finance/components/ManualEntryForm.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useServices } from '@/hooks/useOrgData.js';
 import HmoAuthorizationManager from '@/features/students/components/HmoAuthorizationManager.jsx';
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
-import { coerceAgorot, formatCurrency, isValidCurrencyInput, toAgorot } from '@/lib/currency.js';
+import { coerceAgorot, formatCurrency, toAgorot } from '@/lib/currency.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -107,18 +105,6 @@ function getCoverageReasonLabel(reason) {
   }
 }
 
-function buildEntryForm() {
-  return {
-    mode: 'payment',
-    amount: '',
-    effectiveAt: new Date().toISOString().slice(0, 10),
-    notes: '',
-    externalReference: '',
-    calculatorServiceId: '',
-    calculatorLessonCount: '1',
-  };
-}
-
 function shortId(id) {
   return id ? String(id).slice(-8) : '';
 }
@@ -155,7 +141,8 @@ export default function StudentBillingWorkspace({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [snapshot, setSnapshot] = useState(null);
-  const [entryForm, setEntryForm] = useState(() => buildEntryForm());
+  const [manualEntrySheetOpen, setManualEntrySheetOpen] = useState(false);
+  const [manualEntryResetVersion, setManualEntryResetVersion] = useState(0);
   const [confirmEntry, setConfirmEntry] = useState(null);
 
   const loadData = useCallback(async () => {
@@ -192,27 +179,14 @@ export default function StudentBillingWorkspace({
     }
   }
 
-  // Step 1: validate and show confirmation dialog — no API call yet.
-  function handleAppendEntry() {
-    if (!activeOrgId || !studentId || !canMutateBilling) return;
-
-    if (!isValidCurrencyInput(entryForm.amount)) {
-      toast.error('יש להזין סכום חוקי וחיובי.');
-      return;
-    }
-
-    if (entryForm.mode === 'adjustment' && !entryForm.notes.trim()) {
-      toast.error('יש להוסיף הערה לתנועת חיוב ידני — הלדר הוא מסמך קבוע.');
-      return;
-    }
-
+  function handleRequestAppendEntry(formData) {
     setConfirmEntry({
-      type: entryForm.mode === 'adjustment' ? 'debit' : 'credit',
-      amount: toAgorot(entryForm.amount),
+      type: formData.mode === 'adjustment' ? 'debit' : 'credit',
+      amount: toAgorot(formData.amount),
       accountName: studentName,
-      effectiveAt: entryForm.effectiveAt,
-      notes: entryForm.notes,
-      _formData: { ...entryForm },
+      effectiveAt: formData.effectiveAt,
+      notes: formData.notes,
+      _formData: { ...formData },
     });
   }
 
@@ -238,9 +212,10 @@ export default function StudentBillingWorkspace({
         },
       });
       setConfirmEntry(null);
-      setEntryForm(buildEntryForm());
       await loadData();
       await notifyDataChanged();
+      setManualEntryResetVersion((current) => current + 1);
+      setManualEntrySheetOpen(false);
       toast.success(confirmEntry.type === 'debit' ? 'ההתאמה נשמרה.' : 'התשלום נשמר.');
     } catch (error) {
       console.error('Failed to append manual student ledger entry', error);
@@ -288,35 +263,6 @@ export default function StudentBillingWorkspace({
     () => (Array.isArray(snapshot?.authorizations) ? snapshot.authorizations : []),
     [snapshot?.authorizations],
   );
-
-  const calculatorServices = useMemo(() => (
-    Array.isArray(services)
-      ? services
-        .filter((service) => service?.is_active !== false)
-        .filter((service) => Number.isFinite(Number(service?.default_customer_charge_amount)))
-        .sort((left, right) => getServiceName(services, left?.id).localeCompare(getServiceName(services, right?.id), 'he'))
-      : []
-  ), [services]);
-
-  const selectedCalculatorService = useMemo(
-    () => calculatorServices.find((service) => service.id === entryForm.calculatorServiceId) || null,
-    [calculatorServices, entryForm.calculatorServiceId],
-  );
-
-  const calculatorLessonCount = useMemo(() => {
-    const parsed = Number.parseInt(entryForm.calculatorLessonCount, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-  }, [entryForm.calculatorLessonCount]);
-
-  const calculatorAmountAgorot = useMemo(() => {
-    const serviceRate = Number.isFinite(Number(selectedCalculatorService?.default_customer_charge_amount))
-      ? coerceAgorot(selectedCalculatorService.default_customer_charge_amount)
-      : null;
-    if (!serviceRate || !calculatorLessonCount) {
-      return 0;
-    }
-    return serviceRate * calculatorLessonCount;
-  }, [calculatorLessonCount, selectedCalculatorService]);
 
   const studentName = useMemo(() => {
     const source = snapshot?.student || student;
@@ -397,22 +343,6 @@ export default function StudentBillingWorkspace({
     };
   }), [canMutateBilling, displayedBalances, ledgerEntries, reversalMap, saving]);
 
-  function applyCalculatorAmount() {
-    if (!selectedCalculatorService || !calculatorLessonCount || !calculatorAmountAgorot) {
-      toast.error('יש לבחור שירות וכמות שיעורים חוקית.');
-      return;
-    }
-
-    const serviceLabel = getServiceName(services, selectedCalculatorService.id);
-    const suggestedNote = `זיכוי ידני לפי ${calculatorLessonCount} שיעורים של ${serviceLabel}`;
-
-    setEntryForm((current) => ({
-      ...current,
-      amount: (calculatorAmountAgorot / 100).toFixed(2),
-      notes: current.notes.trim() ? current.notes : suggestedNote,
-    }));
-  }
-
   if (!canViewBilling) {
     return (
       <div className="rounded-xl border border-border bg-white p-6 text-sm text-muted-foreground shadow-sm">
@@ -477,152 +407,52 @@ export default function StudentBillingWorkspace({
           </div>
         </section>
 
-        {/* ── Manual entry form ── */}
+        {/* ── Manual entry form trigger ── */}
         {canMutateBilling ? (
-          <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
-            <div className="h-1.5 bg-slate-900" />
-            <div className="p-5 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-zinc-900">הוספת תנועה ידנית</h3>
-                  <p className="text-sm text-muted-foreground">תשלום מגדיל יתרה, התאמה ידנית מקטינה אותה. כל תנועה נרשמת לצמיתות.</p>
-                </div>
-                <div className="max-w-sm text-xs text-muted-foreground">
-                  חיובי שיעורים מתעדכנים אוטומטית כשמשנים נוכחות, שיעור או אישור גורם מממן במקומם הטבעי.
-                </div>
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70 sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-950">תנועות ידניות</h3>
+                <p className="text-sm text-slate-500">תשלום מגדיל יתרה, התאמה ידנית מקטינה אותה. כל תנועה נרשמת לצמיתות.</p>
               </div>
-
-              <div className="grid gap-3 md:grid-cols-4">
-                <div className="space-y-2">
-                  <Label>סוג תנועה</Label>
-                  <Select value={entryForm.mode} onValueChange={(value) => setEntryForm((current) => ({ ...current, mode: value }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="payment">תשלום ידני</SelectItem>
-                      <SelectItem value="adjustment">התאמה ידנית</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>סכום</Label>
-                  <CurrencyInput
-                    value={entryForm.amount}
-                    onChange={(value) => setEntryForm((current) => ({ ...current, amount: value }))}
-                    disabled={saving}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>תאריך</Label>
-                  <Input type="date" value={entryForm.effectiveAt} onChange={(event) => setEntryForm((current) => ({ ...current, effectiveAt: event.target.value }))} />
-                </div>
-                <div className="space-y-2">
-                  <Label>אסמכתא</Label>
-                  <Input value={entryForm.externalReference} onChange={(event) => setEntryForm((current) => ({ ...current, externalReference: event.target.value }))} />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>
-                  הערות
-                  {entryForm.mode === 'adjustment' ? <span className="ms-1 text-destructive">*</span> : null}
-                </Label>
-                <Input
-                  value={entryForm.notes}
-                  onChange={(event) => setEntryForm((current) => ({ ...current, notes: event.target.value }))}
-                  placeholder={entryForm.mode === 'adjustment' ? 'חובה לציין סיבה לחיוב ידני' : ''}
-                />
-                {entryForm.mode === 'adjustment' ? (
-                  <p className="text-xs text-muted-foreground">הסבר לחיוב חובה — הלדר לא ניתן למחיקה.</p>
-                ) : null}
-              </div>
-
-              {entryForm.mode === 'payment' ? (
-                <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h4 className="text-sm font-semibold text-indigo-950">מחשבון זיכוי מהיר לפי שיעורים</h4>
-                      <p className="text-xs text-indigo-800">
-                        בחרו שירות וכמות שיעורים. המערכת תחשב את הזיכוי לפי מחיר השירות ותעביר אותו לשדה הסכום.
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="border-indigo-200 bg-white text-indigo-900">
-                      עדיין נשמר כזיכוי רגיל בלדר
-                    </Badge>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 md:grid-cols-4">
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>שירות לחישוב</Label>
-                      <Select
-                        value={entryForm.calculatorServiceId}
-                        onValueChange={(value) => setEntryForm((current) => ({ ...current, calculatorServiceId: value }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="בחירת שירות" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {calculatorServices.map((service) => (
-                            <SelectItem key={service.id} value={service.id}>
-                              {getServiceName(services, service.id)} • {formatCurrency(service.default_customer_charge_amount)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>כמות שיעורים</Label>
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        min="1"
-                        step="1"
-                        value={entryForm.calculatorLessonCount}
-                        onChange={(event) => setEntryForm((current) => ({ ...current, calculatorLessonCount: event.target.value }))}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>זיכוי מחושב</Label>
-                      <div className="flex h-10 items-center rounded-md border border-indigo-200 bg-white px-3 text-sm font-semibold text-indigo-950">
-                        {calculatorAmountAgorot > 0 ? formatCurrency(calculatorAmountAgorot) : '—'}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    <div className="text-xs text-indigo-900">
-                      {selectedCalculatorService ? (
-                        <>
-                          מחיר שירות: {formatCurrency(selectedCalculatorService.default_customer_charge_amount)} לכל שיעור
-                        </>
-                      ) : 'יש לבחור שירות פעיל עם מחיר מוגדר.'}
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="border-indigo-300 bg-white text-indigo-950 hover:bg-indigo-100"
-                      onClick={applyCalculatorAmount}
-                      disabled={!selectedCalculatorService || calculatorLessonCount <= 0 || saving}
-                    >
-                      העבר לסכום
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={handleAppendEntry} disabled={saving}>
-                  {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-                  שמור תנועה
-                </Button>
-                <Button type="button" variant="outline" onClick={() => setEntryForm(buildEntryForm())} disabled={saving}>
-                  נקה
-                </Button>
-              </div>
+              <Button type="button" onClick={() => setManualEntrySheetOpen(true)} className="gap-2">
+                <Plus className="h-4 w-4" />
+                <span>תנועה ידנית</span>
+              </Button>
             </div>
           </section>
         ) : null}
+
+        <Sheet
+          open={manualEntrySheetOpen}
+          onOpenChange={(open) => {
+            if (saving) return;
+            setManualEntrySheetOpen(open);
+          }}
+        >
+          <SheetContent side="left" className="w-[92vw] border-slate-200 p-0 sm:max-w-[460px]">
+            <div className="flex h-full flex-col p-6">
+              <SheetHeader className="text-right">
+                <SheetTitle>הוספת תנועה ידנית</SheetTitle>
+                <SheetDescription>
+                  רושמים תשלום או התאמה ידנית בלדר, ואז מאשרים את הפעולה לפני השמירה הסופית.
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="mt-6 flex-1 overflow-hidden">
+                <ManualEntryForm
+                  open={manualEntrySheetOpen}
+                  resetVersion={manualEntryResetVersion}
+                  saving={saving}
+                  availableServices={services}
+                  showCreditCalculator
+                  onSubmit={handleRequestAppendEntry}
+                  onCancel={() => setManualEntrySheetOpen(false)}
+                />
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
 
         {/* ── HMO Authorizations ── */}
         <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">

@@ -47,6 +47,7 @@
 - Currency helpers (backend): [`../api/_shared/currency.js`](../api/_shared/currency.js) — `coerceAgorot`, `toShekel`, `assertAgorot`, `assertAgorotNullable`, `FINANCE_LIMITS`, `BILLING_THRESHOLDS`
 - HMO claims UI feedback helper: [`../src/features/finance/lib/hmo-claim-feedback.js`](../src/features/finance/lib/hmo-claim-feedback.js) — maps HMO claim/payment errors to user-facing next-step guidance
 - Shared ledger table surface: [`../src/features/finance/components/LedgerEntriesTable.jsx`](../src/features/finance/components/LedgerEntriesTable.jsx) — use this for profile billing ledgers instead of rebuilding per-row cards or ad-hoc table markup.
+- Shared manual-ledger-entry UI: [`../src/features/finance/components/ManualEntryForm.jsx`](../src/features/finance/components/ManualEntryForm.jsx) — use this inside Sheets for student/client manual transactions, while keeping the actual billing mutation, confirmation dialog, and post-save refetch contract in the owning workspace.
 
 ## Currency helpers — mandatory usage
 - **All monetary values in the DB and API layer are integers (agorot). 1 ₪ = 100 agorot.**

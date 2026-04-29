@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Pencil, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet.jsx';
 import {
   Select,
   SelectContent,
@@ -162,6 +163,7 @@ export default function HmoAuthorizationManager({
   const [authorizations, setAuthorizations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [cancelTargetId, setCancelTargetId] = useState('');
   const [form, setForm] = useState(() => buildEmptyAuthorizationForm());
 
@@ -221,6 +223,7 @@ export default function HmoAuthorizationManager({
     const selected = authorizations.find((row) => row.id === selectedAuthorizationId);
     if (selected) {
       setForm(buildFormFromAuthorization(selected));
+      setSheetOpen(true);
     }
   }, [authorizations, selectedAuthorizationId]);
 
@@ -275,6 +278,7 @@ export default function HmoAuthorizationManager({
 
       setForm(buildEmptyAuthorizationForm());
       await notifyChanged();
+      setSheetOpen(false);
       toast.success(form.id ? 'האישור עודכן וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.' : 'האישור נוצר וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.');
     } catch (error) {
       console.error('Failed to save HMO authorization', error);
@@ -298,8 +302,10 @@ export default function HmoAuthorizationManager({
       });
       if (form.id === id) {
         setForm(buildEmptyAuthorizationForm());
+        setSheetOpen(false);
       }
       await notifyChanged();
+      setCancelTargetId('');
       toast.success('האישור בוטל וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.');
     } catch (error) {
       console.error('Failed to cancel HMO authorization', error);
@@ -332,281 +338,326 @@ export default function HmoAuthorizationManager({
     }));
   }
 
+  function handleCreateAuthorization() {
+    setCancelTargetId('');
+    setForm(buildEmptyAuthorizationForm());
+    setSheetOpen(true);
+  }
+
+  function handleEditAuthorization(row) {
+    setCancelTargetId('');
+    setForm(buildFormFromAuthorization(row));
+    setSheetOpen(true);
+  }
+
+  function handleCloseSheet(open) {
+    if (saving) return;
+    setSheetOpen(open);
+    if (!open) {
+      setForm(buildEmptyAuthorizationForm());
+      setCancelTargetId('');
+    }
+  }
+
   return (
-    <div className={embedded ? 'space-y-4' : 'grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]'}>
-      {!embedded ? (
-        <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
-          <div className="h-1.5 bg-indigo-500" />
-          <div className="p-5 space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-zinc-800">אישורי גורם מממן</h3>
-                <p className="text-sm text-muted-foreground">האישור שומר snapshot מפורש: מחיר לקוח בזמן כיסוי, מחיר גורם מממן בזמן כיסוי, ומה קורה אחרי שממצים את המכסה.</p>
-              </div>
-              {(loading || loadingProviders) ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+    <div className="space-y-4">
+      <section className="rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200/70 overflow-hidden">
+        <div className="border-b border-slate-200 px-5 py-4 sm:px-6">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-950">אישורי גורם מממן</h3>
+              <p className="text-sm text-slate-500">רשימת האישורים הפעילים וההיסטוריים, עם סיכום המכסה, מחירי הכיסוי ומדיניות ההמשך.</p>
             </div>
-
-            {!loadingProviders && providersError ? (
-              <div className="rounded-xl border border-dashed border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-                {providersError}
-              </div>
-            ) : null}
-
-            {!loadingProviders && !providersError && availableTracks.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border bg-slate-50 p-4 text-sm text-muted-foreground">
-                <div>{providersNotice || 'עדיין לא הוגדרו מסלולי גורם מממן בארגון.'}</div>
-                {typeof onRequestSetup === 'function' ? (
-                  <Button type="button" variant="outline" size="sm" className="mt-3" onClick={onRequestSetup}>
-                    פתח הגדרות גורמים מממנים
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-
-            <div className="space-y-3">
-              {authorizations.map((row) => {
-                const serviceName = services.find((service) => service.id === row.service_id)?.service_name
-                  || services.find((service) => service.id === row.service_id)?.name
-                  || 'שירות';
-                const lessonCountDisplay = getLessonCountDisplay(row);
-                return (
-                  <div key={row.id} className="rounded-xl border border-border bg-slate-50/70 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-zinc-900">{serviceName} • {row.provider?.name || 'גורם מממן'}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">{row.provider_track?.name || 'ללא מסלול'} • {getStatusLabel(row.status)}</div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <Badge variant="secondary" className="bg-white text-slate-700 hover:bg-white">
-                            נוצלו: {lessonCountDisplay.consumed}
-                          </Badge>
-                          <Badge variant="secondary" className="bg-white text-slate-700 hover:bg-white">
-                            מתוכננים: {lessonCountDisplay.reserved}
-                          </Badge>
-                          <Badge variant="secondary" className="bg-emerald-50 text-emerald-800 hover:bg-emerald-50 border border-emerald-200">
-                            זמינים לקביעת תור: {lessonCountDisplay.available}
-                          </Badge>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">{row.authorization_reference || 'ללא מספר אישור'}</Badge>
-                        <Badge variant="outline" className="border-indigo-200 bg-indigo-50 text-indigo-900">
-                          {row.authorized_lessons} מפגשים
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4 text-sm">
-                      <div className="rounded-lg bg-white p-3">
-                        <div className="text-[11px] text-muted-foreground">לקוח בזמן כיסוי</div>
-                        <div className="mt-1 font-semibold">{formatCurrency(row.covered_customer_charge_amount)}</div>
-                      </div>
-                      <div className="rounded-lg bg-white p-3">
-                        <div className="text-[11px] text-muted-foreground">גורם מממן בזמן כיסוי</div>
-                        <div className="mt-1 font-semibold">{formatCurrency(row.covered_insurer_claim_amount)}</div>
-                      </div>
-                      <div className="rounded-lg bg-white p-3">
-                        <div className="text-[11px] text-muted-foreground">אחרי מיצוי זכאות</div>
-                        <div className="mt-1 font-semibold">{describePostCoverage(row.post_coverage_policy, row.post_coverage_customer_charge_amount)}</div>
-                      </div>
-                      <div className="rounded-lg bg-white p-3">
-                        <div className="text-[11px] text-muted-foreground">תוקף</div>
-                        <div className="mt-1 font-semibold">{formatDate(row.expires_at)}</div>
-                      </div>
-                    </div>
-                    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-                      <div>תזכורת: {formatDate(row.reminder_date)}</div>
-                      <div>שיעורים מתוכננים כבר שומרים מקום במכסה, גם לפני שהתקיימו בפועל.</div>
-                    </div>
-
-                    {canMutateBilling ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button type="button" size="sm" variant="outline" onClick={() => setForm(buildFormFromAuthorization(row))} disabled={saving}>
-                          ערוך אישור
-                        </Button>
-                        {row.status === 'active' ? (
-                          <Button type="button" size="sm" variant="outline" onClick={() => setCancelTargetId(row.id)} disabled={saving}>
-                            בטל אישור
-                          </Button>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-
-              {!loading && authorizations.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
-                  אין אישורי גורם מממן לתלמיד הזה עדיין.
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {canMutateBilling ? (
-        <section className={embedded ? '' : 'rounded-xl border border-border bg-white shadow-sm overflow-hidden'}>
-          {!embedded ? <div className="h-1.5 bg-indigo-600" /> : null}
-          <div className={embedded ? 'space-y-4' : 'p-5 space-y-4'}>
-            <div className="space-y-2">
-              <Label className="text-xs text-slate-600">מסלול</Label>
-              <Select
-                value={form.providerTrackId || '__none__'}
-                onValueChange={handleTrackSelection}
-                disabled={saving}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="בחר מסלול" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">בחר מסלול</SelectItem>
-                  {availableTracks.map((track) => (
-                    <SelectItem key={track.id} value={track.id}>
-                      {track.provider?.name || 'גורם מממן'} • {track.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="authorization-reference">מספר אישור</Label>
-                <Input id="authorization-reference" value={form.authorizationReference} onChange={(event) => setForm((current) => ({ ...current, authorizationReference: event.target.value }))} disabled={saving} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="authorized-lessons">כמות מפגשים מאושרת</Label>
-                <Input id="authorized-lessons" type="number" min="0" step="1" value={form.authorizedLessons} onChange={(event) => setForm((current) => ({ ...current, authorizedLessons: event.target.value }))} disabled={saving} />
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="covered-customer-charge-amount">חיוב לקוח בזמן כיסוי<span className="ms-1 text-destructive">*</span></Label>
-                <CurrencyInput
-                  id="covered-customer-charge-amount"
-                  value={form.coveredCustomerChargeAmount}
-                  onChange={(value) => setForm((current) => ({ ...current, coveredCustomerChargeAmount: value }))}
-                  disabled={saving}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="covered-insurer-claim-amount">חיוב גורם מממן בזמן כיסוי<span className="ms-1 text-destructive">*</span></Label>
-                <CurrencyInput
-                  id="covered-insurer-claim-amount"
-                  value={form.coveredInsurerClaimAmount}
-                  onChange={(value) => setForm((current) => ({ ...current, coveredInsurerClaimAmount: value }))}
-                  disabled={saving}
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-lg border border-border bg-white p-3 text-sm">
-                <div className="text-[11px] text-muted-foreground">ברירת מחדל ללקוח מהמסלול</div>
-                <div className="mt-1 font-semibold">{formatCurrency(selectedTrack?.default_customer_charge_amount)}</div>
-              </div>
-              <div className="rounded-lg border border-border bg-white p-3 text-sm">
-                <div className="text-[11px] text-muted-foreground">ברירת מחדל לגורם מממן מהמסלול</div>
-                <div className="mt-1 font-semibold">{formatCurrency(selectedTrack?.default_insurer_claim_amount)}</div>
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-600">אחרי מיצוי זכאות</Label>
-                <Select value={form.postCoveragePolicy} onValueChange={(value) => setForm((current) => ({ ...current, postCoveragePolicy: value }))} disabled={saving}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="service_default">מחיר שירות רגיל</SelectItem>
-                    <SelectItem value="explicit_customer_charge">מחיר המשך מפורש</SelectItem>
-                    <SelectItem value="manual_block">חסימה להחלטה ידנית</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="post-coverage-customer-charge">מחיר המשך ללקוח</Label>
-                <CurrencyInput
-                  id="post-coverage-customer-charge"
-                  value={form.postCoverageCustomerChargeAmount}
-                  onChange={(value) => setForm((current) => ({ ...current, postCoverageCustomerChargeAmount: value }))}
-                  disabled={saving || form.postCoveragePolicy !== 'explicit_customer_charge'}
-                />
-              </div>
-            </div>
-
-            <div className={`rounded-lg border px-3 py-2 text-sm ${preview.blockingReason ? 'border-amber-200 bg-amber-50' : 'border-blue-100 bg-blue-50'}`}>
-              <div className="text-xs font-medium text-zinc-700">תצוגה מקדימה לכל שיעור</div>
-              <div className="mt-1 flex flex-wrap gap-3 text-xs">
-                <span>תלמיד בזמן כיסוי: <strong className="text-zinc-900">{formatCurrency(preview.coveredCustomerAmount)}</strong></span>
-                <span>גורם מממן בזמן כיסוי: <strong className="text-zinc-900">{formatCurrency(preview.coveredInsurerAmount)}</strong></span>
-              </div>
-              <p className="mt-1 text-xs text-blue-700">
-                {preview.postCoveragePolicy === 'service_default'
-                  ? 'אחרי מיצוי הזכאות, השיעור הבא יחויב במחיר השירות הרגיל.'
-                  : preview.postCoveragePolicy === 'explicit_customer_charge'
-                    ? `אחרי מיצוי הזכאות, השיעור הבא יחויב ב-${formatCurrency(preview.postCoverageCustomerAmount)}.`
-                    : 'אחרי מיצוי הזכאות, המערכת תחסום חיוב ותדרוש החלטה ידנית.'}
-              </p>
-              {preview.blockingReason ? (
-                <p className="mt-1 text-xs text-amber-700">{mapAuthorizationErrorMessage(preview.blockingReason)}</p>
-              ) : null}
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="valid-from">תקף מ־</Label>
-                <Input id="valid-from" type="date" value={form.validFrom} onChange={(event) => setForm((current) => ({ ...current, validFrom: event.target.value }))} disabled={saving} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="expires-at">תוקף עד</Label>
-                <Input id="expires-at" type="date" value={form.expiresAt} onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={saving} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reminder-date">תזכורת פעולה</Label>
-                <Input id="reminder-date" type="date" value={form.reminderDate} onChange={(event) => setForm((current) => ({ ...current, reminderDate: event.target.value }))} disabled={saving} />
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-600">סטטוס</Label>
-                <Select value={form.status} onValueChange={(value) => setForm((current) => ({ ...current, status: value }))} disabled={saving}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">פעיל</SelectItem>
-                    <SelectItem value="completed">הושלם</SelectItem>
-                    <SelectItem value="expired">פג תוקף</SelectItem>
-                    <SelectItem value="cancelled">בוטל</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="authorization-notes">הערות</Label>
-                <Input id="authorization-notes" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={handleSave} disabled={saving}>
-                {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-                {form.id ? 'עדכן אישור' : 'צור אישור'}
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setForm(buildEmptyAuthorizationForm())} disabled={saving}>
-                נקה
-              </Button>
-              {cancelTargetId ? (
-                <Button type="button" variant="outline" onClick={() => { void handleCancelAuthorization(cancelTargetId); setCancelTargetId(''); }} disabled={saving}>
-                  אשר ביטול
+            <div className="flex items-center gap-2">
+              {(loading || loadingProviders) ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : null}
+              {canMutateBilling ? (
+                <Button type="button" size="sm" onClick={handleCreateAuthorization} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  <span>הוספת אישור</span>
                 </Button>
               ) : null}
             </div>
           </div>
-        </section>
+        </div>
+
+        <div className="p-5 space-y-4 sm:p-6">
+          {!loadingProviders && providersError ? (
+            <div className="rounded-xl border border-dashed border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+              {providersError}
+            </div>
+          ) : null}
+
+          {!loadingProviders && !providersError && availableTracks.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-slate-50 p-4 text-sm text-muted-foreground">
+              <div>{providersNotice || 'עדיין לא הוגדרו מסלולי גורם מממן בארגון.'}</div>
+              {typeof onRequestSetup === 'function' ? (
+                <Button type="button" variant="outline" size="sm" className="mt-3" onClick={onRequestSetup}>
+                  פתח הגדרות גורמים מממנים
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="space-y-3">
+            {authorizations.map((row) => {
+              const serviceName = services.find((service) => service.id === row.service_id)?.service_name
+                || services.find((service) => service.id === row.service_id)?.name
+                || 'שירות';
+              const lessonCountDisplay = getLessonCountDisplay(row);
+              const isPendingCancel = cancelTargetId === row.id;
+              return (
+                <div key={row.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-2">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">{serviceName} • {row.provider?.name || 'גורם מממן'}</div>
+                        <div className="mt-1 text-xs text-slate-500">{row.provider_track?.name || 'ללא מסלול'} • {getStatusLabel(row.status)}</div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="secondary" className="bg-white text-slate-700 hover:bg-white">
+                          נוצלו: {lessonCountDisplay.consumed}
+                        </Badge>
+                        <Badge variant="secondary" className="bg-white text-slate-700 hover:bg-white">
+                          מתוכננים: {lessonCountDisplay.reserved}
+                        </Badge>
+                        <Badge variant="secondary" className="border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+                          זמינים לקביעת תור: {lessonCountDisplay.available}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{row.authorization_reference || 'ללא מספר אישור'}</Badge>
+                      <Badge variant="outline" className="border-indigo-200 bg-indigo-50 text-indigo-900">
+                        {row.authorized_lessons} מפגשים
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4 text-sm">
+                    <div className="rounded-lg bg-white p-3">
+                      <div className="text-[11px] text-slate-500">לקוח בזמן כיסוי</div>
+                      <div className="mt-1 font-semibold text-slate-900">{formatCurrency(row.covered_customer_charge_amount)}</div>
+                    </div>
+                    <div className="rounded-lg bg-white p-3">
+                      <div className="text-[11px] text-slate-500">גורם מממן בזמן כיסוי</div>
+                      <div className="mt-1 font-semibold text-slate-900">{formatCurrency(row.covered_insurer_claim_amount)}</div>
+                    </div>
+                    <div className="rounded-lg bg-white p-3">
+                      <div className="text-[11px] text-slate-500">אחרי מיצוי זכאות</div>
+                      <div className="mt-1 font-semibold text-slate-900">{describePostCoverage(row.post_coverage_policy, row.post_coverage_customer_charge_amount)}</div>
+                    </div>
+                    <div className="rounded-lg bg-white p-3">
+                      <div className="text-[11px] text-slate-500">תוקף</div>
+                      <div className="mt-1 font-semibold text-slate-900">{formatDate(row.expires_at)}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 space-y-1 text-xs text-slate-500">
+                    <div>תזכורת: {formatDate(row.reminder_date)}</div>
+                    <div>שיעורים מתוכננים כבר שומרים מקום במכסה, גם לפני שהתקיימו בפועל.</div>
+                  </div>
+
+                  {canMutateBilling ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button type="button" size="sm" variant="outline" onClick={() => handleEditAuthorization(row)} disabled={saving} className="gap-2">
+                        <Pencil className="h-4 w-4" />
+                        <span>ערוך אישור</span>
+                      </Button>
+                      {row.status === 'active' ? (
+                        isPendingCancel ? (
+                          <>
+                            <Button type="button" size="sm" variant="outline" onClick={() => { void handleCancelAuthorization(row.id); }} disabled={saving}>
+                              אשר ביטול
+                            </Button>
+                            <Button type="button" size="sm" variant="ghost" onClick={() => setCancelTargetId('')} disabled={saving}>
+                              חזור
+                            </Button>
+                          </>
+                        ) : (
+                          <Button type="button" size="sm" variant="outline" onClick={() => setCancelTargetId(row.id)} disabled={saving}>
+                            בטל אישור
+                          </Button>
+                        )
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+
+            {!loading && authorizations.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
+                אין אישורי גורם מממן לתלמיד הזה עדיין.
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
+      {canMutateBilling ? (
+        <Sheet open={sheetOpen} onOpenChange={handleCloseSheet}>
+          <SheetContent side="left" className="w-[92vw] border-slate-200 p-0 sm:max-w-[520px]">
+            <div className="flex h-full flex-col p-6">
+              <SheetHeader className="text-right">
+                <SheetTitle>{form.id ? 'עריכת אישור גורם מממן' : 'הוספת אישור גורם מממן'}</SheetTitle>
+                <SheetDescription>
+                  הגדירו את מסלול הכיסוי, המכסה והמחירים. לאחר השמירה החיובים הרלוונטיים יתעדכנו אוטומטית.
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="mt-6 flex-1 space-y-4 overflow-y-auto pe-1">
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-600">מסלול</Label>
+                  <Select
+                    value={form.providerTrackId || '__none__'}
+                    onValueChange={handleTrackSelection}
+                    disabled={saving}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="בחר מסלול" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">בחר מסלול</SelectItem>
+                      {availableTracks.map((track) => (
+                        <SelectItem key={track.id} value={track.id}>
+                          {track.provider?.name || 'גורם מממן'} • {track.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="authorization-reference">מספר אישור</Label>
+                    <Input id="authorization-reference" value={form.authorizationReference} onChange={(event) => setForm((current) => ({ ...current, authorizationReference: event.target.value }))} disabled={saving} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="authorized-lessons">כמות מפגשים מאושרת</Label>
+                    <Input id="authorized-lessons" type="number" min="0" step="1" value={form.authorizedLessons} onChange={(event) => setForm((current) => ({ ...current, authorizedLessons: event.target.value }))} disabled={saving} />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="covered-customer-charge-amount">חיוב לקוח בזמן כיסוי<span className="ms-1 text-destructive">*</span></Label>
+                    <CurrencyInput
+                      id="covered-customer-charge-amount"
+                      value={form.coveredCustomerChargeAmount}
+                      onChange={(value) => setForm((current) => ({ ...current, coveredCustomerChargeAmount: value }))}
+                      disabled={saving}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="covered-insurer-claim-amount">חיוב גורם מממן בזמן כיסוי<span className="ms-1 text-destructive">*</span></Label>
+                    <CurrencyInput
+                      id="covered-insurer-claim-amount"
+                      value={form.coveredInsurerClaimAmount}
+                      onChange={(value) => setForm((current) => ({ ...current, coveredInsurerClaimAmount: value }))}
+                      disabled={saving}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-600">אחרי מיצוי זכאות</Label>
+                    <Select value={form.postCoveragePolicy} onValueChange={(value) => setForm((current) => ({ ...current, postCoveragePolicy: value }))} disabled={saving}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="service_default">מחיר שירות רגיל</SelectItem>
+                        <SelectItem value="explicit_customer_charge">מחיר המשך מפורש</SelectItem>
+                        <SelectItem value="manual_block">חסימה להחלטה ידנית</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="post-coverage-customer-charge">מחיר המשך ללקוח</Label>
+                    <CurrencyInput
+                      id="post-coverage-customer-charge"
+                      value={form.postCoverageCustomerChargeAmount}
+                      onChange={(value) => setForm((current) => ({ ...current, postCoverageCustomerChargeAmount: value }))}
+                      disabled={saving || form.postCoveragePolicy !== 'explicit_customer_charge'}
+                    />
+                  </div>
+                </div>
+
+                <section className={`rounded-2xl border px-4 py-3 text-sm ${preview.blockingReason ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+                  <div className="text-xs font-medium text-slate-700">תצוגה מקדימה לכל שיעור</div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-lg bg-white px-3 py-2">
+                      <div className="text-[11px] text-slate-500">תלמיד בזמן כיסוי</div>
+                      <div className="mt-1 font-semibold text-slate-900">{formatCurrency(preview.coveredCustomerAmount)}</div>
+                    </div>
+                    <div className="rounded-lg bg-white px-3 py-2">
+                      <div className="text-[11px] text-slate-500">גורם מממן בזמן כיסוי</div>
+                      <div className="mt-1 font-semibold text-slate-900">{formatCurrency(preview.coveredInsurerAmount)}</div>
+                    </div>
+                  </div>
+                  <p className={`mt-3 text-xs ${preview.blockingReason ? 'text-amber-700' : 'text-slate-600'}`}>
+                    {preview.postCoveragePolicy === 'service_default'
+                      ? 'אחרי מיצוי הזכאות, השיעור הבא יחויב במחיר השירות הרגיל.'
+                      : preview.postCoveragePolicy === 'explicit_customer_charge'
+                        ? `אחרי מיצוי הזכאות, השיעור הבא יחויב ב-${formatCurrency(preview.postCoverageCustomerAmount)}.`
+                        : 'אחרי מיצוי הזכאות, המערכת תחסום חיוב ותדרוש החלטה ידנית.'}
+                  </p>
+                  {preview.blockingReason ? (
+                    <p className="mt-1 text-xs text-amber-700">{mapAuthorizationErrorMessage(preview.blockingReason)}</p>
+                  ) : null}
+                </section>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="valid-from">תקף מ־</Label>
+                    <Input id="valid-from" type="date" value={form.validFrom} onChange={(event) => setForm((current) => ({ ...current, validFrom: event.target.value }))} disabled={saving} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="expires-at">תוקף עד</Label>
+                    <Input id="expires-at" type="date" value={form.expiresAt} onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))} disabled={saving} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reminder-date">תזכורת פעולה</Label>
+                    <Input id="reminder-date" type="date" value={form.reminderDate} onChange={(event) => setForm((current) => ({ ...current, reminderDate: event.target.value }))} disabled={saving} />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-600">סטטוס</Label>
+                    <Select value={form.status} onValueChange={(value) => setForm((current) => ({ ...current, status: value }))} disabled={saving}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">פעיל</SelectItem>
+                        <SelectItem value="completed">הושלם</SelectItem>
+                        <SelectItem value="expired">פג תוקף</SelectItem>
+                        <SelectItem value="cancelled">בוטל</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="authorization-notes">הערות</Label>
+                    <Input id="authorization-notes" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} disabled={saving} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-start">
+                <Button type="button" variant="outline" onClick={() => handleCloseSheet(false)} disabled={saving}>
+                  ביטול
+                </Button>
+                <Button type="button" onClick={handleSave} disabled={saving}>
+                  {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+                  {form.id ? 'עדכן אישור' : 'צור אישור'}
+                </Button>
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
       ) : null}
     </div>
   );
