@@ -341,6 +341,48 @@ export default function CalendarPage() {
     refetchInstructors();
   }, [refetchInstructors]);
 
+  const handleOpenAttentionItem = useCallback((item) => {
+    if (item?.availabilityIssue) {
+      handleFixAvailabilityIssue(item.availabilityIssue);
+      return;
+    }
+
+    if (item?.instance) {
+      setPendingSlotSelection(null);
+      setSelectedInstance(item.instance);
+      setShowInstanceDialog(false);
+    }
+  }, [handleFixAvailabilityIssue]);
+
+  const handleCalendarEmptyStateAction = useCallback((action, payload = null) => {
+    if (action === 'fix_availability') {
+      const issue = payload?.availabilityIssue || workspaceSummary.emptyState?.availabilityIssue || workspaceSummary.availabilityIssues?.[0];
+      if (issue) {
+        handleFixAvailabilityIssue(issue);
+      }
+      return;
+    }
+
+    if (action === 'create_lesson') {
+      handleOpenBlankCreateLesson();
+      return;
+    }
+
+    if (action === 'templates') {
+      setShowGenerationDialog(true);
+      return;
+    }
+
+    if (action === 'employees') {
+      navigate('/employees');
+      return;
+    }
+
+    if (action === 'services') {
+      navigate('/services');
+    }
+  }, [handleFixAvailabilityIssue, handleOpenBlankCreateLesson, navigate, workspaceSummary.availabilityIssues, workspaceSummary.emptyState]);
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Compact top bar: page title + action buttons + date navigator + view toggle */}
@@ -436,7 +478,7 @@ export default function CalendarPage() {
                   onOpenCreateLesson={handleOpenCreateLesson}
                   onOpenSelectedLesson={handleOpenSelectedLesson}
                   onOpenInstructorWhatsApp={openInstructorWhatsApp}
-                  onFixAvailabilityIssue={handleFixAvailabilityIssue}
+                  onOpenAttentionItem={handleOpenAttentionItem}
                 />
               </div>
 
@@ -456,6 +498,8 @@ export default function CalendarPage() {
                   onEventRescheduled={handleRescheduleSuccess}
                   onExternalServiceDrop={handleExternalServiceDrop}
                   onOpenInstructorWhatsApp={openInstructorWhatsApp}
+                  emptyState={workspaceSummary.emptyState}
+                  onEmptyStateAction={handleCalendarEmptyStateAction}
                 />
               </div>
             </div>

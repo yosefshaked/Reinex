@@ -277,18 +277,6 @@ function expandHexColor(hexColor) {
   return '';
 }
 
-function toRgbaColor(hexColor, alpha, fallbackHex = '#CBD5E1') {
-  const expanded = expandHexColor(hexColor) || expandHexColor(fallbackHex);
-  if (!expanded) {
-    return `rgba(203, 213, 225, ${alpha})`;
-  }
-
-  const red = Number.parseInt(expanded.slice(0, 2), 16);
-  const green = Number.parseInt(expanded.slice(2, 4), 16);
-  const blue = Number.parseInt(expanded.slice(4, 6), 16);
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-}
-
 function hexToRgb(hexColor, fallbackHex = '#CBD5E1') {
   const expanded = expandHexColor(hexColor) || expandHexColor(fallbackHex);
   if (!expanded) {
@@ -642,6 +630,8 @@ export default function ReinexFullCalendar({
   onEventRescheduled,
   onExternalServiceDrop,
   onOpenInstructorWhatsApp,
+  emptyState = null,
+  onEmptyStateAction,
 }) {
   const calendarRef = useRef(null);
   const pendingCalendarSyncRef = useRef(null);
@@ -1043,7 +1033,37 @@ export default function ReinexFullCalendar({
 
       {!hasVisibleResources && !isLoading ? (
         <div className="reinex-fullcalendar-empty">
-          אין מדריכים זמינים או שיעורים קיימים בטווח שנבחר
+          <div className="reinex-fullcalendar-empty__content">
+            <div className="reinex-fullcalendar-empty__title">
+              {emptyState?.title || 'אין מדריכים זמינים או שיעורים קיימים בטווח שנבחר'}
+            </div>
+            <div className="reinex-fullcalendar-empty__description">
+              {emptyState?.description || 'בדקו שהוגדרו מדריכים, שירותים וחלונות זמינות לטווח הנוכחי.'}
+            </div>
+            {(emptyState?.primaryAction || emptyState?.secondaryAction) ? (
+              <div className="reinex-fullcalendar-empty__actions">
+                {emptyState?.primaryAction ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => onEmptyStateAction?.(emptyState.primaryAction, emptyState)}
+                  >
+                    {emptyState.primaryLabel || 'המשך'}
+                  </Button>
+                ) : null}
+                {emptyState?.secondaryAction ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onEmptyStateAction?.(emptyState.secondaryAction, emptyState)}
+                  >
+                    {emptyState.secondaryLabel || 'אפשרות נוספת'}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

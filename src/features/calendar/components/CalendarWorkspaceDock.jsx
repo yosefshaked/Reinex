@@ -1,9 +1,10 @@
-import { AlertTriangle, CalendarDays, Clock3, ExternalLink, FileText, MessageCircle, Plus, Sparkles, UserRound } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, ExternalLink, FileText, HelpCircle, MessageCircle, Sparkles, UserRound } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card.jsx';
 import { Badge } from '@/components/ui/badge.jsx';
 import { getWeekRangeDateStrings, parseLocalDateString } from '../utils/localDate.js';
 import { getParticipantDisplayNames } from '../utils/participantDisplay.js';
+import { getLessonOpenActions } from '../utils/calendarWorkspace.js';
 import CalendarServicePalette from './CalendarServicePalette.jsx';
 
 function formatDateLabel(dateString) {
@@ -52,6 +53,20 @@ function SummaryMetric({ label, value, tone = 'default' }) {
   );
 }
 
+function getQueueToneClass(tone) {
+  if (tone === 'warn') {
+    return 'border-amber-200 bg-amber-50 text-amber-950';
+  }
+  return 'border-slate-200 bg-white text-slate-900';
+}
+
+function getActionToneClass(tone) {
+  if (tone === 'warn') {
+    return 'border-amber-200 bg-amber-50 text-amber-950';
+  }
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+}
+
 export default function CalendarWorkspaceDock({
   currentDate,
   viewMode,
@@ -62,7 +77,7 @@ export default function CalendarWorkspaceDock({
   onOpenCreateLesson,
   onOpenSelectedLesson,
   onOpenInstructorWhatsApp,
-  onFixAvailabilityIssue,
+  onOpenAttentionItem,
 }) {
   const dateRangeLabel = formatDateRange(currentDate, viewMode);
   const selectedLessonHasException = Boolean(selectedInstance?.metadata?.scheduling_override?.reason);
@@ -72,12 +87,13 @@ export default function CalendarWorkspaceDock({
   const selectedLessonEnd = selectedLessonStart instanceof Date && !Number.isNaN(selectedLessonStart.getTime())
     ? new Date(selectedLessonStart.getTime() + (Number(selectedInstance?.duration_minutes) || 0) * 60000)
     : null;
-  const hasAttentionContent = summary.attentionLessons.length > 0
-    || summary.availabilityIssues.length > 0;
+  const hasAttentionContent = (summary.attentionQueues || []).length > 0;
   const showInstructorSummaries = !selectedInstance
     && !selectedSlot
     && viewMode === 'week'
     && summary.visibleInstructors.length > 0;
+  const selectedLessonOpenActions = selectedInstance ? getLessonOpenActions(selectedInstance) : [];
+  const hasNoSelectedOpenActions = selectedInstance && selectedLessonOpenActions.length === 0;
 
   return (
     <aside className="space-y-4 xl:pe-1">
@@ -93,6 +109,18 @@ export default function CalendarWorkspaceDock({
               <SummaryMetric label="חריגות" value={summary.exceptionLessons.length} tone={summary.exceptionLessons.length ? 'warn' : 'default'} />
               <SummaryMetric label="לא תועדו" value={summary.undocumentedCompleted.length} tone={summary.undocumentedCompleted.length ? 'warn' : 'default'} />
               <SummaryMetric label="דורש תשומת לב" value={summary.attentionCount} tone={summary.attentionCount ? 'warn' : 'default'} />
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <div className="mb-2 flex items-center gap-1 font-medium text-slate-800">
+                <HelpCircle className="h-3.5 w-3.5" />
+                סימנים בלוח
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <Badge variant="outline" title="שיעור מתוכנן ללא פעולה חריגה כרגע">מתוכנן</Badge>
+                <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-900" title="יש פעולה פתוחה או חריגה שדורשת בדיקה">דורש טיפול</Badge>
+                <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-900" title="השיעור הושלם או נסגר תפעולית">סגור / הושלם</Badge>
+                <Badge variant="outline" title="המספרים על כרטיס השיעור מציגים תזכורות שנשלחו ואישורי הגעה">תזכורות</Badge>
+              </div>
             </div>
             <CalendarServicePalette />
           </CardContent>
@@ -186,6 +214,33 @@ export default function CalendarWorkspaceDock({
               </Badge>
             ) : null}
 
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-slate-900">פעולות פתוחות</div>
+                <Badge variant="outline">{selectedLessonOpenActions.length}</Badge>
+              </div>
+              {selectedLessonOpenActions.length > 0 ? (
+                <div className="space-y-2">
+                  {selectedLessonOpenActions.slice(0, 5).map((action) => (
+                    <div
+                      key={action.id}
+                      className={`rounded-xl border px-3 py-2 text-sm ${getActionToneClass(action.tone)}`}
+                      title={action.description}
+                    >
+                      <div className="font-medium">{action.label}</div>
+                      <div className="mt-0.5 text-xs opacity-80">{action.description}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {hasNoSelectedOpenActions ? (
+                <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+                  <CheckCircle2 className="h-4 w-4" />
+                  אין פעולות פתוחות לשיעור הזה כרגע.
+                </div>
+              ) : null}
+            </div>
+
             <div className="grid gap-2">
               <Button className="justify-between" onClick={onOpenSelectedLesson}>
                 <span>פתח פרטי שיעור</span>
@@ -208,33 +263,30 @@ export default function CalendarWorkspaceDock({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {summary.attentionLessons.slice(0, 3).map((item) => (
-              <div key={item.id} className="rounded-xl border border-amber-200 bg-white/70 px-3 py-2 text-sm text-amber-950">
-                <div className="font-medium">{item.instance?.service?.service_name || 'שיעור'}</div>
-                <div className="space-y-1 text-xs text-amber-800">
-                  {item.hasException ? <div>שיעור זה נשמר כחריגה חד-פעמית עבור {buildParticipantLabel(item.instance)}</div> : null}
-                  {item.needsDocumentation ? <div>השיעור הושלם ועדיין חסר תיעוד.</div> : null}
-                </div>
-              </div>
-            ))}
-
-            {summary.availabilityIssues.slice(0, 2).map((issue) => (
-              <div key={issue.instructorId} className="rounded-xl border border-amber-200 bg-white/70 px-3 py-2 text-sm text-amber-950">
-                <div className="font-medium">{issue.instructorName}</div>
-                <div className="text-xs text-amber-800">
-                  {issue.blocksVisibility
-                    ? `חסרה זמינות ב-${issue.missingCount} שירותים ולכן המדריך/ה לא זמין/ה כרגע בלוח`
-                    : `חסרה זמינות ב-${issue.missingCount} שירותים`}
-                </div>
-                {typeof onFixAvailabilityIssue === 'function' ? (
-                  <div className="mt-2">
-                    <Button size="sm" variant="outline" onClick={() => onFixAvailabilityIssue(issue)}>
-                      תקן זמינות
-                    </Button>
+            {(summary.attentionQueues || []).slice(0, 6).map((queue) => {
+              const firstItem = queue.items?.[0] || null;
+              const canOpen = firstItem && typeof onOpenAttentionItem === 'function';
+              return (
+                <div key={queue.id} className={`rounded-xl border px-3 py-2 text-sm ${getQueueToneClass(queue.tone)}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium">{queue.label}</div>
+                    <Badge variant="outline">{queue.count}</Badge>
                   </div>
-                ) : null}
-              </div>
-            ))}
+                  <div className="mt-1 text-xs opacity-80">{queue.description}</div>
+                  {canOpen ? (
+                    <div className="mt-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onOpenAttentionItem(firstItem)}
+                      >
+                        הצג פריט ראשון
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       ) : null}

@@ -923,3 +923,40 @@ Recommended first milestone based on owner decisions:
 
 Rationale:
 This sequence respects the decision to postpone conflict enforcement while still improving safety, clarity, and learnability. It avoids a broad visual redesign before the operational workflow is easier to understand.
+
+## Implementation Progress
+
+### 2026-04-29 First Milestone Start
+
+Implemented:
+- Added centralized calendar workspace derivations in `src/features/calendar/utils/calendarWorkspace.js`:
+  - actionable attention queues
+  - setup-aware empty-state metadata
+  - fact-derived lesson open actions
+- Updated `CalendarWorkspaceDock.jsx`:
+  - compact status education chips with hover explanations
+  - action-oriented attention queues
+  - supplemental quick inspector foundation for selected lessons
+  - open-actions list instead of a single "next action"
+- Updated `CalendarPage.jsx`:
+  - attention queue item selection
+  - setup empty-state action routing
+  - availability repair routing from calendar empty state
+- Updated `ReinexFullCalendar.jsx` and `reinex-fullcalendar.css`:
+  - contextual empty states
+  - empty-state actions for employees/services/create/template/availability repair flows
+
+Verified:
+- `npm run build` passes.
+- Targeted ESLint passes for touched calendar files:
+  - `src/features/calendar/utils/calendarWorkspace.js`
+  - `src/features/calendar/components/CalendarWorkspaceDock.jsx`
+  - `src/features/calendar/components/ReinexFullCalendar.jsx`
+  - `src/features/calendar/pages/CalendarPage.jsx`
+
+Not implemented yet:
+- Server-backed edit/reschedule impact preview.
+- Full lesson-details redesign.
+- Full filter system.
+- Conflict blocking remains postponed by owner decision.
+- Mobile/agenda mode remains postponed by owner decision.

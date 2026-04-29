@@ -555,7 +555,34 @@
   border: 1px dashed rgb(209 213 219);
   border-radius: 1rem;
   background: rgb(255 255 255);
-  color: rgb(107 114 128);
+  color: rgb(51 65 85);
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.reinex-fullcalendar-empty__content {
+  max-width: 28rem;
+}
+
+.reinex-fullcalendar-empty__title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: rgb(15 23 42);
+}
+
+.reinex-fullcalendar-empty__description {
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: rgb(71 85 105);
+}
+
+.reinex-fullcalendar-empty__actions {
+  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 .reinex-fullcalendar-loading {
