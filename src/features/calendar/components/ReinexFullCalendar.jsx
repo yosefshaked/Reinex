@@ -289,6 +289,73 @@ function toRgbaColor(hexColor, alpha, fallbackHex = '#CBD5E1') {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
+function hexToRgb(hexColor, fallbackHex = '#CBD5E1') {
+  const expanded = expandHexColor(hexColor) || expandHexColor(fallbackHex);
+  if (!expanded) {
+    return { red: 203, green: 213, blue: 225 };
+  }
+
+  return {
+    red: Number.parseInt(expanded.slice(0, 2), 16),
+    green: Number.parseInt(expanded.slice(2, 4), 16),
+    blue: Number.parseInt(expanded.slice(4, 6), 16),
+  };
+}
+
+function rgbToHsl({ red, green, blue }) {
+  const r = red / 255;
+  const g = green / 255;
+  const b = blue / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 2;
+
+  if (max === min) {
+    return {
+      hue: 0,
+      saturation: 0,
+      lightness: lightness * 100,
+    };
+  }
+
+  const delta = max - min;
+  const saturation = lightness > 0.5
+    ? delta / (2 - max - min)
+    : delta / (max + min);
+
+  let hue;
+  switch (max) {
+    case r:
+      hue = ((g - b) / delta) + (g < b ? 6 : 0);
+      break;
+    case g:
+      hue = ((b - r) / delta) + 2;
+      break;
+    default:
+      hue = ((r - g) / delta) + 4;
+      break;
+  }
+
+  return {
+    hue: hue * 60,
+    saturation: saturation * 100,
+    lightness: lightness * 100,
+  };
+}
+
+function buildSoftSolidTone(hexColor) {
+  const hsl = rgbToHsl(hexToRgb(hexColor));
+  const hue = Math.round(hsl.hue);
+  const saturation = Math.max(18, Math.min(42, Math.round(hsl.saturation * 0.55)));
+  const backgroundLightness = 95;
+  const borderLightness = 85;
+
+  return {
+    backgroundColor: `hsl(${hue} ${saturation}% ${backgroundLightness}%)`,
+    borderColor: `hsl(${hue} ${saturation}% ${borderLightness}%)`,
+  };
+}
+
 function normalizeWorkflowState(instance) {
   const workflowState = String(instance?.metadata?.workflow_state || '').trim().toLowerCase();
   if (workflowState) {
@@ -299,12 +366,13 @@ function normalizeWorkflowState(instance) {
 
 function getEventWorkflowStyles(instance) {
   const workflowState = normalizeWorkflowState(instance);
-  const backgroundColor = toRgbaColor(instance?.service?.color, 0.15);
+  const tone = buildSoftSolidTone(instance?.service?.color);
 
   if (workflowState === 'closed' || workflowState === 'completed') {
     return {
       workflowState,
-      backgroundColor,
+      backgroundColor: tone.backgroundColor,
+      borderColor: tone.borderColor,
       stripColor: 'rgb(16 185 129)',
       icon: '✅',
       iconClassName: 'reinex-calendar-event__status--closed',
@@ -315,7 +383,8 @@ function getEventWorkflowStyles(instance) {
   if (workflowState === 'needs_attention') {
     return {
       workflowState,
-      backgroundColor,
+      backgroundColor: tone.backgroundColor,
+      borderColor: tone.borderColor,
       stripColor: 'rgb(245 158 11)',
       icon: '⚠️',
       iconClassName: 'reinex-calendar-event__status--attention',
@@ -326,7 +395,8 @@ function getEventWorkflowStyles(instance) {
   if (workflowState === 'in_progress') {
     return {
       workflowState,
-      backgroundColor,
+      backgroundColor: tone.backgroundColor,
+      borderColor: tone.borderColor,
       stripColor: 'rgb(59 130 246)',
       icon: '🔵',
       iconClassName: 'reinex-calendar-event__status--progress',
@@ -336,7 +406,8 @@ function getEventWorkflowStyles(instance) {
 
   return {
     workflowState,
-    backgroundColor,
+    backgroundColor: tone.backgroundColor,
+    borderColor: tone.borderColor,
     stripColor: 'rgb(203 213 225)',
     icon: null,
     iconClassName: 'reinex-calendar-event__status--scheduled',
@@ -479,7 +550,10 @@ function EventContent({ arg }) {
       <div
         ref={rootRef}
         className={`reinex-calendar-event ${densityClass} ${isInlineSummary ? 'reinex-calendar-event--inline' : ''} ${isStudentOnlySummary ? 'reinex-calendar-event--student-only' : ''}`.trim()}
-        style={{ backgroundColor: workflowStyles.backgroundColor }}
+        style={{
+          backgroundColor: workflowStyles.backgroundColor,
+          borderColor: workflowStyles.borderColor,
+        }}
         title={`${instance.service?.service_name || 'שיעור'} • ${firstStudentName}`}
       >
       <span
