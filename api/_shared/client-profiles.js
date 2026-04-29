@@ -375,11 +375,15 @@ export async function ensureStudentForClientProfile(tenantClient, clientProfileI
   if (!profile) {
     return { student: null, created: false, error: 'client_profile_not_found' };
   }
+  if (!UUID_PATTERN.test(String(profile.org_id || ''))) {
+    throw new Error('client_profile_missing_org_id');
+  }
 
   const createdAt = nowIso();
   const { data: createdStudent, error: createError } = await tenantClient
     .from('students')
     .insert({
+      org_id: profile.org_id,
       client_profile_id: clientProfileId,
       medical_provider: medicalProvider,
       notes_internal: notesInternal,

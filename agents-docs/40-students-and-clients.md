@@ -29,10 +29,12 @@
 ## Known patterns / do not reinvent
 - Student responses are composed from `students` + `client_profiles` + optional guardian data; keep the merged shape consistent.
 - Student writes are split between student fields and client-profile fields in [`../api/students-list/index.js`](../api/students-list/index.js); do not hand-merge updates in a new way.
+- Client-profile-to-student promotion must copy `org_id` from `client_profiles` into `students`; `ensureStudentForClientProfile` in [`../api/_shared/client-profiles.js`](../api/_shared/client-profiles.js) is the shared path and must remain tenant-safe.
 - Suspending a student from the student header or by saving the edit form as inactive must go through the shared suspend flow, so future lessons are cancelled together with the status change. Do not introduce a separate "inactive only" path in edit UI that skips lesson cancellation.
 - One-time customers stay in `client_profiles` and may remain non-students.
 - Instructors are scoped to their own students via lesson-template-derived IDs in [`../api/_shared/instructor-student-scope.js`](../api/_shared/instructor-student-scope.js).
 - Roster pages persist filter state and reuse shared role helpers in [`../src/features/students/utils/endpoints.js`](../src/features/students/utils/endpoints.js).
 - Student detail lesson-balance displays must reuse backend-provided lesson-count buckets (`consumed_lessons`, `reserved_lessons`, `available_lessons_to_book`) rather than recomputing "lessons left" inside React components.
 - Student detail and one-time-customer detail should share the same tabs-shell layout source where possible; differ by tab set/capabilities, not by inventing a separate page framework for each profile type.
+- Student detail and one-time-customer detail headers should reuse the shared master-strip UI in [`../src/components/ui/ProfileMasterStrip.jsx`](../src/components/ui/ProfileMasterStrip.jsx); keep identity, KPI, and action layout aligned across both profile types, and only vary the data/actions passed into the strip.
 - One-time customers use `client_profiles` as their canonical subject record and should reuse form-submission flows by `client_profile_id` rather than inventing a second forms-delivery path.

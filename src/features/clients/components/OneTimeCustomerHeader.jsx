@@ -1,9 +1,13 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowRight, Send } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Copy, Pencil, Send } from 'lucide-react';
+import { toast } from 'sonner';
+import ProfileMasterStrip from '@/components/ui/ProfileMasterStrip.jsx';
+import { authenticatedFetch } from '@/lib/api-client.js';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { coerceAgorot, formatCurrency } from '@/lib/currency.js';
 import SendFormDialog from '@/features/students/components/SendFormDialog.jsx';
+import CreateClientProfileDialog from '@/features/clients/components/CreateClientProfileDialog.jsx';
 
 function getInitials(profile) {
   const first = profile?.first_name?.[0] || '';
@@ -15,8 +19,54 @@ function getFullName(profile) {
   return profile?.full_name || [profile?.first_name, profile?.middle_name, profile?.last_name].filter(Boolean).join(' ').trim() || 'ללא שם';
 }
 
-export default function OneTimeCustomerHeader({ clientProfile, canManage = false }) {
+export default function OneTimeCustomerHeader({
+  clientProfile,
+  canEdit = false,
+  onUpdated,
+}) {
+  const { activeOrgId } = useOrg();
+  const { session } = useSupabase();
   const [sendFormDialogOpen, setSendFormDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [summary, setSummary] = useState({ formsCount: null, balance: 0, debt: 0 });
+
+  const loadSummary = useCallback(async () => {
+    if (!clientProfile?.id || !session || !activeOrgId) return;
+
+    try {
+      const [billingPayload, formsPayload] = await Promise.all([
+        authenticatedFetch('billing', {
+          session,
+          params: {
+            org_id: activeOrgId,
+            client_profile_id: clientProfile.id,
+          },
+        }),
+        authenticatedFetch('form-submissions', {
+          session,
+          params: {
+            org_id: activeOrgId,
+            client_profile_id: clientProfile.id,
+            limit: 100,
+          },
+        }),
+      ]);
+
+      const balanceAgorot = coerceAgorot(billingPayload?.summary?.balance);
+      setSummary({
+        formsCount: Array.isArray(formsPayload) ? formsPayload.length : 0,
+        balance: balanceAgorot > 0 ? balanceAgorot : 0,
+        debt: balanceAgorot < 0 ? Math.abs(balanceAgorot) : 0,
+      });
+    } catch (error) {
+      console.error('Failed to load one-time customer header summary', error);
+      setSummary({ formsCount: null, balance: 0, debt: 0 });
+    }
+  }, [activeOrgId, clientProfile?.id, session]);
+
+  useEffect(() => {
+    void loadSummary();
+  }, [loadSummary]);
 
   if (!clientProfile) return null;
 
@@ -24,70 +74,88 @@ export default function OneTimeCustomerHeader({ clientProfile, canManage = false
   if (clientProfile?.identity_number) subtitleParts.push(`ת.ז. ${clientProfile.identity_number}`);
   if (clientProfile?.phone) subtitleParts.push(clientProfile.phone);
 
+  const kpis = [
+    {
+      label: 'טפסים',
+      value: summary.formsCount ?? '—',
+      className: 'text-slate-900',
+    },
+    {
+      label: 'יתרה',
+      value: formatCurrency(summary.balance),
+      className: summary.balance > 0 ? 'text-emerald-700' : 'text-slate-900',
+    },
+    {
+      label: 'חוב',
+      value: formatCurrency(summary.debt),
+      className: summary.debt > 0 ? 'text-red-600' : 'text-slate-900',
+    },
+  ];
+
+  const primaryActions = canEdit ? [
+    {
+      label: 'עריכה',
+      icon: <Pencil className="h-4 w-4" />,
+      onClick: () => setEditDialogOpen(true),
+    },
+    {
+      label: 'שלח טופס',
+      icon: <Send className="h-4 w-4" />,
+      onClick: () => setSendFormDialogOpen(true),
+    },
+  ] : [
+    {
+      label: 'שלח טופס',
+      icon: <Send className="h-4 w-4" />,
+      onClick: () => setSendFormDialogOpen(true),
+    },
+  ];
+
+  const moreActions = [
+    {
+      label: 'העתק מזהה',
+      icon: <Copy className="h-4 w-4" />,
+      onClick: () => {
+        navigator.clipboard.writeText(clientProfile.id);
+        toast.success('מזהה הועתק');
+      },
+    },
+  ];
+
   return (
     <>
-      <div className="space-y-6">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="flex items-center gap-5">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white flex items-center justify-center text-2xl font-bold shrink-0 shadow-lg shadow-violet-200/40">
-              {getInitials(clientProfile)}
-            </div>
-            <div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-2xl font-bold tracking-tight">{getFullName(clientProfile)}</h1>
-                <Badge variant="secondary" className="bg-violet-50 text-violet-700 border-violet-200">לקוח/ה חד-פעמי/ת</Badge>
-                <Badge variant="outline">ללא כרטיס תלמיד/ה</Badge>
-              </div>
-              {subtitleParts.length > 0 && (
-                <p className="text-sm text-muted-foreground mt-1">{subtitleParts.join(' · ')}</p>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-5 shrink-0 bg-white rounded-xl border border-border px-6 py-4 shadow-sm">
-            <div className="text-center px-3">
-              <p className="text-2xl font-bold text-zinc-900">{clientProfile?.onboarding_status === 'approved' ? 'כן' : 'לא'}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">מוכן/ה להמשך</p>
-            </div>
-            <div className="w-px h-10 bg-border" />
-            <div className="text-center px-3">
-              <p className="text-2xl font-bold text-emerald-600">{clientProfile?.guardian ? 'כן' : 'לא'}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">איש קשר</p>
-            </div>
-            <div className="w-px h-10 bg-border" />
-            <div className="text-center px-3">
-              <p className="text-2xl font-bold text-amber-500">{Array.isArray(clientProfile?.tags) ? clientProfile.tags.length : 0}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">תגיות</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 justify-end">
-          <Button asChild variant="ghost" size="sm" className="gap-2 me-auto">
-            <Link to="/one-time-customers">
-              <ArrowRight className="h-4 w-4" />
-              <span className="text-sm">חזרה</span>
-            </Link>
-          </Button>
-
-          {canManage && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSendFormDialogOpen(true)}
-              className="gap-2"
-            >
-              <Send className="h-4 w-4" />
-              שלח טופס
-            </Button>
-          )}
-        </div>
-      </div>
+      <ProfileMasterStrip
+        backHref="/one-time-customers"
+        backLabel="חזרה ללקוחות חד-פעמיים"
+        avatarFallback={getInitials(clientProfile)}
+        name={getFullName(clientProfile)}
+        status={{ label: 'לקוח/ה חד-פעמי/ת', className: 'border-sky-200 bg-sky-50 text-sky-700' }}
+        subtitle={subtitleParts.join(' · ')}
+        kpis={kpis}
+        primaryActions={primaryActions}
+        moreActions={moreActions}
+      />
 
       <SendFormDialog
         open={sendFormDialogOpen}
         onOpenChange={setSendFormDialogOpen}
         clientProfile={clientProfile}
+      />
+
+      <CreateClientProfileDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        session={session}
+        orgId={activeOrgId}
+        mode="edit"
+        clientProfileId={clientProfile.id}
+        initialValues={clientProfile}
+        title="עריכת לקוח/ה חד-פעמי/ת"
+        description="עדכנו את פרטי הקשר והזיהוי של הלקוח/ה מתוך אותו כרטיס."
+        onSuccess={async () => {
+          await onUpdated?.();
+          await loadSummary();
+        }}
       />
     </>
   );

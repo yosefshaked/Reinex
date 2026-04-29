@@ -24,6 +24,9 @@ export default function CreateClientProfileDialog({
   session,
   orgId,
   onSuccess,
+  mode = 'create',
+  clientProfileId = '',
+  initialValues = null,
   createdFrom = 'ui',
   title = 'יצירת לקוח/ה חד-פעמי/ת',
   description = 'יוצרים כרטיס לקוח/ה שניתן לשייך לשיעורים חד-פעמיים, לטפסים ולהיסטוריה, בלי לפתוח כרטיס תלמיד/ה.',
@@ -31,14 +34,31 @@ export default function CreateClientProfileDialog({
   const [formData, setFormData] = useState(INITIAL_FORM);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const isEditMode = mode === 'edit';
 
   useEffect(() => {
     if (!open) {
-      setFormData(INITIAL_FORM);
       setError('');
       setIsSubmitting(false);
+      return;
     }
-  }, [open]);
+
+    if (isEditMode && initialValues) {
+      setFormData({
+        firstName: initialValues.first_name || '',
+        middleName: initialValues.middle_name || '',
+        lastName: initialValues.last_name || '',
+        identityNumber: initialValues.identity_number || '',
+        phone: initialValues.phone || '',
+        email: initialValues.email || '',
+        defaultNotificationMethod: initialValues.default_notification_method || 'whatsapp',
+      });
+      return;
+    }
+
+    setFormData(INITIAL_FORM);
+    setError('');
+  }, [initialValues, isEditMode, open]);
 
   const handleChange = (field) => (event) => {
     setFormData((prev) => ({ ...prev, [field]: event.target.value }));
@@ -63,27 +83,41 @@ export default function CreateClientProfileDialog({
 
     setIsSubmitting(true);
     try {
-      const payload = await authenticatedFetch('client-profiles', {
-        session,
-        method: 'POST',
-        body: {
-          org_id: orgId,
-          first_name: formData.firstName.trim(),
-          middle_name: formData.middleName.trim() || null,
-          last_name: formData.lastName.trim(),
-          identity_number: formData.identityNumber.trim() || null,
-          phone: formData.phone.trim() || null,
-          email: formData.email.trim() || null,
-          default_notification_method: formData.defaultNotificationMethod,
-          created_from: createdFrom,
-        },
-      });
+      const body = {
+        org_id: orgId,
+        first_name: formData.firstName.trim(),
+        middle_name: formData.middleName.trim() || null,
+        last_name: formData.lastName.trim(),
+        identity_number: formData.identityNumber.trim() || null,
+        phone: formData.phone.trim() || null,
+        email: formData.email.trim() || null,
+        default_notification_method: formData.defaultNotificationMethod,
+      };
 
-      toast.success(payload?.action === 'created' ? 'כרטיס הלקוח/ה נוצר.' : 'נמצא כרטיס קיים והשתמשנו בו.');
+      const payload = isEditMode
+        ? await authenticatedFetch(`client-profiles/${clientProfileId}`, {
+          session,
+          method: 'PATCH',
+          body,
+        })
+        : await authenticatedFetch('client-profiles', {
+          session,
+          method: 'POST',
+          body: {
+            ...body,
+            created_from: createdFrom,
+          },
+        });
+
+      if (isEditMode) {
+        toast.success('כרטיס הלקוח/ה עודכן.');
+      } else {
+        toast.success(payload?.action === 'created' ? 'כרטיס הלקוח/ה נוצר.' : 'נמצא כרטיס קיים והשתמשנו בו.');
+      }
       onSuccess?.(payload);
       onOpenChange(false);
     } catch (submitError) {
-      const message = submitError?.message || 'יצירת הלקוח/ה נכשלה.';
+      const message = submitError?.message || (isEditMode ? 'עדכון הלקוח/ה נכשל.' : 'יצירת הלקוח/ה נכשלה.');
       setError(message);
       toast.error(message);
     } finally {
@@ -188,7 +222,7 @@ export default function CreateClientProfileDialog({
             <div className="flex w-full flex-row-reverse gap-2">
               <Button type="submit" disabled={isSubmitting} className="gap-2">
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                צור לקוח/ה
+                {isEditMode ? 'שמור שינויים' : 'צור לקוח/ה'}
               </Button>
               <Button type="button" variant="outline" disabled={isSubmitting} onClick={() => onOpenChange(false)}>
                 ביטול

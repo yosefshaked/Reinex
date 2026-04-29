@@ -152,7 +152,7 @@ export default function OneTimeCustomersPage() {
 
           {detailState !== 'loading' && !detailError && detailProfile ? (
             <DetailTabsShell
-              header={<OneTimeCustomerHeader clientProfile={detailProfile} canManage={canManage} />}
+              header={<OneTimeCustomerHeader clientProfile={detailProfile} canEdit={canManage} onUpdated={loadDetailProfile} />}
               activeTab={activeTab}
               onTabChange={(nextTab) => navigate(`/one-time-customers/${clientProfileId}/${nextTab}`)}
               tabs={tabs}
