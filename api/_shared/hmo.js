@@ -37,6 +37,7 @@ function normalizePostCoveragePolicy(value, fallback = 'manual_block') {
 }
 
 function toDateKey(value) {
+  if (value == null) return '';
   const normalized = normalizeString(value);
   if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
     return normalized;

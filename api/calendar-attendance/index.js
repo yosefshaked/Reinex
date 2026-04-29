@@ -1451,7 +1451,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       message: syncError?.message,
       instanceId: body.instance_id,
     });
-    return respond(context, 500, { message: 'failed_to_sync_financial_artifacts', _debug_message: syncError?.message, _debug_code: syncError?.code });
+    return respond(context, 500, { message: 'failed_to_sync_financial_artifacts' });
   }
 
   // HMO claim workflow task: when a participant is marked attended on an HMO commitment,

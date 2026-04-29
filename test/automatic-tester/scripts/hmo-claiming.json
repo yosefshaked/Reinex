@@ -4,7 +4,7 @@
     "name": "HMO Claiming – End to End",
     "description": "Full HMO claiming flow: create provider + track → assign authorization to student → create lesson → mark attended → open financials claims tab → create draft batch → submit batch.",
     "version": "1.0.0",
-    "last_validated_at": "2026-04-27T00:00:00Z",
+    "last_validated_at": "2026-04-29T00:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [

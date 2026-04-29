@@ -16,19 +16,22 @@ export async function logEmailSent(supabase, {
   metadata = {},
 }) {
   if (!supabase) return;
-  await supabase
-    .from('email_log')
-    .insert({
-      email_type: emailType,
-      to_email: String(toEmail || '').trim(),
-      subject: subject ? String(subject).trim() : null,
-      status,
-      error_message: errorMessage || null,
-      org_id: orgId || null,
-      actor_user_id: actorUserId || null,
-      metadata: metadata || {},
-    })
-    .catch(() => {});
+  try {
+    await supabase
+      .from('email_log')
+      .insert({
+        email_type: emailType,
+        to_email: String(toEmail || '').trim(),
+        subject: subject ? String(subject).trim() : null,
+        status,
+        error_message: errorMessage || null,
+        org_id: orgId || null,
+        actor_user_id: actorUserId || null,
+        metadata: metadata || {},
+      });
+  } catch {
+    // Logging must never block or fail the calling email flow.
+  }
 }
 
 /**
@@ -50,24 +53,34 @@ export async function sendAndLogBrevoEmail(
 ) {
   let status = 'sent';
   let errorMessage = null;
+  let result;
 
   try {
-    const result = await sendBrevoEmail(emailParams, source, azureContext);
-    return result;
+    result = await sendBrevoEmail(emailParams, source, azureContext);
   } catch (err) {
     status = 'failed';
     errorMessage = err?.message || 'unknown_error';
     throw err;
   } finally {
-    await logEmailSent(supabase, {
-      emailType: logParams.emailType || 'unknown',
-      toEmail: emailParams.to,
-      subject: emailParams.subject,
-      status,
-      errorMessage,
-      orgId: logParams.orgId || null,
-      actorUserId: logParams.actorUserId || null,
-      metadata: logParams.metadata || {},
-    });
+    try {
+      await logEmailSent(supabase, {
+        emailType: logParams.emailType || 'unknown',
+        toEmail: emailParams.to,
+        subject: emailParams.subject,
+        status,
+        errorMessage,
+        orgId: logParams.orgId || null,
+        actorUserId: logParams.actorUserId || null,
+        metadata: logParams.metadata || {},
+      });
+    } catch (logError) {
+      azureContext?.log?.warn?.('email-log failed after Brevo send attempt', {
+        message: logError?.message || 'unknown_email_log_error',
+        emailType: logParams.emailType || 'unknown',
+        status,
+      });
+    }
   }
+
+  return result;
 }
