@@ -83,7 +83,7 @@ export default function OneTimeCustomerHeader({
     {
       label: 'יתרה',
       value: formatCurrency(summary.balance),
-      className: summary.balance > 0 ? 'text-emerald-600' : 'text-slate-900',
+      className: summary.balance > 0 ? 'text-emerald-700' : 'text-slate-900',
     },
     {
       label: 'חוב',
@@ -129,7 +129,7 @@ export default function OneTimeCustomerHeader({
         backLabel="חזרה ללקוחות חד-פעמיים"
         avatarFallback={getInitials(clientProfile)}
         name={getFullName(clientProfile)}
-        status={{ label: 'לקוח/ה חד-פעמי/ת', className: 'border-violet-200 bg-violet-50 text-violet-700' }}
+        status={{ label: 'לקוח/ה חד-פעמי/ת', className: 'border-sky-200 bg-sky-50 text-sky-700' }}
         subtitle={subtitleParts.join(' · ')}
         kpis={kpis}
         primaryActions={primaryActions}

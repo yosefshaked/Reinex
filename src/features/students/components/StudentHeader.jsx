@@ -126,7 +126,7 @@ export default function StudentHeader({
     {
       label: 'יתרה',
       value: formatCurrency(summary.balance),
-      className: summary.balance > 0 ? 'text-emerald-600' : 'text-slate-900',
+      className: summary.balance > 0 ? 'text-emerald-700' : 'text-slate-900',
     },
     {
       label: 'חוב',
