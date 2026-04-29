@@ -20,6 +20,27 @@ import ResendOtpDialog from '@/features/students/components/ResendOtpDialog.jsx'
 import { toast } from 'sonner';
 import { findQuestionLabel, normalizeFormSchema } from '@/features/forms/lib/form-schema.js';
 
+const WAITING_LIST_RELATIONSHIP_LABELS = {
+  self: 'התלמיד/ה עצמו/ה',
+  mother: 'אם',
+  father: 'אב',
+  caretaker: 'מטפל/ת',
+  other: 'אחר',
+};
+
+const WAITING_LIST_PAYMENT_PATH_LABELS = {
+  private: 'פרטי',
+  hmo: 'קופת חולים',
+  unsure: 'לא בטוח/ה עדיין',
+};
+
+const WAITING_LIST_HMO_APPROVAL_LABELS = {
+  no_approval_yet: 'ללא אישור עדיין',
+  send_separately: 'אישור יישלח בנפרד',
+};
+
+const DAYS_OF_WEEK = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+
 function normalizeWaPhone(value) {
   const digits = String(value || '').replace(/[^\d]/g, '');
   if (!digits) return '';
@@ -79,14 +100,97 @@ function formatDateTime(value) {
   }
 }
 
+function formatWaitingListDays(days) {
+  if (!Array.isArray(days) || !days.length) return '—';
+  return days
+    .map((day) => {
+      const numericDay = Number(day);
+      return Number.isInteger(numericDay) && numericDay >= 0 && numericDay <= 6 ? DAYS_OF_WEEK[numericDay] : '';
+    })
+    .filter(Boolean)
+    .join(', ');
+}
+
+function formatWaitingListTimes(preferredTimes) {
+  if (!Array.isArray(preferredTimes) || !preferredTimes.length) return '—';
+  return preferredTimes
+    .map((entry) => {
+      const numericDay = Number(entry?.day);
+      const dayLabel = Number.isInteger(numericDay) && numericDay >= 0 && numericDay <= 6 ? DAYS_OF_WEEK[numericDay] : '';
+      const ranges = Array.isArray(entry?.ranges)
+        ? entry.ranges
+          .map((range) => {
+            const start = typeof range?.start === 'string' ? range.start.trim() : '';
+            const end = typeof range?.end === 'string' ? range.end.trim() : '';
+            return start && end ? `${start}-${end}` : '';
+          })
+          .filter(Boolean)
+        : [];
+      if (!dayLabel || !ranges.length) return '';
+      return `${dayLabel}: ${ranges.join(', ')}`;
+    })
+    .filter(Boolean)
+    .join(' • ');
+}
+
+function isWaitingListIntakeSubmission(submission) {
+  return String(submission?.metadata?.workflow_kind || '').toLowerCase() === 'waiting_list_intake';
+}
+
 function getWorkflowStatus(submission) {
   const status = String(submission?.metadata?.workflow_status || '').toLowerCase();
-  if (status === 'submitted') return { label: 'נשלח', variant: 'secondary' };
-  return { label: 'ממתין למילוי', variant: 'default' };
+  const wasOpened = Boolean(
+    submission?.metadata?.form_accessed_at
+    || submission?.metadata?.verify_ip_at
+    || submission?.metadata?.verify_ip
+    || submission?.otp_metadata?.verified_at
+    || submission?.otp_metadata?.consumed_at
+  );
+
+  if (status === 'submitted') {
+    return { label: 'הושלם', variant: 'secondary' };
+  }
+
+  if (wasOpened) {
+    return { label: 'נפתח וממתין לשליחה', variant: 'outline' };
+  }
+
+  return { label: 'נשלח וממתין למילוי', variant: 'default' };
 }
 
 function getOtpStatus(submission) {
   const otpStatus = String(submission?.otp_metadata?.otp_status || '').toLowerCase();
+  const inviteStatus = String(submission?.otp_metadata?.invite_status || '').toLowerCase();
+  const accessMode = String(submission?.otp_metadata?.access_mode || '').toLowerCase();
+  const wasOpened = Boolean(
+    submission?.metadata?.form_accessed_at
+    || submission?.metadata?.verify_ip_at
+    || submission?.metadata?.verify_ip
+    || submission?.otp_metadata?.verified_at
+    || submission?.otp_metadata?.consumed_at
+  );
+  const wasSubmitted = String(submission?.metadata?.workflow_status || '').toLowerCase() === 'submitted';
+
+  if (accessMode === 'invite_token') {
+    if (inviteStatus === 'submitted' || wasSubmitted) {
+      return {
+        label: 'הקישור שומש',
+        className: 'border-emerald-200 bg-emerald-100 text-emerald-700 hover:bg-emerald-100',
+      };
+    }
+
+    if (wasOpened) {
+      return {
+        label: 'הקישור נפתח',
+        className: 'border-sky-200 bg-sky-100 text-sky-700 hover:bg-sky-100',
+      };
+    }
+
+    return {
+      label: 'קישור פעיל',
+      className: 'border-border bg-background text-foreground hover:bg-background',
+    };
+  }
 
   if (otpStatus === 'expired') {
     return {
@@ -95,10 +199,17 @@ function getOtpStatus(submission) {
     };
   }
 
-  if (otpStatus === 'verified') {
+  if (otpStatus === 'verified' || wasSubmitted) {
     return {
-      label: 'אומת',
+      label: 'OTP שומש',
       className: 'border-emerald-200 bg-emerald-100 text-emerald-700 hover:bg-emerald-100',
+    };
+  }
+
+  if (wasOpened) {
+    return {
+      label: 'OTP אומת',
+      className: 'border-sky-200 bg-sky-100 text-sky-700 hover:bg-sky-100',
     };
   }
 
@@ -121,6 +232,28 @@ function buildAnswerEntries(submission) {
     ? rawAnswers.custom_answers
     : rawAnswers;
   return Object.entries(customAnswers).slice(0, 30);
+}
+
+function buildWaitingListIntakeEntries(submission) {
+  if (!isWaitingListIntakeSubmission(submission)) return [];
+  const intake = submission?.answers?.intake;
+  if (!intake || typeof intake !== 'object' || Array.isArray(intake)) return [];
+
+  return [
+    ['שם פרטי של התלמיד/ה', intake.student_first_name || ''],
+    ['שם משפחה של התלמיד/ה', intake.student_last_name || ''],
+    ['איש קשר', intake.contact_name || intake.student_first_name || ''],
+    ['קשר לאיש הקשר', WAITING_LIST_RELATIONSHIP_LABELS[String(intake.contact_relationship || '').toLowerCase()] || intake.contact_relationship || '—'],
+    ['טלפון', intake.phone || '—'],
+    ['אימייל', intake.email || '—'],
+    ['תעודת זהות', intake.identity_number || '—'],
+    ['ימי זמינות', formatWaitingListDays(intake.preferred_days)],
+    ['טווחי זמינות', formatWaitingListTimes(intake.preferred_times)],
+    ['מסלול תשלום', WAITING_LIST_PAYMENT_PATH_LABELS[String(intake.payment_path_intent || '').toLowerCase()] || intake.payment_path_intent || '—'],
+    ['סטטוס אישור קופה', WAITING_LIST_HMO_APPROVAL_LABELS[String(intake.hmo_approval_status || '').toLowerCase()] || intake.hmo_approval_status || '—'],
+    ['קופת חולים', intake.hmo_provider_name || '—'],
+    ['הערות', intake.notes || '—'],
+  ].filter(([, value]) => value !== '');
 }
 
 function getSubmissionSchemaSnapshot(submission) {
@@ -352,6 +485,7 @@ export default function SubjectFormsTab({
     workflow: getWorkflowStatus(submission),
     otp: getOtpStatus(submission),
     alertsCount: countAlerts(submission),
+    waitingListEntries: buildWaitingListIntakeEntries(submission),
     answersEntries: buildAnswerEntries(submission),
   })), [submissions]);
 
@@ -455,18 +589,43 @@ export default function SubjectFormsTab({
                             <TableCell colSpan={7}>
                               <div className="rounded-md border bg-neutral-50 p-3 space-y-2">
                                 <p className="text-xs text-muted-foreground">
-                                  תשובות ({submission.answersEntries.length})
+                                  תשובות{submission.waitingListEntries.length > 0 || submission.answersEntries.length > 0
+                                    ? ` (${submission.waitingListEntries.length + submission.answersEntries.length})`
+                                    : ''}
                                 </p>
-                                {submission.answersEntries.length === 0 ? (
+                                {submission.waitingListEntries.length === 0 && submission.answersEntries.length === 0 ? (
                                   <p className="text-sm text-muted-foreground">עדיין לא מולאו תשובות.</p>
                                 ) : (
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                                    {submission.answersEntries.map(([key, value]) => (
-                                      <div key={`${submission.id}-${key}`} className="rounded-md border bg-white p-2">
-                                        <p className="text-xs font-semibold text-zinc-600 mb-1">{resolveAnswerLabel(submission, key)}</p>
-                                        {renderAnswerValue(value)}
+                                  <div className="space-y-3">
+                                    {submission.waitingListEntries.length > 0 ? (
+                                      <div className="space-y-2">
+                                        <p className="text-xs font-semibold text-zinc-600">פרטי intake</p>
+                                        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 text-sm">
+                                          {submission.waitingListEntries.map(([key, value]) => (
+                                            <div key={`${submission.id}-intake-${key}`} className="rounded-md border bg-white p-2">
+                                              <p className="mb-1 text-xs font-semibold text-zinc-600">{key}</p>
+                                              {renderAnswerValue(value)}
+                                            </div>
+                                          ))}
+                                        </div>
                                       </div>
-                                    ))}
+                                    ) : null}
+
+                                    {submission.answersEntries.length > 0 ? (
+                                      <div className="space-y-2">
+                                        {submission.waitingListEntries.length > 0 ? (
+                                          <p className="text-xs font-semibold text-zinc-600">שאלות הטופס</p>
+                                        ) : null}
+                                        <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
+                                          {submission.answersEntries.map(([key, value]) => (
+                                            <div key={`${submission.id}-${key}`} className="rounded-md border bg-white p-2">
+                                              <p className="mb-1 text-xs font-semibold text-zinc-600">{resolveAnswerLabel(submission, key)}</p>
+                                              {renderAnswerValue(value)}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 )}
 

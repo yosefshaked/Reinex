@@ -231,7 +231,8 @@ async function runApiCall(page, params, ctx) {
     });
   } catch { /* page might not be on a real URL yet */ }
 
-  const url = `${ctx.vars.BASE_URL}${endpoint}`;
+  // Allow fully-qualified URLs (e.g., direct Supabase REST calls); otherwise prefix with BASE_URL
+  const url = /^https?:\/\//.test(endpoint) ? endpoint : `${ctx.vars.BASE_URL}${endpoint}`;
   const resolvedBody = body ? interpolateDeep(body, ctx.vars) : undefined;
 
   const response = await page.request.fetch(url, {
@@ -261,10 +262,16 @@ async function runApiCall(page, params, ctx) {
   function resolveField(obj, fieldPath) {
     if (!fieldPath) return obj;
     const parts = String(fieldPath).split('.');
-    const value = parts.reduce(
-      (o, key) => (o !== null && o !== undefined ? o[key] : undefined),
-      obj
-    );
+    const value = parts.reduce((o, key) => {
+      if (o === null || o === undefined) return undefined;
+      // Support [key=value] find syntax on arrays, e.g. "providers.[name=Acme].id"
+      const findMatch = key.match(/^\[(\w+)=(.+)\]$/);
+      if (findMatch && Array.isArray(o)) {
+        const [, findKey, findVal] = findMatch;
+        return o.find(item => String(item[findKey]) === findVal);
+      }
+      return o[key];
+    }, obj);
     return value === undefined ? obj : value;
   }
 
