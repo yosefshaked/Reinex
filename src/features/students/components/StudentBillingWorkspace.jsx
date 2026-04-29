@@ -268,6 +268,10 @@ export default function StudentBillingWorkspace({
     const source = snapshot?.student || student;
     return source?.full_name || [source?.first_name, source?.middle_name, source?.last_name].filter(Boolean).join(' ') || 'תלמיד';
   }, [snapshot, student]);
+  const manualEntryDraftStorageKey = useMemo(
+    () => (activeOrgId && studentId ? `manual-entry:${activeOrgId}:student:${studentId}` : ''),
+    [activeOrgId, studentId],
+  );
 
   // Map: original entry id → reversal entry id (for visual linkage)
   const reversalMap = useMemo(() => {
@@ -447,6 +451,7 @@ export default function StudentBillingWorkspace({
                   saving={saving}
                   availableServices={services}
                   showCreditCalculator
+                  draftStorageKey={manualEntryDraftStorageKey}
                   onSubmit={handleRequestAppendEntry}
                   onCancel={() => setManualEntrySheetOpen(false)}
                 />

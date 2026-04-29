@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label.jsx';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
 import CurrencyInput from '@/components/ui/CurrencyInput.jsx';
 import { coerceAgorot, formatCurrency, isValidCurrencyInput } from '@/lib/currency.js';
+import { clearSheetDraft, readSheetDraft, writeSheetDraft } from '@/features/finance/utils/sheetDraftStorage.js';
 
 function buildEntryForm() {
   return {
@@ -27,6 +28,26 @@ function buildInitialErrors() {
   };
 }
 
+function normalizeDraft(value) {
+  const base = buildEntryForm();
+  if (!value || typeof value !== 'object') {
+    return base;
+  }
+
+  return {
+    ...base,
+    mode: value.mode === 'adjustment' ? 'adjustment' : 'payment',
+    amount: typeof value.amount === 'string' ? value.amount : base.amount,
+    effectiveAt: typeof value.effectiveAt === 'string' && value.effectiveAt ? value.effectiveAt : base.effectiveAt,
+    notes: typeof value.notes === 'string' ? value.notes : base.notes,
+    externalReference: typeof value.externalReference === 'string' ? value.externalReference : base.externalReference,
+    calculatorServiceId: typeof value.calculatorServiceId === 'string' ? value.calculatorServiceId : base.calculatorServiceId,
+    calculatorLessonCount: typeof value.calculatorLessonCount === 'string' && value.calculatorLessonCount
+      ? value.calculatorLessonCount
+      : base.calculatorLessonCount,
+  };
+}
+
 function getServiceName(services, serviceId) {
   return services.find((service) => service.id === serviceId)?.service_name
     || services.find((service) => service.id === serviceId)?.name
@@ -39,23 +60,44 @@ export default function ManualEntryForm({
   saving = false,
   availableServices = [],
   showCreditCalculator = false,
+  draftStorageKey = '',
   onSubmit,
   onCancel,
 }) {
   const [form, setForm] = useState(() => buildEntryForm());
   const [errors, setErrors] = useState(() => buildInitialErrors());
+  const [draftReady, setDraftReady] = useState(false);
+  const lastResetVersionRef = useRef(resetVersion);
 
   useEffect(() => {
-    if (open) {
-      setForm(buildEntryForm());
-      setErrors(buildInitialErrors());
+    if (!open) {
+      setDraftReady(false);
+      return;
     }
-  }, [open]);
+
+    const draft = readSheetDraft(draftStorageKey);
+    setForm(normalizeDraft(draft));
+    setErrors(buildInitialErrors());
+    setDraftReady(true);
+  }, [draftStorageKey, open]);
 
   useEffect(() => {
+    if (lastResetVersionRef.current === resetVersion) {
+      return;
+    }
+    lastResetVersionRef.current = resetVersion;
+    clearSheetDraft(draftStorageKey);
     setForm(buildEntryForm());
     setErrors(buildInitialErrors());
-  }, [resetVersion]);
+    setDraftReady(false);
+  }, [draftStorageKey, open, resetVersion]);
+
+  useEffect(() => {
+    if (!open || !draftReady) {
+      return;
+    }
+    writeSheetDraft(draftStorageKey, form);
+  }, [draftReady, draftStorageKey, form, open]);
 
   const calculatorServices = useMemo(() => (
     Array.isArray(availableServices)

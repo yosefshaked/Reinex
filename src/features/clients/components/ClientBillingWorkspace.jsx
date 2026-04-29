@@ -199,6 +199,10 @@ export default function ClientBillingWorkspace({ clientProfile }) {
     () => clientProfile?.full_name || [clientProfile?.first_name, clientProfile?.middle_name, clientProfile?.last_name].filter(Boolean).join(' ') || 'לקוח/ה',
     [clientProfile],
   );
+  const manualEntryDraftStorageKey = useMemo(
+    () => (activeOrgId && clientProfileId ? `manual-entry:${activeOrgId}:client-profile:${clientProfileId}` : ''),
+    [activeOrgId, clientProfileId],
+  );
 
   // Map: original entry id → reversal entry id (for visual linkage)
   const reversalMap = useMemo(() => {
@@ -372,6 +376,7 @@ export default function ClientBillingWorkspace({ clientProfile }) {
                   resetVersion={manualEntryResetVersion}
                   saving={saving}
                   availableServices={services}
+                  draftStorageKey={manualEntryDraftStorageKey}
                   onSubmit={handleRequestAppendEntry}
                   onCancel={() => setManualEntrySheetOpen(false)}
                 />

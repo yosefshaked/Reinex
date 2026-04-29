@@ -19,6 +19,7 @@ import { formatCurrency, isValidCurrencyInput, toAgorot, toShekel } from '@/lib/
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useMedicalProviders } from '@/features/students/hooks/useMedicalProviders.js';
+import { clearSheetDraft, readSheetDraft, writeSheetDraft } from '@/features/finance/utils/sheetDraftStorage.js';
 
 function buildEmptyAuthorizationForm() {
   return {
@@ -141,6 +142,32 @@ function buildFormFromAuthorization(selected) {
   };
 }
 
+function normalizeAuthorizationDraft(value, fallback) {
+  const base = { ...buildEmptyAuthorizationForm(), ...(fallback || {}) };
+  if (!value || typeof value !== 'object') {
+    return base;
+  }
+
+  return {
+    ...base,
+    id: typeof value.id === 'string' ? value.id : base.id,
+    providerTrackId: typeof value.providerTrackId === 'string' ? value.providerTrackId : base.providerTrackId,
+    authorizationReference: typeof value.authorizationReference === 'string' ? value.authorizationReference : base.authorizationReference,
+    authorizedLessons: typeof value.authorizedLessons === 'string' || typeof value.authorizedLessons === 'number'
+      ? String(value.authorizedLessons)
+      : base.authorizedLessons,
+    coveredCustomerChargeAmount: typeof value.coveredCustomerChargeAmount === 'string' ? value.coveredCustomerChargeAmount : base.coveredCustomerChargeAmount,
+    coveredInsurerClaimAmount: typeof value.coveredInsurerClaimAmount === 'string' ? value.coveredInsurerClaimAmount : base.coveredInsurerClaimAmount,
+    postCoveragePolicy: typeof value.postCoveragePolicy === 'string' ? value.postCoveragePolicy : base.postCoveragePolicy,
+    postCoverageCustomerChargeAmount: typeof value.postCoverageCustomerChargeAmount === 'string' ? value.postCoverageCustomerChargeAmount : base.postCoverageCustomerChargeAmount,
+    validFrom: typeof value.validFrom === 'string' ? value.validFrom : base.validFrom,
+    expiresAt: typeof value.expiresAt === 'string' ? value.expiresAt : base.expiresAt,
+    reminderDate: typeof value.reminderDate === 'string' ? value.reminderDate : base.reminderDate,
+    status: typeof value.status === 'string' ? value.status : base.status,
+    notes: typeof value.notes === 'string' ? value.notes : base.notes,
+  };
+}
+
 export default function HmoAuthorizationManager({
   studentId,
   services,
@@ -166,6 +193,8 @@ export default function HmoAuthorizationManager({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [cancelTargetId, setCancelTargetId] = useState('');
   const [form, setForm] = useState(() => buildEmptyAuthorizationForm());
+  const [draftKey, setDraftKey] = useState('');
+  const [draftReady, setDraftReady] = useState(false);
 
   const availableTracks = useMemo(
     () => providers.flatMap((provider) => (
@@ -222,10 +251,32 @@ export default function HmoAuthorizationManager({
     if (!selectedAuthorizationId) return;
     const selected = authorizations.find((row) => row.id === selectedAuthorizationId);
     if (selected) {
+      const nextDraftKey = activeOrgId && studentId ? `hmo-authorization:${activeOrgId}:${studentId}:${selected.id}` : '';
+      setDraftKey(nextDraftKey);
       setForm(buildFormFromAuthorization(selected));
       setSheetOpen(true);
     }
-  }, [authorizations, selectedAuthorizationId]);
+  }, [activeOrgId, authorizations, selectedAuthorizationId, studentId]);
+
+  useEffect(() => {
+    if (!sheetOpen || !draftKey) {
+      setDraftReady(false);
+      return;
+    }
+
+    const draft = readSheetDraft(draftKey);
+    if (draft) {
+      setForm((current) => normalizeAuthorizationDraft(draft, current));
+    }
+    setDraftReady(true);
+  }, [draftKey, sheetOpen]);
+
+  useEffect(() => {
+    if (!sheetOpen || !draftKey || !draftReady) {
+      return;
+    }
+    writeSheetDraft(draftKey, form);
+  }, [draftKey, draftReady, form, sheetOpen]);
 
   async function notifyChanged() {
     await loadAuthorizations();
@@ -276,9 +327,11 @@ export default function HmoAuthorizationManager({
         },
       });
 
+      clearSheetDraft(draftKey);
       setForm(buildEmptyAuthorizationForm());
       await notifyChanged();
       setSheetOpen(false);
+      setDraftKey('');
       toast.success(form.id ? 'האישור עודכן וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.' : 'האישור נוצר וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.');
     } catch (error) {
       console.error('Failed to save HMO authorization', error);
@@ -301,8 +354,10 @@ export default function HmoAuthorizationManager({
         },
       });
       if (form.id === id) {
+        clearSheetDraft(draftKey);
         setForm(buildEmptyAuthorizationForm());
         setSheetOpen(false);
+        setDraftKey('');
       }
       await notifyChanged();
       setCancelTargetId('');
@@ -340,12 +395,14 @@ export default function HmoAuthorizationManager({
 
   function handleCreateAuthorization() {
     setCancelTargetId('');
+    setDraftKey(activeOrgId && studentId ? `hmo-authorization:${activeOrgId}:${studentId}:new` : '');
     setForm(buildEmptyAuthorizationForm());
     setSheetOpen(true);
   }
 
   function handleEditAuthorization(row) {
     setCancelTargetId('');
+    setDraftKey(activeOrgId && studentId ? `hmo-authorization:${activeOrgId}:${studentId}:${row.id}` : '');
     setForm(buildFormFromAuthorization(row));
     setSheetOpen(true);
   }
@@ -354,8 +411,8 @@ export default function HmoAuthorizationManager({
     if (saving) return;
     setSheetOpen(open);
     if (!open) {
-      setForm(buildEmptyAuthorizationForm());
       setCancelTargetId('');
+      setDraftReady(false);
     }
   }
 
