@@ -366,7 +366,7 @@ export default function ClientBillingWorkspace({ clientProfile }) {
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="mt-6 flex-1 overflow-hidden">
+              <div className="mt-6 flex-1 overflow-y-auto pe-1">
                 <ManualEntryForm
                   open={manualEntrySheetOpen}
                   resetVersion={manualEntryResetVersion}

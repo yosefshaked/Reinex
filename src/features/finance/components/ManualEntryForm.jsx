@@ -134,158 +134,156 @@ export default function ManualEntryForm({
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 space-y-5 overflow-y-auto pe-1">
-        <div className="grid gap-4">
-          <div className="space-y-2">
-            <Label>סוג תנועה</Label>
-            <Select value={form.mode} onValueChange={(value) => updateField('mode', value)} disabled={saving}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="payment">תשלום ידני</SelectItem>
-                <SelectItem value="adjustment">התאמה ידנית</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+    <div className="space-y-5">
+      <div className="grid gap-4">
+        <div className="space-y-2">
+          <Label>סוג תנועה</Label>
+          <Select value={form.mode} onValueChange={(value) => updateField('mode', value)} disabled={saving}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="payment">תשלום ידני</SelectItem>
+              <SelectItem value="adjustment">התאמה ידנית</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
-          <div className="space-y-2">
-            <Label>סכום</Label>
-            <CurrencyInput
-              value={form.amount}
-              onChange={(value) => updateField('amount', value)}
-              disabled={saving}
-            />
-            {errors.amount ? (
-              <p className="text-xs text-red-600">{errors.amount}</p>
-            ) : null}
-          </div>
+        <div className="space-y-2">
+          <Label>סכום</Label>
+          <CurrencyInput
+            value={form.amount}
+            onChange={(value) => updateField('amount', value)}
+            disabled={saving}
+          />
+          {errors.amount ? (
+            <p className="text-xs text-red-600">{errors.amount}</p>
+          ) : null}
+        </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>תאריך</Label>
-              <Input
-                type="date"
-                value={form.effectiveAt}
-                onChange={(event) => updateField('effectiveAt', event.target.value)}
-                disabled={saving}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>אסמכתא</Label>
-              <Input
-                value={form.externalReference}
-                onChange={(event) => updateField('externalReference', event.target.value)}
-                disabled={saving}
-              />
-            </div>
-          </div>
-
+        <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label>
-              הערות
-              {form.mode === 'adjustment' ? <span className="ms-1 text-red-600">*</span> : null}
-            </Label>
+            <Label>תאריך</Label>
             <Input
-              value={form.notes}
-              onChange={(event) => updateField('notes', event.target.value)}
-              placeholder={form.mode === 'adjustment' ? 'חובה לציין סיבה לחיוב ידני' : ''}
+              type="date"
+              value={form.effectiveAt}
+              onChange={(event) => updateField('effectiveAt', event.target.value)}
               disabled={saving}
             />
-            {errors.notes ? (
-              <p className="text-xs text-red-600">{errors.notes}</p>
-            ) : form.mode === 'adjustment' ? (
-              <p className="text-xs text-slate-500">הסבר לחיוב חובה, כי הלדר הוא מסמך קבוע.</p>
-            ) : null}
+          </div>
+          <div className="space-y-2">
+            <Label>אסמכתא</Label>
+            <Input
+              value={form.externalReference}
+              onChange={(event) => updateField('externalReference', event.target.value)}
+              disabled={saving}
+            />
           </div>
         </div>
 
-        {showCreditCalculator && form.mode === 'payment' ? (
-          <section className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4">
-            <div className="space-y-1">
-              <h4 className="text-sm font-semibold text-indigo-950">מחשבון זיכוי מהיר לפי שיעורים</h4>
-              <p className="text-xs text-indigo-800">
-                בחרו שירות וכמות שיעורים. המערכת תחשב את הזיכוי לפי מחיר השירות ותעביר אותו לשדה הסכום.
-              </p>
+        <div className="space-y-2">
+          <Label>
+            הערות
+            {form.mode === 'adjustment' ? <span className="ms-1 text-red-600">*</span> : null}
+          </Label>
+          <Input
+            value={form.notes}
+            onChange={(event) => updateField('notes', event.target.value)}
+            placeholder={form.mode === 'adjustment' ? 'חובה לציין סיבה לחיוב ידני' : ''}
+            disabled={saving}
+          />
+          {errors.notes ? (
+            <p className="text-xs text-red-600">{errors.notes}</p>
+          ) : form.mode === 'adjustment' ? (
+            <p className="text-xs text-slate-500">הסבר לחיוב חובה, כי הלדר הוא מסמך קבוע.</p>
+          ) : null}
+        </div>
+      </div>
+
+      {showCreditCalculator && form.mode === 'payment' ? (
+        <section className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4">
+          <div className="space-y-1">
+            <h4 className="text-sm font-semibold text-indigo-950">מחשבון זיכוי מהיר לפי שיעורים</h4>
+            <p className="text-xs text-indigo-800">
+              בחרו שירות וכמות שיעורים. המערכת תחשב את הזיכוי לפי מחיר השירות ותעביר אותו לשדה הסכום.
+            </p>
+          </div>
+
+          <div className="mt-4 grid gap-4">
+            <div className="space-y-2">
+              <Label>שירות לחישוב</Label>
+              <Select
+                value={form.calculatorServiceId}
+                onValueChange={(value) => {
+                  setErrors((current) => ({ ...current, calculator: '' }));
+                  updateField('calculatorServiceId', value);
+                }}
+                disabled={saving}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="בחירת שירות" />
+                </SelectTrigger>
+                <SelectContent>
+                  {calculatorServices.map((service) => (
+                    <SelectItem key={service.id} value={service.id}>
+                      {getServiceName(availableServices, service.id)} • {formatCurrency(service.default_customer_charge_amount)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="mt-4 grid gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label>שירות לחישוב</Label>
-                <Select
-                  value={form.calculatorServiceId}
-                  onValueChange={(value) => {
+                <Label>כמות שיעורים</Label>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min="1"
+                  step="1"
+                  value={form.calculatorLessonCount}
+                  onChange={(event) => {
                     setErrors((current) => ({ ...current, calculator: '' }));
-                    updateField('calculatorServiceId', value);
+                    updateField('calculatorLessonCount', event.target.value);
                   }}
                   disabled={saving}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="בחירת שירות" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {calculatorServices.map((service) => (
-                      <SelectItem key={service.id} value={service.id}>
-                        {getServiceName(availableServices, service.id)} • {formatCurrency(service.default_customer_charge_amount)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                />
               </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>כמות שיעורים</Label>
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    min="1"
-                    step="1"
-                    value={form.calculatorLessonCount}
-                    onChange={(event) => {
-                      setErrors((current) => ({ ...current, calculator: '' }));
-                      updateField('calculatorLessonCount', event.target.value);
-                    }}
-                    disabled={saving}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>זיכוי מחושב</Label>
-                  <div className="flex h-10 items-center rounded-md border border-indigo-200 bg-white px-3 text-sm font-semibold text-indigo-950">
-                    {calculatorAmountAgorot > 0 ? formatCurrency(calculatorAmountAgorot) : '—'}
-                  </div>
+              <div className="space-y-2">
+                <Label>זיכוי מחושב</Label>
+                <div className="flex h-10 items-center rounded-md border border-indigo-200 bg-white px-3 text-sm font-semibold text-indigo-950">
+                  {calculatorAmountAgorot > 0 ? formatCurrency(calculatorAmountAgorot) : '—'}
                 </div>
               </div>
-
-              <div className="rounded-xl border border-indigo-100 bg-white/80 p-3">
-                <div className="text-xs text-indigo-900">
-                  {selectedCalculatorService ? (
-                    <>מחיר שירות: {formatCurrency(selectedCalculatorService.default_customer_charge_amount)} לכל שיעור</>
-                  ) : 'יש לבחור שירות פעיל עם מחיר מוגדר.'}
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-indigo-800">החישוב הוא עזר בלבד. בפועל נשמרת תנועת זיכוי רגילה בלדר.</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="border-indigo-300 bg-white text-indigo-950 hover:bg-indigo-100"
-                  onClick={handleApplyCalculatorAmount}
-                  disabled={!selectedCalculatorService || calculatorLessonCount <= 0 || saving}
-                >
-                  העבר לסכום
-                </Button>
-              </div>
-
-              {errors.calculator ? (
-                <p className="text-xs text-red-600">{errors.calculator}</p>
-              ) : null}
             </div>
-          </section>
-        ) : null}
-      </div>
+
+            <div className="rounded-xl border border-indigo-100 bg-white/80 p-3">
+              <div className="text-xs text-indigo-900">
+                {selectedCalculatorService ? (
+                  <>מחיר שירות: {formatCurrency(selectedCalculatorService.default_customer_charge_amount)} לכל שיעור</>
+                ) : 'יש לבחור שירות פעיל עם מחיר מוגדר.'}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-indigo-800">החישוב הוא עזר בלבד. בפועל נשמרת תנועת זיכוי רגילה בלדר.</p>
+              <Button
+                type="button"
+                variant="outline"
+                className="border-indigo-300 bg-white text-indigo-950 hover:bg-indigo-100"
+                onClick={handleApplyCalculatorAmount}
+                disabled={!selectedCalculatorService || calculatorLessonCount <= 0 || saving}
+              >
+                העבר לסכום
+              </Button>
+            </div>
+
+            {errors.calculator ? (
+              <p className="text-xs text-red-600">{errors.calculator}</p>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       <div className="mt-5 flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-start">
         <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
