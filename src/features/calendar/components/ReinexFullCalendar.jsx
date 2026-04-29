@@ -266,9 +266,82 @@ function resolveSchedulerLicenseKey(runtimeConfig) {
   );
 }
 
-function buildEventGradient(color) {
-  const baseColor = typeof color === 'string' && color.trim() ? color.trim() : '#4F46E5';
-  return `linear-gradient(135deg, ${baseColor} 0%, ${baseColor}dd 100%)`;
+function expandHexColor(hexColor) {
+  const normalized = String(hexColor || '').trim().replace(/^#/, '');
+  if (/^[0-9a-fA-F]{3}$/.test(normalized)) {
+    return normalized.split('').map((char) => `${char}${char}`).join('');
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return normalized;
+  }
+  return '';
+}
+
+function toRgbaColor(hexColor, alpha, fallbackHex = '#CBD5E1') {
+  const expanded = expandHexColor(hexColor) || expandHexColor(fallbackHex);
+  if (!expanded) {
+    return `rgba(203, 213, 225, ${alpha})`;
+  }
+
+  const red = Number.parseInt(expanded.slice(0, 2), 16);
+  const green = Number.parseInt(expanded.slice(2, 4), 16);
+  const blue = Number.parseInt(expanded.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function normalizeWorkflowState(instance) {
+  const workflowState = String(instance?.metadata?.workflow_state || '').trim().toLowerCase();
+  if (workflowState) {
+    return workflowState;
+  }
+  return 'scheduled';
+}
+
+function getEventWorkflowStyles(instance) {
+  const workflowState = normalizeWorkflowState(instance);
+  const backgroundColor = toRgbaColor(instance?.service?.color, 0.15);
+
+  if (workflowState === 'closed' || workflowState === 'completed') {
+    return {
+      workflowState,
+      backgroundColor,
+      stripColor: 'rgb(16 185 129)',
+      icon: '✅',
+      iconClassName: 'reinex-calendar-event__status--closed',
+      iconLabel: 'נסגר',
+    };
+  }
+
+  if (workflowState === 'needs_attention') {
+    return {
+      workflowState,
+      backgroundColor,
+      stripColor: 'rgb(245 158 11)',
+      icon: '⚠️',
+      iconClassName: 'reinex-calendar-event__status--attention',
+      iconLabel: 'דורש תשומת לב',
+    };
+  }
+
+  if (workflowState === 'in_progress') {
+    return {
+      workflowState,
+      backgroundColor,
+      stripColor: 'rgb(59 130 246)',
+      icon: '🔵',
+      iconClassName: 'reinex-calendar-event__status--progress',
+      iconLabel: 'בתהליך',
+    };
+  }
+
+  return {
+    workflowState,
+    backgroundColor,
+    stripColor: 'rgb(203 213 225)',
+    icon: null,
+    iconClassName: 'reinex-calendar-event__status--scheduled',
+    iconLabel: 'מתוזמן',
+  };
 }
 
 function WhatsAppIcon({ className = 'h-3.5 w-3.5' }) {
@@ -340,6 +413,7 @@ function EventContent({ arg }) {
   const firstStudentName = getParticipantDisplayName(instance.participants?.[0], 'ללא לקוח/ה');
   const additionalCount = Math.max(0, (instance.participants?.length || 1) - 1);
   const statusInfo = getInstanceStatusIcon(instance.status, instance.documentation_status);
+  const workflowStyles = getEventWorkflowStyles(instance);
   const durationMinutes = Number(instance.duration_minutes) || 0;
   const densityClass = getEventDensityClass(durationMinutes);
   const isVeryNarrow = contentWidth != null && contentWidth < 115;
@@ -397,19 +471,30 @@ function EventContent({ arg }) {
       </TooltipContent>
     </Tooltip>
   ) : null;
+  const displayStatusIcon = workflowStyles.icon || statusInfo.icon;
+  const displayStatusLabel = workflowStyles.icon ? workflowStyles.iconLabel : statusInfo.label;
 
   return (
     <TooltipProvider delayDuration={120}>
       <div
         ref={rootRef}
         className={`reinex-calendar-event ${densityClass} ${isInlineSummary ? 'reinex-calendar-event--inline' : ''} ${isStudentOnlySummary ? 'reinex-calendar-event--student-only' : ''}`.trim()}
-        style={{ background: buildEventGradient(instance.service?.color) }}
+        style={{ backgroundColor: workflowStyles.backgroundColor }}
         title={`${instance.service?.service_name || 'שיעור'} • ${firstStudentName}`}
       >
+      <span
+        aria-hidden="true"
+        className="reinex-calendar-event__workflow-strip"
+        style={{ backgroundColor: workflowStyles.stripColor }}
+      />
       {isStudentOnlySummary ? (
         <div className="reinex-calendar-event__inline">
-          <span className="reinex-calendar-event__status" aria-label={statusInfo.label} title={statusInfo.label}>
-            {statusInfo.icon}
+          <span
+            className={`reinex-calendar-event__status ${workflowStyles.iconClassName}`.trim()}
+            aria-label={displayStatusLabel}
+            title={displayStatusLabel}
+          >
+            {displayStatusIcon}
           </span>
           <span className="reinex-calendar-event__inline-main">
             <span className="reinex-calendar-event__student">{studentLabel}</span>
@@ -418,8 +503,12 @@ function EventContent({ arg }) {
         </div>
       ) : isInlineSummary ? (
         <div className="reinex-calendar-event__inline">
-          <span className="reinex-calendar-event__status" aria-label={statusInfo.label} title={statusInfo.label}>
-            {statusInfo.icon}
+          <span
+            className={`reinex-calendar-event__status ${workflowStyles.iconClassName}`.trim()}
+            aria-label={displayStatusLabel}
+            title={displayStatusLabel}
+          >
+            {displayStatusIcon}
           </span>
           <span className="reinex-calendar-event__inline-main">
             <span className="reinex-calendar-event__student">{studentLabel}</span>
@@ -434,8 +523,12 @@ function EventContent({ arg }) {
         <span className="reinex-calendar-event__service">
           {serviceLabel}
         </span>
-        <span className="reinex-calendar-event__status" aria-label={statusInfo.label} title={statusInfo.label}>
-          {statusInfo.icon}
+        <span
+          className={`reinex-calendar-event__status ${workflowStyles.iconClassName}`.trim()}
+          aria-label={displayStatusLabel}
+          title={displayStatusLabel}
+        >
+          {displayStatusIcon}
         </span>
       </div>
 
