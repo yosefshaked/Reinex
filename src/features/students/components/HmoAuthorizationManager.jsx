@@ -496,8 +496,8 @@ export default function HmoAuthorizationManager({
       </section>
 
       {canMutateBilling ? (
-        <Sheet open={sheetOpen} onOpenChange={handleCloseSheet}>
-          <SheetContent side="left" className="w-[92vw] border-slate-200 p-0 sm:max-w-[520px]">
+        <Sheet open={sheetOpen} modal={false} onOpenChange={handleCloseSheet}>
+          <SheetContent side="left" showOverlay={false} className="w-[92vw] border-slate-200 p-0 sm:max-w-[520px]">
             <div className="flex h-full flex-col p-6">
               <SheetHeader className="text-right">
                 <SheetTitle>{form.id ? 'עריכת אישור גורם מממן' : 'הוספת אישור גורם מממן'}</SheetTitle>

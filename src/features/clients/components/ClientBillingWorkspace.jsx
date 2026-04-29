@@ -351,12 +351,13 @@ export default function ClientBillingWorkspace({ clientProfile }) {
 
         <Sheet
           open={manualEntrySheetOpen}
+          modal={false}
           onOpenChange={(open) => {
             if (saving) return;
             setManualEntrySheetOpen(open);
           }}
         >
-          <SheetContent side="left" className="w-[92vw] border-slate-200 p-0 sm:max-w-[460px]">
+          <SheetContent side="left" showOverlay={false} className="w-[92vw] border-slate-200 p-0 sm:max-w-[460px]">
             <div className="flex h-full flex-col p-6">
               <SheetHeader className="text-right">
                 <SheetTitle>הוספת תנועה ידנית</SheetTitle>

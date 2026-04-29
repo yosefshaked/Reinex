@@ -48,6 +48,7 @@
 - HMO claims UI feedback helper: [`../src/features/finance/lib/hmo-claim-feedback.js`](../src/features/finance/lib/hmo-claim-feedback.js) — maps HMO claim/payment errors to user-facing next-step guidance
 - Shared ledger table surface: [`../src/features/finance/components/LedgerEntriesTable.jsx`](../src/features/finance/components/LedgerEntriesTable.jsx) — use this for profile billing ledgers instead of rebuilding per-row cards or ad-hoc table markup.
 - Shared manual-ledger-entry UI: [`../src/features/finance/components/ManualEntryForm.jsx`](../src/features/finance/components/ManualEntryForm.jsx) — use this inside Sheets for student/client manual transactions, while keeping the actual billing mutation, confirmation dialog, and post-save refetch contract in the owning workspace.
+- `Sheet` supports both blocking modal use and non-blocking workspace-panel use. For detail-page finance/HMO side panels, prefer `modal={false}` on `Sheet` plus `showOverlay={false}` on `SheetContent` so users can keep seeing and scrolling the underlying page while the panel is open.
 
 ## Currency helpers — mandatory usage
 - **All monetary values in the DB and API layer are integers (agorot). 1 ₪ = 100 agorot.**
