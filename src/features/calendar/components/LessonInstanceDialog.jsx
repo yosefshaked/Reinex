@@ -1725,7 +1725,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const openActions = getLessonOpenActions({
     ...displayInstance,
     participants: displayParticipants,
-  });
+  }).filter((action) => action.id !== 'exception');
   const participantCountLabel = displayParticipants.length === 1
     ? 'משתתף אחד'
     : `${displayParticipants.length} משתתפים`;
@@ -1810,7 +1810,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                     variant="outline"
                     onClick={() => setActiveViewTab(targetTab)}
                   >
-                    פתח אזור מתאים
+                    {targetTab === 'participants' ? 'עבור למשתתפים'
+                      : targetTab === 'workflow' ? 'עבור למצב שיעור'
+                      : targetTab === 'admin' ? 'עבור לניהול'
+                      : 'פתח אזור מתאים'}
                   </Button>
                 ) : null}
               </div>
@@ -1967,15 +1970,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             </Alert>
           )}
 
-          {schedulingOverrideReason && !isEditMode && (
-            <Alert className="border-amber-300 bg-amber-50 text-amber-950">
-              <AlertTriangle className="h-4 w-4 text-amber-700" />
-              <AlertDescription>
-                <div className="font-medium">שיעור זה מסומן כחריגה חד-פעמית.</div>
-                <div className="mt-1 text-sm">הסיבה שנשמרה: {schedulingOverrideReason}</div>
-              </AlertDescription>
-            </Alert>
-          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
@@ -2058,7 +2052,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
             {/* Duration */}
             <div>
-              <Label htmlFor="duration">משך (דקות)</Label>
+              <Label htmlFor="duration">משך (דקות) <span className="text-slate-400 font-normal text-xs">— מחושב לפי השירות</span></Label>
               <div id="duration" className="flex min-h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700">
                 {selectedEditService
                   ? (selectedEditServiceHasValidDuration ? `${formData.duration_minutes} דקות` : 'לשירות אין משך תקין')
@@ -2232,7 +2226,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                 ) : null}
               </TabsTrigger>
               <TabsTrigger value="participants" className="py-2">משתתפים</TabsTrigger>
-              <TabsTrigger value="workflow" className="py-2">סגירה ותיעוד</TabsTrigger>
+              <TabsTrigger value="workflow" className="py-2">מצב שיעור</TabsTrigger>
               <TabsTrigger value="admin" className="py-2">ניהול</TabsTrigger>
             </TabsList>
 
@@ -2270,7 +2264,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   {canQuickReport && (
                     <Button
                       size="sm"
-                      variant="outline"
                       onClick={() => handleReportStatus('completed')}
                       disabled={isSaving || hasUnsetParticipants}
                       title={
@@ -2278,9 +2271,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                           ? `יש לסמן נוכחות ל-${scheduledParticipantsCount} תלמיד/ים לפני השלמת השיעור`
                           : 'סמן את השיעור כהושלם'
                       }
+                      className="bg-emerald-600 text-white hover:bg-emerald-700"
                     >
                       <Check className="h-4 w-4 ms-1" />
-                      הושלם
+                      סמן כהושלם
                     </Button>
                   )}
                 </div>
@@ -2321,12 +2315,22 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                 </div>
               ) : null}
 
-              {lessonIsBlocked ? (
-                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-950">
-                  <div className="text-sm font-semibold">השיעור מוגבל לשינוי ישיר</div>
-                  <div className="mt-1 text-sm">
-                    שינוי ישיר אינו זמין כאשר שיעור נעול או חסום פיננסית. פרטי הנעילה והפעולות האפשריות מוצגים מעל הטאבים.
+              {canEdit && !isCancellationStatus(displayInstance.status) ? (
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+                  <div className="mb-3">
+                    <div className="text-sm font-semibold text-red-950">פעולה רגישה</div>
+                    <div className="mt-1 text-sm text-red-900">
+                      ביטול שיעור פותח תצוגת השפעה מקדימה מהשרת לפני ביצוע הפעולה.
+                    </div>
                   </div>
+                  <Button
+                    variant="destructive"
+                    onClick={() => setCancelDialogOpen(true)}
+                    disabled={isSaving}
+                  >
+                    <X className="me-2 h-4 w-4" />
+                    בטל שיעור
+                  </Button>
                 </div>
               ) : null}
             </TabsContent>
@@ -2432,7 +2436,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
             <TabsContent value="workflow" className="space-y-4">
               {resolutionPanel}
-              {displayInstance.documentation_status ? (
+              {displayInstance.documentation_status && (
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   <div className="text-sm font-semibold text-slate-900">סטטוס תיעוד</div>
                   <div className="mt-2">
@@ -2443,11 +2447,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                     </Badge>
                   </div>
                 </div>
-              ) : (
-                <EmptyTabState
-                  title="אין סטטוס תיעוד לשיעור"
-                  description="כאשר השיעור ידרוש תיעוד או יסומן כמתועד, הסטטוס יוצג כאן."
-                />
               )}
             </TabsContent>
 
@@ -2458,33 +2457,9 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   <DetailField label="מקור יצירה">{displayInstance.created_source || 'לא ידוע'}</DetailField>
                   <DetailField label="מזהה שיעור">{shortId(displayInstance.id) || 'לא זמין'}</DetailField>
                   <DetailField label="גרסה">{displayInstance.version ?? 'לא זמין'}</DetailField>
-                  <DetailField label="מצב נעילה">{lessonIsBlocked ? 'מוגבל לשינוי' : 'לא נעול'}</DetailField>
                 </div>
               </div>
 
-              {canEdit && !isCancellationStatus(displayInstance.status) ? (
-                <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
-                  <div className="mb-3">
-                    <div className="text-sm font-semibold text-red-950">פעולה רגישה</div>
-                    <div className="mt-1 text-sm text-red-900">
-                      ביטול שיעור פותח תצוגת השפעה מקדימה מהשרת לפני ביצוע הפעולה.
-                    </div>
-                  </div>
-                  <Button
-                    variant="destructive"
-                    onClick={() => setCancelDialogOpen(true)}
-                    disabled={isSaving}
-                  >
-                    <X className="me-2 h-4 w-4" />
-                    בטל שיעור
-                  </Button>
-                </div>
-              ) : (
-                <EmptyTabState
-                  title="אין פעולות ניהול זמינות"
-                  description="אין פעולה ניהולית זמינה לשיעור במצבו הנוכחי או לפי ההרשאות שלך."
-                />
-              )}
             </TabsContent>
           </Tabs>
         )}
@@ -2539,7 +2514,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                       שומר...
                     </>
                   ) : (
-                    'בדוק שינויים'
+                    'הצג תצוגה מקדימה'
                   )}
                 </Button>
               )}
