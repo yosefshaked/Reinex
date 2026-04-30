@@ -263,9 +263,11 @@ function getWorkflowDecisionLabel(decision, kind = 'generic') {
     if (decision === 'not_applicable') return 'לא רלוונטי';
   }
   if (kind === 'hmo_claim') {
+    if (decision === 'expected') return 'צפויה תביעה';
     if (decision === 'pending') return 'ממתין להגשת תביעה';
     if (decision === 'required') return 'נדרשת תביעה';
     if (decision === 'not_required') return 'לא נדרשת תביעה';
+    if (decision === 'blocked') return 'דורש בדיקת גורם מממן';
     if (decision === 'unknown') return 'טרם נקבע';
   }
   if (kind === 'instructor_compensation') {
@@ -286,13 +288,27 @@ function deriveDisplayWorkflowDecisions(participant, billingPolicy) {
     ? participant.metadata.workflow
     : {};
   const status = String(participant?.participant_status || '').trim().toLowerCase();
+  const hmoCoverageStatus = String(participant?.hmo_coverage?.status || '').trim().toLowerCase();
   const studentBillingDecision = workflow.student_billing?.decision || 'unknown';
   const compensationDecision = workflow.instructor_compensation?.decision || 'unknown';
   const hmoDecision = workflow.hmo_claim?.decision || 'unknown';
   const hasResolvedStatus = ['attended', 'no_show', 'cancelled_student', 'cancelled_clinic'].includes(status);
+  const hasCoveredHmoAuthorization = hmoCoverageStatus === 'covered';
   let resolvedStudentBillingDecision = studentBillingDecision;
   if (studentBillingDecision === 'pending' && !billingPolicy?.[status]) {
     resolvedStudentBillingDecision = 'not_applicable';
+  }
+  let resolvedHmoDecision = hmoDecision;
+  if (resolvedHmoDecision === 'unknown') {
+    if (hmoCoverageStatus === 'blocked') {
+      resolvedHmoDecision = 'blocked';
+    } else if (hasCoveredHmoAuthorization && status === 'scheduled') {
+      resolvedHmoDecision = 'expected';
+    } else if (hasCoveredHmoAuthorization && status === 'attended') {
+      resolvedHmoDecision = 'pending';
+    } else if (['no_show', 'cancelled_student', 'cancelled_clinic'].includes(status)) {
+      resolvedHmoDecision = 'not_required';
+    }
   }
 
   return {
@@ -306,9 +322,7 @@ function deriveDisplayWorkflowDecisions(participant, billingPolicy) {
       : (status === 'attended'
         ? 'compensated'
         : 'unknown'),
-    hmoDecision: hmoDecision !== 'unknown'
-      ? hmoDecision
-      : (status === 'scheduled' ? 'not_required' : 'unknown'),
+    hmoDecision: resolvedHmoDecision,
   };
 }
 
