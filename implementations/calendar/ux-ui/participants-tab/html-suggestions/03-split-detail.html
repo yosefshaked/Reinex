@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Participants Tab Suggestion 03 - Split Detail</title>
+  <style>
+    :root {
+      --ink: #111827;
+      --muted: #667085;
+      --line: #d0d5dd;
+      --card: #ffffff;
+      --wash: #f9fafb;
+      --navy: #1e3a8a;
+      --navy-soft: #dbeafe;
+      --green: #166534;
+      --green-soft: #dcfce7;
+      --orange: #c2410c;
+      --orange-soft: #ffedd5;
+      --red: #991b1b;
+      --red-soft: #fee2e2;
+      font-family: "Noto Sans Hebrew", "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)),
+        repeating-linear-gradient(45deg, #e2e8f0 0 1px, transparent 1px 18px);
+    }
+
+    .modal-body {
+      max-width: 1080px;
+      margin: auto;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: var(--card);
+      box-shadow: 0 24px 80px rgba(17, 24, 39, 0.14);
+      overflow: hidden;
+    }
+
+    .top {
+      padding: 22px 26px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(90deg, #eff6ff, #ffffff);
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: start;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: -0.02em;
+    }
+
+    .top p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .mode-toggle {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      background: white;
+      border-radius: 999px;
+      padding: 4px;
+      gap: 4px;
+      white-space: nowrap;
+    }
+
+    .mode-toggle button {
+      border: 0;
+      background: transparent;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-weight: 750;
+    }
+
+    .mode-toggle .active {
+      background: var(--navy);
+      color: white;
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      min-height: 650px;
+    }
+
+    .sidebar {
+      border-left: 1px solid var(--line);
+      background: var(--wash);
+      padding: 16px;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+    }
+
+    .search {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: white;
+      padding: 12px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .student-row {
+      border: 1px solid transparent;
+      border-radius: 18px;
+      background: white;
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .student-row.active {
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 3px var(--navy-soft);
+    }
+
+    .student-main {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .student-main strong { display: block; }
+    .student-main small { color: var(--muted); }
+
+    .count {
+      min-width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      background: var(--orange-soft);
+      color: var(--orange);
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .pill {
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .green { background: var(--green-soft); color: var(--green); }
+    .orange { background: var(--orange-soft); color: var(--orange); }
+    .red { background: var(--red-soft); color: var(--red); }
+    .blue { background: var(--navy-soft); color: var(--navy); }
+    .gray { background: #eef2f7; color: #475467; }
+
+    .detail {
+      padding: 22px;
+      display: grid;
+      align-content: start;
+      gap: 18px;
+    }
+
+    .detail-card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: white;
+      padding: 18px;
+    }
+
+    .detail-card h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+
+    .identity {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .avatar-line {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .avatar {
+      width: 54px;
+      height: 54px;
+      border-radius: 18px;
+      display: grid;
+      place-items: center;
+      background: var(--navy-soft);
+      color: var(--navy);
+      font-weight: 900;
+      font-size: 18px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .field {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--wash);
+      padding: 12px;
+    }
+
+    .field span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .field strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 15px;
+    }
+
+    .action-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+      padding: 10px 13px;
+      font-weight: 800;
+      color: var(--ink);
+    }
+
+    .primary { background: var(--navy); border-color: var(--navy); color: white; }
+    .success { border-color: #86efac; color: var(--green); }
+    .danger { border-color: #fca5a5; color: var(--red); }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 96px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 10px;
+      background: var(--wash);
+    }
+
+    .timeline-item time {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 900px) {
+      body { padding: 14px; }
+      .top { flex-direction: column; }
+      .content { grid-template-columns: 1fr; }
+      .sidebar { border-left: 0; border-bottom: 1px solid var(--line); }
+      .grid { grid-template-columns: 1fr; }
+      .timeline-item { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="modal-body">
+    <section class="top">
+      <div>
+        <h1>משתתפים</h1>
+        <p>תצוגת מאסטר-דיטייל: בוחרים משתתף מימין, ומקבלים משמאל תמונת מצב מלאה ופעולות ממוקדות.</p>
+      </div>
+      <div class="mode-toggle" aria-label="מצב צפייה">
+        <button class="active">פרטני</button>
+        <button>רשימה</button>
+      </div>
+    </section>
+
+    <section class="content">
+      <aside class="sidebar" aria-label="בחירת משתתף">
+        <div class="search">חיפוש משתתף או סינון לפי פעולה פתוחה...</div>
+
+        <article class="student-row active">
+          <div class="student-main">
+            <div><strong>דניאל אברהם</strong><small>הורה: מיכל · 052-1234567</small></div>
+            <span class="count">2</span>
+          </div>
+          <div class="pills">
+            <span class="pill orange">מתוכנן</span>
+            <span class="pill orange">תזכורת חסרה</span>
+            <span class="pill blue">צפויה תביעה</span>
+          </div>
+        </article>
+
+        <article class="student-row">
+          <div class="student-main">
+            <div><strong>נועה עמר</strong><small>לקוחה · מייל זמין</small></div>
+            <span class="count">1</span>
+          </div>
+          <div class="pills">
+            <span class="pill orange">ממתין לאישור</span>
+          </div>
+        </article>
+
+        <article class="student-row">
+          <div class="student-main">
+            <div><strong>מאיה לוי</strong><small>הורה: רועי</small></div>
+          </div>
+          <div class="pills">
+            <span class="pill green">נכחה</span>
+            <span class="pill green">מסודר</span>
+          </div>
+        </article>
+
+        <article class="student-row">
+          <div class="student-main">
+            <div><strong>ים כהן</strong><small>אין פרטי קשר</small></div>
+            <span class="count">1</span>
+          </div>
+          <div class="pills">
+            <span class="pill red">חיוב חסום</span>
+          </div>
+        </article>
+      </aside>
+
+      <section class="detail" aria-label="פרטי משתתף נבחר">
+        <article class="detail-card">
+          <div class="identity">
+            <div class="avatar-line">
+              <div class="avatar">דא</div>
+              <div>
+                <h2>דניאל אברהם</h2>
+                <div class="pills">
+                  <span class="pill orange">מתוכנן</span>
+                  <span class="pill blue">אישור גורם מממן פעיל</span>
+                </div>
+              </div>
+            </div>
+            <button>פתח תיק תלמיד</button>
+          </div>
+        </article>
+
+        <article class="detail-card">
+          <h2>מה צריך לעשות עכשיו?</h2>
+          <div class="timeline">
+            <div class="timeline-item">
+              <time>עכשיו</time>
+              <strong>שליחת תזכורת</strong>
+              <div class="action-strip">
+                <button class="primary">WhatsApp</button>
+                <button>מייל</button>
+              </div>
+            </div>
+            <div class="timeline-item">
+              <time>במהלך השיעור</time>
+              <strong>סימון נוכחות</strong>
+              <div class="action-strip">
+                <button class="success">נכח</button>
+                <button class="danger">לא הגיע</button>
+              </div>
+            </div>
+            <div class="timeline-item">
+              <time>אחרי נוכחות</time>
+              <strong>תביעה צפויה לגורם מממן אם יסומן כנכח</strong>
+              <span class="pill blue">מידע בלבד</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="detail-card">
+          <h2>פרטי עבודה</h2>
+          <div class="grid">
+            <div class="field"><span>איש קשר לתזכורת</span><strong>מיכל אברהם · הורה</strong></div>
+            <div class="field"><span>טלפון</span><strong>052-1234567</strong></div>
+            <div class="field"><span>אימייל</span><strong>michal@example.com</strong></div>
+            <div class="field"><span>חיוב תלמיד</span><strong>השתתפות לקוח/ה 45.00 ₪</strong></div>
+            <div class="field"><span>גורם מממן</span><strong>תביעה צפויה 180.00 ₪</strong></div>
+            <div class="field"><span>שכר מדריך</span><strong>ייקבע לאחר נוכחות</strong></div>
+          </div>
+        </article>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

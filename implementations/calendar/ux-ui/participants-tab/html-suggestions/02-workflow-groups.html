@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Participants Tab Suggestion 02 - Workflow Groups</title>
+  <style>
+    :root {
+      --ink: #1f2937;
+      --muted: #667085;
+      --line: #d7dee8;
+      --paper: #ffffff;
+      --canvas: #f3f7fb;
+      --todo: #fff7ed;
+      --todo-line: #fed7aa;
+      --done: #ecfdf3;
+      --done-line: #bbf7d0;
+      --risk: #fef2f2;
+      --risk-line: #fecaca;
+      --accent: #0f766e;
+      font-family: "Noto Sans Hebrew", "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 28px;
+      background:
+        radial-gradient(circle at 80% 10%, rgba(20, 184, 166, 0.16), transparent 34%),
+        linear-gradient(145deg, #f8fafc, #eef6f7);
+      color: var(--ink);
+    }
+
+    .frame {
+      max-width: 1060px;
+      margin: auto;
+      display: grid;
+      gap: 18px;
+    }
+
+    .hero {
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.86);
+      padding: 22px;
+      box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: 25px;
+      letter-spacing: -0.03em;
+    }
+
+    .hero p {
+      margin: 7px 0 0;
+      color: var(--muted);
+    }
+
+    .top-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--paper);
+      padding: 10px 14px;
+      font-weight: 750;
+      color: var(--ink);
+    }
+
+    .primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: white;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .lane {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255,255,255,0.78);
+      overflow: hidden;
+    }
+
+    .lane-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .lane-header h2 {
+      margin: 0;
+      font-size: 17px;
+    }
+
+    .lane-header p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .lane.todo .lane-header { background: var(--todo); border-color: var(--todo-line); }
+    .lane.done .lane-header { background: var(--done); border-color: var(--done-line); }
+    .lane.risk .lane-header { background: var(--risk); border-color: var(--risk-line); }
+
+    .cards {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--paper);
+      padding: 14px;
+    }
+
+    .person {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .dot {
+      width: 38px;
+      height: 38px;
+      border-radius: 14px;
+      background: #ccfbf1;
+      color: #0f766e;
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+    }
+
+    .person strong { display: block; }
+    .person small { color: var(--muted); }
+
+    .tasks {
+      margin-top: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .task {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 1px dashed #cbd5e1;
+      border-radius: 12px;
+      padding: 8px 10px;
+      font-size: 13px;
+      background: #f8fafc;
+    }
+
+    .task strong { font-size: 12px; }
+
+    .mini-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 12px;
+    }
+
+    .mini-actions button {
+      padding: 7px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+
+    .success { color: #15803d; border-color: #86efac; }
+    .danger { color: #b91c1c; border-color: #fca5a5; }
+    .quiet { color: var(--muted); }
+
+    @media (max-width: 940px) {
+      body { padding: 16px; }
+      .layout { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <section class="hero">
+      <h1>משתתפים</h1>
+      <p>חלוקה לפי מצב עבודה במקום רשימה אחת ארוכה: קודם מה שדורש טיפול, אחר כך מה שמוכן, ובסוף חסימות.</p>
+      <div class="top-actions">
+        <div>
+          <button class="primary">טפל בכל התזכורות שלא נשלחו</button>
+          <button>הוסף משתתף</button>
+        </div>
+        <button class="quiet">4 משתתפים · 3 פעולות פתוחות</button>
+      </div>
+    </section>
+
+    <section class="layout" aria-label="קבוצות עבודה למשתתפים">
+      <section class="lane todo">
+        <div class="lane-header">
+          <h2>צריך טיפול עכשיו</h2>
+          <p>פעולות שמקדמות את השיעור לסגירה תקינה.</p>
+        </div>
+        <div class="cards">
+          <article class="card">
+            <div class="person">
+              <div class="dot">ד</div>
+              <div><strong>דניאל אברהם</strong><small>מתוכנן · הורה זמין</small></div>
+            </div>
+            <div class="tasks">
+              <div class="task"><span>תזכורת לא נשלחה</span><strong>לפני נוכחות</strong></div>
+              <div class="task"><span>נוכחות לא סומנה</span><strong>חובה</strong></div>
+            </div>
+            <div class="mini-actions">
+              <button>שלח WhatsApp</button>
+              <button>שלח מייל</button>
+              <button class="success">נכח</button>
+              <button class="danger">לא הגיע</button>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="person">
+              <div class="dot">נ</div>
+              <div><strong>נועה עמר</strong><small>תזכורת נשלחה</small></div>
+            </div>
+            <div class="tasks">
+              <div class="task"><span>ממתין לאישור הגעה</span><strong>מעקב</strong></div>
+            </div>
+            <div class="mini-actions">
+              <button class="success">אישרה</button>
+              <button class="danger">לא תגיע</button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="lane done">
+        <div class="lane-header">
+          <h2>מסודר</h2>
+          <p>אין פעולה מיידית מול המשתתף.</p>
+        </div>
+        <div class="cards">
+          <article class="card">
+            <div class="person">
+              <div class="dot">מ</div>
+              <div><strong>מאיה לוי</strong><small>נכחה · חיוב תקין</small></div>
+            </div>
+            <div class="tasks">
+              <div class="task"><span>נוכחות סומנה</span><strong>בוצע</strong></div>
+              <div class="task"><span>תזכורת אושרה</span><strong>בוצע</strong></div>
+            </div>
+            <div class="mini-actions">
+              <button>פתח פרטים</button>
+              <button>שחזר לתוכנן</button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="lane risk">
+        <div class="lane-header">
+          <h2>חסימות וחריגים</h2>
+          <p>דברים שעלולים למנוע סגירה או ליצור אי-בהירות.</p>
+        </div>
+        <div class="cards">
+          <article class="card">
+            <div class="person">
+              <div class="dot">י</div>
+              <div><strong>ים כהן</strong><small>נכח · חסימת חיוב</small></div>
+            </div>
+            <div class="tasks">
+              <div class="task"><span>מסגרת חיוב חסרה</span><strong>חוסם</strong></div>
+              <div class="task"><span>שכר מדריך טרם נסגר</span><strong>פתוח</strong></div>
+            </div>
+            <div class="mini-actions">
+              <button>פתח חיוב</button>
+              <button>פתח סגירה</button>
+            </div>
+          </article>
+        </div>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

@@ -12,13 +12,12 @@ import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { toast } from 'sonner';
-import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, MessageCircle, Mail, ThumbsUp, ThumbsDown, UserPlus, RotateCcw } from 'lucide-react';
+import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, UserPlus, RotateCcw } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Textarea } from '../../../components/ui/textarea';
 import { Checkbox } from '../../../components/ui/checkbox';
 import { LockedCorrectionPanel } from './LockedCorrectionPanel';
 import { LessonParticipantRoster } from './LessonParticipantRoster.jsx';
-import { LessonReminderSummary } from './LessonReminderSummary.jsx';
 import { LessonResolutionStatus } from './LessonResolutionStatus.jsx';
 import { useVersionConflictResolver } from './useVersionConflictResolver';
 import { dayTokenForJsDay } from '@/lib/day-of-week.js';
@@ -1764,7 +1763,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       handleSendWaReminder={handleSendWaReminder}
       handleSendEmailReminder={handleSendEmailReminder}
       handleSetReminderConfirmation={handleSetReminderConfirmation}
-      showReminderActions={false}
+      showReminderActions={true}
       resolveReminderContact={resolveReminderContact}
       formatPhoneForWhatsApp={formatPhoneForWhatsApp}
       deriveDisplayWorkflowDecisions={deriveDisplayWorkflowDecisions}
@@ -1776,118 +1775,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       groupPreviewImpacts={groupPreviewImpacts}
       shortId={shortId}
       formatAgorotPreview={formatAgorotPreview}
-    />
-  );
-  const scheduledReminderParticipants = displayParticipants.filter(
-    (participant) => participant?.participant_status === 'scheduled',
-  );
-  const reminderActionsPanel = canManageAll ? (
-    <div className="space-y-3">
-      {scheduledReminderParticipants.length > 0 ? (
-        scheduledReminderParticipants.map((participant) => {
-          const rs = localReminderState[participant.id] || {};
-          const hasSent = rs.reminder_sent ?? participant.reminder_sent ?? false;
-          const hasConfirmed = rs.reminder_seen ?? participant.reminder_seen ?? false;
-          const reminderContact = resolveReminderContact(participant);
-          const waPhone = formatPhoneForWhatsApp(reminderContact.phone);
-          const emailAddress = reminderContact.email;
-
-          return (
-            <div key={participant.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="font-medium text-slate-950">
-                    {getParticipantDisplayName(participant, 'לא ידוע')}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    {reminderContact.source === 'guardian' ? 'איש קשר: הורה' : 'איש קשר: לקוח/ה'}
-                    {reminderContact.name ? ` · ${reminderContact.name}` : ''}
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {hasConfirmed ? (
-                    <Badge className="bg-green-100 text-green-800 border-green-200">אישר הגעה</Badge>
-                  ) : hasSent ? (
-                    <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-900">
-                      ממתין לאישור
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline">טרם נשלחה תזכורת</Badge>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {waPhone ? (
-                  <Button
-                    size="sm"
-                    variant={hasSent ? 'outline' : 'secondary'}
-                    onClick={() => handleSendWaReminder(participant)}
-                    disabled={reminderUpdating}
-                    title="שלח תזכורת ב-WhatsApp"
-                    className="gap-1"
-                  >
-                    <MessageCircle className="h-4 w-4" />
-                    {hasSent ? 'שלח שוב WhatsApp' : 'שלח WhatsApp'}
-                  </Button>
-                ) : null}
-                {emailAddress ? (
-                  <Button
-                    size="sm"
-                    variant={hasSent ? 'outline' : 'secondary'}
-                    onClick={() => handleSendEmailReminder(participant)}
-                    disabled={reminderUpdating}
-                    title="שלח תזכורת באימייל"
-                    className="gap-1"
-                  >
-                    <Mail className="h-4 w-4" />
-                    {hasSent ? 'שלח שוב מייל' : 'שלח מייל'}
-                  </Button>
-                ) : null}
-                {hasSent && !hasConfirmed ? (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="gap-1 text-green-700 hover:text-green-800 hover:bg-green-50"
-                      onClick={() => handleSetReminderConfirmation(participant, true)}
-                      disabled={reminderUpdating}
-                      title="אישר הגעה"
-                    >
-                      <ThumbsUp className="h-4 w-4" />
-                      אישר הגעה
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="gap-1 text-red-700 hover:text-red-800 hover:bg-red-50"
-                      onClick={() => handleSetReminderConfirmation(participant, false)}
-                      disabled={reminderUpdating}
-                      title="לא יגיע — פותח תהליך ביטול השתתפות"
-                    >
-                      <ThumbsDown className="h-4 w-4" />
-                      לא יגיע
-                    </Button>
-                  </>
-                ) : null}
-                {!waPhone && !emailAddress ? (
-                  <span className="text-sm text-slate-500">אין פרטי קשר זמינים לשליחת תזכורת.</span>
-                ) : null}
-              </div>
-            </div>
-          );
-        })
-      ) : (
-        <EmptyTabState
-          title="אין משתתפים מתוכננים לתזכורת"
-          description="תזכורות מוצגות רק למשתתפים שעדיין נמצאים בסטטוס מתוכנן."
-        />
-      )}
-    </div>
-  ) : (
-    <EmptyTabState
-      title="אין הרשאה לניהול תזכורות"
-      description="רק משתמשים עם הרשאת ניהול יכולים לשלוח או לעדכן תזכורות."
     />
   );
   const openActionsPanel = openActions.length > 0 ? (
@@ -1937,94 +1824,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       אין פעולות פתוחות כרגע. לפי הנתונים הנוכחיים אין משימה תפעולית שמונעת המשך עבודה.
     </div>
   );
-  const addParticipantPanel = canManageAll && isReportable && !instance?.is_locked ? (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-slate-900">ניהול משתתפים</div>
-          <div className="mt-1 text-xs text-slate-500">הוספת תלמיד זמינה רק לשיעורים מתוכננים ולא נעולים.</div>
-        </div>
-        {!isAddingParticipant ? (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setIsAddingParticipant(true)}
-          >
-            <UserPlus className="h-4 w-4 ms-1" />
-            הוסף תלמיד
-          </Button>
-        ) : null}
-      </div>
-
-      {isAddingParticipant ? (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 space-y-2">
-          <div className="flex gap-2">
-            <Input
-              placeholder="חפש תלמיד (2 תווים לפחות)..."
-              value={addStudentQuery}
-              onChange={(e) => {
-                setAddStudentQuery(e.target.value);
-                searchStudents(e.target.value);
-              }}
-              className="flex-1 h-8 text-sm"
-              autoFocus
-            />
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 px-2"
-              onClick={() => {
-                setIsAddingParticipant(false);
-                setAddStudentQuery('');
-                setAddStudentResults([]);
-              }}
-              aria-label="בטל הוספת תלמיד"
-              title="בטל הוספת תלמיד"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-          {isSearchingStudents && (
-            <div className="flex items-center gap-1 text-sm text-gray-500">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              מחפש...
-            </div>
-          )}
-          {!isSearchingStudents && addStudentResults.length > 0 && (() => {
-            const enrolledIds = new Set(displayParticipants.map((p) => p.student_id));
-            const filtered = addStudentResults.filter((s) => !enrolledIds.has(s.id));
-            return filtered.length === 0 ? (
-              <p className="text-xs text-gray-400">כל התלמידים שנמצאו כבר רשומים לשיעור</p>
-            ) : (
-              <div className="space-y-1 max-h-48 overflow-y-auto">
-                {filtered.map((student) => (
-                  <button
-                    key={student.id}
-                    type="button"
-                    className="w-full text-start text-sm px-2 py-1.5 rounded hover:bg-blue-100 flex items-center justify-between"
-                    onClick={() => handleAddParticipant(student.id)}
-                  >
-                    <span className="font-medium">
-                      {[student.first_name, student.last_name].filter(Boolean).join(' ')}
-                    </span>
-                    {student.phone && (
-                      <span className="text-xs text-gray-500">{student.phone}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            );
-          })()}
-          {!isSearchingStudents && addStudentQuery.length >= 2 && addStudentResults.length === 0 && (
-            <p className="text-sm text-gray-500">לא נמצאו תלמידים</p>
-          )}
-          {addStudentQuery.length === 1 && (
-            <p className="text-xs text-gray-400">הקלד לפחות 2 תווים לחיפוש</p>
-          )}
-        </div>
-      ) : null}
-    </div>
-  ) : null;
   const resolutionPanel = (
     <LessonResolutionStatus
       metadata={displayInstance.metadata}
@@ -2533,20 +2332,102 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             </TabsContent>
 
             <TabsContent value="participants" className="space-y-4">
+              {/* Section header: participant count + add button */}
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-slate-700">
+                  {displayParticipants.length === 0
+                    ? 'אין משתתפים'
+                    : displayParticipants.length === 1
+                      ? 'משתתף אחד'
+                      : `${displayParticipants.length} משתתפים`}
+                </p>
+                {canManageAll && isReportable && !instance?.is_locked && !isAddingParticipant && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setIsAddingParticipant(true)}
+                  >
+                    <UserPlus className="h-4 w-4 ms-1.5" />
+                    הוסף תלמיד
+                  </Button>
+                )}
+              </div>
+
+              {/* Add participant search — shown inline when active */}
+              {isAddingParticipant && (
+                <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-4 space-y-2">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="חפש תלמיד (2 תווים לפחות)..."
+                      value={addStudentQuery}
+                      onChange={(e) => {
+                        setAddStudentQuery(e.target.value);
+                        searchStudents(e.target.value);
+                      }}
+                      className="flex-1 h-8 text-sm"
+                      autoFocus
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 px-2"
+                      onClick={() => {
+                        setIsAddingParticipant(false);
+                        setAddStudentQuery('');
+                        setAddStudentResults([]);
+                      }}
+                      aria-label="סגור חיפוש"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {isSearchingStudents && (
+                    <div className="flex items-center gap-1 text-sm text-slate-500">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      מחפש...
+                    </div>
+                  )}
+                  {!isSearchingStudents && addStudentResults.length > 0 && (() => {
+                    const enrolledIds = new Set(displayParticipants.map((p) => p.student_id));
+                    const filtered = addStudentResults.filter((s) => !enrolledIds.has(s.id));
+                    return filtered.length === 0 ? (
+                      <p className="text-xs text-slate-400">כל התלמידים שנמצאו כבר רשומים לשיעור</p>
+                    ) : (
+                      <div className="space-y-1 max-h-48 overflow-y-auto">
+                        {filtered.map((student) => (
+                          <button
+                            key={student.id}
+                            type="button"
+                            className="w-full text-start text-sm px-2 py-1.5 rounded-lg hover:bg-blue-100 flex items-center justify-between"
+                            onClick={() => handleAddParticipant(student.id)}
+                          >
+                            <span className="font-medium">
+                              {[student.first_name, student.last_name].filter(Boolean).join(' ')}
+                            </span>
+                            {student.phone && (
+                              <span className="text-xs text-slate-500">{student.phone}</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  {!isSearchingStudents && addStudentQuery.length >= 2 && addStudentResults.length === 0 && (
+                    <p className="text-sm text-slate-500">לא נמצאו תלמידים</p>
+                  )}
+                  {addStudentQuery.length === 1 && (
+                    <p className="text-xs text-slate-400">הקלד לפחות 2 תווים לחיפוש</p>
+                  )}
+                </div>
+              )}
+
+              {/* Participant roster */}
               {displayParticipants.length > 0 ? participantRosterPanel : (
                 <EmptyTabState
                   title="אין משתתפים בשיעור"
                   description="כאשר יתווספו תלמידים, ניהול הנוכחות והסטטוסים שלהם יופיע כאן."
                 />
               )}
-              {addParticipantPanel}
-              <LessonReminderSummary
-                participants={displayParticipants}
-                localReminderState={localReminderState}
-                canManageAll={canManageAll}
-                resolveReminderContact={resolveReminderContact}
-              />
-              {reminderActionsPanel}
             </TabsContent>
 
             <TabsContent value="workflow" className="space-y-4">
