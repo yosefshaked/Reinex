@@ -8,6 +8,13 @@ Owner decision status legend:
 - Decision: `Later`
 - Decision: `Do not do`
 
+Implementation status legend:
+- Status: `Implemented`
+- Status: `Implemented v1`
+- Status: `Partially implemented`
+- Status: `Not started`
+- Status: `Later`
+
 This document is the persistent to-do list for moving the calendar from "working" to "comfortable to use and easy to understand".
 
 Primary priorities, in order:
@@ -98,7 +105,7 @@ Captured from owner review:
 
 ## Phase 1: Data Integrity UX Hardening
 
-### 1.1 Make lesson conflicts blocking by default
+### 1.1 [Status: Later] Make lesson conflicts blocking by default
 
 Problem:
 `AddLessonDialog.jsx` currently displays conflict warnings and says users can continue anyway. The create endpoint validates availability and leave conflicts, but overlap conflicts are currently exposed mainly through `api/calendar-conflicts/index.js` as a separate advisory check.
@@ -129,7 +136,7 @@ Owner notes: Currently we've got a warning that stops the user before action, we
 
 ---
 
-### 1.2 Add server-backed impact preview for lesson reschedule/edit
+### 1.2 [Status: Implemented] Add server-backed impact preview for lesson reschedule/edit
 
 Problem:
 Cancellation and attendance already use server-backed previews. General lesson edits and drag/drop reschedule do not present the same level of impact clarity.
@@ -160,7 +167,7 @@ Owner notes: While you're at it, improve the way it's designed. I want it to be 
 
 ---
 
-### 1.3 Standardize exception handling
+### 1.3 [Status: Partially implemented] Standardize exception handling
 
 Problem:
 Availability exceptions exist, but conflict exceptions, capacity exceptions, and operational exceptions are not presented as one coherent model.
@@ -193,7 +200,7 @@ Owner notes: Make sure you don't make it overwhelming, it doesn't necessarily ne
 
 ---
 
-### 1.4 Improve lock and correction visibility
+### 1.4 [Status: Partially implemented] Improve lock and correction visibility
 
 Problem:
 Locked/corrected lessons are protected, but the user experience can still feel like controls simply disappear or fail.
@@ -223,7 +230,7 @@ Owner notes:
 
 ## Phase 2: Actionable Calendar Workspace
 
-### 2.1 Replace generic attention count with actionable queues
+### 2.1 [Status: Implemented] Replace generic attention count with actionable queues
 
 Problem:
 The current dock shows "requires attention" as a count, but does not fully explain what to do next.
@@ -257,7 +264,7 @@ Owner notes:
 
 ---
 
-### 2.2 Add calendar legend and status education
+### 2.2 [Status: Partially implemented] Add calendar legend and status education
 
 Problem:
 Calendar cards use colors, icons, badges, reminder counts, and workflow strips. Users need a legend.
@@ -291,7 +298,7 @@ Owner notes: I tried to do that in the past, but it became annoying when it's al
 
 ---
 
-### 2.3 Improve empty and setup states
+### 2.3 [Status: Implemented] Improve empty and setup states
 
 Problem:
 "No instructors available or lessons in selected range" does not tell the user whether the problem is missing availability, missing service capabilities, filters, or truly empty schedule.
@@ -325,7 +332,7 @@ Owner notes: Very important.
 
 ---
 
-### 2.4 Add focused filters without hiding integrity issues
+### 2.4 [Status: Not started] Add focused filters without hiding integrity issues
 
 Problem:
 The week view can become dense. Users may need focus modes, but filters can hide important problems.
@@ -355,7 +362,7 @@ Owner notes: Very important, needs to be engineered carefully.
 
 ## Phase 3: Lesson Details Redesign
 
-### 3.1 Split lesson details into task-based sections
+### 3.1 [Status: Implemented v1] Split lesson details into task-based sections
 
 Problem:
 `LessonInstanceDialog.jsx` is dense and mixes viewing, editing, attendance, reminders, billing, payroll, closure, cancellation, correction, and participant management.
@@ -387,7 +394,7 @@ Owner notes: Instead of "Next action" we should have "Open actions" - listing al
 
 ---
 
-### 3.2 Make "next action" explicit in lesson details
+### 3.2 [Status: Implemented] Make "next action" explicit in lesson details
 
 Problem:
 Users must infer whether they should mark attendance, send reminders, close a blocker, resolve billing, or do nothing.
@@ -419,7 +426,7 @@ Owner notes: I prefer it to derive the next action from actually making sure the
 
 ---
 
-### 3.3 Redesign participant rows for clarity
+### 3.3 [Status: Not started] Redesign participant rows for clarity
 
 Problem:
 Participant rows currently contain attendance state, workflow badges, reminder controls, absence form, preview impacts, and restore controls in one dense card.
@@ -453,7 +460,7 @@ Owner notes: Instead of replacing icon-only controls with text labels, put a hov
 
 ---
 
-### 3.4 Improve workflow closure explanation
+### 3.4 [Status: Partially implemented] Improve workflow closure explanation
 
 Problem:
 The closure panel is accurate but can feel abstract.
@@ -482,7 +489,7 @@ Owner notes:
 
 ## Phase 4: Lesson Creation Flow
 
-### 4.1 Convert create lesson form into guided flow
+### 4.1 [Status: Not started] Convert create lesson form into guided flow
 
 Problem:
 The create dialog has the correct fields and validations, but the form is cognitively heavy.
@@ -511,7 +518,7 @@ Owner notes:
 
 ---
 
-### 4.2 Improve direct client pricing UX
+### 4.2 [Status: Not started] Improve direct client pricing UX
 
 Problem:
 Direct client charge amount is required only when the service has no default customer charge amount. This is correct but needs clearer language.
@@ -540,7 +547,7 @@ Owner notes:
 
 ---
 
-### 4.3 Make availability selection more transparent
+### 4.3 [Status: Not started] Make availability selection more transparent
 
 Problem:
 Users see available slots, but not always why a slot/instructor is missing.
@@ -569,7 +576,7 @@ Owner notes: I find FullCalendar easily breakable with custom solutions, stick t
 
 ## Phase 5: Calendar Grid and Interaction Polish
 
-### 5.1 Refine event card information hierarchy
+### 5.1 [Status: Not started] Refine event card information hierarchy
 
 Problem:
 Short lessons and narrow columns hide details. The current card is functional but can be hard to scan.
@@ -600,7 +607,7 @@ Owner notes:
 
 ---
 
-### 5.2 Improve drag/drop safety and affordance
+### 5.2 [Status: Partially implemented] Improve drag/drop safety and affordance
 
 Problem:
 Drag/drop is powerful but risky.
@@ -631,7 +638,7 @@ Owner notes: We need to be careful doing that. Revertability is great and I supp
 
 ---
 
-### 5.3 Add quick inspector panel
+### 5.3 [Status: Implemented v1] Add quick inspector panel
 
 Problem:
 Opening the full lesson dialog for every click is heavy.
@@ -683,7 +690,7 @@ Reasoning:
 
 ---
 
-### 5.4 Improve mobile and small-screen behavior
+### 5.4 [Status: Later] Improve mobile and small-screen behavior
 
 Problem:
 Resource time-grid calendars are difficult on small screens.
@@ -712,7 +719,7 @@ Owner notes: It's a very important task, but we'll wait with it for after the de
 
 ## Phase 6: Manual Template Generation UX
 
-### 6.1 Make generation preview easier to understand
+### 6.1 [Status: Not started] Make generation preview easier to understand
 
 Problem:
 Manual generation has the right safety model, but the preview can still feel technical.
@@ -745,7 +752,7 @@ Owner notes:
 
 ---
 
-### 6.2 Improve saved repair review workflow
+### 6.2 [Status: Not started] Improve saved repair review workflow
 
 Problem:
 Saved review is useful, but can become another hidden state users do not understand.
@@ -773,7 +780,7 @@ Owner notes:
 
 ## Phase 7: Language, Accessibility, and Professional Polish
 
-### 7.1 Standardize Hebrew domain language
+### 7.1 [Status: Partially implemented] Standardize Hebrew domain language
 
 Problem:
 Some labels are technical or mixed-language, for example "Grace".
@@ -807,7 +814,7 @@ Owner notes: Super important.
 
 ---
 
-### 7.2 Accessibility pass
+### 7.2 [Status: Partially implemented] Accessibility pass
 
 Problem:
 Calendar interactions include dense visual status, icon buttons, drag/drop, tooltips, dialogs, and RTL text.
@@ -834,7 +841,7 @@ Owner notes:
 
 ---
 
-### 7.3 Visual consistency and hierarchy pass
+### 7.3 [Status: Partially implemented] Visual consistency and hierarchy pass
 
 Problem:
 The calendar has many cards, alerts, badges, and dialogs built over time.
@@ -1018,3 +1025,28 @@ Verified:
 Still needed:
 - Add dedicated backend tests for preview contracts if/when the project has endpoint test coverage for calendar updates.
 - Consider extracting the preview cards into a shared component once the design stabilizes across drag/drop and edit dialog.
+
+### 2026-04-30 Lesson Details Modal Tab Refactor
+
+Implemented:
+- Refactored the read-only `LessonInstanceDialog.jsx` view into a controlled tabbed layout using the existing Radix-backed `Tabs` UI primitive.
+- Kept edit mode, preview-before-save, attendance, reminder, add-participant, cancellation preview, correction, lock, billing warning, and version-conflict flows on their existing handlers.
+- Added tab reset when a different lesson/correction is opened.
+- Added task-based tabs:
+  - `סקירה`
+  - `פעולות פתוחות`
+  - `משתתפים ונוכחות`
+  - `תזכורות`
+  - `סגירה ותיעוד`
+  - `ניהול`
+- Reused `getLessonOpenActions()` so open actions remain fact-derived rather than relying on one mutable status field.
+- Kept high-risk cancellation inside the management tab with explanatory text and the existing server-backed preview dialog.
+
+Verified:
+- Targeted ESLint passes for:
+  - `src/features/calendar/components/LessonInstanceDialog.jsx`
+- `npm run build` passes.
+
+Still needed:
+- Browser-check the tabbed dialog with representative regular, completed, cancelled, locked/corrected, and exception lessons.
+- Consider a later deeper refactor of `LessonParticipantRoster.jsx` into smaller task-specific subcomponents once the tab structure is stable.

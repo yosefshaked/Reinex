@@ -6,6 +6,7 @@ import { Input } from '../../../components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../../../components/ui/select';
 import { formatTimeDisplay, formatDateDisplay, getInstanceStatusIcon } from '../utils/timeGrid';
 import { Badge } from '../../../components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
 import { useOrg } from '@/org/OrgContext';
 import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
@@ -29,6 +30,7 @@ import {
   SCHEDULING_OVERRIDE_REASON_OPTIONS,
 } from '../utils/schedulingOverride.js';
 import { getParticipantDisplayName, resolveParticipantReminderContact } from '../utils/participantDisplay.js';
+import { getLessonOpenActions } from '../utils/calendarWorkspace.js';
 
 const DEFAULT_BILLING_POLICY = {
   attended: true,
@@ -378,6 +380,42 @@ function shortId(value) {
   return value ? String(value).slice(-8) : '';
 }
 
+function DetailField({ label, children, className = '' }) {
+  return (
+    <div className={className}>
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1 text-base font-medium text-slate-950">{children}</div>
+    </div>
+  );
+}
+
+function EmptyTabState({ title, description }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 p-5 text-center">
+      <div className="text-sm font-semibold text-slate-900">{title}</div>
+      <div className="mt-1 text-sm text-slate-600">{description}</div>
+    </div>
+  );
+}
+
+function getOpenActionToneClass(tone) {
+  if (tone === 'warn') {
+    return 'border-amber-200 bg-amber-50 text-amber-950';
+  }
+  if (tone === 'danger') {
+    return 'border-red-200 bg-red-50 text-red-950';
+  }
+  return 'border-slate-200 bg-white text-slate-900';
+}
+
+function getOpenActionTab(actionId) {
+  if (actionId === 'attendance') return 'participants';
+  if (actionId === 'reminders') return 'reminders';
+  if (['documentation', 'billing', 'payroll', 'hmo', 'closure'].includes(actionId)) return 'workflow';
+  if (actionId === 'exception') return 'overview';
+  return 'overview';
+}
+
 function isResolvedParticipantStatus(status) {
   return ['attended', 'no_show', 'cancelled_student', 'cancelled_clinic'].includes(String(status || '').trim().toLowerCase());
 }
@@ -496,6 +534,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [editPreviewError, setEditPreviewError] = useState('');
   const [editPreviewLoading, setEditPreviewLoading] = useState(false);
   const [pendingEditBody, setPendingEditBody] = useState(null);
+  const [activeViewTab, setActiveViewTab] = useState('overview');
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
   const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
   const latestPreviewRequestIdRef = useRef(0);
@@ -573,6 +612,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setEditPreviewError('');
     setEditPreviewLoading(false);
     setPendingEditBody(null);
+    setActiveViewTab('overview');
     latestPreviewRequestIdRef.current += 1;
     latestCancelPreviewRequestIdRef.current += 1;
     latestStudentSearchRequestIdRef.current += 1;
@@ -1669,9 +1709,170 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   if (!instance || !displayInstance) return null;
 
+  const openActions = getLessonOpenActions({
+    ...displayInstance,
+    participants: displayParticipants,
+  });
+  const participantCountLabel = displayParticipants.length === 1
+    ? 'משתתף אחד'
+    : `${displayParticipants.length} משתתפים`;
+  const lessonIsBlocked = Boolean(instance.is_locked || hardBlockedByPaidClaim);
+  const participantRosterPanel = (
+    <LessonParticipantRoster
+      displayParticipants={displayParticipants}
+      localReminderState={localReminderState}
+      absenceForm={absenceForm}
+      setAbsenceForm={setAbsenceForm}
+      absenceFormError={absenceFormError}
+      absenceRequirements={absenceRequirements}
+      absenceRequirementsLoading={absenceRequirementsLoading}
+      restorePreview={restorePreview}
+      restorePreviewLoading={restorePreviewLoading}
+      restorePreviewError={restorePreviewError}
+      setRestorePreview={setRestorePreview}
+      setRestorePreviewError={setRestorePreviewError}
+      billingPolicy={billingPolicy}
+      canQuickReport={canQuickReport}
+      hasUnsetParticipants={hasUnsetParticipants}
+      scheduledParticipantsCount={scheduledParticipantsCount}
+      canMarkAttendance={canMarkAttendance}
+      canManageAll={canManageAll}
+      reminderUpdating={reminderUpdating}
+      isMarkingAttendance={isMarkingAttendance}
+      isOperationallyOpen={isOperationallyOpen}
+      openAttendancePreview={openAttendancePreview}
+      openAbsenceForm={openAbsenceForm}
+      handleAbsenceStatusChange={handleAbsenceStatusChange}
+      closeAbsenceForm={closeAbsenceForm}
+      confirmAbsenceForm={confirmAbsenceForm}
+      openRestorePreview={openRestorePreview}
+      handleMarkAttendance={handleMarkAttendance}
+      handleSendWaReminder={handleSendWaReminder}
+      handleSendEmailReminder={handleSendEmailReminder}
+      handleSetReminderConfirmation={handleSetReminderConfirmation}
+      resolveReminderContact={resolveReminderContact}
+      formatPhoneForWhatsApp={formatPhoneForWhatsApp}
+      deriveDisplayWorkflowDecisions={deriveDisplayWorkflowDecisions}
+      getWorkflowDecisionLabel={getWorkflowDecisionLabel}
+      shouldShowGraceWaiver={shouldShowGraceWaiver}
+      getCancellationStatusLabel={getCancellationStatusLabel}
+      getCompensationDecisionLabel={getCompensationDecisionLabel}
+      getParticipantStatusLabel={getParticipantStatusLabel}
+      groupPreviewImpacts={groupPreviewImpacts}
+      shortId={shortId}
+      formatAgorotPreview={formatAgorotPreview}
+    />
+  );
+  const addParticipantPanel = canManageAll && isReportable && !instance?.is_locked ? (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">ניהול משתתפים</div>
+          <div className="mt-1 text-xs text-slate-500">הוספת תלמיד זמינה רק לשיעורים מתוכננים ולא נעולים.</div>
+        </div>
+        {!isAddingParticipant ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setIsAddingParticipant(true)}
+          >
+            <UserPlus className="h-4 w-4 ms-1" />
+            הוסף תלמיד
+          </Button>
+        ) : null}
+      </div>
+
+      {isAddingParticipant ? (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 space-y-2">
+          <div className="flex gap-2">
+            <Input
+              placeholder="חפש תלמיד (2 תווים לפחות)..."
+              value={addStudentQuery}
+              onChange={(e) => {
+                setAddStudentQuery(e.target.value);
+                searchStudents(e.target.value);
+              }}
+              className="flex-1 h-8 text-sm"
+              autoFocus
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2"
+              onClick={() => {
+                setIsAddingParticipant(false);
+                setAddStudentQuery('');
+                setAddStudentResults([]);
+              }}
+              aria-label="בטל הוספת תלמיד"
+              title="בטל הוספת תלמיד"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          {isSearchingStudents && (
+            <div className="flex items-center gap-1 text-sm text-gray-500">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              מחפש...
+            </div>
+          )}
+          {!isSearchingStudents && addStudentResults.length > 0 && (() => {
+            const enrolledIds = new Set(displayParticipants.map((p) => p.student_id));
+            const filtered = addStudentResults.filter((s) => !enrolledIds.has(s.id));
+            return filtered.length === 0 ? (
+              <p className="text-xs text-gray-400">כל התלמידים שנמצאו כבר רשומים לשיעור</p>
+            ) : (
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {filtered.map((student) => (
+                  <button
+                    key={student.id}
+                    type="button"
+                    className="w-full text-start text-sm px-2 py-1.5 rounded hover:bg-blue-100 flex items-center justify-between"
+                    onClick={() => handleAddParticipant(student.id)}
+                  >
+                    <span className="font-medium">
+                      {[student.first_name, student.last_name].filter(Boolean).join(' ')}
+                    </span>
+                    {student.phone && (
+                      <span className="text-xs text-gray-500">{student.phone}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
+          {!isSearchingStudents && addStudentQuery.length >= 2 && addStudentResults.length === 0 && (
+            <p className="text-sm text-gray-500">לא נמצאו תלמידים</p>
+          )}
+          {addStudentQuery.length === 1 && (
+            <p className="text-xs text-gray-400">הקלד לפחות 2 תווים לחיפוש</p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+  const resolutionPanel = (
+    <LessonResolutionStatus
+      metadata={displayInstance.metadata}
+      isClosed={displayInstance.is_closed}
+      workflowEvaluatedAt={workflowEvaluatedAt}
+      closureDoneCount={closureDoneCount}
+      closureTotalCount={closureTotalCount}
+      closureAttendanceResolved={closureAttendanceResolved}
+      closureBillingResolved={closureBillingResolved}
+      closureCompensationResolved={closureCompensationResolved}
+      closureHmoResolved={closureHmoResolved}
+      studentBillingRequired={studentBillingRequired}
+      instructorCompensationRequired={instructorCompensationRequired}
+      hmoClaimRequired={hmoClaimRequired}
+      workflowReasonsOpen={workflowReasonsOpen}
+      getWorkflowReasonLabel={getWorkflowReasonLabel}
+    />
+  );
+
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             <span>פרטי שיעור</span>
@@ -2087,258 +2288,231 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
           </div>
         ) : (
           // View Mode
-          <div className="space-y-6">{/* Status Badge */}
-            <div className="flex items-center gap-2">
-              <span className={`text-2xl ${statusInfo.color}`}>{statusInfo.icon}</span>
-              <Badge variant={displayInstance.status === 'completed' ? 'default' : 'secondary'}>
-                {statusInfo.label}
-              </Badge>
-              <Badge variant={displayInstance.is_closed ? 'default' : 'outline'}>
-                {displayInstance.is_closed ? 'סגור תפעולית' : 'פתוח תפעולית'}
-              </Badge>
-              {instance.latest_correction && (
-                <Badge className="bg-sky-100 text-sky-800 border-sky-200">מציג ערך מתוקן</Badge>
-              )}
-              {canQuickReport && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleReportStatus('completed')}
-                    disabled={isSaving || hasUnsetParticipants}
-                    title={
-                      hasUnsetParticipants
-                        ? `יש לסמן נוכחות ל-${scheduledParticipantsCount} תלמיד/ים לפני השלמת השיעור`
-                        : undefined
-                    }
-                  >
-                    <Check className="h-4 w-4 ms-1" />
-                    הושלם
-                  </Button>
-                </div>
-              )}
-            </div>
+          <Tabs value={activeViewTab} onValueChange={setActiveViewTab} dir="rtl" className="space-y-5">
+            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-slate-100 p-1 text-slate-600 md:grid-cols-6">
+              <TabsTrigger value="overview" className="py-2">סקירה</TabsTrigger>
+              <TabsTrigger value="actions" className="py-2">
+                פעולות פתוחות
+                {openActions.length > 0 ? (
+                  <Badge variant="secondary" className="ms-2 h-5 min-w-5 rounded-full px-1 text-[11px]">
+                    {openActions.length}
+                  </Badge>
+                ) : null}
+              </TabsTrigger>
+              <TabsTrigger value="participants" className="py-2">משתתפים ונוכחות</TabsTrigger>
+              <TabsTrigger value="reminders" className="py-2">תזכורות</TabsTrigger>
+              <TabsTrigger value="workflow" className="py-2">סגירה ותיעוד</TabsTrigger>
+              <TabsTrigger value="admin" className="py-2">ניהול</TabsTrigger>
+            </TabsList>
 
-            {/* Service Info */}
-            <div>
-              <label className="text-sm font-medium text-gray-700">שירות</label>
-              <div className="mt-1 flex items-center gap-2">
-                {displayInstance.service?.color && (
-                  <div
-                    className="w-4 h-4 rounded"
-                    style={{ backgroundColor: displayInstance.service.color }}
-                  />
-                )}
-                <span className="text-lg">{displayInstance.service?.service_name || 'לא ידוע'}</span>
-              </div>
-            </div>
+            <TabsContent value="overview" className="space-y-5">
+              <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className={`text-3xl ${statusInfo.color}`}>{statusInfo.icon}</span>
+                    <div>
+                      <div className="text-lg font-semibold text-slate-950">
+                        {displayInstance.service?.service_name || 'שירות לא ידוע'}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <Badge variant={displayInstance.status === 'completed' ? 'default' : 'secondary'}>
+                          {statusInfo.label}
+                        </Badge>
+                        <Badge variant={displayInstance.is_closed ? 'default' : 'outline'}>
+                          {displayInstance.is_closed ? 'סגור תפעולית' : 'פתוח תפעולית'}
+                        </Badge>
+                        {instance.latest_correction && (
+                          <Badge className="bg-sky-100 text-sky-800 border-sky-200">מציג ערך מתוקן</Badge>
+                        )}
+                        {schedulingOverrideReason && (
+                          <Badge className="border-amber-200 bg-amber-100 text-amber-900">חריגה חד-פעמית</Badge>
+                        )}
+                        {lessonIsBlocked && (
+                          <Badge variant="destructive">חסום לשינוי</Badge>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
-            {/* Date & Time */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700">תאריך</label>
-                <p className="mt-1 text-lg">{dateDisplay}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700">שעה</label>
-                <p className="mt-1 text-lg">
-                  {startTime} - {endTime} ({displayInstance.duration_minutes} דקות)
-                </p>
-              </div>
-            </div>
-
-            {/* Instructor */}
-            <div>
-              <label className="text-sm font-medium text-gray-700">מדריך</label>
-              <p className="mt-1 text-lg">{displayInstance.instructor?.full_name || 'לא ידוע'}</p>
-            </div>
-
-            <LessonResolutionStatus
-              metadata={displayInstance.metadata}
-              isClosed={displayInstance.is_closed}
-              workflowEvaluatedAt={workflowEvaluatedAt}
-              closureDoneCount={closureDoneCount}
-              closureTotalCount={closureTotalCount}
-              closureAttendanceResolved={closureAttendanceResolved}
-              closureBillingResolved={closureBillingResolved}
-              closureCompensationResolved={closureCompensationResolved}
-              closureHmoResolved={closureHmoResolved}
-              studentBillingRequired={studentBillingRequired}
-              instructorCompensationRequired={instructorCompensationRequired}
-              hmoClaimRequired={hmoClaimRequired}
-              workflowReasonsOpen={workflowReasonsOpen}
-              getWorkflowReasonLabel={getWorkflowReasonLabel}
-            />
-
-            <LessonReminderSummary
-              participants={displayParticipants}
-              localReminderState={localReminderState}
-              canManageAll={canManageAll}
-              resolveReminderContact={resolveReminderContact}
-            />
-
-            <LessonParticipantRoster
-              displayParticipants={displayParticipants}
-              localReminderState={localReminderState}
-              absenceForm={absenceForm}
-              setAbsenceForm={setAbsenceForm}
-              absenceFormError={absenceFormError}
-              absenceRequirements={absenceRequirements}
-              absenceRequirementsLoading={absenceRequirementsLoading}
-              restorePreview={restorePreview}
-              restorePreviewLoading={restorePreviewLoading}
-              restorePreviewError={restorePreviewError}
-              setRestorePreview={setRestorePreview}
-              setRestorePreviewError={setRestorePreviewError}
-              billingPolicy={billingPolicy}
-              canQuickReport={canQuickReport}
-              hasUnsetParticipants={hasUnsetParticipants}
-              scheduledParticipantsCount={scheduledParticipantsCount}
-              canMarkAttendance={canMarkAttendance}
-              canManageAll={canManageAll}
-              reminderUpdating={reminderUpdating}
-              isMarkingAttendance={isMarkingAttendance}
-              isOperationallyOpen={isOperationallyOpen}
-              openAttendancePreview={openAttendancePreview}
-              openAbsenceForm={openAbsenceForm}
-              handleAbsenceStatusChange={handleAbsenceStatusChange}
-              closeAbsenceForm={closeAbsenceForm}
-              confirmAbsenceForm={confirmAbsenceForm}
-              openRestorePreview={openRestorePreview}
-              handleMarkAttendance={handleMarkAttendance}
-              handleSendWaReminder={handleSendWaReminder}
-              handleSendEmailReminder={handleSendEmailReminder}
-              handleSetReminderConfirmation={handleSetReminderConfirmation}
-              resolveReminderContact={resolveReminderContact}
-              formatPhoneForWhatsApp={formatPhoneForWhatsApp}
-              deriveDisplayWorkflowDecisions={deriveDisplayWorkflowDecisions}
-              getWorkflowDecisionLabel={getWorkflowDecisionLabel}
-              shouldShowGraceWaiver={shouldShowGraceWaiver}
-              getCancellationStatusLabel={getCancellationStatusLabel}
-              getCompensationDecisionLabel={getCompensationDecisionLabel}
-              getParticipantStatusLabel={getParticipantStatusLabel}
-              groupPreviewImpacts={groupPreviewImpacts}
-              shortId={shortId}
-              formatAgorotPreview={formatAgorotPreview}
-            />
-
-            <div>
-              {/* Add Student — admin only, scheduled unlocked instances */}
-              {canManageAll && isReportable && !instance?.is_locked && (
-                <div className="mt-3">
-                  {!isAddingParticipant ? (
+                  {canQuickReport && (
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => setIsAddingParticipant(true)}
+                      onClick={() => handleReportStatus('completed')}
+                      disabled={isSaving || hasUnsetParticipants}
+                      title={
+                        hasUnsetParticipants
+                          ? `יש לסמן נוכחות ל-${scheduledParticipantsCount} תלמיד/ים לפני השלמת השיעור`
+                          : 'סמן את השיעור כהושלם'
+                      }
                     >
-                      <UserPlus className="h-4 w-4 ms-1" />
-                      הוסף תלמיד
+                      <Check className="h-4 w-4 ms-1" />
+                      הושלם
                     </Button>
-                  ) : (
-                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
-                      <div className="flex gap-2">
-                        <Input
-                          placeholder="חפש תלמיד (2 תווים לפחות)..."
-                          value={addStudentQuery}
-                          onChange={(e) => {
-                            setAddStudentQuery(e.target.value);
-                            searchStudents(e.target.value);
-                          }}
-                          className="flex-1 h-8 text-sm"
-                          autoFocus
-                        />
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 px-2"
-                          onClick={() => {
-                            setIsAddingParticipant(false);
-                            setAddStudentQuery('');
-                            setAddStudentResults([]);
-                          }}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      {isSearchingStudents && (
-                        <div className="flex items-center gap-1 text-sm text-gray-500">
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                          מחפש...
-                        </div>
-                      )}
-                      {!isSearchingStudents && addStudentResults.length > 0 && (() => {
-                        const enrolledIds = new Set(displayParticipants.map((p) => p.student_id));
-                        const filtered = addStudentResults.filter((s) => !enrolledIds.has(s.id));
-                        return filtered.length === 0 ? (
-                          <p className="text-xs text-gray-400">כל התלמידים שנמצאו כבר רשומים לשיעור</p>
-                        ) : (
-                          <div className="space-y-1 max-h-48 overflow-y-auto">
-                            {filtered.map((student) => (
-                              <button
-                                key={student.id}
-                                type="button"
-                                className="w-full text-start text-sm px-2 py-1.5 rounded hover:bg-blue-100 flex items-center justify-between"
-                                onClick={() => handleAddParticipant(student.id)}
-                              >
-                                <span className="font-medium">
-                                  {[student.first_name, student.last_name].filter(Boolean).join(' ')}
-                                </span>
-                                {student.phone && (
-                                  <span className="text-xs text-gray-500">{student.phone}</span>
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        );
-                      })()}
-                      {!isSearchingStudents && addStudentQuery.length >= 2 && addStudentResults.length === 0 && (
-                        <p className="text-sm text-gray-500">לא נמצאו תלמידים</p>
-                      )}
-                      {addStudentQuery.length === 1 && (
-                        <p className="text-xs text-gray-400">הקלד לפחות 2 תווים לחיפוש</p>
-                      )}
-                    </div>
                   )}
                 </div>
+
+                <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <DetailField label="תאריך">{dateDisplay || 'לא ידוע'}</DetailField>
+                  <DetailField label="שעה">
+                    {startTime && endTime ? `${startTime} - ${endTime}` : 'לא ידוע'}
+                  </DetailField>
+                  <DetailField label="משך">{displayInstance.duration_minutes || 0} דקות</DetailField>
+                  <DetailField label="משתתפים">{participantCountLabel}</DetailField>
+                  <DetailField label="מדריך" className="sm:col-span-2">
+                    {displayInstance.instructor?.full_name || 'לא ידוע'}
+                  </DetailField>
+                  <DetailField label="שירות" className="sm:col-span-2">
+                    <span className="inline-flex items-center gap-2">
+                      {displayInstance.service?.color && (
+                        <span
+                          className="h-3 w-3 rounded"
+                          style={{ backgroundColor: displayInstance.service.color }}
+                        />
+                      )}
+                      {displayInstance.service?.service_name || 'לא ידוע'}
+                    </span>
+                  </DetailField>
+                </div>
+              </div>
+
+              {schedulingOverrideReason ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-700" />
+                    <div>
+                      <div className="text-sm font-semibold">חריגה חד-פעמית</div>
+                      <div className="mt-1 text-sm">הסיבה שנשמרה: {schedulingOverrideReason}</div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {lessonIsBlocked ? (
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-950">
+                  <div className="text-sm font-semibold">השיעור מוגבל לשינוי ישיר</div>
+                  <div className="mt-1 text-sm">
+                    שינוי ישיר אינו זמין כאשר שיעור נעול או חסום פיננסית. פרטי הנעילה והפעולות האפשריות מוצגים מעל הטאבים.
+                  </div>
+                </div>
+              ) : null}
+            </TabsContent>
+
+            <TabsContent value="actions" className="space-y-4">
+              {openActions.length > 0 ? (
+                <div className="space-y-3">
+                  {openActions.map((action, index) => {
+                    const targetTab = getOpenActionTab(action.id);
+                    return (
+                      <div
+                        key={`${action.id}-${index}`}
+                        className={`rounded-2xl border p-4 ${getOpenActionToneClass(action.tone)}`}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold">{index + 1}. {action.label}</div>
+                            <div className="mt-1 text-sm opacity-85">{action.description}</div>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setActiveViewTab(targetTab)}
+                          >
+                            פתח אזור מתאים
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyTabState
+                  title="אין פעולות פתוחות"
+                  description="לפי הנתונים הנוכחיים אין משימה תפעולית שדורשת טיפול בשיעור הזה."
+                />
               )}
-            </div>
+            </TabsContent>
 
-            {/* Documentation Status */}
-            {displayInstance.documentation_status && (
-              <div>
-                <label className="text-sm font-medium text-gray-700">סטטוס תיעוד</label>
-                <p className="mt-1">
-                  <Badge
-                    variant={displayInstance.documentation_status === 'documented' ? 'default' : 'secondary'}
+            <TabsContent value="participants" className="space-y-4">
+              {displayParticipants.length > 0 ? participantRosterPanel : (
+                <EmptyTabState
+                  title="אין משתתפים בשיעור"
+                  description="כאשר יתווספו תלמידים, ניהול הנוכחות והסטטוסים שלהם יופיע כאן."
+                />
+              )}
+              {addParticipantPanel}
+            </TabsContent>
+
+            <TabsContent value="reminders" className="space-y-4">
+              <LessonReminderSummary
+                participants={displayParticipants}
+                localReminderState={localReminderState}
+                canManageAll={canManageAll}
+                resolveReminderContact={resolveReminderContact}
+              />
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                פעולות שליחה ואישור תזכורות נמצאות בשורות המשתתפים כדי לשמור על הקשר ישיר בין תלמיד, איש קשר וסטטוס הגעה.
+              </div>
+            </TabsContent>
+
+            <TabsContent value="workflow" className="space-y-4">
+              {resolutionPanel}
+              {displayInstance.documentation_status ? (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="text-sm font-semibold text-slate-900">סטטוס תיעוד</div>
+                  <div className="mt-2">
+                    <Badge
+                      variant={displayInstance.documentation_status === 'documented' ? 'default' : 'secondary'}
+                    >
+                      {displayInstance.documentation_status === 'documented' ? 'תועד' : 'ממתין לתיעוד'}
+                    </Badge>
+                  </div>
+                </div>
+              ) : (
+                <EmptyTabState
+                  title="אין סטטוס תיעוד לשיעור"
+                  description="כאשר השיעור ידרוש תיעוד או יסומן כמתועד, הסטטוס יוצג כאן."
+                />
+              )}
+            </TabsContent>
+
+            <TabsContent value="admin" className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="text-sm font-semibold text-slate-900">פרטי מקור ובקרה</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <DetailField label="מקור יצירה">{displayInstance.created_source || 'לא ידוע'}</DetailField>
+                  <DetailField label="מזהה שיעור">{shortId(displayInstance.id) || 'לא זמין'}</DetailField>
+                  <DetailField label="גרסה">{displayInstance.version ?? 'לא זמין'}</DetailField>
+                  <DetailField label="מצב נעילה">{lessonIsBlocked ? 'מוגבל לשינוי' : 'לא נעול'}</DetailField>
+                </div>
+              </div>
+
+              {canEdit && !isCancellationStatus(displayInstance.status) ? (
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+                  <div className="mb-3">
+                    <div className="text-sm font-semibold text-red-950">פעולה רגישה</div>
+                    <div className="mt-1 text-sm text-red-900">
+                      ביטול שיעור פותח תצוגת השפעה מקדימה מהשרת לפני ביצוע הפעולה.
+                    </div>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    onClick={() => setCancelDialogOpen(true)}
+                    disabled={isSaving}
                   >
-                    {displayInstance.documentation_status === 'documented' ? 'תועד' : 'ממתין לתיעוד'}
-                  </Badge>
-                </p>
-              </div>
-            )}
-
-            {/* Created Source */}
-            {displayInstance.created_source && (
-              <div className="text-sm text-gray-600">
-                מקור: {displayInstance.created_source}
-              </div>
-            )}
-
-            {/* Cancel Button */}
-            {canEdit && !isCancellationStatus(displayInstance.status) && (
-              <div className="pt-4 border-t">
-                <Button
-                  variant="destructive"
-                  onClick={() => setCancelDialogOpen(true)}
-                  disabled={isSaving}
-                >
-                  <X className="me-2 h-4 w-4" />
-                  בטל שיעור
-                </Button>
-              </div>
-            )}
-          </div>
+                    <X className="me-2 h-4 w-4" />
+                    בטל שיעור
+                  </Button>
+                </div>
+              ) : (
+                <EmptyTabState
+                  title="אין פעולות ניהול זמינות"
+                  description="אין פעולה ניהולית זמינה לשיעור במצבו הנוכחי או לפי ההרשאות שלך."
+                />
+              )}
+            </TabsContent>
+          </Tabs>
         )}
       </DialogContent>
       <Dialog
