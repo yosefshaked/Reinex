@@ -424,7 +424,7 @@ function getOpenActionToneClass(tone) {
 
 function getOpenActionTab(actionId) {
   if (actionId === 'attendance') return 'participants';
-  if (actionId === 'reminders') return 'reminders';
+  if (actionId === 'reminders') return 'participants';
   if (['documentation', 'billing', 'payroll', 'hmo', 'closure'].includes(actionId)) return 'workflow';
   if (actionId === 'exception') return 'overview';
   return 'overview';
@@ -1764,6 +1764,7 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       handleSendWaReminder={handleSendWaReminder}
       handleSendEmailReminder={handleSendEmailReminder}
       handleSetReminderConfirmation={handleSetReminderConfirmation}
+      showReminderActions={false}
       resolveReminderContact={resolveReminderContact}
       formatPhoneForWhatsApp={formatPhoneForWhatsApp}
       deriveDisplayWorkflowDecisions={deriveDisplayWorkflowDecisions}
@@ -1776,6 +1777,165 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
       shortId={shortId}
       formatAgorotPreview={formatAgorotPreview}
     />
+  );
+  const scheduledReminderParticipants = displayParticipants.filter(
+    (participant) => participant?.participant_status === 'scheduled',
+  );
+  const reminderActionsPanel = canManageAll ? (
+    <div className="space-y-3">
+      {scheduledReminderParticipants.length > 0 ? (
+        scheduledReminderParticipants.map((participant) => {
+          const rs = localReminderState[participant.id] || {};
+          const hasSent = rs.reminder_sent ?? participant.reminder_sent ?? false;
+          const hasConfirmed = rs.reminder_seen ?? participant.reminder_seen ?? false;
+          const reminderContact = resolveReminderContact(participant);
+          const waPhone = formatPhoneForWhatsApp(reminderContact.phone);
+          const emailAddress = reminderContact.email;
+
+          return (
+            <div key={participant.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="font-medium text-slate-950">
+                    {getParticipantDisplayName(participant, 'לא ידוע')}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {reminderContact.source === 'guardian' ? 'איש קשר: הורה' : 'איש קשר: לקוח/ה'}
+                    {reminderContact.name ? ` · ${reminderContact.name}` : ''}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {hasConfirmed ? (
+                    <Badge className="bg-green-100 text-green-800 border-green-200">אישר הגעה</Badge>
+                  ) : hasSent ? (
+                    <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-900">
+                      ממתין לאישור
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline">טרם נשלחה תזכורת</Badge>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {waPhone ? (
+                  <Button
+                    size="sm"
+                    variant={hasSent ? 'outline' : 'secondary'}
+                    onClick={() => handleSendWaReminder(participant)}
+                    disabled={reminderUpdating}
+                    title="שלח תזכורת ב-WhatsApp"
+                    className="gap-1"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    {hasSent ? 'שלח שוב WhatsApp' : 'שלח WhatsApp'}
+                  </Button>
+                ) : null}
+                {emailAddress ? (
+                  <Button
+                    size="sm"
+                    variant={hasSent ? 'outline' : 'secondary'}
+                    onClick={() => handleSendEmailReminder(participant)}
+                    disabled={reminderUpdating}
+                    title="שלח תזכורת באימייל"
+                    className="gap-1"
+                  >
+                    <Mail className="h-4 w-4" />
+                    {hasSent ? 'שלח שוב מייל' : 'שלח מייל'}
+                  </Button>
+                ) : null}
+                {hasSent && !hasConfirmed ? (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="gap-1 text-green-700 hover:text-green-800 hover:bg-green-50"
+                      onClick={() => handleSetReminderConfirmation(participant, true)}
+                      disabled={reminderUpdating}
+                      title="אישר הגעה"
+                    >
+                      <ThumbsUp className="h-4 w-4" />
+                      אישר הגעה
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="gap-1 text-red-700 hover:text-red-800 hover:bg-red-50"
+                      onClick={() => handleSetReminderConfirmation(participant, false)}
+                      disabled={reminderUpdating}
+                      title="לא יגיע — פותח תהליך ביטול השתתפות"
+                    >
+                      <ThumbsDown className="h-4 w-4" />
+                      לא יגיע
+                    </Button>
+                  </>
+                ) : null}
+                {!waPhone && !emailAddress ? (
+                  <span className="text-sm text-slate-500">אין פרטי קשר זמינים לשליחת תזכורת.</span>
+                ) : null}
+              </div>
+            </div>
+          );
+        })
+      ) : (
+        <EmptyTabState
+          title="אין משתתפים מתוכננים לתזכורת"
+          description="תזכורות מוצגות רק למשתתפים שעדיין נמצאים בסטטוס מתוכנן."
+        />
+      )}
+    </div>
+  ) : (
+    <EmptyTabState
+      title="אין הרשאה לניהול תזכורות"
+      description="רק משתמשים עם הרשאת ניהול יכולים לשלוח או לעדכן תזכורות."
+    />
+  );
+  const openActionsPanel = openActions.length > 0 ? (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-amber-950">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">דורש תשומת לב לפני סגירה</div>
+          <div className="mt-1 text-sm">
+            נמצאו {openActions.length} פעולות פתוחות. טפלו בהן לפי הסדר כדי לשמור על רצף עבודה תקין.
+          </div>
+        </div>
+        <Badge className="border-amber-300 bg-white text-amber-900">
+          {openActions.length}
+        </Badge>
+      </div>
+      <div className="mt-3 space-y-2">
+        {openActions.map((action, index) => {
+          const targetTab = getOpenActionTab(action.id);
+          return (
+            <div
+              key={`${action.id}-${index}`}
+              className={`rounded-xl border px-3 py-2 ${getOpenActionToneClass(action.tone)}`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold">{index + 1}. {action.label}</div>
+                  <div className="mt-1 text-sm opacity-85">{action.description}</div>
+                </div>
+                {targetTab !== 'overview' ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setActiveViewTab(targetTab)}
+                  >
+                    פתח אזור מתאים
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  ) : (
+    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-950">
+      אין פעולות פתוחות כרגע. לפי הנתונים הנוכחיים אין משימה תפעולית שמונעת המשך עבודה.
+    </div>
   );
   const addParticipantPanel = canManageAll && isReportable && !instance?.is_locked ? (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1886,136 +2046,140 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            <span>פרטי שיעור</span>
-            {!isEditMode && canEdit && (
-              <Button variant="ghost" size="sm" onClick={() => {
-                resetEditState();
-                setIsEditMode(true);
-              }}>
-                <Pencil className="h-4 w-4 ms-2" />
-                עריכה
-              </Button>
-            )}
-          </DialogTitle>
-          <DialogDescription className="sr-only">צפייה ועריכת פרטי שיעור קיים.</DialogDescription>
-        </DialogHeader>
-
-        {error && (
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
-        {conflictState && (
-          <Alert className="border-amber-400 bg-amber-50 text-amber-950">
-            <AlertTriangle className="h-4 w-4 text-amber-700" />
-            <AlertDescription className="space-y-3">
-              <div className="font-medium">{conflictState.title}</div>
-              <div className="text-sm">הפעולה שביקשתם: {conflictState.actionLabel}.</div>
-              <div className="text-sm">המצב הנוכחי בשרת:</div>
-              <ul className="list-disc pe-5 text-sm space-y-1">
-                {(conflictState.diffLines || []).map((line, index) => (
-                  <li key={`${line}-${index}`}>{line}</li>
-                ))}
-              </ul>
-              <div className="flex gap-2 justify-end">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={clearConflict}
-                  disabled={isResolvingConflict}
-                >
-                  ביטול
+      <DialogContent className="flex max-h-[90vh] max-w-4xl flex-col overflow-hidden p-0">
+        <div className="shrink-0 space-y-4 border-b border-slate-200 bg-white p-6 pb-4">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>פרטי שיעור</span>
+              {!isEditMode && canEdit && (
+                <Button variant="ghost" size="sm" onClick={() => {
+                  resetEditState();
+                  setIsEditMode(true);
+                }}>
+                  <Pencil className="h-4 w-4 ms-2" />
+                  עריכה
                 </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => applyConflictOverride({
-                    onUnhandledError: (err) => {
-                      console.error('Error overriding conflict:', err);
-                      setError(resolveMutationError(err));
-                    },
-                  })}
-                  disabled={isResolvingConflict}
-                >
-                  {isResolvingConflict ? (
-                    <>
-                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                      מחיל...
-                    </>
-                  ) : (
-                    'החל בכל זאת'
-                  )}
-                </Button>
-              </div>
-            </AlertDescription>
-          </Alert>
-        )}
+              )}
+            </DialogTitle>
+            <DialogDescription className="sr-only">צפייה ועריכת פרטי שיעור קיים.</DialogDescription>
+          </DialogHeader>
 
-        {billingWarnings.length > 0 && (() => {
-          const participantMap = new Map(
-            displayParticipants.flatMap((participant) => {
-              const displayName = getParticipantDisplayName(participant, 'לקוח/ה');
-              return [
-                participant?.student_id ? [`student:${participant.student_id}`, displayName] : null,
-                participant?.client_profile_id ? [`client:${participant.client_profile_id}`, displayName] : null,
-                participant?.student?.client_profile_id ? [`client:${participant.student.client_profile_id}`, displayName] : null,
-              ].filter(Boolean);
-            })
-          );
-          const names = billingWarnings
-            .map((warning) => (
-              participantMap.get(warning?.student_id ? `student:${warning.student_id}` : '')
-              || participantMap.get(warning?.client_profile_id ? `client:${warning.client_profile_id}` : '')
-              || 'לקוח/ה'
-            ))
-            .filter((v, i, a) => a.indexOf(v) === i)
-            .join(', ');
-          return (
-            <Alert variant="warning" className="border-amber-400 bg-amber-50 text-amber-900">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              <AlertDescription>
-                <strong>שיעור הושלם — אך ישנה בעיית חיוב</strong>
-                <br />
-                {`לא נמצאה מסגרת חיוב תקינה עבור: ${names}. יש לסדר זאת במסך הניהול המתאים כדי שהחיוב יתבצע.`}
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {conflictState && (
+            <Alert className="border-amber-400 bg-amber-50 text-amber-950">
+              <AlertTriangle className="h-4 w-4 text-amber-700" />
+              <AlertDescription className="space-y-3">
+                <div className="font-medium">{conflictState.title}</div>
+                <div className="text-sm">הפעולה שביקשתם: {conflictState.actionLabel}.</div>
+                <div className="text-sm">המצב הנוכחי בשרת:</div>
+                <ul className="list-disc pe-5 text-sm space-y-1">
+                  {(conflictState.diffLines || []).map((line, index) => (
+                    <li key={`${line}-${index}`}>{line}</li>
+                  ))}
+                </ul>
+                <div className="flex gap-2 justify-end">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={clearConflict}
+                    disabled={isResolvingConflict}
+                  >
+                    ביטול
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => applyConflictOverride({
+                      onUnhandledError: (err) => {
+                        console.error('Error overriding conflict:', err);
+                        setError(resolveMutationError(err));
+                      },
+                    })}
+                    disabled={isResolvingConflict}
+                  >
+                    {isResolvingConflict ? (
+                      <>
+                        <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                        מחיל...
+                      </>
+                    ) : (
+                      'החל בכל זאת'
+                    )}
+                  </Button>
+                </div>
               </AlertDescription>
             </Alert>
-          );
-        })()}
+          )}
 
-        {(instance.is_locked || instance.latest_correction) && canManageAll && !hardBlockedByPaidClaim && (
-          <LockedCorrectionPanel
-            instance={instance}
-            orgId={org?.id}
-            forceOpen={Boolean(error && instance.is_locked)}
-            onApplied={() => onUpdate?.()}
-          />
-        )}
+          {billingWarnings.length > 0 && (() => {
+            const participantMap = new Map(
+              displayParticipants.flatMap((participant) => {
+                const displayName = getParticipantDisplayName(participant, 'לקוח/ה');
+                return [
+                  participant?.student_id ? [`student:${participant.student_id}`, displayName] : null,
+                  participant?.client_profile_id ? [`client:${participant.client_profile_id}`, displayName] : null,
+                  participant?.student?.client_profile_id ? [`client:${participant.student.client_profile_id}`, displayName] : null,
+                ].filter(Boolean);
+              })
+            );
+            const names = billingWarnings
+              .map((warning) => (
+                participantMap.get(warning?.student_id ? `student:${warning.student_id}` : '')
+                || participantMap.get(warning?.client_profile_id ? `client:${warning.client_profile_id}` : '')
+                || 'לקוח/ה'
+              ))
+              .filter((v, i, a) => a.indexOf(v) === i)
+              .join(', ');
+            return (
+              <Alert variant="warning" className="border-amber-400 bg-amber-50 text-amber-900">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <AlertDescription>
+                  <strong>שיעור הושלם — אך ישנה בעיית חיוב</strong>
+                  <br />
+                  {`לא נמצאה מסגרת חיוב תקינה עבור: ${names}. יש לסדר זאת במסך הניהול המתאים כדי שהחיוב יתבצע.`}
+                </AlertDescription>
+              </Alert>
+            );
+          })()}
 
-        {hardBlockedByPaidClaim && canManageAll && (
-          <Alert className="border-red-300 bg-red-50 text-red-950">
-            <AlertTriangle className="h-4 w-4 text-red-700" />
-            <AlertDescription>
-              <div className="font-medium">השיעור חסום לתיקון בגלל תביעה ששולמה.</div>
-              <div className="text-sm">לא ניתן לפתוח תיקון לשיעור זה. יש להעביר את האירוע לטיפול ידני.</div>
-            </AlertDescription>
-          </Alert>
-        )}
+          {(instance.is_locked || instance.latest_correction) && canManageAll && !hardBlockedByPaidClaim && (
+            <LockedCorrectionPanel
+              instance={instance}
+              orgId={org?.id}
+              forceOpen={Boolean(error && instance.is_locked)}
+              onApplied={() => onUpdate?.()}
+            />
+          )}
 
-        {schedulingOverrideReason && !isEditMode && (
-          <Alert className="border-amber-300 bg-amber-50 text-amber-950">
-            <AlertTriangle className="h-4 w-4 text-amber-700" />
-            <AlertDescription>
-              <div className="font-medium">שיעור זה מסומן כחריגה חד-פעמית.</div>
-              <div className="mt-1 text-sm">הסיבה שנשמרה: {schedulingOverrideReason}</div>
-            </AlertDescription>
-          </Alert>
-        )}
+          {hardBlockedByPaidClaim && canManageAll && (
+            <Alert className="border-red-300 bg-red-50 text-red-950">
+              <AlertTriangle className="h-4 w-4 text-red-700" />
+              <AlertDescription>
+                <div className="font-medium">השיעור חסום לתיקון בגלל תביעה ששולמה.</div>
+                <div className="text-sm">לא ניתן לפתוח תיקון לשיעור זה. יש להעביר את האירוע לטיפול ידני.</div>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {schedulingOverrideReason && !isEditMode && (
+            <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+              <AlertTriangle className="h-4 w-4 text-amber-700" />
+              <AlertDescription>
+                <div className="font-medium">שיעור זה מסומן כחריגה חד-פעמית.</div>
+                <div className="mt-1 text-sm">הסיבה שנשמרה: {schedulingOverrideReason}</div>
+              </AlertDescription>
+            </Alert>
+          )}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
 
         {isEditMode ? (
           // Edit Mode
@@ -2255,71 +2419,27 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               </div>
             ) : null}
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  resetEditState();
-                  setIsEditMode(false);
-                }}
-                disabled={isSaving || editPreviewLoading}
-              >
-                ביטול
-              </Button>
-              {editPreview && pendingEditBody ? (
-                <Button
-                  onClick={confirmEditPreview}
-                  disabled={isSaving || editPreviewLoading || editPreview.can_apply === false}
-                >
-                  {isSaving ? (
-                    <>
-                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                      שומר...
-                    </>
-                  ) : (
-                    'אשר ושמור'
-                  )}
-                </Button>
-              ) : (
-                <Button onClick={handleSave} disabled={isSaving || editPreviewLoading || (selectedEditService && !selectedEditServiceHasValidDuration)}>
-                  {editPreviewLoading ? (
-                    <>
-                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                      בודק...
-                    </>
-                  ) : isSaving ? (
-                  <>
-                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                    שומר...
-                  </>
-                ) : (
-                    'בדוק שינויים'
-                  )}
-                </Button>
-              )}
-            </DialogFooter>
           </div>
         ) : (
           // View Mode
           <Tabs value={activeViewTab} onValueChange={setActiveViewTab} dir="rtl" className="space-y-5">
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-slate-100 p-1 text-slate-600 md:grid-cols-6">
-              <TabsTrigger value="overview" className="py-2">סקירה</TabsTrigger>
-              <TabsTrigger value="actions" className="py-2">
-                פעולות פתוחות
+            <TabsList className="sticky top-0 z-10 grid h-auto w-full grid-cols-2 gap-1 border-b border-slate-200 bg-slate-100 p-1 text-slate-600 shadow-sm md:grid-cols-4">
+              <TabsTrigger value="overview" className="py-2">
+                סקירה
                 {openActions.length > 0 ? (
                   <Badge variant="secondary" className="ms-2 h-5 min-w-5 rounded-full px-1 text-[11px]">
                     {openActions.length}
                   </Badge>
                 ) : null}
               </TabsTrigger>
-              <TabsTrigger value="participants" className="py-2">משתתפים ונוכחות</TabsTrigger>
-              <TabsTrigger value="reminders" className="py-2">תזכורות</TabsTrigger>
+              <TabsTrigger value="participants" className="py-2">משתתפים</TabsTrigger>
               <TabsTrigger value="workflow" className="py-2">סגירה ותיעוד</TabsTrigger>
               <TabsTrigger value="admin" className="py-2">ניהול</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-5">
+              {openActionsPanel}
+
               <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
@@ -2412,42 +2532,6 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               ) : null}
             </TabsContent>
 
-            <TabsContent value="actions" className="space-y-4">
-              {openActions.length > 0 ? (
-                <div className="space-y-3">
-                  {openActions.map((action, index) => {
-                    const targetTab = getOpenActionTab(action.id);
-                    return (
-                      <div
-                        key={`${action.id}-${index}`}
-                        className={`rounded-2xl border p-4 ${getOpenActionToneClass(action.tone)}`}
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold">{index + 1}. {action.label}</div>
-                            <div className="mt-1 text-sm opacity-85">{action.description}</div>
-                          </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setActiveViewTab(targetTab)}
-                          >
-                            פתח אזור מתאים
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <EmptyTabState
-                  title="אין פעולות פתוחות"
-                  description="לפי הנתונים הנוכחיים אין משימה תפעולית שדורשת טיפול בשיעור הזה."
-                />
-              )}
-            </TabsContent>
-
             <TabsContent value="participants" className="space-y-4">
               {displayParticipants.length > 0 ? participantRosterPanel : (
                 <EmptyTabState
@@ -2456,18 +2540,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                 />
               )}
               {addParticipantPanel}
-            </TabsContent>
-
-            <TabsContent value="reminders" className="space-y-4">
               <LessonReminderSummary
                 participants={displayParticipants}
                 localReminderState={localReminderState}
                 canManageAll={canManageAll}
                 resolveReminderContact={resolveReminderContact}
               />
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                פעולות שליחה ואישור תזכורות נמצאות בשורות המשתתפים כדי לשמור על הקשר ישיר בין תלמיד, איש קשר וסטטוס הגעה.
-              </div>
+              {reminderActionsPanel}
             </TabsContent>
 
             <TabsContent value="workflow" className="space-y-4">
@@ -2528,6 +2607,64 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
             </TabsContent>
           </Tabs>
         )}
+        </div>
+        {isEditMode ? (
+          <div className="shrink-0 border-t border-slate-200 bg-white p-4">
+            {editPreview && pendingEditBody ? (
+              <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">
+                השינויים נבדקו — ניתן לאשר
+              </div>
+            ) : null}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  resetEditState();
+                  setIsEditMode(false);
+                }}
+                disabled={isSaving || editPreviewLoading}
+              >
+                ביטול
+              </Button>
+              {editPreview && pendingEditBody ? (
+                <Button
+                  onClick={confirmEditPreview}
+                  disabled={isSaving || editPreviewLoading || editPreview.can_apply === false}
+                  className="min-w-36 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 focus-visible:ring-emerald-600"
+                >
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                      שומר...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="me-2 h-4 w-4" />
+                      אשר ושמור
+                    </>
+                  )}
+                </Button>
+              ) : (
+                <Button onClick={handleSave} disabled={isSaving || editPreviewLoading || (selectedEditService && !selectedEditServiceHasValidDuration)}>
+                  {editPreviewLoading ? (
+                    <>
+                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                      בודק...
+                    </>
+                  ) : isSaving ? (
+                    <>
+                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                      שומר...
+                    </>
+                  ) : (
+                    'בדוק שינויים'
+                  )}
+                </Button>
+              )}
+            </DialogFooter>
+          </div>
+        ) : null}
       </DialogContent>
       <Dialog
         open={cancelDialogOpen}

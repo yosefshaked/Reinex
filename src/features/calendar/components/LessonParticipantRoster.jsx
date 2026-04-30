@@ -40,6 +40,7 @@ export function LessonParticipantRoster({
   handleSendWaReminder,
   handleSendEmailReminder,
   handleSetReminderConfirmation,
+  showReminderActions = true,
   resolveReminderContact,
   formatPhoneForWhatsApp,
   deriveDisplayWorkflowDecisions,
@@ -378,7 +379,7 @@ export function LessonParticipantRoster({
                 </div>
               )}
 
-              {isScheduled && canManageAll && (
+              {showReminderActions && isScheduled && canManageAll && (
                 <div className="flex items-center gap-2 pt-1.5 border-t border-gray-200 flex-wrap">
                   <span className="text-[11px] text-gray-500">
                     {reminderContact.source === 'guardian' ? 'איש קשר: הורה' : 'איש קשר: לקוח/ה'}
