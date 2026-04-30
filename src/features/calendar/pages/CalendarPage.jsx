@@ -3,7 +3,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge.jsx';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Plus, LayoutTemplate, Wand2 } from 'lucide-react';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Plus, LayoutTemplate, Wand2, PanelRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { DateNavigator } from '../components/CalendarHeader/DateNavigator.jsx';
 import { LessonInstanceDialog } from '../components/LessonInstanceDialog';
@@ -60,6 +61,7 @@ export default function CalendarPage() {
   const [pendingServiceId, setPendingServiceId] = useState('');
   const [whatsAppCompose, setWhatsAppCompose] = useState(null);
   const [availabilityFixIssue, setAvailabilityFixIssue] = useState(null);
+  const [mobileDockOpen, setMobileDockOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -388,7 +390,7 @@ export default function CalendarPage() {
       {/* Compact top bar: page title + action buttons + date navigator + view toggle */}
       <div className="flex-shrink-0 border-b border-slate-100 bg-background px-4 py-3">
         <div className="mx-auto" style={{ maxWidth: "min(1680px, calc(100vw - 1.5rem))" }}>
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="shrink-0 text-lg font-semibold text-neutral-900">לוח זמנים</h1>
               <Button onClick={handleOpenBlankCreateLesson} className="gap-2">
@@ -405,7 +407,7 @@ export default function CalendarPage() {
               </Button>
             </div>
 
-            <div className="flex justify-center xl:flex-1">
+            <div className="flex justify-center lg:flex-1">
               <DateNavigator currentDate={currentDate} onDateChange={setCurrentDate} onNavigate={handleCalendarNavigate} viewMode={viewMode} />
             </div>
 
@@ -427,6 +429,16 @@ export default function CalendarPage() {
               <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
                 דורש תשומת לב: {workspaceSummary.attentionCount}
               </Badge>
+              {/* Workspace toggle — visible only below lg where the dock is hidden */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="lg:hidden"
+                onClick={() => setMobileDockOpen(true)}
+              >
+                <PanelRight className="h-4 w-4 ms-1" />
+                מרכז תפעול
+              </Button>
             </div>
           </div>
         </div>
@@ -465,9 +477,9 @@ export default function CalendarPage() {
       {!instructorsError && !instancesError ? (
         <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4 pt-3">
           <div className="mx-auto h-full" style={{ maxWidth: "min(1680px, calc(100vw - 1.5rem))" }}>
-            <div className="grid h-full gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
-              {/* Dock — independently scrollable */}
-              <div className="min-h-0 overflow-y-auto xl:pe-1">
+            <div className="grid h-full gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
+              {/* Dock — hidden below lg; shown as side panel on lg+ */}
+              <div className="hidden lg:block min-h-0 overflow-y-auto lg:pe-1">
                 <CalendarWorkspaceDock
                   currentDate={currentDate}
                   viewMode={viewMode}
@@ -506,6 +518,27 @@ export default function CalendarPage() {
           </div>
         </div>
       ) : null}
+
+      {/* Mobile/tablet workspace dock — drawer accessible via top-bar button below lg */}
+      <Sheet open={mobileDockOpen} onOpenChange={setMobileDockOpen}>
+        <SheetContent side="right" className="w-[22rem] max-w-full overflow-y-auto p-4">
+          <SheetHeader className="mb-4">
+            <SheetTitle>מרכז תפעול</SheetTitle>
+          </SheetHeader>
+          <CalendarWorkspaceDock
+            currentDate={currentDate}
+            viewMode={viewMode}
+            summary={workspaceSummary}
+            selectedInstance={selectedInstance}
+            selectedSlot={selectedSlotSummary}
+            onClearSelection={() => { clearSelections(); setMobileDockOpen(false); }}
+            onOpenCreateLesson={() => { handleOpenCreateLesson(); setMobileDockOpen(false); }}
+            onOpenSelectedLesson={() => { handleOpenSelectedLesson(); setMobileDockOpen(false); }}
+            onOpenInstructorWhatsApp={openInstructorWhatsApp}
+            onOpenAttentionItem={(item) => { handleOpenAttentionItem(item); setMobileDockOpen(false); }}
+          />
+        </SheetContent>
+      </Sheet>
 
       <LessonInstanceDialog
         instance={selectedInstance}

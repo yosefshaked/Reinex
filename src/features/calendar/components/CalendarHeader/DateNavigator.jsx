@@ -122,7 +122,7 @@ export function DateNavigator({ currentDate, onDateChange, onNavigate, viewMode 
 
   return (
     <div className="flex w-full justify-center">
-      <div className="flex w-full max-w-[46rem] flex-wrap items-center justify-center gap-2 rounded-[1.75rem] border border-slate-200 bg-slate-50/90 p-1.5 shadow-sm">
+      <div className="flex w-full max-w-[40rem] flex-nowrap items-center justify-center gap-2 rounded-[1.75rem] border border-slate-200 bg-slate-50/90 p-1.5 shadow-sm">
         <Button
           type="button"
           variant="ghost"
@@ -152,7 +152,7 @@ export function DateNavigator({ currentDate, onDateChange, onNavigate, viewMode 
             <Button
               type="button"
               variant="ghost"
-              className="order-last flex h-auto min-h-12 w-full flex-1 flex-col items-center justify-center rounded-[1.2rem] border border-blue-100 bg-gradient-to-b from-white to-blue-50 px-4 py-2 text-center text-slate-900 shadow-sm hover:border-blue-200 hover:bg-blue-50 sm:order-none sm:min-w-[22rem]"
+              className="order-last flex h-auto min-h-12 w-full flex-1 flex-col items-center justify-center rounded-[1.2rem] border border-blue-100 bg-gradient-to-b from-white to-blue-50 px-4 py-2 text-center text-slate-900 shadow-sm hover:border-blue-200 hover:bg-blue-50 sm:order-none"
             >
               <span className="truncate text-sm font-semibold sm:text-[0.95rem]">{displayText}</span>
               <span className="mt-0.5 truncate text-[11px] font-medium text-slate-500 sm:text-xs">{subtitle}</span>
