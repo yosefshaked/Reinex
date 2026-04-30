@@ -4,6 +4,7 @@ import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/s
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { enrichInstancesWithCorrectionState } from '../_shared/calendar-corrections.js';
+import { enrichLessonInstancesWithHmoCoverage } from '../_shared/calendar-hmo-coverage.js';
 import {
   fetchLessonMutationState,
   isLockedState,
@@ -137,6 +138,24 @@ function normalizeCancelledParticipantAuditRows(value) {
     : [];
 }
 
+async function enrichLessonInstanceRecordsForResponse(client, orgId, records = []) {
+  const normalizedRecords = (Array.isArray(records) ? records : [records])
+    .filter(Boolean)
+    .map(normalizeLessonInstanceRecord);
+
+  if (normalizedRecords.length === 0) {
+    return [];
+  }
+
+  const correctionEnriched = await enrichInstancesWithCorrectionState(client, normalizedRecords);
+  const coverageEnriched = await enrichLessonInstancesWithHmoCoverage(client, orgId, correctionEnriched);
+  return coverageEnriched.map((record) => (
+    record?.version !== undefined
+      ? { ...record, version: normalizeEntityVersion(record.version) }
+      : record
+  ));
+}
+
 async function loadCreatedInstanceResponse(client, orgId, instanceId, fallbackInstance = null) {
   const loadEnriched = async () => {
     const { data, error } = await withOrgScope(client, 'lesson_instances', orgId)
@@ -148,10 +167,7 @@ async function loadCreatedInstanceResponse(client, orgId, instanceId, fallbackIn
       throw error;
     }
 
-    const [enriched] = await enrichInstancesWithCorrectionState(client, [normalizeLessonInstanceRecord(data)]);
-    if (enriched?.version !== undefined) {
-      enriched.version = normalizeEntityVersion(enriched.version);
-    }
+    const [enriched] = await enrichLessonInstanceRecordsForResponse(client, orgId, data);
     return enriched || data;
   };
 
@@ -162,7 +178,7 @@ async function loadCreatedInstanceResponse(client, orgId, instanceId, fallbackIn
       return await loadEnriched();
     } catch (secondError) {
       if (fallbackInstance) {
-        const [enrichedFallback] = await enrichInstancesWithCorrectionState(client, [normalizeLessonInstanceRecord(fallbackInstance)]);
+        const [enrichedFallback] = await enrichLessonInstanceRecordsForResponse(client, orgId, fallbackInstance);
         return enrichedFallback || fallbackInstance;
       }
       throw secondError || firstError;
@@ -269,10 +285,7 @@ export default async function lessonInstances(context, req) {
         return respond(context, 404, { message: 'lesson_instance_not_found' });
       }
 
-      const [enriched] = await enrichInstancesWithCorrectionState(supabase, [normalizeLessonInstanceRecord(data)]);
-      if (enriched?.version !== undefined) {
-        enriched.version = normalizeEntityVersion(enriched.version);
-      }
+      const [enriched] = await enrichLessonInstanceRecordsForResponse(supabase, orgId, data);
       return respond(context, 200, enriched || data);
     }
 
@@ -317,10 +330,7 @@ export default async function lessonInstances(context, req) {
       return respond(context, 500, { message: 'failed_to_load_lesson_instances' });
     }
 
-    const enrichedData = await enrichInstancesWithCorrectionState(
-      supabase,
-      (Array.isArray(data) ? data : []).map(normalizeLessonInstanceRecord),
-    );
+    const enrichedData = await enrichLessonInstanceRecordsForResponse(supabase, orgId, data || []);
     return respond(context, 200, enrichedData);
   }
 
@@ -958,13 +968,7 @@ export default async function lessonInstances(context, req) {
       }
     }
 
-    const [enriched] = await enrichInstancesWithCorrectionState(
-      supabase,
-      data ? [normalizeLessonInstanceRecord(data)] : [],
-    );
-    if (enriched?.version !== undefined) {
-      enriched.version = normalizeEntityVersion(enriched.version);
-    }
+    const [enriched] = await enrichLessonInstanceRecordsForResponse(supabase, orgId, data);
     return respond(context, 200, enriched || data);
   }
 
@@ -1103,10 +1107,7 @@ export default async function lessonInstances(context, req) {
       const { data: addedRefreshed, error: addedRefreshError } = await withOrgScope(supabase, 'lesson_instances', orgId)
         .select(buildInstanceSelect()).eq('id', instanceId).single();
       if (addedRefreshError) return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
-      const [addedEnriched] = await enrichInstancesWithCorrectionState(
-        supabase,
-        addedRefreshed ? [normalizeLessonInstanceRecord(addedRefreshed)] : [],
-      );
+      const [addedEnriched] = await enrichLessonInstanceRecordsForResponse(supabase, orgId, addedRefreshed);
       return respond(context, 200, addedEnriched || addedRefreshed);
     }
 

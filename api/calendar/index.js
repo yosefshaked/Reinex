@@ -25,7 +25,7 @@ import { assertNoLeaveForLesson, syncInstructorAttendanceFromLessons, syncLesson
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
-import { resolveLessonCoverageDecision } from '../_shared/hmo.js';
+import { enrichLessonInstancesWithHmoCoverage } from '../_shared/calendar-hmo-coverage.js';
 import {
   buildUtcBoundsForTimezoneDateRange,
   getCurrentDateInTimezone,
@@ -130,62 +130,6 @@ function buildEditFieldChange(field, label, beforeValue, afterValue) {
     after: afterText,
     changed: String(beforeText ?? '') !== String(afterText ?? ''),
   };
-}
-
-async function buildParticipantCoverageById(client, orgId, instances = []) {
-  const coverageByParticipantId = new Map();
-  const coverageRequests = [];
-
-  for (const instance of Array.isArray(instances) ? instances : []) {
-    const serviceId = normalizeString(instance?.service_id);
-    if (!serviceId) continue;
-
-    for (const participant of Array.isArray(instance?.participants) ? instance.participants : []) {
-      const participantId = normalizeString(participant?.id);
-      const studentId = normalizeString(participant?.student_id);
-      if (!participantId || !studentId) continue;
-
-      coverageRequests.push({
-        participantId,
-        studentId,
-        serviceId,
-        lessonDate: instance?.datetime_start || '',
-      });
-    }
-  }
-
-  await Promise.all(coverageRequests.map(async (request) => {
-    try {
-      const decision = await resolveLessonCoverageDecision(client, {
-        orgId,
-        studentId: request.studentId,
-        serviceId: request.serviceId,
-        lessonDate: request.lessonDate,
-        lessonParticipantId: request.participantId,
-      });
-      const authorization = decision?.authorization || null;
-      coverageByParticipantId.set(request.participantId, {
-        status: decision?.status || 'standard_uncovered',
-        reason: decision?.reason || null,
-        authorization_id: decision?.authorization_id || null,
-        remaining_authorized_lessons: decision?.remaining_authorized_lessons ?? null,
-        covered_customer_charge_amount: decision?.covered_customer_charge_amount ?? null,
-        covered_insurer_claim_amount: decision?.covered_insurer_claim_amount ?? null,
-        hmo_provider_id: authorization?.provider_id || authorization?.provider?.id || null,
-        hmo_provider_name: authorization?.provider?.name || null,
-        hmo_provider_track_id: authorization?.provider_track_id || authorization?.provider_track?.id || null,
-        hmo_provider_track_name: authorization?.provider_track?.name || null,
-      });
-    } catch (coverageError) {
-      coverageByParticipantId.set(request.participantId, {
-        status: 'unknown',
-        reason: coverageError?.message || 'failed_to_resolve_hmo_coverage',
-        authorization_id: null,
-      });
-    }
-  }));
-
-  return coverageByParticipantId;
 }
 
 function buildUpdateInstancePreview({
@@ -724,8 +668,6 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
     }
   }
 
-  const coverageByParticipantId = await buildParticipantCoverageById(client, orgId, instances || []);
-
   // Transform data for frontend consumption
   const transformedInstances = (instances || []).map(instance => {
     const participants = Array.isArray(instance.participants) 
@@ -747,7 +689,6 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
             attendance_confirmed_at: p.attendance_confirmed_at,
             documented_at: p.documented_at,
             metadata: p.metadata && typeof p.metadata === 'object' ? p.metadata : {},
-            hmo_coverage: coverageByParticipantId.get(p.id) || null,
             client_profile: resolvedProfile ? {
               id: resolvedProfile.id,
               first_name: resolvedProfile.first_name,
@@ -831,7 +772,8 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
     };
   });
 
-  const enrichedInstances = await enrichInstancesWithCorrectionState(client, transformedInstances);
+  const coverageEnrichedInstances = await enrichLessonInstancesWithHmoCoverage(client, orgId, transformedInstances);
+  const enrichedInstances = await enrichInstancesWithCorrectionState(client, coverageEnrichedInstances);
   return respond(context, 200, enrichedInstances);
 }
 
