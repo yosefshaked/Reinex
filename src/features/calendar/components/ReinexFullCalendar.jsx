@@ -97,6 +97,42 @@ function getLocalStartTime(date) {
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
+function formatPreviewValue(field, value) {
+  if (value == null || value === '') {
+    return '—';
+  }
+
+  if (field === 'datetime_start') {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleString('he-IL', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+    }
+  }
+
+  if (field === 'duration_minutes') {
+    return `${value} דקות`;
+  }
+
+  return String(value);
+}
+
+function getPreviewImpactClass(severity) {
+  if (severity === 'blocking') {
+    return 'border-red-200 bg-red-50 text-red-950';
+  }
+  if (severity === 'warning') {
+    return 'border-amber-200 bg-amber-50 text-amber-950';
+  }
+  return 'border-slate-200 bg-slate-50 text-slate-800';
+}
+
 function buildSchedulingOverrideMetadata(baseMetadata, {
   enabled,
   selectedReasonCode,
@@ -680,6 +716,9 @@ export default function ReinexFullCalendar({
   const initialCalendarViewRef = useRef(fullCalendarView);
   const pendingDropConfirmDisabled = useMemo(() => {
     if (!pendingDropInfo) return false;
+    if (pendingDropInfo.previewLoading) return true;
+    if (pendingDropInfo.previewError) return true;
+    if (pendingDropInfo.preview?.can_apply === false) return true;
     if (pendingDropInfo.availabilityState?.status === 'outside_availability' && !pendingDropInfo.useSchedulingOverride) {
       return true;
     }
@@ -688,6 +727,103 @@ export default function ReinexFullCalendar({
     }
     return false;
   }, [pendingDropInfo]);
+
+  useEffect(() => {
+    if (!pendingDropInfo) {
+      return undefined;
+    }
+
+    const dropInfo = pendingDropInfo.rawInfo;
+    const instance = dropInfo?.event.extendedProps?.instance;
+    const nextStart = dropInfo?.event.start;
+    const nextResourceId = dropInfo?.newResource?.id
+      || dropInfo?.event.getResources?.()?.[0]?.id
+      || instance?.instructor_employee_id;
+
+    if (!activeOrgId || !instance?.id || !nextStart || !nextResourceId) {
+      return undefined;
+    }
+
+    if (
+      pendingDropInfo.availabilityState?.status === 'outside_availability'
+      && !hasValidSchedulingOverrideReason(pendingDropInfo.selectedReasonCode, pendingDropInfo.customReason)
+    ) {
+      if (!pendingDropInfo.preview && !pendingDropInfo.previewError && !pendingDropInfo.previewLoading && !pendingDropInfo.previewRequestKey) {
+        return undefined;
+      }
+      setPendingDropInfo((current) => (
+        current?.rawInfo === dropInfo
+          ? { ...current, preview: null, previewError: '', previewLoading: false, previewRequestKey: '' }
+          : current
+      ));
+      return undefined;
+    }
+
+    const metadata = buildSchedulingOverrideMetadata(instance.metadata, {
+      enabled: pendingDropInfo.useSchedulingOverride,
+      selectedReasonCode: pendingDropInfo.selectedReasonCode,
+      customReason: pendingDropInfo.customReason,
+    });
+    const requestKey = JSON.stringify({
+      id: instance.id,
+      start: nextStart.toISOString(),
+      instructor: nextResourceId,
+      metadata,
+    });
+
+    if (pendingDropInfo.previewRequestKey === requestKey && (pendingDropInfo.preview || pendingDropInfo.previewLoading || pendingDropInfo.previewError)) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    setPendingDropInfo((current) => (
+      current?.rawInfo === dropInfo
+        ? { ...current, preview: null, previewError: '', previewLoading: true, previewRequestKey: requestKey }
+        : current
+    ));
+
+    async function fetchPreview() {
+      try {
+        const payload = await authenticatedFetch('calendar/instances', {
+          method: 'PUT',
+          body: {
+            action: 'preview-update-instance',
+            org_id: activeOrgId,
+            id: instance.id,
+            datetime_start: nextStart.toISOString(),
+            instructor_employee_id: nextResourceId,
+            duration_minutes: instance.duration_minutes,
+            service_id: instance.service_id,
+            status: instance.status,
+            metadata,
+            expected_version: instance.version,
+          },
+        });
+
+        if (cancelled) return;
+        setPendingDropInfo((current) => (
+          current?.rawInfo === dropInfo
+            ? { ...current, preview: payload?.preview || null, previewError: '', previewLoading: false, previewRequestKey: requestKey }
+            : current
+        ));
+      } catch (error) {
+        if (cancelled) return;
+        setPendingDropInfo((current) => (
+          current?.rawInfo === dropInfo
+            ? { ...current, preview: null, previewError: error?.message || 'לא ניתן היה לבנות תצוגה מקדימה להעברה.', previewLoading: false, previewRequestKey: requestKey }
+            : current
+        ));
+      }
+    }
+
+    void fetchPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeOrgId,
+    pendingDropInfo,
+  ]);
 
   const navigateCalendarWithoutApi = useCallback((action) => {
     if (typeof onDateChange !== 'function') {
@@ -915,6 +1051,16 @@ export default function ReinexFullCalendar({
       return;
     }
 
+    if (pendingDropInfo.previewLoading) {
+      toast.error('התצוגה המקדימה עדיין נטענת.');
+      return;
+    }
+
+    if (pendingDropInfo.previewError || pendingDropInfo.preview?.can_apply === false) {
+      toast.error(pendingDropInfo.previewError || 'התצוגה המקדימה חסמה את ההעברה.');
+      return;
+    }
+
     setUpdatingEventId(instance.id);
     try {
       const conflictResponse = await authenticatedFetch('calendar/conflicts/check', {
@@ -1022,6 +1168,27 @@ export default function ReinexFullCalendar({
       </div>
     );
   }, [onOpenInstructorWhatsApp]);
+
+  const formatPendingDropPreviewValue = useCallback((field, value) => {
+    if (field === 'instructor_employee_id') {
+      return instructorMap.get(String(value || ''))?.full_name || formatPreviewValue(field, value);
+    }
+
+    if (field === 'service_id') {
+      const instance = pendingDropInfo?.rawInfo?.event?.extendedProps?.instance;
+      if (String(instance?.service_id || '') === String(value || '')) {
+        return instance?.service?.service_name || formatPreviewValue(field, value);
+      }
+    }
+
+    if (field === 'status') {
+      if (value === 'scheduled') return 'מתוכנן';
+      if (value === 'completed') return 'הושלם';
+      if (value === 'cancelled') return 'בוטל';
+    }
+
+    return formatPreviewValue(field, value);
+  }, [instructorMap, pendingDropInfo?.rawInfo]);
 
   return (
     <div className="reinex-fullcalendar-shell">
@@ -1191,6 +1358,63 @@ export default function ReinexFullCalendar({
               </div>
             </div>
           ) : null}
+          <div className="space-y-3">
+            {pendingDropInfo?.previewLoading ? (
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                בונה תצוגה מקדימה מהשרת...
+              </div>
+            ) : null}
+
+            {pendingDropInfo?.previewError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-950">
+                {pendingDropInfo.previewError}
+              </div>
+            ) : null}
+
+            {pendingDropInfo?.preview ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">תצוגה מקדימה</div>
+                    <div className="text-xs text-slate-500">הנתונים נבדקו מול מצב השרת הנוכחי.</div>
+                  </div>
+                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${pendingDropInfo.preview.can_apply ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}>
+                    {pendingDropInfo.preview.can_apply ? 'ניתן לשמור' : 'חסום'}
+                  </span>
+                </div>
+
+                {(pendingDropInfo.preview.changes || []).length > 0 ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {pendingDropInfo.preview.changes.map((change) => (
+                      <div key={change.field} className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-xs">
+                        <div className="font-semibold text-slate-800">{change.label}</div>
+                        <div className="mt-1 grid gap-1 text-slate-600">
+                          <div>לפני: {formatPendingDropPreviewValue(change.field, change.before)}</div>
+                          <div>אחרי: {formatPendingDropPreviewValue(change.field, change.after)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm text-slate-700">
+                    לא זוהו שינויים בשדות השיבוץ.
+                  </div>
+                )}
+
+                {(pendingDropInfo.preview.impacts || []).length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {(pendingDropInfo.preview.impacts || []).map((impact, index) => (
+                      <div key={`${impact.type || 'impact'}-${index}`} className={`rounded-xl border px-3 py-2 text-sm ${getPreviewImpactClass(impact.severity)}`}>
+                        <div className="font-semibold">{impact.label || 'השפעה'}</div>
+                        <div className="mt-0.5 text-xs opacity-85">{impact.message}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={cancelPendingDrop}>ביטול</AlertDialogCancel>
             <AlertDialogAction onClick={confirmPendingDrop} disabled={pendingDropConfirmDisabled}>אישור</AlertDialogAction>

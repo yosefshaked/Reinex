@@ -354,12 +354,6 @@ function resolveClosureStepState(summary, key, isClosed) {
   return null;
 }
 
-function getClosureStepLabel(value, { done, pending, unknown = 'לא ידוע' }) {
-  if (value === true) return done;
-  if (value === false) return pending;
-  return unknown;
-}
-
 function formatAgorotPreview(value) {
   const amount = Number(value || 0);
   return new Intl.NumberFormat('he-IL', {
@@ -368,6 +362,16 @@ function formatAgorotPreview(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount / 100);
+}
+
+function getPreviewImpactClass(severity) {
+  if (severity === 'blocking') {
+    return 'border-red-200 bg-red-50 text-red-950';
+  }
+  if (severity === 'warning') {
+    return 'border-amber-200 bg-amber-50 text-amber-950';
+  }
+  return 'border-slate-200 bg-slate-50 text-slate-800';
 }
 
 function shortId(value) {
@@ -488,6 +492,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [cancelPreview, setCancelPreview] = useState(null);
   const [cancelPreviewError, setCancelPreviewError] = useState('');
   const [cancelPreviewLoading, setCancelPreviewLoading] = useState(false);
+  const [editPreview, setEditPreview] = useState(null);
+  const [editPreviewError, setEditPreviewError] = useState('');
+  const [editPreviewLoading, setEditPreviewLoading] = useState(false);
+  const [pendingEditBody, setPendingEditBody] = useState(null);
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
   const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
   const latestPreviewRequestIdRef = useRef(0);
@@ -505,6 +513,13 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
   const [useSchedulingOverride, setUseSchedulingOverride] = useState(false);
   const [selectedOverrideReasonCode, setSelectedOverrideReasonCode] = useState('');
   const [customOverrideReason, setCustomOverrideReason] = useState('');
+
+  useEffect(() => {
+    setEditPreview(null);
+    setEditPreviewError('');
+    setEditPreviewLoading(false);
+    setPendingEditBody(null);
+  }, [formData, useSchedulingOverride, selectedOverrideReasonCode, customOverrideReason]);
 
   const resetEditState = useCallback((instanceValue = displayInstance) => {
     if (!instanceValue) {
@@ -524,6 +539,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setUseSchedulingOverride(overrideState.enabled);
     setSelectedOverrideReasonCode(overrideState.selectedReasonCode);
     setCustomOverrideReason(overrideState.customReason);
+    setEditPreview(null);
+    setEditPreviewError('');
+    setEditPreviewLoading(false);
+    setPendingEditBody(null);
   }, [displayInstance]);
 
   // Initialize form data when instance changes
@@ -550,6 +569,10 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     setCancelPreview(null);
     setCancelPreviewError('');
     setCancelPreviewLoading(false);
+    setEditPreview(null);
+    setEditPreviewError('');
+    setEditPreviewLoading(false);
+    setPendingEditBody(null);
     latestPreviewRequestIdRef.current += 1;
     latestCancelPreviewRequestIdRef.current += 1;
     latestStudentSearchRequestIdRef.current += 1;
@@ -849,65 +872,68 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     };
   }
 
-  async function handleSave() {
+  function buildEditUpdateBody() {
     if (!org?.id) {
-      setError('Organization not found');
-      return;
+      throw new Error('Organization not found');
     }
 
     if (formData.status === 'completed' && hasUnsetParticipants) {
-      setError(
+      throw new Error(
         `יש לסמן נוכחות לכל התלמידים לפני השלמת השיעור (${scheduledParticipantsCount} ${scheduledParticipantsCount === 1 ? 'תלמיד ממתין' : 'תלמידים ממתינים'})`
       );
-      return;
     }
 
+    if (selectedEditService && !selectedEditServiceHasValidDuration) {
+      throw new Error('לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת השיעור.');
+    }
+    if (schedulingAvailabilityState.status === 'missing_capability') {
+      throw new Error('missing_instructor_service_capability');
+    }
+    if (schedulingAvailabilityState.status === 'missing_availability') {
+      throw new Error('missing_instructor_service_availability');
+    }
+    if (schedulingAvailabilityState.status === 'outside_instructor_service_availability' && !useSchedulingOverride) {
+      throw new Error('outside_instructor_service_availability');
+    }
+    if (useSchedulingOverride && !hasValidSchedulingOverrideReason(selectedOverrideReasonCode, customOverrideReason)) {
+      throw new Error('יש למלא סיבת חריגה לפני שמירת שיבוץ מחוץ לזמינות.');
+    }
+
+    const datetime_start = toUtcIsoString(formData.date, formData.time);
+    if (!datetime_start) {
+      throw new Error('תאריך או שעה אינם תקינים.');
+    }
+
+    return {
+      id: instance.id,
+      org_id: org.id,
+      datetime_start,
+      duration_minutes: formData.duration_minutes,
+      instructor_employee_id: formData.instructor_employee_id,
+      service_id: formData.service_id,
+      status: formData.status,
+      expected_version: instance.version,
+      metadata: buildSchedulingOverrideMetadata(displayInstance?.metadata, {
+        enabled: useSchedulingOverride,
+        selectedReasonCode: selectedOverrideReasonCode,
+        customReason: customOverrideReason,
+      }),
+    };
+  }
+
+  async function commitEditUpdate(body) {
     setIsSaving(true);
     setError(null);
 
     try {
-      if (selectedEditService && !selectedEditServiceHasValidDuration) {
-        throw new Error('לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת השיעור.');
-      }
-      if (schedulingAvailabilityState.status === 'missing_capability') {
-        throw new Error('missing_instructor_service_capability');
-      }
-      if (schedulingAvailabilityState.status === 'missing_availability') {
-        throw new Error('missing_instructor_service_availability');
-      }
-      if (schedulingAvailabilityState.status === 'outside_instructor_service_availability' && !useSchedulingOverride) {
-        throw new Error('outside_instructor_service_availability');
-      }
-      if (useSchedulingOverride && !hasValidSchedulingOverrideReason(selectedOverrideReasonCode, customOverrideReason)) {
-        throw new Error('יש למלא סיבת חריגה לפני שמירת שיבוץ מחוץ לזמינות.');
-      }
-
-      const datetime_start = toUtcIsoString(formData.date, formData.time);
-      if (!datetime_start) {
-        throw new Error('תאריך או שעה אינם תקינים.');
-      }
-
-      const body = {
-        id: instance.id,
-        org_id: org.id,
-        datetime_start,
-        duration_minutes: formData.duration_minutes,
-        instructor_employee_id: formData.instructor_employee_id,
-        service_id: formData.service_id,
-        status: formData.status,
-        expected_version: instance.version,
-        metadata: buildSchedulingOverrideMetadata(displayInstance?.metadata, {
-          enabled: useSchedulingOverride,
-          selectedReasonCode: selectedOverrideReasonCode,
-          customReason: customOverrideReason,
-        }),
-      };
-
       await authenticatedFetch('calendar/instances', {
         method: 'PUT',
         body,
       });
 
+      setEditPreview(null);
+      setEditPreviewError('');
+      setPendingEditBody(null);
       setIsEditMode(false);
       onUpdate?.();
     } catch (err) {
@@ -924,6 +950,53 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function handleSave() {
+    setError(null);
+    setEditPreviewError('');
+    setEditPreview(null);
+    setPendingEditBody(null);
+
+    let body;
+    try {
+      body = buildEditUpdateBody();
+    } catch (err) {
+      setError(resolveMutationError(err));
+      return;
+    }
+
+    setEditPreviewLoading(true);
+    try {
+      const payload = await authenticatedFetch('calendar/instances', {
+        method: 'PUT',
+        body: {
+          ...body,
+          action: 'preview-update-instance',
+        },
+      });
+
+      setEditPreview(payload?.preview || null);
+      setPendingEditBody(body);
+    } catch (err) {
+      setEditPreview(null);
+      setPendingEditBody(null);
+      setEditPreviewError(resolveMutationError(err));
+    } finally {
+      setEditPreviewLoading(false);
+    }
+  }
+
+  async function confirmEditPreview() {
+    if (!pendingEditBody) {
+      setEditPreviewError('אין פעולה מוכנה לשמירה.');
+      return;
+    }
+    if (editPreview?.can_apply === false) {
+      setEditPreviewError('התצוגה המקדימה חסמה את השמירה.');
+      return;
+    }
+    await commitEditUpdate(pendingEditBody);
   }
 
   async function handleMarkAttendance(participantId, status, notes, options = {}) {
@@ -1473,6 +1546,39 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
     [selectedEditService?.duration_minutes],
   );
   const selectedEditServiceHasValidDuration = selectedEditServiceDurationMinutes > 0;
+  const formatEditPreviewValue = useCallback((field, value) => {
+    if (value == null || value === '') {
+      return '—';
+    }
+
+    if (field === 'datetime_start') {
+      return `${formatDateDisplay(value)} ${formatTimeDisplay(value)}`;
+    }
+
+    if (field === 'duration_minutes') {
+      return `${value} דקות`;
+    }
+
+    if (field === 'instructor_employee_id') {
+      const instructor = (instructors || []).find((entry) => String(entry.id) === String(value));
+      return instructor?.full_name || String(value);
+    }
+
+    if (field === 'service_id') {
+      const service = (services || []).find((entry) => String(entry.id) === String(value));
+      return service?.service_name || service?.name || String(value);
+    }
+
+    if (field === 'status') {
+      return getParticipantStatusLabel(value);
+    }
+
+    if (field === 'documentation_status') {
+      return value === 'documented' ? 'תועד' : 'ממתין לתיעוד';
+    }
+
+    return String(value);
+  }, [instructors, services]);
   const isReportable = displayInstance?.status === 'scheduled';
   const isOperationallyOpen = !instance?.is_locked && !displayInstance?.is_closed;
   const displayWorkflowState = displayInstance?.metadata?.workflow_state && typeof displayInstance.metadata.workflow_state === 'object'
@@ -1869,6 +1975,71 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               </Select>
             </div>
 
+            {(editPreviewLoading || editPreviewError || editPreview) ? (
+              <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">תצוגה מקדימה לשמירה</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    הבדיקה מתבצעת מול מצב השרת הנוכחי לפני שמירה בפועל.
+                  </div>
+                </div>
+
+                {editPreviewLoading ? (
+                  <Alert>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <AlertDescription>בונה תצוגה מקדימה...</AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {editPreviewError ? (
+                  <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>{editPreviewError}</AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {editPreview ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-medium text-slate-800">שינויים שיישמרו</div>
+                      <Badge variant={editPreview.can_apply ? 'outline' : 'destructive'}>
+                        {editPreview.can_apply ? 'ניתן לשמור' : 'חסום'}
+                      </Badge>
+                    </div>
+
+                    {(editPreview.changes || []).length > 0 ? (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {editPreview.changes.map((change) => (
+                          <div key={change.field} className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-xs">
+                            <div className="font-semibold text-slate-800">{change.label}</div>
+                            <div className="mt-1 grid gap-1 text-slate-600">
+                              <div>לפני: {formatEditPreviewValue(change.field, change.before)}</div>
+                              <div>אחרי: {formatEditPreviewValue(change.field, change.after)}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm text-slate-700">
+                        לא זוהו שינויים לשמירה.
+                      </div>
+                    )}
+
+                    {(editPreview.impacts || []).length > 0 ? (
+                      <div className="space-y-2">
+                        {(editPreview.impacts || []).map((impact, index) => (
+                          <div key={`${impact.type || 'impact'}-${index}`} className={`rounded-xl border px-3 py-2 text-sm ${getPreviewImpactClass(impact.severity)}`}>
+                            <div className="font-semibold">{impact.label || 'השפעה'}</div>
+                            <div className="mt-0.5 text-xs opacity-85">{impact.message}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <DialogFooter>
               <Button
                 type="button"
@@ -1877,20 +2048,41 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                   resetEditState();
                   setIsEditMode(false);
                 }}
-                disabled={isSaving}
+                disabled={isSaving || editPreviewLoading}
               >
                 ביטול
               </Button>
-              <Button onClick={handleSave} disabled={isSaving || (selectedEditService && !selectedEditServiceHasValidDuration)}>
-                {isSaving ? (
+              {editPreview && pendingEditBody ? (
+                <Button
+                  onClick={confirmEditPreview}
+                  disabled={isSaving || editPreviewLoading || editPreview.can_apply === false}
+                >
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                      שומר...
+                    </>
+                  ) : (
+                    'אשר ושמור'
+                  )}
+                </Button>
+              ) : (
+                <Button onClick={handleSave} disabled={isSaving || editPreviewLoading || (selectedEditService && !selectedEditServiceHasValidDuration)}>
+                  {editPreviewLoading ? (
+                    <>
+                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                      בודק...
+                    </>
+                  ) : isSaving ? (
                   <>
                     <Loader2 className="me-2 h-4 w-4 animate-spin" />
                     שומר...
                   </>
                 ) : (
-                  'שמור שינויים'
-                )}
-              </Button>
+                    'בדוק שינויים'
+                  )}
+                </Button>
+              )}
             </DialogFooter>
           </div>
         ) : (

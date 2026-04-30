@@ -960,3 +960,61 @@ Not implemented yet:
 - Full filter system.
 - Conflict blocking remains postponed by owner decision.
 - Mobile/agenda mode remains postponed by owner decision.
+
+### 2026-04-30 Reschedule Preview Start
+
+Implemented:
+- Added `preview-update-instance` support to `PUT /api/calendar/instances`.
+- Extended `fetchLessonMutationState()` to include `datetime_start` and `duration_minutes`, so update/preview paths can compare against complete scheduling state.
+- The preview action reuses the same target resolution path as real updates:
+  - expected version check
+  - finance lock check
+  - instructor self-scope restriction
+  - service-duration derivation when service changes
+  - instructor leave validation
+  - instructor service availability validation
+- Added a non-mutating preview payload with:
+  - `can_apply`
+  - changed fields
+  - impacts
+  - availability/leave validation status
+- Updated drag/drop reschedule confirmation in `ReinexFullCalendar.jsx`:
+  - fetches server preview before confirmation
+  - disables confirmation while preview loads, errors, or blocks
+  - shows a scan-friendly before/after and impact panel
+  - keeps existing revert behavior
+
+Verified:
+- Targeted ESLint passes for:
+  - `api/_shared/calendar-editing.js`
+  - `api/calendar/index.js`
+  - `src/features/calendar/components/ReinexFullCalendar.jsx`
+- `npm run build` passes.
+
+Still needed:
+- Improve preview field labels for service names if service changes from the edit dialog.
+- Add dedicated backend tests for preview contracts if/when the project has endpoint test coverage for calendar updates.
+
+### 2026-04-30 Lesson Edit Preview Integration
+
+Implemented:
+- Reused `preview-update-instance` inside `LessonInstanceDialog.jsx`.
+- Edit mode now uses a preview-before-save flow:
+  - first click builds the server preview
+  - preview shows changed fields and downstream impacts
+  - second click confirms and performs the existing save mutation
+- Preserved the existing actual save path, billing warning handling, and version-conflict resolver.
+- Cleared stale edit previews when the form changes.
+- Removed dead unused helper code exposed by targeted lint.
+
+Verified:
+- Targeted ESLint passes for:
+  - `api/_shared/calendar-editing.js`
+  - `api/calendar/index.js`
+  - `src/features/calendar/components/ReinexFullCalendar.jsx`
+  - `src/features/calendar/components/LessonInstanceDialog.jsx`
+- `npm run build` passes.
+
+Still needed:
+- Add dedicated backend tests for preview contracts if/when the project has endpoint test coverage for calendar updates.
+- Consider extracting the preview cards into a shared component once the design stabilizes across drag/drop and edit dialog.

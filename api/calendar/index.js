@@ -119,6 +119,131 @@ async function buildCancelInstancePreview(client, orgId, { instanceId } = {}) {
   };
 }
 
+function buildEditFieldChange(field, label, beforeValue, afterValue) {
+  const beforeText = beforeValue === undefined ? null : beforeValue;
+  const afterText = afterValue === undefined ? null : afterValue;
+  return {
+    field,
+    label,
+    before: beforeText,
+    after: afterText,
+    changed: String(beforeText ?? '') !== String(afterText ?? ''),
+  };
+}
+
+function buildUpdateInstancePreview({
+  existingInstance,
+  target,
+  leaveConflict,
+  availabilityValidation,
+  durationDerivedFromService,
+  serviceChanged,
+  schedulingOverrideBefore,
+  schedulingOverrideAfter,
+}) {
+  const changes = [
+    buildEditFieldChange('datetime_start', 'מועד', existingInstance.datetime_start, target.datetimeStart),
+    buildEditFieldChange('duration_minutes', 'משך', existingInstance.duration_minutes, target.durationMinutes),
+    buildEditFieldChange('instructor_employee_id', 'מדריך', existingInstance.instructor_employee_id, target.instructorEmployeeId),
+    buildEditFieldChange('service_id', 'שירות', existingInstance.service_id, target.serviceId),
+    buildEditFieldChange('status', 'סטטוס', normalizeLessonInstanceStatus(existingInstance.status) || existingInstance.status, target.status),
+    buildEditFieldChange('documentation_status', 'תיעוד', existingInstance.documentation_status, target.documentationStatus),
+  ].filter((change) => change.changed);
+
+  const overrideBeforeReason = normalizeString(schedulingOverrideBefore?.reason);
+  const overrideAfterReason = normalizeString(schedulingOverrideAfter?.reason);
+  if (overrideBeforeReason !== overrideAfterReason) {
+    changes.push({
+      field: 'scheduling_override',
+      label: 'חריגת שיבוץ',
+      before: overrideBeforeReason || null,
+      after: overrideAfterReason || null,
+      changed: true,
+    });
+  }
+
+  const impacts = [];
+
+  if (changes.some((change) => ['datetime_start', 'duration_minutes', 'instructor_employee_id', 'service_id'].includes(change.field))) {
+    impacts.push({
+      type: 'schedule',
+      severity: 'info',
+      label: 'שיבוץ',
+      message: 'מועד השיעור או פרטי השיבוץ יעודכנו.',
+    });
+  }
+
+  if (serviceChanged) {
+    impacts.push({
+      type: 'service',
+      severity: 'warning',
+      label: 'שירות',
+      message: durationDerivedFromService
+        ? 'השירות הוחלף, ולכן משך השיעור יעודכן לפי משך השירות החדש.'
+        : 'השירות הוחלף.',
+    });
+  }
+
+  if (availabilityValidation?.override) {
+    impacts.push({
+      type: 'availability_override',
+      severity: 'warning',
+      label: 'חריגה חד-פעמית',
+      message: `השיעור יישמר כחריגה: ${availabilityValidation.override.reason}`,
+    });
+  }
+
+  if (availabilityValidation && availabilityValidation.ok === false) {
+    impacts.push({
+      type: 'availability_blocked',
+      severity: 'blocking',
+      label: 'זמינות',
+      message: availabilityValidation.code || 'השיבוץ אינו עומד בכללי הזמינות.',
+    });
+  }
+
+  if (leaveConflict) {
+    impacts.push({
+      type: 'leave_conflict',
+      severity: 'blocking',
+      label: 'היעדרות מדריך',
+      message: leaveConflict.message || 'המדריך/ה לא זמין/ה בתאריך הזה בגלל היעדרות.',
+    });
+  }
+
+  if (changes.length > 0) {
+    impacts.push({
+      type: 'financial_resync',
+      severity: 'info',
+      label: 'חיוב ושכר',
+      message: 'לאחר השמירה המערכת תריץ מחדש סנכרון חיובים, שכר מדריך וסגירת שיעור.',
+    });
+  }
+
+  return {
+    can_apply: !leaveConflict && (!availabilityValidation || availabilityValidation.ok !== false),
+    changes,
+    impacts,
+    validations: {
+      availability: availabilityValidation
+        ? {
+            ok: availabilityValidation.ok !== false,
+            code: availabilityValidation.code || null,
+            override_reason: availabilityValidation.override?.reason || null,
+          }
+        : null,
+      leave: leaveConflict
+        ? {
+            ok: false,
+            message: leaveConflict.message || null,
+            code: leaveConflict.code || null,
+          }
+        : { ok: true },
+    },
+    target,
+  };
+}
+
 function normalizeSchedulingOverrideMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     return { metadata: {}, override: null };
@@ -999,6 +1124,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
   const { client, orgId } = dbContext;
   const { userId, userEmail, role, canManageAll, billingService } = authContext;
   const action = normalizeString(body.action).toLowerCase();
+  const isPreviewUpdate = action === 'preview-update-instance';
   if (!body.id) {
     return respond(context, 400, { message: 'missing instance id' });
   }
@@ -1051,6 +1177,10 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
 
     if (action === 'preview-cancel-instance') {
       return respond(context, 403, { message: 'forbidden: instructors cannot preview instance cancellation' });
+    }
+
+    if (isPreviewUpdate) {
+      return respond(context, 403, { message: 'forbidden: instructors cannot preview instance updates' });
     }
 
     const allowedStatusUpdates = new Set(['completed']);
@@ -1146,6 +1276,8 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
   const targetMetadata = body.metadata !== undefined
     ? normalizeSchedulingOverrideMetadata(body.metadata).metadata
     : (existingInstance.metadata || {});
+  const schedulingOverrideBefore = normalizeSchedulingOverrideMetadata(existingInstance.metadata || {}).override;
+  const schedulingOverrideAfter = normalizeSchedulingOverrideMetadata(targetMetadata).override;
   const scheduleChanged = [
     'datetime_start',
     'instructor_employee_id',
@@ -1153,20 +1285,22 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
     'metadata',
   ].some((field) => Object.prototype.hasOwnProperty.call(body, field)) || durationDerivedFromService;
 
+  let leaveConflict = null;
   if (targetInstructorId && targetDate) {
-    const leaveConflict = await assertNoLeaveForLesson(client, {
+    leaveConflict = await assertNoLeaveForLesson(client, {
       employeeId: targetInstructorId,
       date: targetDate,
     });
 
-    if (leaveConflict) {
+    if (leaveConflict && !isPreviewUpdate) {
       return respond(context, 409, leaveConflict);
     }
   }
 
+  let availabilityValidation = null;
   if (scheduleChanged) {
     try {
-      const availabilityValidation = await validateLessonInstanceAvailability(client, orgId, {
+      availabilityValidation = await validateLessonInstanceAvailability(client, orgId, {
         instructorEmployeeId: targetInstructorId,
         serviceId: targetServiceId,
         datetimeStart: body.datetime_start || existingInstance.datetime_start,
@@ -1174,7 +1308,7 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
         metadata: targetMetadata,
       });
 
-      if (!availabilityValidation.ok) {
+      if (!availabilityValidation.ok && !isPreviewUpdate) {
         return respond(context, 409, { message: availabilityValidation.code });
       }
     } catch (availabilityError) {
@@ -1186,6 +1320,38 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
       });
       return respond(context, 500, { message: 'failed_to_validate_instructor_availability' });
     }
+  }
+
+  if (isPreviewUpdate) {
+    if (!canManageAll) {
+      return respond(context, 403, { message: 'forbidden' });
+    }
+
+    const preview = buildUpdateInstancePreview({
+      existingInstance,
+      target: {
+        datetimeStart: body.datetime_start || existingInstance.datetime_start,
+        durationMinutes: targetDurationMinutes,
+        instructorEmployeeId: targetInstructorId,
+        serviceId: targetServiceId,
+        status: body.status !== undefined ? body.status : (normalizeLessonInstanceStatus(existingInstance.status) || existingInstance.status || 'scheduled'),
+        documentationStatus: body.documentation_status !== undefined ? body.documentation_status : existingInstance.documentation_status,
+      },
+      leaveConflict,
+      availabilityValidation,
+      durationDerivedFromService,
+      serviceChanged,
+      schedulingOverrideBefore,
+      schedulingOverrideAfter,
+    });
+
+    return respond(context, 200, {
+      action,
+      instance_id: body.id,
+      instance_status: normalizeLessonInstanceStatus(existingInstance.status) || existingInstance.status || 'scheduled',
+      instance_version: existingInstance.version,
+      preview,
+    });
   }
 
   // Instructor rate pre-flight: block completion if no base_rate is configured.
