@@ -145,8 +145,6 @@ export function LessonParticipantRoster({
         const previewImpactGroups = isRestorePreviewOpen
           ? groupPreviewImpacts(restorePreview.preview?.impacts || [])
           : [];
-        const previewProjected = restorePreview?.preview?.projected || null;
-        const showProjectedHmoSplit = previewProjected?.hmo_split_applied === true;
 
         const name = getParticipantDisplayName(participant, 'לא ידוע');
         const initials = getInitials(name);
@@ -497,79 +495,69 @@ export function LessonParticipantRoster({
 
             {/* ── RESTORE / STATUS-CHANGE PREVIEW ─────────────────── */}
             {isRestorePreviewOpen && (
-              <div className="border-t border-blue-200 bg-blue-50/40 px-4 py-3 space-y-2">
-                <div className="text-sm font-medium text-slate-800">
-                  {restorePreview?.targetStatus === 'scheduled'
-                    ? 'השפעות השחזור לסטטוס מתוכנן'
-                    : `השפעות שינוי הסטטוס ל-${getParticipantStatusLabel(restorePreview?.targetStatus)}`}
+              <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-4 space-y-3">
+                {/* Header */}
+                <div className="flex items-center gap-2">
+                  <RotateCcw className="h-3.5 w-3.5 text-slate-500" />
+                  <span className="text-sm font-semibold text-slate-800">
+                    {restorePreview?.targetStatus === 'scheduled'
+                      ? 'השפעות שחזור לסטטוס מתוכנן'
+                      : `השפעות שינוי ל-${getParticipantStatusLabel(restorePreview?.targetStatus)}`}
+                  </span>
                 </div>
 
+                {/* Impact groups */}
                 {previewImpactGroups.length > 0 ? (
                   <div className="space-y-2">
                     {previewImpactGroups.map((group) => (
                       <div
                         key={group.key}
-                        className={`rounded-md border p-2 ${group.borderClass} ${group.bgClass}`}
+                        className={`rounded-xl border overflow-hidden ${group.borderClass}`}
                       >
-                        <div className="text-xs font-medium text-slate-800">{group.label}</div>
-                        <ul className="mt-1 list-disc pe-5 text-sm text-slate-700 space-y-1">
+                        {/* Group header */}
+                        <div className={`px-3 py-1.5 text-xs font-semibold ${group.bgClass}`}>
+                          {group.label}
+                        </div>
+                        {/* Group rows */}
+                        <div className="divide-y divide-slate-100 bg-white">
                           {group.impacts.map((impact, index) => (
-                            <li key={`${impact.type || group.key}-${index}`}>
-                              {impact.message}
+                            <div
+                              key={`${impact.type || group.key}-${index}`}
+                              className="px-3 py-2.5"
+                            >
+                              <p className="text-sm text-slate-800">{impact.message}</p>
                               {impact.type === 'hmo_split_detail' && (
-                                <div className="mt-1 text-xs text-slate-700 space-y-0.5">
+                                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border border-fuchsia-100 bg-fuchsia-50/60 px-3 py-2 text-xs text-slate-700">
+                                  {(impact.hmo_provider_name || impact.hmo_provider_track_name) && (
+                                    <div className="col-span-2 font-medium text-slate-800">
+                                      {[impact.hmo_provider_name, impact.hmo_provider_track_name].filter(Boolean).join(' · ')}
+                                    </div>
+                                  )}
                                   {impact.hmo_authorization_id && (
-                                    <div>אישור: #{shortId(impact.hmo_authorization_id)}</div>
-                                  )}
-                                  {impact.hmo_provider_name && (
-                                    <div>גורם מממן: {impact.hmo_provider_name}</div>
-                                  )}
-                                  {impact.hmo_provider_track_name && (
-                                    <div>מסלול: {impact.hmo_provider_track_name}</div>
+                                    <div className="col-span-2 text-slate-500">אישור #{shortId(impact.hmo_authorization_id)}</div>
                                   )}
                                   <div>
-                                    השתתפות לקוח/ה:{' '}
-                                    {formatAgorotPreview(impact.hmo_student_copay_amount)}
+                                    <span className="text-slate-500">השתתפות לקוח/ה</span>
+                                    <div className="font-medium">{formatAgorotPreview(impact.hmo_student_copay_amount)}</div>
                                   </div>
                                   <div>
-                                    סכום תביעה לגורם מממן:{' '}
-                                    {formatAgorotPreview(impact.hmo_insurer_claim_amount)}
+                                    <span className="text-slate-500">תביעה לגורם מממן</span>
+                                    <div className="font-medium">{formatAgorotPreview(impact.hmo_insurer_claim_amount)}</div>
                                   </div>
                                 </div>
                               )}
-                            </li>
+                            </div>
                           ))}
-                        </ul>
+                        </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <ul className="list-disc pe-5 text-sm text-slate-700 space-y-1">
-                    <li>
-                      {restorePreview?.targetStatus === 'scheduled'
-                        ? 'לא זוהו השפעות נוספות מעבר להחזרת התלמיד לסטטוס "מתוכנן".'
-                        : 'לא זוהו השפעות נוספות מעבר לעדכון הסטטוס המבוקש.'}
-                    </li>
-                  </ul>
-                )}
-
-                {showProjectedHmoSplit && (
-                  <div className="rounded-md border border-fuchsia-200 bg-fuchsia-50/70 p-2">
-                    <div className="text-xs font-medium text-slate-800">פירוט פיצול גורם מממן</div>
-                    <div className="mt-1 grid grid-cols-1 gap-1 text-xs text-slate-700 sm:grid-cols-2">
-                      <div>אישור: #{shortId(previewProjected?.hmo_authorization_id)}</div>
-                      <div>גורם מממן: {previewProjected?.hmo_provider_name || 'לא ידוע'}</div>
-                      <div>מסלול: {previewProjected?.hmo_provider_track_name || 'לא ידוע'}</div>
-                      <div>
-                        השתתפות לקוח/ה:{' '}
-                        {formatAgorotPreview(previewProjected?.hmo_student_copay_amount)}
-                      </div>
-                      <div>
-                        סכום תביעה לגורם מממן:{' '}
-                        {formatAgorotPreview(previewProjected?.hmo_insurer_claim_amount)}
-                      </div>
-                    </div>
-                  </div>
+                  <p className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-500">
+                    {restorePreview?.targetStatus === 'scheduled'
+                      ? 'אין השפעות נוספות — התלמיד יחזור לסטטוס מתוכנן.'
+                      : 'אין השפעות נוספות מעבר לעדכון הסטטוס.'}
+                  </p>
                 )}
 
                 {restorePreviewError && (
@@ -595,7 +583,6 @@ export function LessonParticipantRoster({
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
                     onClick={async () => {
                       const result = await handleMarkAttendance(
                         participant.id,

@@ -29,7 +29,7 @@ function resolveTaskKindLabel(task) {
   const taskType = typeof task?.task_type === 'string' ? task.task_type.trim().toLowerCase() : ''
   switch (taskType) {
     case 'hmo_claim_submission':
-      return 'הגשת תביעות HMO'
+      return 'הגשת תביעות גורם מממן'
     case 'calendar_correction_paid_claim_block':
       return 'תיקוני יומן חסומים'
     default:

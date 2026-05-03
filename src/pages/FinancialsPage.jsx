@@ -432,7 +432,7 @@ export default function FinancialsPage() {
       setClaimsReadModel(payload || null);
     } catch (error) {
       console.error('Failed to load HMO claims overview', error);
-      toast.error(error?.message || 'טעינת נתוני תביעות HMO נכשלה.');
+      toast.error(error?.message || 'טעינת נתוני תביעות גורם מממן נכשלה.');
       setClaimsReadModel(null);
     } finally {
       setLoadingClaims(false);
@@ -858,7 +858,7 @@ export default function FinancialsPage() {
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>שליחת דרישת HMO</DialogTitle>
+            <DialogTitle>שליחת דרישת גורם מממן</DialogTitle>
             <DialogDescription>
               משלימים את פרטי השליחה לדרישה ורק אז מסמנים אותה כנשלחה. לאחר מכן הדרישה ננעלת לשימוש רגיל.
             </DialogDescription>
@@ -1029,7 +1029,7 @@ export default function FinancialsPage() {
         <TabsList className="h-auto rounded-2xl bg-slate-100 p-1">
           <TabsTrigger value="payroll" className="rounded-xl px-4 py-2">שכר</TabsTrigger>
           <TabsTrigger value="billing" className="rounded-xl px-4 py-2">חיובי תלמידים</TabsTrigger>
-          <TabsTrigger value="claims" className="rounded-xl px-4 py-2">תביעות HMO</TabsTrigger>
+          <TabsTrigger value="claims" className="rounded-xl px-4 py-2">תביעות גורם מממן</TabsTrigger>
         </TabsList>
 
         <TabsContent value="payroll">
@@ -1113,7 +1113,7 @@ export default function FinancialsPage() {
               <div className="mt-1 text-2xl font-bold text-emerald-950">{formatCurrency(overview.lessonChargeTotal)}</div>
             </Card>
             <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <div className="text-xs text-indigo-700">חיובי גורמים מממנים בחודש</div>
+              <div className="text-xs text-indigo-700">חיוב מול גורם מממן בחודש</div>
               <div className="mt-1 text-2xl font-bold text-indigo-950">{formatCurrency(overview.hmoChargeTotal)}</div>
               <div className="mt-2 text-xs text-muted-foreground">{overview.activeAuthorizationCount} אישורים פעילים בתצוגה</div>
             </Card>
@@ -1155,12 +1155,12 @@ export default function FinancialsPage() {
                           </div>
                         </div>
                         <div className={`mt-2 text-xs ${isSelected ? 'text-white/80' : 'text-muted-foreground'}`}>
-                          חיובי תלמיד {formatCurrency(summary.lesson_charge_total)} • חיובי HMO {formatCurrency(summary.hmo_charge_total)}
+                          חיובי תלמיד {formatCurrency(summary.lesson_charge_total)} • חיוב מול גורם מממן {formatCurrency(summary.hmo_charge_total)}
                         </div>
                         <div className={`mt-1 text-xs ${isSelected ? 'text-white/70' : 'text-muted-foreground'}`}>
                           {Array.isArray(summary.authorizations) && summary.authorizations.length > 0
-                            ? `${summary.authorizations.length} אישורי HMO פעילים`
-                            : 'ללא אישור HMO פעיל'}
+                            ? `${summary.authorizations.length} אישורי גורם מממן פעילים`
+                            : 'ללא אישור גורם מממן פעיל'}
                         </div>
                       </button>
                     );
@@ -1210,7 +1210,7 @@ export default function FinancialsPage() {
             <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                טוען נתוני תביעות HMO...
+                טוען נתוני תביעות גורם מממן...
               </div>
             </Card>
           ) : (
@@ -1233,7 +1233,7 @@ export default function FinancialsPage() {
                   <div className="mt-1 text-2xl font-bold text-blue-950">{formatCurrency(claimsReadModel?.summary?.payment_received_total ?? 0)}</div>
                 </Card>
                 <Card className="rounded-2xl border border-violet-200 bg-violet-50 p-lg shadow-sm">
-                  <div className="text-xs text-violet-700">תלמידים פעילים עם זכאות קופת חולים</div>
+                  <div className="text-xs text-violet-700">תלמידים פעילים עם אישור גורם מממן</div>
                   <div className="mt-1 text-2xl font-bold text-violet-950">{claimsReadModel?.summary?.active_students_with_hmo_eligibility ?? 0}</div>
                 </Card>
               </div>
@@ -1252,7 +1252,7 @@ export default function FinancialsPage() {
               {canMutateClaims && (
                 <div className="grid gap-4 lg:grid-cols-2">
                   <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-                    <h3 className="text-lg font-semibold text-zinc-900">יצירת דרישת HMO</h3>
+                    <h3 className="text-lg font-semibold text-zinc-900">יצירת דרישת גורם מממן</h3>
                     <p className="text-sm text-muted-foreground">
                       בוחרים שורות פתוחות מאותו גורם מממן, יוצרים טיוטה, ואז שולחים אותה. שורה שנכנסה לטיוטה לא תיכנס בטעות לדרישה נוספת.
                     </p>
@@ -1299,7 +1299,7 @@ export default function FinancialsPage() {
                       </div>
                     )}
                     <p className="mt-3 text-xs text-slate-500">
-                      טיפ תפעולי: אם יש כמה קופות/גורמים מממנים, יוצרים דרישה נפרדת לכל אחד כדי למנוע ערבוב בתשלום ובבקרה.
+                      טיפ תפעולי: אם יש כמה גורמים מממנים, יוצרים דרישה נפרדת לכל אחד כדי למנוע ערבוב בתשלום ובבקרה.
                     </p>
                   </Card>
 
@@ -1378,7 +1378,7 @@ export default function FinancialsPage() {
 
               <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
                 <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-                  <h3 className="text-lg font-semibold text-zinc-900">משימות תביעות HMO</h3>
+                  <h3 className="text-lg font-semibold text-zinc-900">משימות תביעות גורם מממן</h3>
                   <p className="text-sm text-muted-foreground">מבט ריכוזי על תביעות פתוחות/שטופלו, מקובצות לפי תלמיד עם טווח שעות לכל מפגש.</p>
                   <div className="mt-3 max-h-[420px] overflow-y-auto space-y-2">
                     {groupedClaims.map((group) => (
@@ -1423,14 +1423,14 @@ export default function FinancialsPage() {
                     ))}
                     {groupedClaims.length === 0 && (
                       <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
-                        אין משימות תביעת HMO להצגה בטווח הנבחר.
+                        אין משימות תביעת גורם מממן להצגה בטווח הנבחר.
                       </div>
                     )}
                   </div>
                 </Card>
 
                 <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-                  <h3 className="text-lg font-semibold text-zinc-900">יתרות גורמים מממנים</h3>
+                  <h3 className="text-lg font-semibold text-zinc-900">יתרה מגורם מממן</h3>
                   <p className="text-sm text-muted-foreground">לקריאה בלבד: מבוסס לדר וחשבוניות שנוצרו.</p>
                   <div className="mt-3 space-y-2 max-h-[420px] overflow-y-auto">
                     {(claimsReadModel?.provider_receivables || []).map((provider) => (
@@ -1510,7 +1510,7 @@ export default function FinancialsPage() {
                     ))}
                     {(claimsReadModel?.provider_receivables || []).length === 0 && (
                       <div className="rounded-xl border border-dashed border-border bg-slate-50 p-6 text-center text-sm text-muted-foreground">
-                        אין נתוני יתרות גורמים מממנים בטווח הנבחר.
+                        אין נתוני יתרה מגורם מממן בטווח הנבחר.
                       </div>
                     )}
                   </div>

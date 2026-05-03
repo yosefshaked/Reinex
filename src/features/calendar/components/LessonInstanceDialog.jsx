@@ -12,7 +12,7 @@ import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { toast } from 'sonner';
-import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, UserPlus, RotateCcw } from 'lucide-react';
+import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, UserPlus, RotateCcw, Users } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Textarea } from '../../../components/ui/textarea';
 import { Checkbox } from '../../../components/ui/checkbox';
@@ -2543,12 +2543,12 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
               הפעולה תסמן את השיעור כמבוטל ותעדכן את המשתתפים שעדיין מתוכננים לביטול ע"י המרפאה.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-3">
             {cancelPreviewLoading && (
-              <Alert>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <AlertDescription>טוען תצוגה מקדימה עדכנית מהשרת...</AlertDescription>
-              </Alert>
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                טוען תצוגה מקדימה...
+              </div>
             )}
             {cancelPreviewError && (
               <Alert variant="destructive">
@@ -2556,39 +2556,67 @@ export function LessonInstanceDialog({ instance, open, onClose, onUpdate }) {
                 <AlertDescription>{cancelPreviewError}</AlertDescription>
               </Alert>
             )}
-            {!cancelPreviewLoading && !cancelPreviewError && cancelPreviewBlocked ? (
-              <Alert variant="destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>
-                  לא ניתן לבטל שיעור שבו כבר סומנה נוכחות. יש להסדיר קודם את: {cancelPreviewAttendedNames.join(', ')}.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            {!cancelPreviewLoading && !cancelPreviewError && !cancelPreviewBlocked ? (
-              <Alert>
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>
-                  {cancelPreviewScheduledCount > 0
-                    ? `${cancelPreviewScheduledCount} משתתפים/ות שעדיין במצב מתוכנן יסומנו כ-"בוטל ע"י המרפאה". ${cancelPreviewResolvedCount > 0 ? `${cancelPreviewResolvedCount} משתתפים/ות שכבר הוכרעו יישארו ללא שינוי.` : ''}`
-                    : 'לשיעור הזה אין משתתפים במצב מתוכנן, ולכן הפעולה תעדכן רק את סטטוס השיעור עצמו.'}
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-              <div className="font-medium text-slate-900">השפעת מדיניות הארגון</div>
-              <ul className="mt-3 space-y-2">
-                <li>
-                  {clinicCancellationChargesClients
-                    ? 'חיוב לקוח/ה: לפי מדיניות הארגון, ביטול ע"י המרפאה עדיין מסומן כחיוב רלוונטי.'
-                    : 'חיוב לקוח/ה: לפי מדיניות הארגון, ביטול ע"י המרפאה לא יחייב את הלקוח/ה.'}
-                </li>
-                <li>
-                  {clinicCancellationPaysInstructor
-                    ? 'שכר מדריך/ה: לפי מדיניות הארגון, ביטול ע"י המרפאה עדיין מזכה את המדריך/ה.'
-                    : 'שכר מדריך/ה: לפי מדיניות הארגון, ביטול ע"י המרפאה לא מזכה את המדריך/ה.'}
-                </li>
-              </ul>
-            </div>
+
+            {/* Blocked: attended participants exist */}
+            {!cancelPreviewLoading && !cancelPreviewError && cancelPreviewBlocked && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+                <div className="flex items-start gap-2 text-sm text-red-900">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+                  <div>
+                    <div className="font-semibold">לא ניתן לבטל</div>
+                    <div className="mt-0.5">נוכחות כבר סומנה עבור: {cancelPreviewAttendedNames.join(', ')}. יש להסדיר קודם.</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Impact summary */}
+            {!cancelPreviewLoading && !cancelPreviewError && !cancelPreviewBlocked && (
+              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden divide-y divide-slate-100">
+                {/* Participant row */}
+                <div className="flex items-start gap-3 px-4 py-3 text-sm">
+                  <Users className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                  <div className="text-slate-700">
+                    {cancelPreviewScheduledCount > 0 ? (
+                      <>
+                        <span className="font-medium text-slate-900">{cancelPreviewScheduledCount} משתתפים</span> יסומנו כ״בוטל ע״י המרפאה״
+                        {cancelPreviewResolvedCount > 0 && (
+                          <span className="text-slate-400"> · {cancelPreviewResolvedCount} שכבר הוכרעו לא ישתנו</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-slate-500">אין משתתפים מתוכננים — יעודכן סטטוס השיעור בלבד</span>
+                    )}
+                  </div>
+                </div>
+                {/* Client billing row */}
+                <div className="flex items-center gap-3 px-4 py-3 text-sm">
+                  {clinicCancellationChargesClients ? (
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+                  ) : (
+                    <Check className="h-4 w-4 shrink-0 text-emerald-500" />
+                  )}
+                  <span className="text-slate-700">
+                    {clinicCancellationChargesClients
+                      ? 'הלקוח/ה יחויב/תחויב (מדיניות הארגון)'
+                      : 'הלקוח/ה לא יחויב/תחויב'}
+                  </span>
+                </div>
+                {/* Instructor pay row */}
+                <div className="flex items-center gap-3 px-4 py-3 text-sm">
+                  {clinicCancellationPaysInstructor ? (
+                    <Check className="h-4 w-4 shrink-0 text-emerald-500" />
+                  ) : (
+                    <X className="h-4 w-4 shrink-0 text-slate-400" />
+                  )}
+                  <span className="text-slate-700">
+                    {clinicCancellationPaysInstructor
+                      ? 'המדריך/ה יקבל/תקבל שכר (מדיניות הארגון)'
+                      : 'המדריך/ה לא יקבל/תקבל שכר'}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setCancelDialogOpen(false)} disabled={isSaving || cancelPreviewLoading}>

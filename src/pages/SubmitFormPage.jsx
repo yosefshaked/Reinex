@@ -33,7 +33,7 @@ const CONTACT_RELATIONSHIP_OPTIONS = [
 const PAYMENT_PATH_OPTIONS = [
   { value: 'unsure', label: 'לא בטוח/ה, צריך עזרה' },
   { value: 'private', label: 'תשלום פרטי' },
-  { value: 'hmo', label: 'דרך קופת חולים / גורם מממן' },
+  { value: 'hmo', label: 'דרך גורם מממן' },
 ];
 
 const HMO_APPROVAL_OPTIONS = [
@@ -104,7 +104,7 @@ function validateInviteIntake(values) {
     errors.preferredTimes = 'יש למלא לפחות טווח שעות אחד לכל יום שנבחר, או להסיר את היום.';
   }
   if (values.paymentPathIntent === 'hmo' && !String(values.hmoProviderName || '').trim()) {
-    errors.hmoProviderName = 'יש למלא את שם קופת החולים / הגורם המממן.';
+    errors.hmoProviderName = 'יש למלא את שם הגורם המממן.';
   }
   if (values.paymentPathIntent === 'hmo' && !String(values.hmoApprovalStatus || '').trim()) {
     errors.hmoApprovalStatus = 'יש לבחור את סטטוס האישור.';
@@ -116,14 +116,14 @@ function mapInviteLoadErrorMessage(code) {
   switch (String(code || '').trim()) {
     case 'invalid_invite_token':
     case 'invite_not_found':
-      return 'הקישור הזה אינו תקין או שכבר אינו זמין. אפשר לבקש קישור חדש מהארגון.';
+      return 'הקישור הזה אינו תקין או שכבר אינו זמין. נא לבקש קישור חדש.';
     case 'invite_already_completed':
-      return 'הטופס כבר נשלח דרך הקישור הזה. אם צריך לעדכן פרטים, אפשר לבקש קישור חדש מהארגון.';
+      return 'הטופס כבר נשלח דרך הקישור הזה. אם צריך לעדכן פרטים, נא לבקש קישור חדש.';
     case 'form_not_found':
       return 'לא הצלחנו לטעון את הטופס כרגע. אפשר לנסות שוב בעוד כמה דקות.';
     case 'form_not_published':
     case 'form_unavailable':
-      return 'הטופס הזה אינו זמין כרגע למילוי. אפשר לבקש קישור חדש מהארגון.';
+      return 'הטופס הזה אינו זמין כרגע למילוי. נא לבקש קישור חדש.';
     case 'failed_to_load_invite':
       return 'לא הצלחנו לטעון את הקישור כרגע. אפשר לנסות שוב בעוד כמה דקות.';
     default:
@@ -135,7 +135,7 @@ function mapInviteSubmitErrorMessage(code) {
   switch (String(code || '').trim()) {
     case 'invalid_invite_token':
     case 'invite_not_found':
-      return 'הקישור הזה אינו תקין או שכבר פג תוקפו. אפשר לבקש קישור חדש מהארגון.';
+      return 'הקישור הזה אינו תקין או שכבר פג תוקפו. נא לבקש קישור חדש.';
     case 'invite_already_completed':
       return 'הטופס כבר נשלח דרך הקישור הזה.';
     case 'missing_student_first_name':
@@ -155,7 +155,7 @@ function mapInviteSubmitErrorMessage(code) {
       return 'לא הצלחנו לשמור את הפרטים כרגע. אפשר לנסות שוב בעוד כמה דקות.';
     case 'form_not_published':
     case 'form_unavailable':
-      return 'הטופס הזה אינו זמין כרגע למילוי. אפשר לבקש קישור חדש מהארגון.';
+      return 'הטופס הזה אינו זמין כרגע למילוי. נא לבקש קישור חדש.';
     default:
       return 'שליחת הטופס נכשלה. אפשר לנסות שוב בעוד כמה דקות.';
   }
@@ -173,7 +173,7 @@ function mapPublicFormSubmitErrorMessage(code) {
       return 'לא הצלחנו לשמור את המענה כרגע. אפשר לנסות שוב בעוד כמה דקות.';
     case 'form_not_published':
     case 'form_unavailable':
-      return 'הטופס הזה אינו זמין כרגע למילוי. אפשר לבקש קישור חדש מהארגון.';
+      return 'הטופס הזה אינו זמין כרגע למילוי. נא לבקש קישור חדש.';
     default:
       return 'שליחת הטופס נכשלה. אפשר לנסות שוב בעוד כמה דקות.';
   }
@@ -634,7 +634,7 @@ export default function SubmitFormPage() {
                 ) : (
                   <Alert>
                     <AlertDescription className="text-slate-700">
-                      {error || 'לא ניתן לפתוח את קישור ההצטרפות. אפשר לבקש קישור חדש מהארגון.'}
+                      {error || 'לא ניתן לפתוח את קישור ההצטרפות. נא לבקש קישור חדש.'}
                     </AlertDescription>
                   </Alert>
                 )}
@@ -974,7 +974,7 @@ export default function SubmitFormPage() {
                         {intakeValues.paymentPathIntent === 'hmo' && (
                           <>
                             <div className="space-y-2">
-                              <RequiredLabel htmlFor="hmo-provider-name" required>שם קופת החולים / הגורם המממן</RequiredLabel>
+                              <RequiredLabel htmlFor="hmo-provider-name" required>שם הגורם המממן</RequiredLabel>
                               <Input
                                 id="hmo-provider-name"
                                 value={intakeValues.hmoProviderName}
@@ -987,7 +987,7 @@ export default function SubmitFormPage() {
                               ) : null}
                             </div>
                             <div className="space-y-2">
-                              <RequiredLabel htmlFor="hmo-approval-status" required>סטטוס אישור קופת חולים</RequiredLabel>
+                              <RequiredLabel htmlFor="hmo-approval-status" required>סטטוס אישור גורם מממן</RequiredLabel>
                               <select
                                 id="hmo-approval-status"
                                 className={`h-11 w-full rounded-xl border bg-white px-3 text-sm shadow-sm ${showInviteValidation && inviteValidationErrors.hmoApprovalStatus ? 'border-red-300' : 'border-slate-200'}`}

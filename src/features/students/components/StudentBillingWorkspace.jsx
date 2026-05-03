@@ -402,7 +402,7 @@ export default function StudentBillingWorkspace({
             <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(summary.lesson_charge_total)}</div>
           </div>
           <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-            <div className="text-xs text-indigo-700">חיובי גורם מממן</div>
+            <div className="text-xs text-indigo-700">חיוב מול גורם מממן</div>
             <div className="mt-1 text-xl font-bold text-indigo-950">{formatCurrency(summary.hmo_charge_total)}</div>
           </div>
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">

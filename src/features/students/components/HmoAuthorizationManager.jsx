@@ -173,7 +173,6 @@ export default function HmoAuthorizationManager({
   services,
   canMutateBilling,
   onChanged = null,
-  embedded = false,
   selectedAuthorizationId = '',
   onRequestSetup = null,
 }) {
@@ -423,7 +422,7 @@ export default function HmoAuthorizationManager({
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-lg font-semibold text-slate-950">אישורי גורם מממן</h3>
-              <p className="text-sm text-slate-500">רשימת האישורים הפעילים וההיסטוריים, עם סיכום המכסה, מחירי הכיסוי ומדיניות ההמשך.</p>
+              <p className="text-sm text-slate-500">רשימת אישורי הגורם המממן הפעילים וההיסטוריים, עם סיכום המכסה, מחירי הכיסוי ומדיניות ההמשך.</p>
             </div>
             <div className="flex items-center gap-2">
               {(loading || loadingProviders) ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : null}
@@ -468,7 +467,7 @@ export default function HmoAuthorizationManager({
                     <div className="space-y-2">
                       <div>
                         <div className="text-sm font-semibold text-slate-900">{serviceName} • {row.provider?.name || 'גורם מממן'}</div>
-                        <div className="mt-1 text-xs text-slate-500">{row.provider_track?.name || 'ללא מסלול'} • {getStatusLabel(row.status)}</div>
+                        <div className="mt-1 text-xs text-slate-500">{row.provider_track?.name || 'ללא מסלול גורם מממן'} • {getStatusLabel(row.status)}</div>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Badge variant="secondary" className="bg-white text-slate-700 hover:bg-white">
@@ -497,7 +496,7 @@ export default function HmoAuthorizationManager({
                       <div className="mt-1 font-semibold text-slate-900">{formatCurrency(row.covered_customer_charge_amount)}</div>
                     </div>
                     <div className="rounded-lg bg-white p-3">
-                      <div className="text-[11px] text-slate-500">גורם מממן בזמן כיסוי</div>
+                      <div className="text-[11px] text-slate-500">חיוב מול גורם מממן</div>
                       <div className="mt-1 font-semibold text-slate-900">{formatCurrency(row.covered_insurer_claim_amount)}</div>
                     </div>
                     <div className="rounded-lg bg-white p-3">
@@ -559,23 +558,23 @@ export default function HmoAuthorizationManager({
               <SheetHeader className="shrink-0 text-right">
                 <SheetTitle>{form.id ? 'עריכת אישור גורם מממן' : 'הוספת אישור גורם מממן'}</SheetTitle>
                 <SheetDescription>
-                  הגדירו את מסלול הכיסוי, המכסה והמחירים. לאחר השמירה החיובים הרלוונטיים יתעדכנו אוטומטית.
+                  הגדירו את מסלול הגורם המממן, המכסה והמחירים. לאחר השמירה החיובים הרלוונטיים יתעדכנו אוטומטית.
                 </SheetDescription>
               </SheetHeader>
 
               <div className="mt-6 min-h-0 flex-1 space-y-4 overflow-y-auto pe-1">
                 <div className="space-y-2">
-                  <Label className="text-xs text-slate-600">מסלול</Label>
+                  <Label className="text-xs text-slate-600">מסלול גורם מממן</Label>
                   <Select
                     value={form.providerTrackId || '__none__'}
                     onValueChange={handleTrackSelection}
                     disabled={saving}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="בחר מסלול" />
+                      <SelectValue placeholder="בחר מסלול גורם מממן" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">בחר מסלול</SelectItem>
+                      <SelectItem value="__none__">בחר מסלול גורם מממן</SelectItem>
                       {availableTracks.map((track) => (
                         <SelectItem key={track.id} value={track.id}>
                           {track.provider?.name || 'גורם מממן'} • {track.name}
@@ -607,7 +606,7 @@ export default function HmoAuthorizationManager({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="covered-insurer-claim-amount">חיוב גורם מממן בזמן כיסוי<span className="ms-1 text-destructive">*</span></Label>
+                    <Label htmlFor="covered-insurer-claim-amount">חיוב מול גורם מממן בזמן כיסוי<span className="ms-1 text-destructive">*</span></Label>
                     <CurrencyInput
                       id="covered-insurer-claim-amount"
                       value={form.coveredInsurerClaimAmount}
@@ -650,7 +649,7 @@ export default function HmoAuthorizationManager({
                       <div className="mt-1 font-semibold text-slate-900">{formatCurrency(preview.coveredCustomerAmount)}</div>
                     </div>
                     <div className="rounded-lg bg-white px-3 py-2">
-                      <div className="text-[11px] text-slate-500">גורם מממן בזמן כיסוי</div>
+                      <div className="text-[11px] text-slate-500">חיוב מול גורם מממן</div>
                       <div className="mt-1 font-semibold text-slate-900">{formatCurrency(preview.coveredInsurerAmount)}</div>
                     </div>
                   </div>
