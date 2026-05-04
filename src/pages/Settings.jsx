@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EnhancedDialogHeader } from '@/components/ui/DialogHeader';
 import { Sparkles, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History } from 'lucide-react';
-import BackupManager from '@/components/settings/BackupManager.jsx';
+import LocalExportImportManager from '@/components/settings/LocalExportImportManager.jsx';
 import LogoManager from '@/components/settings/LogoManager.jsx';
 import TagsManager from '@/components/settings/TagsManager.jsx';
 import StudentVisibilitySettings from '@/components/settings/StudentVisibilitySettings.jsx';
@@ -46,8 +46,8 @@ export default function Settings() {
   const canManageSessionForm = normalizedRole === 'admin' || normalizedRole === 'owner';
   const orgIdSyncCompletedRef = useRef(new Set());
   const orgIdSyncInFlightRef = useRef(new Set());
-  const [selectedModule, setSelectedModule] = useState(null); // 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
-  const [backupEnabled, setBackupEnabled] = useState(false);
+  const [selectedModule, setSelectedModule] = useState(null); // 'localExport' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
+  const [localExportEnabled, setLocalExportEnabled] = useState(false);
   const [logoEnabled, setLogoEnabled] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
   const [orgDocsVisibility, setOrgDocsVisibility] = useState(false);
@@ -57,7 +57,7 @@ export default function Settings() {
   const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
   const [savingBillingPolicy, setSavingBillingPolicy] = useState(false);
 
-  // Fetch backup permissions and initialize if empty using the proper RPC function
+  // Fetch organization feature permissions and initialize if empty using the proper RPC function.
   useEffect(() => {
     if (!activeOrgId || !authClient) return;
     let isCancelled = false;
@@ -72,7 +72,7 @@ export default function Settings() {
         if (isCancelled) return;
         if (initError) {
           console.error('Error initializing permissions:', initError);
-          setBackupEnabled(false);
+          setLocalExportEnabled(false);
           setLogoEnabled(false);
           setStorageEnabled(false);
           return;
@@ -91,14 +91,14 @@ export default function Settings() {
         }
         
         if (isCancelled) return;
-        setBackupEnabled(permissions?.backup_local_enabled === true);
+        setLocalExportEnabled(permissions?.backup_local_enabled === true);
         setLogoEnabled(permissions?.logo_enabled === true);
         // Storage is enabled if storage_access_level is not false (can be byos_only, managed_only, or all)
         setStorageEnabled(permissions?.storage_access_level && permissions.storage_access_level !== false);
       } catch (err) {
         console.error('Error in permissions initialization:', err);
         if (!isCancelled) {
-          setBackupEnabled(false);
+          setLocalExportEnabled(false);
           setLogoEnabled(false);
           setStorageEnabled(false);
         }
@@ -396,7 +396,7 @@ export default function Settings() {
       console.log('Permissions merged successfully (missing permissions added, existing preserved)');
       
       // Update local state
-      setBackupEnabled(mergedPermissions?.backup_local_enabled === true);
+      setLocalExportEnabled(mergedPermissions?.backup_local_enabled === true);
       setLogoEnabled(mergedPermissions?.logo_enabled === true);
       setStorageEnabled(mergedPermissions?.storage_access_level && mergedPermissions.storage_access_level !== false);
       
@@ -584,27 +584,27 @@ export default function Settings() {
             </CardContent>
           </Card>
 
-          {/* Backup & Restore Card */}
+          {/* Local Export & Import Card */}
           <Card className={`group relative w-full overflow-hidden border-0 shadow-md transition-all duration-200 flex flex-col ${
-            backupEnabled ? 'bg-white/80 hover:shadow-xl hover:scale-[1.02]' : 'bg-slate-50 opacity-75'
+            localExportEnabled ? 'bg-white/80 hover:shadow-xl hover:scale-[1.02]' : 'bg-slate-50 opacity-75'
           }`}>
             <CardHeader className="space-y-2 pb-3 flex-1">
               <div className="flex items-start gap-2">
                 <div className={`rounded-lg p-2 transition-colors ${
-                  backupEnabled 
+                  localExportEnabled 
                     ? 'bg-slate-100 text-slate-700 group-hover:bg-slate-700 group-hover:text-white' 
                     : 'bg-slate-200 text-slate-400'
                 }`}>
                   <ShieldCheck className="h-5 w-5" aria-hidden="true" />
                 </div>
-                <CardTitle className={`text-lg font-bold ${backupEnabled ? 'text-slate-900' : 'text-slate-500'}`}>
-                  גיבוי ושחזור
+                <CardTitle className={`text-lg font-bold ${localExportEnabled ? 'text-slate-900' : 'text-slate-500'}`}>
+                  ייצוא וייבוא מקומי
                 </CardTitle>
               </div>
-              <p className={`text-sm leading-relaxed min-h-[2.5rem] ${backupEnabled ? 'text-slate-600' : 'text-slate-500'}`}>
-                {backupEnabled 
-                  ? 'יצירת קובץ גיבוי מוצפן של נתוני הארגון ושחזור מגיבוי קיים'
-                  : 'גיבוי אינו זמין. נא לפנות לתמיכה על מנת לבחון הפעלת הפונקציה'
+              <p className={`text-sm leading-relaxed min-h-[2.5rem] ${localExportEnabled ? 'text-slate-600' : 'text-slate-500'}`}>
+                {localExportEnabled 
+                  ? 'כלי עזר לייצוא JSON מקומי ולייבוא לא הרסני של נתוני הארגון'
+                  : 'ייצוא/ייבוא מקומי אינו זמין. נא לפנות לתמיכה על מנת לבחון הפעלת הפונקציה'
                 }
               </p>
             </CardHeader>
@@ -612,11 +612,11 @@ export default function Settings() {
               <Button 
                 size="sm" 
                 className="w-full gap-2" 
-                onClick={() => setSelectedModule('backup')} 
-                disabled={!canManageSessionForm || !backupEnabled}
-                variant={(!canManageSessionForm || !backupEnabled) ? 'secondary' : 'default'}
+                onClick={() => setSelectedModule('localExport')} 
+                disabled={!canManageSessionForm || !localExportEnabled}
+                variant={(!canManageSessionForm || !localExportEnabled) ? 'secondary' : 'default'}
               >
-                <ShieldCheck className="h-4 w-4" /> ניהול גיבויים
+                <ShieldCheck className="h-4 w-4" /> ניהול ייצוא/ייבוא
               </Button>
             </CardContent>
           </Card>
@@ -886,7 +886,7 @@ export default function Settings() {
           <DialogContent hideDefaultClose className="max-w-5xl max-h-[90vh] p-0 gap-0 overflow-hidden bg-white border border-slate-200 shadow-2xl">
             <EnhancedDialogHeader
               icon={
-                selectedModule === 'backup' ? <ShieldCheck /> :
+                selectedModule === 'localExport' ? <ShieldCheck /> :
                 selectedModule === 'logo' ? <Sparkles /> :
                 selectedModule === 'tags' ? <Tag /> :
                 selectedModule === 'studentVisibility' ? <EyeOff /> :
@@ -899,7 +899,7 @@ export default function Settings() {
                 null
               }
               title={
-                selectedModule === 'backup' ? 'גיבוי ושחזור' :
+                selectedModule === 'localExport' ? 'ייצוא וייבוא מקומי' :
                 selectedModule === 'logo' ? 'לוגו מותאם אישית' :
                 selectedModule === 'tags' ? 'ניהול תגיות וסיווגים' :
                 selectedModule === 'studentVisibility' ? 'תצוגת תלמידים לא פעילים' :
@@ -922,8 +922,8 @@ export default function Settings() {
             {/* Content area with padding and scroll */}
             <div className="overflow-y-auto px-6 py-6 max-h-[calc(90vh-80px)] bg-slate-50/30">
               <div className="mx-auto max-w-4xl">
-                {selectedModule === 'backup' && (
-                  <BackupManager session={session} orgId={activeOrgId} />
+                {selectedModule === 'localExport' && (
+                  <LocalExportImportManager session={session} orgId={activeOrgId} />
                 )}
                 {selectedModule === 'logo' && (
                   <LogoManager session={session} orgId={activeOrgId} />

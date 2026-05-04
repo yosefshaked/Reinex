@@ -183,12 +183,25 @@ function shouldRedactPathSegment(segment, previousSegment) {
   return UUID_PATTERN.test(segment);
 }
 
+function splitPathAndSearch(path) {
+  const normalizedPath = String(path);
+  const searchStart = normalizedPath.indexOf('?');
+  if (searchStart === -1) {
+    return { pathname: normalizedPath, search: '' };
+  }
+
+  return {
+    pathname: normalizedPath.slice(0, searchStart),
+    search: normalizedPath.slice(searchStart + 1),
+  };
+}
+
 function sanitizePath(path) {
   if (!path) {
     return path;
   }
 
-  const [pathname, search = ''] = String(path).split('?');
+  const { pathname, search } = splitPathAndSearch(path);
   const sanitizedPathname = pathname
     .split('/')
     .map((segment, index, segments) => {
@@ -242,7 +255,7 @@ function sanitizeAnalyticsProperty(key, value) {
   return sanitizeAnalyticsUrl(value);
 }
 
-function sanitizePostHogEvent(captureResult) {
+export function sanitizePostHogEvent(captureResult) {
   if (!captureResult || !captureResult.properties) {
     return captureResult;
   }

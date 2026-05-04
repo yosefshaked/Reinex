@@ -166,6 +166,14 @@ export const AUDIT_ACTIONS = {
   // Backup
   BACKUP_CREATED: 'backup.created',
   BACKUP_RESTORED: 'backup.restored',
+
+  // Local export/import
+  LOCAL_EXPORT_STARTED: 'local_export_started',
+  LOCAL_EXPORT_COMPLETED: 'local_export_completed',
+  LOCAL_EXPORT_FAILED: 'local_export_failed',
+  LOCAL_IMPORT_ANALYZED: 'local_import_analyzed',
+  LOCAL_IMPORT_APPLIED: 'local_import_applied',
+  LOCAL_IMPORT_FAILED: 'local_import_failed',
   
   // Files
   FILE_UPLOADED: 'file.uploaded',
@@ -226,6 +234,7 @@ export const AUDIT_CATEGORIES = {
   PERMISSIONS: 'permissions',
   MEMBERSHIP: 'membership',
   BACKUP: 'backup',
+  LOCAL_DATA_PORTABILITY: 'local_data_portability',
   SETTINGS: 'settings',
   FILES: 'files',
   SESSIONS: 'sessions',
