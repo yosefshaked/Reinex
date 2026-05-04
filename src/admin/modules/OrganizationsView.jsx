@@ -97,7 +97,7 @@ export default function OrganizationsView() {
         target_user_email: targetEmail || undefined,
       },
     });
-    captureAdminEvent(`org_action_${actionType}`, { org_id: org.id });
+    captureAdminEvent(`org_action_${actionType}`, { has_org_id: Boolean(org.id) });
     setFlash({
       tone: 'success',
       message: `Request queued: ${payload?.request?.request_id || actionType}`,

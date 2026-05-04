@@ -79,8 +79,9 @@ export default function ImpersonateUserDialog({
         targetOrgId: targetOrg?.id || undefined,
       });
       captureAdminEvent('impersonation_started', {
-        session_id: result.sessionId,
-        target_email: result.targetEmail,
+        has_session_id: Boolean(result.sessionId),
+        has_target_email: Boolean(result.targetEmail),
+        has_target_org: Boolean(targetOrg?.id),
         duration_minutes: Number(duration),
       });
       onStarted?.(result);

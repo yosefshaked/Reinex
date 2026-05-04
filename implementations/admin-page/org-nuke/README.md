@@ -1,6 +1,6 @@
 # Smart Nuke — Complete Org Purge Tool
 
-**Version:** manifest-v1  
+**Version:** manifest-v1.1  
 **Scope:** System-admin console (`/system-admin/*`)  
 **Access gate:** AAL2 + `profiles.is_system_admin = true` + service-role key  
 **SSOT for schema:** `src/lib/setup-sql.js`
@@ -21,7 +21,8 @@ The Smart Nuke tool permanently and completely removes a single `organization_id
 
 - It does **not** rely on `ON DELETE CASCADE` from the `organizations` row as its primary deletion mechanism. That approach is unreliable due to mixed cascade behaviour across 52 tables.
 - It does **not** delete platform-control records (`profiles`, `permission_registry`, `admin_data`, `email_log`) that are not owned by the org.
-- It does **not** hard-delete `audit_log` rows. Those are retention-governed and the `org_id` column becomes `NULL` when the org row is deleted (`ON DELETE SET NULL`).
+- It does **not** hard-delete the `organizations` row. The root record is **tombstoned** — all sensitive columns are wiped to NULL/empty defaults and the name is rewritten to `'PURGED: <original name>'`. The UUID is preserved to maintain referential integrity for system-level logs (see Section 3 Phase 14).
+- It does **not** hard-delete `audit_log` rows. Those are retention-governed and retain their `org_id` FK pointing to the tombstone row, providing a permanent archive link.
 - It does **not** run as a single transaction. Volumes may be large. It uses an advisory lock + phased deletion with row counts surfaced per phase.
 
 ---
@@ -55,7 +56,7 @@ This manifest is the **authoritative contract** for what gets deleted, in what o
 | Field | Values |
 |-------|--------|
 | `ownership` | `tenant` — org-scoped data to be purged; `platform` — cross-tenant/system data to retain or archive |
-| `strategy` | `hard_delete` — explicit `DELETE … WHERE org_id = $1`; `cascade_via_fk` — deleted implicitly by a parent `hard_delete` in the same wave (listed for completeness); `storage_then_delete` — delete Storage files then DB row; `retain` — do not touch; `set_null_on_org_delete` — org_id becomes NULL when org row is deleted via FK `ON DELETE SET NULL` |
+| `strategy` | `hard_delete` — explicit `DELETE … WHERE org_id = $1`; `cascade_via_fk` — deleted implicitly by a parent `hard_delete` in the same wave (listed for completeness); `storage_then_delete` — delete Storage files then DB row; `tombstone` — UPDATE the row to wipe all sensitive columns, preserve the UUID and rewrite the name; `retain` — do not touch; `fk_points_to_tombstone` — FK to organizations is preserved; the tombstone row satisfies referential integrity |
 | `retention` | `none` — no retention required; `archive_7y` — legal hold, do not delete; `soft` — not applicable (data retained by platform) |
 | `phase` | Execution wave. Lower phases run first. |
 
@@ -69,8 +70,8 @@ These tables are **not touched** by the purge. They are listed here for complete
 | `public.permission_registry` | Global reference data, no `org_id` column. | `retain` |
 | `public.admin_data` | System-admin console store. No `org_id` FK to `organizations`. | `retain` |
 | `public.email_log` | Platform outbound email log. `org_id` is nullable, no hard FK constraint. Archived, never hard-deleted. | `retain` |
-| `public.audit_log` | Compliance/legal log. `org_id REFERENCES organizations(id) ON DELETE SET NULL`. Rows are retained; `org_id` nullified when org row is deleted. | `set_null_on_org_delete` |
-| `public.impersonation_sessions` | Admin audit trail. `target_org_id REFERENCES organizations(id) ON DELETE SET NULL`. | `set_null_on_org_delete` |
+| `public.audit_log` | Compliance/legal log. `org_id REFERENCES organizations(id) ON DELETE SET NULL`. Rows are retained; `org_id` continues to point to the tombstone row — the FK is satisfied and the archive link is preserved. | `fk_points_to_tombstone` |
+| `public.impersonation_sessions` | Admin audit trail. `target_org_id REFERENCES organizations(id) ON DELETE SET NULL`. Rows are retained; FK points to the tombstone row. | `fk_points_to_tombstone` |
 
 ### 3.3 Tenant tables — ordered purge manifest
 
@@ -183,14 +184,50 @@ Phases run sequentially. Within a phase, tables run in the listed row order. Eac
 | 13.1 | `public."Employees"` | `org_id → organizations(id)` | All employee-referencing tables deleted in earlier phases. |
 | 13.2 | `public."Services"` | `org_id → organizations(id)` | All service-referencing tables deleted in earlier phases. |
 
-#### Phase 14 — Org root (triggers built-in cascades)
+#### Phase 14 — Org root (tombstone)
 
 | # | Table | FK dependencies | Strategy | Notes |
 |---|-------|-----------------|----------|-------|
-| 14.1 | `public.active_routing` | `org_id → organizations(id) ON DELETE CASCADE` | Explicit delete before org row for auditability. | |
-| 14.2 | `public.org_invitations` | `org_id → organizations(id) ON DELETE CASCADE` | Explicit delete before org row. | |
-| 14.3 | `public.org_memberships` | `org_id → organizations(id) ON DELETE CASCADE` | Explicit delete before org row. | |
-| 14.4 | `public.organizations` | Root record | `hard_delete` | **Delete last.** Triggers `ON DELETE SET NULL` on `audit_log.org_id` and `impersonation_sessions.target_org_id`. |
+| 14.1 | `public.active_routing` | `org_id → organizations(id) ON DELETE CASCADE` | `hard_delete` | Explicit delete before tombstone write for auditability. |
+| 14.2 | `public.org_invitations` | `org_id → organizations(id) ON DELETE CASCADE` | `hard_delete` | Explicit delete before tombstone write. |
+| 14.3 | `public.org_memberships` | `org_id → organizations(id) ON DELETE CASCADE` | `hard_delete` | Explicit delete before tombstone write. |
+| 14.4 | `public.organizations` | Root record | `tombstone` | **Tombstone last.** Run `UPDATE public.organizations SET ... WHERE id = $orgId`. Preserves the UUID so `audit_log.org_id` and `impersonation_sessions.target_org_id` FKs continue to resolve to the now-dead stub. See Section 14.5 for the exact UPDATE statement. |
+
+#### Phase 14.5 — Tombstone UPDATE contract
+
+The `organizations` row is rewritten to a zero-data-footprint stub:
+
+```sql
+UPDATE public.organizations
+SET
+  name                 = 'PURGED: ' || name,
+  slug                 = 'purged-' || id::text,
+  setup_completed      = false,
+  verified_at          = NULL,
+  permissions          = '{}'::jsonb,
+  logo_url             = NULL,
+  storage_profile      = '{}'::jsonb,
+  storage_grace_ends_at = NULL,
+  backup_history       = '[]'::jsonb,
+  policy_links         = NULL,
+  legal_settings       = NULL,
+  metadata             = NULL,
+  updated_at           = now()
+WHERE id = $1;
+```
+
+**Preserved columns** (intentional — read the reasoning before changing):
+
+| Column | Reason |
+|--------|--------|
+| `id` | Primary key. Preserved so all FK references in `audit_log`, `impersonation_sessions`, etc. remain valid. |
+| `created_by` | NOT NULL FK to `auth.users`. The user account may still exist independently. Kept to avoid orphaned FK violation. |
+| `created_at` | Historical timestamp — not personal data. |
+
+**Self-identifying archive requirement:** The `original_org_name` (captured before the tombstone write) must be stamped into:
+1. The root of the JSON export/backup payload as `"org_name": "<original name>"`.
+2. The backup file name: `org-purge-<slug>-<ISO8601-date>.json`.
+3. The `before_state` object in the `audit_log` entry.
 
 ---
 
@@ -211,12 +248,12 @@ Phases run sequentially. Within a phase, tables run in the listed row order. Eac
 | 11 | 2 | HMO provider hierarchy |
 | 12 | 4 | Core client/student entities |
 | 13 | 2 | Employee & service roots |
-| 14 | 4 | Org root + cascade targets |
-| **Total** | **46 tenant tables** | |
+| 14 | 4 | Org root — 3 hard deletes + 1 tombstone |
+| **Total** | **46 tables touched** | 45 hard-deleted + 1 tombstoned |
 
-**6 platform tables retained:** `profiles`, `permission_registry`, `admin_data`, `email_log`, `audit_log` (SET NULL), `impersonation_sessions` (SET NULL).
+**6 platform tables retained:** `profiles`, `permission_registry`, `admin_data`, `email_log`, `audit_log` (FK → tombstone), `impersonation_sessions` (FK → tombstone).
 
-Total manifest coverage: **52 tables** = 46 purged + 6 platform.
+Total manifest coverage: **52 tables** = 45 hard-deleted + 1 tombstoned (`organizations`) + 6 platform.
 
 ---
 
@@ -394,11 +431,13 @@ Admin UI                           /api/org-purge/prepare          /api/org-purg
    │                                                                          │── verify challenge not expired (15 min TTL)
    │                                                                          │── verify org_name_confirm matches org.name
    │                                                                          │── acquire pg_advisory_lock(org_id_as_bigint)
-   │                                                                          │── run phases 1–14 sequentially
+   │                                                                          │── run phases 1–13 sequentially (hard deletes)
    │                                                                          │── delete Storage files (phase 8)
-   │                                                                          │── write audit_log entry
+   │                                                                          │── phase 14: delete active_routing, invitations, memberships
+   │                                                                          │── phase 14.4: tombstone UPDATE on organizations row
+   │                                                                          │── write audit_log entry (org_id = tombstone UUID)
    │                                                                          │── release advisory lock
-   │◀──── 200 { deleted_counts, storage_errors, duration_ms } ──────────────│
+   │◀──── 200 { deleted_counts, tombstoned_org, storage_errors, duration_ms } ─│
 ```
 
 ### Advisory lock strategy
@@ -551,8 +590,17 @@ This prevents two concurrent execute calls for the same org.
   "deleted_counts": {
     "instance_locks": 0,
     "ledger_transactions": 847,
-    // ... one entry per manifest tenant table
-    "organizations": 1
+    // ... one entry per hard-deleted manifest tenant table
+    "org_memberships": 4,
+    "org_invitations": 2,
+    "active_routing": 0
+    // organizations is NOT in deleted_counts — it is tombstoned, not deleted
+  },
+  "tombstoned_org": {
+    "id": "uuid",
+    "original_name": "Acme Clinic",
+    "tombstone_name": "PURGED: Acme Clinic",
+    "tombstone_slug": "purged-<uuid>"
   },
   "storage": {
     "files_attempted": 74,
@@ -635,7 +683,7 @@ await client
 | Challenge TTL | HMAC challenge expires in **15 minutes**. After expiry, the operator must call prepare again. |
 | Org name confirmation | Execute requires the operator to type the exact org name. This is the final human gate before irreversible deletion. |
 | Advisory lock | Prevents two concurrent executes for the same org. Returns 409 if lock cannot be acquired. |
-| Audit log entry | Write a `system_admin.org_purge_executed` event to `audit_log` with `retention_category = 'critical'` and `org_id = null` (org no longer exists). Include `before_state` with org name, total row counts, storage counts. |
+| Audit log entry | Write a `system_admin.org_purge_executed` event to `audit_log` with `retention_category = 'critical'` and `org_id = <tombstone UUID>` (the org row still exists as a stub — the FK is valid). Include `before_state` with `original_org_name`, total row counts, storage counts, and tombstone column snapshot. |
 | No route named `admin/*` | The Azure Functions host reserves the `admin` route prefix. The route must be `/api/org-purge/*`, not `/api/admin-org-purge/*`. |
 | No `resolveTenantClient()` | Deprecated. Always use `createSingleClient(env)`. |
 | `respond()` for all returns | All Azure Function responses must go through `respond(context, statusCode, body)`. |
@@ -721,7 +769,7 @@ The `plan_id` and `row_counts` from prepare are stored **in memory / process-loc
 - [ ] **M1 — Purge manifest module:** Create `api/org-purge/purge-manifest.js` with the exact ordered table array from Section 3. Include `phase`, `table`, `schema_quoted` (e.g. `'"Documents"'`), `strategy`, `org_id_column` fields.
 - [ ] **M2 — Drift check module:** Create `api/org-purge/drift-check.js` implementing checks C1–C7 using the SQL from Section 5.2.
 - [ ] **M3 — Challenge module:** Create `api/org-purge/challenge.js` with HMAC generate/verify using constant-time comparison.
-- [ ] **M4 — Execute phases module:** Create `api/org-purge/execute-phases.js`. Runs phases 1–14 sequentially using `supabase.from(table).delete().eq('org_id', orgId)` for each table. Collects deleted counts.
+- [ ] **M4 — Execute phases module:** Create `api/org-purge/execute-phases.js`. Runs phases 1–14 sequentially. Phases 1–14.3 use `supabase.from(table).delete().eq('org_id', orgId)`. Phase 14.4 issues the tombstone UPDATE from Section 14.5 via `supabase.rpc` or a raw query. Collects deleted counts + tombstone result.
 - [ ] **M5 — Storage handler module:** Create `api/org-purge/storage-handler.js` implementing the algorithm from Section 8.
 - [ ] **M6 — Azure Function handler:** Create `api/org-purge/index.js`. Wire prepare (C1–C7 + row counts + challenge) and execute (verify challenge + advisory lock + phases + storage + audit log) sub-actions. Use `respond(context, ...)` and `resolveBearerAuthorization(req)`.
 - [ ] **M7 — Admin UI:** Create `OrgNukePage.jsx` in `/system-admin`. Show org lookup, row count table, warning banners, org-name confirmation field, and phased progress indicator during execute.
@@ -735,6 +783,7 @@ The `plan_id` and `row_counts` from prepare are stored **in memory / process-loc
 
 | Version | Date | Changes |
 |---------|------|---------|
-| v1 | Initial | Full 52-table manifest. 46 tenant tables, 6 platform tables. 14 deletion phases. |
+| v1 | Initial | Full 52-table manifest. 46 tenant tables, 6 platform tables. 14 deletion phases. Hard-delete on organizations root. |
+| v1.1 | 2026-05-03 | **Tombstone pivot.** Phase 14.4 changed from `hard_delete` to `tombstone` UPDATE on organizations row. UUID preserved for FK integrity. Added Phase 14.5 (tombstone SQL contract). Updated platform table classification for audit_log and impersonation_sessions (FK → tombstone, not SET NULL). Added self-identifying archive requirement (original org name in export, filename, and audit entry). Updated API execute response shape (tombstoned_org field). |
 
 > **Important:** When a new org-scoped table is added to `src/lib/setup-sql.js`, this manifest **must be updated before the table ships to production**. Failure to do so will cause the drift check (C1) to block all future org purge operations until the manifest is updated.

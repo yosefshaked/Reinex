@@ -98,10 +98,19 @@ export default function KnowledgeBaseView() {
     if (editing.id) {
       const existing = articles.find((a) => a.id === editing.id);
       upsert({ ...existing, title, tags, body: editing.body, updated_at: new Date().toISOString() });
-      captureAdminEvent('kb_article_updated', { id: editing.id });
+      captureAdminEvent('kb_article_updated', {
+        has_article_id: Boolean(editing.id),
+        title_length: title.length,
+        tag_count: tags.length,
+        body_length: editing.body.length,
+      });
     } else {
       upsert({ id: `kb-${Date.now().toString(36)}`, title, tags, body: editing.body, updated_at: new Date().toISOString() });
-      captureAdminEvent('kb_article_created', { title });
+      captureAdminEvent('kb_article_created', {
+        title_length: title.length,
+        tag_count: tags.length,
+        body_length: editing.body.length,
+      });
     }
     setEditing(null);
   };

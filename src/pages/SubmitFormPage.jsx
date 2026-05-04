@@ -1072,8 +1072,9 @@ export default function SubmitFormPage() {
             <div className="flex items-start gap-2 text-xs text-slate-700">
               <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-500" />
               <p className="flex-1">
-                בהמשך השימוש באתר ושליחת הטופס, הנך מאשר/ת את תנאי השימוש ומדיניות הפרטיות של הארגון,
-                לרבות שימוש במידע הנמסר לצורך טיפול מנהלתי, רפואי ותפעולי.
+                המידע שתמסרו בטופס עשוי לכלול מידע אישי או מידע בעל רגישות מיוחדת. מסירת המידע נועדה לצורך טיפול בפנייה,
+                ניהול השירות ותפעול הארגון. אין למסור מידע שאינו נדרש לצורך הפנייה. לפרטים נוספים ראו{' '}
+                <a href="#/legal/privacy" className="font-semibold text-slate-900 underline">מדיניות הפרטיות</a>.
               </p>
               <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={dismissLegalNotice}>
                 הבנתי

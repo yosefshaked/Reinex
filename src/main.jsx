@@ -42,6 +42,7 @@ import FormBuilderPage from './features/forms/pages/FormBuilderPage.jsx';
 import FormPreviewPage from './features/forms/pages/FormPreviewPage.jsx';
 import FormBlocksPage from './features/forms/pages/FormBlocksPage.jsx';
 import SubmitFormPage from './pages/SubmitFormPage.jsx';
+import LegalPage from './pages/LegalPage.jsx';
 import { bootstrapSupabaseCallback } from './auth/bootstrapSupabaseCallback.js';
 import AdminApp from './admin/AdminApp.jsx';
 import { initPostHog } from './lib/analytics/posthog.js';
@@ -90,6 +91,8 @@ function App({ config = null }) {
                 <Route path="/complete-registration" element={<CompleteRegistrationPage />} />
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route path="/submit" element={<SubmitFormPage />} />
+                <Route path="/legal" element={<LegalPage />} />
+                <Route path="/legal/:slug" element={<LegalPage />} />
                 <Route element={<AuthGuard />}>
                   <Route path="/account/setup" element={<AccountSetupPage />} />
                   <Route path="/account/reactivate" element={<AccountReactivationPage />} />

@@ -32,7 +32,7 @@ const SEVERITY_LABEL = {
 export default function IncidentsView() {
   useAdminModuleView('incidents');
 
-  const { items, upsert, remove: removeItem } = useAdminStore('incidents');
+  const { items, upsert } = useAdminStore('incidents');
   const [openDraft, setOpenDraft] = React.useState(false);
   const [selected, setSelected] = React.useState(null);
   const [resolveOpen, setResolveOpen] = React.useState(false);
@@ -64,7 +64,10 @@ export default function IncidentsView() {
     const incident = items.find((i) => i.id === id);
     if (!incident) return;
     upsert({ ...incident, status: 'resolved', resolved_at: new Date().toISOString(), resolution_notes: notes });
-    captureAdminEvent('incident_resolved', { id });
+    captureAdminEvent('incident_resolved', {
+      has_incident_id: Boolean(id),
+      severity: incident.severity,
+    });
   };
 
   return (

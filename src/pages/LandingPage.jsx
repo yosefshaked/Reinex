@@ -28,7 +28,7 @@ export default function LandingPage() {
     {
       icon: Shield,
       title: 'אבטחה ופרטיות',
-      description: 'הגנה מלאה על מידע רגיש עם הצפנה, גיבויים ובקרת גישה נוחה',
+      description: 'בקרות גישה, הפרדת ארגונים ותהליכי אבטחה שנועדו לצמצם סיכון במידע רגיש',
     },
     {
       icon: Sparkles,
@@ -255,7 +255,7 @@ export default function LandingPage() {
               למה לבחור ב-Reinex?
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-lg text-neutral-600">
-              הצטרפו לארגונים שכבר משתמשים במערכת שלנו
+              מיועד לארגונים שרוצים לבחון ניהול תפעולי ברור ומסודר יותר
             </p>
           </div>
 
@@ -304,18 +304,18 @@ export default function LandingPage() {
             <span className="text-sm">מערכת ניהול מפגשים מתקדמת</span>
           </div>
           <div className="mt-4 flex flex-wrap justify-center gap-6">
-            <a href="https://thepcrunners.com/he/privacy-policy" aria-label='מדיניות הפרטיות' className="text-sm text-neutral-600 underline hover:text-neutral-800">
+            <a href="#/legal/privacy" aria-label='מדיניות הפרטיות' className="text-sm text-neutral-600 underline hover:text-neutral-800">
               מדיניות פרטיות
             </a>
-            <a href="https://thepcrunners.com/he/usage-policy" aria-label='תנאי השימוש' className="text-sm text-neutral-600 underline hover:text-neutral-800">
+            <a href="#/legal/terms" aria-label='תנאי השימוש' className="text-sm text-neutral-600 underline hover:text-neutral-800">
               תנאי שימוש
             </a>
-            <a href="https://thepcrunners.com/he/accessibility-policy" aria-label='מדיניות נגישות' className="text-sm text-neutral-600 underline hover:text-neutral-800">
+            <a href="#/legal/accessibility" aria-label='מדיניות נגישות' className="text-sm text-neutral-600 underline hover:text-neutral-800">
               מדיניות נגישות
             </a>
           </div>
           <p className="mt-4 text-sm text-neutral-500">
-            © {new Date().getFullYear()} Reinex ThePCRunners. כל הזכויות שמורות.
+            © {new Date().getFullYear()} Reinex. מערכת בשלב MVP / הערכה תפעולית.
           </p>
         </div>
       </footer>

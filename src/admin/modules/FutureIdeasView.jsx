@@ -90,7 +90,11 @@ export default function FutureIdeasView() {
       created_at: new Date().toISOString(),
     });
     setDraft({ title: '', description: '', tags: '' });
-    captureAdminEvent('future_idea_added', { title });
+    captureAdminEvent('future_idea_added', {
+      title_length: title.length,
+      description_length: draft.description.trim().length,
+      tag_count: tags.length,
+    });
   };
 
   const upvote = (id) => {

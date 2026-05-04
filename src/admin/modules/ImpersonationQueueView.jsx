@@ -80,7 +80,7 @@ export default function ImpersonationQueueView() {
           force_revoke: true,
         },
       });
-      captureAdminEvent('impersonation_force_revoked', { session_id: revokeTarget.id });
+      captureAdminEvent('impersonation_force_revoked', { has_session_id: Boolean(revokeTarget.id) });
       setRevokeTarget(null);
       setSelected(null);
       await load(query);

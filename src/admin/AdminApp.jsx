@@ -25,6 +25,7 @@ import DataQualityView from './modules/DataQualityView.jsx';
 import AdminToolsView from './modules/AdminToolsView.jsx';
 import OnboardingPipelineView from './modules/OnboardingPipelineView.jsx';
 import EmailLogView from './modules/EmailLogView.jsx';
+import OrgPurgeView from './modules/OrgPurgeView.jsx';
 import AdminShell from './ui/AdminShell.jsx';
 import DashboardView from './ui/DashboardView.jsx';
 import ComingSoon from './ui/ComingSoon.jsx';
@@ -108,6 +109,7 @@ const LIVE_ELEMENTS = {
   'admin-tools': <AdminToolsView />,
   'onboarding-pipeline': <OnboardingPipelineView />,
   'email-log': <EmailLogView />,
+  'org-purge': <OrgPurgeView />,
   // Legacy aggregate view retained while its sub-modules are built out.
   'operations-support': <OperationsSupportView />,
 };
