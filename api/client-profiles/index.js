@@ -23,16 +23,17 @@ import {
   coerceTags,
   validateIsraeliPhone,
 } from '../_shared/student-validation.js';
-import { createOrReuseClientProfile, fetchPrimaryGuardianForClientProfile } from '../_shared/client-profiles.js';
+import { createOrReuseClientProfile, fetchPrimaryGuardianForClientProfile, maskIfAnonymized } from '../_shared/client-profiles.js';
 
 function buildDisplayName(row) {
   return [row?.first_name, row?.middle_name, row?.last_name].filter(Boolean).join(' ').trim() || 'ללא שם';
 }
 
 function mergeClientProfile(profile, studentId = null, guardian = null) {
+  const masked = maskIfAnonymized(profile) || {};
   return {
-    ...profile,
-    full_name: buildDisplayName(profile),
+    ...masked,
+    full_name: buildDisplayName(masked),
     student_id: studentId || null,
     guardian: guardian || null,
     is_student: Boolean(studentId),

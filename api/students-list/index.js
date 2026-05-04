@@ -40,6 +40,7 @@ import {
   fetchPrimaryGuardianForClientProfile,
   upsertClientGuardianLink,
   buildClientProfileDisplayName,
+  maskIfAnonymized,
 } from '../_shared/client-profiles.js';
 
 const CLIENT_PROFILE_FIELD_NAMES = new Set([
@@ -58,7 +59,7 @@ const CLIENT_PROFILE_FIELD_NAMES = new Set([
 
 function mergeStudentWithClientProfile(studentRow, clientProfileRow, guardian = null) {
   const student = studentRow || {};
-  const profile = clientProfileRow || {};
+  const profile = maskIfAnonymized(clientProfileRow) || {};
 
   return {
     ...student,

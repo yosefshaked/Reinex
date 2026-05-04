@@ -447,3 +447,41 @@ export function buildClientProfileReference(row = {}) {
     metadata: row.metadata || null,
   };
 }
+
+// ── Privacy masking ───────────────────────────────────────────────────────────
+
+// Frozen null-payload for anonymized client_profile rows.
+// Allocated once at module load; spread-reused on every masked row call.
+const ANONYMIZED_PROFILE_NULLS = Object.freeze({
+  identity_number: null,
+  phone: null,
+  email: null,
+  date_of_birth: null,
+  metadata: null,
+});
+
+/**
+ * Mask sensitive fields for a client_profile row before it is returned to callers.
+ *
+ * Always strips the internal `pii_encrypted_data` bucket column.
+ * Nulls encrypted fields (identity_number, phone, email, date_of_birth, metadata)
+ * when privacy_status === 'anonymized'.
+ *
+ * Optimised for tight roster loops:
+ *  - When the row is not anonymized AND the bucket column is absent (explicit SELECT),
+ *    the original object reference is returned with zero allocation.
+ *  - The null-payload object is frozen and reused, never recreated per call.
+ */
+export function maskIfAnonymized(profileRow) {
+  if (!profileRow) return profileRow;
+  const hasBucket = Object.prototype.hasOwnProperty.call(profileRow, 'pii_encrypted_data');
+  if (profileRow.privacy_status === 'anonymized') {
+    const { pii_encrypted_data: _bucket, ...safe } = profileRow;
+    return { ...safe, ...ANONYMIZED_PROFILE_NULLS };
+  }
+  if (hasBucket) {
+    const { pii_encrypted_data: _bucket, ...safe } = profileRow;
+    return safe;
+  }
+  return profileRow;
+}

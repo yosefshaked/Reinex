@@ -26,6 +26,11 @@ export const SETUP_SQL_SCRIPT = String.raw`-- ==================================
 -- - RLS enabled on all tables; uniform policies for authenticated users.
 -- - Final SELECT prints a dedicated JWT key; replace the placeholder secret first.
 --
+-- Patch Notes (2026-05-04):
+-- - [PRIVACY] Added privacy_status column to students and client_profiles.
+--   Values: 'active' (default) | 'anonymized'. Idempotent; uses IF NOT EXISTS guard.
+--   Indexes added on (org_id, privacy_status) for fast compliance queries.
+--
 -- Patch Notes (2026-04-09):
 -- - [AGOROT MIGRATION] Converted ALL currency/money columns from numeric to integer (agorot).
 --   1 shekel = 100 agorot. Financial values stored as integers (e.g. ₪10.50 = 1050 agorot).
@@ -5722,4 +5727,107 @@ SELECT extensions.sign(
   ),
   'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE'
 ) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";
+
+-- =================================================================
+-- Patch 2026-05-04: Privacy / pseudonymization status columns
+-- =================================================================
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name   = 'students'
+      AND column_name  = 'privacy_status'
+  ) THEN
+    ALTER TABLE public.students
+      ADD COLUMN IF NOT EXISTS privacy_status text NOT NULL DEFAULT 'active'
+        CHECK (privacy_status IN ('active', 'anonymized'));
+  END IF;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name   = 'client_profiles'
+      AND column_name  = 'privacy_status'
+  ) THEN
+    ALTER TABLE public.client_profiles
+      ADD COLUMN IF NOT EXISTS privacy_status text NOT NULL DEFAULT 'active'
+        CHECK (privacy_status IN ('active', 'anonymized'));
+  END IF;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS students_privacy_status_idx
+  ON public.students (org_id, privacy_status);
+
+CREATE INDEX IF NOT EXISTS client_profiles_privacy_status_idx
+  ON public.client_profiles (org_id, privacy_status);
+
+-- =================================================================
+-- Patch 2026-05-04b: Encrypted Bucket — pii_encrypted_data columns
+-- =================================================================
+-- Strategy: Collect all sensitive fields into a single JSON object,
+-- AES-256-GCM-encrypt the serialized string, and store the ciphertext in
+-- pii_encrypted_data (text). On anonymize the source columns are NULLed.
+-- Existing column types are NEVER changed.
+--
+-- Bucket contents:
+--   students         : notes_internal, medical_provider, metadata
+--   client_profiles  : identity_number, phone, email, date_of_birth, metadata
+--   guardians        : phone, email, metadata
+--
+-- Names (first_name, middle_name, last_name) are intentionally excluded
+-- from the bucket on all tables to preserve searchability.
+--
+-- privacy_status is added to students and client_profiles (tracked ownership).
+-- Guardians do not carry privacy_status — their anonymization is a side-effect
+-- of the linked student and is controlled by the endpoint's sole-link check.
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'students'
+      AND column_name = 'pii_encrypted_data'
+  ) THEN
+    ALTER TABLE public.students ADD COLUMN IF NOT EXISTS pii_encrypted_data text NULL;
+  END IF;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'client_profiles'
+      AND column_name = 'pii_encrypted_data'
+  ) THEN
+    ALTER TABLE public.client_profiles ADD COLUMN IF NOT EXISTS pii_encrypted_data text NULL;
+  END IF;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'guardians'
+      AND column_name = 'pii_encrypted_data'
+  ) THEN
+    ALTER TABLE public.guardians ADD COLUMN IF NOT EXISTS pii_encrypted_data text NULL;
+  END IF;
+EXCEPTION
+  WHEN others THEN NULL;
+END $$;
 `;

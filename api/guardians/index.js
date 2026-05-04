@@ -117,7 +117,10 @@ async function handleGet(context, client, orgId) {
     return respond(context, 500, { error: 'database_error', message: error.message });
   }
 
-  const guardians = (data || []).map(guardian => ({
+  // Destructure out the internal encryption bucket column so it is never
+  // returned to callers, regardless of whether the guardian has been anonymized.
+  // eslint-disable-next-line no-unused-vars
+  const guardians = (data || []).map(({ pii_encrypted_data: _bucket, ...guardian }) => ({
     ...guardian,
     first_name: normalizeStoredText(guardian.first_name),
     middle_name: normalizeStoredText(guardian.middle_name),

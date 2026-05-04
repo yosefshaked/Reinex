@@ -27,6 +27,7 @@ function ensureInit() {
 export function identifyUser(userId, traits = {}) {
   if (!ensureInit()) return false;
   if (!userId) return false;
+  // Do not pass email, name, phone, health/therapy, billing, document or free-text data to PostHog without a separate privacy review.
   posthog.identify(String(userId), {
     ...traits,
     is_system_admin: true,
