@@ -21,6 +21,11 @@ Ensure these environment variables are set in Azure Static Web App Configuration
 - `SECURITY_ENCRYPTION_SECRET` - current encryption secret used for encrypt/decrypt
 - `SECURITY_ENCRYPTION_SECRET_OLD` - optional previous secret for zero-downtime rotation fallback
 
+### Org purge workflow (Required for /api/org-purge/*):
+- `ORG_PURGE_CHALLENGE_SECRET` - required by `/api/org-purge/prepare` and `/api/org-purge/execute` to issue and verify short-lived challenge tokens. Must be at least 32 characters.
+- Generate a strong secret (example PowerShell):
+  `[Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }))`
+
 ## 3. Verify Tenant Database Schema
 
 Connect to your tenant database and verify:

@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, ClipboardCopy, ClipboardCheck, Skull, Tria
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,6 +16,49 @@ function SectionCard({ children, className = '' }) {
   return (
     <div className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
       {children}
+    </div>
+  );
+}
+
+function formatAdminDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString();
+}
+
+function PrepareChecksNotice({ checks }) {
+  if (!Array.isArray(checks) || checks.length === 0) return null;
+
+  return (
+    <div className="space-y-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3">
+      <p className="flex items-center gap-1.5 text-xs font-semibold text-rose-700">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+        Prepare was blocked by {checks.length} drift check{checks.length !== 1 ? 's' : ''}
+      </p>
+      <div className="space-y-2">
+        {checks.map((check, index) => {
+          const lastBackupLabel = formatAdminDateTime(check?.last_backup_at);
+          return (
+            <div key={`${check?.check || 'check'}-${index}`} className="rounded-md border border-rose-100 bg-white/70 px-3 py-2">
+              <p className="font-mono text-[11px] font-semibold text-rose-700">
+                {check?.check || 'DRIFT_CHECK'}
+              </p>
+              <p className="mt-1 text-xs font-medium text-rose-800">
+                {check?.message || 'Prepare failed.'}
+              </p>
+              {Object.prototype.hasOwnProperty.call(check || {}, 'last_backup_at') ? (
+                <p className="mt-1 text-[11px] text-rose-700">
+                  Last known backup: {lastBackupLabel || 'No recorded backups found'}
+                </p>
+              ) : null}
+              {check?.hint ? (
+                <p className="mt-1 text-[11px] text-rose-600">{check.hint}</p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -93,8 +137,10 @@ function ChallengeTokenBox({ token }) {
 
 function PrepareStep({ onSuccess }) {
   const [orgId, setOrgId] = React.useState('');
+  const [forceSkipBackupCheck, setForceSkipBackupCheck] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
+  const [prepareChecks, setPrepareChecks] = React.useState([]);
 
   const handlePrepare = React.useCallback(async () => {
     const trimmed = orgId.trim();
@@ -104,20 +150,26 @@ function PrepareStep({ onSuccess }) {
     }
     setLoading(true);
     setError('');
+    setPrepareChecks([]);
     try {
       const data = await authenticatedFetch('org-purge/prepare', {
         method: 'POST',
-        body: { org_id: trimmed },
+        body: {
+          org_id: trimmed,
+          force_skip_backup_check: forceSkipBackupCheck,
+        },
       });
       onSuccess(data);
     } catch (err) {
+      const checks = Array.isArray(err?.data?.checks) ? err.data.checks : [];
       const reason = err?.data?.reason || err?.data?.error || err?.message || 'Prepare failed.';
+      setPrepareChecks(checks);
       setError(reason);
       toast.error(`Prepare failed: ${reason}`);
     } finally {
       setLoading(false);
     }
-  }, [orgId, onSuccess]);
+  }, [forceSkipBackupCheck, orgId, onSuccess]);
 
   return (
     <SectionCard>
@@ -133,12 +185,33 @@ function PrepareStep({ onSuccess }) {
             className="font-mono text-sm"
           />
         </div>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex items-start gap-3">
+            <Checkbox
+              id="force-skip-backup-check"
+              checked={forceSkipBackupCheck}
+              onCheckedChange={(checked) => setForceSkipBackupCheck(checked === true)}
+              disabled={loading}
+              className="mt-0.5"
+            />
+            <div className="space-y-1">
+              <Label htmlFor="force-skip-backup-check" className="text-xs font-semibold text-amber-900">
+                Bypass the recent-backup guard for this purge
+              </Label>
+              <p className="text-[11px] leading-5 text-amber-800">
+                Only enable this when you explicitly accept that no backup was found in the last 30 days.
+                This does not skip any other drift checks.
+              </p>
+            </div>
+          </div>
+        </div>
         {error ? (
           <p className="flex items-center gap-1.5 rounded-lg bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
             {error}
           </p>
         ) : null}
+        <PrepareChecksNotice checks={prepareChecks} />
         <Button
           onClick={handlePrepare}
           disabled={loading || !orgId.trim()}

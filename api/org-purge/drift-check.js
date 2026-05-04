@@ -512,14 +512,24 @@ async function checkC7BackupGuard(client, orgId, forceSkipBackupCheck) {
   }
 
   const backupHistory = Array.isArray(org.backup_history) ? org.backup_history : [];
+  const completedBackups = backupHistory
+    .filter((entry) => entry && entry.type === 'backup' && entry.status === 'completed')
+    .map((entry) => {
+      const rawTimestamp = entry.timestamp || entry.created_at || null;
+      const timestampMs = rawTimestamp ? new Date(rawTimestamp).getTime() : 0;
+      return {
+        rawTimestamp,
+        timestampMs,
+      };
+    })
+    .filter((entry) => Number.isFinite(entry.timestampMs) && entry.timestampMs > 0)
+    .sort((a, b) => b.timestampMs - a.timestampMs);
+
   const now = Date.now();
-  const recentBackup = backupHistory.find(entry => {
-    const entryTime = entry?.created_at ? new Date(entry.created_at).getTime() : 0;
-    return now - entryTime <= BACKUP_MAX_AGE_MS;
-  });
+  const recentBackup = completedBackups.find((entry) => now - entry.timestampMs <= BACKUP_MAX_AGE_MS);
 
   if (!recentBackup) {
-    const lastEntry = backupHistory[backupHistory.length - 1] ?? null;
+    const lastEntry = completedBackups[0] ?? null;
     return {
       orgNotFound: false,
       orgName: org.name,
@@ -527,7 +537,7 @@ async function checkC7BackupGuard(client, orgId, forceSkipBackupCheck) {
       issue: {
         check: 'C7_NO_RECENT_BACKUP',
         message: 'No backup found within the last 30 days for this organization.',
-        last_backup_at: lastEntry?.created_at ?? null,
+        last_backup_at: lastEntry?.rawTimestamp ?? null,
         hint: 'Create a backup first, or pass force_skip_backup_check: true in the request body to bypass (explicit acknowledgement required).',
       },
     };
