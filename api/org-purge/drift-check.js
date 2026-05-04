@@ -8,10 +8,10 @@
  * All seven checks run even when earlier ones fail, so the caller gets a
  * complete picture of all drift issues in one response.
  *
- * Catalog queries (C1–C5) use Supabase JS client.schema('information_schema').
- * If information_schema is not accessible via PostgREST, those checks degrade
- * gracefully to warnings rather than hard failures — this is intentional so the
- * operator is never silently blocked by a configuration gap.
+ * Catalog queries (C1–C5) use the live DB RPC public.schema_introspection_v1(),
+ * which reads pg_catalog directly inside Postgres and returns a snapshot of the
+ * public schema. This avoids PostgREST's schema exposure limits while still
+ * validating the real deployed Supabase schema.
  *
  * Usage:
  *   const result = await runDriftChecks(client, orgId, { forceSkipBackupCheck: false });
@@ -29,6 +29,63 @@ import {
 
 // The 30-day backup guard window (check C7).
 const BACKUP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function loadCatalogSnapshot(client) {
+  const { data, error } = await client.rpc('schema_introspection_v1');
+  if (error) throw error;
+  if (!data || typeof data !== 'object') {
+    throw new Error('schema_introspection_v1 returned no usable snapshot');
+  }
+  return data;
+}
+
+function normalizeConstraintIdentifier(value) {
+  return String(value || '').replace(/"/g, '').trim().toLowerCase();
+}
+
+function parseForeignKeyConstraint(constraint) {
+  if (!constraint || constraint.type !== 'f' || typeof constraint.definition !== 'string') {
+    return null;
+  }
+
+  const definition = normalizeConstraintIdentifier(constraint.definition);
+  const match = definition.match(
+    /foreign key\s*\(([^)]+)\)\s*references\s+((?:[a-z0-9_]+\.)?[a-z0-9_]+)\s*\(([^)]+)\)(?:\s+on delete\s+([a-z ]+?))?(?:\s+on update|$)/i
+  );
+
+  if (!match) return null;
+
+  const sourceColumns = match[1].split(',').map((item) => normalizeConstraintIdentifier(item));
+  const referencedTarget = normalizeConstraintIdentifier(match[2]);
+  const referencedColumns = match[3].split(',').map((item) => normalizeConstraintIdentifier(item));
+  const deleteRule = (match[4] || 'NO ACTION').trim().toUpperCase();
+
+  const referencedTable = referencedTarget.includes('.')
+    ? referencedTarget.split('.').pop()
+    : referencedTarget;
+
+  return {
+    table: constraint.table,
+    sourceColumns,
+    referencedTable,
+    referencedColumns,
+    deleteRule,
+  };
+}
+
+function getOrgForeignKeys(snapshot) {
+  const constraints = Array.isArray(snapshot?.constraints) ? snapshot.constraints : [];
+  return constraints
+    .map(parseForeignKeyConstraint)
+    .filter((constraint) => (
+      constraint
+      && constraint.sourceColumns.length === 1
+      && constraint.sourceColumns[0] === 'org_id'
+      && constraint.referencedTable === 'organizations'
+      && constraint.referencedColumns.length === 1
+      && constraint.referencedColumns[0] === 'id'
+    ));
+}
 
 /**
  * Run all seven drift checks against the live database.
@@ -67,12 +124,20 @@ export async function runDriftChecks(client, orgId, options = {}) {
   }
 
   // ── Run catalog checks C1–C5 in parallel (all read-only, independent).
+  let catalogSnapshot = null;
+  let catalogError = null;
+  try {
+    catalogSnapshot = await loadCatalogSnapshot(client);
+  } catch (err) {
+    catalogError = err;
+  }
+
   const [c1Result, c2Result, c3Result, c4Result, c5Result] = await Promise.all([
-    checkC1CoverageGap(client),
-    checkC2ManifestGhost(client),
-    checkC3FkDrift(client),
-    checkC4RetentionCascadeRisk(client),
-    checkC5StorageHandlerIntegrity(client),
+    checkC1CoverageGap(catalogSnapshot, catalogError),
+    checkC2ManifestGhost(catalogSnapshot, catalogError),
+    checkC3FkDrift(catalogSnapshot, catalogError),
+    checkC4RetentionCascadeRisk(catalogSnapshot, catalogError),
+    checkC5StorageHandlerIntegrity(catalogSnapshot, catalogError),
   ]);
 
   if (c1Result.blocking) blocking.push(c1Result.issue);
@@ -107,42 +172,14 @@ export async function runDriftChecks(client, orgId, options = {}) {
  * Every table in public schema with an org_id column that has an FK to
  * organizations must appear in the manifest (or in PLATFORM_TABLES).
  *
- * Implementation: query information_schema.columns for org_id columns,
- * then cross-reference with information_schema.key_column_usage and
- * information_schema.referential_constraints to confirm FK target is organizations.
- * All joins are done in JavaScript to avoid multi-table PostgREST queries.
+ * Implementation: read the live public-schema snapshot from schema_introspection_v1()
+ * and inspect FK constraints targeting organizations(id).
  */
-async function checkC1CoverageGap(client) {
+async function checkC1CoverageGap(snapshot, catalogError) {
   try {
-    const is = client.schema('information_schema');
+    if (catalogError) throw catalogError;
 
-    // Step 1: Get all FK constraints in public schema on org_id.
-    const { data: kcuRows, error: e1 } = await is
-      .from('key_column_usage')
-      .select('table_name, constraint_name')
-      .eq('table_schema', 'public')
-      .eq('column_name', 'org_id');
-
-    if (e1) throw e1;
-
-    // Step 2: Get all referential constraints whose referenced table is 'organizations'.
-    const { data: ccuRows, error: e2 } = await is
-      .from('constraint_column_usage')
-      .select('constraint_name, table_name')
-      .eq('table_schema', 'public')
-      .eq('table_name', 'organizations');
-
-    if (e2) throw e2;
-
-    // Build a set of constraint names that point to organizations.
-    const orgFkConstraintNames = new Set(ccuRows.map(r => r.constraint_name));
-
-    // Build a set of table names that have an FK from org_id to organizations.
-    const tablesWithOrgFk = new Set(
-      kcuRows
-        .filter(r => orgFkConstraintNames.has(r.constraint_name))
-        .map(r => r.table_name)
-    );
+    const tablesWithOrgFk = new Set(getOrgForeignKeys(snapshot).map((constraint) => constraint.table));
 
     // Any table with org_id + org FK that is NOT in manifest AND NOT in platform list
     // is a coverage gap.
@@ -163,13 +200,12 @@ async function checkC1CoverageGap(client) {
 
     return { blocking: false };
   } catch (err) {
-    // information_schema not accessible via PostgREST — degrade to warning.
     return {
       blocking: false,
       warning: {
         check: 'C1_CATALOG_UNAVAILABLE',
-        message: 'Could not query information_schema to verify manifest coverage. ' +
-          'Ensure information_schema is exposed via PostgREST or accept this risk manually.',
+        message: 'Could not query the live schema snapshot to verify manifest coverage. ' +
+          'Ensure schema_introspection_v1 exists in the deployed database or accept this risk manually.',
         detail: err?.message,
       },
     };
@@ -180,23 +216,15 @@ async function checkC1CoverageGap(client) {
  * C2 — Manifest ghost.
  * Every table listed in the manifest must physically exist in the DB.
  *
- * Implementation: query information_schema.tables for all public tables,
- * then diff against MANIFEST_TABLE_SET. Tables in manifest but not in DB
- * are ghosts (schema was changed without updating the manifest).
+ * Implementation: diff the manifest against the live table list from
+ * schema_introspection_v1(). Tables in manifest but not in DB are ghosts.
  */
-async function checkC2ManifestGhost(client) {
+async function checkC2ManifestGhost(snapshot, catalogError) {
   try {
-    const is = client.schema('information_schema');
+    if (catalogError) throw catalogError;
 
-    const { data: tables, error } = await is
-      .from('tables')
-      .select('table_name')
-      .eq('table_schema', 'public')
-      .eq('table_type', 'BASE TABLE');
-
-    if (error) throw error;
-
-    const dbTableSet = new Set(tables.map(r => r.table_name));
+    const tables = Array.isArray(snapshot?.tables) ? snapshot.tables : [];
+    const dbTableSet = new Set(tables.map((table) => table.name));
     const missingFromDb = [...MANIFEST_TABLE_SET].filter(t => !dbTableSet.has(t));
 
     if (missingFromDb.length > 0) {
@@ -218,7 +246,7 @@ async function checkC2ManifestGhost(client) {
       blocking: false,
       warning: {
         check: 'C2_CATALOG_UNAVAILABLE',
-        message: 'Could not query information_schema.tables to verify manifest ghost check.',
+        message: 'Could not query the live schema snapshot to verify manifest ghost check.',
         detail: err?.message,
       },
     };
@@ -232,43 +260,13 @@ async function checkC2ManifestGhost(client) {
  *
  * Returns warnings[] rather than a single blocking issue.
  */
-async function checkC3FkDrift(client) {
+async function checkC3FkDrift(snapshot, catalogError) {
   try {
-    const is = client.schema('information_schema');
+    if (catalogError) throw catalogError;
 
-    // Get delete_rule for all FK constraints where org_id → organizations.
-    const { data: kcuRows, error: e1 } = await is
-      .from('key_column_usage')
-      .select('table_name, constraint_name')
-      .eq('table_schema', 'public')
-      .eq('column_name', 'org_id');
-
-    if (e1) throw e1;
-
-    const { data: ccuRows, error: e2 } = await is
-      .from('constraint_column_usage')
-      .select('constraint_name, table_name')
-      .eq('table_schema', 'public')
-      .eq('table_name', 'organizations');
-
-    if (e2) throw e2;
-
-    const { data: refCons, error: e3 } = await is
-      .from('referential_constraints')
-      .select('constraint_name, constraint_schema, delete_rule');
-
-    if (e3) throw e3;
-
-    const orgFkConstraintNames = new Set(ccuRows.map(r => r.constraint_name));
-    const deleteRuleByConstraint = Object.fromEntries(refCons.map(r => [r.constraint_name, r.delete_rule]));
-
-    // Build a map: tableName → delete_rule for org_id FKs targeting organizations.
-    const tableDeleteRule = {};
-    for (const kcu of kcuRows) {
-      if (orgFkConstraintNames.has(kcu.constraint_name)) {
-        tableDeleteRule[kcu.table_name] = deleteRuleByConstraint[kcu.constraint_name] ?? 'UNKNOWN';
-      }
-    }
+    const tableDeleteRule = Object.fromEntries(
+      getOrgForeignKeys(snapshot).map((constraint) => [constraint.table, constraint.deleteRule])
+    );
 
     const warnings = [];
 
@@ -295,7 +293,7 @@ async function checkC3FkDrift(client) {
       catalogUnavailable: {
         check: 'C3_CATALOG_UNAVAILABLE',
         severity: 'warning',
-        message: 'Could not verify FK delete rules (C3). Accept risk or expose information_schema via PostgREST.',
+        message: 'Could not verify FK delete rules (C3). Accept risk or ensure schema_introspection_v1 is deployed.',
         detail: err?.message,
       },
     };
@@ -310,34 +308,15 @@ async function checkC3FkDrift(client) {
  * (With the tombstone strategy the org row is never deleted, but this check
  *  remains as a defence-in-depth guard against future schema accidents.)
  */
-async function checkC4RetentionCascadeRisk(client) {
+async function checkC4RetentionCascadeRisk(snapshot, catalogError) {
   try {
-    const is = client.schema('information_schema');
+    if (catalogError) throw catalogError;
 
-    const { data: kcuRows, error: e1 } = await is
-      .from('key_column_usage')
-      .select('table_name, constraint_name')
-      .eq('table_schema', 'public')
-      .in('table_name', RETENTION_TABLE_NAMES);
+    const affectedTables = getOrgForeignKeys(snapshot)
+      .filter((constraint) => RETENTION_TABLE_NAMES.includes(constraint.table) && constraint.deleteRule === 'CASCADE')
+      .map((constraint) => constraint.table);
 
-    if (e1) throw e1;
-    if (!kcuRows || kcuRows.length === 0) return { blocking: false };
-
-    const constraintNames = kcuRows.map(r => r.constraint_name);
-
-    const { data: refCons, error: e2 } = await is
-      .from('referential_constraints')
-      .select('constraint_name, delete_rule')
-      .in('constraint_name', constraintNames)
-      .eq('delete_rule', 'CASCADE');
-
-    if (e2) throw e2;
-
-    if (refCons && refCons.length > 0) {
-      const cascadeConstraintNames = new Set(refCons.map(r => r.constraint_name));
-      const affectedTables = kcuRows
-        .filter(r => cascadeConstraintNames.has(r.constraint_name))
-        .map(r => r.table_name);
+    if (affectedTables.length > 0) {
 
       return {
         blocking: true,
@@ -370,20 +349,17 @@ async function checkC4RetentionCascadeRisk(client) {
  * Verifies that public."Documents" exists and has a `path` column of type text.
  * If the column is missing or renamed, the storage handler (phase 8) cannot run.
  */
-async function checkC5StorageHandlerIntegrity(client) {
+async function checkC5StorageHandlerIntegrity(snapshot, catalogError) {
   try {
-    const is = client.schema('information_schema');
+    if (catalogError) throw catalogError;
 
-    const { data, error } = await is
-      .from('columns')
-      .select('column_name, data_type')
-      .eq('table_schema', 'public')
-      .eq('table_name', 'Documents')
-      .eq('column_name', 'path');
+    const tables = Array.isArray(snapshot?.tables) ? snapshot.tables : [];
+    const documentsTable = tables.find((table) => table.name === 'Documents');
+    const pathCol = Array.isArray(documentsTable?.columns)
+      ? documentsTable.columns.find((column) => column.name === 'path')
+      : null;
 
-    if (error) throw error;
-
-    if (!data || data.length === 0) {
+    if (!pathCol) {
       return {
         blocking: true,
         issue: {
@@ -395,13 +371,12 @@ async function checkC5StorageHandlerIntegrity(client) {
       };
     }
 
-    const pathCol = data[0];
-    if (pathCol.data_type !== 'text') {
+    if (pathCol.type !== 'text') {
       return {
         blocking: true,
         issue: {
           check: 'C5_STORAGE_HANDLER_BROKEN',
-          message: `public."Documents".path has unexpected data type '${pathCol.data_type}' (expected 'text').`,
+          message: `public."Documents".path has unexpected data type '${pathCol.type}' (expected 'text').`,
           action: 'Review the storage handler to ensure it can read storage paths from this column type.',
         },
       };
@@ -413,7 +388,7 @@ async function checkC5StorageHandlerIntegrity(client) {
       blocking: false,
       warning: {
         check: 'C5_CATALOG_UNAVAILABLE',
-        message: 'Could not verify Documents.path column via information_schema (C5). ' +
+        message: 'Could not verify Documents.path column via the live schema snapshot (C5). ' +
           'Storage handler integrity is unconfirmed.',
         detail: err?.message,
       },
