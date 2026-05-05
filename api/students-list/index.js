@@ -1855,7 +1855,26 @@ export default async function handler(context, req) {
     return respond(context, 500, { message: 'failed_to_update_student' });
   }
 
-  const updated = mergeStudentWithClientProfile(existingStudent, updatedProfile || existingClientProfile);
+  if (!updatedProfile) {
+    context.log?.error?.('students-list status update returned no profile row', {
+      studentId,
+      clientProfileId: existingStudent.client_profile_id,
+      statusBefore: oldIsActive,
+      statusAfter: newIsActive,
+    });
+    return respond(context, 500, { message: 'failed_to_update_student_status' });
+  }
+
+  const updated = mergeStudentWithClientProfile(existingStudent, updatedProfile);
+  if (updated.is_active !== newIsActive) {
+    context.log?.error?.('students-list status update verification failed', {
+      studentId,
+      clientProfileId: existingStudent.client_profile_id,
+      expected: newIsActive,
+      actual: updated.is_active,
+    });
+    return respond(context, 500, { message: 'failed_to_update_student_status' });
+  }
 
   // Audit: status changed
   await logAuditEvent(supabase, {

@@ -34,7 +34,19 @@ export default function StudentHeader({
 
   const activeOrgId = activeOrg?.id || '';
   const isSuspended = student?.is_active === false;
-  const medicalFlags = Array.isArray(student?.medical_flags) ? student.medical_flags : [];
+  const medicalFlags = useMemo(
+    () => (Array.isArray(student?.medical_flags) ? student.medical_flags : []),
+    [student?.medical_flags],
+  );
+
+  const alertPills = useMemo(
+    () => medicalFlags.map((flag, index) => ({
+      key: `${flag}-${index}`,
+      label: flag,
+      icon: <AlertCircle className="h-3 w-3" />,
+    })),
+    [medicalFlags],
+  );
 
   const loadSummary = useCallback(async () => {
     if (!student?.id || !session || !activeOrgId) return;
@@ -85,14 +97,18 @@ export default function StudentHeader({
     setIsSuspendingOrDeleting(true);
     try {
       const newStatus = !isSuspended;
-      await authenticatedFetch(`students-list/${student.id}`, {
+      const updatedStudent = await authenticatedFetch(`students-list/${student.id}`, {
         method: 'PATCH',
         body: { org_id: activeOrgId, is_active: newStatus },
         session,
       });
 
+      if (updatedStudent?.is_active !== newStatus) {
+        throw new Error('עדכון סטטוס התלמיד לא נשמר.');
+      }
+
       toast.success(newStatus ? 'התלמיד הופעל בהצלחה' : 'התלמיד הושהה בהצלחה');
-      onSuspend?.();
+      await onSuspend?.();
       void loadSummary();
     } catch (error) {
       console.error('Failed to update student status', error);
@@ -177,15 +193,6 @@ export default function StudentHeader({
       onClick: handleCopyId,
     },
   ];
-
-  const alertPills = useMemo(
-    () => medicalFlags.map((flag, index) => ({
-      key: `${flag}-${index}`,
-      label: flag,
-      icon: <AlertCircle className="h-3 w-3" />,
-    })),
-    [medicalFlags],
-  );
 
   return (
     <>
