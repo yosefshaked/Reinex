@@ -31,13 +31,15 @@ export default function StudentHeader({
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
   const [sendFormDialogOpen, setSendFormDialogOpen] = useState(false);
   const [isSuspendingOrDeleting, setIsSuspendingOrDeleting] = useState(false);
+  const [localStudentOverride, setLocalStudentOverride] = useState(null);
   const [summary, setSummary] = useState({ lessonsCount: null, balance: 0, debt: 0 });
 
+  const displayStudent = localStudentOverride?.id === student?.id ? localStudentOverride : student;
   const activeOrgId = activeOrg?.id || '';
-  const isSuspended = student?.is_active === false;
+  const isSuspended = displayStudent?.is_active === false;
   const medicalFlags = useMemo(
-    () => (Array.isArray(student?.medical_flags) ? student.medical_flags : []),
-    [student?.medical_flags],
+    () => (Array.isArray(displayStudent?.medical_flags) ? displayStudent.medical_flags : []),
+    [displayStudent?.medical_flags],
   );
 
   const alertPills = useMemo(
@@ -90,7 +92,11 @@ export default function StudentHeader({
     void loadSummary();
   }, [loadSummary]);
 
-  if (!student) return null;
+  useEffect(() => {
+    setLocalStudentOverride(null);
+  }, [student?.id, student?.is_active]);
+
+  if (!displayStudent) return null;
 
   const handleSuspend = async () => {
     if (!activeOrgId || isSuspendingOrDeleting) return;
@@ -98,7 +104,7 @@ export default function StudentHeader({
     setIsSuspendingOrDeleting(true);
     try {
       const newStatus = !isSuspended;
-      const updatedStudent = await updateStudentStatus(student, newStatus, { orgId: activeOrgId, session });
+      const updatedStudent = await updateStudentStatus(displayStudent, newStatus, { orgId: activeOrgId, session });
 
       if (updatedStudent?.is_active !== newStatus) {
         throw new Error('עדכון סטטוס התלמיד לא נשמר.');
@@ -107,12 +113,13 @@ export default function StudentHeader({
       const refreshedStudent = await onSuspend?.();
       const verifiedStudent = refreshedStudent?.id
         ? refreshedStudent
-        : await fetchStudentById(student.id, { orgId: activeOrgId, session });
+        : await fetchStudentById(displayStudent.id, { orgId: activeOrgId, session });
 
       if (verifiedStudent?.is_active !== newStatus) {
         throw new Error('עדכון סטטוס התלמיד לא נשמר.');
       }
 
+      setLocalStudentOverride(verifiedStudent);
       toast.success(newStatus ? 'התלמיד הופעל בהצלחה' : 'התלמיד הושהה בהצלחה');
       void loadSummary();
     } catch (error) {
@@ -124,18 +131,18 @@ export default function StudentHeader({
   };
 
   const handleCopyId = () => {
-    if (student?.id) {
-      navigator.clipboard.writeText(student.id);
+    if (displayStudent?.id) {
+      navigator.clipboard.writeText(displayStudent.id);
       toast.success('מזהה הועתק');
     }
   };
 
-  const age = student?.date_of_birth
-    ? Math.floor((Date.now() - new Date(student.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+  const age = displayStudent?.date_of_birth
+    ? Math.floor((Date.now() - new Date(displayStudent.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
     : null;
 
   const subtitleParts = [];
-  if (student?.identity_number) subtitleParts.push(`ת.ז. ${student.identity_number}`);
+  if (displayStudent?.identity_number) subtitleParts.push(`ת.ז. ${displayStudent.identity_number}`);
   if (age != null && age > 0) subtitleParts.push(`גיל ${age}`);
 
   const kpis = [
@@ -204,8 +211,8 @@ export default function StudentHeader({
       <ProfileMasterStrip
         onBack={() => navigate('/students-list')}
         backLabel="חזרה לרשימת התלמידים"
-        avatarFallback={getInitials(student)}
-        name={formatStudentName(student)}
+        avatarFallback={getInitials(displayStudent)}
+        name={formatStudentName(displayStudent)}
         status={isSuspended
           ? { label: 'לא פעיל', className: 'border-red-200 bg-red-50 text-red-700' }
           : { label: 'פעיל', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' }}
@@ -219,7 +226,7 @@ export default function StudentHeader({
       <SuspendStudentDialog
         open={suspendDialogOpen}
         onOpenChange={setSuspendDialogOpen}
-        student={student}
+        student={displayStudent}
         orgId={activeOrgId}
         session={session}
         onSuccess={async () => {
@@ -231,7 +238,7 @@ export default function StudentHeader({
       <SendFormDialog
         open={sendFormDialogOpen}
         onOpenChange={setSendFormDialogOpen}
-        student={student}
+        student={displayStudent}
       />
     </>
   );

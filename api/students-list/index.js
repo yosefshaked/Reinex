@@ -1857,10 +1857,23 @@ export default async function handler(context, req) {
   }
 
   const oldIsActive = existingClientProfile.is_active !== false;
+  context.log?.info?.('students-list PATCH status requested', {
+    studentId,
+    clientProfileId: existingStudent.client_profile_id,
+    oldIsActive,
+    requestedIsActive: newIsActive,
+    bodyKeys: Object.keys(body || {}),
+  });
 
   // No change needed
   if (oldIsActive === newIsActive) {
-    return respond(context, 200, mergeStudentWithClientProfile(existingStudent, existingClientProfile));
+    const unchanged = mergeStudentWithClientProfile(existingStudent, existingClientProfile);
+    context.log?.info?.('students-list PATCH status unchanged', {
+      studentId,
+      clientProfileId: existingStudent.client_profile_id,
+      returnedIsActive: unchanged.is_active,
+    });
+    return respond(context, 200, unchanged);
   }
 
   // Update is_active
@@ -1896,6 +1909,13 @@ export default async function handler(context, req) {
   }
 
   const updated = mergeStudentWithClientProfile(existingStudent, updatedProfile);
+  context.log?.info?.('students-list PATCH status updated', {
+    studentId,
+    clientProfileId: existingStudent.client_profile_id,
+    requestedIsActive: newIsActive,
+    updatedProfileIsActive: updatedProfile.is_active,
+    returnedIsActive: updated.is_active,
+  });
   if (updated.is_active !== newIsActive) {
     context.log?.error?.('students-list status update verification failed', {
       studentId,
