@@ -1,5 +1,5 @@
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { toAgorot } from '@/lib/currency.js';
+import { toAgorot, toShekel } from '@/lib/currency.js';
 import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
 
 function normalizeSpecialRate(value) {
@@ -46,6 +46,27 @@ export async function updateStudentFromForm(payload, { orgId, session, overrides
   });
 }
 
+function buildStudentFormPayloadFromRecord(student, isActive) {
+  return {
+    id: student.id,
+    firstName: student.first_name || '',
+    middleName: student.middle_name || null,
+    lastName: student.last_name || '',
+    identityNumber: student.identity_number || '',
+    dateOfBirth: student.date_of_birth || null,
+    phone: student.phone || null,
+    email: student.email || null,
+    medicalProvider: student.medical_provider || null,
+    notificationMethod: student.default_notification_method || 'whatsapp',
+    specialRate: student.special_rate == null ? null : toShekel(student.special_rate),
+    notesInternal: student.notes_internal || null,
+    tags: Array.isArray(student.tags) ? student.tags : [],
+    isActive,
+    guardianId: student.guardian?.id || null,
+    guardianRelationship: student.guardian?.relationship || null,
+  };
+}
+
 export async function updateStudentStatus(student, isActive, { orgId, session } = {}) {
   if (!student?.id || !orgId) {
     throw new Error('missing_student_update_context');
@@ -64,5 +85,30 @@ export async function updateStudentStatus(student, isActive, { orgId, session } 
     throw new Error('student_status_update_not_persisted');
   }
 
-  return updatedStudent;
+  const verifiedStudent = await fetchStudentById(student.id, { orgId, session });
+  if (verifiedStudent?.is_active === isActive) {
+    return verifiedStudent;
+  }
+
+  await updateStudentFromForm(buildStudentFormPayloadFromRecord(student, isActive), { orgId, session });
+  const retriedStudent = await fetchStudentById(student.id, { orgId, session });
+  if (retriedStudent?.is_active !== isActive) {
+    throw new Error('student_status_update_not_persisted');
+  }
+
+  return retriedStudent;
+}
+
+export async function fetchStudentById(studentId, { orgId, session } = {}) {
+  if (!studentId || !orgId) {
+    throw new Error('missing_student_update_context');
+  }
+
+  return authenticatedFetch(`students-list/${studentId}`, {
+    session,
+    params: {
+      org_id: orgId,
+      _: Date.now(),
+    },
+  });
 }
