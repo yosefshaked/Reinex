@@ -36,6 +36,8 @@
 - Draft and published schemas are separate states inside the form record flow; do not add a parallel publish model.
 - Sending flows (`form-submissions` and `waiting-list-intake/send`) must require canonical publish metadata (`metadata.published_form_schema`); legacy `published_at`+draft-schema rows are treated as `form_requires_publish_migration` and are not silently accepted.
 - Use `PUT /api/forms/{formId}` with `action: migrate_publish_structure` to migrate legacy-published forms into canonical publish metadata before allowing delivery/invite sends.
+- Completed form submissions retain `metadata.schema_snapshot`, `metadata.visibility_rules_snapshot`, and `metadata.alert_rules_snapshot`; submission metadata also stores explicit form/published version stamps (`published_version_at_initiation`, `published_version_at_submission`, etc.) so legacy-version submissions can be filtered without diffing snapshots.
+- Deactivated forms (`is_active=false`) are unavailable for new submission initiation, resend, public verify, and final submit. Historical completed submissions remain readable through their stored snapshots.
 - Waiting-list intake depends on built-in field IDs and writes into routing/client/guardian flows; keep those identifiers stable.
 - Anonymous invite and OTP flows rely on `active_routing` as a generic routing table keyed by route `id` with `category`, `routing_info`, and `expires_at`; do not regress it back to a user-only active-org pointer table.
 - Visibility rules and alert rules are runtime-evaluated by shared helpers, not by ad hoc component logic.

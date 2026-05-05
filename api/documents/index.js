@@ -672,7 +672,13 @@ async function handleDelete(req, supabase, client, orgId, userId, userEmail, use
     await driver.delete(existingDoc.path);
   } catch (err) {
     console.error('Storage deletion error:', err);
-    // Continue with database deletion even if storage fails
+    return {
+      status: 502,
+      body: {
+        error: 'storage_delete_failed',
+        details: err.message,
+      },
+    };
   }
 
   // Delete from Documents table

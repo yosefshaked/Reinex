@@ -233,6 +233,20 @@ function isPublishedFormRecord(form) {
   return hasPublishedSchema;
 }
 
+function resolveFormVersionMetadata(formRecord, { suffix = '' } = {}) {
+  const metadata = normalizeJsonObject(formRecord?.metadata, {});
+  const formVersion = Number(formRecord?.version);
+  const publishedVersion = Number(metadata.published_version);
+  const keySuffix = suffix ? `_${suffix}` : '';
+
+  return {
+    [`form_name_snapshot${keySuffix}`]: normalizeString(formRecord?.name),
+    [`form_version${keySuffix}`]: Number.isFinite(formVersion) ? formVersion : null,
+    [`published_version${keySuffix}`]: Number.isFinite(publishedVersion) ? publishedVersion : null,
+    [`published_at_snapshot${keySuffix}`]: normalizeString(metadata.published_at || formRecord?.published_at) || null,
+  };
+}
+
 async function resolveSubmissionDestination(client, orgId, clientProfileId, deliveryMethod) {
   if (!UUID_PATTERN.test(String(clientProfileId || ''))) {
     return '';
@@ -1210,7 +1224,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
 
   const [{ data: form, error: formError }, subject] = await Promise.all([
     withOrgScope(controlClient, 'forms', orgId)
-      .select('id, name, is_active, form_schema, metadata, published_at')
+      .select('id, name, is_active, version, form_schema, metadata, published_at')
       .eq('id', formId)
       .maybeSingle(),
     resolveSubmissionSubject(controlClient, orgId, {
@@ -1262,6 +1276,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     sent_via: [deliveryMethod],
     initiated_at: nowIso,
     initiated_by: userId,
+    ...resolveFormVersionMetadata(form, { suffix: 'at_initiation' }),
   };
 
   const { data: submission, error: submissionError } = await withOrgScope(controlClient, 'form_submissions', orgId)
@@ -1436,7 +1451,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
   }
 
   const [{ data: form, error: formError }, subject] = await Promise.all([
-    withOrgScope(controlClient, 'forms', orgId).select('id, name, form_schema, metadata, published_at').eq('id', submission.form_id).maybeSingle(),
+    withOrgScope(controlClient, 'forms', orgId).select('id, name, is_active, version, form_schema, metadata, published_at').eq('id', submission.form_id).maybeSingle(),
     resolveSubmissionSubject(controlClient, orgId, {
       clientProfileId: submission.client_profile_id,
       studentId: submission.student_id,
@@ -1451,7 +1466,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
     });
     return respond(context, 500, { message: 'failed_to_load_form' });
   }
-  if (!form) return respond(context, 404, { message: 'form_not_found' });
+  if (!form || !form.is_active) return respond(context, 404, { message: 'form_not_found' });
   if (!isPublishedFormRecord(form)) {
     if (requiresPublishMigration(form)) return respond(context, 409, { message: 'form_requires_publish_migration' });
     return respond(context, 409, { message: 'form_not_published' });
@@ -1889,11 +1904,11 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
   }
 
   const { data: form, error: formError } = await withOrgScope(controlClient, 'forms', orgId)
-    .select('id, name, description, form_schema, alert_rules, visibility_rules, metadata')
+    .select('id, name, description, is_active, version, form_schema, alert_rules, visibility_rules, metadata, published_at')
     .eq('id', submission.form_id)
     .maybeSingle();
 
-  if (formError || !form) {
+  if (formError || !form || !form.is_active) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
@@ -1988,12 +2003,17 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     visibility_rules: [],
     alert_rules: [],
   };
+  let formVersionMetadataAtSubmission = {};
   if (submission.form_id && UUID_PATTERN.test(String(submission.form_id))) {
     const { data: formRecord } = await withOrgScope(controlClient, 'forms', orgId)
-      .select('form_schema, alert_rules, visibility_rules, metadata')
+      .select('id, name, is_active, version, form_schema, alert_rules, visibility_rules, metadata, published_at')
       .eq('id', submission.form_id)
       .maybeSingle();
     if (formRecord) {
+      if (!formRecord.is_active) {
+        return respond(context, 404, { message: 'form_not_found' });
+      }
+      formVersionMetadataAtSubmission = resolveFormVersionMetadata(formRecord, { suffix: 'at_submission' });
       try {
         publicFormState = await resolvePublicFormStateWithSharedBlocks(controlClient, orgId, formRecord, { allowDraftFallback: false });
       } catch (error) {
@@ -2035,6 +2055,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
         ...currentMetadata,
         workflow_status: 'submitted',
         submitted_at: nowIso,
+        ...formVersionMetadataAtSubmission,
         schema_snapshot: materializeSchemaForSnapshot(publicFormState.form_schema),
         visibility_rules_snapshot: publicFormState.visibility_rules,
         alert_rules_snapshot: publicFormState.alert_rules,
