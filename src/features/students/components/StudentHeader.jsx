@@ -18,6 +18,18 @@ function getInitials(student) {
   return (first + last) || '?';
 }
 
+function isStudentActive(student) {
+  const value = student?.is_active;
+  if (value === false || value === 0) return false;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'לא') {
+      return false;
+    }
+  }
+  return true;
+}
+
 export default function StudentHeader({
   student,
   canEdit = false,
@@ -36,7 +48,7 @@ export default function StudentHeader({
 
   const displayStudent = localStudentOverride?.id === student?.id ? localStudentOverride : student;
   const activeOrgId = activeOrg?.id || '';
-  const isSuspended = displayStudent?.is_active === false;
+  const isSuspended = !isStudentActive(displayStudent);
   const medicalFlags = useMemo(
     () => (Array.isArray(displayStudent?.medical_flags) ? displayStudent.medical_flags : []),
     [displayStudent?.medical_flags],
@@ -98,12 +110,12 @@ export default function StudentHeader({
 
   if (!displayStudent) return null;
 
-  const handleSuspend = async () => {
+  const handleReactivate = async () => {
     if (!activeOrgId || isSuspendingOrDeleting) return;
 
     setIsSuspendingOrDeleting(true);
     try {
-      const newStatus = !isSuspended;
+      const newStatus = true;
       const updatedStudent = await updateStudentStatus(displayStudent, newStatus, { orgId: activeOrgId, session });
 
       if (updatedStudent?.is_active !== newStatus) {
@@ -123,7 +135,7 @@ export default function StudentHeader({
       toast.success(newStatus ? 'התלמיד הופעל בהצלחה' : 'התלמיד הושהה בהצלחה');
       void loadSummary();
     } catch (error) {
-      console.error('Failed to update student status', error);
+      console.error('Failed to reactivate student', error);
       toast.error(error?.message || 'שגיאה בעדכון סטטוס התלמיד');
     } finally {
       setIsSuspendingOrDeleting(false);
@@ -190,7 +202,7 @@ export default function StudentHeader({
       icon: isSuspended ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />,
       onClick: () => {
         if (isSuspended) {
-          void handleSuspend();
+          void handleReactivate();
         } else {
           setSuspendDialogOpen(true);
         }
