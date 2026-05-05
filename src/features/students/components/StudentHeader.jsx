@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, Copy, Pause, Pencil, Play, Send } from 'lucide-react';
+import { AlertCircle, Copy, Loader2, Pause, Pencil, Play, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import ProfileMasterStrip from '@/components/ui/ProfileMasterStrip.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -114,6 +114,7 @@ export default function StudentHeader({
     if (!activeOrgId || isSuspendingOrDeleting) return;
 
     setIsSuspendingOrDeleting(true);
+    const toastId = toast.loading('מפעיל את התלמיד...');
     try {
       const newStatus = true;
       const updatedStudent = await updateStudentStatus(displayStudent, newStatus, { orgId: activeOrgId, session });
@@ -132,11 +133,11 @@ export default function StudentHeader({
       }
 
       setLocalStudentOverride(verifiedStudent);
-      toast.success(newStatus ? 'התלמיד הופעל בהצלחה' : 'התלמיד הושהה בהצלחה');
+      toast.success('התלמיד הופעל בהצלחה', { id: toastId });
       void loadSummary();
     } catch (error) {
       console.error('Failed to reactivate student', error);
-      toast.error(error?.message || 'שגיאה בעדכון סטטוס התלמיד');
+      toast.error(error?.message || 'שגיאה בעדכון סטטוס התלמיד', { id: toastId });
     } finally {
       setIsSuspendingOrDeleting(false);
     }
@@ -199,7 +200,11 @@ export default function StudentHeader({
     { separator: true },
     {
       label: isSuspended ? 'ביטול השהיה' : 'השהיה',
-      icon: isSuspended ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />,
+      icon: isSuspendingOrDeleting
+        ? <Loader2 className="h-4 w-4 animate-spin" />
+        : isSuspended
+          ? <Play className="h-4 w-4" />
+          : <Pause className="h-4 w-4" />,
       onClick: () => {
         if (isSuspended) {
           void handleReactivate();
