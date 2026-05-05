@@ -51,12 +51,18 @@ export async function updateStudentStatus(student, isActive, { orgId, session } 
     throw new Error('missing_student_update_context');
   }
 
-  return authenticatedFetch(`students-list/${student.id}`, {
-    method: 'PUT',
+  const updatedStudent = await authenticatedFetch(`students-list/${student.id}`, {
+    method: 'PATCH',
     body: {
       org_id: orgId,
       isActive,
     },
     session,
   });
+
+  if (updatedStudent?.is_active !== isActive) {
+    throw new Error('student_status_update_not_persisted');
+  }
+
+  return updatedStudent;
 }

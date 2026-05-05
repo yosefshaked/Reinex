@@ -1510,6 +1510,14 @@ export default async function handler(context, req) {
     return respond(context, 500, { message: 'failed_to_fetch_student' });
   }
 
+  if (!existingClientProfile) {
+    context.log?.error?.('students-list student points at missing client profile', {
+      studentId,
+      clientProfileId: existingStudent.client_profile_id,
+    });
+    return respond(context, 500, { message: 'failed_to_fetch_student' });
+  }
+
   if (Object.prototype.hasOwnProperty.call(normalizedUpdates.updates, 'identity_number')) {
     const desiredIdentityNumber = normalizedUpdates.updates.identity_number;
 
@@ -1589,6 +1597,15 @@ export default async function handler(context, req) {
         message: clientProfileUpdateError.message,
         studentId,
         clientProfileId: existingStudent.client_profile_id,
+      });
+      return respond(context, 500, { message: 'failed_to_update_student' });
+    }
+
+    if (!updatedClientProfile) {
+      context.log?.error?.('students-list client profile update returned no row', {
+        studentId,
+        clientProfileId: existingStudent.client_profile_id,
+        updatedFields: Object.keys(clientProfileUpdates),
       });
       return respond(context, 500, { message: 'failed_to_update_student' });
     }
@@ -1750,6 +1767,19 @@ export default async function handler(context, req) {
     clientProfileAfterUpdate || clientProfilesAfterUpdate.get(existingStudent.client_profile_id) || null,
     (await fetchPrimaryGuardianForClientProfile(supabase, existingStudent.client_profile_id)).guardian || null,
   );
+
+  if (
+    Object.prototype.hasOwnProperty.call(normalizedUpdates.updates, 'is_active') &&
+    mergedResponse.is_active !== normalizedUpdates.updates.is_active
+  ) {
+    context.log?.error?.('students-list PUT status update verification failed', {
+      studentId,
+      clientProfileId: existingStudent.client_profile_id,
+      expected: normalizedUpdates.updates.is_active,
+      actual: mergedResponse.is_active,
+    });
+    return respond(context, 500, { message: 'failed_to_update_student_status' });
+  }
 
   // Audit log: student updated
   await logAuditEvent(supabase, {
