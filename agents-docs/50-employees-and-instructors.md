@@ -36,6 +36,8 @@
 - Employee documents now live directly inside the unified employee profile UI (`UnifiedEmployeeList` documents tab) and reuse `InstructorDocumentsSection`; do not rebuild a separate employee-files surface.
 - `GET /api/instructors` manually loads and merges those tables; keep that response shape stable.
 - `working_days` currently lives on `Employees`; UI already documents that source.
+- New employee creation should omit `annual_leave_days` when the client has no explicit value so the `Employees.annual_leave_days` database default applies; explicit create/update values still override it.
+- `leave_pay_method` may remain null on `Employees`; payroll/leave calculations resolve null to the org `leave_pay_policy.default_method` (`legal` in the seeded default policy).
 - Service capabilities include `availability_windows`; scheduling rules depend on them.
 - Instructor service capability pay setup is hybrid:
   - `base_rate` remains the canonical hourly payout in agorot for payroll math

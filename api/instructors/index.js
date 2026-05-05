@@ -563,6 +563,9 @@ export default async function (context, req) {
     if (!validatePayrollModelForEmployeeType(employeeType, payrollModel)) {
       return respond(context, 400, { message: 'invalid_payroll_model_for_employee_type' });
     }
+    const hasAnnualLeaveDaysInput =
+      Object.prototype.hasOwnProperty.call(body, 'annual_leave_days') ||
+      Object.prototype.hasOwnProperty.call(body, 'annualLeaveDays');
     const insertPayload = {
       ...(validation.userId ? { user_id: validation.userId } : {}),
       first_name: validation.firstName || fallbackFirst,
@@ -579,11 +582,13 @@ export default async function (context, req) {
       is_active: true,
       notes: validation.notes || null,
       working_days: employeeType === 'office' ? workingDaysInput.value : null,
-      annual_leave_days: validation.annualLeaveDays,
       leave_pay_method: validation.leavePayMethod || null,
       leave_fixed_day_rate: validation.leaveFixedDayRate,
       employment_scope: validation.employmentScope || null,
     };
+    if (hasAnnualLeaveDaysInput) {
+      insertPayload.annual_leave_days = validation.annualLeaveDays;
+    }
 
     const { data, error } = await withOrgScope(supabase, 'Employees', orgId)
       .insert(insertPayload)
