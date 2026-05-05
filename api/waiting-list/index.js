@@ -302,7 +302,7 @@ export default async function waitingList(context, req) {
     if ((body?.student_id || body?.studentId) && !studentId) {
       return respond(context, 400, { message: 'invalid_student_id' });
     }
-    updates.student_id = studentId;
+    updates.student_id = studentId || null;
   }
 
   if ('client_profile_id' in body || 'clientProfileId' in body) {
@@ -376,10 +376,16 @@ export default async function waitingList(context, req) {
     return respond(context, 500, { message: 'failed_to_update_waiting_list' });
   }
 
+  const auditEventType = updates.status === 'open' && existingEntry.status === 'new'
+    ? 'waiting_list.entry.reviewed'
+    : updates.status === 'new' && existingEntry.status === 'open'
+      ? 'waiting_list.entry.marked_unreviewed'
+      : 'waiting_list.entry.updated';
+
   await writeTenantAudit(context, supabase, {
     correlationId: randomUUID(),
     actorUserId: userId,
-    eventType: 'waiting_list.entry.updated',
+    eventType: auditEventType,
     retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
     resourceType: 'waiting_list_entry',
     resourceId: entryId,
@@ -388,6 +394,9 @@ export default async function waitingList(context, req) {
     details: {
       origin: 'api/waiting-list',
       updated_fields: Object.keys(updates),
+      status_transition: Object.prototype.hasOwnProperty.call(updates, 'status')
+        ? { from: existingEntry.status, to: updates.status }
+        : null,
     },
   });
 

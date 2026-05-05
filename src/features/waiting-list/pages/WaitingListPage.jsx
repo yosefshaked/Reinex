@@ -12,6 +12,9 @@ import {
   CalendarPlus2,
   ArrowLeft,
   AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  Search,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout.jsx';
@@ -42,10 +45,10 @@ const DAYS_OF_WEEK = [
 ];
 
 const STATUS_OPTIONS = [
-  { value: 'new', label: 'חדש' },
-  { value: 'open', label: 'פתוח' },
+  { value: 'new', label: 'חדש - טרם נבדק' },
+  { value: 'open', label: 'נבדק - בטיפול' },
   { value: 'matched', label: 'שובץ' },
-  { value: 'closed', label: 'בוטל' },
+  { value: 'closed', label: 'לא מעוניין / נסגר' },
 ];
 
 const STATUS_FILTER_OPTIONS = [
@@ -70,6 +73,7 @@ const SUGGESTION_MODE_OPTIONS = [
 
 const EMPTY_RANGE = { start: '', end: '' };
 const FORM_USAGE_WAITING_LIST = 'waiting_list_intake';
+const AUTO_REVIEW_DELAY_MS = 3000;
 
 function buildInitialInviteForm() {
   return {
@@ -283,6 +287,28 @@ function formatEntryCreatedAt(value) {
   }
 }
 
+function getWaitingDays(value) {
+  const createdAt = new Date(value || 0).getTime();
+  if (!Number.isFinite(createdAt) || createdAt <= 0) {
+    return 0;
+  }
+  const diffMs = Date.now() - createdAt;
+  return Math.max(0, Math.floor(diffMs / 86400000));
+}
+
+function getWaitingAgeTone(days) {
+  if (days >= 30) return 'border-red-200 bg-red-50 text-red-800';
+  if (days >= 14) return 'border-amber-200 bg-amber-50 text-amber-800';
+  return 'border-border bg-muted/40 text-muted-foreground';
+}
+
+function formatWaitingAge(value) {
+  const days = getWaitingDays(value);
+  if (days <= 0) return 'נוסף היום';
+  if (days === 1) return 'ממתין יום אחד';
+  return `ממתין ${days} ימים`;
+}
+
 function compareWaitingListEntries(left, right) {
   const leftPriority = Number(Boolean(left?.priority_flag));
   const rightPriority = Number(Boolean(right?.priority_flag));
@@ -293,6 +319,27 @@ function compareWaitingListEntries(left, right) {
   const leftCreated = new Date(left?.created_at || 0).getTime();
   const rightCreated = new Date(right?.created_at || 0).getTime();
   return leftCreated - rightCreated;
+}
+
+function normalizeSearchText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function entryMatchesSearch(entry, query) {
+  if (!query) return true;
+  const person = resolveEntryPerson(entry);
+  const intakeMeta = getEntryIntakeMeta(entry);
+  const haystack = [
+    buildStudentName(person),
+    person?.phone,
+    person?.email,
+    person?.identity_number,
+    entry?.service?.name,
+    entry?.notes,
+    intakeMeta.contact_name,
+    intakeMeta.hmo_provider_name,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(query);
 }
 
 function getStatusLabel(status) {
@@ -376,6 +423,7 @@ export default function WaitingListPage() {
   const [waitingListForms, setWaitingListForms] = useState([]);
   const [loadingWaitingListForms, setLoadingWaitingListForms] = useState(false);
   const [statusFilter, setStatusFilter] = useState('active');
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(false);
   const [listError, setListError] = useState('');
@@ -393,6 +441,8 @@ export default function WaitingListPage() {
   const [inviteMigrating, setInviteMigrating] = useState(false);
   const [inviteResult, setInviteResult] = useState(null);
   const [selectedEntryId, setSelectedEntryId] = useState('');
+  const [autoReviewEligibleEntryId, setAutoReviewEligibleEntryId] = useState('');
+  const [autoReviewPendingEntryId, setAutoReviewPendingEntryId] = useState('');
   const [suggestionMode, setSuggestionMode] = useState('capacity');
   const [suggestions, setSuggestions] = useState([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
@@ -446,9 +496,12 @@ export default function WaitingListPage() {
     () => (waitingListForms || []).find((form) => form.id === inviteFormValues.formId) || null,
     [waitingListForms, inviteFormValues.formId]
   );
+  const normalizedSearchQuery = useMemo(() => normalizeSearchText(searchQuery), [searchQuery]);
   const sortedEntries = useMemo(
-    () => [...entries].sort(compareWaitingListEntries),
-    [entries]
+    () => [...entries]
+      .filter((entry) => entryMatchesSearch(entry, normalizedSearchQuery))
+      .sort(compareWaitingListEntries),
+    [entries, normalizedSearchQuery]
   );
   const selectedEntry = useMemo(
     () => sortedEntries.find((entry) => entry.id === selectedEntryId) || null,
@@ -1028,6 +1081,91 @@ export default function WaitingListPage() {
     }
   };
 
+  const updateWaitingListEntry = useCallback(async (entry, updates, successMessage, options = {}) => {
+    if (!entry?.id) return;
+    const showLoadingToast = options.showLoadingToast !== false;
+    const toastId = showLoadingToast ? toast.loading(options.loadingMessage || 'מעדכן רשומת המתנה...') : null;
+    try {
+      const updatedEntry = await authenticatedFetch(`waiting-list/${entry.id}`, {
+        method: 'PUT',
+        session,
+        body: {
+          org_id: activeOrgId,
+          ...updates,
+        },
+      });
+      setEntries((current) => current.map((item) => (item.id === entry.id ? updatedEntry : item)));
+      if (showLoadingToast) {
+        toast.success(successMessage, { id: toastId });
+      } else if (successMessage) {
+        toast.success(successMessage);
+      }
+    } catch (error) {
+      if (showLoadingToast) {
+        toast.error(error?.data?.message || error?.message || 'עדכון רשומת ההמתנה נכשל.', { id: toastId });
+      } else {
+        toast.error(error?.data?.message || error?.message || 'עדכון רשומת ההמתנה נכשל.');
+      }
+    }
+  }, [activeOrgId, session]);
+
+  const handleMarkChecked = useCallback((entry) => {
+    setAutoReviewEligibleEntryId('');
+    setAutoReviewPendingEntryId('');
+    void updateWaitingListEntry(entry, { status: 'open' }, 'הרשומה סומנה כנבדקה.');
+  }, [updateWaitingListEntry]);
+
+  const handleMarkUnchecked = useCallback((entry) => {
+    setAutoReviewEligibleEntryId('');
+    setAutoReviewPendingEntryId('');
+    void updateWaitingListEntry(entry, { status: 'new' }, 'הרשומה הוחזרה לסטטוס לא נבדק.');
+  }, [updateWaitingListEntry]);
+
+  const handleCloseEntry = useCallback((entry) => {
+    void updateWaitingListEntry(entry, { status: 'closed' }, 'הרשומה נסגרה.');
+  }, [updateWaitingListEntry]);
+
+  const handleTogglePriority = useCallback((entry) => {
+    const nextPriority = !entry?.priority_flag;
+    void updateWaitingListEntry(
+      entry,
+      { priority_flag: nextPriority },
+      nextPriority ? 'הרשומה סומנה כדחופה.' : 'העדיפות הדחופה הוסרה.'
+    );
+  }, [updateWaitingListEntry]);
+
+  useEffect(() => {
+    if (
+      !canFetch ||
+      !selectedEntry?.id ||
+      selectedEntry.id !== autoReviewEligibleEntryId ||
+      selectedEntry.status !== 'new' ||
+      dialogOpen
+    ) {
+      setAutoReviewPendingEntryId('');
+      return undefined;
+    }
+
+    const entryToReview = selectedEntry;
+    setAutoReviewPendingEntryId(entryToReview.id);
+
+    const timeoutId = window.setTimeout(() => {
+      void updateWaitingListEntry(
+        entryToReview,
+        { status: 'open' },
+        'הרשומה סומנה כנבדקה.',
+        { showLoadingToast: false }
+      );
+      setAutoReviewEligibleEntryId((current) => (current === entryToReview.id ? '' : current));
+      setAutoReviewPendingEntryId((current) => (current === entryToReview.id ? '' : current));
+    }, AUTO_REVIEW_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      setAutoReviewPendingEntryId((current) => (current === entryToReview.id ? '' : current));
+    };
+  }, [canFetch, selectedEntry, autoReviewEligibleEntryId, dialogOpen, updateWaitingListEntry]);
+
   const studentError = touched.studentId && !formValues.clientProfileId ? 'בחרו לקוח/ה מהרשימה.' : '';
   const serviceError = touched.serviceId && !formValues.serviceId ? 'בחרו שירות.' : '';
 
@@ -1072,8 +1210,8 @@ export default function WaitingListPage() {
     <PageLayout title="רשימת המתנה" description="מרחב עבודה לשיבוץ וניהול מתעניינים" actions={pageActions}>
       <Card className="mb-4">
         <CardContent className="p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div className="max-w-xs">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div className="grid w-full gap-3 md:grid-cols-[minmax(220px,280px)_minmax(240px,360px)]">
               <SelectField
                 id="waiting-list-status-filter"
                 label="תצוגת תור"
@@ -1081,13 +1219,31 @@ export default function WaitingListPage() {
                 onChange={setStatusFilter}
                 options={STATUS_FILTER_OPTIONS}
               />
+              <div className="space-y-2">
+                <Label htmlFor="waiting-list-search">חיפוש בתור</Label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    id="waiting-list-search"
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    className="h-10 w-full rounded-md border border-input bg-background px-9 py-2 text-sm"
+                    placeholder="שם, טלפון, שירות או הערה"
+                  />
+                </div>
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span>סה״כ רשומות: {sortedEntries.length}</span>
+              <span>מוצגות: {sortedEntries.length}</span>
               <span>•</span>
               <span>חדשות: {entries.filter((entry) => entry.status === 'new').length}</span>
               <span>•</span>
+              <span>נבדקו: {entries.filter((entry) => entry.status === 'open').length}</span>
+              <span>•</span>
               <span>דחופות: {entries.filter((entry) => entry.priority_flag).length}</span>
+              <span>•</span>
+              <span>מעל 14 יום: {entries.filter((entry) => ['new', 'open'].includes(entry.status) && getWaitingDays(entry.created_at) >= 14).length}</span>
               {loadingMeta ? <span>• טוען נתוני עזר...</span> : null}
             </div>
           </div>
@@ -1115,12 +1271,16 @@ export default function WaitingListPage() {
                 const intakeMeta = getEntryIntakeMeta(entry);
                 const isSelected = selectedEntryId === entry.id;
                 const person = resolveEntryPerson(entry);
+                const waitingDays = getWaitingDays(entry.created_at);
 
                 return (
                   <button
                     key={entry.id}
                     type="button"
-                    onClick={() => setSelectedEntryId(entry.id)}
+                    onClick={() => {
+                      setSelectedEntryId(entry.id);
+                      setAutoReviewEligibleEntryId(entry.id);
+                    }}
                     className={cn(
                       'w-full rounded-2xl border p-4 text-right transition-colors',
                       isSelected
@@ -1139,6 +1299,9 @@ export default function WaitingListPage() {
                           {getStatusLabel(entry.status)}
                         </Badge>
                         {entry.priority_flag ? <Badge variant="destructive">דחוף</Badge> : null}
+                        <span className={cn('rounded-full border px-2 py-0.5 text-xs', getWaitingAgeTone(waitingDays))}>
+                          {formatWaitingAge(entry.created_at)}
+                        </span>
                       </div>
                     </div>
 
@@ -1151,6 +1314,66 @@ export default function WaitingListPage() {
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       {!entry?.student_id ? <Badge variant="outline">טרם הומר/ה לתלמיד/ה</Badge> : null}
                       {intakeMeta.source === 'waiting_list_intake' ? <Badge variant="secondary">נוצר מטופס</Badge> : null}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {entry.status === 'new' ? (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleMarkChecked(entry);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              handleMarkChecked(entry);
+                            }
+                          }}
+                          className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-foreground hover:bg-muted"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          נבדק
+                        </span>
+                      ) : entry.status === 'open' ? (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleMarkUnchecked(entry);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              handleMarkUnchecked(entry);
+                            }
+                          }}
+                          className="inline-flex h-7 items-center rounded-md border border-border px-2 text-xs text-foreground hover:bg-muted"
+                        >
+                          סמן כלא נבדק
+                        </span>
+                      ) : null}
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleTogglePriority(entry);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            handleTogglePriority(entry);
+                          }
+                        }}
+                        className="inline-flex h-7 items-center rounded-md border border-border px-2 text-xs text-foreground hover:bg-muted"
+                      >
+                        {entry.priority_flag ? 'הסר דחיפות' : 'סמן דחוף'}
+                      </span>
                     </div>
                   </button>
                 );
@@ -1192,10 +1415,34 @@ export default function WaitingListPage() {
                           {selectedEntry.priority_flag ? <Badge variant="destructive">עדיפות גבוהה</Badge> : null}
                           {!selectedEntry?.student_id ? <Badge variant="outline">טרם הומר/ה לתלמיד/ה</Badge> : null}
                           {intakeMeta.source === 'waiting_list_intake' ? <Badge variant="secondary">נוצר מטופס</Badge> : null}
+                          {autoReviewPendingEntryId === selectedEntry.id ? (
+                            <span className="text-xs text-muted-foreground">יסומן כנבדק בעוד רגע</span>
+                          ) : null}
                         </div>
                       </div>
 
                       <div className="flex flex-wrap gap-2">
+                        {selectedEntry.status === 'new' ? (
+                          <Button variant="outline" size="sm" onClick={() => handleMarkChecked(selectedEntry)} className="gap-2">
+                            <CheckCircle2 className="h-4 w-4" />
+                            סמן כנבדק
+                          </Button>
+                        ) : selectedEntry.status === 'open' ? (
+                          <Button variant="outline" size="sm" onClick={() => handleMarkUnchecked(selectedEntry)} className="gap-2">
+                            <CheckCircle2 className="h-4 w-4" />
+                            סמן כלא נבדק
+                          </Button>
+                        ) : null}
+                        {['new', 'open'].includes(String(selectedEntry.status || '').toLowerCase()) ? (
+                          <Button variant="outline" size="sm" onClick={() => handleCloseEntry(selectedEntry)} className="gap-2">
+                            <XCircle className="h-4 w-4" />
+                            לא מעוניין
+                          </Button>
+                        ) : null}
+                        <Button variant="outline" size="sm" onClick={() => handleTogglePriority(selectedEntry)} className="gap-2">
+                          <AlertTriangle className="h-4 w-4" />
+                          {selectedEntry.priority_flag ? 'הסר דחיפות' : 'סמן דחוף'}
+                        </Button>
                         <Button variant="outline" size="sm" onClick={() => openEditDialog(selectedEntry)} className="gap-2">
                           <Pencil className="h-4 w-4" />
                           עריכת רשומה
@@ -1219,6 +1466,7 @@ export default function WaitingListPage() {
                           <div>ימי זמינות: <span className="font-medium text-foreground">{formatPreferredDays(selectedEntry.preferred_days)}</span></div>
                           <div>טווחי זמן: <span className="font-medium text-foreground">{formatPreferredTimes(selectedEntry.preferred_times)}</span></div>
                           <div>נוצר: <span className="font-medium text-foreground">{formatEntryCreatedAt(selectedEntry.created_at)}</span></div>
+                          <div>זמן המתנה: <span className={cn('rounded-full border px-2 py-0.5 text-xs font-medium', getWaitingAgeTone(getWaitingDays(selectedEntry.created_at)))}>{formatWaitingAge(selectedEntry.created_at)}</span></div>
                         </div>
                       </div>
 
