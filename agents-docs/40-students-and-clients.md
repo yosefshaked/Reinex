@@ -23,6 +23,7 @@
 - `createOrReuseClientProfile`, `createOrReuseGuardian`, `upsertClientGuardianLink`, `fetchPrimaryGuardianForClientProfile`
 - Student validators/search helpers in [`../api/_shared/student-validation.js`](../api/_shared/student-validation.js) and [`../api/_shared/student-search.js`](../api/_shared/student-search.js)
 - `normalizeTagIdsForWrite`, `normalizeTagCatalog`, `buildTagDisplayList`
+- `updateStudentFromForm`, `updateStudentStatus` in [`../src/features/students/api/students.js`](../src/features/students/api/students.js) for student detail/status updates; keep header actions, edit modals, and suspend flows on this shared PUT-based path.
 - `saveFilterState`, `loadFilterState`
 - `describeSchedule`, `formatDefaultTime`, `formatStudentName`
 

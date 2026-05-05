@@ -7,6 +7,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import { toast } from 'sonner';
+import { updateStudentFromForm } from '@/features/students/api/students.js';
 import EditStudentModal from '@/features/admin/components/EditStudentModal.jsx';
 import StudentHeader from '@/features/students/components/StudentHeader.jsx';
 import StudentOverviewTab from '@/features/students/components/StudentOverviewTab.jsx';
@@ -16,7 +17,6 @@ import StudentDocumentsTab from '@/features/students/components/StudentDocuments
 import StudentFinancialTab from '@/features/students/components/StudentFinancialTab.jsx';
 import StudentFormsTab from '@/features/students/components/StudentFormsTab.jsx';
 import DetailTabsShell from '@/components/ui/DetailTabsShell.jsx';
-import { toAgorot } from '@/lib/currency.js';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -135,26 +135,7 @@ export default function StudentDetailPage() {
     setUpdateError('');
 
     try {
-      const body = {
-        org_id: activeOrgId,
-        firstName: payload.firstName,
-        middleName: payload.middleName,
-        lastName: payload.lastName,
-        identityNumber: payload.identityNumber,
-        dateOfBirth: payload.dateOfBirth,
-        phone: payload.phone,
-        email: payload.email,
-        medicalProvider: payload.medicalProvider,
-        notificationMethod: payload.notificationMethod,
-        specialRate: payload.specialRate === '' ? null : toAgorot(payload.specialRate),
-        notesInternal: payload.notesInternal,
-        tags: payload.tags,
-        isActive: payload.isActive,
-        guardianId: payload.guardianId,
-        guardianRelationship: payload.guardianRelationship,
-      };
-
-      await authenticatedFetch(`students-list/${payload.id}`, { method: 'PUT', body, session });
+      await updateStudentFromForm(payload, { orgId: activeOrgId, session });
       setIsEditOpen(false);
       toast.success('התלמיד עודכן בהצלחה');
       await loadStudent();

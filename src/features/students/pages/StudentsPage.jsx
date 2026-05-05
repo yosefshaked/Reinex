@@ -22,7 +22,7 @@ import { StudentFilterSection } from '@/features/students/components/StudentFilt
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { DAY_NAMES, formatDefaultTime } from '@/features/students/utils/schedule.js';
 import DayOfWeekSelect from '@/components/ui/DayOfWeekSelect.jsx';
-import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
+import { updateStudentFromForm } from '@/features/students/api/students.js';
 import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';
 import { STUDENT_SORT_OPTIONS } from '@/features/students/utils/sorting.js';
 import { saveFilterState, loadFilterState } from '@/features/students/utils/filter-state.js';
@@ -491,32 +491,8 @@ export default function StudentsPage() {
     setIsUpdatingStudent(true);
     setUpdateError('');
 
-    const body = {
-      org_id: activeOrgId,
-      firstName: payload.firstName,
-      middleName: payload.middleName,
-      lastName: payload.lastName,
-      identityNumber: payload.identityNumber,
-      dateOfBirth: payload.dateOfBirth,
-      phone: payload.phone,
-      email: payload.email,
-      medicalProvider: payload.medicalProvider,
-      notificationMethod: payload.notificationMethod,
-      specialRate: payload.specialRate === '' ? null : toAgorot(payload.specialRate),
-      notesInternal: payload.notesInternal,
-      tags: normalizeTagIdsForWrite(payload.tags),
-      isActive: payload.isActive,
-      guardianId: payload.guardianId,
-      guardianRelationship: payload.guardianRelationship,
-    };
-
     try {
-      await authenticatedFetch(`students-list/${payload.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        session,
-      });
+      await updateStudentFromForm(payload, { orgId: activeOrgId, session });
       toast.success('פרטי התלמיד עודכנו בהצלחה');
       await refreshRoster();
       handleEditModalClose();

@@ -4,6 +4,7 @@ import { AlertCircle, Copy, Pause, Pencil, Play, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import ProfileMasterStrip from '@/components/ui/ProfileMasterStrip.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { updateStudentStatus } from '@/features/students/api/students.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import SuspendStudentDialog from '@/features/students/components/SuspendStudentDialog.jsx';
@@ -97,18 +98,18 @@ export default function StudentHeader({
     setIsSuspendingOrDeleting(true);
     try {
       const newStatus = !isSuspended;
-      const updatedStudent = await authenticatedFetch(`students-list/${student.id}`, {
-        method: 'PATCH',
-        body: { org_id: activeOrgId, is_active: newStatus },
-        session,
-      });
+      const updatedStudent = await updateStudentStatus(student, newStatus, { orgId: activeOrgId, session });
 
       if (updatedStudent?.is_active !== newStatus) {
         throw new Error('עדכון סטטוס התלמיד לא נשמר.');
       }
 
+      const refreshedStudent = await onSuspend?.();
+      if (refreshedStudent && refreshedStudent.is_active !== newStatus) {
+        throw new Error('עדכון סטטוס התלמיד לא נשמר.');
+      }
+
       toast.success(newStatus ? 'התלמיד הופעל בהצלחה' : 'התלמיד הושהה בהצלחה');
-      await onSuspend?.();
       void loadSummary();
     } catch (error) {
       console.error('Failed to update student status', error);

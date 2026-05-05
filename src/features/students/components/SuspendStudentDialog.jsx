@@ -18,6 +18,7 @@ import {
 import { toast } from 'sonner';
 import { formatStudentName } from '@/features/students/utils/name-utils.js';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { updateStudentFromForm, updateStudentStatus } from '@/features/students/api/students.js';
 
 /**
  * Suspend Student Dialog with two modes:
@@ -57,21 +58,13 @@ export default function SuspendStudentDialog({
     try {
       // Step 1: Suspend the student, optionally with a full edit payload
       if (studentUpdatePayload && typeof studentUpdatePayload === 'object') {
-        await authenticatedFetch(`students-list/${student.id}`, {
-          method: 'PUT',
-          body: {
-            ...studentUpdatePayload,
-            org_id: orgId,
-            isActive: false,
-          },
+        await updateStudentFromForm(studentUpdatePayload, {
+          orgId,
           session,
+          overrides: { isActive: false },
         });
       } else {
-        await authenticatedFetch(`students-list/${student.id}`, {
-          method: 'PATCH',
-          body: { org_id: orgId, is_active: false },
-          session,
-        });
+        await updateStudentStatus(student, false, { orgId, session });
       }
 
       // Step 2: Bulk-cancel future lessons

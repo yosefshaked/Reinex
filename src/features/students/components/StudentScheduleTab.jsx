@@ -182,20 +182,20 @@ export default function StudentScheduleTab({ studentId }) {
       setInstanceError(null);
       try {
         const today = new Date();
-        const datePromises = [];
-        for (let d = 0; d < 14; d++) {
-          const date = new Date(today);
-          date.setDate(today.getDate() + d);
-          const dateStr = date.toISOString().split('T')[0];
-          datePromises.push(
-            authenticatedFetch('lesson-instances', {
-              session,
-              params: { date: dateStr, student_id: studentId, org_id: activeOrgId },
-            }).catch(() => [])
-          );
-        }
-        const results = await Promise.all(datePromises);
-        const allInstances = results.flatMap((dayData) => (Array.isArray(dayData) ? dayData : []));
+        const endDate = new Date(today);
+        endDate.setDate(today.getDate() + 13);
+        const startStr = today.toISOString().split('T')[0];
+        const endStr = endDate.toISOString().split('T')[0];
+        const data = await authenticatedFetch('calendar/instances', {
+          session,
+          params: {
+            org_id: activeOrgId,
+            student_id: studentId,
+            start_date: startStr,
+            end_date: endStr,
+          },
+        });
+        const allInstances = Array.isArray(data) ? data : [];
         const sortedInstances = allInstances.sort((a, b) =>
           new Date(a.datetime_start || 0).getTime() - new Date(b.datetime_start || 0).getTime()
         );
