@@ -120,7 +120,7 @@ export function getPreferenceMatch(entry, dayOfWeek, startMinutes, durationMinut
   const normalizedDay = normalizeDayToken(dayOfWeek);
   const dayRanges = preferredRangesMap.get(normalizedDay) || [];
 
-  if (dayRanges.some((range) => startMinutes < range.end && endMinutes > range.start)) {
+  if (dayRanges.some((range) => startMinutes >= range.start && endMinutes <= range.end)) {
     return 'exact';
   }
 
@@ -129,6 +129,12 @@ export function getPreferenceMatch(entry, dayOfWeek, startMinutes, durationMinut
   }
 
   return 'none';
+}
+
+function hasTimePreferenceForDay(entry, dayOfWeek) {
+  const normalizedDay = normalizeDayToken(dayOfWeek);
+  if (!normalizedDay) return false;
+  return (buildPreferredRangesMap(entry?.preferred_times).get(normalizedDay) || []).length > 0;
 }
 
 export function preferenceWeight(matchType) {
@@ -243,6 +249,10 @@ function buildCapacitySuggestionsForEntry({ entry, capabilityMap, instructorMap,
     }
 
     const matchType = getPreferenceMatch(entry, anchor.day_of_week, startMinutes, durationMinutes);
+    if (hasTimePreferenceForDay(entry, anchor.day_of_week) && matchType !== 'exact') {
+      continue;
+    }
+
     const instructor = instructorMap.get(anchor.instructor_employee_id);
     const base = buildCandidateBase({
       entry,

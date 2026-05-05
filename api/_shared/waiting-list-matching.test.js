@@ -106,6 +106,56 @@ test('capacity mode excludes full templates', () => {
   assert.deepEqual(result.template_matches, {});
 });
 
+test('capacity mode excludes templates outside explicit preferred hours', () => {
+  const context = buildContext({
+    templates: [{
+      id: 'template-1',
+      student_id: 'student-1',
+      instructor_employee_id: 'inst-1',
+      service_id: 'service-1',
+      day_of_week: 1,
+      time_of_day: '11:00',
+      duration_minutes: 60,
+    }],
+    maxStudents: 2,
+  });
+
+  const result = buildLiveWaitingListMatches({
+    entries: [baseEntry({ preferred_times: [{ day: 1, ranges: [{ start: '09:00', end: '10:00' }] }] })],
+    mode: 'capacity',
+    now: NOW,
+    ...context,
+  });
+
+  assert.equal(result.summary.matchable_entries, 0);
+  assert.deepEqual(result.template_matches, {});
+});
+
+test('capacity mode allows day-only entries without explicit hour restrictions', () => {
+  const context = buildContext({
+    templates: [{
+      id: 'template-1',
+      student_id: 'student-1',
+      instructor_employee_id: 'inst-1',
+      service_id: 'service-1',
+      day_of_week: 1,
+      time_of_day: '11:00',
+      duration_minutes: 60,
+    }],
+    maxStudents: 2,
+  });
+
+  const result = buildLiveWaitingListMatches({
+    entries: [baseEntry({ preferred_times: [] })],
+    mode: 'capacity',
+    now: NOW,
+    ...context,
+  });
+
+  assert.equal(result.summary.matchable_entries, 1);
+  assert.equal(result.template_matches['template-1'].count, 1);
+});
+
 test('clear-space mode suggests empty availability windows and excludes overlaps', () => {
   const context = buildContext({
     templates: [{

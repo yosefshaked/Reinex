@@ -226,6 +226,24 @@ export function TemplateGrid({
                     }}
                   >
                     <div className="flex flex-col gap-1 min-h-[48px]">
+                      {cellWaitingCount > 0 ? (
+                        <button
+                          type="button"
+                          className="self-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onWaitingListMatchClick?.({
+                              mode: 'clear_space',
+                              bucket: cellMatchBucket,
+                              template: null,
+                              instructor,
+                              dayOfWeek: day.value,
+                            });
+                          }}
+                        >
+                          יש ממתינים לחלון פנוי
+                        </button>
+                      ) : null}
                       {cellTemplates.map((t) => (
                         <TemplateCard
                           key={t.id}
@@ -247,24 +265,6 @@ export function TemplateGrid({
                       ))}
                       {cellTemplates.length === 0 && !isUnavailableCell && (
                         <div className="flex flex-col items-center gap-2 py-3 text-center">
-                          {cellWaitingCount > 0 ? (
-                            <button
-                              type="button"
-                              className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onWaitingListMatchClick?.({
-                                  mode: 'clear_space',
-                                  bucket: cellMatchBucket,
-                                  template: null,
-                                  instructor,
-                                  dayOfWeek: day.value,
-                                });
-                              }}
-                            >
-                              יש ממתינים
-                            </button>
-                          ) : null}
                           <div className="text-gray-300 text-xs opacity-0 transition-opacity group-hover:opacity-100">
                             + הוסף תבנית
                           </div>
