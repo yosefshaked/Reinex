@@ -3,6 +3,7 @@ import { Clock, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DAY_OPTIONS } from '@/lib/day-of-week.js';
 import { getAvailabilityDayTokens } from '@/lib/instructor-availability.js';
+import { Badge } from '@/components/ui/badge';
 
 function formatTime(timeString) {
   if (!timeString) return '';
@@ -24,17 +25,19 @@ function getInstructorName(instructor) {
 /**
  * Single template card inside the grid cell
  */
-function TemplateCard({ template, onClick, isHighlighted = false }) {
+function TemplateCard({ template, onClick, isHighlighted = false, matchBucket = null, onMatchClick = null }) {
   const studentName = getStudentName(template.student);
   const serviceName = template.service?.name || '—';
   const serviceColor = template.service?.color || '#6B7280';
   const time = formatTime(template.time_of_day);
   const duration = template.duration_minutes;
   const isInactive = !template.is_active;
+  const waitingCount = Number(matchBucket?.count) || 0;
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className={cn(
         'w-full text-end rounded-md px-2 py-1.5 text-xs border transition-shadow cursor-pointer',
         'hover:shadow-md hover:border-white/60',
@@ -49,15 +52,47 @@ function TemplateCard({ template, onClick, isHighlighted = false }) {
         event.stopPropagation();
         onClick(template);
       }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          onClick(template);
+        }
+      }}
     >
-      <div className="flex items-center gap-1 font-medium text-gray-900 truncate">
-        <User className="h-3 w-3 shrink-0 text-gray-500" />
-        <span className="truncate">{studentName}</span>
-      </div>
-      <div className="flex items-center gap-1 text-gray-600 mt-0.5">
-        <Clock className="h-3 w-3 shrink-0" />
-        <span>{time}</span>
-        <span className="text-gray-400">({duration} דק׳)</span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1 font-medium text-gray-900 truncate">
+            <User className="h-3 w-3 shrink-0 text-gray-500" />
+            <span className="truncate">{studentName}</span>
+          </div>
+          <div className="flex items-center gap-1 text-gray-600 mt-0.5">
+            <Clock className="h-3 w-3 shrink-0" />
+            <span>{time}</span>
+            <span className="text-gray-400">({duration} דק׳)</span>
+          </div>
+        </div>
+        {waitingCount > 0 ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(event) => {
+              event.stopPropagation();
+              onMatchClick?.(matchBucket, template);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                event.stopPropagation();
+                onMatchClick?.(matchBucket, template);
+              }
+            }}
+          >
+            <Badge className="border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+              {waitingCount} ממתינים
+            </Badge>
+          </span>
+        ) : null}
       </div>
       <div
         className="mt-0.5 truncate"
@@ -65,7 +100,7 @@ function TemplateCard({ template, onClick, isHighlighted = false }) {
       >
         {serviceName}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -83,6 +118,10 @@ export function TemplateGrid({
   highlightedInstructorId = null,
   highlightedDayOfWeek = null,
   highlightedTemplateId = null,
+  waitingListMatchMode = 'capacity',
+  waitingListTemplateMatches = {},
+  waitingListCellMatches = {},
+  onWaitingListMatchClick,
 }) {
   // Group templates by instructor_employee_id + day_of_week
   const grouped = useMemo(() => {
@@ -160,6 +199,10 @@ export function TemplateGrid({
                 const cellTemplates = grouped.get(cellKey) || [];
                 const hasAvailabilityOnDay = availabilityDaysByInstructor.get(String(instructor.id))?.has(day.value) === true;
                 const isUnavailableCell = !hasAvailabilityOnDay && cellTemplates.length === 0;
+                const cellMatchBucket = waitingListMatchMode === 'clear_space'
+                  ? waitingListCellMatches?.[cellKey] || null
+                  : null;
+                const cellWaitingCount = Number(cellMatchBucket?.count) || 0;
 
                 return (
                   <td
@@ -188,6 +231,14 @@ export function TemplateGrid({
                           key={t.id}
                           template={t}
                           isHighlighted={String(highlightedTemplateId || '') === String(t.id || '')}
+                          matchBucket={waitingListMatchMode === 'capacity' ? waitingListTemplateMatches?.[t.id] || null : null}
+                          onMatchClick={(bucket, template) => onWaitingListMatchClick?.({
+                            mode: 'capacity',
+                            bucket,
+                            template,
+                            instructor,
+                            dayOfWeek: day.value,
+                          })}
                           onClick={(tmpl) => {
                             // Prevent cell click
                             onTemplateClick?.(tmpl);
@@ -195,8 +246,28 @@ export function TemplateGrid({
                         />
                       ))}
                       {cellTemplates.length === 0 && !isUnavailableCell && (
-                        <div className="text-gray-300 text-xs text-center py-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                          + הוסף תבנית
+                        <div className="flex flex-col items-center gap-2 py-3 text-center">
+                          {cellWaitingCount > 0 ? (
+                            <button
+                              type="button"
+                              className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onWaitingListMatchClick?.({
+                                  mode: 'clear_space',
+                                  bucket: cellMatchBucket,
+                                  template: null,
+                                  instructor,
+                                  dayOfWeek: day.value,
+                                });
+                              }}
+                            >
+                              יש ממתינים
+                            </button>
+                          ) : null}
+                          <div className="text-gray-300 text-xs opacity-0 transition-opacity group-hover:opacity-100">
+                            + הוסף תבנית
+                          </div>
                         </div>
                       )}
                       {cellTemplates.length === 0 && isUnavailableCell && (

@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout';
 import { Button } from '@/components/ui/button';
-import { Plus, ArrowRight, Loader2, Eye, EyeOff, Sparkles } from 'lucide-react';
+import { Plus, ArrowRight, Loader2, Eye, EyeOff, Sparkles, UsersRound } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { TemplateGrid } from '../components/TemplateManager/TemplateGrid';
 import { AddTemplateDialog } from '../components/TemplateManager/AddTemplateDialog';
 import { TemplateEditDialog } from '../components/TemplateManager/TemplateEditDialog';
@@ -12,6 +14,34 @@ import { useCalendarInstructors } from '../hooks/useCalendar';
 import EditServiceCapabilitiesDialog from '@/components/settings/employee-management/EditServiceCapabilitiesDialog.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
+import { authenticatedFetch } from '@/lib/api-client.js';
+
+const MATCH_MODE_OPTIONS = [
+  { value: 'capacity', label: 'מקום פנוי בקבוצה' },
+  { value: 'clear_space', label: 'חלון פנוי לשיבוץ נפרד' },
+];
+
+function normalizeMatchMode(value) {
+  return value === 'clear_space' ? 'clear_space' : 'capacity';
+}
+
+function formatWaitDays(days) {
+  const value = Number(days) || 0;
+  if (value <= 0) return 'נוסף היום';
+  if (value === 1) return 'ממתין יום אחד';
+  return `ממתין ${value} ימים`;
+}
+
+function preferenceLabel(value) {
+  switch (value) {
+    case 'exact':
+      return 'תואם יום ושעה';
+    case 'day_only':
+      return 'תואם יום';
+    default:
+      return 'התאמת שירות';
+  }
+}
 
 export default function TemplateManagerPage() {
   const navigate = useNavigate();
@@ -20,6 +50,16 @@ export default function TemplateManagerPage() {
   const { session } = useAuth();
 
   const [showInactive, setShowInactive] = useState(false);
+  const [matchMode, setMatchMode] = useState(() => normalizeMatchMode(searchParams.get('mode')));
+  const [waitingMatches, setWaitingMatches] = useState({
+    summary: { matchable_entries: 0, priority_entries: 0, oldest_wait_days: 0, services: [] },
+    template_matches: {},
+    cell_matches: {},
+    candidates: [],
+  });
+  const [waitingMatchesLoading, setWaitingMatchesLoading] = useState(false);
+  const [waitingMatchesError, setWaitingMatchesError] = useState('');
+  const [selectedMatchContext, setSelectedMatchContext] = useState(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [addDefaults, setAddDefaults] = useState({
     instructorId: null,
@@ -53,6 +93,66 @@ export default function TemplateManagerPage() {
 
   const isLoading = templatesLoading || instructorsLoading;
   const errorMsg = templatesError || instructorsError;
+
+  useEffect(() => {
+    const nextMode = normalizeMatchMode(searchParams.get('mode'));
+    setMatchMode(nextMode);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!activeOrgId || !session || isLoading || errorMsg) {
+      setWaitingMatches({
+        summary: { matchable_entries: 0, priority_entries: 0, oldest_wait_days: 0, services: [] },
+        template_matches: {},
+        cell_matches: {},
+        candidates: [],
+      });
+      return;
+    }
+
+    let cancelled = false;
+    async function fetchWaitingMatches() {
+      setWaitingMatchesLoading(true);
+      setWaitingMatchesError('');
+      try {
+        const payload = await authenticatedFetch('waiting-list-matches', {
+          session,
+          params: {
+            org_id: activeOrgId,
+            scope: 'template_manager',
+            mode: matchMode,
+          },
+        });
+        if (!cancelled) {
+          setWaitingMatches({
+            summary: payload?.summary || { matchable_entries: 0, priority_entries: 0, oldest_wait_days: 0, services: [] },
+            template_matches: payload?.template_matches || {},
+            cell_matches: payload?.cell_matches || {},
+            candidates: Array.isArray(payload?.candidates) ? payload.candidates : [],
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setWaitingMatchesError(error?.message || 'טעינת התאמות רשימת ההמתנה נכשלה.');
+          setWaitingMatches({
+            summary: { matchable_entries: 0, priority_entries: 0, oldest_wait_days: 0, services: [] },
+            template_matches: {},
+            cell_matches: {},
+            candidates: [],
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setWaitingMatchesLoading(false);
+        }
+      }
+    }
+
+    void fetchWaitingMatches();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrgId, session, matchMode, isLoading, errorMsg]);
 
   const waitingListSeed = useMemo(() => {
     const waitingListEntryId = searchParams.get('waiting_list_entry_id') || '';
@@ -182,6 +282,7 @@ export default function TemplateManagerPage() {
 
   function handleAddSuccess() {
     refetchTemplates();
+    setSelectedMatchContext(null);
   }
 
   function handleFixAvailability({
@@ -237,6 +338,46 @@ export default function TemplateManagerPage() {
   function handleUpdateSuccess() {
     refetchTemplates();
     setSelectedTemplate(null);
+  }
+
+  function handleMatchModeChange(nextMode) {
+    const normalizedMode = normalizeMatchMode(nextMode);
+    setMatchMode(normalizedMode);
+    const params = new URLSearchParams(searchParams);
+    if (params.get('waiting_matches') === '1' || params.has('mode')) {
+      params.set('waiting_matches', '1');
+      params.set('mode', normalizedMode);
+      navigate(`/calendar/templates?${params.toString()}`, { replace: true });
+    }
+  }
+
+  function handleWaitingListMatchClick(context) {
+    const candidates = Array.isArray(context?.bucket?.candidates) ? context.bucket.candidates : [];
+    if (!candidates.length) return;
+    setSelectedMatchContext({
+      ...context,
+      candidates,
+    });
+  }
+
+  function handleAssignWaitingCandidate(candidate) {
+    if (!candidate) return;
+    setAddDefaults({
+      instructorId: candidate.instructor_id || null,
+      dayOfWeek: candidate.day_of_week || null,
+      clientProfileId: candidate.client_profile_id || '',
+      studentId: candidate.student_id || '',
+      serviceId: candidate.service_id || '',
+      timeOfDay: candidate.time_of_day || '09:00',
+      durationMinutes: Number(candidate.duration_minutes) || 60,
+      waitingListEntryId: candidate.waiting_list_entry_id || candidate.entry_id || '',
+      waitingListContext: {
+        studentName: candidate.student_name || '',
+        serviceName: candidate.service_name || '',
+      },
+    });
+    setSelectedMatchContext(null);
+    setShowAddDialog(true);
   }
 
   return (
@@ -311,6 +452,47 @@ export default function TemplateManagerPage() {
         </Alert>
       ) : null}
 
+      {!isLoading && !errorMsg ? (
+        <div className="mb-4 rounded-lg border border-border bg-background p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <UsersRound className="h-4 w-4 text-primary" />
+                התאמות מרשימת ההמתנה
+                {waitingMatchesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {waitingMatchesError
+                  ? waitingMatchesError
+                  : `נמצאו ${waitingMatches.summary.matchable_entries || 0} רשומות מתאימות במצב הנוכחי.`}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1 rounded-full bg-muted p-1">
+                {MATCH_MODE_OPTIONS.map((option) => (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    size="sm"
+                    variant={matchMode === option.value ? 'default' : 'ghost'}
+                    className="h-8 rounded-full px-3 text-xs"
+                    onClick={() => handleMatchModeChange(option.value)}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+              {waitingMatches.summary.priority_entries > 0 ? (
+                <Badge variant="destructive">{waitingMatches.summary.priority_entries} דחופים</Badge>
+              ) : null}
+              {waitingMatches.summary.oldest_wait_days > 0 ? (
+                <Badge variant="outline">{formatWaitDays(waitingMatches.summary.oldest_wait_days)}</Badge>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* Grid */}
       {!isLoading && !errorMsg && (
         <TemplateGrid
@@ -322,6 +504,10 @@ export default function TemplateManagerPage() {
           highlightedInstructorId={waitingListSeed?.instructorId || null}
           highlightedDayOfWeek={waitingListSeed?.dayOfWeek || null}
           highlightedTemplateId={waitingListSeed?.sourceTemplateId || null}
+          waitingListMatchMode={matchMode}
+          waitingListTemplateMatches={waitingMatches.template_matches}
+          waitingListCellMatches={waitingMatches.cell_matches}
+          onWaitingListMatchClick={handleWaitingListMatchClick}
         />
       )}
 
@@ -380,6 +566,49 @@ export default function TemplateManagerPage() {
         onUpdate={handleUpdateSuccess}
         onFixAvailability={handleFixAvailability}
       />
+
+      <Dialog open={Boolean(selectedMatchContext)} onOpenChange={(open) => !open && setSelectedMatchContext(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {matchMode === 'capacity' ? 'ממתינים שמתאימים לקבוצה קיימת' : 'ממתינים שמתאימים לשיבוץ נפרד'}
+            </DialogTitle>
+            <DialogDescription>
+              בחרו מתעניין/ת לשיבוץ. השמירה תעבור דרך יצירת תבנית ותמיר לקוח/ה לתלמיד/ה בצד השרת.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] space-y-3 overflow-y-auto py-2">
+            {(selectedMatchContext?.candidates || []).map((candidate) => (
+              <div key={`${candidate.waiting_list_entry_id}-${candidate.instructor_id}-${candidate.day_of_week}-${candidate.time_of_day}`} className="rounded-xl border border-border p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="font-medium text-foreground">{candidate.student_name || 'ללא שם'}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {candidate.service_name || 'שירות'} · {candidate.day_label} · {candidate.time_of_day} · {candidate.duration_minutes} דק׳
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="outline">{preferenceLabel(candidate.preference_match)}</Badge>
+                      <Badge variant="outline">{formatWaitDays(candidate.wait_days)}</Badge>
+                      {candidate.priority_flag ? <Badge variant="destructive">דחוף</Badge> : null}
+                      {matchMode === 'capacity' ? (
+                        <Badge variant="secondary">{candidate.current_students}/{candidate.capacity} בקבוצה</Badge>
+                      ) : (
+                        <Badge variant="secondary">חלון נפרד</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <Button type="button" onClick={() => handleAssignWaitingCandidate(candidate)}>
+                    שבץ
+                  </Button>
+                </div>
+                <div className="mt-3 rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
+                  {candidate.match_reason}
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </PageLayout>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react"
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Loader2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Loader2, UsersRound } from 'lucide-react'
 
 import Card from "@/components/ui/CustomCard.jsx"
 import { Badge } from '@/components/ui/badge'
@@ -142,8 +142,11 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const [instructorName, setInstructorName] = useState(null)
   const [dashboardTasks, setDashboardTasks] = useState([])
+  const [waitingListMatches, setWaitingListMatches] = useState(null)
   const [isLoadingTasks, setIsLoadingTasks] = useState(false)
+  const [isLoadingWaitingMatches, setIsLoadingWaitingMatches] = useState(false)
   const [tasksError, setTasksError] = useState(null)
+  const [waitingMatchesError, setWaitingMatchesError] = useState(null)
 
   const membershipRole = typeof activeOrg?.membership?.role === 'string'
     ? activeOrg.membership.role.trim().toLowerCase()
@@ -203,6 +206,120 @@ export default function DashboardPage() {
       isMounted = false
     }
   }, [activeOrgId, canManageAll, session])
+
+  useEffect(() => {
+    if (!canManageAll || !activeOrgId || !session) {
+      setWaitingListMatches(null)
+      return
+    }
+
+    let isMounted = true
+
+    async function fetchWaitingListMatches() {
+      setIsLoadingWaitingMatches(true)
+      setWaitingMatchesError(null)
+      try {
+        const payload = await authenticatedFetch('waiting-list-matches', {
+          params: {
+            org_id: activeOrgId,
+            scope: 'dashboard',
+          },
+          session,
+        })
+        if (!isMounted) return
+        setWaitingListMatches(payload || null)
+      } catch (error) {
+        if (!isMounted) return
+        setWaitingMatchesError(error?.message || 'טעינת התאמות רשימת ההמתנה נכשלה.')
+      } finally {
+        if (isMounted) {
+          setIsLoadingWaitingMatches(false)
+        }
+      }
+    }
+
+    fetchWaitingListMatches()
+
+    return () => {
+      isMounted = false
+    }
+  }, [activeOrgId, canManageAll, session])
+
+  function renderWaitingListMatches() {
+    if (!canManageAll || !activeOrgId || !session) {
+      return null
+    }
+
+    const capacityCount = Number(waitingListMatches?.summary?.capacity?.matchable_entries) || 0
+    const clearSpaceCount = Number(waitingListMatches?.summary?.clear_space?.matchable_entries) || 0
+    const urgentCount = Number(waitingListMatches?.summary?.priority_entries) || 0
+    const oldestWaitDays = Number(waitingListMatches?.summary?.oldest_wait_days) || 0
+
+    return (
+      <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <UsersRound className="h-4 w-4 text-emerald-700" />
+              <h2 className="text-base font-semibold text-neutral-900">התאמות מרשימת ההמתנה</h2>
+            </div>
+            <p className="mt-1 text-sm text-neutral-600">התאמות חיות לשיבוץ ידני בתבניות.</p>
+          </div>
+          {urgentCount > 0 ? <Badge variant="destructive">{urgentCount} דחופים</Badge> : null}
+        </div>
+
+        {waitingMatchesError && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {waitingMatchesError}
+          </div>
+        )}
+
+        {isLoadingWaitingMatches ? (
+          <div className="mt-4 flex items-center gap-2 text-sm text-neutral-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            בודק התאמות...
+          </div>
+        ) : capacityCount === 0 && clearSpaceCount === 0 ? (
+          <div className="mt-4 rounded-xl border border-dashed border-neutral-200 p-4 text-sm text-neutral-500">
+            אין כרגע התאמות זמינות מרשימת ההמתנה.
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+              <div className="text-sm font-medium text-emerald-950">ממתינים שאפשר לצרף לקבוצה קיימת</div>
+              <div className="mt-2 text-2xl font-semibold text-emerald-950">{capacityCount}</div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => navigate('/calendar/templates?waiting_matches=1&mode=capacity')}
+              >
+                <ArrowLeft className="ms-1 h-4 w-4" />
+                פתח
+              </Button>
+            </div>
+            <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-4">
+              <div className="text-sm font-medium text-sky-950">ממתינים שמתאימים לשיבוץ נפרד</div>
+              <div className="mt-2 text-2xl font-semibold text-sky-950">{clearSpaceCount}</div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => navigate('/calendar/templates?waiting_matches=1&mode=clear_space')}
+              >
+                <ArrowLeft className="ms-1 h-4 w-4" />
+                פתח
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {oldestWaitDays > 0 ? (
+          <p className="mt-3 text-xs text-neutral-500">ההמתנה הארוכה ביותר עם התאמה: {oldestWaitDays} ימים.</p>
+        ) : null}
+      </Card>
+    )
+  }
 
   function renderDashboardTasks() {
     if (!canManageAll) {
@@ -304,6 +421,7 @@ export default function DashboardPage() {
           </header>
 
           {renderDashboardTasks()}
+          {renderWaitingListMatches()}
 
           <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
             <p className="text-sm text-muted-foreground">
@@ -326,6 +444,7 @@ export default function DashboardPage() {
           </header>
 
           {renderDashboardTasks()}
+          {renderWaitingListMatches()}
 
           <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
             <p className="text-sm text-muted-foreground">
