@@ -125,7 +125,6 @@ export default async function handler(context, req) {
     });
 
     const { data: document, error: fetchError } = await withOrgScope(supabase, 'Documents', org_id)
-      .from('Documents')
       .select('*')
       .eq('id', document_id)
       .single();
@@ -157,7 +156,6 @@ export default async function handler(context, req) {
     if (document.entity_type === 'organization' && !isAdmin) {
       // Check org_documents_member_visibility setting (stored as bare boolean)
       const { data: visibilitySetting } = await withOrgScope(supabase, 'Settings', org_id)
-        .from('Settings')
         .select('settings_value')
         .eq('key', 'org_documents_member_visibility')
         .single();
