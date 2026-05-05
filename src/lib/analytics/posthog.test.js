@@ -93,3 +93,32 @@ test('sanitizePostHogEvent covers PostHog URL property names', () => {
   assert.equal(event.properties.$referrer, 'https://app.test/#/forms/:id');
   assert.equal(event.properties.unrelated, `https://app.test/#/students/${STUDENT_ID}`);
 });
+
+test('sanitizePostHogEvent rewrites pathname from hash-router current URL', () => {
+  const event = sanitizePostHogEvent({
+    event: '$pageview',
+    properties: {
+      $current_url: `https://app.test/#/students-list`,
+      $pathname: '/',
+    },
+  });
+
+  assert.equal(event.properties.$current_url, 'https://app.test/#/students-list');
+  assert.equal(event.properties.$pathname, '/#/students-list');
+});
+
+test('sanitizePostHogEvent rewrites initial pathname and redacts hash query params', () => {
+  const event = sanitizePostHogEvent({
+    event: '$pageview',
+    properties: {
+      $initial_current_url: `https://app.test/#/submit?identity_number=123456789&otp=123456&safe=ok`,
+      $initial_pathname: '/',
+    },
+  });
+
+  assert.equal(
+    event.properties.$initial_current_url,
+    'https://app.test/#/submit?identity_number=redacted&otp=redacted&safe=ok',
+  );
+  assert.equal(event.properties.$initial_pathname, '/#/submit?identity_number=redacted&otp=redacted&safe=ok');
+});

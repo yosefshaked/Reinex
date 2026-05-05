@@ -255,12 +255,53 @@ function sanitizeAnalyticsProperty(key, value) {
   return sanitizeAnalyticsUrl(value);
 }
 
+function deriveHashRouterPathname(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return '';
+  }
+
+  try {
+    const url = new URL(value, typeof window !== 'undefined' ? window.location.origin : 'https://reinex.local');
+    if (!url.hash || url.hash === '#') {
+      return '';
+    }
+    return `${sanitizePath(url.pathname)}${sanitizeHash(url.hash)}`;
+  } catch {
+    return '';
+  }
+}
+
+function shouldRewritePathnameFromHash(currentPathname, nextPathname) {
+  if (!nextPathname) {
+    return false;
+  }
+  if (typeof currentPathname !== 'string' || !currentPathname.trim()) {
+    return true;
+  }
+
+  const sanitizedCurrentPathname = sanitizePath(currentPathname);
+  const hashStart = nextPathname.indexOf('#');
+  const documentPathname = hashStart === -1 ? nextPathname : nextPathname.slice(0, hashStart);
+  return sanitizedCurrentPathname === documentPathname;
+}
+
 export function sanitizePostHogEvent(captureResult) {
   if (!captureResult || !captureResult.properties) {
     return captureResult;
   }
 
   const properties = { ...captureResult.properties };
+
+  const currentHashPathname = deriveHashRouterPathname(properties.$current_url);
+  if (shouldRewritePathnameFromHash(properties.$pathname, currentHashPathname)) {
+    properties.$pathname = currentHashPathname;
+  }
+
+  const initialHashPathname = deriveHashRouterPathname(properties.$initial_current_url);
+  if (shouldRewritePathnameFromHash(properties.$initial_pathname, initialHashPathname)) {
+    properties.$initial_pathname = initialHashPathname;
+  }
+
   URL_PROPERTY_KEYS.forEach((key) => {
     if (typeof properties[key] === 'string') {
       properties[key] = sanitizeAnalyticsProperty(key, properties[key]);
