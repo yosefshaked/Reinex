@@ -41,6 +41,7 @@
 - `logSystemAuditEvent` in [`../api/_shared/audit-log.js`](../api/_shared/audit-log.js) — use this when a backend lifecycle transition must be audited without a real authenticated actor (for example public-token expiry)
 
 ## Known patterns / do not reinvent
+- API dependencies are installed and linted on Node 20; keep `api/package.json` engines, GitHub integrity checks, and the Azure Functions app Node setting aligned before upgrading packages that raise the runtime floor.
 - Standard endpoint flow is:
   - `readEnv(context)`
   - `createSingleClient(env)`
