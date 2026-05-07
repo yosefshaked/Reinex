@@ -67,6 +67,7 @@
   - `payment_model = fixed_rate` pays once per lesson
   - `payment_model = per_student` multiplies by compensation-eligible participant count
 - Templates and date-specific overrides are separate resources; do not collapse them into one model.
+- Template management is rendered as a recurring weekly FullCalendar resource-timegrid view, not as real dated lesson instances. Use a fixed synthetic week/day model for display only; persisted templates still store `day_of_week` + `time_of_day`, and add/edit actions must continue through the template dialogs and `lesson-templates` API.
 - Cancellation modal uses a server-backed preview action (`PUT /api/calendar/instances` with `action: 'preview-cancel-instance'`) before submitting cancellation, so UI impact text is based on current server state.
 - Lesson `is_closed` is a workflow-state flag and does not hard-lock edits by itself. Hard lock enforcement for mutations uses finance lock sources only (`payroll_run`, `claim_batch`).
 - Pending reports / loose sessions already have shared API wrappers and error mapping.

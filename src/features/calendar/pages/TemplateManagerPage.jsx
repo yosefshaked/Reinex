@@ -6,7 +6,8 @@ import { Plus, ArrowRight, Loader2, Eye, EyeOff, Sparkles, UsersRound } from 'lu
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { TemplateGrid } from '../components/TemplateManager/TemplateGrid';
+import { DAY_OPTIONS } from '@/lib/day-of-week.js';
+import { TemplateScheduleCalendar } from '../components/TemplateManager/TemplateScheduleCalendar';
 import { AddTemplateDialog } from '../components/TemplateManager/AddTemplateDialog';
 import { TemplateEditDialog } from '../components/TemplateManager/TemplateEditDialog';
 import { useTemplates } from '../hooks/useTemplates';
@@ -51,6 +52,8 @@ export default function TemplateManagerPage() {
 
   const [showInactive, setShowInactive] = useState(false);
   const [matchMode, setMatchMode] = useState(() => normalizeMatchMode(searchParams.get('mode')));
+  const [templateViewMode, setTemplateViewMode] = useState(() => (searchParams.get('view') === 'week' ? 'week' : 'day'));
+  const [selectedDay, setSelectedDay] = useState(() => searchParams.get('day') || 'sunday');
   const [waitingMatches, setWaitingMatches] = useState({
     summary: { matchable_entries: 0, priority_entries: 0, oldest_wait_days: 0, services: [] },
     template_matches: {},
@@ -97,6 +100,9 @@ export default function TemplateManagerPage() {
   useEffect(() => {
     const nextMode = normalizeMatchMode(searchParams.get('mode'));
     setMatchMode(nextMode);
+    setTemplateViewMode(searchParams.get('view') === 'week' ? 'week' : 'day');
+    const nextDay = searchParams.get('day') || 'sunday';
+    setSelectedDay(DAY_OPTIONS.some((day) => day.value === nextDay) ? nextDay : 'sunday');
   }, [searchParams]);
 
   useEffect(() => {
@@ -209,6 +215,10 @@ export default function TemplateManagerPage() {
     if (consumedSeedRef.current === waitingListSeed.seedKey) return;
 
     consumedSeedRef.current = waitingListSeed.seedKey;
+    if (DAY_OPTIONS.some((day) => day.value === waitingListSeed.dayOfWeek)) {
+      setSelectedDay(waitingListSeed.dayOfWeek);
+      setTemplateViewMode('day');
+    }
     setAddDefaults({
       instructorId: waitingListSeed.instructorId,
       dayOfWeek: waitingListSeed.dayOfWeek,
@@ -261,14 +271,14 @@ export default function TemplateManagerPage() {
     [instructors, availabilityContext.instructorId],
   );
 
-  function handleCellClick(instructor, dayOfWeek) {
+  function handleCellClick(instructor, dayOfWeek, timeOfDay = '09:00') {
     setAddDefaults({
       instructorId: instructor.id,
       dayOfWeek,
       clientProfileId: '',
       studentId: '',
       serviceId: '',
-      timeOfDay: '09:00',
+      timeOfDay,
       durationMinutes: 60,
       waitingListEntryId: '',
       waitingListContext: null,
@@ -349,6 +359,26 @@ export default function TemplateManagerPage() {
       params.set('mode', normalizedMode);
       navigate(`/calendar/templates?${params.toString()}`, { replace: true });
     }
+  }
+
+  function handleTemplateViewModeChange(nextViewMode) {
+    const normalizedViewMode = nextViewMode === 'week' ? 'week' : 'day';
+    setTemplateViewMode(normalizedViewMode);
+    const params = new URLSearchParams(searchParams);
+    params.set('view', normalizedViewMode);
+    if (normalizedViewMode === 'day') {
+      params.set('day', selectedDay);
+    }
+    navigate(`/calendar/templates?${params.toString()}`, { replace: true });
+  }
+
+  function handleSelectedDayChange(dayValue) {
+    const normalizedDay = DAY_OPTIONS.some((day) => day.value === dayValue) ? dayValue : 'sunday';
+    setSelectedDay(normalizedDay);
+    const params = new URLSearchParams(searchParams);
+    params.set('view', 'day');
+    params.set('day', normalizedDay);
+    navigate(`/calendar/templates?${params.toString()}`, { replace: true });
   }
 
   function handleWaitingListMatchClick(context) {
@@ -469,6 +499,42 @@ export default function TemplateManagerPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-1 rounded-full bg-muted p-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={templateViewMode === 'day' ? 'default' : 'ghost'}
+                  className="h-8 rounded-full px-3 text-xs"
+                  onClick={() => handleTemplateViewModeChange('day')}
+                >
+                  יום
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={templateViewMode === 'week' ? 'default' : 'ghost'}
+                  className="h-8 rounded-full px-3 text-xs"
+                  onClick={() => handleTemplateViewModeChange('week')}
+                >
+                  שבוע
+                </Button>
+              </div>
+              {templateViewMode === 'day' ? (
+                <div className="flex items-center gap-1 rounded-full bg-muted p-1">
+                  {DAY_OPTIONS.map((day) => (
+                    <Button
+                      key={day.value}
+                      type="button"
+                      size="sm"
+                      variant={selectedDay === day.value ? 'default' : 'ghost'}
+                      className="h-8 rounded-full px-2.5 text-xs"
+                      onClick={() => handleSelectedDayChange(day.value)}
+                    >
+                      {day.labelShort}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+              <div className="flex items-center gap-1 rounded-full bg-muted p-1">
                 {MATCH_MODE_OPTIONS.map((option) => (
                   <Button
                     key={option.value}
@@ -495,18 +561,18 @@ export default function TemplateManagerPage() {
 
       {/* Grid */}
       {!isLoading && !errorMsg && (
-        <TemplateGrid
+        <TemplateScheduleCalendar
           templates={templates}
           instructors={instructors}
           onTemplateClick={handleTemplateClick}
-          onCellClick={handleCellClick}
+          onSlotClick={handleCellClick}
           showInactive={showInactive}
-          highlightedInstructorId={waitingListSeed?.instructorId || null}
-          highlightedDayOfWeek={waitingListSeed?.dayOfWeek || null}
-          highlightedTemplateId={waitingListSeed?.sourceTemplateId || null}
+          viewMode={templateViewMode}
+          selectedDay={selectedDay}
           waitingListMatchMode={matchMode}
           waitingListTemplateMatches={waitingMatches.template_matches}
-          waitingListCellMatches={waitingMatches.cell_matches}
+          waitingListCandidates={waitingMatches.candidates}
+          isLoading={waitingMatchesLoading}
           onWaitingListMatchClick={handleWaitingListMatchClick}
         />
       )}
