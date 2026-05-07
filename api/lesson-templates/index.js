@@ -190,21 +190,33 @@ async function resolveInstructorEmployeeIdsForUser(client, orgId, userId) {
   };
 }
 
-async function serviceExists(client, orgId, serviceId) {
+async function loadServiceForTemplate(client, orgId, serviceId, { requireActive = false } = {}) {
   if (!serviceId) {
-    return false;
+    return { service: null, error: null };
   }
 
-  const { data, error } = await withOrgScope(client, 'Services', orgId)
-    .select('id')
-    .eq('id', serviceId)
-    .maybeSingle();
+  let query = withOrgScope(client, 'Services', orgId)
+    .select('id, duration_minutes, is_active')
+    .eq('id', serviceId);
+
+  if (requireActive) {
+    query = query.eq('is_active', true);
+  }
+
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     throw error;
   }
 
-  return Boolean(data?.id);
+  return { service: data || null, error: null };
+}
+
+function resolveServiceDurationMinutes(service) {
+  const durationMinutes = Number(service?.duration_minutes);
+  return Number.isFinite(durationMinutes) && durationMinutes > 0
+    ? Math.round(durationMinutes)
+    : 0;
 }
 
 async function validateInstructorServiceAvailability(client, orgId, {
@@ -437,7 +449,6 @@ export default async function lessonTemplates(context, req) {
     const waitingListEntryId = normalizeUuid(body?.waiting_list_entry_id || body?.waitingListEntryId);
     const dayOfWeek = normalizeDayOfWeek(body?.day_of_week ?? body?.dayOfWeek);
     const timeOfDay = normalizeTime(body?.time_of_day || body?.timeOfDay);
-    const durationMinutes = Number(body?.duration_minutes ?? body?.durationMinutes);
     const validFrom = normalizeString(body?.valid_from || body?.validFrom);
     const validUntil = normalizeString(body?.valid_until || body?.validUntil);
 
@@ -453,8 +464,11 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 400, { message: 'invalid_service_id' });
     }
 
+    let selectedService = null;
     try {
-      if (!(await serviceExists(supabase, orgId, serviceId))) {
+      const serviceLookup = await loadServiceForTemplate(supabase, orgId, serviceId, { requireActive: true });
+      selectedService = serviceLookup.service;
+      if (!selectedService) {
         return respond(context, 400, { message: 'invalid_service_id' });
       }
     } catch (serviceLookupError) {
@@ -465,6 +479,8 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 500, { message: 'failed_to_create_lesson_template' });
     }
 
+    const durationMinutes = resolveServiceDurationMinutes(selectedService);
+
     if (dayOfWeek === null) {
       return respond(context, 400, { message: 'invalid_day_of_week' });
     }
@@ -473,8 +489,8 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 400, { message: 'invalid_time_of_day' });
     }
 
-    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
-      return respond(context, 400, { message: 'invalid_duration_minutes' });
+    if (durationMinutes <= 0) {
+      return respond(context, 400, { message: 'invalid_service_duration' });
     }
 
     if (!validFrom || !isIsoDate(validFrom)) {
@@ -906,7 +922,8 @@ export default async function lessonTemplates(context, req) {
       }
 
       try {
-        if (!(await serviceExists(supabase, orgId, serviceId))) {
+        const serviceLookup = await loadServiceForTemplate(supabase, orgId, serviceId, { requireActive: true });
+        if (!serviceLookup.service) {
           return respond(context, 400, { message: 'invalid_service_id' });
         }
       } catch (serviceLookupError) {
@@ -936,14 +953,6 @@ export default async function lessonTemplates(context, req) {
       updates.time_of_day = timeOfDay;
     }
 
-    if (Object.prototype.hasOwnProperty.call(body, 'duration_minutes') || Object.prototype.hasOwnProperty.call(body, 'durationMinutes')) {
-      const durationMinutes = Number(body?.duration_minutes ?? body?.durationMinutes);
-      if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
-        return respond(context, 400, { message: 'invalid_duration_minutes' });
-      }
-      updates.duration_minutes = durationMinutes;
-    }
-
     if (Object.prototype.hasOwnProperty.call(body, 'valid_from') || Object.prototype.hasOwnProperty.call(body, 'validFrom')) {
       const validFrom = normalizeString(body?.valid_from || body?.validFrom);
       if (!validFrom || !isIsoDate(validFrom)) {
@@ -968,9 +977,38 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 400, { message: 'missing_updates' });
     }
 
+    const effectiveServiceId = updates.service_id ?? existingTemplate.service_id;
+    let effectiveService = null;
+    try {
+      const serviceLookup = await loadServiceForTemplate(supabase, orgId, effectiveServiceId, {
+        requireActive: Object.prototype.hasOwnProperty.call(updates, 'service_id'),
+      });
+      effectiveService = serviceLookup.service;
+      if (!effectiveService) {
+        return respond(context, 400, { message: 'invalid_service_id' });
+      }
+    } catch (serviceLookupError) {
+      context.log?.error?.('lesson-templates failed to load effective service on update', {
+        message: serviceLookupError.message,
+        serviceId: effectiveServiceId,
+        templateId,
+      });
+      return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+    }
+
+    const effectiveDurationMinutes = resolveServiceDurationMinutes(effectiveService);
+    if (effectiveDurationMinutes <= 0) {
+      return respond(context, 400, { message: 'invalid_service_duration' });
+    }
+    if (Number(existingTemplate.duration_minutes) !== effectiveDurationMinutes) {
+      updates.duration_minutes = effectiveDurationMinutes;
+    }
+
     const nextTemplateState = {
       student_id: updates.student_id ?? existingTemplate.student_id,
       instructor_employee_id: updates.instructor_employee_id ?? existingTemplate.instructor_employee_id,
+      service_id: effectiveServiceId,
+      duration_minutes: effectiveDurationMinutes,
       day_of_week: updates.day_of_week ?? existingTemplate.day_of_week,
       time_of_day: updates.time_of_day ?? existingTemplate.time_of_day,
       valid_from: updates.valid_from ?? existingTemplate.valid_from,
@@ -989,10 +1027,10 @@ export default async function lessonTemplates(context, req) {
     try {
       const availabilityResult = await validateInstructorServiceAvailability(supabase, orgId, {
         instructorEmployeeId: nextTemplateState.instructor_employee_id,
-        serviceId: updates.service_id ?? existingTemplate.service_id,
+        serviceId: nextTemplateState.service_id,
         dayOfWeek: nextTemplateState.day_of_week,
         timeOfDay: nextTemplateState.time_of_day,
-        durationMinutes: updates.duration_minutes ?? existingTemplate.duration_minutes,
+        durationMinutes: nextTemplateState.duration_minutes,
       });
       if (!availabilityResult.ok) {
         return respond(context, 409, { message: availabilityResult.code });

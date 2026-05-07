@@ -11,6 +11,7 @@ import { DAY_OPTIONS, dayLabel, normalizeDayToken } from '@/lib/day-of-week.js';
 import { getAvailabilityWindowsForDay, timeToMinutes } from '@/lib/instructor-availability.js';
 import { cn } from '@/lib/utils';
 import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
+import { toast } from 'sonner';
 import '../reinex-fullcalendar.css';
 import './template-schedule-calendar.css';
 
@@ -226,7 +227,16 @@ function buildClearSpaceEvents(candidates) {
 }
 
 function TemplateEventContent({ event }) {
-  const { kind, template, waitingCount } = event.extendedProps || {};
+  const { kind, previewKind, template, waitingCount } = event.extendedProps || {};
+  if (kind === 'service_drop' || previewKind === 'service_drop') {
+    return (
+      <div className="reinex-template-clear-space-card">
+        <div className="reinex-template-clear-space-card__title">{event.title || 'שירות'}</div>
+        <div className="reinex-template-clear-space-card__meta">גרירה ליצירת תבנית</div>
+      </div>
+    );
+  }
+
   if (kind === 'clear_space_match') {
     return (
       <div className="reinex-template-clear-space-card">
@@ -272,6 +282,7 @@ export function TemplateScheduleCalendar({
   isLoading = false,
   onTemplateClick,
   onSlotClick,
+  onExternalServiceDrop,
   onWaitingListMatchClick,
 }) {
   const calendarRef = useRef(null);
@@ -296,6 +307,29 @@ export function TemplateScheduleCalendar({
   }, [showInactive, showWaitingListMatches, templates, waitingListCandidates, waitingListTemplateMatches]);
   const initialDate = viewMode === 'day' ? DAY_DATE_BY_TOKEN[selectedDay] || TEMPLATE_WEEK_START : TEMPLATE_WEEK_START;
   const initialView = viewMode === 'day' ? 'resourceTimeGridDay' : 'resourceTimeGridWeek';
+
+  function handleExternalDrop(dropInfo) {
+    const startDate = dropInfo?.date instanceof Date ? dropInfo.date : null;
+    const resourceId = dropInfo?.resource?.id || null;
+    const draggedEl = dropInfo?.draggedEl;
+    const serviceId = draggedEl?.getAttribute?.('data-service-id') || '';
+    const durationMinutes = Number(draggedEl?.getAttribute?.('data-service-duration-minutes')) || 0;
+    const dayOfWeek = normalizeDayToken(startDate?.getDay?.());
+    const timeOfDay = ceilClockTimeToGrid(formatDateObjectTime(startDate));
+
+    if (!serviceId || !resourceId || !dayOfWeek || !timeOfDay || durationMinutes <= 0) {
+      toast.error('אי אפשר לפתוח יצירת תבנית מהשירות שנגרר.');
+      return;
+    }
+
+    onExternalServiceDrop?.({
+      serviceId,
+      resourceId: String(resourceId),
+      dayOfWeek,
+      timeOfDay,
+      durationMinutes,
+    });
+  }
 
   useEffect(() => {
     const api = calendarRef.current?.getApi?.();
@@ -329,6 +363,8 @@ export function TemplateScheduleCalendar({
           selectable
           selectMirror
           editable={false}
+          droppable
+          dropAccept=".calendar-service-drag-item"
           allDaySlot={false}
           slotEventOverlap={false}
           eventMinHeight={22}
@@ -337,6 +373,7 @@ export function TemplateScheduleCalendar({
           slotMaxTime={bounds.slotMaxTime}
           height="100%"
           resourceOrder="title"
+          drop={handleExternalDrop}
           eventClick={(info) => {
             const kind = info.event.extendedProps?.kind;
             if (kind === 'clear_space_match') {

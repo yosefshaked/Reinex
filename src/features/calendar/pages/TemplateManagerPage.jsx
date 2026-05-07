@@ -10,6 +10,7 @@ import { DAY_OPTIONS } from '@/lib/day-of-week.js';
 import { TemplateScheduleCalendar } from '../components/TemplateManager/TemplateScheduleCalendar';
 import { AddTemplateDialog } from '../components/TemplateManager/AddTemplateDialog';
 import { TemplateEditDialog } from '../components/TemplateManager/TemplateEditDialog';
+import CalendarServicePalette from '../components/CalendarServicePalette.jsx';
 import { useTemplates } from '../hooks/useTemplates';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import EditServiceCapabilitiesDialog from '@/components/settings/employee-management/EditServiceCapabilitiesDialog.jsx';
@@ -455,6 +456,25 @@ export default function TemplateManagerPage() {
     setShowAddDialog(true);
   }
 
+  function handleExternalServiceDrop({ serviceId, resourceId, dayOfWeek, timeOfDay, durationMinutes }) {
+    if (!serviceId || !resourceId || !dayOfWeek || !timeOfDay) {
+      return;
+    }
+
+    setAddDefaults({
+      instructorId: resourceId,
+      dayOfWeek,
+      clientProfileId: '',
+      studentId: '',
+      serviceId,
+      timeOfDay: ceilClockTimeToGrid(timeOfDay) || '09:00',
+      durationMinutes: Number(durationMinutes) || 60,
+      waitingListEntryId: '',
+      waitingListContext: null,
+    });
+    setShowAddDialog(true);
+  }
+
   return (
     <PageLayout
       title="ניהול תבניות"
@@ -562,6 +582,9 @@ export default function TemplateManagerPage() {
               ) : null}
             </div>
             <div className="flex flex-wrap items-center justify-center gap-2">
+              <div className="min-w-[13rem]">
+                <CalendarServicePalette />
+              </div>
               <Button
                 type="button"
                 variant={showWaitingMatches ? 'default' : 'outline'}
@@ -602,6 +625,7 @@ export default function TemplateManagerPage() {
           instructors={instructors}
           onTemplateClick={handleTemplateClick}
           onSlotClick={handleCellClick}
+          onExternalServiceDrop={handleExternalServiceDrop}
           showInactive={showInactive}
           viewMode={templateViewMode}
           selectedDay={selectedDay}

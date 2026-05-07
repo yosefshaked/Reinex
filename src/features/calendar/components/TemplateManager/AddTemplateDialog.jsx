@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { useStudents } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../../hooks/useCalendar';
@@ -102,6 +102,16 @@ export function AddTemplateDialog({
   });
 
   const [error, setError] = useState(null);
+  const activeServices = useMemo(
+    () => (services || []).filter((s) => s?.is_active === true),
+    [services],
+  );
+  const selectedService = useMemo(
+    () => activeServices.find((service) => String(service.id) === String(formData.service_id || '')) || null,
+    [activeServices, formData.service_id],
+  );
+  const selectedServiceDurationMinutes = Number(selectedService?.duration_minutes) || 0;
+  const selectedServiceHasValidDuration = selectedServiceDurationMinutes > 0;
   const selectedStudent = students.find((student) => student.id === formData.student_id) || null;
   const selectedClientProfile = selectedStudent || (waitingListProfile?.id === formData.client_profile_id ? waitingListProfile : null);
   const selectedInstructor = (instructors || []).find((instructor) => instructor.id === formData.instructor_employee_id) || null;
@@ -110,7 +120,7 @@ export function AddTemplateDialog({
   const availableTimeSlots = buildAvailabilityTimeSlots({
     availabilityWindows: selectedCapability?.availability_windows || [],
     day: formData.day_of_week,
-    durationMinutes: Number(formData.duration_minutes) || 0,
+    durationMinutes: selectedServiceDurationMinutes,
   });
   const missingCapability = Boolean(formData.instructor_employee_id && formData.service_id && !selectedCapability);
   const missingAvailability = Boolean(selectedCapability && !hasConfiguredAvailability(selectedCapability.availability_windows));
@@ -119,14 +129,26 @@ export function AddTemplateDialog({
     && hasConfiguredAvailability(selectedCapability.availability_windows)
     && formData.day_of_week
     && formData.time_of_day
-    && Number(formData.duration_minutes) > 0
+    && selectedServiceDurationMinutes > 0
     && !isWithinAvailabilityWindows({
       availabilityWindows: selectedCapability.availability_windows,
       day: formData.day_of_week,
       startTime: formData.time_of_day,
-      durationMinutes: Number(formData.duration_minutes),
+      durationMinutes: selectedServiceDurationMinutes,
     }),
   );
+
+  useEffect(() => {
+    if (!selectedService?.id || !selectedServiceHasValidDuration) {
+      return;
+    }
+
+    setFormData((prev) => (
+      Number(prev.duration_minutes) === selectedServiceDurationMinutes
+        ? prev
+        : { ...prev, duration_minutes: selectedServiceDurationMinutes }
+    ));
+  }, [selectedService?.id, selectedServiceDurationMinutes, selectedServiceHasValidDuration]);
 
   useEffect(() => {
     if (!selectedCapability || availableDayTokens.length === 0) {
@@ -310,6 +332,10 @@ export function AddTemplateDialog({
       setError('יש לבחור שירות');
       return;
     }
+    if (!selectedServiceHasValidDuration) {
+      setError('לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני יצירת תבנית.');
+      return;
+    }
     if (formData.day_of_week === '' || formData.day_of_week === null) {
       setError('יש לבחור יום');
       return;
@@ -350,7 +376,6 @@ export function AddTemplateDialog({
       service_id: formData.service_id,
       day_of_week: formData.day_of_week,
       time_of_day: formData.time_of_day,
-      duration_minutes: Number(formData.duration_minutes),
       valid_from: formData.valid_from,
       valid_until: formData.valid_until || null,
       waiting_list_entry_id: waitingListEntryId || null,
@@ -372,6 +397,8 @@ export function AddTemplateDialog({
             ? 'לשירות הזה עדיין לא הוגדרה זמינות אצל המדריך/ה שנבחר/ה.'
           : apiError === 'outside_instructor_service_availability'
             ? 'השיבוץ שנבחר נמצא מחוץ לחלונות הזמינות שהוגדרו עבור השירות הזה.'
+          : apiError === 'invalid_service_duration'
+            ? 'לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני יצירת תבנית.'
           : apiError === 'failed_to_activate_student_from_waiting_list'
             ? 'התבנית לא נשמרה כי לא הצלחנו להפעיל את התלמיד/ה מתוך רשומת ההמתנה. אפשר לנסות שוב.'
           : apiError === 'failed_to_link_waiting_list_entry'
@@ -410,8 +437,6 @@ export function AddTemplateDialog({
   }, [open, formData.student_id, studentLabel, studentOptions]);
 
   const activeExistingTemplates = existingTemplates.filter((template) => template.is_active);
-  const activeServices = (services || []).filter((s) => s?.is_active === true);
-
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -596,11 +621,9 @@ export function AddTemplateDialog({
               <Select
                 value={formData.service_id}
                 onValueChange={(value) => {
-                  const svc = activeServices.find((s) => s.id === value);
                   setFormData((prev) => ({
                     ...prev,
                     service_id: value,
-                    duration_minutes: svc?.duration_minutes || prev.duration_minutes,
                   }));
                 }}
               >
@@ -671,16 +694,17 @@ export function AddTemplateDialog({
             </div>
             <div>
               <Label htmlFor="template-duration">משך (דקות) *</Label>
-              <Input
+              <div
                 id="template-duration"
-                type="number"
-                min={15}
-                max={480}
-                step={15}
-                value={formData.duration_minutes}
-                onChange={(e) => setFormData((prev) => ({ ...prev, duration_minutes: Number(e.target.value) || 60 }))}
-                required
-              />
+                className="flex min-h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"
+              >
+                {selectedService
+                  ? (selectedServiceHasValidDuration ? `${selectedServiceDurationMinutes} דקות` : 'לשירות אין משך תקין')
+                  : 'המשך ייקבע לפי השירות'}
+              </div>
+              {selectedService && !selectedServiceHasValidDuration ? (
+                <p className="mt-1 text-sm text-red-600">יש לעדכן את משך השירות לפני יצירת תבנית.</p>
+              ) : null}
             </div>
           </div>
 
@@ -721,7 +745,7 @@ export function AddTemplateDialog({
             </Button>
             <Button
               type="submit"
-              disabled={isSubmitting || !formData.day_of_week || !formData.time_of_day || availableTimeSlots.length === 0}
+              disabled={isSubmitting || !formData.day_of_week || !formData.time_of_day || !selectedServiceHasValidDuration || availableTimeSlots.length === 0}
             >
               {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
               צור תבנית

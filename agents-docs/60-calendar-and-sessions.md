@@ -47,7 +47,9 @@
 - Calendar writes must enforce membership scope and instructor self-scope for non-admin users.
 - Availability checks come from service-capability `availability_windows`; do not duplicate availability math.
 - In normal calendar lesson-instance create/edit flows, `duration_minutes` is service-derived, not free-hand. Create uses the selected service's current duration; existing instances keep their stored duration unless the user explicitly changes the service on that instance.
+- Lesson-template create/edit flows also treat `duration_minutes` as service-derived, not free-hand. The template API resolves duration from `Services.duration_minutes`; frontend dialogs may display it but must not let users manually type it.
 - External service drag-to-calendar uses FullCalendar `droppable` + external `Draggable` items, but it does not create lessons directly on drop. Drop opens the existing add-lesson dialog prefilled with service/instructor/date/time so normal validation, participant selection, conflicts, and billing side-effects still go through the shared create flow.
+- External service drag-to-template-manager follows the same pattern: drag opens the existing add-template dialog prefilled with service/instructor/day/time, and the API remains responsible for final validation and service-derived duration.
 - Service catalog duration changes do not retroactively mutate already-created lesson instances. They affect only future instance creation and explicit service changes during instance editing.
 - Manual template generation must resolve `lesson_participants.client_profile_id` from `students.client_profile_id` during proposal building, not only at apply time; preview and apply must follow the same participant-validity rules.
 - Manual template generation must treat template `target_date` + `time_of_day` as `Asia/Jerusalem` local time when creating or comparing `lesson_instances.datetime_start`; never compare or insert using raw naive timestamps.

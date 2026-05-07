@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { useCalendarInstructors } from '../../hooks/useCalendar';
 import { useTemplateMutations, useTemplateOverrides } from '../../hooks/useTemplates';
@@ -143,14 +143,23 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
   const instructorName = getPersonName(template?.instructor);
   const serviceName = template?.service?.name || '—';
   const dayLabel = DAY_OPTIONS.find((d) => d.value === normalizeDayToken(template?.day_of_week))?.label || '—';
-  const activeServices = (services || []).filter((s) => s?.is_active === true);
+  const activeServices = useMemo(
+    () => (services || []).filter((s) => s?.is_active === true),
+    [services],
+  );
+  const selectedService = useMemo(
+    () => activeServices.find((service) => String(service.id) === String(formData.service_id || '')) || null,
+    [activeServices, formData.service_id],
+  );
+  const selectedServiceDurationMinutes = Number(selectedService?.duration_minutes) || 0;
+  const selectedServiceHasValidDuration = selectedServiceDurationMinutes > 0;
   const selectedInstructor = (instructors || []).find((instructor) => instructor.id === formData.instructor_employee_id) || null;
   const selectedCapability = (selectedInstructor?.service_capabilities || []).find((capability) => capability.service_id === formData.service_id) || null;
   const availableDayTokens = getAvailabilityDayTokens(selectedCapability?.availability_windows || []);
   const availableTimeSlots = buildAvailabilityTimeSlots({
     availabilityWindows: selectedCapability?.availability_windows || [],
     day: formData.day_of_week,
-    durationMinutes: Number(formData.duration_minutes) || 0,
+    durationMinutes: selectedServiceDurationMinutes,
   });
   const missingCapability = Boolean(formData.instructor_employee_id && formData.service_id && !selectedCapability);
   const missingAvailability = Boolean(selectedCapability && !hasConfiguredAvailability(selectedCapability.availability_windows));
@@ -159,14 +168,26 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
     && hasConfiguredAvailability(selectedCapability.availability_windows)
     && formData.day_of_week
     && formData.time_of_day
-    && Number(formData.duration_minutes) > 0
+    && selectedServiceDurationMinutes > 0
     && !isWithinAvailabilityWindows({
       availabilityWindows: selectedCapability.availability_windows,
       day: formData.day_of_week,
       startTime: formData.time_of_day,
-      durationMinutes: Number(formData.duration_minutes),
+      durationMinutes: selectedServiceDurationMinutes,
     })
   );
+
+  useEffect(() => {
+    if (!selectedService?.id || !selectedServiceHasValidDuration) {
+      return;
+    }
+
+    setFormData((prev) => (
+      Number(prev.duration_minutes) === selectedServiceDurationMinutes
+        ? prev
+        : { ...prev, duration_minutes: selectedServiceDurationMinutes }
+    ));
+  }, [selectedService?.id, selectedServiceDurationMinutes, selectedServiceHasValidDuration]);
 
   useEffect(() => {
     if (!selectedCapability || availableDayTokens.length === 0) {
@@ -213,6 +234,11 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
       return;
     }
 
+    if (!selectedServiceHasValidDuration) {
+      setError('לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת התבנית.');
+      return;
+    }
+
     const updates = {};
 
     if (formData.instructor_employee_id !== template.instructor_employee_id) {
@@ -226,9 +252,6 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
     }
     if (formData.time_of_day !== formatTime(template.time_of_day)) {
       updates.time_of_day = formData.time_of_day;
-    }
-    if (Number(formData.duration_minutes) !== template.duration_minutes) {
-      updates.duration_minutes = Number(formData.duration_minutes);
     }
     if (formData.valid_from !== (template.valid_from || '')) {
       updates.valid_from = formData.valid_from;
@@ -254,6 +277,8 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
               ? 'לא ניתן לשמור בלי חלונות זמינות שהוגדרו למדריך/ה עבור השירות שנבחר.'
               : apiError === 'outside_instructor_service_availability'
                 ? 'היום או השעה שנבחרו נמצאים מחוץ לחלונות הזמינות שהוגדרו למדריך/ה עבור השירות.'
+              : apiError === 'invalid_service_duration'
+                ? 'לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת התבנית.'
           : apiError,
       );
       return;
@@ -669,12 +694,10 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
               ) : (
                 <Select
                   value={formData.service_id}
-                  onValueChange={(value) => {
-                    const svc = activeServices.find((s) => s.id === value);
+                onValueChange={(value) => {
                     setFormData((prev) => ({
                       ...prev,
                       service_id: value,
-                      duration_minutes: svc?.duration_minutes || prev.duration_minutes,
                     }));
                   }}
                 >
@@ -745,16 +768,17 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
               </div>
               <div>
                 <Label htmlFor="edit-duration">משך (דקות) *</Label>
-                <Input
+                <div
                   id="edit-duration"
-                  type="number"
-                  min={15}
-                  max={480}
-                  step={15}
-                  value={formData.duration_minutes}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, duration_minutes: Number(e.target.value) || 60 }))}
-                  required
-                />
+                  className="flex min-h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"
+                >
+                  {selectedService
+                    ? (selectedServiceHasValidDuration ? `${selectedServiceDurationMinutes} דקות` : 'לשירות אין משך תקין')
+                    : 'המשך ייקבע לפי השירות'}
+                </div>
+                {selectedService && !selectedServiceHasValidDuration ? (
+                  <p className="mt-1 text-sm text-red-600">יש לעדכן את משך השירות לפני שמירת התבנית.</p>
+                ) : null}
               </div>
             </div>
 
@@ -792,7 +816,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
                 <X className="h-4 w-4 ms-1" />
                 ביטול עריכה
               </Button>
-              <Button onClick={handleSave} disabled={isSubmitting || !formData.day_of_week || !formData.time_of_day || availableTimeSlots.length === 0}>
+              <Button onClick={handleSave} disabled={isSubmitting || !formData.day_of_week || !formData.time_of_day || !selectedServiceHasValidDuration || availableTimeSlots.length === 0}>
                 {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
                 שמור שינויים
               </Button>
