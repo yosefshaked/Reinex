@@ -279,6 +279,10 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
                 ? 'היום או השעה שנבחרו נמצאים מחוץ לחלונות הזמינות שהוגדרו למדריך/ה עבור השירות.'
               : apiError === 'invalid_service_duration'
                 ? 'לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת התבנית.'
+              : apiError === 'instructor_template_time_conflict'
+                ? 'למדריך/ה כבר קיימת תבנית שחופפת לשעה הזאת. אם זו קבוצה, בחרו בדיוק את אותו שירות ושעה; אחרת בחרו חלון פנוי.'
+              : apiError === 'template_group_capacity_exceeded'
+                ? 'הקבוצה בשעה הזאת כבר מלאה לפי מגבלת התלמידים של השירות אצל המדריך/ה.'
           : apiError,
       );
       return;

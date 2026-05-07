@@ -4,7 +4,7 @@ import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/s
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { normalizeDayToken, daySortValue } from '../_shared/day-of-week.js';
-import { hasConfiguredAvailability, isWithinAvailabilityWindows } from '../_shared/instructor-availability.js';
+import { hasConfiguredAvailability, isWithinAvailabilityWindows, timeToMinutes } from '../_shared/instructor-availability.js';
 import {
   UUID_PATTERN,
   ensureMembership,
@@ -61,6 +61,18 @@ function rangesOverlap(startA, endA, startB, endB) {
   return normalizedStartA <= normalizedEndB && normalizedStartB <= normalizedEndA;
 }
 
+function timeRangesOverlap(startA, durationA, startB, durationB) {
+  const startMinutesA = timeToMinutes(startA);
+  const startMinutesB = timeToMinutes(startB);
+  const safeDurationA = Number(durationA) || 0;
+  const safeDurationB = Number(durationB) || 0;
+  if (startMinutesA == null || startMinutesB == null || safeDurationA <= 0 || safeDurationB <= 0) {
+    return false;
+  }
+
+  return startMinutesA < startMinutesB + safeDurationB && startMinutesB < startMinutesA + safeDurationA;
+}
+
 async function findExactTemplateConflict(client, orgId, {
   studentId,
   instructorEmployeeId,
@@ -92,6 +104,81 @@ async function findExactTemplateConflict(client, orgId, {
   );
 
   return { conflict: overlappingTemplate || null, error: null };
+}
+
+async function findInstructorSlotConflict(client, orgId, {
+  instructorEmployeeId,
+  serviceId,
+  dayOfWeek,
+  timeOfDay,
+  durationMinutes,
+  validFrom,
+  validUntil,
+  excludeTemplateId = null,
+}) {
+  let query = withOrgScope(client, 'lesson_templates', orgId)
+    .select('id, service_id, time_of_day, duration_minutes, valid_from, valid_until')
+    .eq('instructor_employee_id', instructorEmployeeId)
+    .eq('day_of_week', dayOfWeek)
+    .eq('is_active', true);
+
+  if (excludeTemplateId) {
+    query = query.neq('id', excludeTemplateId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    return { conflict: null, error };
+  }
+
+  const overlappingTemplates = (data || []).filter((template) => (
+    rangesOverlap(template.valid_from, template.valid_until, validFrom, validUntil)
+    && timeRangesOverlap(template.time_of_day, template.duration_minutes, timeOfDay, durationMinutes)
+  ));
+
+  if (overlappingTemplates.length === 0) {
+    return { conflict: null, error: null };
+  }
+
+  const sameGroupTemplates = overlappingTemplates.filter((template) => (
+    template.service_id === serviceId
+    && normalizeTime(template.time_of_day) === normalizeTime(timeOfDay)
+    && Number(template.duration_minutes) === Number(durationMinutes)
+  ));
+
+  if (sameGroupTemplates.length !== overlappingTemplates.length) {
+    return {
+      conflict: {
+        code: 'instructor_template_time_conflict',
+        templates: overlappingTemplates,
+      },
+      error: null,
+    };
+  }
+
+  const { data: capability, error: capabilityError } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
+    .select('max_students')
+    .eq('employee_id', instructorEmployeeId)
+    .eq('service_id', serviceId)
+    .maybeSingle();
+
+  if (capabilityError) {
+    return { conflict: null, error: capabilityError };
+  }
+
+  const maxStudents = Number(capability?.max_students) || 1;
+  if (sameGroupTemplates.length >= maxStudents) {
+    return {
+      conflict: {
+        code: 'template_group_capacity_exceeded',
+        templates: sameGroupTemplates,
+        maxStudents,
+      },
+      error: null,
+    };
+  }
+
+  return { conflict: null, error: null };
 }
 
 function buildTemplateSelect({ includeStudent = false } = {}) {
@@ -656,6 +743,33 @@ export default async function lessonTemplates(context, req) {
       });
     }
 
+    const { conflict: instructorSlotConflict, error: instructorSlotConflictError } = await findInstructorSlotConflict(supabase, orgId, {
+      instructorEmployeeId,
+      serviceId,
+      dayOfWeek,
+      timeOfDay,
+      durationMinutes,
+      validFrom,
+      validUntil,
+    });
+
+    if (instructorSlotConflictError) {
+      context.log?.error?.('lesson-templates failed to check instructor slot conflict on create', {
+        message: instructorSlotConflictError.message,
+        instructorEmployeeId,
+        serviceId,
+      });
+      return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+    }
+
+    if (instructorSlotConflict) {
+      return respond(context, 409, {
+        message: instructorSlotConflict.code,
+        conflicting_template_ids: (instructorSlotConflict.templates || []).map((template) => template.id).filter(Boolean),
+        max_students: instructorSlotConflict.maxStudents || null,
+      });
+    }
+
     const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .insert({
         student_id: effectiveStudentId,
@@ -1081,6 +1195,33 @@ export default async function lessonTemplates(context, req) {
         return respond(context, 409, {
           message: 'duplicate_template_conflict',
           conflicting_template_id: conflict.id,
+        });
+      }
+
+      const { conflict: instructorSlotConflict, error: instructorSlotConflictError } = await findInstructorSlotConflict(supabase, orgId, {
+        instructorEmployeeId: nextTemplateState.instructor_employee_id,
+        serviceId: nextTemplateState.service_id,
+        dayOfWeek: nextTemplateState.day_of_week,
+        timeOfDay: nextTemplateState.time_of_day,
+        durationMinutes: nextTemplateState.duration_minutes,
+        validFrom: nextTemplateState.valid_from,
+        validUntil: nextTemplateState.valid_until,
+        excludeTemplateId: templateId,
+      });
+
+      if (instructorSlotConflictError) {
+        context.log?.error?.('lesson-templates failed to check instructor slot conflict on update', {
+          message: instructorSlotConflictError.message,
+          templateId,
+        });
+        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+      }
+
+      if (instructorSlotConflict) {
+        return respond(context, 409, {
+          message: instructorSlotConflict.code,
+          conflicting_template_ids: (instructorSlotConflict.templates || []).map((template) => template.id).filter(Boolean),
+          max_students: instructorSlotConflict.maxStudents || null,
         });
       }
     }
