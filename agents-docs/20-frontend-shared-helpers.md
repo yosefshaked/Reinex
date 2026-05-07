@@ -16,6 +16,7 @@
 - [`../src/lib/day-of-week.js`](../src/lib/day-of-week.js)
 - [`../src/lib/format-name.js`](../src/lib/format-name.js)
 - [`../src/lib/instructor-availability.js`](../src/lib/instructor-availability.js)
+- [`../src/lib/time-grid.js`](../src/lib/time-grid.js)
 - [`../src/lib/utils.js`](../src/lib/utils.js)
 - [`../src/lib/error-utils.js`](../src/lib/error-utils.js)
 - [`../src/lib/error-mapping.js`](../src/lib/error-mapping.js)
@@ -37,6 +38,7 @@
 - `formatStudentName`, `formatInstructorName`, `formatName`
 - `formatUserAccountName`
 - `normalizeAvailabilityWindows`, `getAvailabilitySummary`, `buildAvailabilityTimeSlots`
+- `ceilClockTimeToGrid`, `normalizePreferredTimeRangeToGrid` for 15-minute calendar/waiting-list time normalization
 - `mapLooseSessionError`
 - `extractRegistrationTokens`, `extractInvitationToken`, `buildInvitationSearch`
 - `normalizeExternalHttpUrl`

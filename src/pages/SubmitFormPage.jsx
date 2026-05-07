@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import SectionedFormRenderer from '@/features/forms/components/SectionedFormRenderer.jsx';
 import { buildInitialAnswers, getVisibleSections, normalizeFormSchema, normalizeVisibilityRules, validateVisibleAnswers } from '@/features/forms/lib/form-schema.js';
+import { normalizePreferredTimeRangeToGrid, ceilClockTimeToGrid } from '@/lib/time-grid.js';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'ראשון', short: 'א' },
@@ -50,11 +51,8 @@ function serializePreferredTimes(preferredTimesByDay) {
       if (!Number.isInteger(day) || day < 0 || day > 6) return null;
       const normalizedRanges = Array.isArray(ranges)
         ? ranges
-            .map((range) => ({
-              start: typeof range?.start === 'string' ? range.start.trim() : '',
-              end: typeof range?.end === 'string' ? range.end.trim() : '',
-            }))
-            .filter((range) => range.start && range.end)
+            .map((range) => normalizePreferredTimeRangeToGrid(range))
+            .filter(Boolean)
         : [];
       return normalizedRanges.length ? { day, ranges: normalizedRanges } : null;
     })
@@ -590,6 +588,18 @@ export default function SubmitFormPage() {
     }));
   };
 
+  const snapPreferredRangeToGrid = (day, index, field) => {
+    setIntakeValues((prev) => ({
+      ...prev,
+      preferredTimesByDay: {
+        ...prev.preferredTimesByDay,
+        [day]: (prev.preferredTimesByDay[day] || []).map((range, rangeIndex) => (
+          rangeIndex === index ? { ...range, [field]: ceilClockTimeToGrid(range?.[field]) } : range
+        )),
+      },
+    }));
+  };
+
   const removePreferredRange = (day, index) => {
     setIntakeValues((prev) => {
       const nextRanges = (prev.preferredTimesByDay[day] || []).filter((_, rangeIndex) => rangeIndex !== index);
@@ -907,16 +917,20 @@ export default function SubmitFormPage() {
                                   <div key={`${day}-${index}`} className="flex flex-col gap-2 sm:flex-row sm:items-center">
                                     <Input
                                       type="time"
+                                      step="900"
                                       value={range.start}
                                       className={getPublicInputClass(false)}
                                       onChange={(e) => updatePreferredRange(day, index, 'start', e.target.value)}
+                                      onBlur={() => snapPreferredRangeToGrid(day, index, 'start')}
                                     />
                                     <span className="text-sm text-slate-500">עד</span>
                                     <Input
                                       type="time"
+                                      step="900"
                                       value={range.end}
                                       className={getPublicInputClass(false)}
                                       onChange={(e) => updatePreferredRange(day, index, 'end', e.target.value)}
+                                      onBlur={() => snapPreferredRangeToGrid(day, index, 'end')}
                                     />
                                     {ranges.length > 1 && (
                                       <Button type="button" variant="outline" onClick={() => removePreferredRange(day, index)}>

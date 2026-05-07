@@ -33,6 +33,7 @@ import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/feature
 import AddStudentForm, { AddStudentFormFooter } from '@/features/admin/components/AddStudentForm.jsx';
 import { toast } from 'sonner';
 import { toAgorot } from '@/lib/currency.js';
+import { normalizePreferredTimeRangeToGrid, ceilClockTimeToGrid } from '@/lib/time-grid.js';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'ראשון', labelShort: 'א' },
@@ -195,10 +196,10 @@ function buildPreferredTimesMap(preferredTimes) {
     }
     const ranges = Array.isArray(entry?.ranges) ? entry.ranges : [];
     const normalizedRanges = ranges
-      .map((range) => ({
+      .map((range) => normalizePreferredTimeRangeToGrid(range) || {
         start: typeof range?.start === 'string' ? range.start : '',
         end: typeof range?.end === 'string' ? range.end : '',
-      }))
+      })
       .filter((range) => range.start || range.end);
     if (normalizedRanges.length) {
       map[day] = normalizedRanges;
@@ -220,11 +221,8 @@ function serializePreferredTimes(preferredTimesByDay) {
       }
       const normalizedRanges = Array.isArray(ranges)
         ? ranges
-            .map((range) => ({
-              start: typeof range?.start === 'string' ? range.start.trim() : '',
-              end: typeof range?.end === 'string' ? range.end.trim() : '',
-            }))
-            .filter((range) => range.start && range.end)
+            .map((range) => normalizePreferredTimeRangeToGrid(range))
+            .filter(Boolean)
         : [];
       if (!normalizedRanges.length) {
         return null;
@@ -1079,6 +1077,22 @@ export default function WaitingListPage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const snapPreferredTimeToGrid = (dayValue, index, field) => {
+    setFormValues((prev) => {
+      const currentRanges = prev.preferredTimesByDay?.[dayValue] || [];
+      const nextRanges = currentRanges.map((range, idx) => (
+        idx === index ? { ...range, [field]: ceilClockTimeToGrid(range?.[field]) } : range
+      ));
+      return {
+        ...prev,
+        preferredTimesByDay: {
+          ...prev.preferredTimesByDay,
+          [dayValue]: nextRanges,
+        },
+      };
+    });
   };
 
   const updateWaitingListEntry = useCallback(async (entry, updates, successMessage, options = {}) => {
@@ -1991,17 +2005,21 @@ export default function WaitingListPage() {
                       <span className="text-xs text-neutral-500">התחלה</span>
                       <input
                         type="time"
+                        step="900"
                         className="h-9 rounded-md border border-input bg-background px-2 text-sm"
                         value={range.start}
                         onChange={(event) => updatePreferredTime(timeEditorDay, index, 'start', event.target.value)}
+                        onBlur={() => snapPreferredTimeToGrid(timeEditorDay, index, 'start')}
                       />
                       <span className="text-sm text-neutral-500">–</span>
                       <span className="text-xs text-neutral-500">סיום</span>
                       <input
                         type="time"
+                        step="900"
                         className="h-9 rounded-md border border-input bg-background px-2 text-sm"
                         value={range.end}
                         onChange={(event) => updatePreferredTime(timeEditorDay, index, 'end', event.target.value)}
+                        onBlur={() => snapPreferredTimeToGrid(timeEditorDay, index, 'end')}
                       />
                       <Button
                         type="button"

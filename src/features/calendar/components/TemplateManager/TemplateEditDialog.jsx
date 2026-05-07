@@ -18,11 +18,10 @@ import {
   hasConfiguredAvailability,
   isWithinAvailabilityWindows,
 } from '@/lib/instructor-availability.js';
+import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
 
 function formatTime(timeString) {
-  if (!timeString) return '';
-  const parts = String(timeString).split(':');
-  return `${parts[0]}:${parts[1]}`;
+  return ceilClockTimeToGrid(timeString);
 }
 
 function getPersonName(person) {

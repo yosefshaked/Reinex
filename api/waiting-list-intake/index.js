@@ -33,6 +33,7 @@ import {
   findClientProfileByIdentityNumber,
 } from '../_shared/client-profiles.js';
 import { resolvePublicAppBaseUrl } from '../_shared/public-app-url.js';
+import { normalizePreferredTimesToGrid } from '../_shared/time-grid.js';
 
 const ROUTING_CATEGORY = 'waiting_list_intake';
 const DEFAULT_INVITE_TTL_MINUTES = 10080;
@@ -133,32 +134,8 @@ function normalizePreferredDays(value) {
   return Array.from(unique).sort((a, b) => a - b);
 }
 
-function isValidTime(value) {
-  if (!value) return false;
-  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(String(value).trim());
-}
-
 function normalizePreferredTimes(value) {
-  if (value === null || value === undefined) return null;
-  if (!Array.isArray(value)) return null;
-
-  const normalized = [];
-  for (const entry of value) {
-    const day = Number(entry?.day);
-    if (!Number.isInteger(day) || day < 0 || day > 6) continue;
-
-    const ranges = Array.isArray(entry?.ranges) ? entry.ranges : [];
-    const normalizedRanges = ranges
-      .map((range) => ({
-        start: typeof range?.start === 'string' ? range.start.trim() : '',
-        end: typeof range?.end === 'string' ? range.end.trim() : '',
-      }))
-      .filter((range) => isValidTime(range.start) && isValidTime(range.end));
-
-    if (normalizedRanges.length) normalized.push({ day, ranges: normalizedRanges });
-  }
-
-  return normalized.length ? normalized : [];
+  return normalizePreferredTimesToGrid(value);
 }
 
 function selectedDaysCoveredByRanges(preferredDays, preferredTimes) {

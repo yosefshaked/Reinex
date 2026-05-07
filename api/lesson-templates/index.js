@@ -17,6 +17,7 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { ensureStudentForClientProfile } from '../_shared/client-profiles.js';
+import { ceilClockTimeToGrid } from '../_shared/time-grid.js';
 
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
@@ -38,32 +39,7 @@ function compareTemplatesByDayAndTime(left, right) {
 }
 
 function normalizeTime(value) {
-  if (!value) return '';
-  const trimmed = String(value).trim();
-  if (!trimmed) return '';
-
-  const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-  if (!match) return '';
-
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  const seconds = Number(match[3] ?? 0);
-
-  if (
-    !Number.isInteger(hours) ||
-    !Number.isInteger(minutes) ||
-    !Number.isInteger(seconds) ||
-    hours < 0 ||
-    hours > 23 ||
-    minutes < 0 ||
-    minutes > 59 ||
-    seconds < 0 ||
-    seconds > 59
-  ) {
-    return '';
-  }
-
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return ceilClockTimeToGrid(value);
 }
 
 function isIsoDate(value) {

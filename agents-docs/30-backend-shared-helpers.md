@@ -17,6 +17,7 @@
 - [`../api/_shared/currency.js`](../api/_shared/currency.js)
 - [`../api/_shared/csv.js`](../api/_shared/csv.js)
 - [`../api/_shared/day-of-week.js`](../api/_shared/day-of-week.js)
+- [`../api/_shared/time-grid.js`](../api/_shared/time-grid.js)
 - [`../api/_shared/instructor-colors.js`](../api/_shared/instructor-colors.js)
 - [`../api/_shared/metadata-utils.js`](../api/_shared/metadata-utils.js)
 - [`../api/_shared/public-app-url.js`](../api/_shared/public-app-url.js)
@@ -33,6 +34,7 @@
 - `ensureInstructorColors` in [`../api/_shared/instructor-colors.js`](../api/_shared/instructor-colors.js)
 - `mergeMetadata` in [`../api/_shared/metadata-utils.js`](../api/_shared/metadata-utils.js) — use for all nested metadata patch operations; do not hand-spread metadata
 - Day-name/number utilities in [`../api/_shared/day-of-week.js`](../api/_shared/day-of-week.js) — backend counterpart to `src/lib/day-of-week.js`
+- `ceilClockTimeToGrid`, `normalizePreferredTimesToGrid` in [`../api/_shared/time-grid.js`](../api/_shared/time-grid.js) — use these for 15-minute calendar/waiting-list time normalization
 - `findAuthUserByEmail`, `getAuthUserById`, `getAuthUsersByIds` in [`../api/_shared/auth-users.js`](../api/_shared/auth-users.js) — use these when auth user emails are needed; `profiles` is not the source of truth for auth email addresses
 - `resolvePublicAppBaseUrl`, `buildPublicAppHashRouteUrl`, `normalizeAbsoluteRedirectUrl` in [`../api/_shared/public-app-url.js`](../api/_shared/public-app-url.js) — use these for public links sent from backend flows
 - `buildAccountDisplayName`, `extractAuthDisplayName`, `getAuthNameParts`, `buildAccountUserMetadata`, `isAccountSetupComplete`, `ensureAccountProfileRow` in [`../api/_shared/account-profile.js`](../api/_shared/account-profile.js) — use these for canonical user profile bootstrap, setup-state checks, auth metadata sync, and derived display names after `profiles.full_name` removal

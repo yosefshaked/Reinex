@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { DAY_OPTIONS, dayLabel, normalizeDayToken } from '@/lib/day-of-week.js';
 import { getAvailabilityWindowsForDay, timeToMinutes } from '@/lib/instructor-availability.js';
 import { cn } from '@/lib/utils';
+import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
 import '../reinex-fullcalendar.css';
 import './template-schedule-calendar.css';
 
@@ -29,7 +30,7 @@ const DAY_DATE_BY_TOKEN = Object.freeze(
 );
 
 function formatClock(value) {
-  const text = String(value || '').trim();
+  const text = ceilClockTimeToGrid(value) || String(value || '').trim();
   const match = /^(\d{1,2}):(\d{2})/.exec(text);
   if (!match) return '00:00';
   return `${String(Number(match[1])).padStart(2, '0')}:${match[2]}`;

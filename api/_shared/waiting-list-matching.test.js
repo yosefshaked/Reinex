@@ -185,6 +185,23 @@ test('clear-space mode suggests empty availability windows and excludes overlaps
   );
 });
 
+test('clear-space mode rounds off-grid preferred starts up to the next 15 minute slot', () => {
+  const context = buildContext({
+    templates: [],
+    maxStudents: 3,
+  });
+
+  const result = buildLiveWaitingListMatches({
+    entries: [baseEntry({ preferred_times: [{ day: 1, ranges: [{ start: '09:06', end: '10:01' }] }] })],
+    mode: 'clear_space',
+    now: NOW,
+    ...context,
+  });
+
+  assert.equal(result.summary.matchable_entries, 1);
+  assert.equal(result.candidates[0].time_of_day, '09:15');
+});
+
 test('closed and matched entries are excluded', () => {
   const context = buildContext();
 

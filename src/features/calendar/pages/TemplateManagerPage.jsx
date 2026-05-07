@@ -16,6 +16,7 @@ import EditServiceCapabilitiesDialog from '@/components/settings/employee-manage
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
 
 const EMPTY_WAITING_MATCHES = {
   summary: { matchable_entries: 0, priority_entries: 0, oldest_wait_days: 0, services: [] },
@@ -216,7 +217,7 @@ export default function TemplateManagerPage() {
       suggestionMode: searchParams.get('suggestion_mode') || '',
       instructorId: searchParams.get('instructor_id') || null,
       dayOfWeek: searchParams.get('day_of_week') || null,
-      timeOfDay: searchParams.get('time_of_day') || '09:00',
+      timeOfDay: ceilClockTimeToGrid(searchParams.get('time_of_day')) || '09:00',
       durationMinutes: Number(searchParams.get('duration_minutes')) || 60,
       clientProfileId: searchParams.get('client_profile_id') || '',
       studentId: searchParams.get('student_id') || '',
@@ -442,7 +443,7 @@ export default function TemplateManagerPage() {
       clientProfileId: candidate.client_profile_id || '',
       studentId: candidate.student_id || '',
       serviceId: candidate.service_id || '',
-      timeOfDay: candidate.time_of_day || '09:00',
+      timeOfDay: ceilClockTimeToGrid(candidate.time_of_day) || '09:00',
       durationMinutes: Number(candidate.duration_minutes) || 60,
       waitingListEntryId: candidate.waiting_list_entry_id || candidate.entry_id || '',
       waitingListContext: {

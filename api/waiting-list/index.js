@@ -14,6 +14,7 @@ import {
   resolveOrgId,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { normalizePreferredTimesToGrid } from '../_shared/time-grid.js';
 
 const STATUS_OPTIONS = new Set(['new', 'open', 'matched', 'closed', 'active', 'all']);
 
@@ -55,44 +56,8 @@ function normalizePreferredDays(value) {
   return Array.from(unique).sort((a, b) => a - b);
 }
 
-function isValidTime(value) {
-  if (!value) return false;
-  const trimmed = String(value).trim();
-  if (!trimmed) return false;
-  const match = trimmed.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
-  return Boolean(match);
-}
-
 function normalizePreferredTimes(value) {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  const normalized = [];
-
-  for (const entry of value) {
-    const day = Number(entry?.day);
-    if (!Number.isInteger(day) || day < 0 || day > 6) {
-      continue;
-    }
-    const ranges = Array.isArray(entry?.ranges) ? entry.ranges : [];
-    const normalizedRanges = ranges
-      .map((range) => ({
-        start: typeof range?.start === 'string' ? range.start.trim() : '',
-        end: typeof range?.end === 'string' ? range.end.trim() : '',
-      }))
-      .filter((range) => isValidTime(range.start) && isValidTime(range.end));
-
-    if (normalizedRanges.length) {
-      normalized.push({ day, ranges: normalizedRanges });
-    }
-  }
-
-  return normalized.length ? normalized : [];
+  return normalizePreferredTimesToGrid(value);
 }
 
 function normalizeBoolean(value, defaultValue = false) {

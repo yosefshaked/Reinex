@@ -7,6 +7,12 @@ import {
   timeToMinutes,
 } from './instructor-availability.js';
 import { daySortValue, normalizeDayToken } from './day-of-week.js';
+import {
+  ceilClockTimeToGrid,
+  ceilMinutesToGrid,
+  normalizePreferredTimesToGrid,
+  parseClockTimeToMinutes,
+} from './time-grid.js';
 
 export const WAITING_LIST_MATCH_MODES = new Set(['capacity', 'clear_space']);
 export const GRID_STEP_MINUTES = 15;
@@ -94,14 +100,14 @@ function resolveEntryPerson(entry) {
 
 function buildPreferredRangesMap(preferredTimes) {
   const map = new Map();
-  if (!Array.isArray(preferredTimes)) return map;
-  preferredTimes.forEach((entry) => {
+  const normalizedPreferredTimes = normalizePreferredTimesToGrid(preferredTimes) || [];
+  normalizedPreferredTimes.forEach((entry) => {
     const day = normalizeDayToken(entry?.day);
     if (!day) return;
     const normalizedRanges = (Array.isArray(entry?.ranges) ? entry.ranges : [])
       .map((range) => ({
-        start: timeToMinutes(range?.start),
-        end: timeToMinutes(range?.end),
+        start: parseClockTimeToMinutes(range?.start),
+        end: parseClockTimeToMinutes(range?.end, { allowEndOfDay: true }),
       }))
       .filter((range) => range.start != null && range.end != null && range.end > range.start);
     if (normalizedRanges.length) {
@@ -212,7 +218,7 @@ function buildCapacitySuggestionsForEntry({ entry, capabilityMap, instructorMap,
       template.instructor_employee_id,
       template.service_id,
       template.day_of_week,
-      normalizeString(template.time_of_day),
+      ceilClockTimeToGrid(template.time_of_day),
       Number(template.duration_minutes) || 0,
     ].join('|');
 
@@ -236,13 +242,14 @@ function buildCapacitySuggestionsForEntry({ entry, capabilityMap, instructorMap,
     if (availableSeats <= 0) continue;
     if (entry.student_id && templates.some((template) => template.student_id === entry.student_id)) continue;
 
-    const startMinutes = timeToMinutes(anchor.time_of_day);
+    const roundedStartTime = ceilClockTimeToGrid(anchor.time_of_day);
+    const startMinutes = timeToMinutes(roundedStartTime);
     const durationMinutes = Number(anchor.duration_minutes) || Number(entry?.service?.duration_minutes) || 60;
     if (startMinutes == null) continue;
     if (!isWithinAvailabilityWindows({
       availabilityWindows: capability.availability_windows,
       day: anchor.day_of_week,
-      startTime: anchor.time_of_day,
+      startTime: roundedStartTime,
       durationMinutes,
     })) {
       continue;
@@ -289,7 +296,7 @@ function buildCandidateWindows(dayOfWeek, entry, availabilityWindows) {
   if (explicitRanges?.length) {
     const serviceWindows = getAvailabilityWindowsForDay(availabilityWindows, normalizedDay)
       .map((window) => ({
-        start: timeToMinutes(window.start),
+        start: ceilMinutesToGrid(timeToMinutes(window.start)),
         end: timeToMinutes(window.end),
       }))
       .filter((window) => window.start != null && window.end != null);
@@ -304,8 +311,8 @@ function buildCandidateWindows(dayOfWeek, entry, availabilityWindows) {
   }
   return getAvailabilityWindowsForDay(availabilityWindows, normalizedDay)
     .map((window) => ({
-      start: timeToMinutes(window.start),
-      end: timeToMinutes(window.end),
+        start: ceilMinutesToGrid(timeToMinutes(window.start)),
+        end: timeToMinutes(window.end),
     }))
     .filter((window) => window.start != null && window.end != null && window.end > window.start);
 }

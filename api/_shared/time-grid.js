@@ -1,0 +1,85 @@
+/* eslint-env node */
+
+export const DEFAULT_TIME_GRID_STEP_MINUTES = 15;
+
+export function parseClockTimeToMinutes(value, { allowEndOfDay = false } = {}) {
+  if (!value) return null;
+  const match = String(value).trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return null;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3] ?? 0);
+  if (
+    !Number.isInteger(hours)
+    || !Number.isInteger(minutes)
+    || !Number.isInteger(seconds)
+    || minutes < 0
+    || minutes > 59
+    || seconds < 0
+    || seconds > 59
+  ) {
+    return null;
+  }
+
+  if (allowEndOfDay && hours === 24 && minutes === 0 && seconds === 0) {
+    return 24 * 60;
+  }
+
+  if (hours < 0 || hours > 23) return null;
+  return (hours * 60) + minutes + (seconds > 0 ? 1 : 0);
+}
+
+export function formatClockMinutes(totalMinutes) {
+  const safeMinutes = Math.max(0, Math.min(24 * 60, Number(totalMinutes) || 0));
+  const hours = Math.floor(safeMinutes / 60);
+  const minutes = safeMinutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+export function ceilMinutesToGrid(minutes, stepMinutes = DEFAULT_TIME_GRID_STEP_MINUTES) {
+  if (!Number.isFinite(Number(minutes))) return null;
+  const safeStep = Math.max(1, Number(stepMinutes) || DEFAULT_TIME_GRID_STEP_MINUTES);
+  return Math.ceil(Number(minutes) / safeStep) * safeStep;
+}
+
+export function ceilClockTimeToGrid(value, {
+  stepMinutes = DEFAULT_TIME_GRID_STEP_MINUTES,
+  allowEndOfDay = false,
+} = {}) {
+  const minutes = parseClockTimeToMinutes(value, { allowEndOfDay });
+  if (minutes == null) return '';
+  const max = allowEndOfDay ? 24 * 60 : (24 * 60) - stepMinutes;
+  const rounded = ceilMinutesToGrid(minutes, stepMinutes);
+  if (rounded == null || rounded > max) return '';
+  return formatClockMinutes(rounded);
+}
+
+export function normalizePreferredTimesToGrid(value, { stepMinutes = DEFAULT_TIME_GRID_STEP_MINUTES } = {}) {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value)) return null;
+
+  const normalized = [];
+  for (const entry of value) {
+    const day = Number(entry?.day);
+    if (!Number.isInteger(day) || day < 0 || day > 6) continue;
+
+    const ranges = Array.isArray(entry?.ranges) ? entry.ranges : [];
+    const normalizedRanges = ranges
+      .map((range) => {
+        const start = ceilClockTimeToGrid(range?.start, { stepMinutes });
+        const end = ceilClockTimeToGrid(range?.end, { stepMinutes, allowEndOfDay: true });
+        const startMinutes = parseClockTimeToMinutes(start);
+        const endMinutes = parseClockTimeToMinutes(end, { allowEndOfDay: true });
+        if (!start || !end || startMinutes == null || endMinutes == null || endMinutes <= startMinutes) {
+          return null;
+        }
+        return { start, end };
+      })
+      .filter(Boolean);
+
+    if (normalizedRanges.length) normalized.push({ day, ranges: normalizedRanges });
+  }
+
+  return normalized.length ? normalized : [];
+}
