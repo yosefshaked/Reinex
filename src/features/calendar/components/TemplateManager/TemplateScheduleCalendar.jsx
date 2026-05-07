@@ -265,7 +265,7 @@ export function TemplateScheduleCalendar({
   showInactive,
   viewMode,
   selectedDay,
-  waitingListMatchMode,
+  showWaitingListMatches,
   waitingListTemplateMatches,
   waitingListCandidates,
   isLoading = false,
@@ -280,15 +280,19 @@ export function TemplateScheduleCalendar({
     [instructors, selectedDay, templates, viewMode],
   );
   const events = useMemo(() => {
-    const templateEvents = buildTemplateEvents({ templates, showInactive, waitingListTemplateMatches });
-    if (waitingListMatchMode !== 'clear_space') {
+    const templateEvents = buildTemplateEvents({
+      templates,
+      showInactive,
+      waitingListTemplateMatches: showWaitingListMatches ? waitingListTemplateMatches : {},
+    });
+    if (!showWaitingListMatches) {
       return templateEvents;
     }
     return [
       ...templateEvents,
       ...buildClearSpaceEvents(waitingListCandidates),
     ];
-  }, [showInactive, templates, waitingListCandidates, waitingListMatchMode, waitingListTemplateMatches]);
+  }, [showInactive, showWaitingListMatches, templates, waitingListCandidates, waitingListTemplateMatches]);
   const initialDate = viewMode === 'day' ? DAY_DATE_BY_TOKEN[selectedDay] || TEMPLATE_WEEK_START : TEMPLATE_WEEK_START;
   const initialView = viewMode === 'day' ? 'resourceTimeGridDay' : 'resourceTimeGridWeek';
 
@@ -346,7 +350,7 @@ export function TemplateScheduleCalendar({
             }
 
             const bucket = info.event.extendedProps?.matchBucket;
-            if (waitingListMatchMode === 'capacity' && Number(bucket?.count) > 0 && info.jsEvent?.target?.closest?.('.reinex-template-event-card__badge')) {
+            if (showWaitingListMatches && Number(bucket?.count) > 0 && info.jsEvent?.target?.closest?.('.reinex-template-event-card__badge')) {
               onWaitingListMatchClick?.({
                 mode: 'capacity',
                 bucket,

@@ -1,6 +1,6 @@
 .reinex-template-calendar-shell {
-  min-height: 34rem;
-  height: min(72vh, 48rem);
+  min-height: 38rem;
+  height: min(80vh, 56rem);
 }
 
 .reinex-template-calendar .fc .fc-timegrid-col.fc-day-today {
@@ -11,7 +11,7 @@
   color: rgb(15 23 42);
   font-size: 0.8rem;
   font-weight: 700;
-  padding-block: 0.45rem;
+  padding-block: 0.32rem;
 }
 
 .reinex-template-calendar .fc .fc-resource-cell {
@@ -140,7 +140,7 @@
 
 @media (min-width: 1024px) {
   .reinex-template-calendar-shell {
-    height: calc(100vh - 20rem);
-    min-height: 36rem;
+    height: calc(100vh - 13.5rem);
+    min-height: 40rem;
   }
 }

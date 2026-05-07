@@ -17,20 +17,59 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 
-const MATCH_MODE_OPTIONS = [
-  { value: 'capacity', label: 'מקום פנוי בקבוצה' },
-  { value: 'clear_space', label: 'חלון פנוי לשיבוץ נפרד' },
-];
-
-function normalizeMatchMode(value) {
-  return value === 'clear_space' ? 'clear_space' : 'capacity';
-}
+const EMPTY_WAITING_MATCHES = {
+  summary: { matchable_entries: 0, priority_entries: 0, oldest_wait_days: 0, services: [] },
+  template_matches: {},
+  cell_matches: {},
+  candidates: [],
+};
 
 function formatWaitDays(days) {
   const value = Number(days) || 0;
   if (value <= 0) return 'נוסף היום';
   if (value === 1) return 'ממתין יום אחד';
   return `ממתין ${value} ימים`;
+}
+
+function formatMaxWaitDays(days) {
+  const value = Number(days) || 0;
+  if (value <= 0) return 'אין התאמות כרגע';
+  if (value === 1) return 'המתנה מירבית: יום אחד';
+  return `המתנה מירבית: ${value} ימים`;
+}
+
+function normalizeWaitingMatchPayload(payload) {
+  return {
+    summary: payload?.summary || EMPTY_WAITING_MATCHES.summary,
+    template_matches: payload?.template_matches || {},
+    cell_matches: payload?.cell_matches || {},
+    candidates: Array.isArray(payload?.candidates) ? payload.candidates : [],
+  };
+}
+
+function buildCombinedWaitingSummary(waitingMatches) {
+  const seenEntries = new Set();
+  let priorityEntries = 0;
+  let oldestWaitDays = 0;
+
+  for (const modePayload of [waitingMatches.capacity, waitingMatches.clear_space]) {
+    for (const candidate of modePayload?.candidates || []) {
+      const entryId = candidate?.waiting_list_entry_id || candidate?.entry_id;
+      if (!entryId || seenEntries.has(entryId)) continue;
+      seenEntries.add(entryId);
+      if (candidate.priority_flag) priorityEntries += 1;
+      oldestWaitDays = Math.max(oldestWaitDays, Number(candidate.wait_days) || 0);
+    }
+
+    const summary = modePayload?.summary || {};
+    oldestWaitDays = Math.max(oldestWaitDays, Number(summary.oldest_wait_days) || 0);
+  }
+
+  return {
+    matchableEntries: seenEntries.size,
+    priorityEntries,
+    oldestWaitDays,
+  };
 }
 
 function preferenceLabel(value) {
@@ -51,14 +90,12 @@ export default function TemplateManagerPage() {
   const { session } = useAuth();
 
   const [showInactive, setShowInactive] = useState(false);
-  const [matchMode, setMatchMode] = useState(() => normalizeMatchMode(searchParams.get('mode')));
+  const [showWaitingMatches, setShowWaitingMatches] = useState(() => searchParams.get('waiting_matches') !== '0');
   const [templateViewMode, setTemplateViewMode] = useState(() => (searchParams.get('view') === 'week' ? 'week' : 'day'));
   const [selectedDay, setSelectedDay] = useState(() => searchParams.get('day') || 'sunday');
   const [waitingMatches, setWaitingMatches] = useState({
-    summary: { matchable_entries: 0, priority_entries: 0, oldest_wait_days: 0, services: [] },
-    template_matches: {},
-    cell_matches: {},
-    candidates: [],
+    capacity: EMPTY_WAITING_MATCHES,
+    clear_space: EMPTY_WAITING_MATCHES,
   });
   const [waitingMatchesLoading, setWaitingMatchesLoading] = useState(false);
   const [waitingMatchesError, setWaitingMatchesError] = useState('');
@@ -96,10 +133,15 @@ export default function TemplateManagerPage() {
 
   const isLoading = templatesLoading || instructorsLoading;
   const errorMsg = templatesError || instructorsError;
+  const combinedWaitingSummary = useMemo(
+    () => buildCombinedWaitingSummary(waitingMatches),
+    [waitingMatches],
+  );
 
   useEffect(() => {
-    const nextMode = normalizeMatchMode(searchParams.get('mode'));
-    setMatchMode(nextMode);
+    if (searchParams.has('waiting_matches')) {
+      setShowWaitingMatches(searchParams.get('waiting_matches') !== '0');
+    }
     setTemplateViewMode(searchParams.get('view') === 'week' ? 'week' : 'day');
     const nextDay = searchParams.get('day') || 'sunday';
     setSelectedDay(DAY_OPTIONS.some((day) => day.value === nextDay) ? nextDay : 'sunday');
@@ -108,10 +150,8 @@ export default function TemplateManagerPage() {
   useEffect(() => {
     if (!activeOrgId || !session || isLoading || errorMsg) {
       setWaitingMatches({
-        summary: { matchable_entries: 0, priority_entries: 0, oldest_wait_days: 0, services: [] },
-        template_matches: {},
-        cell_matches: {},
-        candidates: [],
+        capacity: EMPTY_WAITING_MATCHES,
+        clear_space: EMPTY_WAITING_MATCHES,
       });
       return;
     }
@@ -121,30 +161,36 @@ export default function TemplateManagerPage() {
       setWaitingMatchesLoading(true);
       setWaitingMatchesError('');
       try {
-        const payload = await authenticatedFetch('waiting-list-matches', {
-          session,
-          params: {
-            org_id: activeOrgId,
-            scope: 'template_manager',
-            mode: matchMode,
-          },
-        });
+        const [capacityPayload, clearSpacePayload] = await Promise.all([
+          authenticatedFetch('waiting-list-matches', {
+            session,
+            params: {
+              org_id: activeOrgId,
+              scope: 'template_manager',
+              mode: 'capacity',
+            },
+          }),
+          authenticatedFetch('waiting-list-matches', {
+            session,
+            params: {
+              org_id: activeOrgId,
+              scope: 'template_manager',
+              mode: 'clear_space',
+            },
+          }),
+        ]);
         if (!cancelled) {
           setWaitingMatches({
-            summary: payload?.summary || { matchable_entries: 0, priority_entries: 0, oldest_wait_days: 0, services: [] },
-            template_matches: payload?.template_matches || {},
-            cell_matches: payload?.cell_matches || {},
-            candidates: Array.isArray(payload?.candidates) ? payload.candidates : [],
+            capacity: normalizeWaitingMatchPayload(capacityPayload),
+            clear_space: normalizeWaitingMatchPayload(clearSpacePayload),
           });
         }
       } catch (error) {
         if (!cancelled) {
           setWaitingMatchesError(error?.message || 'טעינת התאמות רשימת ההמתנה נכשלה.');
           setWaitingMatches({
-            summary: { matchable_entries: 0, priority_entries: 0, oldest_wait_days: 0, services: [] },
-            template_matches: {},
-            cell_matches: {},
-            candidates: [],
+            capacity: EMPTY_WAITING_MATCHES,
+            clear_space: EMPTY_WAITING_MATCHES,
           });
         }
       } finally {
@@ -158,7 +204,7 @@ export default function TemplateManagerPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeOrgId, session, matchMode, isLoading, errorMsg]);
+  }, [activeOrgId, session, isLoading, errorMsg]);
 
   const waitingListSeed = useMemo(() => {
     const waitingListEntryId = searchParams.get('waiting_list_entry_id') || '';
@@ -350,15 +396,13 @@ export default function TemplateManagerPage() {
     setSelectedTemplate(null);
   }
 
-  function handleMatchModeChange(nextMode) {
-    const normalizedMode = normalizeMatchMode(nextMode);
-    setMatchMode(normalizedMode);
+  function handleWaitingMatchesVisibilityChange() {
+    const nextValue = !showWaitingMatches;
+    setShowWaitingMatches(nextValue);
     const params = new URLSearchParams(searchParams);
-    if (params.get('waiting_matches') === '1' || params.has('mode')) {
-      params.set('waiting_matches', '1');
-      params.set('mode', normalizedMode);
-      navigate(`/calendar/templates?${params.toString()}`, { replace: true });
-    }
+    params.set('waiting_matches', nextValue ? '1' : '0');
+    params.delete('mode');
+    navigate(`/calendar/templates?${params.toString()}`, { replace: true });
   }
 
   function handleTemplateViewModeChange(nextViewMode) {
@@ -413,23 +457,16 @@ export default function TemplateManagerPage() {
   return (
     <PageLayout
       title="ניהול תבניות"
-      description="תבניות שיעורים שבועיות קבועות — לחצו על תא ריק להוספה או על תבנית לעריכה"
+      headerClassName="pb-2 sm:pb-3"
+      contentClassName="space-y-3"
       actions={
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowInactive(!showInactive)}
-            className="gap-1"
-          >
-            {showInactive ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            {showInactive ? 'הסתר לא פעילים' : 'הצג לא פעילים'}
-          </Button>
           <Button
             onClick={() => {
               setAddDefaults({
                 instructorId: null,
                 dayOfWeek: null,
+                clientProfileId: '',
                 studentId: '',
                 serviceId: '',
                 timeOfDay: '09:00',
@@ -483,27 +520,15 @@ export default function TemplateManagerPage() {
       ) : null}
 
       {!isLoading && !errorMsg ? (
-        <div className="mb-4 rounded-lg border border-border bg-background p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <UsersRound className="h-4 w-4 text-primary" />
-                התאמות מרשימת ההמתנה
-                {waitingMatchesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {waitingMatchesError
-                  ? waitingMatchesError
-                  : `נמצאו ${waitingMatches.summary.matchable_entries || 0} רשומות מתאימות במצב הנוכחי.`}
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1 rounded-full bg-muted p-1">
+        <div className="rounded-lg border border-border bg-background px-3 py-2">
+          <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-between">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
                 <Button
                   type="button"
                   size="sm"
                   variant={templateViewMode === 'day' ? 'default' : 'ghost'}
-                  className="h-8 rounded-full px-3 text-xs"
+                  className="h-8 rounded-md px-3 text-xs"
                   onClick={() => handleTemplateViewModeChange('day')}
                 >
                   יום
@@ -512,21 +537,21 @@ export default function TemplateManagerPage() {
                   type="button"
                   size="sm"
                   variant={templateViewMode === 'week' ? 'default' : 'ghost'}
-                  className="h-8 rounded-full px-3 text-xs"
+                  className="h-8 rounded-md px-3 text-xs"
                   onClick={() => handleTemplateViewModeChange('week')}
                 >
                   שבוע
                 </Button>
               </div>
               {templateViewMode === 'day' ? (
-                <div className="flex items-center gap-1 rounded-full bg-muted p-1">
+                <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
                   {DAY_OPTIONS.map((day) => (
                     <Button
                       key={day.value}
                       type="button"
                       size="sm"
                       variant={selectedDay === day.value ? 'default' : 'ghost'}
-                      className="h-8 rounded-full px-2.5 text-xs"
+                      className="h-8 rounded-md px-2.5 text-xs"
                       onClick={() => handleSelectedDayChange(day.value)}
                     >
                       {day.labelShort}
@@ -534,26 +559,36 @@ export default function TemplateManagerPage() {
                   ))}
                 </div>
               ) : null}
-              <div className="flex items-center gap-1 rounded-full bg-muted p-1">
-                {MATCH_MODE_OPTIONS.map((option) => (
-                  <Button
-                    key={option.value}
-                    type="button"
-                    size="sm"
-                    variant={matchMode === option.value ? 'default' : 'ghost'}
-                    className="h-8 rounded-full px-3 text-xs"
-                    onClick={() => handleMatchModeChange(option.value)}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </div>
-              {waitingMatches.summary.priority_entries > 0 ? (
-                <Badge variant="destructive">{waitingMatches.summary.priority_entries} דחופים</Badge>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button
+                type="button"
+                variant={showWaitingMatches ? 'default' : 'outline'}
+                className="h-12 min-w-[10.5rem] flex-col gap-0 rounded-lg px-3 leading-tight"
+                onClick={handleWaitingMatchesVisibilityChange}
+                title={waitingMatchesError || undefined}
+              >
+                <span className="flex items-center gap-1 text-sm font-semibold">
+                  <UsersRound className="h-4 w-4" />
+                  {showWaitingMatches ? 'הסתר ממתינים' : 'הצג ממתינים'} ({combinedWaitingSummary.matchableEntries})
+                  {waitingMatchesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                </span>
+                <span className={showWaitingMatches ? 'text-xs text-primary-foreground/80' : 'text-xs text-muted-foreground'}>
+                  {waitingMatchesError ? 'שגיאה בטעינת ממתינים' : formatMaxWaitDays(combinedWaitingSummary.oldestWaitDays)}
+                </span>
+              </Button>
+              {combinedWaitingSummary.priorityEntries > 0 ? (
+                <Badge variant="destructive">{combinedWaitingSummary.priorityEntries} דחופים</Badge>
               ) : null}
-              {waitingMatches.summary.oldest_wait_days > 0 ? (
-                <Badge variant="outline">{formatWaitDays(waitingMatches.summary.oldest_wait_days)}</Badge>
-              ) : null}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowInactive(!showInactive)}
+                className="h-12 gap-1 rounded-lg"
+              >
+                {showInactive ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showInactive ? 'הסתר לא פעילים' : 'הצג לא פעילים'}
+              </Button>
             </div>
           </div>
         </div>
@@ -569,9 +604,9 @@ export default function TemplateManagerPage() {
           showInactive={showInactive}
           viewMode={templateViewMode}
           selectedDay={selectedDay}
-          waitingListMatchMode={matchMode}
-          waitingListTemplateMatches={waitingMatches.template_matches}
-          waitingListCandidates={waitingMatches.candidates}
+          showWaitingListMatches={showWaitingMatches}
+          waitingListTemplateMatches={waitingMatches.capacity.template_matches}
+          waitingListCandidates={waitingMatches.clear_space.candidates}
           isLoading={waitingMatchesLoading}
           onWaitingListMatchClick={handleWaitingListMatchClick}
         />
@@ -637,7 +672,7 @@ export default function TemplateManagerPage() {
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              {matchMode === 'capacity' ? 'ממתינים שמתאימים לקבוצה קיימת' : 'ממתינים שמתאימים לשיבוץ נפרד'}
+              {selectedMatchContext?.mode === 'capacity' ? 'ממתינים שמתאימים לקבוצה קיימת' : 'ממתינים שמתאימים לשיבוץ נפרד'}
             </DialogTitle>
             <DialogDescription>
               בחרו מתעניין/ת לשיבוץ. השמירה תעבור דרך יצירת תבנית ותמיר לקוח/ה לתלמיד/ה בצד השרת.
@@ -656,7 +691,7 @@ export default function TemplateManagerPage() {
                       <Badge variant="outline">{preferenceLabel(candidate.preference_match)}</Badge>
                       <Badge variant="outline">{formatWaitDays(candidate.wait_days)}</Badge>
                       {candidate.priority_flag ? <Badge variant="destructive">דחוף</Badge> : null}
-                      {matchMode === 'capacity' ? (
+                      {selectedMatchContext?.mode === 'capacity' ? (
                         <Badge variant="secondary">{candidate.current_students}/{candidate.capacity} בקבוצה</Badge>
                       ) : (
                         <Badge variant="secondary">חלון נפרד</Badge>
