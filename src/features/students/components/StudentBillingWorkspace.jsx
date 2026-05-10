@@ -16,6 +16,7 @@ import HmoAuthorizationManager from '@/features/students/components/HmoAuthoriza
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 import { coerceAgorot, formatCurrency, toAgorot } from '@/lib/currency.js';
 import { groupLedgerEntries, sumByDirection } from '@/features/finance/utils/ledgerGrouping.js';
+import { formatLedgerNote } from '@/features/finance/utils/ledgerPresentation.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -64,7 +65,7 @@ function getEntryTypeLabel(entry) {
     case 'hmo_invoice_payment':
       return 'תשלום גורם מממן';
     default:
-      return entry?.source_type || 'תנועה';
+      return 'תנועה';
   }
 }
 
@@ -363,7 +364,7 @@ export default function StudentBillingWorkspace({
       const coverageReasonLabel = getCoverageReasonLabel(entry?.metadata?.coverage_reason);
       const direction = String(entry?.direction || '').toUpperCase();
       const descriptionLines = [
-        entry.notes ? `הערות: ${entry.notes}` : '',
+        entry.notes ? `הערות: ${formatLedgerNote(entry.notes)}` : '',
         entry.external_reference ? `אסמכתא: ${entry.external_reference}` : '',
         coverageReasonLabel || '',
         isReversal && entry.reverses_transaction_id ? `היפוך של תנועה #${shortId(entry.reverses_transaction_id)}` : '',
@@ -371,6 +372,7 @@ export default function StudentBillingWorkspace({
 
       return {
         key: entry.id,
+        entryId: shortId(entry.id),
         date: formatDateTime(entry.effective_at || entry.posted_at),
         primaryText: getEntryTypeLabel(entry),
         detailLines: descriptionLines,
@@ -438,7 +440,7 @@ export default function StudentBillingWorkspace({
         detailLines: [
           `תנועה מקורית #${shortId(original.id)}`,
           `תנועת היפוך #${shortId(reversal.id)}`,
-          reversal.notes ? `סיבת היפוך: ${reversal.notes}` : '',
+          reversal.notes ? `סיבת היפוך: ${formatLedgerNote(reversal.notes)}` : '',
         ].filter(Boolean),
         statusBadges: [
           {

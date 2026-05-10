@@ -19,13 +19,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { useMedicalProviders } from '@/features/students/hooks/useMedicalProviders.js';
 import { coerceAgorot, formatCurrency } from '@/lib/currency.js';
 import { groupLedgerEntries, sumByDirection } from '@/features/finance/utils/ledgerGrouping.js';
-
-function formatDate(value) {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime()) || d.getTime() <= 0) return '—';
-  return new Intl.DateTimeFormat('he-IL', { day: 'numeric', month: 'numeric', year: 'numeric' }).format(d);
-}
+import { formatLedgerNote } from '@/features/finance/utils/ledgerPresentation.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -50,7 +44,7 @@ function getEntryTypeLabel(sourceType) {
     case 'hmo_invoice_payment': return 'תשלום חשבונית';
     case 'reversal': return 'פעולת היפוך';
     case 'manual_adjustment': return 'התאמה ידנית';
-    default: return sourceType || 'תנועה';
+    default: return 'תנועה';
   }
 }
 
@@ -135,10 +129,11 @@ export default function HmoProviderBillingWorkspace({ providerId = '' }) {
       const isReversal = entry.source_type === 'reversal';
       return {
         key: entry.id,
+        entryId: shortId(entry.id),
         date: formatDateTime(entry.effective_at || entry.posted_at),
         primaryText: getEntryTypeLabel(entry.source_type),
         detailLines: [
-          entry.notes || '',
+          formatLedgerNote(entry.notes),
           entry.external_reference ? `אסמכתא: ${entry.external_reference}` : '',
           isReversal && entry.reverses_transaction_id
             ? `היפוך של תנועה #${shortId(entry.reverses_transaction_id)}`
@@ -186,7 +181,7 @@ export default function HmoProviderBillingWorkspace({ providerId = '' }) {
         detailLines: [
           `תנועה מקורית #${shortId(original.id)}`,
           `תנועת היפוך #${shortId(reversal.id)}`,
-          reversal.notes ? `סיבת היפוך: ${reversal.notes}` : '',
+          reversal.notes ? `סיבת היפוך: ${formatLedgerNote(reversal.notes)}` : '',
         ].filter(Boolean),
         statusBadges: [
           { label: 'צמד היפוך', className: 'border-amber-200 bg-amber-50 text-amber-800' },

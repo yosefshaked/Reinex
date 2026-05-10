@@ -15,6 +15,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useServices } from '@/hooks/useOrgData.js';
 import { coerceAgorot, formatCurrency, toAgorot } from '@/lib/currency.js';
 import { groupLedgerEntries, sumByDirection } from '@/features/finance/utils/ledgerGrouping.js';
+import { formatLedgerNote } from '@/features/finance/utils/ledgerPresentation.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -61,7 +62,7 @@ function getEntryTypeLabel(entry) {
     case 'reversal':
       return 'פעולת היפוך';
     default:
-      return entry?.source_type || 'תנועה';
+      return 'תנועה';
   }
 }
 
@@ -238,13 +239,14 @@ export default function ClientBillingWorkspace({ clientProfile }) {
       const isReversal = entry.source_type === 'reversal';
       const direction = String(entry?.direction || '').toUpperCase();
       const descriptionLines = [
-        entry.notes ? `הערות: ${entry.notes}` : '',
+        entry.notes ? `הערות: ${formatLedgerNote(entry.notes)}` : '',
         entry.external_reference ? `אסמכתא: ${entry.external_reference}` : '',
         isReversal && entry.reverses_transaction_id ? `היפוך של תנועה #${shortId(entry.reverses_transaction_id)}` : '',
       ].filter(Boolean);
 
       return {
         key: entry.id,
+        entryId: shortId(entry.id),
         date: formatDateTime(entry.effective_at || entry.posted_at),
         primaryText: getEntryTypeLabel(entry),
         detailLines: descriptionLines,
@@ -306,7 +308,7 @@ export default function ClientBillingWorkspace({ clientProfile }) {
         detailLines: [
           `תנועה מקורית #${shortId(original.id)}`,
           `תנועת היפוך #${shortId(reversal.id)}`,
-          reversal.notes ? `סיבת היפוך: ${reversal.notes}` : '',
+          reversal.notes ? `סיבת היפוך: ${formatLedgerNote(reversal.notes)}` : '',
         ].filter(Boolean),
         statusBadges: [
           {
