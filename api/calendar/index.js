@@ -39,6 +39,7 @@ import {
   completeLessonInstanceWithParticipants,
   normalizeLessonInstanceStatus,
 } from '../_shared/lesson-instance-status.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -437,7 +438,7 @@ export default async function (context, req) {
   }
 
   if (method === 'PUT') {
-    return await handleUpdateInstance(context, body, { client: supabase, orgId }, supabase, {
+    return await handleUpdateInstance(context, req, body, { client: supabase, orgId }, supabase, {
       orgId,
       userId,
       userEmail: authResult.data.user.email || '',
@@ -1119,11 +1120,25 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
   return respond(context, 201, { id: instance.id, message: 'instance created successfully' });
 }
 
-async function handleUpdateInstance(context, body, dbContext, supabase, authContext) {
+async function handleUpdateInstance(context, req, body, dbContext, supabase, authContext) {
   const { client, orgId } = dbContext;
   const { userId, userEmail, role, canManageAll, billingService } = authContext;
   const action = normalizeString(body.action).toLowerCase();
   const isPreviewUpdate = action === 'preview-update-instance';
+  const respondTrackedCalendarError = ({ status = 500, message, error, metadata = {} }) => respondTrackedError(context, req, supabase, {
+    status,
+    message,
+    orgId,
+    userId,
+    error,
+    metadata: {
+      endpoint: 'calendar/instances',
+      action: action || null,
+      instance_id: body?.id || null,
+      ...metadata,
+    },
+  });
+
   if (!body.id) {
     return respond(context, 400, { message: 'missing instance id' });
   }
@@ -1136,7 +1151,10 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
 
   if (mutationStateError) {
     context.log?.error?.('calendar/instances failed to load mutation state', { message: mutationStateError.message, instanceId: body.id });
-    return respond(context, 500, { message: 'failed_to_load_instance' });
+    return respondTrackedCalendarError({
+      message: 'failed_to_load_instance',
+      error: mutationStateError,
+    });
   }
 
   const existingInstance = mutationState.instance;
@@ -1167,7 +1185,10 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
     const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to resolve actor instructor', { message: instructorError.message, userId });
-      return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
+      return respondTrackedCalendarError({
+        message: 'failed_to_resolve_actor_instructor',
+        error: instructorError,
+      });
     }
 
     if (!instructorId || instructorId !== existingInstance.instructor_employee_id) {
@@ -1227,7 +1248,10 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
         message: previewError?.message,
         instanceId: body.id,
       });
-      return respond(context, 500, { message: 'failed_to_build_status_change_preview' });
+      return respondTrackedCalendarError({
+        message: 'failed_to_build_status_change_preview',
+        error: previewError,
+      });
     }
   }
 
@@ -1257,7 +1281,11 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
         instanceId: body.id,
         serviceId: targetServiceId,
       });
-      return respond(context, 500, { message: 'failed_to_load_service' });
+      return respondTrackedCalendarError({
+        message: 'failed_to_load_service',
+        error: serviceError,
+        metadata: { service_id: targetServiceId },
+      });
     }
 
     if (!nextService) {
@@ -1317,7 +1345,14 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
         instructorEmployeeId: targetInstructorId,
         serviceId: targetServiceId,
       });
-      return respond(context, 500, { message: 'failed_to_validate_instructor_availability' });
+      return respondTrackedCalendarError({
+        message: 'failed_to_validate_instructor_availability',
+        error: availabilityError,
+        metadata: {
+          instructor_employee_id: targetInstructorId,
+          service_id: targetServiceId,
+        },
+      });
     }
   }
 
@@ -1447,7 +1482,11 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
             message: refreshedError.message,
             instanceId: body.id,
           });
-          return respond(context, 500, { message: 'failed_to_cancel_instance' });
+          return respondTrackedCalendarError({
+            message: 'failed_to_cancel_instance',
+            error: refreshedError,
+            metadata: { cancellation_outcome: cancellationResult.outcome },
+          });
         }
         return respondWithLockedMutation(context, {
           instanceId: body.id,
@@ -1461,7 +1500,11 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
           outcome: cancellationResult.outcome,
           instanceId: body.id,
         });
-        return respond(context, 500, { message: 'failed_to_cancel_instance' });
+        return respondTrackedCalendarError({
+          message: 'failed_to_cancel_instance',
+          error: new Error(`Unexpected cancellation outcome: ${cancellationResult.outcome || 'unknown'}`),
+          metadata: { cancellation_outcome: cancellationResult.outcome || null },
+        });
       }
 
       cancelledParticipantIds = cancellationResult.cancelledParticipantIds;
@@ -1484,7 +1527,10 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
         message: cancellationError?.message,
         instanceId: body.id,
       });
-      return respond(context, 500, { message: 'failed_to_cancel_instance' });
+      return respondTrackedCalendarError({
+        message: 'failed_to_cancel_instance',
+        error: cancellationError,
+      });
     }
   }
 
@@ -1524,7 +1570,11 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
             message: refreshedError.message,
             instanceId: body.id,
           });
-          return respond(context, 500, { message: 'failed_to_complete_instance' });
+          return respondTrackedCalendarError({
+            message: 'failed_to_complete_instance',
+            error: refreshedError,
+            metadata: { completion_outcome: completionResult.outcome },
+          });
         }
         return respondWithLockedMutation(context, {
           instanceId: body.id,
@@ -1538,7 +1588,11 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
           outcome: completionResult.outcome,
           instanceId: body.id,
         });
-        return respond(context, 500, { message: 'failed_to_complete_instance' });
+        return respondTrackedCalendarError({
+          message: 'failed_to_complete_instance',
+          error: new Error(`Unexpected completion outcome: ${completionResult.outcome || 'unknown'}`),
+          metadata: { completion_outcome: completionResult.outcome || null },
+        });
       }
 
       completedParticipantAuditRows = normalizeParticipantAuditRows(completionResult.promotedParticipantAuditRows);
@@ -1560,7 +1614,10 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
         message: completionError?.message,
         instanceId: body.id,
       });
-      return respond(context, 500, { message: 'failed_to_complete_instance' });
+      return respondTrackedCalendarError({
+        message: 'failed_to_complete_instance',
+        error: completionError,
+      });
     }
   }
 
@@ -1588,7 +1645,10 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
         message: updateError.message,
         code: updateError.code,
       });
-      return respond(context, 500, { message: 'failed_to_update_instance' });
+      return respondTrackedCalendarError({
+        message: 'failed_to_update_instance',
+        error: updateError,
+      });
     }
 
     if (!updatedInstanceRow) {
@@ -1597,7 +1657,11 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
       });
       if (refreshedError) {
         context.log?.error?.('calendar/instances failed to refresh instance after conflict', { message: refreshedError.message, instanceId: body.id });
-        return respond(context, 500, { message: 'failed_to_update_instance' });
+        return respondTrackedCalendarError({
+          message: 'failed_to_update_instance',
+          error: refreshedError,
+          metadata: { refresh_after_conflict: true },
+        });
       }
       return respondWithVersionConflict(context, {
         resourceType: 'lesson_instance',
@@ -1745,7 +1809,10 @@ async function handleUpdateInstance(context, body, dbContext, supabase, authCont
       message: syncError?.message,
       instanceId: body?.id,
     });
-    return respond(context, 500, { message: 'failed_to_sync_financial_artifacts' });
+    return respondTrackedCalendarError({
+      message: 'failed_to_sync_financial_artifacts',
+      error: syncError,
+    });
   }
 
   return respond(context, 200, {

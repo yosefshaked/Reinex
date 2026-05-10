@@ -2933,10 +2933,10 @@ BEGIN
     RETURNING participant.id, to_jsonb(participant.*) AS after_state
   )
   SELECT
-    COALESCE(array_agg(id), ARRAY[]::uuid[]),
+    COALESCE(array_agg(updated_participants.id), ARRAY[]::uuid[]),
     COALESCE(
       jsonb_object_agg(
-        id::text,
+        updated_participants.id::text,
         jsonb_build_object(
           'evaluated_at', v_now,
           'participant_status', 'cancelled_clinic',
@@ -3160,10 +3160,10 @@ BEGIN
     RETURNING participant.id, to_jsonb(participant.*) AS after_state
   )
   SELECT
-    COALESCE(array_agg(id), ARRAY[]::uuid[]),
+    COALESCE(array_agg(updated_participants.id), ARRAY[]::uuid[]),
     COALESCE(
       jsonb_object_agg(
-        id::text,
+        updated_participants.id::text,
         jsonb_build_object(
           'evaluated_at', v_now,
           'participant_status', 'attended',
@@ -3432,10 +3432,10 @@ BEGIN
     RETURNING participant.id, to_jsonb(participant.*) AS after_state
   )
   SELECT
-    COALESCE(array_agg(id), ARRAY[]::uuid[]),
+    COALESCE(array_agg(updated_participants.id), ARRAY[]::uuid[]),
     COALESCE(
       jsonb_object_agg(
-        id::text,
+        updated_participants.id::text,
         jsonb_build_object(
           'evaluated_at', v_now,
           'participant_status', 'cancelled_student',

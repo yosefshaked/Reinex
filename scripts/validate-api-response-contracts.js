@@ -19,6 +19,9 @@ const STRICT_UX = process.argv.includes('--strict-ux');
 
 const SKIPPED_DIRS = new Set(['node_modules', '_shared', 'cross-platform']);
 const FRONTEND_ERROR_KEYS = new Set(['message', 'error', 'details', 'title', 'description']);
+const TRACKED_5XX_REQUIRED_FUNCTIONS = new Map([
+  ['api/calendar/index.js', ['handleUpdateInstance']],
+]);
 
 function toRepoPath(filePath) {
   return relative(ROOT_DIR, filePath).replace(/\\/g, '/');
@@ -179,6 +182,30 @@ function collectReturnedBodies(source) {
   return responses;
 }
 
+function collectFunctionRanges(source, functionNames) {
+  const ranges = [];
+  for (const functionName of functionNames) {
+    const pattern = new RegExp(`\\b(?:async\\s+)?function\\s+${functionName}\\s*\\(`, 'g');
+    let match;
+    while ((match = pattern.exec(source)) !== null) {
+      const bodyOpenIndex = source.indexOf('{', match.index);
+      if (bodyOpenIndex === -1) continue;
+      const bodyCloseIndex = findMatchingDelimiter(source, bodyOpenIndex, '{', '}');
+      if (bodyCloseIndex === -1) continue;
+      ranges.push({
+        name: functionName,
+        start: bodyOpenIndex,
+        end: bodyCloseIndex,
+      });
+    }
+  }
+  return ranges;
+}
+
+function findContainingFunction(functionRanges, index) {
+  return functionRanges.find((range) => index >= range.start && index <= range.end) || null;
+}
+
 function lineNumberFor(source, index) {
   return source.slice(0, index).split(/\r?\n/).length;
 }
@@ -217,6 +244,21 @@ function validateNoRaw5xxLeaks(filePath, source, response) {
   }
 }
 
+function validateTracked5xxForCriticalFunctions(filePath, source, response, functionRanges) {
+  if (response.status < 500 || response.status > 599 || response.kind !== 'respond') {
+    return;
+  }
+
+  const containingFunction = findContainingFunction(functionRanges, response.index);
+  if (!containingFunction) {
+    return;
+  }
+
+  const line = lineNumberFor(source, response.index);
+  const location = `${toRepoPath(filePath)}:${line}`;
+  errors.push(`${location}: 5xx response inside ${containingFunction.name} bypasses respondTrackedError, so users may see a raw/non-Hebrew failure and support will not get an error_id.`);
+}
+
 function validateNoEnglishProseError(filePath, source, response) {
   if (response.status < 400) {
     return;
@@ -244,6 +286,11 @@ function validateNoEnglishProseError(filePath, source, response) {
 
 async function validateFile(filePath) {
   const source = await readFile(filePath, 'utf8');
+  const repoPath = toRepoPath(filePath);
+  const trackedFunctionRanges = collectFunctionRanges(
+    source,
+    TRACKED_5XX_REQUIRED_FUNCTIONS.get(repoPath) || [],
+  );
   const responses = [
     ...collectRespondCalls(source),
     ...collectReturnedBodies(source),
@@ -251,6 +298,7 @@ async function validateFile(filePath) {
 
   for (const response of responses) {
     validateNoRaw5xxLeaks(filePath, source, response);
+    validateTracked5xxForCriticalFunctions(filePath, source, response, trackedFunctionRanges);
     validateNoEnglishProseError(filePath, source, response);
   }
 }

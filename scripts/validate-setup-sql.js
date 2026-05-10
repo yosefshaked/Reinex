@@ -23,6 +23,7 @@ const RULES = {
   CREATE_TABLE_UNIQUE_USING_INDEX: 'SQL013',
   TABLE_OPERATION_ORDER: 'SQL014',
   FRONTEND_RPC_COVERAGE: 'SQL015',
+  UNQUALIFIED_JOIN_AGGREGATE: 'SQL016',
   BROAD_EXCEPTION_SWALLOW: 'SQL101',
   DESTRUCTIVE_DROP_TABLE: 'SQL102',
 };
@@ -487,6 +488,32 @@ function validateFrontendRpcCoverage() {
   }
 }
 
+function validateUnqualifiedJoinAggregates() {
+  const riskyAggregates = [
+    /\barray_agg\(\s*id\b/gi,
+    /\bjsonb_object_agg\(\s*id::text\b/gi,
+  ];
+
+  for (const pattern of riskyAggregates) {
+    for (const match of sql.matchAll(pattern)) {
+      const surroundingSql = sql.slice(Math.max(0, (match.index ?? 0) - 1200), (match.index ?? 0) + 1200);
+      const joinsUpdatedParticipantSnapshots =
+        /\bFROM\s+updated_participants\b/i.test(surroundingSql)
+        && /\bJOIN\s+participants_before\b/i.test(surroundingSql);
+
+      if (!joinsUpdatedParticipantSnapshots) {
+        continue;
+      }
+
+      addError(
+        RULES.UNQUALIFIED_JOIN_AGGREGATE,
+        'Joined participant snapshot aggregation uses unqualified "id". Qualify it as updated_participants.id to avoid PostgreSQL ambiguous-column runtime failures.',
+        offsetToPosition(match.index),
+      );
+    }
+  }
+}
+
 function validateWarnings() {
   const broadSwallows = Array.from(sql.matchAll(/WHEN others THEN NULL;/gi));
   for (const match of broadSwallows) {
@@ -649,6 +676,7 @@ function main() {
     validateCreateTableUniqueUsingIndex();
     validateTableOperationOrder();
     validateFrontendRpcCoverage();
+    validateUnqualifiedJoinAggregates();
     validateWarnings();
   }
 
