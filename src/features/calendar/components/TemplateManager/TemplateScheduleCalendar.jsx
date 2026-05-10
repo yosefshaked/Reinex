@@ -77,6 +77,30 @@ function normalizeClockTime(value) {
   return text === '00:00' && !String(value || '').startsWith('00:00') ? '' : text;
 }
 
+function timeRangesOverlap(startA, durationA, startB, durationB) {
+  const startMinutesA = timeToMinutes(startA);
+  const startMinutesB = timeToMinutes(startB);
+  const safeDurationA = Number(durationA) || 0;
+  const safeDurationB = Number(durationB) || 0;
+  if (startMinutesA == null || startMinutesB == null || safeDurationA <= 0 || safeDurationB <= 0) {
+    return false;
+  }
+  return startMinutesA < startMinutesB + safeDurationB && startMinutesB < startMinutesA + safeDurationA;
+}
+
+function findOccupiedTemplate({ templates, instructorId, dayOfWeek, timeOfDay, durationMinutes }) {
+  const normalizedInstructorId = String(instructorId || '');
+  const normalizedDay = normalizeDayToken(dayOfWeek);
+  if (!normalizedInstructorId || !normalizedDay || !timeOfDay) return null;
+
+  return (templates || []).find((template) => (
+    template?.is_active !== false
+    && String(template?.instructor_employee_id || '') === normalizedInstructorId
+    && normalizeDayToken(template?.day_of_week) === normalizedDay
+    && timeRangesOverlap(template?.time_of_day, template?.duration_minutes, timeOfDay, durationMinutes)
+  )) || null;
+}
+
 function dayTokenToJsDay(token) {
   const normalized = normalizeDayToken(token);
   const option = DAY_OPTIONS.find((day) => day.value === normalized);
@@ -408,6 +432,24 @@ export function TemplateScheduleCalendar({
       return;
     }
 
+    const occupiedTemplate = findOccupiedTemplate({
+      templates,
+      instructorId: resourceId,
+      dayOfWeek,
+      timeOfDay,
+      durationMinutes,
+    });
+    if (occupiedTemplate) {
+      toast.error('כבר קיימת תבנית למדריך/ה בשעה הזו.', {
+        description: 'בחרו חלון פנוי אחר או ערכו את התבנית הקיימת.',
+        action: {
+          label: 'פתח תבנית',
+          onClick: () => onTemplateClick?.(occupiedTemplate),
+        },
+      });
+      return;
+    }
+
     onExternalServiceDrop?.({
       serviceId,
       resourceId: String(resourceId),
@@ -501,6 +543,25 @@ export function TemplateScheduleCalendar({
               const day = normalizeDayToken(selection.start?.getDay?.());
               const instructor = selection.resource?.extendedProps?.instructor || null;
               if (!day || !instructor) return;
+              const timeOfDay = formatDateObjectTime(selection.start);
+              const occupiedTemplate = findOccupiedTemplate({
+                templates,
+                instructorId: instructor.id,
+                dayOfWeek: day,
+                timeOfDay,
+                durationMinutes: 15,
+              });
+              if (occupiedTemplate) {
+                toast.error('כבר קיימת תבנית למדריך/ה בשעה הזו.', {
+                  description: 'בחרו שעה פנויה או ערכו את התבנית הקיימת.',
+                  action: {
+                    label: 'פתח תבנית',
+                    onClick: () => onTemplateClick?.(occupiedTemplate),
+                  },
+                });
+                selection.view.calendar.unselect();
+                return;
+              }
               if (!instructorHasAnyAvailabilityOnDay(instructor, day)) {
                 toast.error('המדריך/ה לא זמינ/ה ביום הזה.', {
                   description: 'בחרו יום אחר או עדכנו את זמינות המדריך/ה.',
@@ -518,7 +579,7 @@ export function TemplateScheduleCalendar({
                 selection.view.calendar.unselect();
                 return;
               }
-              onSlotClick?.(instructor, day, formatDateObjectTime(selection.start));
+              onSlotClick?.(instructor, day, timeOfDay);
               selection.view.calendar.unselect();
             }}
             eventContent={(arg) => <TemplateEventContent event={arg.event} />}

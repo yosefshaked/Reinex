@@ -35,6 +35,7 @@
 - One-time customers stay in `client_profiles` and may remain non-students.
 - Instructors are scoped to their own students via lesson-template-derived IDs in [`../api/_shared/instructor-student-scope.js`](../api/_shared/instructor-student-scope.js).
 - Roster pages persist filter state and reuse shared role helpers in [`../src/features/students/utils/endpoints.js`](../src/features/students/utils/endpoints.js).
+- Roster rows may display `finance_payment_source` from `students-list`: active HMO authorization shows the provider as a small finance tag; no active HMO authorization is displayed as regular billing and is not an error state.
 - Student detail lesson-balance displays must reuse backend-provided lesson-count buckets (`consumed_lessons`, `reserved_lessons`, `available_lessons_to_book`) rather than recomputing "lessons left" inside React components.
 - Student detail and one-time-customer detail should share the same tabs-shell layout source where possible; differ by tab set/capabilities, not by inventing a separate page framework for each profile type.
 - Student detail and one-time-customer detail headers should reuse the shared master-strip UI in [`../src/components/ui/ProfileMasterStrip.jsx`](../src/components/ui/ProfileMasterStrip.jsx); keep identity, KPI, and action layout aligned across both profile types, and only vary the data/actions passed into the strip.

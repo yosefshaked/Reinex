@@ -98,6 +98,114 @@ function mergeStudentWithClientProfile(studentRow, clientProfileRow, guardian = 
   };
 }
 
+function buildRegularPaymentSource() {
+  return {
+    type: 'regular',
+    label: 'תשלום רגיל',
+    provider_name: null,
+    active_authorization_count: 0,
+  };
+}
+
+function isDateInAuthorizationRange(row, dateString) {
+  const target = normalizeString(dateString);
+  const validFrom = normalizeString(row?.valid_from);
+  const expiresAt = normalizeString(row?.expires_at);
+  if (target && validFrom && validFrom > target) return false;
+  if (target && expiresAt && expiresAt < target) return false;
+  return true;
+}
+
+async function fetchPaymentSourceByStudentId(client, orgId, studentIds) {
+  const ids = Array.from(new Set((studentIds || []).map((id) => normalizeString(id)).filter(Boolean)));
+  const result = new Map(ids.map((id) => [id, buildRegularPaymentSource()]));
+  if (!ids.length) {
+    return { data: result, error: null };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: authorizations, error } = await withOrgScope(client, 'hmo_authorizations', orgId)
+    .select('id, student_id, provider_id, valid_from, expires_at, status')
+    .in('student_id', ids)
+    .eq('status', 'active');
+
+  if (error) {
+    if (error.code === '42P01') {
+      return { data: result, error: null };
+    }
+    return { data: result, error };
+  }
+
+  const activeAuthorizations = (authorizations || [])
+    .filter((row) => isDateInAuthorizationRange(row, today));
+  if (!activeAuthorizations.length) {
+    return { data: result, error: null };
+  }
+
+  const providerIds = Array.from(new Set(activeAuthorizations.map((row) => normalizeString(row?.provider_id)).filter(Boolean)));
+  const { data: providers, error: providersError } = providerIds.length > 0
+    ? await withOrgScope(client, 'hmo_providers', orgId)
+      .select('id, name')
+      .in('id', providerIds)
+    : { data: [], error: null };
+
+  if (providersError && providersError.code !== '42P01') {
+    return { data: result, error: providersError };
+  }
+
+  const providerNameById = new Map((providers || []).map((row) => [row.id, normalizeString(row?.name)]));
+  const groupedByStudent = new Map();
+  for (const authorization of activeAuthorizations) {
+    const studentId = normalizeString(authorization?.student_id);
+    if (!studentId) continue;
+    if (!groupedByStudent.has(studentId)) {
+      groupedByStudent.set(studentId, []);
+    }
+    groupedByStudent.get(studentId).push(authorization);
+  }
+
+  for (const [studentId, rows] of groupedByStudent.entries()) {
+    const providerNames = Array.from(new Set(
+      rows
+        .map((row) => providerNameById.get(row.provider_id) || '')
+        .filter(Boolean),
+    ));
+    const providerName = providerNames.length === 1
+      ? providerNames[0]
+      : providerNames.length > 1
+        ? `${providerNames[0]} +${providerNames.length - 1}`
+        : 'גורם מממן';
+
+    result.set(studentId, {
+      type: 'hmo',
+      label: providerName,
+      provider_name: providerName,
+      active_authorization_count: rows.length,
+    });
+  }
+
+  return { data: result, error: null };
+}
+
+async function attachPaymentSources(client, orgId, students) {
+  const rows = Array.isArray(students) ? students : [];
+  if (!rows.length) return rows;
+
+  const { data: paymentSourceByStudentId, error } = await fetchPaymentSourceByStudentId(
+    client,
+    orgId,
+    rows.map((student) => student?.id).filter(Boolean),
+  );
+  if (error) {
+    throw error;
+  }
+
+  return rows.map((student) => ({
+    ...student,
+    finance_payment_source: paymentSourceByStudentId.get(student.id) || buildRegularPaymentSource(),
+  }));
+}
+
 async function fetchClientProfilesByIds(client, orgId, clientProfileIds) {
   const ids = Array.from(new Set((clientProfileIds || []).filter(Boolean)));
   if (!ids.length) {
@@ -1230,10 +1338,6 @@ export default async function handler(context, req) {
       }
     }
 
-    if (!paginationRequested) {
-      return respond(context, 200, normalizedData);
-    }
-
     const total = requiresDerivedSchedule
       ? normalizedData.length
       : (Number.isFinite(count) ? count : normalizedData.length);
@@ -1244,8 +1348,23 @@ export default async function handler(context, req) {
       : normalizedData;
     const hasMore = offset + pagedData.length < total;
 
+    let responseRows = paginationRequested ? pagedData : normalizedData;
+    try {
+      responseRows = await attachPaymentSources(supabase, orgId, responseRows);
+    } catch (paymentSourceError) {
+      context.log?.warn?.('students-list failed to load payment source tags', { message: paymentSourceError?.message });
+      responseRows = responseRows.map((student) => ({
+        ...student,
+        finance_payment_source: buildRegularPaymentSource(),
+      }));
+    }
+
+    if (!paginationRequested) {
+      return respond(context, 200, responseRows);
+    }
+
     return respond(context, 200, {
-      data: pagedData,
+      data: responseRows,
       total,
       page_size: pageSize,
       page,

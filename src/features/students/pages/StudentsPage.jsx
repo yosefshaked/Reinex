@@ -33,6 +33,23 @@ import { formatStudentName } from '@/features/students/utils/name-utils.js';
 import { toAgorot } from '@/lib/currency.js';
 import { isSessionRecordsEnabled } from '@/features/sessions/config/session-records.js';
 
+function getPaymentSourceBadge(source) {
+  const type = String(source?.type || '').toLowerCase();
+  if (type === 'hmo') {
+    return {
+      label: source?.provider_name || source?.label || 'גורם מממן',
+      className: 'w-fit border-blue-200 bg-blue-50 text-blue-800',
+      title: 'לתלמיד/ה קיימת הרשאת גורם מממן פעילה.',
+    };
+  }
+
+  return {
+    label: 'תשלום רגיל',
+    className: 'w-fit border-neutral-200 bg-neutral-50 text-neutral-700',
+    title: 'לא נמצאה הרשאת גורם מממן פעילה. השיעורים יחויבו במסלול רגיל.',
+  };
+}
+
 export default function StudentsPage() {
   const { activeOrg, activeOrgId } = useOrg();
   const { session, loading: supabaseLoading } = useSupabase();
@@ -662,6 +679,7 @@ export default function StudentsPage() {
                         const extraTemplateCount = Number.isInteger(activeTemplateCount) && activeTemplateCount > 1
                           ? activeTemplateCount - 1
                           : 0;
+                        const paymentSourceBadge = getPaymentSourceBadge(student.finance_payment_source);
                         const additionalTemplatesTitle = additionalTemplates.length
                           ? additionalTemplates
                             .map((template) => {
@@ -699,6 +717,13 @@ export default function StudentsPage() {
                                     <span>{summary.expiredDocuments} מסמכים שפג תוקפם</span>
                                   </Badge>
                                 )}
+                                <Badge
+                                  variant="outline"
+                                  className={paymentSourceBadge.className}
+                                  title={paymentSourceBadge.title}
+                                >
+                                  {paymentSourceBadge.label}
+                                </Badge>
                               </div>
                             </TableCell>
                             <TableCell>

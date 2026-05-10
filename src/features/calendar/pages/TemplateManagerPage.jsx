@@ -700,9 +700,10 @@ export default function TemplateManagerPage() {
         defaultServiceId={addDefaults.serviceId}
         defaultTimeOfDay={addDefaults.timeOfDay}
         defaultDurationMinutes={addDefaults.durationMinutes}
-          waitingListEntryId={addDefaults.waitingListEntryId}
-          waitingListContext={addDefaults.waitingListContext}
-          onFixAvailability={handleFixAvailability}
+        waitingListEntryId={addDefaults.waitingListEntryId}
+        waitingListContext={addDefaults.waitingListContext}
+        onFixAvailability={handleFixAvailability}
+        templates={templates}
       />
 
       <EditServiceCapabilitiesDialog

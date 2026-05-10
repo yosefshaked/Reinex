@@ -360,10 +360,12 @@ function buildCoverageWarningFromDecision(candidate, coverageDecision) {
 
   const targetDate = normalizeString(candidate?.target_date) || extractDatePart(candidate?.datetime_start);
   const reason = normalizeString(coverageDecision.reason) || 'coverage_warning';
-  let message = 'קיים סיכון שהחיוב האוטומטי לא יתבצע לפי כיסוי גורם מממן.';
   if (reason === 'no_authorization_found') {
-    message = 'לא נמצאה הרשאת גורם מממן לתלמיד/ה עבור השירות במועד זה. החיוב יתבצע כחיוב רגיל.';
-  } else if (reason === 'no_active_authorization') {
+    return null;
+  }
+
+  let message = 'קיים סיכון שהחיוב האוטומטי לא יתבצע לפי כיסוי גורם מממן.';
+  if (reason === 'no_active_authorization') {
     message = 'קיימת הרשאה לשירות אך היא אינה פעילה. החיוב יתבצע כחיוב רגיל.';
   } else if (reason === 'no_active_authorization_for_date') {
     message = 'קיימת הרשאה פעילה לשירות אך טווח התאריכים שלה אינו מכסה את המועד שנוצר.';

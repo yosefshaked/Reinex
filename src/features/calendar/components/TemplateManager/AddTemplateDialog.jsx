@@ -20,6 +20,7 @@ import {
   getAvailabilityDayTokens,
   hasConfiguredAvailability,
   isWithinAvailabilityWindows,
+  timeToMinutes,
 } from '@/lib/instructor-availability.js';
 import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
 
@@ -53,6 +54,17 @@ function rangeOverlap(startA, endA, startB, endB) {
   return aStart <= bEnd && bStart <= aEnd;
 }
 
+function timeRangesOverlap(startA, durationA, startB, durationB) {
+  const startMinutesA = timeToMinutes(startA);
+  const startMinutesB = timeToMinutes(startB);
+  const safeDurationA = Number(durationA) || 0;
+  const safeDurationB = Number(durationB) || 0;
+  if (startMinutesA == null || startMinutesB == null || safeDurationA <= 0 || safeDurationB <= 0) {
+    return false;
+  }
+  return startMinutesA < startMinutesB + safeDurationB && startMinutesB < startMinutesA + safeDurationA;
+}
+
 /**
  * AddTemplateDialog — Create a new lesson template
  */
@@ -70,6 +82,7 @@ export function AddTemplateDialog({
   waitingListEntryId = '',
   waitingListContext = null,
   onFixAvailability,
+  templates = [],
 }) {
   const { activeOrgId } = useOrg();
   const { session } = useAuth();
@@ -137,6 +150,34 @@ export function AddTemplateDialog({
       durationMinutes: selectedServiceDurationMinutes,
     }),
   );
+  const occupiedTemplate = useMemo(() => {
+    if (
+      !formData.instructor_employee_id
+      || !formData.day_of_week
+      || !formData.time_of_day
+      || !formData.valid_from
+      || !selectedServiceHasValidDuration
+    ) {
+      return null;
+    }
+
+    return (templates || []).find((template) => (
+      template?.is_active !== false
+      && String(template?.instructor_employee_id || '') === String(formData.instructor_employee_id)
+      && normalizeDayToken(template?.day_of_week) === normalizeDayToken(formData.day_of_week)
+      && rangeOverlap(template?.valid_from, template?.valid_until, formData.valid_from, formData.valid_until || null)
+      && timeRangesOverlap(template?.time_of_day, template?.duration_minutes, formData.time_of_day, selectedServiceDurationMinutes)
+    )) || null;
+  }, [
+    formData.day_of_week,
+    formData.instructor_employee_id,
+    formData.time_of_day,
+    formData.valid_from,
+    formData.valid_until,
+    selectedServiceDurationMinutes,
+    selectedServiceHasValidDuration,
+    templates,
+  ]);
 
   useEffect(() => {
     if (!selectedService?.id || !selectedServiceHasValidDuration) {
@@ -339,6 +380,11 @@ export function AddTemplateDialog({
       return;
     }
 
+    if (occupiedTemplate) {
+      setError('למדריך/ה כבר קיימת תבנית שחופפת ליום ולשעה האלה. בחרו חלון פנוי אחר או ערכו את התבנית הקיימת.');
+      return;
+    }
+
     const { data: createdTemplate, error: apiError } = await createTemplate({
       client_profile_id: formData.client_profile_id || null,
       student_id: formData.student_id,
@@ -474,6 +520,22 @@ export function AddTemplateDialog({
                     תקן זמינות
                   </Button>
                 ) : null}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {occupiedTemplate ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                למדריך/ה כבר קיימת תבנית שחופפת ליום ולשעה האלה:
+                {' '}
+                {dayLabel(occupiedTemplate.day_of_week)}
+                {' '}
+                {formatTemplateTime(occupiedTemplate.time_of_day)}
+                {' · '}
+                {occupiedTemplate.service?.name || 'שירות'}
+                . בחרו חלון פנוי אחר או ערכו את התבנית הקיימת.
               </AlertDescription>
             </Alert>
           ) : null}
