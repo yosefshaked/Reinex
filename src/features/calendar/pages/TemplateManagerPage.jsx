@@ -2,10 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import PageLayout from '@/components/ui/PageLayout';
 import { Button } from '@/components/ui/button';
-import { Plus, ArrowRight, Loader2, Eye, EyeOff, Sparkles, UsersRound } from 'lucide-react';
+import { Plus, ArrowRight, Loader2, SlidersHorizontal, Sparkles, UsersRound } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu.jsx';
 import { DAY_OPTIONS } from '@/lib/day-of-week.js';
 import { TemplateScheduleCalendar } from '../components/TemplateManager/TemplateScheduleCalendar';
 import { AddTemplateDialog } from '../components/TemplateManager/AddTemplateDialog';
@@ -92,8 +100,9 @@ export default function TemplateManagerPage() {
   const { session } = useAuth();
 
   const [showInactive, setShowInactive] = useState(false);
+  const [showUnavailable, setShowUnavailable] = useState(false);
   const [showWaitingMatches, setShowWaitingMatches] = useState(() => searchParams.get('waiting_matches') !== '0');
-  const [templateViewMode, setTemplateViewMode] = useState(() => (searchParams.get('view') === 'week' ? 'week' : 'day'));
+  const [templateViewMode, setTemplateViewMode] = useState(() => (searchParams.get('view') === 'day' ? 'day' : 'week'));
   const [selectedDay, setSelectedDay] = useState(() => searchParams.get('day') || 'sunday');
   const [waitingMatches, setWaitingMatches] = useState({
     capacity: EMPTY_WAITING_MATCHES,
@@ -144,7 +153,7 @@ export default function TemplateManagerPage() {
     if (searchParams.has('waiting_matches')) {
       setShowWaitingMatches(searchParams.get('waiting_matches') !== '0');
     }
-    setTemplateViewMode(searchParams.get('view') === 'week' ? 'week' : 'day');
+    setTemplateViewMode(searchParams.get('view') === 'day' ? 'day' : 'week');
     const nextDay = searchParams.get('day') || 'sunday';
     setSelectedDay(DAY_OPTIONS.some((day) => day.value === nextDay) ? nextDay : 'sunday');
   }, [searchParams]);
@@ -604,15 +613,30 @@ export default function TemplateManagerPage() {
               {combinedWaitingSummary.priorityEntries > 0 ? (
                 <Badge variant="destructive">{combinedWaitingSummary.priorityEntries} דחופים</Badge>
               ) : null}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowInactive(!showInactive)}
-                className="h-12 gap-1 rounded-lg"
-              >
-                {showInactive ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                {showInactive ? 'הסתר לא פעילים' : 'הצג לא פעילים'}
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-12 gap-1 rounded-lg">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    אפשרויות תצוגה
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>תצוגת תבניות</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuCheckboxItem
+                    checked={showInactive}
+                    onCheckedChange={(checked) => setShowInactive(Boolean(checked))}
+                  >
+                    הצג לא פעילים
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem
+                    checked={showUnavailable}
+                    onCheckedChange={(checked) => setShowUnavailable(Boolean(checked))}
+                  >
+                    הצג מדריכים ללא זמינות
+                  </DropdownMenuCheckboxItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>
@@ -627,6 +651,7 @@ export default function TemplateManagerPage() {
           onSlotClick={handleCellClick}
           onExternalServiceDrop={handleExternalServiceDrop}
           showInactive={showInactive}
+          showUnavailable={showUnavailable}
           viewMode={templateViewMode}
           selectedDay={selectedDay}
           showWaitingListMatches={showWaitingMatches}

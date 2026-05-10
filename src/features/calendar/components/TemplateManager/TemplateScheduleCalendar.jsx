@@ -146,9 +146,49 @@ function buildBounds({ templates, instructors, viewMode, selectedDay }) {
   };
 }
 
-function buildResources(instructors) {
+function getVisibleDayTokens(viewMode, selectedDay) {
+  return viewMode === 'day'
+    ? [normalizeDayToken(selectedDay)].filter(Boolean)
+    : DAY_OPTIONS.map((day) => day.value);
+}
+
+function instructorHasAvailabilityInDays(instructor, days) {
+  const visibleDays = new Set(days || []);
+  if (!visibleDays.size) return false;
+
+  for (const capability of instructor?.service_capabilities || []) {
+    for (const day of visibleDays) {
+      if (getAvailabilityWindowsForDay(capability?.availability_windows, day).length > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function buildInstructorIdsWithVisibleTemplates({ templates, showInactive, days }) {
+  const visibleDays = new Set(days || []);
+  const ids = new Set();
+  for (const template of templates || []) {
+    if (!showInactive && template?.is_active === false) continue;
+    if (!visibleDays.has(normalizeDayToken(template?.day_of_week))) continue;
+    if (template?.instructor_employee_id) {
+      ids.add(String(template.instructor_employee_id));
+    }
+  }
+  return ids;
+}
+
+function buildResources({ instructors, templates, showInactive, showUnavailable, viewMode, selectedDay }) {
+  const days = getVisibleDayTokens(viewMode, selectedDay);
+  const instructorIdsWithTemplates = buildInstructorIdsWithVisibleTemplates({ templates, showInactive, days });
   return (instructors || [])
     .filter((instructor) => instructor?.id)
+    .filter((instructor) => {
+      if (showUnavailable) return true;
+      if (instructorIdsWithTemplates.has(String(instructor.id))) return true;
+      return instructorHasAvailabilityInDays(instructor, days);
+    })
     .map((instructor) => ({
       id: String(instructor.id),
       title: getPersonName(instructor),
@@ -274,6 +314,7 @@ export function TemplateScheduleCalendar({
   templates,
   instructors,
   showInactive,
+  showUnavailable,
   viewMode,
   selectedDay,
   showWaitingListMatches,
@@ -286,7 +327,10 @@ export function TemplateScheduleCalendar({
   onWaitingListMatchClick,
 }) {
   const calendarRef = useRef(null);
-  const resources = useMemo(() => buildResources(instructors), [instructors]);
+  const resources = useMemo(
+    () => buildResources({ instructors, templates, showInactive, showUnavailable, viewMode, selectedDay }),
+    [instructors, selectedDay, showInactive, showUnavailable, templates, viewMode],
+  );
   const bounds = useMemo(
     () => buildBounds({ templates, instructors, viewMode, selectedDay }),
     [instructors, selectedDay, templates, viewMode],
@@ -346,85 +390,96 @@ export function TemplateScheduleCalendar({
       ) : null}
 
       <div className="reinex-fullcalendar reinex-template-calendar">
-        <FullCalendar
-          ref={calendarRef}
-          plugins={[resourceTimeGridPlugin, timeGridPlugin, interactionPlugin]}
-          schedulerLicenseKey="GPL-My-Project-Is-Open-Source"
-          initialView={initialView}
-          initialDate={initialDate}
-          locale={heLocale}
-          direction="rtl"
-          businessHours
-          firstDay={0}
-          datesAboveResources={viewMode === 'week'}
-          headerToolbar={false}
-          resources={resources}
-          events={events}
-          selectable
-          selectMirror
-          editable={false}
-          droppable
-          dropAccept=".calendar-service-drag-item"
-          allDaySlot={false}
-          slotEventOverlap={false}
-          eventMinHeight={22}
-          eventShortHeight={26}
-          slotMinTime={bounds.slotMinTime}
-          slotMaxTime={bounds.slotMaxTime}
-          height="100%"
-          resourceOrder="title"
-          drop={handleExternalDrop}
-          eventClick={(info) => {
-            const kind = info.event.extendedProps?.kind;
-            if (kind === 'clear_space_match') {
-              onWaitingListMatchClick?.({
-                mode: 'clear_space',
-                bucket: info.event.extendedProps.matchBucket,
-                template: null,
-                instructor: info.event.getResources?.()?.[0]?.extendedProps?.instructor || null,
-                dayOfWeek: normalizeDayToken(info.event.start?.getDay?.()),
-              });
-              return;
-            }
+        {resources.length === 0 ? (
+          <div className="flex h-full min-h-[26rem] items-center justify-center rounded-lg border border-dashed border-border bg-muted/20 p-8 text-center">
+            <div className="max-w-md space-y-2">
+              <div className="text-sm font-semibold text-foreground">אין זמינות מוגדרת לתצוגה הזו</div>
+              <div className="text-sm text-muted-foreground">
+                אפשר להציג מדריכים ללא זמינות דרך אפשרויות התצוגה, או לעדכן זמינות בהגדרות המדריכים.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <FullCalendar
+            ref={calendarRef}
+            plugins={[resourceTimeGridPlugin, timeGridPlugin, interactionPlugin]}
+            schedulerLicenseKey="GPL-My-Project-Is-Open-Source"
+            initialView={initialView}
+            initialDate={initialDate}
+            locale={heLocale}
+            direction="rtl"
+            businessHours
+            firstDay={0}
+            datesAboveResources={viewMode === 'week'}
+            headerToolbar={false}
+            resources={resources}
+            events={events}
+            selectable
+            selectMirror
+            editable={false}
+            droppable
+            dropAccept=".calendar-service-drag-item"
+            allDaySlot={false}
+            slotEventOverlap={false}
+            eventMinHeight={22}
+            eventShortHeight={26}
+            slotMinTime={bounds.slotMinTime}
+            slotMaxTime={bounds.slotMaxTime}
+            height="100%"
+            resourceOrder="title"
+            drop={handleExternalDrop}
+            eventClick={(info) => {
+              const kind = info.event.extendedProps?.kind;
+              if (kind === 'clear_space_match') {
+                onWaitingListMatchClick?.({
+                  mode: 'clear_space',
+                  bucket: info.event.extendedProps.matchBucket,
+                  template: null,
+                  instructor: info.event.getResources?.()?.[0]?.extendedProps?.instructor || null,
+                  dayOfWeek: normalizeDayToken(info.event.start?.getDay?.()),
+                });
+                return;
+              }
 
-            const bucket = info.event.extendedProps?.matchBucket;
-            if (showWaitingListMatches && Number(bucket?.count) > 0 && info.jsEvent?.target?.closest?.('.reinex-template-event-card__badge')) {
-              onWaitingListMatchClick?.({
-                mode: 'capacity',
-                bucket,
-                template: info.event.extendedProps.template,
-                instructor: info.event.getResources?.()?.[0]?.extendedProps?.instructor || null,
-                dayOfWeek: normalizeDayToken(info.event.start?.getDay?.()),
-              });
-              return;
-            }
+              const bucket = info.event.extendedProps?.matchBucket;
+              if (showWaitingListMatches && Number(bucket?.count) > 0 && info.jsEvent?.target?.closest?.('.reinex-template-event-card__badge')) {
+                onWaitingListMatchClick?.({
+                  mode: 'capacity',
+                  bucket,
+                  template: info.event.extendedProps.template,
+                  instructor: info.event.getResources?.()?.[0]?.extendedProps?.instructor || null,
+                  dayOfWeek: normalizeDayToken(info.event.start?.getDay?.()),
+                });
+                return;
+              }
 
-            onTemplateClick?.(info.event.extendedProps?.template);
-          }}
-          select={(selection) => {
-            const day = normalizeDayToken(selection.start?.getDay?.());
-            const instructor = selection.resource?.extendedProps?.instructor || null;
-            if (!day || !instructor) return;
-            onSlotClick?.(instructor, day, formatDateObjectTime(selection.start));
-            selection.view.calendar.unselect();
-          }}
-          eventContent={(arg) => <TemplateEventContent event={arg.event} />}
-          dayHeaderContent={(arg) => dayLabel(arg.date?.getDay?.()) || arg.text}
-          views={{
-            resourceTimeGridDay: {
-              slotDuration: '00:15:00',
-              slotLabelInterval: '01:00:00',
-              slotLabelFormat: [{ hour: '2-digit', minute: '2-digit', hour12: false }],
-              dayHeaderFormat: { weekday: 'long' },
-            },
-            resourceTimeGridWeek: {
-              slotDuration: '00:15:00',
-              slotLabelInterval: '01:00:00',
-              slotLabelFormat: [{ hour: '2-digit', minute: '2-digit', hour12: false }],
-              dayHeaderFormat: { weekday: 'short' },
-            },
-          }}
-        />
+              onTemplateClick?.(info.event.extendedProps?.template);
+            }}
+            select={(selection) => {
+              const day = normalizeDayToken(selection.start?.getDay?.());
+              const instructor = selection.resource?.extendedProps?.instructor || null;
+              if (!day || !instructor) return;
+              onSlotClick?.(instructor, day, formatDateObjectTime(selection.start));
+              selection.view.calendar.unselect();
+            }}
+            eventContent={(arg) => <TemplateEventContent event={arg.event} />}
+            dayHeaderContent={(arg) => dayLabel(arg.date?.getDay?.()) || arg.text}
+            views={{
+              resourceTimeGridDay: {
+                slotDuration: '00:15:00',
+                slotLabelInterval: '01:00:00',
+                slotLabelFormat: [{ hour: '2-digit', minute: '2-digit', hour12: false }],
+                dayHeaderFormat: { weekday: 'long' },
+              },
+              resourceTimeGridWeek: {
+                slotDuration: '00:15:00',
+                slotLabelInterval: '01:00:00',
+                slotLabelFormat: [{ hour: '2-digit', minute: '2-digit', hour12: false }],
+                dayHeaderFormat: { weekday: 'short' },
+              },
+            }}
+          />
+        )}
       </div>
     </div>
   );
