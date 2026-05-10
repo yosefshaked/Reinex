@@ -1456,19 +1456,44 @@ export default function FinancialsPage() {
         open={Boolean(providerBillingSheetId)}
         onOpenChange={(open) => { if (!open) setProviderBillingSheetId(''); }}
       >
-        <SheetContent side="left" className="w-[min(96vw,860px)] overflow-y-auto p-0">
-          <div className="p-6 space-y-6">
-            <SheetHeader className="text-right">
-              <SheetTitle>ניהול גורם מממן</SheetTitle>
-              <SheetDescription>
-                צפייה בחשבון הלדר, הפקת חשבוניות ורישום תשלומים.
-              </SheetDescription>
-            </SheetHeader>
+        <SheetContent side="left" className="w-[min(96vw,860px)] overflow-hidden p-0 flex flex-col">
+          <Tabs defaultValue="billing" className="flex flex-col h-full overflow-hidden">
 
-            {canMutateClaims && providerBillingSheetId && (
-              <section className="rounded-xl border border-border bg-white p-5 shadow-sm">
-                <h4 className="text-base font-semibold text-zinc-900">הגדרות תביעה</h4>
-                <div className="mt-3 space-y-4">
+            {/* Fixed header with title + tab nav */}
+            <div className="shrink-0 border-b border-border px-6 pt-5 pb-0">
+              <SheetHeader className="text-right mb-3">
+                <SheetTitle>ניהול גורם מממן</SheetTitle>
+                <SheetDescription>
+                  צפייה בחשבון הלדר, הפקת חשבוניות ורישום תשלומים.
+                </SheetDescription>
+              </SheetHeader>
+              <TabsList className="h-9 w-full justify-start rounded-none border-0 bg-transparent p-0 gap-0">
+                <TabsTrigger
+                  value="billing"
+                  className="rounded-none border-b-2 border-transparent px-3 pb-2 pt-0 text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+                >
+                  דרישות ותשלומים
+                </TabsTrigger>
+                {canMutateClaims && providerBillingSheetId ? (
+                  <TabsTrigger
+                    value="settings"
+                    className="rounded-none border-b-2 border-transparent px-3 pb-2 pt-0 text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+                  >
+                    הגדרות
+                  </TabsTrigger>
+                ) : null}
+              </TabsList>
+            </div>
+
+            {/* Billing tab */}
+            <TabsContent value="billing" className="flex-1 overflow-y-auto m-0 p-6">
+              <HmoProviderBillingWorkspace providerId={providerBillingSheetId} />
+            </TabsContent>
+
+            {/* Settings tab */}
+            {canMutateClaims && providerBillingSheetId ? (
+              <TabsContent value="settings" className="flex-1 overflow-y-auto m-0 p-6">
+                <div className="max-w-sm space-y-5">
                   <div className="space-y-2">
                     <Label>צורת דרישה</Label>
                     <Select
@@ -1529,11 +1554,10 @@ export default function FinancialsPage() {
                     שמור הגדרות
                   </Button>
                 </div>
-              </section>
-            )}
+              </TabsContent>
+            ) : null}
 
-            <HmoProviderBillingWorkspace providerId={providerBillingSheetId} />
-          </div>
+          </Tabs>
         </SheetContent>
       </Sheet>
 

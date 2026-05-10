@@ -15,6 +15,7 @@ import { useServices } from '@/hooks/useOrgData.js';
 import HmoAuthorizationManager from '@/features/students/components/HmoAuthorizationManager.jsx';
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 import { coerceAgorot, formatCurrency, toAgorot } from '@/lib/currency.js';
+import { groupLedgerEntries, sumByDirection } from '@/features/finance/utils/ledgerGrouping.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -349,60 +350,127 @@ export default function StudentBillingWorkspace({
     () => computeDisplayedRowBalances(ledgerEntries, balanceAgorot),
     [balanceAgorot, ledgerEntries],
   );
-  const ledgerRows = useMemo(() => ledgerEntries.map((entry, index) => {
-    const isReversed = reversalMap.has(entry.id);
-    const isReversal = entry.source_type === 'reversal';
-    const coverageBadge = getCoverageBadge(entry?.metadata || {});
-    const coverageReasonLabel = getCoverageReasonLabel(entry?.metadata?.coverage_reason);
-    const direction = String(entry?.direction || '').toUpperCase();
-    const descriptionLines = [
-      entry.notes ? `הערות: ${entry.notes}` : '',
-      entry.external_reference ? `אסמכתא: ${entry.external_reference}` : '',
-      coverageReasonLabel || '',
-      isReversal && entry.reverses_transaction_id ? `היפוך של תנועה #${shortId(entry.reverses_transaction_id)}` : '',
-    ].filter(Boolean);
+  const ledgerIndexById = useMemo(
+    () => new Map(ledgerEntries.map((entry, index) => [entry.id, index])),
+    [ledgerEntries],
+  );
+  const ledgerGroups = useMemo(() => groupLedgerEntries(ledgerEntries), [ledgerEntries]);
+  const ledgerRows = useMemo(() => {
+    function buildRowFromEntry(entry, index, { dimmed = false, hideReverseAction = false } = {}) {
+      const isReversed = reversalMap.has(entry.id);
+      const isReversal = entry.source_type === 'reversal';
+      const coverageBadge = getCoverageBadge(entry?.metadata || {});
+      const coverageReasonLabel = getCoverageReasonLabel(entry?.metadata?.coverage_reason);
+      const direction = String(entry?.direction || '').toUpperCase();
+      const descriptionLines = [
+        entry.notes ? `הערות: ${entry.notes}` : '',
+        entry.external_reference ? `אסמכתא: ${entry.external_reference}` : '',
+        coverageReasonLabel || '',
+        isReversal && entry.reverses_transaction_id ? `היפוך של תנועה #${shortId(entry.reverses_transaction_id)}` : '',
+      ].filter(Boolean);
 
-    return {
-      key: entry.id,
-      date: formatDateTime(entry.effective_at || entry.posted_at),
-      primaryText: getEntryTypeLabel(entry),
-      detailLines: descriptionLines,
-      statusBadges: [
-        {
-          label: direction === 'CREDIT' ? 'זיכוי' : 'חיוב',
-          className: direction === 'CREDIT'
-            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-            : 'border-red-200 bg-red-50 text-red-700',
-        },
-        ...(isReversed ? [{
-          label: 'הופך',
-          className: 'border-amber-200 bg-amber-50 text-amber-800',
-        }] : []),
-        ...(coverageBadge ? [coverageBadge] : []),
-      ],
-      debit: direction === 'DEBIT' ? formatCurrency(entry.amount) : '—',
-      credit: direction === 'CREDIT' ? formatCurrency(entry.amount) : '—',
-      balance: formatCurrency(displayedBalances[index] || 0),
-      dimmed: isReversed,
-      actions: [
-        {
-          label: 'העתק מזהה תנועה',
-          icon: <Copy className="h-4 w-4" />,
-          onSelect: () => {
-            navigator.clipboard.writeText(entry.id);
-            toast.success('מזהה תנועה הועתק');
+      return {
+        key: entry.id,
+        date: formatDateTime(entry.effective_at || entry.posted_at),
+        primaryText: getEntryTypeLabel(entry),
+        detailLines: descriptionLines,
+        statusBadges: [
+          {
+            label: direction === 'CREDIT' ? 'זיכוי' : 'חיוב',
+            className: direction === 'CREDIT'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : 'border-red-200 bg-red-50 text-red-700',
           },
-        },
-        ...(canMutateBilling && !isReversed && ['manual_payment', 'manual_adjustment'].includes(entry.source_type) ? [{
-          label: 'בצע היפוך',
-          icon: <CornerUpLeft className="h-4 w-4" />,
-          onSelect: () => handleReverseEntry(entry.id),
-          disabled: saving,
-          className: 'text-amber-700 focus:text-amber-700',
-        }] : []),
-      ],
-    };
-  }), [canMutateBilling, displayedBalances, handleReverseEntry, ledgerEntries, reversalMap, saving]);
+          ...(isReversed ? [{
+            label: 'הופך',
+            className: 'border-amber-200 bg-amber-50 text-amber-800',
+          }] : []),
+          ...(coverageBadge ? [coverageBadge] : []),
+        ],
+        debit: direction === 'DEBIT' ? formatCurrency(entry.amount) : '—',
+        credit: direction === 'CREDIT' ? formatCurrency(entry.amount) : '—',
+        balance: formatCurrency(displayedBalances[index] || 0),
+        dimmed: dimmed || isReversed,
+        actions: [
+          {
+            label: 'העתק מזהה תנועה',
+            icon: <Copy className="h-4 w-4" />,
+            onSelect: () => {
+              navigator.clipboard.writeText(entry.id);
+              toast.success('מזהה תנועה הועתק');
+            },
+          },
+          ...(canMutateBilling
+            && !hideReverseAction
+            && !isReversed
+            && ['manual_payment', 'manual_adjustment'].includes(entry.source_type)
+            ? [{
+              label: 'בצע היפוך',
+              icon: <CornerUpLeft className="h-4 w-4" />,
+              onSelect: () => handleReverseEntry(entry.id),
+              disabled: saving,
+              className: 'text-amber-700 focus:text-amber-700',
+            }]
+            : []),
+        ],
+      };
+    }
+
+    return ledgerGroups.map((group) => {
+      if (group.kind !== 'reversal_pair') {
+        const entry = group.entry;
+        const index = ledgerIndexById.get(entry.id) || 0;
+        return buildRowFromEntry(entry, index);
+      }
+
+      const original = group.originalEntry;
+      const reversal = group.reversalEntry;
+      const originalIndex = ledgerIndexById.get(original.id) || 0;
+      const pairEntries = [original, reversal];
+      const totalDebit = sumByDirection(pairEntries, 'DEBIT');
+      const totalCredit = sumByDirection(pairEntries, 'CREDIT');
+      const netImpact = totalDebit - totalCredit;
+
+      return {
+        key: group.key,
+        date: formatDateTime(original.effective_at || original.posted_at),
+        primaryText: `${getEntryTypeLabel(original)} • בוצע היפוך`,
+        detailLines: [
+          `תנועה מקורית #${shortId(original.id)}`,
+          `תנועת היפוך #${shortId(reversal.id)}`,
+          reversal.notes ? `סיבת היפוך: ${reversal.notes}` : '',
+        ].filter(Boolean),
+        statusBadges: [
+          {
+            label: 'צמד היפוך',
+            className: 'border-amber-200 bg-amber-50 text-amber-800',
+          },
+          {
+            label: netImpact === 0 ? 'השפעה נטו: 0' : `השפעה נטו: ${formatCurrency(netImpact)}`,
+            className: 'border-slate-200 bg-slate-50 text-slate-700',
+          },
+        ],
+        debit: totalDebit > 0 ? formatCurrency(totalDebit) : '—',
+        credit: totalCredit > 0 ? formatCurrency(totalCredit) : '—',
+        balance: formatCurrency(displayedBalances[originalIndex] || 0),
+        dimmed: false,
+        childRows: [
+          buildRowFromEntry(original, originalIndex, { dimmed: false, hideReverseAction: true }),
+          buildRowFromEntry(reversal, ledgerIndexById.get(reversal.id) || originalIndex, { dimmed: false, hideReverseAction: true }),
+        ],
+        actions: [
+          {
+            label: 'העתק מזהה תנועה מקורית',
+            icon: <Copy className="h-4 w-4" />,
+            onSelect: () => {
+              navigator.clipboard.writeText(original.id);
+              toast.success('מזהה תנועה הועתק');
+            },
+          },
+        ],
+      };
+    });
+  }, [canMutateBilling, displayedBalances, handleReverseEntry, ledgerGroups, ledgerIndexById, reversalMap, saving]);
 
   if (!canViewBilling) {
     return (
