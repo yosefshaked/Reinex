@@ -21,6 +21,7 @@ import {
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { decryptStorageProfile } from '../_shared/storage-encryption.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 import archiver from 'archiver';
 
 export default async function (context, req) {
@@ -170,9 +171,13 @@ export default async function (context, req) {
     }
   } catch (driverError) {
     context.log.error('Failed to create storage driver', { message: driverError?.message });
-    return respond(context, 500, { 
-      message: 'storage_driver_error', 
-      details: driverError.message 
+    return respondTrackedError(context, req, controlClient, {
+      status: 500,
+      message: 'storage_driver_error',
+      orgId,
+      userId,
+      error: driverError,
+      metadata: { storage_mode: decryptedProfile?.mode },
     });
   }
 

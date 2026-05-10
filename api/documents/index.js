@@ -13,6 +13,7 @@ import { ensureMembership, readEnv, respond, withOrgScope } from '../_shared/org
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { decryptStorageProfile } from '../_shared/storage-encryption.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 import multipart from 'parse-multipart-data';
 import { createHash } from 'crypto';
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
@@ -80,7 +81,7 @@ async function validateEntityAccessForRequest(client, orgId, entityType, userId,
     .maybeSingle();
 
   if (error) {
-    return { valid: false, error: 'failed_to_verify_entity_access', details: error.message };
+    return { valid: false, error: 'failed_to_verify_entity_access' };
   }
 
   if (!employee || employee.user_id !== userId) {
@@ -132,9 +133,7 @@ async function handleGet(req, supabase, client, orgId, userId, userRole, isAdmin
         status: 424, 
         body: { 
           error: 'documents_table_not_found', 
-          message: 'Documents table does not exist. Please run the setup script.', 
-          details: error.message,
-          hint: 'Run setup-sql.js on the tenant database to create the Documents table'
+          message: 'Documents table does not exist. Please run the setup script.'
         } 
       };
     }
@@ -142,11 +141,7 @@ async function handleGet(req, supabase, client, orgId, userId, userRole, isAdmin
     return { 
       status: 500, 
       body: { 
-        error: 'fetch_failed', 
-        message: error.message,
-        details: error.details,
-        code: error.code,
-        hint: error.hint
+        error: 'fetch_failed'
       } 
     };
   }
@@ -371,7 +366,7 @@ async function handlePost(req, supabase, client, orgId, userId, userEmail, userR
 
       if (insertError || !insertedDoc) {
         console.error('Document insert error:', insertError);
-        errors.push({ fileName, error: 'insert_failed', details: insertError?.message });
+        errors.push({ fileName, error: 'insert_failed' });
         continue;
       }
 
@@ -393,7 +388,7 @@ async function handlePost(req, supabase, client, orgId, userId, userEmail, userR
         console.error('Storage upload error:', err);
         // Rollback: delete the document record
         await withOrgScope(client, 'Documents', orgId).delete().eq('id', fileId);
-        errors.push({ fileName, error: 'upload_failed', details: err.message });
+        errors.push({ fileName, error: 'upload_failed' });
         continue;
       }
 
@@ -414,7 +409,7 @@ async function handlePost(req, supabase, client, orgId, userId, userEmail, userR
           console.error('Cleanup error after failed path update:', cleanupErr);
         }
         await withOrgScope(client, 'Documents', orgId).delete().eq('id', fileId);
-        errors.push({ fileName, error: 'path_update_failed', details: updateError.message });
+        errors.push({ fileName, error: 'path_update_failed' });
         continue;
       }
 
@@ -458,7 +453,7 @@ async function handlePost(req, supabase, client, orgId, userId, userEmail, userR
 
     } catch (err) {
       console.error(`Error processing file ${fileName}:`, err);
-      errors.push({ fileName, error: 'processing_failed', details: err.message });
+      errors.push({ fileName, error: 'processing_failed' });
     }
   }
 
@@ -561,7 +556,7 @@ async function handlePut(req, supabase, client, orgId, userId, userEmail, userRo
 
   if (updateError) {
     console.error('Document update error:', updateError);
-    return { status: 500, body: { error: 'update_failed', details: updateError.message } };
+    return { status: 500, body: { error: 'update_failed' } };
   }
 
   // Audit log
@@ -675,8 +670,7 @@ async function handleDelete(req, supabase, client, orgId, userId, userEmail, use
     return {
       status: 502,
       body: {
-        error: 'storage_delete_failed',
-        details: err.message,
+        error: 'storage_delete_failed'
       },
     };
   }
@@ -688,7 +682,7 @@ async function handleDelete(req, supabase, client, orgId, userId, userEmail, use
 
   if (deleteError) {
     console.error('Document deletion error:', deleteError);
-    return { status: 500, body: { error: 'delete_failed', details: deleteError.message } };
+    return { status: 500, body: { error: 'delete_failed' } };
   }
 
   // Audit log
@@ -714,6 +708,10 @@ async function handleDelete(req, supabase, client, orgId, userId, userEmail, use
 }
 
 export default async function handler(context, req) {
+  let trackingSupabase = null;
+  let trackingOrgId = null;
+  let trackingUserId = null;
+
   try {
     const method = req.method;
 
@@ -729,7 +727,7 @@ export default async function handler(context, req) {
         }
       } catch (err) {
         console.error('Failed to parse JSON body:', err.message);
-        return respond(context, 400, { error: 'invalid_json_body', details: err.message });
+        return respond(context, 400, { error: 'invalid_json_body' });
       }
     }
 
@@ -746,11 +744,12 @@ export default async function handler(context, req) {
       };
       console.error('[ERROR] Missing Supabase admin credentials', errorDetails);
       context.log?.error?.('documents missing Supabase admin credentials', errorDetails);
-      return respond(context, 500, { error: 'server_misconfigured', message: 'Missing Supabase credentials', debug: errorDetails });
+      return respond(context, 500, { error: 'server_misconfigured' });
     }
 
     // Auth check
     const supabase = createSupabaseAdminClient(adminConfig);
+    trackingSupabase = supabase;
 
     const authorization = resolveBearerAuthorization(req);
     if (!authorization?.token) {
@@ -764,14 +763,15 @@ export default async function handler(context, req) {
       authResult = await supabase.auth.getUser(token);
     } catch (err) {
       console.error('Token verification threw exception:', err.message);
-      return respond(context, 401, { error: 'invalid_token', details: err.message });
+      return respond(context, 401, { error: 'invalid_token' });
     }
     
     if (authResult.error || !authResult?.data?.user?.id) {
-      return respond(context, 401, { error: 'invalid_token', details: authResult.error?.message });
+      return respond(context, 401, { error: 'invalid_token' });
     }
 
     const userId = authResult.data.user.id;
+    trackingUserId = userId;
     const userEmail = authResult.data.user.email;
     
     // Validate email exists (required for audit logging)
@@ -785,8 +785,7 @@ export default async function handler(context, req) {
         fullUserObject: JSON.stringify(authResult.data.user, null, 2)
       });
       return respond(context, 401, { 
-        error: 'invalid_token', 
-        details: 'User email required for audit logging' 
+        error: 'invalid_token'
       });
     }
 
@@ -816,6 +815,7 @@ export default async function handler(context, req) {
     if (!orgId) {
       return respond(context, 400, { error: 'org_id_required' });
     }
+    trackingOrgId = orgId;
 
     // Step 7: Verify membership
     let role;
@@ -828,7 +828,13 @@ export default async function handler(context, req) {
         orgId,
         userId,
       });
-      return respond(context, 500, { error: 'failed_to_verify_membership', details: membershipError?.message });
+      return respondTrackedError(context, req, supabase, {
+        status: 500,
+        message: 'failed_to_verify_membership',
+        orgId,
+        userId,
+        error: membershipError,
+      });
     }
 
     if (!role) {
@@ -856,11 +862,16 @@ export default async function handler(context, req) {
     return respond(context, result.status, result.body);
   } catch (error) {
     console.error('Unhandled error in documents API:', error);
-    context.log?.error?.('Documents API crashed:', error);
-    return respond(context, 500, { 
-      error: 'internal_server_error', 
-      message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    context.log?.error?.('Documents API crashed:', {
+      message: error?.message,
+      stack: error?.stack,
+    });
+    return respondTrackedError(context, req, trackingSupabase, {
+      status: 500,
+      message: 'internal_server_error',
+      orgId: trackingOrgId,
+      userId: trackingUserId,
+      error,
     });
   }
 }

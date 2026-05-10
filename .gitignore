@@ -34,3 +34,4 @@ settings.json
 .aider*
 /.cache
 /.pki
+/.github/agents

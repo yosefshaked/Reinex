@@ -17,6 +17,7 @@ import { ensureMembership, withOrgScope, readEnv, respond } from '../_shared/org
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { decryptStorageProfile } from '../_shared/storage-encryption.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 
 async function canAccessInstructorDocument(supabase, orgId, employeeId, userId) {
   const { data: employee, error } = await withOrgScope(supabase, 'Employees', orgId)
@@ -39,6 +40,12 @@ export default async function handler(context, req) {
     headers: Object.keys(req.headers || {})
   });
 
+  let supabase = null;
+  let userId = null;
+  let documentIdForTracking = null;
+  let orgIdForTracking = null;
+  let previewForTracking = false;
+
   try {
     if (req.method !== 'GET') {
       return respond(context, 405, { error: 'method_not_allowed' });
@@ -46,6 +53,9 @@ export default async function handler(context, req) {
 
     const { document_id, org_id, preview } = req.query;
     const isPreview = preview === 'true';
+    documentIdForTracking = document_id || null;
+    orgIdForTracking = org_id || null;
+    previewForTracking = isPreview;
 
     context.log?.info?.('[DOCUMENTS-DOWNLOAD] Parsed parameters', {
       document_id,
@@ -68,7 +78,7 @@ export default async function handler(context, req) {
     }
 
     // Auth check
-    const supabase = createSupabaseAdminClient(adminConfig);
+    supabase = createSupabaseAdminClient(adminConfig);
     const authorization = resolveBearerAuthorization(req);
     if (!authorization?.token) {
       return respond(context, 401, { error: 'missing_auth' });
@@ -80,7 +90,7 @@ export default async function handler(context, req) {
       return respond(context, 401, { error: 'invalid_token' });
     }
 
-    const userId = authResult.data.user.id;
+    userId = authResult.data.user.id;
 
     // Membership check
     let role;
@@ -270,11 +280,16 @@ export default async function handler(context, req) {
     } catch (driverError) {
       context.log?.error?.('Failed to generate download URL', { 
         message: driverError?.message,
+        stack: driverError?.stack,
         mode: decryptedProfile.mode
       });
-      return respond(context, 500, { 
-        error: 'failed_to_generate_download_url', 
-        details: driverError.message 
+      return respondTrackedError(context, req, supabase, {
+        status: 500,
+        message: 'failed_to_generate_download_url',
+        orgId: org_id,
+        userId,
+        error: driverError,
+        metadata: { document_id, storage_mode: decryptedProfile.mode, disposition_type: dispositionType },
       });
     }
 
@@ -297,10 +312,13 @@ export default async function handler(context, req) {
       message: error.message,
       stack: error.stack
     });
-    return respond(context, 500, { 
-      error: 'internal_error', 
-      details: error.message,
-      type: error.name 
+    return respondTrackedError(context, req, supabase, {
+      status: 500,
+      message: 'internal_error',
+      orgId: orgIdForTracking,
+      userId,
+      error,
+      metadata: { document_id: documentIdForTracking, preview: previewForTracking },
     });
   }
 }

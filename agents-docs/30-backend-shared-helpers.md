@@ -40,6 +40,7 @@
 - `buildAccountDisplayName`, `extractAuthDisplayName`, `getAuthNameParts`, `buildAccountUserMetadata`, `isAccountSetupComplete`, `ensureAccountProfileRow` in [`../api/_shared/account-profile.js`](../api/_shared/account-profile.js) — use these for canonical user profile bootstrap, setup-state checks, auth metadata sync, and derived display names after `profiles.full_name` removal
 - `deliverInvitationEmail` in [`../api/_shared/invitation-email.js`](../api/_shared/invitation-email.js) — use this for invitation email delivery; invite flows should use Brevo as the sender while keeping Supabase only as the source of secure generated invite links/tokens
 - `deliverPasswordResetEmail` in [`../api/_shared/password-reset-email.js`](../api/_shared/password-reset-email.js) — use this for password reset delivery; recovery emails should be generated via Supabase Auth links and sent through Brevo
+- `respondTrackedError`, `trackErrorEvent` in [`../api/_shared/error-events.js`](../api/_shared/error-events.js) — use for 5xx API failures so the client receives a safe `error_id` while raw DB/provider/stack detail is stored in `error_events` for system-admin support.
 - `logSystemAuditEvent` in [`../api/_shared/audit-log.js`](../api/_shared/audit-log.js) — use this when a backend lifecycle transition must be audited without a real authenticated actor (for example public-token expiry)
 
 ## Known patterns / do not reinvent
@@ -53,6 +54,9 @@
   - `withOrgScope(...)` or explicit `.eq('org_id', orgId)`
   - `respond(context, ...)`
 - Always set `context.res` through `respond`.
+- JSON API responses sent through `respond` include default security headers (`nosniff`, referrer policy, permissions policy, HSTS). Keep endpoint-specific response headers additive unless a route has a concrete reason to override one.
+- Keep frontend-facing error responses stable: never return raw DB/provider `message`, `details`, `stack`, `type`, or `debug` fields on 5xx responses. Use stable snake_case codes that the frontend can translate, or Hebrew user copy where direct copy is unavoidable. `npm run lint:api-responses` enforces the 5xx leak contract and reports legacy English prose; `npm run lint:api-responses:strict-ux` fails on English prose after that backlog is cleaned.
+- 5xx responses that have a service-role client available should prefer `respondTrackedError(...)`. This stores full internal detail in service-role-only `error_events` for 90 days and returns `{ message, error_id }` to the frontend.
 - Use `resolveOrgId` or `parseRequestBody` instead of ad hoc request parsing.
 - Use body-size-aware parsing for write endpoints.
 - Auth/membership checks happen first; tenant reads/writes must always be org-scoped in the shared single DB.

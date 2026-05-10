@@ -99,7 +99,7 @@ export default async function handler(context, req) {
     }
   } catch (error) {
     context.log.error('[guardians] Handler error:', error);
-    return respond(context, 500, { error: 'internal_server_error', message: error.message });
+    return respond(context, 500, { error: 'internal_server_error' });
   }
 }
 
@@ -114,7 +114,7 @@ async function handleGet(context, client, orgId) {
 
   if (error) {
     context.log.error('[guardians/GET] Query error:', error);
-    return respond(context, 500, { error: 'database_error', message: error.message });
+    return respond(context, 500, { error: 'database_error' });
   }
 
   // Destructure out the internal encryption bucket column so it is never
@@ -139,7 +139,7 @@ async function handleGet(context, client, orgId) {
 
   if (linksError) {
     context.log.error('[guardians/GET] client_guardians query error:', linksError);
-    return respond(context, 500, { error: 'database_error', message: linksError.message });
+    return respond(context, 500, { error: 'database_error' });
   }
 
   const linkedProfileIds = Array.from(new Set((links || []).map((link) => link?.client_profile_id).filter(Boolean)));
@@ -151,7 +151,7 @@ async function handleGet(context, client, orgId) {
 
   if (studentsError) {
     context.log.error('[guardians/GET] students query error:', studentsError);
-    return respond(context, 500, { error: 'database_error', message: studentsError.message });
+    return respond(context, 500, { error: 'database_error' });
   }
 
   const studentIdByClientProfile = new Map((students || []).map((student) => [student.client_profile_id, student.id]));
@@ -241,7 +241,7 @@ async function handlePost(context, req, client, orgId, userId) {
 
   if (error) {
     context.log.error('[guardians/POST] Insert error:', error);
-    return respond(context, 500, { error: 'database_error', message: error.message });
+    return respond(context, 500, { error: 'database_error' });
   }
 
   context.log.info('[guardians/POST] Guardian created:', data.id);
@@ -311,7 +311,7 @@ async function handlePut(context, req, client, orgId, guardianId, userId) {
 
   if (fetchError) {
     context.log.error('[guardians/PUT] Fetch existing error:', fetchError);
-    return respond(context, 500, { error: 'database_error', message: fetchError.message });
+    return respond(context, 500, { error: 'database_error' });
   }
   if (!existing) {
     return respond(context, 404, { error: 'guardian_not_found' });
@@ -333,7 +333,7 @@ async function handlePut(context, req, client, orgId, guardianId, userId) {
 
   if (error) {
     context.log.error('[guardians/PUT] Update error:', error);
-    return respond(context, 500, { error: 'database_error', message: error.message });
+    return respond(context, 500, { error: 'database_error' });
   }
 
   if (!data) {
@@ -375,7 +375,7 @@ async function handleDelete(context, client, orgId, guardianId) {
 
   if (error) {
     context.log.error('[guardians/DELETE] Delete error:', error);
-    return respond(context, 500, { error: 'database_error', message: error.message });
+    return respond(context, 500, { error: 'database_error' });
   }
 
   if (!data) {

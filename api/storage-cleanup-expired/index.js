@@ -12,6 +12,7 @@ import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/s
 import { readEnv, respond } from '../_shared/org-bff.js';
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 
 export default async function (context) {
   context.log('storage-cleanup-expired: job started');
@@ -178,9 +179,11 @@ export default async function (context) {
       message: error?.message,
       stack: error?.stack,
     });
-    return respond(context, 500, {
+    return respondTrackedError(context, null, supabase, {
+      status: 500,
       message: 'cleanup_job_failed',
-      error: error?.message,
+      error,
+      metadata: { action: 'storage_cleanup_expired' },
     });
   }
 }

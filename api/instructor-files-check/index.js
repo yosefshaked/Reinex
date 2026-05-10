@@ -17,6 +17,7 @@ import {
   respond,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 import crypto from 'crypto';
 import multipart from 'parse-multipart-data';
 
@@ -103,7 +104,7 @@ export default async function (context, req) {
     context.log?.info?.('✅ [INSTRUCTOR-CHECK] Multipart parsed', { partsCount: parts?.length });
   } catch (error) {
     context.log?.error?.('❌ [INSTRUCTOR-CHECK] Failed to parse multipart', { message: error?.message });
-    return respond(context, 400, { message: 'invalid_multipart_data', error: error?.message });
+    return respond(context, 400, { message: 'invalid_multipart_data' });
   }
 
   // Extract fields
@@ -186,9 +187,13 @@ export default async function (context, req) {
       message: documentsError.message,
       code: documentsError.code,
     });
-    return respond(context, 500, { 
+    return respondTrackedError(context, req, controlClient, {
+      status: 500,
       message: 'failed_to_check_duplicates',
-      error: documentsError.message,
+      orgId,
+      userId,
+      error: documentsError,
+      metadata: { entity_type: 'instructor', instructor_id: instructorId },
     });
   }
 

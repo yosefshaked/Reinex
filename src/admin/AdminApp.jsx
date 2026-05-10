@@ -25,6 +25,7 @@ import DataQualityView from './modules/DataQualityView.jsx';
 import AdminToolsView from './modules/AdminToolsView.jsx';
 import OnboardingPipelineView from './modules/OnboardingPipelineView.jsx';
 import EmailLogView from './modules/EmailLogView.jsx';
+import ErrorEventsView from './modules/ErrorEventsView.jsx';
 import OrgPurgeView from './modules/OrgPurgeView.jsx';
 import AdminShell from './ui/AdminShell.jsx';
 import DashboardView from './ui/DashboardView.jsx';
@@ -109,6 +110,7 @@ const LIVE_ELEMENTS = {
   'admin-tools': <AdminToolsView />,
   'onboarding-pipeline': <OnboardingPipelineView />,
   'email-log': <EmailLogView />,
+  'error-events': <ErrorEventsView />,
   'org-purge': <OrgPurgeView />,
   // Legacy aggregate view retained while its sub-modules are built out.
   'operations-support': <OperationsSupportView />,
@@ -291,6 +293,7 @@ export default function AdminApp() {
             <Route path="admin-tools" element={LIVE_ELEMENTS['admin-tools']} />
             <Route path="onboarding-pipeline" element={LIVE_ELEMENTS['onboarding-pipeline']} />
             <Route path="email-log" element={LIVE_ELEMENTS['email-log']} />
+            <Route path="error-events" element={LIVE_ELEMENTS['error-events']} />
             <Route path="org-purge" element={LIVE_ELEMENTS['org-purge']} />
 
             {/* Legacy aggregate view kept reachable while sub-modules are built. */}

@@ -1,4 +1,11 @@
 {
+  "globalHeaders": {
+    "Content-Security-Policy": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.azurestaticapps.net https://*.azurewebsites.net https://*.posthog.com https://*.i.posthog.com; worker-src 'self' blob:; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), clipboard-read=(), clipboard-write=(self)",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload"
+  },
   "routes": [
     {
       "route": "/api/config",

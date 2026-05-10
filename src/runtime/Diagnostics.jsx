@@ -127,6 +127,7 @@ export default function Diagnostics() {
 
   const isDev = Boolean(import.meta?.env?.DEV);
   const envChecks = checks?.health?.env || null;
+  const healthReturnedEnv = Boolean(checks?.health && Object.prototype.hasOwnProperty.call(checks.health, 'env') && checks.health.env);
 
   const REQUIRED_ENV = [
     { key: 'APP_SUPABASE_URL',               label: 'Supabase URL (control)' },
@@ -184,8 +185,8 @@ export default function Diagnostics() {
               label={label}
               mono
               status={
-                envChecks === null
-                  ? 'loading'
+                !healthReturnedEnv
+                  ? 'skip'
                   : present
                     ? 'ok'
                     : 'error'
@@ -196,7 +197,7 @@ export default function Diagnostics() {
         })}
         {!envChecks && !running && checks && (
           <p className="text-xs text-slate-400 pt-1">
-            הנתונים נטענים מ-/api/health — ייתכן שהפונקציה ישנה ולא מחזירה env עדיין.
+            פירוט משתני הסביבה לא מוצג יותר דרך /api/health מטעמי אבטחה.
           </p>
         )}
       </Section>

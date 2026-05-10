@@ -344,6 +344,9 @@ export function ManualGenerationDialog({ open, onClose, onApplied, onReviewState
       }
 
       onApplied?.(payload || null);
+      if (issues.length === 0) {
+        onClose?.();
+      }
       setLastPreviewRequestKey('');
     } catch (err) {
       setError(err?.message || 'החלת היצירה נכשלה.');

@@ -635,6 +635,51 @@ ALTER TABLE public.admin_data ENABLE ROW LEVEL SECURITY;
 -- before RLS even runs, which is the intended security boundary.
 
 -- -----------------------------------------------------------------
+-- public.error_events
+-- Operational support/debug log for frontend-safe error responses.
+-- Written by service_role only; read through system-admin-error-events.
+-- Raw provider/DB/stack details live here, never in user responses.
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.error_events (
+  id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  support_code    text        NOT NULL UNIQUE,
+  status          integer     NOT NULL,
+  public_message  text        NOT NULL,
+  route           text        NULL,
+  method          text        NULL,
+  org_id          uuid        NULL REFERENCES public.organizations(id) ON DELETE SET NULL,
+  actor_user_id   uuid        NULL,
+  severity        text        NOT NULL DEFAULT 'error',
+  request_context jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  internal_error  jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  metadata        jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  expires_at      timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+  CONSTRAINT error_events_status_check CHECK (status >= 400 AND status <= 599),
+  CONSTRAINT error_events_severity_check CHECK (severity IN ('info', 'warning', 'error', 'critical'))
+);
+
+CREATE INDEX IF NOT EXISTS error_events_created_idx
+  ON public.error_events (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS error_events_expires_idx
+  ON public.error_events (expires_at);
+
+CREATE INDEX IF NOT EXISTS error_events_status_idx
+  ON public.error_events (status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS error_events_org_idx
+  ON public.error_events (org_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS error_events_route_idx
+  ON public.error_events (route, created_at DESC);
+
+ALTER TABLE public.error_events ENABLE ROW LEVEL SECURITY;
+
+-- No GRANT to app_user — service_role only. Same pattern as admin_data.
+
+-- -----------------------------------------------------------------
 -- public.email_log
 -- Immutable log of every outbound Brevo email sent by the platform.
 -- Written by service_role only; accessible via system-admin-email-log

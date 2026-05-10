@@ -61,6 +61,27 @@ function createAuthorizationHeaders(customHeaders = {}, bearer, { includeJsonCon
   return headers;
 }
 
+function buildApiErrorMessage(payload, status, fallback = 'An API error occurred') {
+  const errorId = payload?.error_id || payload?.support_code || '';
+  if (status >= 500 && errorId) {
+    return `הפעולה נכשלה. קוד תמיכה: ${errorId}`;
+  }
+  return payload?.message || fallback;
+}
+
+function decorateApiError(error, payload, status) {
+  error.status = status;
+  if (payload) {
+    error.data = payload;
+  }
+  const errorId = payload?.error_id || payload?.support_code || null;
+  if (errorId) {
+    error.error_id = errorId;
+    error.supportCode = errorId;
+  }
+  return error;
+}
+
 export async function authenticatedFetch(path, { session: _session, accessToken: _accessToken, ...options } = {}) {
   const resolved = resolveTokenFromOverrides(_session, _accessToken);
   const token = resolved.token || await resolveBearerToken();
@@ -118,13 +139,11 @@ export async function authenticatedFetch(path, { session: _session, accessToken:
   }
 
   if (!response.ok) {
-    const message = payload?.message || 'An API error occurred';
-    const error = new Error(message);
-    error.status = response.status;
-    if (payload) {
-      error.data = payload;
-    }
-    throw error;
+    throw decorateApiError(
+      new Error(buildApiErrorMessage(payload, response.status)),
+      payload,
+      response.status,
+    );
   }
 
   return payload;
@@ -170,19 +189,18 @@ export async function authenticatedFetchBlob(path, { session: _session, accessTo
   });
 
   if (!response.ok) {
-    let message = 'An API error occurred';
+    let payload = null;
     try {
       const text = await response.text();
-      const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === 'object' && typeof parsed.message === 'string') {
-        message = parsed.message;
-      }
+      payload = JSON.parse(text);
     } catch {
       // Ignore parse errors
     }
-    const error = new Error(message);
-    error.status = response.status;
-    throw error;
+    throw decorateApiError(
+      new Error(buildApiErrorMessage(payload, response.status)),
+      payload,
+      response.status,
+    );
   }
 
   return response.blob();
@@ -230,19 +248,18 @@ export async function authenticatedFetchText(path, { session: _session, accessTo
   const text = await response.text();
 
   if (!response.ok) {
-    let message = 'An API error occurred';
+    let payload = null;
     try {
-      const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === 'object' && typeof parsed.message === 'string') {
-        message = parsed.message;
-      }
+      payload = JSON.parse(text);
     } catch {
       // ignore JSON parsing failures
     }
 
-    const error = new Error(message);
-    error.status = response.status;
-    throw error;
+    throw decorateApiError(
+      new Error(buildApiErrorMessage(payload, response.status)),
+      payload,
+      response.status,
+    );
   }
 
   return text;

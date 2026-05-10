@@ -13,6 +13,7 @@ import {
 } from '../_shared/org-bff.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 import {
   buildSharedBlockMap,
   collectSharedBlockIds,
@@ -424,9 +425,13 @@ export default async function forms(context, req) {
       try {
         await deleteCreatedFormAfterFailedLinkSync(supabase, orgId, context, data.id);
       } catch {
-        return respond(context, 500, {
+        return respondTrackedError(context, req, supabase, {
+          status: 500,
           message: 'failed_to_create_form',
-          details: 'form_created_but_cleanup_failed',
+          orgId,
+          userId,
+          error: linksError,
+          metadata: { form_id: data.id, cleanup_failed: true },
         });
       }
       return respond(context, 500, { message: 'failed_to_create_form' });

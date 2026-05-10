@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run lint:api && npm run lint:sql && vite build",
+    "build": "npm run lint:api && npm run lint:api-responses && npm run lint:sql && vite build",
     "dep:check": "madge --circular src --ts-config jsconfig.json",
     "check:schema": "node scripts/checkSchema.js",
     "lint": "eslint .",
@@ -17,6 +17,8 @@
     "lint:sql:json": "node scripts/validate-setup-sql.js --format=json",
     "lint:sql:github": "node scripts/validate-setup-sql.js --format=github",
     "lint:upsert-conflicts": "node scripts/validate-upsert-conflicts.js",
+    "lint:api-responses": "node scripts/validate-api-response-contracts.js",
+    "lint:api-responses:strict-ux": "node scripts/validate-api-response-contracts.js --strict-ux",
     "lint:fix": "eslint . --fix",
     "validate:api": "node scripts/validate-api-endpoints.js",
     "test:isolation-stress-test": "node --test implementations/database/one-db-refactor/isolation-stress-test.js",

@@ -2,6 +2,7 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { ensureSystemAdmin, normalizeString, readEnv, respond } from '../_shared/org-bff.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
 
 function isUuidLike(value) {
@@ -38,8 +39,9 @@ export default async function systemAdminAdminTools(context, req) {
 
   const supabase = createSupabaseAdminClient(adminConfig);
 
+  let admin = null;
   try {
-    await ensureSystemAdmin(req, supabase, authorization, { context });
+    admin = await ensureSystemAdmin(req, supabase, authorization, { context });
   } catch (err) {
     return respond(context, err.statusCode || 403, { message: err.message || 'forbidden' });
   }
@@ -94,9 +96,16 @@ export default async function systemAdminAdminTools(context, req) {
       hmoProviderId,
       claimCount: requestedClaimIds.length,
     });
-    return respond(context, 500, {
-      message: error?.message || 'failed_to_run_admin_tool',
-      details: error?.details || null,
+    return respondTrackedError(context, req, supabase, {
+      status: 500,
+      message: 'failed_to_run_admin_tool',
+      userId: admin?.userId,
+      error,
+      metadata: {
+        tool: 'hmo_claim_readiness',
+        org_id: orgId,
+        lesson_participant_id: lessonParticipantId,
+      },
     });
   }
 }

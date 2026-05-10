@@ -148,6 +148,7 @@ function extractArrayTableNames() {
 const TABLES_WITHOUT_APP_USER_GRANT = new Set([
   'admin_data',
   'email_log',
+  'error_events',
 ]);
 
 // These control-DB tables have hand-written RLS policies and are intentionally
@@ -163,6 +164,7 @@ const TABLES_WITH_CUSTOM_RLS = new Set([
   'impersonation_sessions',
   'admin_data',
   'email_log',
+  'error_events',
 ]);
 
 function validatePresenceCoverage() {

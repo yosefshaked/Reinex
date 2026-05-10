@@ -712,6 +712,6 @@ export default async function (context, req) {
     });
   } catch (error) {
     context.log?.error?.('instructors-link-user failed to send invitation', { message: error?.message });
-    return respond(context, 500, { message: 'failed_to_send_invitation', error: error?.message });
+    return respond(context, 500, { message: 'failed_to_send_invitation' });
   }
 }

@@ -73,6 +73,16 @@ Every outbound Brevo email is logged via `sendAndLogBrevoEmail` in `api/_shared/
 - Listed in `TABLES_WITHOUT_APP_USER_GRANT`
 - Call sites: `_shared/invitation-email.js`, `_shared/password-reset-email.js`, `api/form-submissions/index.js`, `api/waiting-list-intake/index.js`
 
+## `error_events` Table
+
+Operational support/debug events are stored in `error_events` via `respondTrackedError` / `trackErrorEvent` in `api/_shared/error-events.js`.
+
+- **No GRANT to app_user** — service_role only
+- Listed in `TABLES_WITHOUT_APP_USER_GRANT`
+- Retained for 90 days through `expires_at`; cleanup runs opportunistically from the helper.
+- System admins inspect raw internal error detail in `/system-admin/error-events`.
+- Frontend users receive only stable public codes plus `error_id`; raw DB/provider/stack detail must never be returned in normal API responses.
+
 ## Announcement Banner
 
 - **Admin side:** `AnnouncementsView.jsx` uses `useAdminStore('announcements')`. Single record `id='active-banner'` with `{ active: boolean, text: string }`.

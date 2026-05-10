@@ -12,6 +12,7 @@ import {
 } from '../_shared/org-bff.js';
 import { encryptBackup, exportTenantData } from '../_shared/backup-utils.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 
 const BACKUP_COOLDOWN_DAYS = 7;
 
@@ -248,6 +249,13 @@ export default async function backup(context, req) {
       error_message: error?.message || 'unknown_error',
     });
 
-    return respond(context, 500, { message: 'backup_failed', error: error?.message });
+    return respondTrackedError(context, req, supabase, {
+      status: 500,
+      message: 'backup_failed',
+      orgId,
+      userId,
+      error,
+      metadata: { action: 'backup' },
+    });
   }
 }

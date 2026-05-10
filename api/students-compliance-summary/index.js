@@ -10,6 +10,7 @@ import {
   resolveOrgId,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 
 /**
  * GET /api/students/compliance-summary
@@ -120,10 +121,13 @@ export default async function (context, req) {
         hint: documentsError.hint,
         orgId,
       });
-      return respond(context, 500, { 
+      return respondTrackedError(context, req, supabase, {
+        status: 500,
         message: 'failed_to_fetch_documents',
-        error: documentsError.message,
-        code: documentsError.code
+        orgId,
+        userId,
+        error: documentsError,
+        metadata: { student_count: studentIdsFilter?.length || null },
       });
     }
 

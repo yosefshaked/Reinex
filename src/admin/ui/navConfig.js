@@ -24,6 +24,7 @@ import {
   Settings,
   ShieldEllipsis,
   Sparkles,
+  Bug,
 } from 'lucide-react';
 
 /**
@@ -145,6 +146,13 @@ export const ADMIN_NAV = [
         icon: Mail,
         status: 'live',
         description: 'Outbound email delivery, bounces, and resend controls.',
+      },
+      {
+        to: '/system-admin/error-events',
+        label: 'Error Events',
+        icon: Bug,
+        status: 'live',
+        description: 'Search support codes and inspect internal API errors.',
       },
       {
         to: '/system-admin/integration-health',

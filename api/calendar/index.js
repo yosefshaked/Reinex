@@ -600,9 +600,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
       details: error.details,
     });
     return respond(context, 500, { 
-      message: 'failed_to_load_instances',
-      error: error.message,
-      details: error.details,
+      message: 'failed_to_load_instances'
     });
   }
 
@@ -1021,7 +1019,6 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     return respond(context, 500, {
       message: 'failed_to_create_instance',
       error: instanceError.code || 'instance_insert_failed',
-      details: instanceError.message,
     });
   }
 
@@ -1050,7 +1047,6 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     return respond(context, 500, {
       message: 'failed_to_create_participants',
       error: participantsError.code || 'participants_insert_failed',
-      details: participantsError.message,
     });
   }
 

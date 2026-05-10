@@ -13,6 +13,7 @@ import {
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { decryptBackup, validateBackupManifest, restoreTenantData } from '../_shared/backup-utils.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 
 const MAX_BACKUP_SIZE = 100 * 1024 * 1024; // 100 MB
 
@@ -242,6 +243,13 @@ export default async function restore(context, req) {
       ? 'incorrect_password'
       : 'restore_failed';
 
-    return respond(context, 500, { message, error: error?.message });
+    return respondTrackedError(context, req, supabase, {
+      status: 500,
+      message,
+      orgId,
+      userId,
+      error,
+      metadata: { action: 'restore' },
+    });
   }
 }
