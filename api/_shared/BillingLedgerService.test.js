@@ -1038,6 +1038,113 @@ describe('BillingLedgerService.syncLessonParticipantCharge', () => {
     assert.equal(reversal.reverses_transaction_id, originalTxId);
   });
 
+  it('revert to scheduled — creates CREDIT reversal and NOT a second DEBIT', async () => {
+    // Mark attended → creates a DEBIT charge
+    await service.syncLessonParticipantCharge({
+      lessonParticipantId: 'part-1',
+      actorUserId: 'u1',
+      reasonCode: 'attendance_changed',
+    });
+    const originalTxId = client._store.ledger_transactions[0].id;
+
+    // Revert to scheduled
+    client._store.lesson_participants = [makeParticipant({ participant_status: 'scheduled' })];
+
+    const result = await service.syncLessonParticipantCharge({
+      lessonParticipantId: 'part-1',
+      actorUserId: 'u1',
+      reasonCode: 'attendance_changed',
+    });
+
+    assert.equal(result.status, 'reversed_only', 'reverting to scheduled must only reverse, not add new charge');
+    assert.equal(client._store.ledger_transactions.length, 2, 'exactly 2 rows: original + reversal');
+    const reversal = client._store.ledger_transactions.find((t) => t.source_type === 'reversal');
+    assert.ok(reversal, 'reversal row must exist');
+    assert.equal(reversal.direction, 'CREDIT', 'reversal must be CREDIT to cancel the DEBIT — not another DEBIT (x2 bug)');
+    assert.equal(reversal.reverses_transaction_id, originalTxId);
+  });
+
+  it('revert to scheduled with legacy null-direction row — still creates CREDIT reversal (x2 fix)', async () => {
+    // Simulate a legacy lesson_charge row that has direction=null but transaction_type='DEBIT'
+    // (created before the direction column was populated).
+    const legacyChargeId = 'legacy-charge-1';
+    client._store.ledger_accounts = [
+      { id: 'acct-1', org_id: 'org-1', account_type: 'student', student_id: 'student-1', client_profile_id: 'client-1', hmo_provider_id: null, is_active: true, metadata: {} },
+    ];
+    client._store.ledger_transactions = [
+      {
+        id: legacyChargeId,
+        org_id: 'org-1',
+        ledger_account_id: 'acct-1',
+        direction: null,           // ← legacy row: direction not set
+        transaction_type: 'DEBIT', // ← but transaction_type was always set
+        amount: 5000,
+        source_type: 'lesson_charge',
+        lesson_participant_id: 'part-1',
+        student_id: 'student-1',
+        client_profile_id: 'client-1',
+        hmo_provider_id: null,
+        hmo_authorization_id: null,
+        service_id: 'svc-1',
+        rate_source: 'service_rate',
+        reverses_transaction_id: null,
+        posted_at: '2025-01-01T00:00:00Z',
+        metadata: {},
+      },
+    ];
+    client._store.lesson_participants = [makeParticipant({ participant_status: 'scheduled' })];
+
+    const result = await service.syncLessonParticipantCharge({
+      lessonParticipantId: 'part-1',
+      actorUserId: 'u1',
+      reasonCode: 'attendance_changed',
+    });
+
+    assert.equal(result.status, 'reversed_only', 'must reverse the legacy charge');
+    const reversal = client._store.ledger_transactions.find((t) => t.source_type === 'reversal');
+    assert.ok(reversal, 'reversal row must exist');
+    assert.equal(reversal.direction, 'CREDIT', 'reversal must be CREDIT even when original direction was null');
+    assert.equal(reversal.reverses_transaction_id, legacyChargeId);
+  });
+
+  it('revert to scheduled with malformed linked row missing direction and transaction_type — throws', async () => {
+    const malformedChargeId = 'malformed-charge-1';
+    client._store.ledger_accounts = [
+      { id: 'acct-1', org_id: 'org-1', account_type: 'student', student_id: 'student-1', client_profile_id: 'client-1', hmo_provider_id: null, is_active: true, metadata: {} },
+    ];
+    client._store.ledger_transactions = [
+      {
+        id: malformedChargeId,
+        org_id: 'org-1',
+        ledger_account_id: 'acct-1',
+        direction: null,
+        transaction_type: null,
+        amount: 5000,
+        source_type: 'lesson_charge',
+        lesson_participant_id: 'part-1',
+        student_id: 'student-1',
+        client_profile_id: 'client-1',
+        hmo_provider_id: null,
+        hmo_authorization_id: null,
+        service_id: 'svc-1',
+        rate_source: 'service_rate',
+        reverses_transaction_id: null,
+        posted_at: '2025-01-01T00:00:00Z',
+        metadata: {},
+      },
+    ];
+    client._store.lesson_participants = [makeParticipant({ participant_status: 'scheduled' })];
+
+    await assert.rejects(
+      () => service.syncLessonParticipantCharge({
+        lessonParticipantId: 'part-1',
+        actorUserId: 'u1',
+        reasonCode: 'attendance_changed',
+      }),
+      /invalid_reversal_target_missing_transaction_type/,
+    );
+  });
+
   it('lesson repricing — changes rate → reverses old, creates new debit', async () => {
     // Initial charge at 5000
     await service.syncLessonParticipantCharge({

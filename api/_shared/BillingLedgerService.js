@@ -82,6 +82,21 @@ function normalizeDirection(value) {
   return normalized === 'DEBIT' || normalized === 'CREDIT' ? normalized : '';
 }
 
+function resolveReversalDirectionOrThrow(originalRow) {
+  const originalId = normalizeString(originalRow?.id);
+  if (!originalId) {
+    throw new Error('invalid_reversal_target_missing_original_id');
+  }
+
+  const originalDirection = normalizeDirection(originalRow?.direction)
+    || normalizeDirection(originalRow?.transaction_type);
+  if (!originalDirection) {
+    throw new Error('invalid_reversal_target_missing_transaction_type');
+  }
+
+  return originalDirection === 'DEBIT' ? 'CREDIT' : 'DEBIT';
+}
+
 function normalizeReasonCode(value, fallback = 'manual_rebuild') {
   return normalizeString(value).toLowerCase() || fallback;
 }
@@ -347,6 +362,7 @@ async function loadOpenLessonCharges(tenantClient, lessonParticipantId) {
       id,
       ledger_account_id,
       direction,
+      transaction_type,
       amount,
       source_type,
       lesson_participant_id,
@@ -945,14 +961,16 @@ export default class BillingLedgerService {
       warnings: desiredResult.warnings,
     });
 
-    const reversalRows = existingOpenCharges.map((original) => ({
+    const reversalRows = existingOpenCharges.map((original) => {
+      const reversalDirection = resolveReversalDirectionOrThrow(original);
+      return {
       ...buildLegacyLedgerCompatFields({
         orgId: effectiveOrgId,
-        direction: normalizeDirection(original.direction) === 'DEBIT' ? 'CREDIT' : 'DEBIT',
+        direction: reversalDirection,
         sourceType: 'reversal',
       }),
       ledger_account_id: original.ledger_account_id,
-      direction: normalizeDirection(original.direction) === 'DEBIT' ? 'CREDIT' : 'DEBIT',
+      direction: reversalDirection,
       amount: coerceAgorot(original.amount),
       effective_at: effectiveTimestamp,
       source_type: 'reversal',
@@ -973,7 +991,8 @@ export default class BillingLedgerService {
         actor_user_id: actorUserId || null,
         reversed_source_type: original.source_type || null,
       },
-    }));
+      };
+    });
 
     const debitRows = desiredEntries.map((entry) => ({
       ...buildLegacyLedgerCompatFields({
@@ -1248,15 +1267,16 @@ export default class BillingLedgerService {
       };
     }
 
+    const reversalDirection = resolveReversalDirectionOrThrow(original);
     const reversal = await appendLedgerTransaction(this.tenantClient, {
       ...buildLegacyLedgerCompatFields({
         orgId: original.org_id || this.orgId,
-        direction: normalizeDirection(original.direction) === 'DEBIT' ? 'CREDIT' : 'DEBIT',
+        direction: reversalDirection,
         sourceType: normalizeString(sourceType) || 'reversal',
       }),
       org_id: original.org_id || this.orgId,
       ledger_account_id: original.ledger_account_id,
-      direction: normalizeDirection(original.direction) === 'DEBIT' ? 'CREDIT' : 'DEBIT',
+      direction: reversalDirection,
       amount: coerceAgorot(original.amount),
       effective_at: toIsoOrNow(effectiveAt || original.effective_at, this.clock),
       source_type: normalizeString(sourceType) || 'reversal',

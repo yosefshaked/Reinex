@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import HmoSetupWorkspace from '@/features/finance/components/HmoSetupWorkspace.jsx';
-import HmoProviderBillingWorkspace from '@/features/finance/components/HmoProviderBillingWorkspace.jsx';
 
 const BILLING_POLICY_FIELDS = [
   {
@@ -107,11 +106,6 @@ export default function BillingSettingsWorkspace({
         </div>
       </section>
 
-      <section className="rounded-xl border border-border bg-white p-0 shadow-sm">
-        <div className="p-5">
-          <HmoProviderBillingWorkspace />
-        </div>
-      </section>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { useAuth } from "@/auth/AuthContext.jsx"
 import { useOrg } from "@/org/OrgContext.jsx"
 import { useInstructors } from "@/hooks/useOrgData.js"
 import { authenticatedFetch } from '@/lib/api-client.js'
+import { formatCurrency } from '@/lib/currency.js'
 
 const TASK_PRIORITY_RANK = {
   low: 1,
@@ -147,6 +148,7 @@ export default function DashboardPage() {
   const [isLoadingWaitingMatches, setIsLoadingWaitingMatches] = useState(false)
   const [tasksError, setTasksError] = useState(null)
   const [waitingMatchesError, setWaitingMatchesError] = useState(null)
+  const [billingOverview, setBillingOverview] = useState(null)
 
   const membershipRole = typeof activeOrg?.membership?.role === 'string'
     ? activeOrg.membership.role.trim().toLowerCase()
@@ -243,6 +245,42 @@ export default function DashboardPage() {
     return () => {
       isMounted = false
     }
+  }, [activeOrgId, canManageAll, session])
+
+  useEffect(() => {
+    if (!canManageAll || !activeOrgId || !session) {
+      setBillingOverview(null)
+      return
+    }
+
+    let isMounted = true
+    const now = new Date()
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+
+    async function fetchBillingOverview() {
+      try {
+        const payload = await authenticatedFetch('billing', {
+          params: { org_id: activeOrgId, start_date: monthStart, end_date: monthEnd },
+          session,
+        })
+        if (!isMounted) return
+        const summaries = Array.isArray(payload?.student_summaries) ? payload.student_summaries : []
+        setBillingOverview({
+          studentCount: summaries.length,
+          lessonChargeTotal: summaries.reduce((sum, row) => sum + Number(row?.lesson_charge_total || 0), 0),
+          hmoChargeTotal: summaries.reduce((sum, row) => sum + Number(row?.hmo_charge_total || 0), 0),
+          activeAuthorizationCount: summaries.reduce((sum, row) => sum + (Array.isArray(row?.authorizations) ? row.authorizations.length : 0), 0),
+        })
+      } catch {
+        // Non-critical — dashboard billing summary is best-effort
+        if (isMounted) setBillingOverview(null)
+      }
+    }
+
+    fetchBillingOverview()
+    return () => { isMounted = false }
   }, [activeOrgId, canManageAll, session])
 
   function renderWaitingListMatches() {
@@ -399,6 +437,34 @@ export default function DashboardPage() {
     )
   }
 
+  function renderBillingOverview() {
+    if (!canManageAll || !billingOverview) return null
+    return (
+      <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+        <h2 className="text-base font-semibold text-neutral-900">סיכום חיובים — החודש הנוכחי</h2>
+        <p className="mt-1 text-sm text-neutral-600">מבט מהיר על פעילות הכספים של החודש.</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs text-slate-600">תלמידים במעקב</div>
+            <div className="mt-1 text-2xl font-bold text-zinc-900">{billingOverview.studentCount}</div>
+          </div>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <div className="text-xs text-emerald-700">חיובי שיעורים בחודש</div>
+            <div className="mt-1 text-2xl font-bold text-emerald-950">{formatCurrency(billingOverview.lessonChargeTotal)}</div>
+          </div>
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+            <div className="text-xs text-indigo-700">חיוב מול גורם מממן בחודש</div>
+            <div className="mt-1 text-2xl font-bold text-indigo-950">{formatCurrency(billingOverview.hmoChargeTotal)}</div>
+          </div>
+          <div className="rounded-xl border border-violet-200 bg-violet-50 p-4">
+            <div className="text-xs text-violet-700">אישורי גורם מממן פעילים</div>
+            <div className="mt-1 text-2xl font-bold text-violet-950">{billingOverview.activeAuthorizationCount}</div>
+          </div>
+        </div>
+      </Card>
+    )
+  }
+
   const greeting = buildGreeting(instructorName, account?.displayName, user?.name, user?.email)
 
   return (
@@ -422,6 +488,7 @@ export default function DashboardPage() {
 
           {renderDashboardTasks()}
           {renderWaitingListMatches()}
+          {renderBillingOverview()}
 
           <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
             <p className="text-sm text-muted-foreground">
@@ -445,6 +512,7 @@ export default function DashboardPage() {
 
           {renderDashboardTasks()}
           {renderWaitingListMatches()}
+          {renderBillingOverview()}
 
           <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
             <p className="text-sm text-muted-foreground">

@@ -153,7 +153,7 @@ function buildPaymentForm() {
   };
 }
 
-export default function HmoProviderBillingWorkspace() {
+export default function HmoProviderBillingWorkspace({ providerId = '' }) {
   const { session } = useAuth();
   const { activeOrgId, activeOrg } = useOrg();
   const { providers, loadingProviders } = useMedicalProviders();
@@ -161,7 +161,7 @@ export default function HmoProviderBillingWorkspace() {
   const membershipRole = activeOrg?.membership?.role || '';
   const canMutate = isAdminRole(membershipRole);
 
-  const [selectedProviderId, setSelectedProviderId] = useState('');
+  const [selectedProviderId, setSelectedProviderId] = useState(providerId);
   const [periodStart, setPeriodStart] = useState(() => {
     const today = new Date().toISOString().slice(0, 10);
     return today.slice(0, 8) + '01';
@@ -386,29 +386,31 @@ export default function HmoProviderBillingWorkspace() {
           </p>
         </div>
 
-        {/* ── Provider selector ── */}
-        <div className="grid gap-3 md:grid-cols-3 items-end">
-          <div className="space-y-2">
-            <Label>גורם מממן</Label>
-            {loadingProviders ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> טוען...
-              </div>
-            ) : (
-              <Select
-                value={selectedProviderId || '__none__'}
-                onValueChange={(value) => setSelectedProviderId(value === '__none__' ? '' : value)}
-              >
-                <SelectTrigger><SelectValue placeholder="בחר גורם מממן" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">בחר גורם מממן</SelectItem>
-                  {activeProviders.map((provider) => (
-                    <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
+        {/* ── Provider selector (hidden when pre-selected via prop) ── */}
+        <div className={`grid gap-3 items-end ${providerId ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
+          {!providerId ? (
+            <div className="space-y-2">
+              <Label>גורם מממן</Label>
+              {loadingProviders ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> טוען...
+                </div>
+              ) : (
+                <Select
+                  value={selectedProviderId || '__none__'}
+                  onValueChange={(value) => setSelectedProviderId(value === '__none__' ? '' : value)}
+                >
+                  <SelectTrigger><SelectValue placeholder="בחר גורם מממן" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">בחר גורם מממן</SelectItem>
+                    {activeProviders.map((provider) => (
+                      <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          ) : null}
           <div className="space-y-2">
             <Label>מ-תאריך</Label>
             <Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
@@ -427,9 +429,11 @@ export default function HmoProviderBillingWorkspace() {
         ) : null}
 
         {!selectedProviderId ? (
-          <div className="rounded-xl border border-dashed border-border bg-slate-50 p-8 text-center text-sm text-muted-foreground">
-            בחר גורם מממן כדי לצפות בחשבון שלו.
-          </div>
+          providerId ? null : (
+            <div className="rounded-xl border border-dashed border-border bg-slate-50 p-8 text-center text-sm text-muted-foreground">
+              בחר גורם מממן כדי לצפות בחשבון שלו.
+            </div>
+          )
         ) : loading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> טוען...
