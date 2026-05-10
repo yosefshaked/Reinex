@@ -2,10 +2,96 @@
 /* eslint-env node */
 import BillingLedgerService, { buildDesiredChargeDescriptors, resolveHmoSplitAmounts } from './BillingLedgerService.js';
 import { loadFinancePolicies } from './employee-finance.js';
-import { normalizeString } from './org-bff.js';
+import { normalizeString, withOrgScope } from './org-bff.js';
 import { loadHmoAuthorizations, resolveLessonCoverageDecision } from './hmo.js';
 
 export const BILLING_BREAKDOWN_VERSION = 4;
+export const INTAKE_FINANCE_NOTICE_TTL_DAYS = 30;
+
+const INTAKE_FINANCE_NOTICE_TTL_MS = INTAKE_FINANCE_NOTICE_TTL_DAYS * 24 * 60 * 60 * 1000;
+const PAYMENT_PATH_LABELS = {
+  hmo: 'גורם מממן',
+  private: 'תשלום פרטי',
+  unsure: 'צריך עזרה בבחירת מסלול',
+};
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizePaymentPathIntent(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return Object.prototype.hasOwnProperty.call(PAYMENT_PATH_LABELS, normalized) ? normalized : '';
+}
+
+function parseDateMs(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return NaN;
+  const parsed = new Date(normalized).getTime();
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function resolveNoticeReferenceAt(entry) {
+  const metadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
+  return normalizeString(metadata.matched_at)
+    || normalizeString(metadata.submitted_at)
+    || normalizeString(entry?.created_at)
+    || '';
+}
+
+function hasEffectiveLedgerActivity(entries = []) {
+  const rows = Array.isArray(entries) ? entries : [];
+  const reversedIds = new Set(rows
+    .filter((entry) => normalizeString(entry?.source_type) === 'reversal' && normalizeString(entry?.reverses_transaction_id))
+    .map((entry) => normalizeString(entry.reverses_transaction_id)));
+
+  return rows.some((entry) => (
+    normalizeString(entry?.source_type) !== 'reversal'
+    && !reversedIds.has(normalizeString(entry?.id))
+    && Math.abs(Number(entry?.amount || 0)) > 0
+  ));
+}
+
+export function buildIntakeFinanceNotice({
+  entry = null,
+  hasLedgerActivity = false,
+  hasHmoAuthorization = false,
+  now = new Date(),
+} = {}) {
+  if (!entry?.id || hasLedgerActivity || hasHmoAuthorization) {
+    return null;
+  }
+
+  const metadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
+  const paymentPathIntent = normalizePaymentPathIntent(metadata.payment_path_intent);
+  if (!paymentPathIntent) {
+    return null;
+  }
+
+  const referenceAt = resolveNoticeReferenceAt(entry);
+  const referenceMs = parseDateMs(referenceAt);
+  const nowMs = now instanceof Date ? now.getTime() : parseDateMs(now);
+  if (!Number.isFinite(referenceMs) || !Number.isFinite(nowMs)) {
+    return null;
+  }
+
+  const expiresAtMs = referenceMs + INTAKE_FINANCE_NOTICE_TTL_MS;
+  if (nowMs > expiresAtMs) {
+    return null;
+  }
+
+  return {
+    waiting_list_entry_id: entry.id,
+    payment_path_intent: paymentPathIntent,
+    label: PAYMENT_PATH_LABELS[paymentPathIntent],
+    hmo_provider_name: paymentPathIntent === 'hmo' ? (normalizeString(metadata.hmo_provider_name) || null) : null,
+    hmo_approval_status: paymentPathIntent === 'hmo' ? (normalizeString(metadata.hmo_approval_status) || null) : null,
+    matched_at: normalizeString(metadata.matched_at) || null,
+    submitted_at: normalizeString(metadata.submitted_at) || null,
+    reference_at: referenceAt,
+    expires_at: new Date(expiresAtMs).toISOString(),
+  };
+}
 
 function buildBreakdown({
   participant,
@@ -148,6 +234,101 @@ export async function createCommitmentTransfer() {
   return { error: 'legacy_commitment_transfers_removed' };
 }
 
+async function loadMatchedWaitingListEntryForStudent(tenantClient, {
+  orgId = '',
+  studentId = '',
+  clientProfileId = '',
+} = {}) {
+  const normalizedOrgId = normalizeString(orgId);
+  const normalizedStudentId = normalizeString(studentId);
+  const normalizedClientProfileId = normalizeString(clientProfileId);
+  if (!normalizedOrgId || (!normalizedStudentId && !normalizedClientProfileId)) {
+    return null;
+  }
+
+  const selectColumns = 'id, student_id, client_profile_id, desired_service_id, status, metadata, created_at';
+  const loadByColumn = async (column, value) => {
+    if (!value) return [];
+    const { data, error } = await withOrgScope(tenantClient, 'waiting_list_entries', normalizedOrgId)
+      .select(selectColumns)
+      .eq(column, value)
+      .eq('status', 'matched')
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (error) {
+      if (error.code === '42P01') {
+        return [];
+      }
+      throw error;
+    }
+    return Array.isArray(data) ? data : [];
+  };
+
+  const rows = [
+    ...await loadByColumn('client_profile_id', normalizedClientProfileId),
+    ...await loadByColumn('student_id', normalizedStudentId),
+  ];
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return Array.from(byId.values())
+    .filter((row) => normalizePaymentPathIntent(row?.metadata?.payment_path_intent))
+    .sort((a, b) => {
+      const aMs = parseDateMs(resolveNoticeReferenceAt(a)) || 0;
+      const bMs = parseDateMs(resolveNoticeReferenceAt(b)) || 0;
+      return bMs - aMs;
+    })[0] || null;
+}
+
+async function hasStudentLedgerActivity(tenantClient, { orgId = '', studentId = '' } = {}) {
+  const normalizedOrgId = normalizeString(orgId);
+  const normalizedStudentId = normalizeString(studentId);
+  if (!normalizedOrgId || !normalizedStudentId) {
+    return false;
+  }
+
+  const { data, error } = await withOrgScope(tenantClient, 'ledger_transactions', normalizedOrgId)
+    .select('id, amount, source_type, reverses_transaction_id')
+    .eq('student_id', normalizedStudentId)
+    .limit(1000);
+
+  if (error) {
+    if (error.code === '42P01') {
+      return false;
+    }
+    throw error;
+  }
+  return hasEffectiveLedgerActivity(data || []);
+}
+
+async function loadStudentIntakeFinanceNotice(tenantClient, {
+  orgId = '',
+  studentId = '',
+  snapshot = null,
+} = {}) {
+  const normalizedStudentId = normalizeString(studentId);
+  if (!normalizedStudentId || !snapshot?.student) {
+    return null;
+  }
+
+  const hasHmoAuthorization = Array.isArray(snapshot?.authorizations) && snapshot.authorizations.length > 0;
+  const hasLedgerActivity = await hasStudentLedgerActivity(tenantClient, { orgId, studentId: normalizedStudentId });
+  if (hasLedgerActivity || hasHmoAuthorization) {
+    return null;
+  }
+
+  const entry = await loadMatchedWaitingListEntryForStudent(tenantClient, {
+    orgId,
+    studentId: normalizedStudentId,
+    clientProfileId: snapshot?.student?.client_profile_id,
+  });
+
+  return buildIntakeFinanceNotice({
+    entry,
+    hasLedgerActivity,
+    hasHmoAuthorization,
+  });
+}
+
 export async function fetchBillingSnapshot(tenantClient, {
   orgId = '',
   studentId = '',
@@ -157,11 +338,19 @@ export async function fetchBillingSnapshot(tenantClient, {
 } = {}) {
   const service = new BillingLedgerService({ tenantClient, orgId });
   if (normalizeString(studentId)) {
-    return service.getStudentBillingSnapshot({
+    const snapshot = await service.getStudentBillingSnapshot({
       studentId,
       startDate: normalizeString(startDate) || null,
       endDate: normalizeString(endDate) || null,
     });
+    return {
+      ...snapshot,
+      intake_finance_notice: await loadStudentIntakeFinanceNotice(tenantClient, {
+        orgId,
+        studentId,
+        snapshot,
+      }),
+    };
   }
   if (normalizeString(clientProfileId)) {
     return service.getClientBillingSnapshot({

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Copy, CornerUpLeft, Info, Loader2, Plus } from 'lucide-react';
+import { Copy, CornerUpLeft, Info, Loader2, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -109,6 +109,17 @@ function shortId(id) {
   return id ? String(id).slice(-8) : '';
 }
 
+function getHmoApprovalStatusLabel(status) {
+  switch (status) {
+    case 'send_separately':
+      return 'האישור יישלח בנפרד';
+    case 'no_approval_yet':
+      return 'אין אישור עדיין';
+    default:
+      return '';
+  }
+}
+
 function computeDisplayedRowBalances(entries, currentBalanceAgorot) {
   let rollingBalance = coerceAgorot(currentBalanceAgorot);
   return entries.map((entry) => {
@@ -144,6 +155,7 @@ export default function StudentBillingWorkspace({
   const [manualEntrySheetOpen, setManualEntrySheetOpen] = useState(false);
   const [manualEntryResetVersion, setManualEntryResetVersion] = useState(0);
   const [confirmEntry, setConfirmEntry] = useState(null);
+  const [dismissedIntakeNoticeKey, setDismissedIntakeNoticeKey] = useState('');
 
   const loadData = useCallback(async () => {
     if (!studentId || !activeOrgId || !canViewBilling) return;
@@ -173,11 +185,11 @@ export default function StudentBillingWorkspace({
     return undefined;
   }, [canViewBilling, loadData]);
 
-  async function notifyDataChanged() {
+  const notifyDataChanged = useCallback(async () => {
     if (typeof onDataChanged === 'function') {
       await onDataChanged();
     }
-  }
+  }, [onDataChanged]);
 
   function handleRequestAppendEntry(formData) {
     setConfirmEntry({
@@ -225,7 +237,7 @@ export default function StudentBillingWorkspace({
     }
   }
 
-  async function handleReverseEntry(entryId) {
+  const handleReverseEntry = useCallback(async (entryId) => {
     if (!activeOrgId || !entryId || !canMutateBilling) return;
     setSaving(true);
     try {
@@ -248,7 +260,7 @@ export default function StudentBillingWorkspace({
     } finally {
       setSaving(false);
     }
-  }
+  }, [activeOrgId, canMutateBilling, loadData, notifyDataChanged, session]);
 
   const summary = snapshot?.summary || {};
   const ledgerEntries = useMemo(
@@ -263,6 +275,41 @@ export default function StudentBillingWorkspace({
     () => (Array.isArray(snapshot?.authorizations) ? snapshot.authorizations : []),
     [snapshot?.authorizations],
   );
+  const intakeFinanceNotice = snapshot?.intake_finance_notice || null;
+  const intakeFinanceNoticeStorageKey = useMemo(() => {
+    if (!activeOrgId || !studentId || !intakeFinanceNotice?.waiting_list_entry_id) {
+      return '';
+    }
+    return [
+      'student-finance-intake-notice-dismissed',
+      activeOrgId,
+      studentId,
+      intakeFinanceNotice.waiting_list_entry_id,
+      intakeFinanceNotice.expires_at || '',
+    ].join(':');
+  }, [activeOrgId, intakeFinanceNotice?.expires_at, intakeFinanceNotice?.waiting_list_entry_id, studentId]);
+
+  useEffect(() => {
+    if (!intakeFinanceNoticeStorageKey) {
+      setDismissedIntakeNoticeKey('');
+      return;
+    }
+    try {
+      setDismissedIntakeNoticeKey(
+        localStorage.getItem(intakeFinanceNoticeStorageKey) === '1'
+          ? intakeFinanceNoticeStorageKey
+          : '',
+      );
+    } catch {
+      setDismissedIntakeNoticeKey('');
+    }
+  }, [intakeFinanceNoticeStorageKey]);
+
+  const showIntakeFinanceNotice = Boolean(
+    intakeFinanceNotice
+    && intakeFinanceNoticeStorageKey
+    && dismissedIntakeNoticeKey !== intakeFinanceNoticeStorageKey,
+  );
 
   const studentName = useMemo(() => {
     const source = snapshot?.student || student;
@@ -272,6 +319,16 @@ export default function StudentBillingWorkspace({
     () => (activeOrgId && studentId ? `manual-entry:${activeOrgId}:student:${studentId}` : ''),
     [activeOrgId, studentId],
   );
+
+  function dismissIntakeFinanceNotice() {
+    if (!intakeFinanceNoticeStorageKey) return;
+    try {
+      localStorage.setItem(intakeFinanceNoticeStorageKey, '1');
+    } catch {
+      // localStorage is best-effort here; the backend still controls the notice lifecycle.
+    }
+    setDismissedIntakeNoticeKey(intakeFinanceNoticeStorageKey);
+  }
 
   // Map: original entry id → reversal entry id (for visual linkage)
   const reversalMap = useMemo(() => {
@@ -345,7 +402,7 @@ export default function StudentBillingWorkspace({
         }] : []),
       ],
     };
-  }), [canMutateBilling, displayedBalances, ledgerEntries, reversalMap, saving]);
+  }), [canMutateBilling, displayedBalances, handleReverseEntry, ledgerEntries, reversalMap, saving]);
 
   if (!canViewBilling) {
     return (
@@ -365,6 +422,47 @@ export default function StudentBillingWorkspace({
           saving={saving}
           entry={confirmEntry}
         />
+
+        {showIntakeFinanceNotice ? (
+          <section className="rounded-2xl border border-sky-200 bg-sky-50/80 p-4 shadow-sm shadow-sky-100">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Info className="h-4 w-4 text-sky-700" />
+                  <span className="text-sm font-semibold text-sky-950">מסלול מימון מטופס ההמתנה</span>
+                  <Badge variant="outline" className="border-sky-300 bg-white text-sky-900">
+                    {intakeFinanceNotice.label}
+                  </Badge>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-sky-800">
+                  {intakeFinanceNotice.hmo_provider_name ? (
+                    <Badge variant="outline" className="border-sky-200 bg-white text-sky-800">
+                      {intakeFinanceNotice.hmo_provider_name}
+                    </Badge>
+                  ) : null}
+                  {getHmoApprovalStatusLabel(intakeFinanceNotice.hmo_approval_status) ? (
+                    <Badge variant="outline" className="border-sky-200 bg-white text-sky-800">
+                      {getHmoApprovalStatusLabel(intakeFinanceNotice.hmo_approval_status)}
+                    </Badge>
+                  ) : null}
+                  <span>
+                    יוצג עד שתירשם תנועה כספית, ייווצר אישור גורם מממן, או שיעברו 30 ימים מהשיבוץ.
+                  </span>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 text-sky-700 hover:bg-sky-100 hover:text-sky-900"
+                onClick={dismissIntakeFinanceNotice}
+              >
+                <X className="h-4 w-4" />
+                <span className="sr-only">הסתר מסלול מימון מטופס ההמתנה</span>
+              </Button>
+            </div>
+          </section>
+        ) : null}
 
         {/* ── Summary cards ── */}
         <section className="grid gap-3 md:grid-cols-4">

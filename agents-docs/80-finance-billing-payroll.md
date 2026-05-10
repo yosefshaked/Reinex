@@ -109,3 +109,4 @@
   - `fixed_rate` pays once per lesson
   - `per_student` multiplies by compensation-eligible participant count
 - Do not add "rebuild billing" fallback buttons to student/client billing workspaces. Billing recalculation belongs to the mutation source: attendance/session changes, lesson-instance edits, and HMO authorization create/update/cancel already trigger the relevant ledger resync and should communicate that in their own UX.
+- Student finance snapshots may include `intake_finance_notice` from a matched waiting-list entry so staff can see the funding path chosen on the intake form. The backend owns the lifecycle: do not return the notice once the student has effective ledger activity, any HMO authorization, or the 30-day post-match window has expired. Frontend dismissal is per browser via `localStorage` only and must not be treated as shared workflow state.
