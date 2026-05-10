@@ -37,7 +37,7 @@ export default async function (context, req) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('calendar/conflicts missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
@@ -47,11 +47,11 @@ export default async function (context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('calendar/conflicts failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -59,7 +59,7 @@ export default async function (context, req) {
   const orgId = resolveOrgId(req, body);
 
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   let role;
@@ -84,13 +84,13 @@ export default async function (context, req) {
 async function handleConflictCheck(context, body, supabase, orgId) {
   // Validate required fields
   if (!body.datetime_start) {
-    return respond(context, 400, { message: 'missing datetime_start' });
+    return respond(context, 400, { message: 'missing_datetime_start' });
   }
   if (!body.duration_minutes || body.duration_minutes <= 0) {
-    return respond(context, 400, { message: 'missing or invalid duration_minutes' });
+    return respond(context, 400, { message: 'missing_or_invalid_duration_minutes' });
   }
   if (!body.instructor_employee_id) {
-    return respond(context, 400, { message: 'missing instructor_employee_id' });
+    return respond(context, 400, { message: 'missing_instructor_employee_id' });
   }
   const studentIds = Array.isArray(body.student_ids) ? body.student_ids.filter(Boolean) : [];
   const clientProfileIds = Array.isArray(body.client_profile_ids || body.clientProfileIds)

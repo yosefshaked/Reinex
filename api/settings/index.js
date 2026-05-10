@@ -314,7 +314,7 @@ export default async function (context, req) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('settings missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const env = readEnv(context);
@@ -332,12 +332,12 @@ export default async function (context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('settings failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
     context.log?.warn?.('settings token did not resolve to user');
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -346,7 +346,7 @@ export default async function (context, req) {
   const orgId = resolveOrgId(req, body);
 
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   let role;
@@ -424,7 +424,7 @@ export default async function (context, req) {
   if (method === 'POST') {
     let payload = normalizeSettingsObject(body);
     if (!payload) {
-      return respond(context, 400, { message: 'invalid settings payload' });
+      return respond(context, 400, { message: 'invalid_settings_payload' });
     }
 
     const sessionFormResult = await applySessionFormVersioning(supabase, orgId, payload);
@@ -535,7 +535,7 @@ export default async function (context, req) {
   if (method === 'PUT' || method === 'PATCH') {
     let payload = normalizeSettingsObject(body);
     if (!payload) {
-      return respond(context, 400, { message: 'invalid settings payload' });
+      return respond(context, 400, { message: 'invalid_settings_payload' });
     }
 
     const keys = payload.map((entry) => entry.key);
@@ -673,7 +673,7 @@ export default async function (context, req) {
     const keys = Array.from(new Set([...keysFromBody, ...keysFromQuery]));
 
     if (!keys.length) {
-      return respond(context, 400, { message: 'missing settings keys' });
+      return respond(context, 400, { message: 'missing_settings_keys' });
     }
 
     const { data, error } = await withOrgScope(supabase, 'Settings', orgId)

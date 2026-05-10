@@ -2110,6 +2110,7 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
 
   try {
     await logTenantAuditEvent(controlClient, {
+      orgId,
       actorUserId: null,
       eventType: 'form_submission.completed',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,

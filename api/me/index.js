@@ -27,7 +27,7 @@ function parseAction(context) {
 async function getAuthUser(context, req, supabase) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    respond(context, 401, { message: 'missing bearer' });
+    respond(context, 401, { message: 'missing_bearer' });
     return null;
   }
 
@@ -36,12 +36,12 @@ async function getAuthUser(context, req, supabase) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('me failed to validate token', { message: error?.message });
-    respond(context, 401, { message: 'invalid or expired token' });
+    respond(context, 401, { message: 'invalid_or_expired_token' });
     return null;
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
-    respond(context, 401, { message: 'invalid or expired token' });
+    respond(context, 401, { message: 'invalid_or_expired_token' });
     return null;
   }
 

@@ -377,7 +377,7 @@ export default async function (context, req) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('calendar/instances missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
@@ -387,11 +387,11 @@ export default async function (context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('calendar/instances failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -399,7 +399,7 @@ export default async function (context, req) {
   const orgId = resolveOrgId(req, body);
 
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   let role;
@@ -448,7 +448,7 @@ export default async function (context, req) {
     });
   }
 
-  return respond(context, 405, { message: 'method not allowed' });
+  return respond(context, 405, { message: 'method_not_allowed' });
 }
 
 async function handleGetInstances(context, req, dbContext, userId, canManageAll) {
@@ -484,12 +484,12 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
   // Validate date format (YYYY-MM-DD)
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
-    return respond(context, 400, { message: 'invalid date format, use YYYY-MM-DD' });
+    return respond(context, 400, { message: 'invalid_date_format_use_yyyy_mm_dd' });
   }
 
   const utcBounds = buildUtcBoundsForTimezoneDateRange(startDate, endDate);
   if (!utcBounds) {
-    return respond(context, 400, { message: 'invalid date range' });
+    return respond(context, 400, { message: 'invalid_date_range' });
   }
 
   // Build query
@@ -781,13 +781,13 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
   const { userId, userEmail, role, canManageAll: isAdmin, billingService } = authContext;
   // Validate required fields
   if (!body.datetime_start) {
-    return respond(context, 400, { message: 'missing datetime_start' });
+    return respond(context, 400, { message: 'missing_datetime_start' });
   }
   if (!body.instructor_employee_id) {
-    return respond(context, 400, { message: 'missing instructor_employee_id' });
+    return respond(context, 400, { message: 'missing_instructor_employee_id' });
   }
   if (!body.service_id) {
-    return respond(context, 400, { message: 'missing service_id' });
+    return respond(context, 400, { message: 'missing_service_id' });
   }
   const studentIds = Array.isArray(body.student_ids) ? body.student_ids.filter(Boolean) : [];
   const clientProfileIds = Array.isArray(body.client_profile_ids || body.clientProfileIds)
@@ -801,7 +801,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
   const createdSource = normalizeCreatedSource(body.created_source);
   const normalizedSchedulingMetadata = normalizeSchedulingOverrideMetadata(body.metadata);
   if (!ACTIVE_LESSON_INSTANCE_STATUSES.has(requestedStatus)) {
-    return respond(context, 400, { message: 'invalid status' });
+    return respond(context, 400, { message: 'invalid_status' });
   }
   if (!['weekly_generation', 'one_time', 'manual_reschedule', 'migration'].includes(createdSource)) {
     return respond(context, 400, { message: 'invalid_created_source' });
@@ -816,7 +816,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     }
 
     if (!instructorId || instructorId !== body.instructor_employee_id) {
-      return respond(context, 403, { message: 'forbidden: can only create lessons for yourself' });
+      return respond(context, 403, { message: 'forbidden_can_only_create_lessons_for_yourself' });
     }
   }
 
@@ -828,7 +828,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     .single();
 
   if (instructorError || !instructor) {
-    return respond(context, 400, { message: 'invalid instructor_employee_id' });
+    return respond(context, 400, { message: 'invalid_instructor_employee_id' });
   }
 
   // Verify service exists
@@ -844,7 +844,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
   }
 
   if (!service) {
-    return respond(context, 400, { message: 'invalid service_id' });
+    return respond(context, 400, { message: 'invalid_service_id' });
   }
 
   const serviceDurationMinutes = normalizePositiveDurationMinutes(service.duration_minutes);
@@ -1082,6 +1082,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
 
   try {
     await logTenantAuditEvent(client, {
+      orgId,
       actorUserId: userId,
       eventType: 'calendar.instance.created',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1117,7 +1118,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     });
   }
 
-  return respond(context, 201, { id: instance.id, message: 'instance created successfully' });
+  return respond(context, 201, { id: instance.id, message: 'instance_created_successfully' });
 }
 
 async function handleUpdateInstance(context, req, body, dbContext, supabase, authContext) {
@@ -1140,7 +1141,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
   });
 
   if (!body.id) {
-    return respond(context, 400, { message: 'missing instance id' });
+    return respond(context, 400, { message: 'missing_instance_id' });
   }
 
   const expectedVersion = parseExpectedVersion(body.version, body.expected_version, body.expectedVersion);
@@ -1160,7 +1161,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
   const existingInstance = mutationState.instance;
 
   if (!existingInstance) {
-    return respond(context, 404, { message: 'instance not found' });
+    return respond(context, 404, { message: 'instance_not_found' });
   }
 
   if (isLockedState(mutationState)) {
@@ -1192,15 +1193,15 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
     }
 
     if (!instructorId || instructorId !== existingInstance.instructor_employee_id) {
-      return respond(context, 403, { message: 'forbidden: can only update your own lessons' });
+      return respond(context, 403, { message: 'forbidden_can_only_update_your_own_lessons' });
     }
 
     if (action === 'preview-cancel-instance') {
-      return respond(context, 403, { message: 'forbidden: instructors cannot preview instance cancellation' });
+      return respond(context, 403, { message: 'forbidden_instructors_cannot_preview_instance_cancellation' });
     }
 
     if (isPreviewUpdate) {
-      return respond(context, 403, { message: 'forbidden: instructors cannot preview instance updates' });
+      return respond(context, 403, { message: 'forbidden_instructors_cannot_preview_instance_updates' });
     }
 
     const allowedStatusUpdates = new Set(['completed']);
@@ -1215,15 +1216,15 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
     ].some((field) => Object.prototype.hasOwnProperty.call(body, field));
 
     if (hasOtherUpdates) {
-      return respond(context, 403, { message: 'forbidden: instructors can only report attendance status' });
+      return respond(context, 403, { message: 'forbidden_instructors_can_only_report_attendance_status' });
     }
 
     if (!allowedStatusUpdates.has(requestedStatus)) {
-      return respond(context, 400, { message: 'invalid status update' });
+      return respond(context, 400, { message: 'invalid_status_update' });
     }
 
     if (existingInstance.status !== 'scheduled') {
-      return respond(context, 409, { message: 'instance not in reportable state' });
+      return respond(context, 409, { message: 'instance_not_in_reportable_state' });
     }
 
     body.status = requestedStatus;
@@ -1258,7 +1259,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
   if (body.status !== undefined) {
   const normalizedStatus = normalizeLessonInstanceStatus(body.status);
   if (!ACTIVE_LESSON_INSTANCE_STATUSES.has(normalizedStatus)) {
-      return respond(context, 400, { message: 'invalid status' });
+      return respond(context, 400, { message: 'invalid_status' });
     }
     body.status = normalizedStatus;
   }
@@ -1289,7 +1290,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
     }
 
     if (!nextService) {
-      return respond(context, 400, { message: 'invalid service_id' });
+      return respond(context, 400, { message: 'invalid_service_id' });
     }
 
     const nextServiceDurationMinutes = normalizePositiveDurationMinutes(nextService.duration_minutes);
@@ -1470,7 +1471,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
       }
 
       if (cancellationResult.outcome === 'not_found') {
-        return respond(context, 404, { message: 'instance not found' });
+        return respond(context, 404, { message: 'instance_not_found' });
       }
 
       if (cancellationResult.outcome === 'locked' || cancellationResult.outcome === 'closed') {
@@ -1558,7 +1559,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
       }
 
       if (completionResult.outcome === 'not_found') {
-        return respond(context, 404, { message: 'instance not found' });
+        return respond(context, 404, { message: 'instance_not_found' });
       }
 
       if (completionResult.outcome === 'locked' || completionResult.outcome === 'closed') {
@@ -1715,6 +1716,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
 
   try {
     await logTenantAuditEvent(client, {
+      orgId,
       actorUserId: userId,
       eventType: 'calendar.instance.updated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1739,6 +1741,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
     try {
       for (const row of cancelledParticipantAuditRows) {
         await logTenantAuditEvent(client, {
+          orgId,
           actorUserId: userId,
           eventType: 'calendar.lesson_participant.cancelled_by_instance',
           retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1765,6 +1768,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
     try {
       for (const row of completedParticipantAuditRows) {
         await logTenantAuditEvent(client, {
+          orgId,
           actorUserId: userId,
           eventType: 'calendar.lesson_participant.attended_by_instance_completion',
           retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1816,7 +1820,7 @@ async function handleUpdateInstance(context, req, body, dbContext, supabase, aut
   }
 
   return respond(context, 200, {
-    message: 'instance updated successfully',
+    message: 'instance_updated_successfully',
     ...(billingWarnings.length > 0 ? { billing_warnings: billingWarnings } : {}),
   });
 }

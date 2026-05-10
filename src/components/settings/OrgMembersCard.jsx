@@ -143,9 +143,9 @@ export default function OrgMembersCard() {
       await refreshInvitations({ suppressToast: true });
     } catch (error) {
       console.error('Failed to send invitation', error);
-      if (error?.code === 'user already a member') {
+      if (error?.code === 'user_already_a_member') {
         toast.error('לא נשלחה הזמנה. המשתמש כבר חבר בארגון.');
-      } else if (error?.code === 'invitation already pending') {
+      } else if (error?.code === 'invitation_already_pending') {
         toast.error('כבר קיימת הזמנה בתוקף למשתמש זה.');
       } else {
         toast.error(error?.message || 'שליחת ההזמנה נכשלה. ודא שהכתובת תקינה ונסה שוב.');
@@ -189,9 +189,9 @@ export default function OrgMembersCard() {
       await refreshInvitations({ suppressToast: true });
     } catch (error) {
       console.error('Failed to resend invitation', error);
-      if (error?.code === 'invitation already pending' || error?.data?.message === 'invitation already pending') {
+      if (error?.code === 'invitation_already_pending' || error?.data?.message === 'invitation_already_pending') {
         toast.error('ההזמנה עדיין תקפה. לא ניתן לשלוח הזמנה נוספת.');
-      } else if (error?.code === 'user already a member' || error?.data?.message === 'user already a member') {
+      } else if (error?.code === 'user_already_a_member' || error?.data?.message === 'user_already_a_member') {
         toast.error('לא נשלחה הזמנה. המשתמש כבר חבר בארגון.');
       } else {
         toast.error(error?.message || 'שליחת ההזמנה החדשה נכשלה. נסה שוב.');

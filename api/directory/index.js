@@ -39,7 +39,7 @@ function normalizeUuid(value) {
 async function getAuthenticatedUser(context, req, supabase) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    respond(context, 401, { message: 'missing bearer' });
+    respond(context, 401, { message: 'missing_bearer' });
     return null;
   }
   let authResult;
@@ -47,11 +47,11 @@ async function getAuthenticatedUser(context, req, supabase) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.warn?.('directory failed to validate bearer token', { message: error?.message });
-    respond(context, 401, { message: 'invalid or expired token' });
+    respond(context, 401, { message: 'invalid_or_expired_token' });
     return null;
   }
   if (authResult.error || !authResult.data?.user?.id) {
-    respond(context, 401, { message: 'invalid or expired token' });
+    respond(context, 401, { message: 'invalid_or_expired_token' });
     return null;
   }
   const user = authResult.data.user;
@@ -75,7 +75,7 @@ async function requireOrgMembership(context, supabase, orgId, userId) {
       userId,
       message: membershipResult.error.message,
     });
-    respond(context, 500, { message: 'failed to verify membership' });
+    respond(context, 500, { message: 'failed_to_verify_membership' });
     return null;
   }
 
@@ -124,7 +124,7 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
 
     if (membershipsResult.error) {
       logSupabaseQueryFailure(context, req, userId, 'fetching membership rows', membershipsResult.error);
-      respond(context, 500, { message: 'failed to load members' });
+      respond(context, 500, { message: 'failed_to_load_members' });
       return null;
     }
 
@@ -147,7 +147,7 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
 
       if (profilesResult.error) {
         logSupabaseQueryFailure(context, req, userId, 'fetching member profiles', profilesResult.error);
-        respond(context, 500, { message: 'failed to load members' });
+        respond(context, 500, { message: 'failed_to_load_members' });
         return null;
       }
 
@@ -157,7 +157,7 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
         authUsersById = await getAuthUsersByIds(supabase, userIds);
       } catch (error) {
         logSupabaseQueryFailure(context, req, userId, 'fetching member auth users', error);
-        respond(context, 500, { message: 'failed to load members' });
+        respond(context, 500, { message: 'failed_to_load_members' });
         return null;
       }
     }
@@ -188,7 +188,7 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
     }));
   } catch (error) {
     logSupabaseQueryFailure(context, req, userId, 'fetching members', error);
-    respond(context, 500, { message: 'failed to load members' });
+    respond(context, 500, { message: 'failed_to_load_members' });
     return null;
   }
 }
@@ -206,14 +206,14 @@ async function fetchPendingInvitations(context, req, supabase, orgId, userId) {
 
     if (result.error) {
       logSupabaseQueryFailure(context, req, userId, 'fetching invitations', result.error);
-      respond(context, 500, { message: 'failed to load invitations' });
+      respond(context, 500, { message: 'failed_to_load_invitations' });
       return null;
     }
 
     return Array.isArray(result.data) ? result.data : [];
   } catch (error) {
     logSupabaseQueryFailure(context, req, userId, 'fetching invitations', error);
-    respond(context, 500, { message: 'failed to load invitations' });
+    respond(context, 500, { message: 'failed_to_load_invitations' });
     return null;
   }
 }
@@ -222,7 +222,7 @@ export default async function directory(context, req) {
   const { client: supabase, error } = getAdminClient(context);
   if (error || !supabase) {
     context.log?.error?.('directory missing admin credentials', { message: error?.message });
-    respond(context, 500, { message: 'missing admin credentials' });
+    respond(context, 500, { message: 'missing_admin_credentials' });
     return;
   }
 
@@ -233,7 +233,7 @@ export default async function directory(context, req) {
 
   const orgId = normalizeUuid(req.query?.orgId ?? req.query?.org_id);
   if (!orgId) {
-    respond(context, 400, { message: 'missing orgId' });
+    respond(context, 400, { message: 'missing_orgid' });
     return;
   }
 

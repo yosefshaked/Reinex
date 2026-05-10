@@ -43,7 +43,7 @@ function toRegistryRowForFlag(flagEntry) {
     default_value: flagEntry.enabled,
     category: 'system_feature_flags',
     requires_approval: false,
-    description: 'Managed by system admin console.',
+    description: 'managed_by_system_admin_console',
     updated_at: new Date().toISOString(),
   };
 }

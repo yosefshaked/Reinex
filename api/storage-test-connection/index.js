@@ -97,7 +97,7 @@ export default async function handler(context, req) {
 
     return respond(context, 200, {
       success: true,
-      message: 'Storage connection test passed',
+      message: 'storage_connection_test_passed',
       details: {
         mode,
         provider: mode === 'byos' ? config.provider : 'managed_r2',

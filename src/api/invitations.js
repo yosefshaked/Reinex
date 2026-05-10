@@ -67,6 +67,22 @@ function normalizeInvitationRecord(record) {
   };
 }
 
+function mapInvitationLoadMessage(code, status) {
+  if (code === 'invitation_not_found' || code === 'invite_not_found') {
+    return 'ההזמנה לא נמצאה. ודא שהקישור שלך מעודכן.';
+  }
+  if (code === 'invitation_expired') {
+    return 'תוקף ההזמנה פג. בקש ממנהל הארגון לשלוח קישור חדש.';
+  }
+  if (status === 404) {
+    return 'ההזמנה לא נמצאה. ודא שהקישור שלך מעודכן.';
+  }
+  if (status === 410) {
+    return 'תוקף ההזמנה פג. בקש ממנהל הארגון לשלוח קישור חדש.';
+  }
+  return 'טעינת פרטי ההזמנה נכשלה. נסה שוב מאוחר יותר.';
+}
+
 function normalizeToken(value) {
   if (typeof value !== 'string') {
     return '';
@@ -118,9 +134,9 @@ export async function createInvitation(orgId, email, { session, expiresAt, redir
       error.code = serverMessage;
     }
     if (error?.status === 409) {
-      if (serverMessage === 'user already a member') {
+      if (serverMessage === 'user_already_a_member') {
         error.message = 'לא נשלחה הזמנה. המשתמש כבר חבר בארגון.';
-      } else if (serverMessage === 'invitation already pending') {
+      } else if (serverMessage === 'invitation_already_pending') {
         error.message = 'כבר קיימת הזמנה בתוקף למשתמש זה.';
       }
     }
@@ -154,12 +170,7 @@ export async function getInvitationByToken(token, { signal } = {}) {
   }
 
   if (!response.ok) {
-    const message = payload?.message
-      || (response.status === 404
-        ? 'ההזמנה לא נמצאה. ודא שהקישור שלך מעודכן.'
-        : response.status === 410
-          ? 'תוקף ההזמנה פג. בקש ממנהל הארגון לשלוח קישור חדש.'
-          : 'טעינת פרטי ההזמנה נכשלה. נסה שוב מאוחר יותר.');
+    const message = mapInvitationLoadMessage(payload?.message, response.status);
     const error = new Error(message);
     error.status = response.status;
     if (payload) {

@@ -178,7 +178,7 @@ export default async function systemAdminDataQuality(context, req) {
       display_name: 'Orphaned memberships',
       count: orphanedMembershipsCount,
       status: orphanedMembershipsStatus,
-      description: 'Membership rows pointing to a deleted org',
+      description: 'membership_rows_pointing_to_a_deleted_org',
       ...(orphanedMembershipsError ? { error: orphanedMembershipsError } : {}),
     },
     {
@@ -186,7 +186,7 @@ export default async function systemAdminDataQuality(context, req) {
       display_name: 'Orgs without members',
       count: orgsWithoutMembersCount,
       status: orgsWithoutMembersStatus,
-      description: 'Organizations with no team members',
+      description: 'organizations_with_no_team_members',
       ...(orgsWithoutMembersError ? { error: orgsWithoutMembersError } : {}),
     },
     {
@@ -194,7 +194,7 @@ export default async function systemAdminDataQuality(context, req) {
       display_name: 'Profiles without org',
       count: profilesWithoutOrgCount,
       status: profilesWithoutOrgStatus,
-      description: 'User profiles not belonging to any organization',
+      description: 'user_profiles_not_belonging_to_any_organization',
       ...(profilesWithoutOrgError ? { error: profilesWithoutOrgError } : {}),
     },
   ];

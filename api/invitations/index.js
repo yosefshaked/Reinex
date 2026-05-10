@@ -280,7 +280,7 @@ async function finalizeEmployeeInvitationLink(context, supabase, invitation, aut
 async function getAuthenticatedUser(context, req, supabase) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    respond(context, 401, { message: 'missing bearer' });
+    respond(context, 401, { message: 'missing_bearer' });
     return null;
   }
   let authResult;
@@ -288,11 +288,11 @@ async function getAuthenticatedUser(context, req, supabase) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.warn?.('invitations failed to validate bearer token', { message: error?.message });
-    respond(context, 401, { message: 'invalid or expired token' });
+    respond(context, 401, { message: 'invalid_or_expired_token' });
     return null;
   }
   if (authResult.error || !authResult.data?.user?.id) {
-    respond(context, 401, { message: 'invalid or expired token' });
+    respond(context, 401, { message: 'invalid_or_expired_token' });
     return null;
   }
   const user = authResult.data.user;
@@ -316,7 +316,7 @@ async function requireAdminForOrg(context, supabase, orgId, userId) {
       userId,
       message: membershipResult.error.message,
     });
-    respond(context, 500, { message: 'failed to verify membership' });
+    respond(context, 500, { message: 'failed_to_verify_membership' });
     return null;
   }
 
@@ -340,12 +340,12 @@ async function fetchOrganization(context, supabase, orgId) {
       orgId,
       message: orgResult.error.message,
     });
-    respond(context, 500, { message: 'failed to load organization' });
+    respond(context, 500, { message: 'failed_to_load_organization' });
     return null;
   }
 
   if (!orgResult.data) {
-    respond(context, 404, { message: 'organization not found' });
+    respond(context, 404, { message: 'organization_not_found' });
     return null;
   }
 
@@ -505,7 +505,7 @@ async function handleCreateInvitation(context, req, supabase) {
   if (clientExpiration !== undefined && clientExpiration !== null && clientExpiration !== '') {
     const expiration = normalizeExpirationInput(clientExpiration);
     if (!expiration.valid) {
-      respond(context, 400, { message: 'invalid expiration' });
+      respond(context, 400, { message: 'invalid_expiration' });
       return;
     }
     expiresAt = expiration.value;
@@ -520,12 +520,12 @@ async function handleCreateInvitation(context, req, supabase) {
   const emailData = body.emailData && typeof body.emailData === 'object' ? { ...body.emailData } : {};
 
   if (!orgId) {
-    respond(context, 400, { message: 'missing orgId' });
+    respond(context, 400, { message: 'missing_orgid' });
     return;
   }
 
   if (!email) {
-    respond(context, 400, { message: 'invalid email' });
+    respond(context, 400, { message: 'invalid_email' });
     return;
   }
 
@@ -550,12 +550,12 @@ async function handleCreateInvitation(context, req, supabase) {
       email,
       message: memberLookupError.message,
     });
-    respond(context, 500, { message: 'failed to verify member' });
+    respond(context, 500, { message: 'failed_to_verify_member' });
     return;
   }
 
   if (existingUserId) {
-    respond(context, 409, { message: 'user already a member' });
+    respond(context, 409, { message: 'user_already_a_member' });
     return;
   }
 
@@ -568,7 +568,7 @@ async function handleCreateInvitation(context, req, supabase) {
       email,
       message: error.message,
     });
-    respond(context, 500, { message: 'Failed to verify auth user.' });
+    respond(context, 500, { message: 'failed_to_verify_auth_user' });
     return;
   }
 
@@ -584,7 +584,7 @@ async function handleCreateInvitation(context, req, supabase) {
       email,
       message: pendingError.message,
     });
-    respond(context, 500, { message: 'failed to check pending invitations' });
+    respond(context, 500, { message: 'failed_to_check_pending_invitations' });
     return;
   }
 
@@ -600,7 +600,7 @@ async function handleCreateInvitation(context, req, supabase) {
     } else {
       if (!resendPending) {
         respond(context, 409, {
-          message: 'invitation already pending',
+          message: 'invitation_already_pending',
           canResend: true,
           invitationId: pendingInvitation.id,
           expiresAt: pendingInvitation.expires_at ?? null,
@@ -630,7 +630,7 @@ async function handleCreateInvitation(context, req, supabase) {
       invitedBy: authUser.id,
       message: inviterResult.error?.message ?? 'inviter not found',
     });
-    respond(context, 500, { message: 'failed to personalize invitation email' });
+    respond(context, 500, { message: 'failed_to_personalize_invitation_email' });
     return;
   }
   const inviterName = resolveUserFullName(inviterResult.data.user) || null;
@@ -672,7 +672,7 @@ async function handleCreateInvitation(context, req, supabase) {
             reason: metadataError.message,
           },
         });
-        respond(context, 500, { message: 'failed to prepare invitation email' });
+        respond(context, 500, { message: 'failed_to_prepare_invitation_email' });
         return;
       }
     }
@@ -715,7 +715,7 @@ async function handleCreateInvitation(context, req, supabase) {
           reason: inviteResultError.message,
         },
       });
-      respond(context, 502, { message: 'failed to send invitation email' });
+      respond(context, 502, { message: 'failed_to_send_invitation_email' });
       return;
     }
   } else {
@@ -757,7 +757,7 @@ async function handleCreateInvitation(context, req, supabase) {
           reason: inviteResultError.message,
         },
       });
-      respond(context, 502, { message: 'failed to send invitation email' });
+      respond(context, 502, { message: 'failed_to_send_invitation_email' });
       return;
     }
   }
@@ -792,7 +792,7 @@ async function handleCreateInvitation(context, req, supabase) {
           reason: rotationError.message,
         },
       });
-      respond(context, 500, { message: 'failed to update invitation' });
+      respond(context, 500, { message: 'failed_to_update_invitation' });
       return;
     }
   } else {
@@ -824,7 +824,7 @@ async function handleCreateInvitation(context, req, supabase) {
           reason: insertResult.error?.message || 'missing invitation row',
         },
       });
-      respond(context, 500, { message: 'failed to create invitation' });
+      respond(context, 500, { message: 'failed_to_create_invitation' });
       return;
     }
     persistedInvitation = insertResult.data;
@@ -866,7 +866,7 @@ async function handleListPending(context, req, supabase) {
   }
   const orgId = normalizeUuid(req.query?.orgId ?? req.query?.org_id ?? req.body?.orgId);
   if (!orgId) {
-    respond(context, 400, { message: 'missing orgId' });
+    respond(context, 400, { message: 'missing_orgid' });
     return;
   }
   const role = await requireAdminForOrg(context, supabase, orgId, authUser.id);
@@ -885,7 +885,7 @@ async function handleListPending(context, req, supabase) {
       orgId,
       message: selectResult.error.message,
     });
-    respond(context, 500, { message: 'failed to list invitations' });
+    respond(context, 500, { message: 'failed_to_list_invitations' });
     return;
   }
 
@@ -924,12 +924,12 @@ async function loadInvitationById(context, supabase, invitationId) {
       invitationId,
       message: result.error.message,
     });
-    respond(context, 500, { message: 'failed to load invitation' });
+    respond(context, 500, { message: 'failed_to_load_invitation' });
     return null;
   }
 
   if (!result.data) {
-    respond(context, 404, { message: 'invitation not found' });
+    respond(context, 404, { message: 'invitation_not_found' });
     return null;
   }
 
@@ -938,7 +938,7 @@ async function loadInvitationById(context, supabase, invitationId) {
 
 async function handleGetByToken(context, supabase, token) {
   if (!token) {
-    respond(context, 400, { message: 'missing token' });
+    respond(context, 400, { message: 'missing_token' });
     return;
   }
 
@@ -953,12 +953,12 @@ async function handleGetByToken(context, supabase, token) {
       token,
       message: result.error.message,
     });
-    respond(context, 500, { message: 'failed to load invitation' });
+    respond(context, 500, { message: 'failed_to_load_invitation' });
     return;
   }
 
   if (!result.data) {
-    respond(context, 404, { message: 'invitation not found' });
+    respond(context, 404, { message: 'invitation_not_found' });
     return;
   }
 
@@ -1033,7 +1033,7 @@ async function acceptInvitation(context, req, supabase, invitationId) {
   }
 
   if (invitation.status !== STATUS_PENDING) {
-    respond(context, 409, { message: `invitation ${invitation.status}` });
+    respond(context, 409, { message: 'invitation_not_pending', status: invitation.status });
     return;
   }
 
@@ -1045,13 +1045,13 @@ async function acceptInvitation(context, req, supabase, invitationId) {
       actor: { userId: authUser.id, userEmail: authUser.email || '', userRole: 'invitee' },
       reason: 'expired_on_accept',
     });
-    respond(context, 410, { message: 'invitation expired' });
+    respond(context, 410, { message: 'invitation_expired' });
     return;
   }
 
   const userEmail = authUser.email;
   if (!userEmail || userEmail !== invitation.email.toLowerCase()) {
-    respond(context, 403, { message: 'email mismatch' });
+    respond(context, 403, { message: 'email_mismatch' });
     return;
   }
 
@@ -1083,7 +1083,7 @@ async function acceptInvitation(context, req, supabase, invitationId) {
       invitationId,
       message: membershipResult.error.message,
     });
-    respond(context, 500, { message: 'failed to add membership' });
+    respond(context, 500, { message: 'failed_to_add_membership' });
     return;
   }
 
@@ -1097,12 +1097,12 @@ async function acceptInvitation(context, req, supabase, invitationId) {
       invitationId,
       message: updateResult.error.message,
     });
-    respond(context, 500, { message: 'failed to update invitation' });
+    respond(context, 500, { message: 'failed_to_update_invitation' });
     return;
   }
 
   respond(context, 200, {
-    message: 'invitation accepted',
+    message: 'invitation_accepted',
     employeeLinked: employeeLinkResult.linked,
     employeeId: employeeLinkResult.employeeId,
   });
@@ -1135,12 +1135,12 @@ async function declineInvitation(context, req, supabase, invitationId) {
   }
 
   if (invitation.status !== STATUS_PENDING) {
-    respond(context, 409, { message: `invitation ${invitation.status}` });
+    respond(context, 409, { message: 'invitation_not_pending', status: invitation.status });
     return;
   }
 
   if (!authUser.email || authUser.email !== invitation.email.toLowerCase()) {
-    respond(context, 403, { message: 'email mismatch' });
+    respond(context, 403, { message: 'email_mismatch' });
     return;
   }
 
@@ -1154,11 +1154,11 @@ async function declineInvitation(context, req, supabase, invitationId) {
       invitationId,
       message: updateResult.error.message,
     });
-    respond(context, 500, { message: 'failed to update invitation' });
+    respond(context, 500, { message: 'failed_to_update_invitation' });
     return;
   }
 
-  respond(context, 200, { message: 'invitation declined' });
+  respond(context, 200, { message: 'invitation_declined' });
   await logAuditEvent(supabase, {
     orgId: invitation.org_id,
     userId: authUser.id,
@@ -1189,7 +1189,7 @@ async function revokeInvitation(context, req, supabase, invitationId) {
   }
 
   if (invitation.status !== STATUS_PENDING) {
-    respond(context, 409, { message: `invitation ${invitation.status}` });
+    respond(context, 409, { message: 'invitation_not_pending', status: invitation.status });
     return;
   }
 
@@ -1203,11 +1203,11 @@ async function revokeInvitation(context, req, supabase, invitationId) {
       invitationId,
       message: updateResult.error.message,
     });
-    respond(context, 500, { message: 'failed to revoke invitation' });
+    respond(context, 500, { message: 'failed_to_revoke_invitation' });
     return;
   }
 
-  respond(context, 200, { message: 'invitation revoked' });
+  respond(context, 200, { message: 'invitation_revoked' });
 
   // Audit log: invitation revoked
   await logAuditEvent(supabase, {
@@ -1231,7 +1231,7 @@ async function handleCheckAuth(context, req, supabase) {
 
   const email = normalizeEmail(req.query?.email ?? req.body?.email);
   if (!email) {
-    respond(context, 400, { message: 'missing email' });
+    respond(context, 400, { message: 'missing_email' });
     return;
   }
 
@@ -1246,7 +1246,7 @@ async function handleCheckAuth(context, req, supabase) {
     .maybeSingle();
 
   if (membershipResult.error || !membershipResult.data) {
-    respond(context, 403, { message: 'admin role required' });
+    respond(context, 403, { message: 'admin_role_required' });
     return;
   }
 
@@ -1279,12 +1279,12 @@ async function handleCheckAuth(context, req, supabase) {
       email,
       message: error.message,
     });
-    respond(context, 500, { message: 'failed to check auth state' });
+    respond(context, 500, { message: 'failed_to_check_auth_state' });
     return;
   }
 
   if (!authState) {
-    respond(context, 500, { message: 'failed to resolve auth state' });
+    respond(context, 500, { message: 'failed_to_resolve_auth_state' });
     return;
   }
 
@@ -1325,7 +1325,7 @@ export default async function (context, req) {
   if (method === 'POST' && segments.length === 2 && segments[1] === 'accept') {
     const invitationId = normalizeUuid(segments[0]);
     if (!invitationId) {
-      respond(context, 400, { message: 'invalid invitation id' });
+      respond(context, 400, { message: 'invalid_invitation_id' });
       return;
     }
     await acceptInvitation(context, req, supabase, invitationId);
@@ -1335,7 +1335,7 @@ export default async function (context, req) {
   if (method === 'POST' && segments.length === 2 && segments[1] === 'decline') {
     const invitationId = normalizeUuid(segments[0]);
     if (!invitationId) {
-      respond(context, 400, { message: 'invalid invitation id' });
+      respond(context, 400, { message: 'invalid_invitation_id' });
       return;
     }
     await declineInvitation(context, req, supabase, invitationId);
@@ -1345,12 +1345,12 @@ export default async function (context, req) {
   if (method === 'DELETE' && segments.length === 1) {
     const invitationId = normalizeUuid(segments[0]);
     if (!invitationId) {
-      respond(context, 400, { message: 'invalid invitation id' });
+      respond(context, 400, { message: 'invalid_invitation_id' });
       return;
     }
     await revokeInvitation(context, req, supabase, invitationId);
     return;
   }
 
-  respond(context, 404, { message: 'not found' });
+  respond(context, 404, { message: 'not_found' });
 }

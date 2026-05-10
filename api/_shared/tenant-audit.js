@@ -18,10 +18,11 @@ export async function logTenantAuditEvent(tenantClient, params) {
     before_state: params.beforeState || null,
     after_state: params.afterState || null,
     details: params.details || null,
+    org_id: params.orgId || null,
   };
 
   const { data, error } = await tenantClient
-    .from('tenant_audit_log')
+    .from('audit_log')
     .insert(payload)
     .select('id, correlation_id')
     .maybeSingle();

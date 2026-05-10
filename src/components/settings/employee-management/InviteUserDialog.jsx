@@ -41,9 +41,9 @@ export default function InviteUserDialog({ open, onOpenChange, activeOrgId, sess
       }
     } catch (error) {
       console.error('Failed to send invitation', error);
-      if (error?.code === 'user already a member') {
+      if (error?.code === 'user_already_a_member') {
         toast.error('לא נשלחה הזמנה. המשתמש כבר חבר בארגון.');
-      } else if (error?.code === 'invitation already pending') {
+      } else if (error?.code === 'invitation_already_pending') {
         setPendingConflict({
           email: email.trim(),
           expiresAt: error?.data?.expiresAt || null,

@@ -48,7 +48,7 @@ export default async function waitingListSuggestions(context, req) {
 
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
@@ -58,11 +58,11 @@ export default async function waitingListSuggestions(context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('waiting-list-suggestions failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -75,7 +75,7 @@ export default async function waitingListSuggestions(context, req) {
     : normalizeMatchMode(rawMode, 'capacity');
 
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   if (!entryId) {

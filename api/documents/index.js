@@ -98,7 +98,7 @@ async function handleGet(req, supabase, client, orgId, userId, userRole, isAdmin
   const { entity_type, entity_id } = req.query;
 
   if (!entity_type || !entity_id) {
-    return { status: 400, body: { error: 'entity_type and entity_id required' } };
+    return { status: 400, body: { error: 'entity_type_and_entity_id_required' } };
   }
 
   const validation = await validateEntityAccessForRequest(client, orgId, entity_type, userId, entity_id, isAdmin, 'GET');
@@ -133,7 +133,7 @@ async function handleGet(req, supabase, client, orgId, userId, userRole, isAdmin
         status: 424, 
         body: { 
           error: 'documents_table_not_found', 
-          message: 'Documents table does not exist. Please run the setup script.'
+          message: 'documents_table_does_not_exist_please_run_the_setup_script'
         } 
       };
     }

@@ -170,7 +170,7 @@ export default async function (context, req) {
     context.log?.warn?.('documents-check: invalid entity_type', { entityType });
     return respond(context, 400, { 
       message: 'invalid_entity_type',
-      details: 'entity_type must be: student, instructor, or organization'
+      details: 'entity_type_must_be_student_instructor_or_organization'
     });
   }
 
@@ -178,7 +178,7 @@ export default async function (context, req) {
     context.log?.warn?.('documents-check: missing entity_id', { entityType });
     return respond(context, 400, { 
       message: 'missing_entity_id',
-      details: 'entity_id (student/instructor UUID or org_id) is required'
+      details: 'entity_id_student_instructor_uuid_or_org_id_is_required'
     });
   }
 

@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run lint:api && npm run lint:api-responses && npm run lint:sql && vite build",
+    "build": "npm run lint:api && npm run lint:api-responses:strict-ux && npm run lint:sql && vite build",
     "dep:check": "madge --circular src --ts-config jsconfig.json",
     "check:schema": "node scripts/checkSchema.js",
     "lint": "eslint .",

@@ -277,7 +277,7 @@ export default async function debugUatTools(context, req) {
 
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
@@ -286,10 +286,10 @@ export default async function debugUatTools(context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (authError) {
     context.log?.error?.('debug-uat-tools failed to validate token', { message: authError?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
   if (authResult.error || !authResult.data?.user?.id) {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -299,7 +299,7 @@ export default async function debugUatTools(context, req) {
   const orgId = resolveOrgId(req, body);
 
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   let role = null;
@@ -321,7 +321,7 @@ export default async function debugUatTools(context, req) {
   }
 
   if (method !== 'POST') {
-    return respond(context, 405, { message: 'method not allowed' });
+    return respond(context, 405, { message: 'method_not_allowed' });
   }
 
   const action = normalizeString(body?.action).toLowerCase();
@@ -429,6 +429,7 @@ export default async function debugUatTools(context, req) {
     });
 
     await logTenantAuditEvent(supabase, {
+      orgId,
       actorUserId: userId,
       eventType: 'calendar.instance.lock_created_debug_uat',
       retentionCategory: TENANT_AUDIT_RETENTION.DIAGNOSTIC,

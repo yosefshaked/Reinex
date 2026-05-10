@@ -154,7 +154,7 @@ export default async function handler(context, req) {
 
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
@@ -162,17 +162,17 @@ export default async function handler(context, req) {
   try {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
   if (authResult.error || !authResult.data?.user?.id) {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
   const body = method === 'GET' ? parseRequestBody(null) : parseRequestBody(req);
   const orgId = resolveOrgId(req, body);
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   const role = await ensureMembership(supabase, orgId, userId);
@@ -372,6 +372,7 @@ export default async function handler(context, req) {
 
     try {
       await logTenantAuditEvent(supabase, {
+        orgId,
         actorUserId: userId,
         eventType: result.action === 'created' ? 'client_profile.created' : 'client_profile.reused_for_one_time_customer',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -432,6 +433,7 @@ export default async function handler(context, req) {
 
   try {
     await logTenantAuditEvent(supabase, {
+      orgId,
       actorUserId: userId,
       eventType: 'client_profile.updated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,

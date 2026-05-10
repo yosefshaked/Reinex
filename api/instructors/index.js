@@ -403,7 +403,7 @@ export default async function (context, req) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('instructors missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig, {
@@ -415,11 +415,11 @@ export default async function (context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('instructors failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -427,7 +427,7 @@ export default async function (context, req) {
   const orgId = resolveOrgId(req, body);
 
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   let role;
@@ -772,7 +772,7 @@ export default async function (context, req) {
     }
 
     if (Object.keys(updates).length === 0 && !workingDaysInput.provided && !serviceCapabilitiesInput.provided && body?.break_time_minutes === undefined) {
-      return respond(context, 400, { message: 'no updates provided' });
+      return respond(context, 400, { message: 'no_updates_provided' });
     }
 
     const changedFields = [];
@@ -892,7 +892,7 @@ export default async function (context, req) {
 
     const instructorId = normalizeString(body?.id || body?.instructor_id || body?.instructorId || '');
     if (!instructorId) {
-      return respond(context, 400, { message: 'missing instructor id' });
+      return respond(context, 400, { message: 'missing_instructor_id' });
     }
 
     const { data, error } = await withOrgScope(supabase, 'Employees', orgId)

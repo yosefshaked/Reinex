@@ -68,7 +68,7 @@ export default async function handler(context, req) {
 
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    return respond(context, 401, { message: 'missing bearer token' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const authResult = await supabase.auth.getUser(authorization.token).catch((authError) => {
@@ -76,7 +76,7 @@ export default async function handler(context, req) {
     return { error: authError, data: null };
   });
   if (authResult.error || !authResult.data?.user?.id) {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -84,7 +84,7 @@ export default async function handler(context, req) {
   const orgId = resolveOrgId(req, body);
 
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   // Get filter parameter

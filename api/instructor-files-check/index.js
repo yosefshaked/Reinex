@@ -159,7 +159,7 @@ export default async function (context, req) {
     if (instructorRow?.user_id !== userId) {
       return respond(context, 403, {
         message: 'forbidden',
-        details: 'You can only check files for your own instructor record',
+        details: 'you_can_only_check_files_for_your_own_instructor_record',
       });
     }
   }

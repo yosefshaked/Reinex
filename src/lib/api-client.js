@@ -1,6 +1,54 @@
 import { getAuthClient } from '@/lib/supabase-manager.js';
 
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
+const COMMON_API_ERROR_MESSAGES = {
+  admin_or_owner_required: 'נדרשות הרשאות מנהל או בעלים.',
+  admin_required: 'נדרשות הרשאות מנהל.',
+  client_profile_not_found: 'הלקוח לא נמצא.',
+  database_error: 'אירעה שגיאה בגישה לנתונים. נסו שוב.',
+  document_not_found: 'המסמך לא נמצא.',
+  employee_not_found: 'העובד לא נמצא.',
+  failed_to_load_settings: 'טעינת ההגדרות נכשלה. נסו שוב.',
+  failed_to_verify_membership: 'לא הצלחנו לבדוק את ההרשאות שלכם כרגע. נסו שוב.',
+  forbidden: 'אין לכם הרשאה לבצע את הפעולה.',
+  form_not_found: 'הטופס לא נמצא.',
+  form_not_published: 'הטופס עדיין לא פורסם.',
+  internal_error: 'אירעה שגיאה פנימית. נסו שוב.',
+  internal_server_error: 'אירעה שגיאה פנימית. נסו שוב.',
+  invalid_date: 'התאריך אינו תקין.',
+  invalid_date_range: 'טווח התאריכים אינו תקין.',
+  invalid_email: 'כתובת האימייל אינה תקינה.',
+  invalid_json_body: 'הבקשה אינה תקינה.',
+  invalid_org_id: 'הארגון שנבחר אינו תקין.',
+  invalid_or_expired_token: 'ההתחברות פגה. התחברו מחדש ונסו שוב.',
+  invalid_phone: 'מספר הטלפון אינו תקין.',
+  invalid_service_id: 'השירות שנבחר אינו תקין.',
+  invalid_status: 'הסטטוס שנבחר אינו תקין.',
+  invalid_student_id: 'התלמיד שנבחר אינו תקין.',
+  invalid_token: 'ההתחברות פגה. התחברו מחדש ונסו שוב.',
+  invite_not_found: 'ההזמנה לא נמצאה.',
+  invitation_not_pending: 'ההזמנה כבר טופלה.',
+  lesson_instance_not_found: 'השיעור לא נמצא.',
+  lesson_template_not_found: 'התבנית לא נמצאה.',
+  method_not_allowed: 'הפעולה אינה נתמכת במסך הזה.',
+  missing_bearer: 'ההתחברות פגה. התחברו מחדש ונסו שוב.',
+  missing_bearer_token: 'ההתחברות פגה. התחברו מחדש ונסו שוב.',
+  missing_email: 'חסרה כתובת אימייל.',
+  missing_employee_id: 'חסר עובד לביצוע הפעולה.',
+  missing_instance_id: 'חסר שיעור לביצוע הפעולה.',
+  missing_org_id: 'חסר ארגון לביצוע הפעולה.',
+  missing_orgid: 'חסר ארגון לביצוע הפעולה.',
+  missing_service_id: 'חסר שירות לביצוע הפעולה.',
+  missing_updates: 'לא נשלחו שינויים לעדכון.',
+  not_a_member: 'אין לכם גישה לארגון הזה.',
+  permission_denied: 'אין לכם הרשאה לבצע את הפעולה.',
+  server_misconfigured: 'המערכת לא מוגדרת כראוי. פנו לתמיכה.',
+  storage_disconnected: 'חיבור האחסון מנותק.',
+  storage_not_configured: 'האחסון עדיין לא הוגדר.',
+  student_not_found: 'התלמיד לא נמצא.',
+  table_not_found: 'חסרה טבלת נתונים. יש להריץ את סקריפט ההתקנה.',
+  user_not_found: 'המשתמש לא נמצא.',
+};
 
 function getActiveOrgId() {
   try {
@@ -66,13 +114,19 @@ function buildApiErrorMessage(payload, status, fallback = 'An API error occurred
   if (status >= 500 && errorId) {
     return `הפעולה נכשלה. קוד תמיכה: ${errorId}`;
   }
-  return payload?.message || fallback;
+  const code = payload?.message || payload?.error || payload?.details || payload?.description || payload?.title || '';
+  return COMMON_API_ERROR_MESSAGES[code] || code || fallback;
 }
 
 function decorateApiError(error, payload, status) {
   error.status = status;
   if (payload) {
     error.data = payload;
+  }
+  const code = payload?.message || payload?.error || payload?.details || payload?.description || payload?.title || null;
+  if (code) {
+    error.code = code;
+    error.apiCode = code;
   }
   const errorId = payload?.error_id || payload?.support_code || null;
   if (errorId) {

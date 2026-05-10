@@ -203,7 +203,7 @@ export default async function legacyImport(context, req) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('legacy-import missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
@@ -213,11 +213,11 @@ export default async function legacyImport(context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('legacy-import failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const body = parseJsonBodyWithLimit(req, MAX_BODY_BYTES, { mode: 'observe', context, endpoint: 'legacy-import' }) || {};
@@ -225,11 +225,11 @@ export default async function legacyImport(context, req) {
   const studentId = normalizeString(req.params?.id || body?.student_id);
 
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   if (!studentId || !UUID_PATTERN.test(studentId)) {
-    return respond(context, 400, { message: 'invalid student id' });
+    return respond(context, 400, { message: 'invalid_student_id' });
   }
 
   let role;

@@ -345,7 +345,7 @@ export default async function (context, req) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('calendar/attendance missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
@@ -355,11 +355,11 @@ export default async function (context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('calendar/attendance failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -367,7 +367,7 @@ export default async function (context, req) {
   const orgId = resolveOrgId(req, body);
 
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   let role;
@@ -402,10 +402,10 @@ export default async function (context, req) {
 async function handleUpdateReminder(context, body, dbContext, userId) {
   const { client, orgId } = dbContext;
   if (!body.instance_id) {
-    return respond(context, 400, { message: 'missing instance_id' });
+    return respond(context, 400, { message: 'missing_instance_id' });
   }
   if (!body.participant_id) {
-    return respond(context, 400, { message: 'missing participant_id' });
+    return respond(context, 400, { message: 'missing_participant_id' });
   }
 
   const expectedParticipantVersion = parseExpectedVersion(
@@ -458,7 +458,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
   }
 
   if (Object.keys(update).length === 0) {
-    return respond(context, 400, { message: 'no reminder fields to update' });
+    return respond(context, 400, { message: 'no_reminder_fields_to_update' });
   }
 
   let updateQuery = withOrgScope(client, 'lesson_participants', orgId)
@@ -502,6 +502,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
 
   try {
     await logTenantAuditEvent(client, {
+      orgId,
       actorUserId: userId,
       eventType: 'calendar.lesson_participant.reminder_updated',
       retentionCategory: TENANT_AUDIT_RETENTION.DIAGNOSTIC,
@@ -522,7 +523,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
     context.log?.warn?.('calendar/attendance failed to write tenant audit (reminder)', { message: auditError?.message, participantId: body.participant_id });
   }
 
-  return respond(context, 200, { message: 'reminder updated' });
+  return respond(context, 200, { message: 'reminder_updated' });
 }
 
 async function buildRestorePreview(client, orgId, body) {
@@ -959,7 +960,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       ? body.participant_status.trim().toLowerCase()
       : '';
     if (!requestedStatus) {
-      return respond(context, 400, { message: 'missing participant_status' });
+      return respond(context, 400, { message: 'missing_participant_status' });
     }
     try {
       const requirements = await getAttendanceStatusRequirements(client, orgId, requestedStatus);
@@ -977,10 +978,10 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   // Validate required fields
   if (!body.instance_id) {
-    return respond(context, 400, { message: 'missing instance_id' });
+    return respond(context, 400, { message: 'missing_instance_id' });
   }
   if (!body.participant_id) {
-    return respond(context, 400, { message: 'missing participant_id' });
+    return respond(context, 400, { message: 'missing_participant_id' });
   }
 
   const hasAttendedFlag = typeof body.attended === 'boolean';
@@ -1004,7 +1005,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   if (!isRestorePreviewAction && !isStatusChangePreviewAction && !hasAttendedFlag && !hasParticipantStatus) {
     return respond(context, 400, {
-      message: 'missing update payload (expected attended or participant_status)',
+      message: 'missing_update_payload_expected_attended_or_participant_status',
     });
   }
 
@@ -1023,7 +1024,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
   const participant = mutationState.participant;
 
   if (!instance || !participant) {
-    return respond(context, 404, { message: 'instance not found' });
+    return respond(context, 404, { message: 'instance_not_found' });
   }
 
   if (isLockedState(mutationState)) {
@@ -1063,7 +1064,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     }
 
     if (!instructorId || instructorId !== instance.instructor_employee_id) {
-      return respond(context, 403, { message: 'forbidden: can only mark attendance for your own lessons' });
+      return respond(context, 403, { message: 'forbidden_can_only_mark_attendance_for_your_own_lessons' });
     }
   }
 
@@ -1071,7 +1072,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     try {
       const preview = await buildRestorePreview(client, orgId, body);
       if (!preview) {
-        return respond(context, 404, { message: 'instance not found' });
+        return respond(context, 404, { message: 'instance_not_found' });
       }
       return respond(context, 200, preview);
     } catch (error) {
@@ -1096,7 +1097,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       'unknown',
     );
     if (!previewTargetStatus) {
-      return respond(context, 400, { message: 'missing target_participant_status' });
+      return respond(context, 400, { message: 'missing_target_participant_status' });
     }
     try {
       const preview = await buildParticipantStatusPreview(client, orgId, body, {
@@ -1104,7 +1105,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
         requestedInstructorCompensationDecision: requestedDecision,
       });
       if (!preview) {
-        return respond(context, 404, { message: 'instance not found' });
+        return respond(context, 404, { message: 'instance_not_found' });
       }
       return respond(context, 200, preview);
     } catch (error) {
@@ -1137,7 +1138,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       : requestedParticipantStatus;
 
     if (!allowedParticipantStatuses.has(participantStatus)) {
-      return respond(context, 400, { message: 'invalid participant_status' });
+      return respond(context, 400, { message: 'invalid_participant_status' });
     }
 
     if (requestedGraceExcuse && !['no_show', 'cancelled_student', 'cancelled_clinic'].includes(participantStatus)) {
@@ -1336,6 +1337,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   try {
     await logTenantAuditEvent(client, {
+      orgId,
       actorUserId: userId,
       eventType: 'calendar.lesson_participant.attendance_updated',
       retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1589,6 +1591,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
     try {
       await logTenantAuditEvent(client, {
+        orgId,
         actorUserId: userId,
         eventType: 'calendar.lesson_participant.restored_to_scheduled',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1656,6 +1659,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
     try {
       await logTenantAuditEvent(client, {
+        orgId,
         actorUserId: userId,
         eventType: 'calendar.lesson_participant.status_transition_applied',
         retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
@@ -1689,7 +1693,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
   }
 
   return respond(context, 200, {
-    message: 'participant updated successfully',
+    message: 'participant_updated_successfully',
     ...(billingWarnings.length > 0 ? { billing_warnings: billingWarnings } : {}),
   });
 }

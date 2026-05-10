@@ -93,13 +93,13 @@ export default async function userContext(context, req) {
   }
 
   if (String(req.method || 'GET').toUpperCase() !== 'GET') {
-    return respond(context, 405, { message: 'method not allowed' });
+    return respond(context, 405, { message: 'method_not_allowed' });
   }
 
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('user-context missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
@@ -109,12 +109,12 @@ export default async function userContext(context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('user-context getUser failed', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
     context.log?.warn?.('user-context token could not be resolved');
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -131,13 +131,13 @@ export default async function userContext(context, req) {
       .maybeSingle();
   } catch (error) {
     context.log?.error?.('user-context profile query failed', { message: error?.message, userId });
-    return respond(context, 500, { message: 'failed to load profile' });
+    return respond(context, 500, { message: 'failed_to_load_profile' });
   }
 
   if (profileResponse.error) {
     const status = profileResponse.error.status || 500;
     context.log?.error?.('user-context profile query error', { status, userId });
-    return respond(context, status, { message: 'failed to load profile' });
+    return respond(context, status, { message: 'failed_to_load_profile' });
   }
 
   const profile = profileResponse.data || {};
@@ -167,19 +167,19 @@ export default async function userContext(context, req) {
     }
   } catch (error) {
     context.log?.error?.('user-context primary queries failed', { message: error?.message, userId });
-    return respond(context, 500, { message: 'failed to load memberships' });
+    return respond(context, 500, { message: 'failed_to_load_memberships' });
   }
 
   if (membershipsResponse.error) {
     const status = membershipsResponse.error.status || 500;
     context.log?.error?.('user-context memberships query error', { status, userId });
-    return respond(context, status, { message: 'failed to load memberships' });
+    return respond(context, status, { message: 'failed_to_load_memberships' });
   }
 
   if (invitesResponse.error) {
     const status = invitesResponse.error.status || 500;
     context.log?.error?.('user-context invites query error', { status, userId });
-    return respond(context, status, { message: 'failed to load invitations' });
+    return respond(context, status, { message: 'failed_to_load_invitations' });
   }
 
   const memberships = Array.isArray(membershipsResponse.data) ? membershipsResponse.data : [];
@@ -210,13 +210,13 @@ export default async function userContext(context, req) {
         .in('id', idsArray);
     } catch (error) {
       context.log?.error?.('user-context enrichment queries failed', { message: error?.message, userId });
-      return respond(context, 500, { message: 'failed to load organizations' });
+      return respond(context, 500, { message: 'failed_to_load_organizations' });
     }
 
     if (organizationsResponse.error) {
       const status = organizationsResponse.error.status || 500;
       context.log?.error?.('user-context organizations query error', { status, userId });
-      return respond(context, status, { message: 'failed to load organizations' });
+      return respond(context, status, { message: 'failed_to_load_organizations' });
     }
   }
 

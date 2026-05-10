@@ -65,7 +65,7 @@ export default async function handler(context, req) {
     });
 
     if (!document_id || !org_id) {
-      return respond(context, 400, { error: 'document_id and org_id required' });
+      return respond(context, 400, { error: 'document_id_and_org_id_required' });
     }
 
     // Read environment and create Supabase admin client

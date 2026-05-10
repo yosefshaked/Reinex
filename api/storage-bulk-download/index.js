@@ -114,7 +114,7 @@ export default async function (context, req) {
     if (accessLevel !== 'read_only_grace') {
       return respond(context, 403, { 
         message: 'storage_disconnected',
-        details: 'Storage is disconnected and grace period has ended. Files are no longer available.'
+        details: 'storage_is_disconnected_and_grace_period_has_ended_files_are_no_longer_available'
       });
     }
   }

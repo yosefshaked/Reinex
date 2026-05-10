@@ -14,7 +14,7 @@ async function probeSupabaseDb(supabase) {
       return { name, display_name, status: 'degraded', latency_ms, message: error.message };
     }
     if (latency_ms > 2000) {
-      return { name, display_name, status: 'degraded', latency_ms, message: 'Response exceeded 2000 ms' };
+      return { name, display_name, status: 'degraded', latency_ms, message: 'response_exceeded_2000_ms' };
     }
     return { name, display_name, status: 'healthy', latency_ms, message: null };
   } catch (err) {
@@ -46,7 +46,7 @@ async function probePostHog(env) {
 
   const key = env.VITE_POSTHOG_KEY || env.POSTHOG_API_KEY;
   if (!key) {
-    return { name, display_name, status: 'unconfigured', latency_ms: null, message: 'PostHog API key not configured' };
+    return { name, display_name, status: 'unconfigured', latency_ms: null, message: 'posthog_api_key_not_configured' };
   }
 
   const host = normalizeString(env.VITE_POSTHOG_HOST || 'https://app.posthog.com');

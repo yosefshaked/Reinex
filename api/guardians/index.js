@@ -194,16 +194,16 @@ async function handlePost(context, req, client, orgId, userId) {
   const phoneResult = coerceOptionalString(body.phone);
 
   if (!firstNameResult.valid || !firstNameResult.value) {
-    return respond(context, 400, { error: 'missing_required_fields', message: 'First name is required' });
+    return respond(context, 400, { error: 'missing_required_fields', message: 'first_name_is_required' });
   }
 
   if (!phoneResult.valid || !phoneResult.value) {
-    return respond(context, 400, { error: 'missing_phone', message: 'Phone number is required for guardians' });
+    return respond(context, 400, { error: 'missing_phone', message: 'phone_number_is_required_for_guardians' });
   }
 
   // Validate phone
   if (!validateIsraeliPhone(phoneResult.value)) {
-    return respond(context, 400, { error: 'invalid_phone', message: 'Invalid Israeli phone number' });
+    return respond(context, 400, { error: 'invalid_phone', message: 'invalid_israeli_phone_number' });
   }
 
   // Optional fields
@@ -283,7 +283,7 @@ async function handlePut(context, req, client, orgId, guardianId, userId) {
   if (body.phone !== undefined) {
     const phoneResult = coerceOptionalString(body.phone);
     if (!phoneResult.valid || !phoneResult.value) {
-      return respond(context, 400, { error: 'phone_required', message: 'Phone number cannot be empty' });
+      return respond(context, 400, { error: 'phone_required', message: 'phone_number_cannot_be_empty' });
     }
     if (!validateIsraeliPhone(phoneResult.value)) {
       return respond(context, 400, { error: 'invalid_phone' });
@@ -362,7 +362,7 @@ async function handleDelete(context, client, orgId, guardianId) {
   if (links && links.length > 0) {
     return respond(context, 400, { 
       error: 'guardian_has_clients', 
-      message: 'Cannot delete guardian with linked clients. Remove guardian links first.' 
+      message: 'cannot_delete_guardian_with_linked_clients_remove_guardian_links_first' 
     });
   }
 
