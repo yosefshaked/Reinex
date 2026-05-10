@@ -319,6 +319,8 @@ export default function FinancialsPage() {
   const [cancelBatchConfirmDialog, setCancelBatchConfirmDialog] = useState(null);
   const [expandedProviderGroups, setExpandedProviderGroups] = useState(() => new Set());
   const [expandedStudentGroups, setExpandedStudentGroups] = useState(() => new Set());
+  const [expandedBatchIds, setExpandedBatchIds] = useState(() => new Set());
+  const [providerSettingsDialogId, setProviderSettingsDialogId] = useState('');
 
   const monthStart = useMemo(() => toLocalDateString(startOfMonth(monthDate)), [monthDate]);
   const monthEnd = useMemo(() => toLocalDateString(endOfMonth(monthDate)), [monthDate]);
@@ -477,6 +479,16 @@ export default function FinancialsPage() {
 
   const providerReceivableById = useMemo(() => new Map((claimsReadModel?.provider_receivables || [])
     .map((provider) => [provider.hmo_provider_id, provider])), [claimsReadModel]);
+
+  const batchClaimsMap = useMemo(() => {
+    const map = new Map();
+    for (const claim of (claimsReadModel?.claims || [])) {
+      if (!claim.hmo_invoice_batch_id) continue;
+      if (!map.has(claim.hmo_invoice_batch_id)) map.set(claim.hmo_invoice_batch_id, []);
+      map.get(claim.hmo_invoice_batch_id).push(claim);
+    }
+    return map;
+  }, [claimsReadModel]);
 
   useEffect(() => {
     setSelectedClaimLedgerIds((prev) => {
@@ -908,6 +920,89 @@ export default function FinancialsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ── Provider claim settings dialog ── */}
+      <Dialog
+        open={Boolean(providerSettingsDialogId)}
+        onOpenChange={(open) => { if (!open) setProviderSettingsDialogId(''); }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              הגדרות תביעה — {providerReceivableById.get(providerSettingsDialogId)?.hmo_provider_name || 'גורם מממן'}
+            </DialogTitle>
+            <DialogDescription>
+              הגדרות אלו קובעות כיצד דרישות נשלחות ותשלומים מסוכמים עבור ספק זה.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>צורת דרישה</Label>
+              <Select
+                value={providerPolicyForms[providerSettingsDialogId]?.claim_submission_mode || 'amount'}
+                onValueChange={(value) => updateProviderPolicyForm(providerSettingsDialogId, { claim_submission_mode: value })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="amount">לפי סכום</SelectItem>
+                  <SelectItem value="unit_count">לפי מספר שיעורים</SelectItem>
+                  <SelectItem value="hybrid">סכום + מספר שיעורים</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>תדירות טיפול</Label>
+              <Select
+                value={providerPolicyForms[providerSettingsDialogId]?.claim_payment_timing || 'after_submission'}
+                onValueChange={(value) => updateProviderPolicyForm(providerSettingsDialogId, { claim_payment_timing: value })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="after_submission">אחרי שליחת דרישה</SelectItem>
+                  <SelectItem value="monthly">חודשי</SelectItem>
+                  <SelectItem value="quarterly">רבעוני</SelectItem>
+                  <SelectItem value="custom">מותאם ידנית</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>התאמת תשלום</Label>
+              <Select
+                value={providerPolicyForms[providerSettingsDialogId]?.claim_payment_matching_mode || 'batch_amount'}
+                onValueChange={(value) => updateProviderPolicyForm(providerSettingsDialogId, { claim_payment_matching_mode: value })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="batch_amount">לפי סכום הדרישה</SelectItem>
+                  <SelectItem value="line_amount">לפי שורות</SelectItem>
+                  <SelectItem value="unit_count">לפי מספר שיעורים</SelectItem>
+                  <SelectItem value="manual_reconciliation">התאמה ידנית</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch
+                checked={providerPolicyForms[providerSettingsDialogId]?.claim_reference_required === true}
+                onCheckedChange={(checked) => updateProviderPolicyForm(providerSettingsDialogId, { claim_reference_required: checked })}
+              />
+              <Label>חובה להזין אסמכתת תשלום</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              onClick={async () => {
+                await handleSaveProviderPolicy(providerSettingsDialogId);
+                setProviderSettingsDialogId('');
+              }}
+              disabled={savingProviderPolicy}
+            >
+              {savingProviderPolicy ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+              שמור הגדרות
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setMonthDate(addMonths(monthDate, -1))}>הקודם</Button>
@@ -1298,105 +1393,190 @@ export default function FinancialsPage() {
                       && ['draft', 'submitted', 'issued', 'acknowledged'].includes(batch.status)
                       && Number(batch.paid_amount || 0) === 0;
                     const isPaidOrClosed = ['paid', 'closed'].includes(batch.status);
+
+                    const batchClaims = batchClaimsMap.get(batch.id) || [];
+                    const isExpanded = expandedBatchIds.has(batch.id);
+
+                    // Group by student for the drill-down tree
+                    const studentGroupMap = new Map();
+                    for (const claim of batchClaims) {
+                      const key = claim.student_id || claim.student_name || '';
+                      if (!studentGroupMap.has(key)) {
+                        studentGroupMap.set(key, { name: claim.student_name || 'לקוח/ה', claims: [] });
+                      }
+                      studentGroupMap.get(key).claims.push(claim);
+                    }
+                    const studentGroups = Array.from(studentGroupMap.values())
+                      .map((sg) => ({
+                        ...sg,
+                        claims: sg.claims.slice().sort(
+                          (a, b) => new Date(a.lesson_date || 0) - new Date(b.lesson_date || 0),
+                        ),
+                      }))
+                      .sort((a, b) => a.name.localeCompare(b.name, 'he'));
+
                     return (
-                      <div key={batch.id} className="rounded-xl border border-border bg-slate-50/70 p-4 space-y-3">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-semibold text-zinc-900">{batch.hmo_provider_name || 'גורם מממן'}</span>
-                              {batchState && (
-                                <span className={`rounded-full px-2 py-0.5 text-xs ${batchState.className}`}>
-                                  {batchState.label}
-                                </span>
+                      <div key={batch.id} className="rounded-xl border border-border bg-slate-50/70 overflow-hidden">
+                        {/* Batch header */}
+                        <div className="p-4 space-y-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-semibold text-zinc-900">{batch.hmo_provider_name || 'גורם מממן'}</span>
+                                {batchState && (
+                                  <span className={`rounded-full px-2 py-0.5 text-xs ${batchState.className}`}>
+                                    {batchState.label}
+                                  </span>
+                                )}
+                                {isPaidOrClosed && (
+                                  <span className="text-xs text-emerald-700">✓ טופל</span>
+                                )}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {batch.item_count || 0} שורות • {formatCurrency(batch.total_amount)}
+                                {Number(batch.paid_amount || 0) > 0 ? ` • שולם ${formatCurrency(batch.paid_amount)}` : ''}
+                              </div>
+                              <BatchMetaTags
+                                externalReference={batch.external_reference}
+                                externalLink={batch.external_link}
+                                notes={batch.notes}
+                              />
+                            </div>
+                            <div className="flex flex-wrap items-start gap-2 shrink-0">
+                              {!isPaidOrClosed && (
+                                <>
+                                  {batch.status === 'draft' && (
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      onClick={() => handleOpenSubmitClaimBatch(batch)}
+                                      disabled={processingClaimBatch}
+                                    >
+                                      <Send className="me-2 h-4 w-4" />
+                                      שלח לגורם מממן
+                                    </Button>
+                                  )}
+                                  {canCancel && (
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => setCancelBatchConfirmDialog(batch)}
+                                      disabled={processingClaimBatch}
+                                    >
+                                      בטל
+                                    </Button>
+                                  )}
+                                </>
                               )}
-                              {isPaidOrClosed && (
-                                <span className="text-xs text-emerald-700">✓ טופל</span>
+                              {batchClaims.length > 0 && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0"
+                                  aria-label={isExpanded ? 'כווץ' : 'הרחב'}
+                                  onClick={() => setExpandedBatchIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(batch.id)) next.delete(batch.id);
+                                    else next.add(batch.id);
+                                    return next;
+                                  })}
+                                >
+                                  <ChevronRight className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                                </Button>
                               )}
                             </div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {batch.item_count || 0} שורות • {formatCurrency(batch.total_amount)}
-                              {Number(batch.paid_amount || 0) > 0 ? ` • שולם ${formatCurrency(batch.paid_amount)}` : ''}
-                            </div>
-                            <BatchMetaTags
-                              externalReference={batch.external_reference}
-                              externalLink={batch.external_link}
-                              notes={batch.notes}
-                            />
                           </div>
-                          {!isPaidOrClosed && (
-                            <div className="flex flex-wrap gap-2">
-                              {batch.status === 'draft' && (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={() => handleOpenSubmitClaimBatch(batch)}
-                                  disabled={processingClaimBatch}
-                                >
-                                  <Send className="me-2 h-4 w-4" />
-                                  שלח לגורם מממן
-                                </Button>
-                              )}
-                              {canCancel && (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => setCancelBatchConfirmDialog(batch)}
-                                  disabled={processingClaimBatch}
-                                >
-                                  בטל
-                                </Button>
-                              )}
+
+                          {/* Inline payment form */}
+                          {canPayInline && (
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4 space-y-3">
+                              <div className="text-xs font-semibold text-zinc-900">
+                                רישום תשלום — יתרה פתוחה: {formatCurrency(remainingAmount)}
+                              </div>
+                              <div className="grid gap-3 md:grid-cols-3">
+                                <div className="space-y-1.5">
+                                  <Label className="text-xs">סכום</Label>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={batchPaymentForms[batch.id]?.amount || ''}
+                                    onChange={(e) => updateBatchPaymentForm(batch.id, { amount: e.target.value })}
+                                    placeholder="סכום בש״ח"
+                                    disabled={processingClaimBatch}
+                                  />
+                                </div>
+                                <div className="space-y-1.5">
+                                  <Label className="text-xs">תאריך תשלום</Label>
+                                  <Input
+                                    type="date"
+                                    value={batchPaymentForms[batch.id]?.effectiveAt || ''}
+                                    onChange={(e) => updateBatchPaymentForm(batch.id, { effectiveAt: e.target.value })}
+                                    disabled={processingClaimBatch}
+                                  />
+                                </div>
+                                <div className="space-y-1.5">
+                                  <Label className="text-xs">אסמכתא</Label>
+                                  <Input
+                                    value={batchPaymentForms[batch.id]?.externalReference || ''}
+                                    onChange={(e) => updateBatchPaymentForm(batch.id, { externalReference: e.target.value })}
+                                    disabled={processingClaimBatch}
+                                  />
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={() => handleRecordBatchPayment(batch)}
+                                disabled={processingClaimBatch}
+                              >
+                                {processingClaimBatch && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
+                                רשום תשלום
+                              </Button>
                             </div>
                           )}
                         </div>
 
-                        {/* Inline payment form */}
-                        {canPayInline && (
-                          <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4 space-y-3">
-                            <div className="text-xs font-semibold text-zinc-900">
-                              רישום תשלום — יתרה פתוחה: {formatCurrency(remainingAmount)}
-                            </div>
-                            <div className="grid gap-3 md:grid-cols-3">
-                              <div className="space-y-1.5">
-                                <Label className="text-xs">סכום</Label>
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={batchPaymentForms[batch.id]?.amount || ''}
-                                  onChange={(e) => updateBatchPaymentForm(batch.id, { amount: e.target.value })}
-                                  placeholder="סכום בש״ח"
-                                  disabled={processingClaimBatch}
-                                />
+                        {/* Expanded: Student → Lesson instance tree */}
+                        {isExpanded && (
+                          <div className="border-t border-border bg-white">
+                            {studentGroups.length === 0 ? (
+                              <div className="px-4 py-3 text-xs text-muted-foreground">
+                                אין שורות מפורטות לדרישה זו.
                               </div>
-                              <div className="space-y-1.5">
-                                <Label className="text-xs">תאריך תשלום</Label>
-                                <Input
-                                  type="date"
-                                  value={batchPaymentForms[batch.id]?.effectiveAt || ''}
-                                  onChange={(e) => updateBatchPaymentForm(batch.id, { effectiveAt: e.target.value })}
-                                  disabled={processingClaimBatch}
-                                />
+                            ) : (
+                              <div className="divide-y divide-border/50">
+                                {studentGroups.map((sg) => (
+                                  <div key={sg.name} className="px-4 py-3">
+                                    <div className="mb-2 text-xs font-semibold text-zinc-700">{sg.name}</div>
+                                    <div className="space-y-1.5">
+                                      {sg.claims.map((claim) => (
+                                        <div
+                                          key={claim.ledger_transaction_id || claim.id}
+                                          className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs"
+                                        >
+                                          <span className="font-medium text-zinc-800">
+                                            {formatClaimDate(claim.lesson_date)}
+                                          </span>
+                                          <span className="text-muted-foreground">
+                                            {formatClaimTimeRange(claim)}
+                                          </span>
+                                          <span className="text-muted-foreground">·</span>
+                                          <span className="flex-1 text-zinc-700">
+                                            {claim.service_name || 'שירות'}
+                                          </span>
+                                          <span className="font-medium text-zinc-900">
+                                            {formatCurrency(claim.hmo_contracted_rate_amount || 0)}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
-                              <div className="space-y-1.5">
-                                <Label className="text-xs">אסמכתא</Label>
-                                <Input
-                                  value={batchPaymentForms[batch.id]?.externalReference || ''}
-                                  onChange={(e) => updateBatchPaymentForm(batch.id, { externalReference: e.target.value })}
-                                  disabled={processingClaimBatch}
-                                />
-                              </div>
-                            </div>
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={() => handleRecordBatchPayment(batch)}
-                              disabled={processingClaimBatch}
-                            >
-                              {processingClaimBatch && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
-                              רשום תשלום
-                            </Button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1428,14 +1608,28 @@ export default function FinancialsPage() {
                             )}
                           </div>
                         </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setProviderBillingSheetId(provider.hmo_provider_id)}
-                        >
-                          פתח ניהול מלא
-                        </Button>
+                        <div className="flex items-center gap-1.5">
+                          {canMutateClaims ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground"
+                              aria-label="הגדרות"
+                              onClick={() => setProviderSettingsDialogId(provider.hmo_provider_id)}
+                            >
+                              <Settings2 className="h-4 w-4" />
+                            </Button>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setProviderBillingSheetId(provider.hmo_provider_id)}
+                          >
+                            פנקס תנועות
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1456,108 +1650,16 @@ export default function FinancialsPage() {
         open={Boolean(providerBillingSheetId)}
         onOpenChange={(open) => { if (!open) setProviderBillingSheetId(''); }}
       >
-        <SheetContent side="left" className="w-[min(96vw,860px)] overflow-hidden p-0 flex flex-col">
-          <Tabs defaultValue="billing" className="flex flex-col h-full overflow-hidden">
-
-            {/* Fixed header with title + tab nav */}
-            <div className="shrink-0 border-b border-border px-6 pt-5 pb-0">
-              <SheetHeader className="text-right mb-3">
-                <SheetTitle>ניהול גורם מממן</SheetTitle>
-                <SheetDescription>
-                  צפייה בחשבון הלדר, הפקת חשבוניות ורישום תשלומים.
-                </SheetDescription>
-              </SheetHeader>
-              <TabsList className="h-9 w-full justify-start rounded-none border-0 bg-transparent p-0 gap-0">
-                <TabsTrigger
-                  value="billing"
-                  className="rounded-none border-b-2 border-transparent px-3 pb-2 pt-0 text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
-                >
-                  דרישות ותשלומים
-                </TabsTrigger>
-                {canMutateClaims && providerBillingSheetId ? (
-                  <TabsTrigger
-                    value="settings"
-                    className="rounded-none border-b-2 border-transparent px-3 pb-2 pt-0 text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
-                  >
-                    הגדרות
-                  </TabsTrigger>
-                ) : null}
-              </TabsList>
-            </div>
-
-            {/* Billing tab */}
-            <TabsContent value="billing" className="flex-1 overflow-y-auto m-0 p-6">
-              <HmoProviderBillingWorkspace providerId={providerBillingSheetId} />
-            </TabsContent>
-
-            {/* Settings tab */}
-            {canMutateClaims && providerBillingSheetId ? (
-              <TabsContent value="settings" className="flex-1 overflow-y-auto m-0 p-6">
-                <div className="max-w-sm space-y-5">
-                  <div className="space-y-2">
-                    <Label>צורת דרישה</Label>
-                    <Select
-                      value={providerPolicyForms[providerBillingSheetId]?.claim_submission_mode || 'amount'}
-                      onValueChange={(value) => updateProviderPolicyForm(providerBillingSheetId, { claim_submission_mode: value })}
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="amount">לפי סכום</SelectItem>
-                        <SelectItem value="unit_count">לפי מספר שיעורים</SelectItem>
-                        <SelectItem value="hybrid">סכום + מספר שיעורים</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>תדירות טיפול</Label>
-                    <Select
-                      value={providerPolicyForms[providerBillingSheetId]?.claim_payment_timing || 'after_submission'}
-                      onValueChange={(value) => updateProviderPolicyForm(providerBillingSheetId, { claim_payment_timing: value })}
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="after_submission">אחרי שליחת דרישה</SelectItem>
-                        <SelectItem value="monthly">חודשי</SelectItem>
-                        <SelectItem value="quarterly">רבעוני</SelectItem>
-                        <SelectItem value="custom">מותאם ידנית</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>התאמת תשלום</Label>
-                    <Select
-                      value={providerPolicyForms[providerBillingSheetId]?.claim_payment_matching_mode || 'batch_amount'}
-                      onValueChange={(value) => updateProviderPolicyForm(providerBillingSheetId, { claim_payment_matching_mode: value })}
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="batch_amount">לפי סכום הדרישה</SelectItem>
-                        <SelectItem value="line_amount">לפי שורות</SelectItem>
-                        <SelectItem value="unit_count">לפי מספר שיעורים</SelectItem>
-                        <SelectItem value="manual_reconciliation">התאמה ידנית</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Switch
-                      checked={providerPolicyForms[providerBillingSheetId]?.claim_reference_required === true}
-                      onCheckedChange={(checked) => updateProviderPolicyForm(providerBillingSheetId, { claim_reference_required: checked })}
-                    />
-                    <Label>חובה להזין אסמכתת תשלום</Label>
-                  </div>
-                  <Button
-                    type="button"
-                    onClick={() => handleSaveProviderPolicy(providerBillingSheetId)}
-                    disabled={savingProviderPolicy}
-                  >
-                    {savingProviderPolicy ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
-                    שמור הגדרות
-                  </Button>
-                </div>
-              </TabsContent>
-            ) : null}
-
-          </Tabs>
+        <SheetContent side="left" className="w-[min(96vw,720px)] overflow-hidden p-0 flex flex-col">
+          <SheetHeader className="shrink-0 border-b border-border px-6 py-5 text-right">
+            <SheetTitle>
+              {providerReceivableById.get(providerBillingSheetId)?.hmo_provider_name || 'גורם מממן'}
+            </SheetTitle>
+            <SheetDescription>פנקס תנועות לדר — היסטוריית חיובים ותשלומים.</SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto p-6">
+            <HmoProviderBillingWorkspace providerId={providerBillingSheetId} />
+          </div>
         </SheetContent>
       </Sheet>
 
