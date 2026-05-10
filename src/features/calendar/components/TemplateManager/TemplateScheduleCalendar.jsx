@@ -8,7 +8,7 @@ import { Clock, Loader2, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DAY_OPTIONS, dayLabel, normalizeDayToken } from '@/lib/day-of-week.js';
-import { getAvailabilityWindowsForDay, timeToMinutes } from '@/lib/instructor-availability.js';
+import { getAvailabilityWindowsForDay, isWithinAvailabilityWindows, timeToMinutes } from '@/lib/instructor-availability.js';
 import { cn } from '@/lib/utils';
 import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
 import { toast } from 'sonner';
@@ -164,6 +164,21 @@ function instructorHasAvailabilityInDays(instructor, days) {
     }
   }
   return false;
+}
+
+function instructorHasAnyAvailabilityOnDay(instructor, day) {
+  const normalizedDay = normalizeDayToken(day);
+  if (!normalizedDay) return false;
+  return (instructor?.service_capabilities || []).some((capability) => (
+    getAvailabilityWindowsForDay(capability?.availability_windows, normalizedDay).length > 0
+  ));
+}
+
+function resolveInstructorServiceCapability(instructor, serviceId) {
+  const normalizedServiceId = String(serviceId || '');
+  if (!normalizedServiceId) return null;
+  return (instructor?.service_capabilities || [])
+    .find((capability) => String(capability?.service_id || '') === normalizedServiceId) || null;
 }
 
 function buildInstructorIdsWithVisibleTemplates({ templates, showInactive, days }) {
@@ -324,6 +339,7 @@ export function TemplateScheduleCalendar({
   onTemplateClick,
   onSlotClick,
   onExternalServiceDrop,
+  onUnavailableSlot,
   onWaitingListMatchClick,
 }) {
   const calendarRef = useRef(null);
@@ -363,6 +379,32 @@ export function TemplateScheduleCalendar({
 
     if (!serviceId || !resourceId || !dayOfWeek || !timeOfDay || durationMinutes <= 0) {
       toast.error('אי אפשר לפתוח יצירת תבנית מהשירות שנגרר.');
+      return;
+    }
+
+    const instructor = resources.find((resource) => String(resource.id) === String(resourceId))?.extendedProps?.instructor || null;
+    const capability = resolveInstructorServiceCapability(instructor, serviceId);
+    const isAvailable = capability && isWithinAvailabilityWindows({
+      availabilityWindows: capability.availability_windows,
+      day: dayOfWeek,
+      startTime: timeOfDay,
+      durationMinutes,
+    });
+
+    if (!isAvailable) {
+      toast.error('המדריך/ה לא זמינ/ה לשירות הזה ביום ובשעה שנבחרו.', {
+        description: 'בחרו יום או שעה אחרת, או עדכנו את זמינות המדריך/ה.',
+        action: {
+          label: 'עריכת זמינות',
+          onClick: () => onUnavailableSlot?.({
+            instructorId: String(resourceId),
+            serviceId,
+            dayOfWeek,
+            timeOfDay,
+            source: 'service_drop',
+          }),
+        },
+      });
       return;
     }
 
@@ -459,6 +501,23 @@ export function TemplateScheduleCalendar({
               const day = normalizeDayToken(selection.start?.getDay?.());
               const instructor = selection.resource?.extendedProps?.instructor || null;
               if (!day || !instructor) return;
+              if (!instructorHasAnyAvailabilityOnDay(instructor, day)) {
+                toast.error('המדריך/ה לא זמינ/ה ביום הזה.', {
+                  description: 'בחרו יום אחר או עדכנו את זמינות המדריך/ה.',
+                  action: {
+                    label: 'עריכת זמינות',
+                    onClick: () => onUnavailableSlot?.({
+                      instructorId: instructor.id,
+                      serviceId: '',
+                      dayOfWeek: day,
+                      timeOfDay: formatDateObjectTime(selection.start),
+                      source: 'slot_select',
+                    }),
+                  },
+                });
+                selection.view.calendar.unselect();
+                return;
+              }
               onSlotClick?.(instructor, day, formatDateObjectTime(selection.start));
               selection.view.calendar.unselect();
             }}

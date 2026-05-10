@@ -150,36 +150,6 @@ export function AddTemplateDialog({
     ));
   }, [selectedService?.id, selectedServiceDurationMinutes, selectedServiceHasValidDuration]);
 
-  useEffect(() => {
-    if (!selectedCapability || availableDayTokens.length === 0) {
-      return;
-    }
-
-    if (!availableDayTokens.includes(formData.day_of_week)) {
-      setFormData((prev) => ({
-        ...prev,
-        day_of_week: availableDayTokens[0],
-      }));
-    }
-  }, [availableDayTokens, formData.day_of_week, selectedCapability]);
-
-  useEffect(() => {
-    if (!selectedCapability || !formData.day_of_week) {
-      return;
-    }
-
-    if (availableTimeSlots.length === 0) {
-      if (formData.time_of_day) {
-        setFormData((prev) => ({ ...prev, time_of_day: '' }));
-      }
-      return;
-    }
-
-    if (!availableTimeSlots.includes(formData.time_of_day)) {
-      setFormData((prev) => ({ ...prev, time_of_day: availableTimeSlots[0] }));
-    }
-  }, [availableTimeSlots, formData.day_of_week, formData.time_of_day, selectedCapability]);
-
   // Reset form when dialog opens with defaults
   useEffect(() => {
     if (open) {
@@ -749,7 +719,16 @@ export function AddTemplateDialog({
             </Button>
             <Button
               type="submit"
-              disabled={isSubmitting || !formData.day_of_week || !formData.time_of_day || !selectedServiceHasValidDuration || availableTimeSlots.length === 0}
+              disabled={
+                isSubmitting
+                || !formData.day_of_week
+                || !formData.time_of_day
+                || !selectedServiceHasValidDuration
+                || availableTimeSlots.length === 0
+                || missingCapability
+                || missingAvailability
+                || outsideAvailability
+              }
             >
               {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
               צור תבנית

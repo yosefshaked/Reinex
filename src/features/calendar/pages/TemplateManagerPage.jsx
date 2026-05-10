@@ -383,7 +383,7 @@ export default function TemplateManagerPage() {
     refetchTemplates();
     setShowCapabilitiesDialog(false);
 
-    if (availabilityContext.source !== 'edit' && availabilityContext.instructorId && availabilityContext.serviceId) {
+    if (!['edit', 'calendar'].includes(availabilityContext.source) && availabilityContext.instructorId && availabilityContext.serviceId) {
       setAddDefaults((prev) => ({
         ...prev,
         instructorId: availabilityContext.instructorId,
@@ -482,6 +482,23 @@ export default function TemplateManagerPage() {
       waitingListContext: null,
     });
     setShowAddDialog(true);
+  }
+
+  function handleUnavailableTemplateSlot({ instructorId = '', serviceId = '', dayOfWeek = '', timeOfDay = '' } = {}) {
+    setAvailabilityContext({
+      instructorId: instructorId || '',
+      serviceId: serviceId || '',
+      waitingListEntryId: '',
+      clientProfileId: '',
+      studentId: '',
+      studentName: '',
+      serviceName: '',
+      fixType: serviceId ? 'outside_instructor_service_availability' : 'missing_instructor_availability_day',
+      source: 'calendar',
+      dayOfWeek,
+      timeOfDay,
+    });
+    setShowCapabilitiesDialog(true);
   }
 
   return (
@@ -650,6 +667,7 @@ export default function TemplateManagerPage() {
           onTemplateClick={handleTemplateClick}
           onSlotClick={handleCellClick}
           onExternalServiceDrop={handleExternalServiceDrop}
+          onUnavailableSlot={handleUnavailableTemplateSlot}
           showInactive={showInactive}
           showUnavailable={showUnavailable}
           viewMode={templateViewMode}
@@ -704,6 +722,8 @@ export default function TemplateManagerPage() {
               ? (availabilityContext.serviceName
                   ? `עדכנו את חלונות הזמינות של ${availabilityContext.serviceName} או התאימו את שעת התבנית.`
                   : 'עדכנו את חלונות הזמינות או התאימו את שעת התבנית.')
+            : availabilityContext.fixType === 'missing_instructor_availability_day'
+              ? 'עדכנו את חלונות הזמינות של המדריך/ה ליום שנבחר, או בחרו יום אחר בלוח התבניות.'
               : availabilityContext.serviceName
                 ? `השלימו חלונות זמינות עבור השירות ${availabilityContext.serviceName}.`
                 : 'השלימו חלונות זמינות עבור השירות הנבחר.'
