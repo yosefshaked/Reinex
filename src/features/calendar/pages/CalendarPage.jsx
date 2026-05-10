@@ -235,9 +235,25 @@ export default function CalendarPage() {
     refetchInstances();
   };
 
-  const handleGenerationApplied = () => {
+  const handleGenerationApplied = (payload = null) => {
     refetchInstances();
     refreshGenerationReview();
+    const createdCount = Number(payload?.summary?.applied_instances || 0);
+    const errorCount = Number(payload?.summary?.apply_errors || 0);
+    const issueCount = Number(payload?.actionable_issues?.length || 0);
+
+    if (errorCount > 0 || issueCount > 0) {
+      toast.warning('היצירה הושלמה חלקית', {
+        description: `נוצרו ${createdCount} שיעורים. יש פריטים שדורשים טיפול.`,
+      });
+      return;
+    }
+
+    toast.success('השיעורים נוצרו בהצלחה', {
+      description: createdCount > 0
+        ? `נוצרו ${createdCount} שיעורים מהתבניות.`
+        : 'לא נמצאו שיעורים חדשים ליצירה בטווח שנבחר.',
+    });
   };
 
   const handleDismissGenerationReview = useCallback(() => {
