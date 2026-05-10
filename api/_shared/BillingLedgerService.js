@@ -1228,6 +1228,9 @@ export default class BillingLedgerService {
     if (!original?.id || !REVERSIBLE_SOURCE_TYPES.has(normalizeString(original.source_type))) {
       throw new Error('transaction_not_reversible');
     }
+    if (normalizeString(original.source_type) === 'lesson_charge') {
+      throw new Error('lesson_charge_reversal_must_use_calendar');
+    }
 
     const { data: existingReversal, error: reversalLookupError } = await this.tenantClient
       .from('ledger_transactions')
@@ -2833,7 +2836,7 @@ export default class BillingLedgerService {
       throw ledgerError;
     }
 
-    const { data: participants, error: participantsError } = await this.tenantClient
+    let participantsQuery = this.tenantClient
       .from('lesson_participants')
       .select(`
         id,
@@ -2851,6 +2854,15 @@ export default class BillingLedgerService {
       .eq('student_id', normalizedStudentId)
       .order('lesson_instance(datetime_start)', { ascending: false })
       .limit(pageLimit);
+
+    if (normalizeString(startDate)) {
+      participantsQuery = participantsQuery.gte('lesson_instance.datetime_start', `${startDate}T00:00:00.000Z`);
+    }
+    if (normalizeString(endDate)) {
+      participantsQuery = participantsQuery.lte('lesson_instance.datetime_start', `${endDate}T23:59:59.999Z`);
+    }
+
+    const { data: participants, error: participantsError } = await participantsQuery;
 
     if (participantsError) {
       throw participantsError;
@@ -2984,7 +2996,7 @@ export default class BillingLedgerService {
       throw ledgerError;
     }
 
-    const { data: participants, error: participantsError } = await this.tenantClient
+    let participantsQuery = this.tenantClient
       .from('lesson_participants')
       .select(`
         id,
@@ -3002,6 +3014,15 @@ export default class BillingLedgerService {
       .eq('client_profile_id', normalizedClientProfileId)
       .is('student_id', null)
       .order('lesson_instance(datetime_start)', { ascending: false });
+
+    if (normalizeString(startDate)) {
+      participantsQuery = participantsQuery.gte('lesson_instance.datetime_start', `${startDate}T00:00:00.000Z`);
+    }
+    if (normalizeString(endDate)) {
+      participantsQuery = participantsQuery.lte('lesson_instance.datetime_start', `${endDate}T23:59:59.999Z`);
+    }
+
+    const { data: participants, error: participantsError } = await participantsQuery;
 
     if (participantsError) {
       throw participantsError;

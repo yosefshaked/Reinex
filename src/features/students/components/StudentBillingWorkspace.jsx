@@ -393,7 +393,7 @@ export default function StudentBillingWorkspace({
             toast.success('מזהה תנועה הועתק');
           },
         },
-        ...(canMutateBilling && !isReversed && ['manual_payment', 'manual_adjustment', 'lesson_charge'].includes(entry.source_type) ? [{
+        ...(canMutateBilling && !isReversed && ['manual_payment', 'manual_adjustment'].includes(entry.source_type) ? [{
           label: 'בצע היפוך',
           icon: <CornerUpLeft className="h-4 w-4" />,
           onSelect: () => handleReverseEntry(entry.id),

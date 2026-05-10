@@ -263,7 +263,7 @@ export default function ClientBillingWorkspace({ clientProfile }) {
             toast.success('מזהה תנועה הועתק');
           },
         },
-        ...(!isReversed && entry.source_type !== 'reversal' ? [{
+        ...(['manual_payment', 'manual_adjustment'].includes(entry.source_type) && !isReversed ? [{
           label: 'בצע היפוך',
           icon: <CornerUpLeft className="h-4 w-4" />,
           onSelect: () => handleReverseEntry(entry.id),

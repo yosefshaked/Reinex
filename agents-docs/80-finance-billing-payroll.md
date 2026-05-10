@@ -69,6 +69,7 @@
 - `commitments` are removed from the active billing model. Do not add new code that reads or writes commitment balances or commitment-linked lesson billing.
 - `ledger_transactions` are immutable. Fixes must be expressed as reversing rows plus replacement rows, never `UPDATE` or `DELETE`.
 - Calendar, attendance, HMO authorization, and manual billing endpoints must stay thin. They orchestrate domain changes and then call `BillingLedgerService`; they do not contain billing math or direct ledger SQL.
+- Calendar-generated `lesson_charge` rows must not be manually reversed through generic ledger reversal UI/API. Change the calendar lesson/participant status instead so `BillingLedgerService.syncLessonParticipantCharge(...)` can append the correct reversal and avoid a later calendar sync recreating the same charge.
 - Student billing uses a `student` ledger account. One-time customers use a `client_profile` ledger account. HMO receivables use an `hmo_provider` ledger account.
 - `ledger_accounts` must hold first-class HMO provider accounts (`account_type = 'hmo_provider'`, `hmo_provider_id = provider id`). Do not represent HMO receivables as ledger rows with `ledger_account_id = null`.
 - Legacy student `ledger_accounts` rows may exist without `client_profile_id`. Migrations should backfill that link when possible, but schema constraints must not fail solely because a historical student account is missing that column.

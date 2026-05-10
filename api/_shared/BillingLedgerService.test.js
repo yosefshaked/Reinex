@@ -868,6 +868,38 @@ describe('BillingLedgerService.reverseTransaction', () => {
     assert.equal(reversal.amount, 5000);
     assert.equal(reversal.reverses_transaction_id, 'orig-1');
   });
+
+  it('rejects direct lesson-charge reversal because calendar sync owns those charges', async () => {
+    const client = createMockClient({
+      ledger_accounts: [{ id: 'acct-1', account_type: 'student', student_id: 's1', client_profile_id: null, hmo_provider_id: null, is_active: true, metadata: {} }],
+      ledger_transactions: [
+        {
+          id: 'lesson-tx-1',
+          ledger_account_id: 'acct-1',
+          direction: 'DEBIT',
+          amount: 5000,
+          source_type: 'lesson_charge',
+          effective_at: FIXED_DATE,
+          student_id: 's1',
+          client_profile_id: null,
+          hmo_provider_id: null,
+          hmo_authorization_id: null,
+          service_id: 'service-1',
+          rate_source: 'service_default',
+          lesson_instance_id: 'instance-1',
+          lesson_participant_id: 'part-1',
+          reverses_transaction_id: null,
+        },
+      ],
+    });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
+
+    await assert.rejects(
+      () => service.reverseTransaction({ transactionId: 'lesson-tx-1', actorUserId: 'u1', reasonCode: 'manual_reversal' }),
+      /lesson_charge_reversal_must_use_calendar/,
+    );
+    assert.equal(client._store.ledger_transactions.length, 1);
+  });
 });
 
 // ---------------------------------------------------------------------------

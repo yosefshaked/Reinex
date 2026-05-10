@@ -1025,6 +1025,80 @@ export default function FinancialsPage() {
         </Button>
       </div>
 
+      {/* ── Dashboard KPIs ── */}
+      <div className="mb-6 space-y-4">
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">שכר</p>
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="rounded-xl border border-slate-900 bg-slate-900 p-4 text-white">
+              <div className="text-xs text-slate-300">סה״כ שכר</div>
+              <div className="mt-1 text-xl font-bold">{formatCurrency(payroll?.totals?.total_amount)}</div>
+            </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+              <div className="text-xs text-blue-700">בסיס</div>
+              <div className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(payroll?.totals?.base_amount)}</div>
+            </div>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+              <div className="text-xs text-emerald-700">חופשה בתשלום</div>
+              <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(payroll?.totals?.paid_leave_amount)}</div>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <div className="text-xs text-amber-700">תיקונים</div>
+              <div className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(payroll?.totals?.correction_amount)}</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">חיובי תלמידים</p>
+          <div className="grid gap-3 md:grid-cols-4">
+            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+              <div className="text-xs text-slate-600">תלמידים במעקב</div>
+              <div className="mt-1 text-2xl font-bold text-zinc-900">{overview.studentCount}</div>
+            </Card>
+            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+              <div className="text-xs text-blue-700">יתרת ספרים מצטברת</div>
+              <div className="mt-1 text-2xl font-bold text-blue-950">{formatCurrency(overview.balanceTotal)}</div>
+            </Card>
+            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+              <div className="text-xs text-emerald-700">חיובי תלמידים בחודש</div>
+              <div className="mt-1 text-2xl font-bold text-emerald-950">{formatCurrency(overview.lessonChargeTotal)}</div>
+            </Card>
+            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+              <div className="text-xs text-indigo-700">חיוב מול גורם מממן בחודש</div>
+              <div className="mt-1 text-2xl font-bold text-indigo-950">{formatCurrency(overview.hmoChargeTotal)}</div>
+              <div className="mt-2 text-xs text-muted-foreground">{overview.activeAuthorizationCount} אישורים פעילים בתצוגה</div>
+            </Card>
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">תביעות גורם מממן</p>
+          <div className="grid gap-3 md:grid-cols-5">
+            <Card className="rounded-2xl border border-amber-200 bg-amber-50 p-lg shadow-sm">
+              <div className="text-xs text-amber-700">משימות פתוחות</div>
+              <div className="mt-1 text-2xl font-bold text-amber-950">{claimsReadModel?.summary?.open_claim_tasks ?? 0}</div>
+            </Card>
+            <Card className="rounded-2xl border border-emerald-200 bg-emerald-50 p-lg shadow-sm">
+              <div className="text-xs text-emerald-700">ממתינות לאישור תשלום</div>
+              <div className="mt-1 text-2xl font-bold text-emerald-950">{claimsReadModel?.summary?.pending_payment_followup_batches ?? 0}</div>
+            </Card>
+            <Card className="rounded-2xl border border-indigo-200 bg-indigo-50 p-lg shadow-sm">
+              <div className="text-xs text-indigo-700">תשלום צפוי מדרישות שנשלחו</div>
+              <div className="mt-1 text-2xl font-bold text-indigo-950">{formatCurrency(claimsReadModel?.summary?.expected_payment_from_submitted_batches ?? 0)}</div>
+            </Card>
+            <Card className="rounded-2xl border border-blue-200 bg-blue-50 p-lg shadow-sm">
+              <div className="text-xs text-blue-700">תשלום שהתקבל</div>
+              <div className="mt-1 text-2xl font-bold text-blue-950">{formatCurrency(claimsReadModel?.summary?.payment_received_total ?? 0)}</div>
+            </Card>
+            <Card className="rounded-2xl border border-violet-200 bg-violet-50 p-lg shadow-sm">
+              <div className="text-xs text-violet-700">תלמידים פעילים עם אישור גורם מממן</div>
+              <div className="mt-1 text-2xl font-bold text-violet-950">{claimsReadModel?.summary?.active_students_with_hmo_eligibility ?? 0}</div>
+            </Card>
+          </div>
+        </div>
+      </div>
+
       <Tabs defaultValue="payroll" className="space-y-4">
         <TabsList className="h-auto rounded-2xl bg-slate-100 p-1">
           <TabsTrigger value="payroll" className="rounded-xl px-4 py-2">שכר</TabsTrigger>
@@ -1041,25 +1115,6 @@ export default function FinancialsPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-4">
-                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-                    <div className="text-xs text-blue-700">בסיס</div>
-                    <div className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(payroll?.totals?.base_amount)}</div>
-                  </div>
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                    <div className="text-xs text-emerald-700">חופשה בתשלום</div>
-                    <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(payroll?.totals?.paid_leave_amount)}</div>
-                  </div>
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                    <div className="text-xs text-amber-700">תיקונים</div>
-                    <div className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(payroll?.totals?.correction_amount)}</div>
-                  </div>
-                  <div className="rounded-xl border border-slate-900 bg-slate-900 p-4 text-white">
-                    <div className="text-xs text-slate-300">סה״כ</div>
-                    <div className="mt-1 text-xl font-bold">{formatCurrency(payroll?.totals?.total_amount)}</div>
-                  </div>
-                </div>
-
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -1099,26 +1154,6 @@ export default function FinancialsPage() {
         </TabsContent>
 
         <TabsContent value="billing" className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-4">
-            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <div className="text-xs text-slate-600">תלמידים במעקב</div>
-              <div className="mt-1 text-2xl font-bold text-zinc-900">{overview.studentCount}</div>
-            </Card>
-            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <div className="text-xs text-blue-700">יתרת ספרים מצטברת</div>
-              <div className="mt-1 text-2xl font-bold text-blue-950">{formatCurrency(overview.balanceTotal)}</div>
-            </Card>
-            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <div className="text-xs text-emerald-700">חיובי תלמידים בחודש</div>
-              <div className="mt-1 text-2xl font-bold text-emerald-950">{formatCurrency(overview.lessonChargeTotal)}</div>
-            </Card>
-            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <div className="text-xs text-indigo-700">חיוב מול גורם מממן בחודש</div>
-              <div className="mt-1 text-2xl font-bold text-indigo-950">{formatCurrency(overview.hmoChargeTotal)}</div>
-              <div className="mt-2 text-xs text-muted-foreground">{overview.activeAuthorizationCount} אישורים פעילים בתצוגה</div>
-            </Card>
-          </div>
-
           <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
             <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
               <div className="space-y-4">
@@ -1180,8 +1215,6 @@ export default function FinancialsPage() {
                 <StudentBillingWorkspace
                   studentId={selectedStudentId}
                   student={selectedStudent}
-                  startDate={monthStart}
-                  endDate={monthEnd}
                   onDataChanged={loadBillingOverview}
                 />
               ) : (
@@ -1215,29 +1248,6 @@ export default function FinancialsPage() {
             </Card>
           ) : (
             <>
-              <div className="grid gap-3 md:grid-cols-5">
-                <Card className="rounded-2xl border border-amber-200 bg-amber-50 p-lg shadow-sm">
-                  <div className="text-xs text-amber-700">משימות פתוחות</div>
-                  <div className="mt-1 text-2xl font-bold text-amber-950">{claimsReadModel?.summary?.open_claim_tasks ?? 0}</div>
-                </Card>
-                <Card className="rounded-2xl border border-emerald-200 bg-emerald-50 p-lg shadow-sm">
-                  <div className="text-xs text-emerald-700">משימות שמחכות לאישור קבלת תשלום</div>
-                  <div className="mt-1 text-2xl font-bold text-emerald-950">{claimsReadModel?.summary?.pending_payment_followup_batches ?? 0}</div>
-                </Card>
-                <Card className="rounded-2xl border border-indigo-200 bg-indigo-50 p-lg shadow-sm">
-                  <div className="text-xs text-indigo-700">תשלום צפוי מדרישות שנשלחו</div>
-                  <div className="mt-1 text-2xl font-bold text-indigo-950">{formatCurrency(claimsReadModel?.summary?.expected_payment_from_submitted_batches ?? 0)}</div>
-                </Card>
-                <Card className="rounded-2xl border border-blue-200 bg-blue-50 p-lg shadow-sm">
-                  <div className="text-xs text-blue-700">תשלום שהתקבל</div>
-                  <div className="mt-1 text-2xl font-bold text-blue-950">{formatCurrency(claimsReadModel?.summary?.payment_received_total ?? 0)}</div>
-                </Card>
-                <Card className="rounded-2xl border border-violet-200 bg-violet-50 p-lg shadow-sm">
-                  <div className="text-xs text-violet-700">תלמידים פעילים עם אישור גורם מממן</div>
-                  <div className="mt-1 text-2xl font-bold text-violet-950">{claimsReadModel?.summary?.active_students_with_hmo_eligibility ?? 0}</div>
-                </Card>
-              </div>
-
               {Array.isArray(claimsReadModel?.notices) && claimsReadModel.notices.length > 0 && (
                 <Card className="rounded-2xl border border-amber-300 bg-amber-50 p-lg shadow-sm">
                   <p className="text-sm font-semibold text-amber-900">הערות מערכת</p>

@@ -28,6 +28,7 @@ const COMMON_API_ERROR_MESSAGES = {
   invalid_token: 'ההתחברות פגה. התחברו מחדש ונסו שוב.',
   invite_not_found: 'ההזמנה לא נמצאה.',
   invitation_not_pending: 'ההזמנה כבר טופלה.',
+  lesson_charge_reversal_must_use_calendar: 'חיוב שיעור מתעדכן דרך שינוי סטטוס השיעור ביומן. עדכנו את הנוכחות או הביטול שם כדי לשמור על התאמה בין היומן ללדר.',
   lesson_instance_not_found: 'השיעור לא נמצא.',
   lesson_template_not_found: 'התבנית לא נמצאה.',
   method_not_allowed: 'הפעולה אינה נתמכת במסך הזה.',
