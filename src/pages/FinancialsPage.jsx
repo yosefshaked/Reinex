@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet.jsx';
 import {
   Select,
   SelectContent,
@@ -1645,23 +1644,23 @@ export default function FinancialsPage() {
         </TabsContent>
       </Tabs>
 
-      {/* ── Provider billing Sheet ── */}
-      <Sheet
+      {/* ── Provider ledger dialog ── */}
+      <Dialog
         open={Boolean(providerBillingSheetId)}
         onOpenChange={(open) => { if (!open) setProviderBillingSheetId(''); }}
       >
-        <SheetContent side="left" className="w-[min(96vw,720px)] overflow-hidden p-0 flex flex-col">
-          <SheetHeader className="shrink-0 border-b border-border px-6 py-5 text-right">
-            <SheetTitle>
+        <DialogContent className="flex flex-col gap-0 p-0 max-h-[85vh] w-[min(96vw,900px)] max-w-none">
+          <DialogHeader className="shrink-0 border-b border-border px-6 py-5 text-right">
+            <DialogTitle>
               {providerReceivableById.get(providerBillingSheetId)?.hmo_provider_name || 'גורם מממן'}
-            </SheetTitle>
-            <SheetDescription>פנקס תנועות לדר — היסטוריית חיובים ותשלומים.</SheetDescription>
-          </SheetHeader>
+            </DialogTitle>
+            <DialogDescription>פנקס תנועות לדר — היסטוריית חיובים ותשלומים.</DialogDescription>
+          </DialogHeader>
           <div className="flex-1 overflow-y-auto p-6">
             <HmoProviderBillingWorkspace providerId={providerBillingSheetId} />
           </div>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isBillingPolicyOpen} onOpenChange={setIsBillingPolicyOpen}>
         <DialogContent className="w-[min(96vw,88rem)] max-w-6xl">

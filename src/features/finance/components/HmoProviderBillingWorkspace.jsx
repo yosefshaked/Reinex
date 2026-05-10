@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Copy, Info, Loader2, RefreshCw } from 'lucide-react';
+import { Copy, Info, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -54,12 +52,6 @@ export default function HmoProviderBillingWorkspace({ providerId = '' }) {
   const { providers, loadingProviders } = useMedicalProviders();
 
   const [selectedProviderId, setSelectedProviderId] = useState(providerId);
-  const [periodStart, setPeriodStart] = useState(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    return today.slice(0, 8) + '01';
-  });
-  const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
-
   const [loading, setLoading] = useState(false);
   const [snapshot, setSnapshot] = useState(null);
 
@@ -82,8 +74,6 @@ export default function HmoProviderBillingWorkspace({ providerId = '' }) {
         params: {
           org_id: activeOrgId,
           hmo_provider_id: selectedProviderId,
-          start_date: periodStart || undefined,
-          end_date: periodEnd || undefined,
         },
       });
       setSnapshot(payload || null);
@@ -93,7 +83,7 @@ export default function HmoProviderBillingWorkspace({ providerId = '' }) {
     } finally {
       setLoading(false);
     }
-  }, [activeOrgId, session, selectedProviderId, periodStart, periodEnd]);
+  }, [activeOrgId, session, selectedProviderId]);
 
   useEffect(() => {
     if (selectedProviderId) void loadSnapshot();
@@ -219,36 +209,26 @@ export default function HmoProviderBillingWorkspace({ providerId = '' }) {
 
         {/* ── Provider selector (standalone use only) ── */}
         {!providerId ? (
-          <div className="grid gap-3 items-end md:grid-cols-3">
-            <div className="space-y-2">
-              <Label>גורם מממן</Label>
-              {loadingProviders ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" /> טוען...
-                </div>
-              ) : (
-                <Select
-                  value={selectedProviderId || '__none__'}
-                  onValueChange={(value) => setSelectedProviderId(value === '__none__' ? '' : value)}
-                >
-                  <SelectTrigger><SelectValue placeholder="בחר גורם מממן" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">בחר גורם מממן</SelectItem>
-                    {activeProviders.map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label>מ-תאריך</Label>
-              <Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>עד-תאריך</Label>
-              <Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
-            </div>
+          <div className="space-y-2">
+            <Label>גורם מממן</Label>
+            {loadingProviders ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> טוען...
+              </div>
+            ) : (
+              <Select
+                value={selectedProviderId || '__none__'}
+                onValueChange={(value) => setSelectedProviderId(value === '__none__' ? '' : value)}
+              >
+                <SelectTrigger><SelectValue placeholder="בחר גורם מממן" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">בחר גורם מממן</SelectItem>
+                  {activeProviders.map((provider) => (
+                    <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         ) : null}
 
@@ -260,43 +240,6 @@ export default function HmoProviderBillingWorkspace({ providerId = '' }) {
           )
         ) : (
           <div className="space-y-5">
-
-            {/* ── Toolbar: period filter + refresh ── */}
-            {providerId ? (
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="space-y-1.5 flex-1 min-w-[110px]">
-                  <Label className="text-xs text-muted-foreground">מ-תאריך</Label>
-                  <Input
-                    type="date"
-                    value={periodStart}
-                    onChange={(e) => setPeriodStart(e.target.value)}
-                    className="h-8 text-sm"
-                  />
-                </div>
-                <div className="space-y-1.5 flex-1 min-w-[110px]">
-                  <Label className="text-xs text-muted-foreground">עד-תאריך</Label>
-                  <Input
-                    type="date"
-                    value={periodEnd}
-                    onChange={(e) => setPeriodEnd(e.target.value)}
-                    className="h-8 text-sm"
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 w-8 shrink-0 p-0"
-                  onClick={loadSnapshot}
-                  disabled={loading}
-                  aria-label="רענן"
-                >
-                  {loading
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    : <RefreshCw className="h-3.5 w-3.5" />}
-                </Button>
-              </div>
-            ) : null}
 
             {/* ── Summary metrics ── */}
             {snapshot ? (
