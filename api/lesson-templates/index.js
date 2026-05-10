@@ -108,7 +108,6 @@ async function findExactTemplateConflict(client, orgId, {
 
 async function findInstructorSlotConflict(client, orgId, {
   instructorEmployeeId,
-  serviceId,
   dayOfWeek,
   timeOfDay,
   durationMinutes,
@@ -117,7 +116,7 @@ async function findInstructorSlotConflict(client, orgId, {
   excludeTemplateId = null,
 }) {
   let query = withOrgScope(client, 'lesson_templates', orgId)
-    .select('id, service_id, time_of_day, duration_minutes, valid_from, valid_until')
+    .select('id, time_of_day, duration_minutes, valid_from, valid_until')
     .eq('instructor_employee_id', instructorEmployeeId)
     .eq('day_of_week', dayOfWeek)
     .eq('is_active', true);
@@ -140,45 +139,13 @@ async function findInstructorSlotConflict(client, orgId, {
     return { conflict: null, error: null };
   }
 
-  const sameGroupTemplates = overlappingTemplates.filter((template) => (
-    template.service_id === serviceId
-    && normalizeTime(template.time_of_day) === normalizeTime(timeOfDay)
-    && Number(template.duration_minutes) === Number(durationMinutes)
-  ));
-
-  if (sameGroupTemplates.length !== overlappingTemplates.length) {
-    return {
-      conflict: {
-        code: 'instructor_template_time_conflict',
-        templates: overlappingTemplates,
-      },
-      error: null,
-    };
-  }
-
-  const { data: capability, error: capabilityError } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
-    .select('max_students')
-    .eq('employee_id', instructorEmployeeId)
-    .eq('service_id', serviceId)
-    .maybeSingle();
-
-  if (capabilityError) {
-    return { conflict: null, error: capabilityError };
-  }
-
-  const maxStudents = Number(capability?.max_students) || 1;
-  if (sameGroupTemplates.length >= maxStudents) {
-    return {
-      conflict: {
-        code: 'template_group_capacity_exceeded',
-        templates: sameGroupTemplates,
-        maxStudents,
-      },
-      error: null,
-    };
-  }
-
-  return { conflict: null, error: null };
+  return {
+    conflict: {
+      code: 'instructor_template_time_conflict',
+      templates: overlappingTemplates,
+    },
+    error: null,
+  };
 }
 
 function buildTemplateSelect({ includeStudent = false } = {}) {
@@ -246,6 +213,19 @@ function isDuplicateTemplateConstraintError(error) {
     .toLowerCase();
 
   return text.includes('lesson_templates_active_overlap') || text.includes('duplicate_template_conflict');
+}
+
+function resolveTemplateConstraintMessage(error) {
+  const text = [error?.message, error?.details, error?.hint]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (text.includes('instructor_template_time_conflict') || text.includes('lesson_templates_active_overlap')) {
+    return 'instructor_template_time_conflict';
+  }
+
+  return 'duplicate_template_conflict';
 }
 
 function computeSafeDeactivationUntil(existingTemplate, today) {
@@ -745,7 +725,6 @@ export default async function lessonTemplates(context, req) {
 
     const { conflict: instructorSlotConflict, error: instructorSlotConflictError } = await findInstructorSlotConflict(supabase, orgId, {
       instructorEmployeeId,
-      serviceId,
       dayOfWeek,
       timeOfDay,
       durationMinutes,
@@ -766,7 +745,6 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 409, {
         message: instructorSlotConflict.code,
         conflicting_template_ids: (instructorSlotConflict.templates || []).map((template) => template.id).filter(Boolean),
-        max_students: instructorSlotConflict.maxStudents || null,
       });
     }
 
@@ -789,7 +767,7 @@ export default async function lessonTemplates(context, req) {
     if (error) {
       if (isDuplicateTemplateConstraintError(error)) {
         return respond(context, 409, {
-          message: 'duplicate_template_conflict',
+          message: resolveTemplateConstraintMessage(error),
         });
       }
 
@@ -1200,7 +1178,6 @@ export default async function lessonTemplates(context, req) {
 
       const { conflict: instructorSlotConflict, error: instructorSlotConflictError } = await findInstructorSlotConflict(supabase, orgId, {
         instructorEmployeeId: nextTemplateState.instructor_employee_id,
-        serviceId: nextTemplateState.service_id,
         dayOfWeek: nextTemplateState.day_of_week,
         timeOfDay: nextTemplateState.time_of_day,
         durationMinutes: nextTemplateState.duration_minutes,
@@ -1221,7 +1198,6 @@ export default async function lessonTemplates(context, req) {
         return respond(context, 409, {
           message: instructorSlotConflict.code,
           conflicting_template_ids: (instructorSlotConflict.templates || []).map((template) => template.id).filter(Boolean),
-          max_students: instructorSlotConflict.maxStudents || null,
         });
       }
     }
@@ -1237,7 +1213,7 @@ export default async function lessonTemplates(context, req) {
     if (error) {
       if (isDuplicateTemplateConstraintError(error)) {
         return respond(context, 409, {
-          message: 'duplicate_template_conflict',
+          message: resolveTemplateConstraintMessage(error),
         });
       }
 

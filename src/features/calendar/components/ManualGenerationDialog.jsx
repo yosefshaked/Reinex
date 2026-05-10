@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge.jsx';
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { useOrg } from '@/org/OrgContext';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { getTodayLocalDateString, getWeekRangeDateStrings } from '../utils/localDate.js';
+import { getNextWeekRangeDateStrings, getTodayLocalDateString } from '../utils/localDate.js';
 import {
   buildGenerationReview,
   clearGenerationReview,
@@ -41,19 +41,96 @@ function formatIssueWhen(issue) {
   const time = issue?.time_of_day ? String(issue.time_of_day).slice(0, 5) : '';
 
   if (date && time) {
-    return `${date} ${time}`;
+    return `${formatHebrewDate(date)} ${time}`;
   }
   if (issue?.datetime_start) {
-    return String(issue.datetime_start).replace('T', ' ').slice(0, 16);
+    const raw = String(issue.datetime_start);
+    const datePart = raw.slice(0, 10);
+    const timePart = raw.slice(11, 16);
+    return [formatHebrewDate(datePart), timePart].filter(Boolean).join(' ');
   }
-  return date || '—';
+  return formatHebrewDate(date);
 }
 
 function getIssueSourceLabel(issue) {
+  if (issue?.source === 'hmo_warning') return 'אזהרת גורם מממן';
   return issue?.source === 'apply_error' ? 'נכשל בהחלה' : 'נחסם בתצוגה מקדימה';
 }
 
-export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied, onReviewStateChange }) {
+function formatHebrewDate(value) {
+  if (!value) return '—';
+  try {
+    return new Intl.DateTimeFormat('he-IL', {
+      day: 'numeric',
+      month: 'numeric',
+      year: 'numeric',
+    }).format(new Date(`${value}T12:00:00`));
+  } catch {
+    return value;
+  }
+}
+
+function getIssueTypeLabel(type) {
+  switch (type) {
+    case 'instructor_overlap':
+      return 'חפיפה למדריך/ה';
+    case 'student_overlap':
+      return 'חפיפה לתלמיד/ה';
+    case 'capacity_exceeded':
+      return 'חריגה מקיבולת';
+    case 'invalid_template_data':
+      return 'נתוני תבנית לא תקינים';
+    case 'missing_client_profile_link':
+      return 'חסר קישור לכרטיס לקוח';
+    case 'invalid_datetime':
+      return 'תאריך או שעה לא תקינים';
+    case 'instance_insert_failed':
+      return 'יצירת שיעור נכשלה';
+    case 'participant_insert_failed':
+      return 'הוספת משתתף נכשלה';
+    case 'hmo_authorization_gap':
+      return 'פער בכיסוי גורם מממן';
+    case 'generation_conflict':
+      return 'בעיה ביצירת שיעור';
+    default:
+      return 'בעיה ביצירת שיעור';
+  }
+}
+
+function getIssueLabel(issue) {
+  const issueTypes = Array.isArray(issue?.issue_types) && issue.issue_types.length > 0
+    ? issue.issue_types
+    : [issue?.issue_type].filter(Boolean);
+  return issueTypes.map(getIssueTypeLabel).filter(Boolean).join(', ') || getIssueTypeLabel(issue?.issue_type);
+}
+
+function getRepairTargetLabel(target) {
+  switch (target?.type) {
+    case 'student_profile':
+      if (target?.label === 'student_finance') return 'לכרטיס פיננסי';
+      return 'לכרטיס תלמיד';
+    case 'template_edit':
+      return 'לעריכת תבנית';
+    default:
+      return 'לטיפול';
+  }
+}
+
+function buildIssueDisplayMessage(issue) {
+  const raw = String(issue?.message || '').trim();
+  if (!raw || raw === 'generation_issue') {
+    return getIssueLabel(issue);
+  }
+  if (/^[a-z0-9_:-]+$/i.test(raw)) {
+    return getIssueTypeLabel(raw);
+  }
+  return raw
+    .replaceAll('client_profile_id', 'קישור לכרטיס לקוח')
+    .replaceAll('student_profile', 'כרטיס תלמיד')
+    .replaceAll('template_edit', 'עריכת תבנית');
+}
+
+export function ManualGenerationDialog({ open, onClose, onApplied, onReviewStateChange }) {
   const navigate = useNavigate();
   const { activeOrgId } = useOrg();
   const [startDate, setStartDate] = useState('');
@@ -70,19 +147,18 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied, 
     if (!open) return;
 
     const persistedReview = activeOrgId ? readGenerationReview(activeOrgId) : null;
-    const referenceDate = persistedReview?.scope?.startDate || defaultDate || getTodayLocalDateString();
-    const week = getWeekRangeDateStrings(referenceDate);
+    const week = getNextWeekRangeDateStrings(getTodayLocalDateString());
 
     setSavedReview(persistedReview);
-    setStartDate(persistedReview?.scope?.startDate || week.start);
-    setEndDate(persistedReview?.scope?.endDate || week.end);
+    setStartDate(week.start);
+    setEndDate(week.end);
     setResult(null);
     setError('');
     setIsPreviewLoading(false);
     setIsApplyLoading(false);
     setLastPreviewRequestKey('');
     setActiveMode(persistedReview?.retryableFailures?.length > 0 ? 'retry_failed' : 'full_range');
-  }, [open, defaultDate, activeOrgId]);
+  }, [open, activeOrgId]);
 
   const retryItems = useMemo(() => (
     Array.isArray(savedReview?.retryableFailures)
@@ -150,6 +226,14 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied, 
         return 'קיימת הרשאה אך אינה פעילה';
       case 'no_active_authorization_for_date':
         return 'הרשאה פעילה אך טווח תאריכים לא מכסה את המועד';
+      case 'authorization_conflict':
+        return 'קיימות הרשאות חופפות';
+      case 'authorization_exhausted':
+        return 'מכסת ההרשאה נוצלה';
+      case 'missing_authorization_pricing':
+        return 'חסרים מחירי כיסוי באישור';
+      case 'missing_post_coverage_policy':
+        return 'חסרה מדיניות המשך לאחר מיצוי';
       default:
         return 'פער הרשאה לא מסווג';
     }
@@ -424,16 +508,41 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied, 
               {generationWarnings.length > 0 && (
                 <div>
                   <p className="mb-1 text-sm font-medium">אזהרות כיסוי גורם מממן</p>
-                  <div className="max-h-40 space-y-1 overflow-y-auto">
+                  <div className="max-h-56 space-y-2 overflow-y-auto">
                     {generationWarnings.slice(0, 30).map((warning, index) => (
-                      <div key={`${warning.student_id || 'student'}-${warning.service_id || 'service'}-${warning.target_date || index}`} className="rounded border bg-white px-2 py-1 text-xs">
-                        <span className="font-medium">סיבה:</span> {getWarningReasonLabel(warning.reason)}
-                        {' • '}
-                        <span className="font-medium">תלמיד:</span> {warning.student_name || warning.student_id || '—'}
-                        {' • '}
-                        <span className="font-medium">שירות:</span> {warning.service_id || '—'}
-                        {' • '}
-                        <span className="font-medium">תאריך:</span> {warning.target_date || '—'}
+                      <div key={`${warning.student_id || 'student'}-${warning.service_id || 'service'}-${warning.target_date || index}`} className="rounded border bg-white p-3 text-xs">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={warning.severity === 'error' ? 'destructive' : 'secondary'}>
+                            {getWarningReasonLabel(warning.reason)}
+                          </Badge>
+                          <span className="font-medium text-slate-900">{warning.student_name || 'ללא שם תלמיד'}</span>
+                          <span className="text-slate-500">{formatHebrewDate(warning.target_date)}</span>
+                          {warning.time_of_day ? <span className="text-slate-500">{String(warning.time_of_day).slice(0, 5)}</span> : null}
+                        </div>
+                        <div className="mt-1 text-slate-700">
+                          שירות: <span className="font-medium">{warning.service_name || 'לא זוהה שירות'}</span>
+                        </div>
+                        <div className="mt-1 text-slate-700">{warning.message}</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={!warning.student_id}
+                            onClick={() => handleJumpTo(warning.student_id ? `/students/${warning.student_id}/financial` : '')}
+                          >
+                            לכרטיס פיננסי
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            disabled={!warning.template_id}
+                            onClick={() => handleJumpTo(warning.template_id ? `/calendar/templates?edit_template_id=${warning.template_id}` : '')}
+                          >
+                            לתבנית
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -467,34 +576,27 @@ export function ManualGenerationDialog({ open, onClose, defaultDate, onApplied, 
                         <Badge variant={issue.source === 'apply_error' ? 'destructive' : 'secondary'}>
                           {getIssueSourceLabel(issue)}
                         </Badge>
-                        <span className="font-medium">{issue.student_name || issue.student_id || 'ללא תלמיד מזוהה'}</span>
+                        <span className="font-medium">{issue.student_name || 'ללא שם תלמיד'}</span>
                         <span className="text-xs text-slate-500">{formatIssueWhen(issue)}</span>
                       </div>
-                      <div className="mt-2 text-sm text-slate-800">{issue.message}</div>
+                      <div className="mt-2 text-sm text-slate-800">{buildIssueDisplayMessage(issue)}</div>
                       <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
-                        <span>תלמיד: {issue.student_id || '—'}</span>
-                        <span>תבנית: {issue.template_id || '—'}</span>
-                        <span>סוג: {issue.issue_type || 'generation_issue'}</span>
+                        {issue.service_name ? <span>שירות: {issue.service_name}</span> : null}
+                        <span>סוג: {getIssueLabel(issue)}</span>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={!studentTarget?.path}
-                          onClick={() => handleJumpTo(studentTarget?.path)}
-                        >
-                          לכרטיס תלמיד
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={!templateTarget?.path}
-                          onClick={() => handleJumpTo(templateTarget?.path)}
-                        >
-                          לעריכת תבנית
-                        </Button>
+                        {[studentTarget, templateTarget].filter(Boolean).map((target) => (
+                          <Button
+                            key={`${target.type}-${target.path}`}
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={!target?.path}
+                            onClick={() => handleJumpTo(target?.path)}
+                          >
+                            {getRepairTargetLabel(target)}
+                          </Button>
+                        ))}
                       </div>
                     </div>
                   );

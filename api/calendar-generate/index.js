@@ -173,6 +173,10 @@ function buildStudentName(profile) {
   return [profile.first_name, profile.middle_name, profile.last_name].filter(Boolean).join(' ').trim();
 }
 
+function buildServiceName(service) {
+  return normalizeString(service?.name) || normalizeString(service?.service_name) || '';
+}
+
 function normalizeRetryItems(value) {
   if (!Array.isArray(value)) {
     return { items: [], valid: value == null };
@@ -272,7 +276,7 @@ function buildIssueMessage(entry) {
   return normalizeString(entry?.type) || 'generation_issue';
 }
 
-function buildActionableIssues({ conflicts, applied }) {
+function buildActionableIssues({ conflicts, warnings, applied }) {
   const conflictIssues = Array.isArray(conflicts)
     ? conflicts.map((entry) => ({
       source: 'preview_conflict',
@@ -285,6 +289,7 @@ function buildActionableIssues({ conflicts, applied }) {
       student_id: normalizeString(entry?.student_id) || null,
       student_name: normalizeString(entry?.student_name) || '',
       client_profile_id: normalizeString(entry?.client_profile_id) || null,
+      service_name: normalizeString(entry?.service_name) || '',
       datetime_start: normalizeString(entry?.datetime_start) || null,
       target_date: normalizeString(entry?.target_date) || null,
       time_of_day: normalizeString(entry?.time_of_day) || extractTimePart(entry?.datetime_start) || null,
@@ -294,7 +299,9 @@ function buildActionableIssues({ conflicts, applied }) {
           target_date: entry.retry_item.target_date,
         }
         : null,
-      repair_targets: buildRepairTargets(entry),
+      repair_targets: Array.isArray(entry?.repair_targets) && entry.repair_targets.length > 0
+        ? entry.repair_targets
+        : buildRepairTargets(entry),
     }))
     : [];
 
@@ -308,6 +315,7 @@ function buildActionableIssues({ conflicts, applied }) {
       student_id: normalizeString(entry?.student_id) || null,
       student_name: normalizeString(entry?.student_name) || '',
       client_profile_id: normalizeString(entry?.client_profile_id) || null,
+      service_name: normalizeString(entry?.service_name) || '',
       datetime_start: normalizeString(entry?.datetime_start) || null,
       target_date: normalizeString(entry?.target_date) || null,
       time_of_day: normalizeString(entry?.time_of_day) || extractTimePart(entry?.datetime_start) || null,
@@ -321,7 +329,28 @@ function buildActionableIssues({ conflicts, applied }) {
     }))
     : [];
 
-  return [...conflictIssues, ...applyIssues];
+  const warningIssues = Array.isArray(warnings)
+    ? warnings.map((entry) => ({
+      source: 'hmo_warning',
+      issue_type: normalizeString(entry?.type) || 'hmo_authorization_gap',
+      issue_types: [normalizeString(entry?.type) || 'hmo_authorization_gap'],
+      message: buildIssueMessage(entry),
+      template_id: normalizeString(entry?.template_id) || null,
+      student_id: normalizeString(entry?.student_id) || null,
+      student_name: normalizeString(entry?.student_name) || '',
+      client_profile_id: normalizeString(entry?.client_profile_id) || null,
+      service_name: normalizeString(entry?.service_name) || '',
+      datetime_start: normalizeString(entry?.datetime_start) || null,
+      target_date: normalizeString(entry?.target_date) || null,
+      time_of_day: normalizeString(entry?.time_of_day) || extractTimePart(entry?.datetime_start) || null,
+      retry_item: null,
+      repair_targets: Array.isArray(entry?.repair_targets) && entry.repair_targets.length > 0
+        ? entry.repair_targets
+        : buildRepairTargets(entry),
+    }))
+    : [];
+
+  return [...conflictIssues, ...warningIssues, ...applyIssues];
 }
 
 function buildCoverageWarningFromDecision(candidate, coverageDecision) {
@@ -355,12 +384,31 @@ function buildCoverageWarningFromDecision(candidate, coverageDecision) {
     severity: coverageDecision.status === 'blocked' ? 'error' : 'warning',
     reason,
     student_id: candidate.student_id,
+    student_name: candidate.student_name || '',
+    client_profile_id: candidate.client_profile_id || null,
     service_id: candidate.service_id,
+    service_name: candidate.service_name || '',
     template_id: candidate.template_id || null,
     target_date: targetDate,
+    time_of_day: normalizeString(candidate.time_of_day) || extractTimePart(candidate.datetime_start) || null,
     datetime_start: candidate.datetime_start,
     authorization_id: coverageDecision.authorization_id || null,
     message,
+    retry_item: candidate.retry_item || null,
+    repair_targets: [
+      ...(candidate.student_id ? [{
+        type: 'student_profile',
+        label: 'student_finance',
+        student_id: candidate.student_id,
+        path: `/students/${candidate.student_id}/financial`,
+      }] : []),
+      ...(candidate.template_id ? [{
+        type: 'template_edit',
+        label: 'template_edit',
+        template_id: candidate.template_id,
+        path: `/calendar/templates?edit_template_id=${candidate.template_id}`,
+      }] : []),
+    ],
   };
 }
 
@@ -432,7 +480,7 @@ function buildDiffResponse({
   skippedOverrides,
   applied,
 }) {
-  const actionableIssues = buildActionableIssues({ conflicts, applied });
+  const actionableIssues = buildActionableIssues({ conflicts, warnings, applied });
   return {
     generation_run_id: generationRunId,
     start_date: startDate,
@@ -469,6 +517,7 @@ function buildDiffResponse({
           student_id: entry.student_id || null,
           student_name: entry.student_name || '',
           client_profile_id: entry.client_profile_id || null,
+          service_name: entry.service_name || '',
           datetime_start: entry.datetime_start || null,
           target_date: entry.target_date || null,
           time_of_day: entry.time_of_day || null,
@@ -646,6 +695,21 @@ export default async function calendarGenerate(context, req) {
       buildStudentName(clientProfileById.get(row.client_profile_id || '')) || '',
     ]),
   );
+  const serviceIds = Array.from(new Set(templateRows.map((row) => normalizeString(row?.service_id)).filter(Boolean)));
+  const { data: serviceRows, error: servicesError } = serviceIds.length > 0
+    ? await withOrgScope(supabase, 'Services', orgId)
+      .select('id, name')
+      .in('id', serviceIds)
+    : { data: [], error: null };
+
+  if (servicesError) {
+    context.log?.error?.('calendar/generate failed to load services', { message: servicesError.message });
+    return respond(context, 500, { message: 'failed_to_load_services' });
+  }
+
+  const serviceNameById = new Map(
+    (serviceRows || []).map((row) => [row.id, buildServiceName(row)]),
+  );
   let hmoWarningsNotice = templateStudentIds.length > 0 ? null : null;
 
   const templateIds = templateRows.map((row) => row.id);
@@ -681,6 +745,24 @@ export default async function calendarGenerate(context, req) {
   if (capabilitiesError) {
     context.log?.error?.('calendar/generate failed to load instructor capabilities', { message: capabilitiesError.message });
     return respond(context, 500, { message: 'failed_to_load_capabilities' });
+  }
+
+  const overrideServiceIds = Array.from(new Set(
+    (overridesRows || [])
+      .map((row) => normalizeString(row?.new_service_id))
+      .filter((serviceId) => serviceId && !serviceNameById.has(serviceId)),
+  ));
+  if (overrideServiceIds.length > 0) {
+    const { data: overrideServiceRows, error: overrideServicesError } = await withOrgScope(supabase, 'Services', orgId)
+      .select('id, name')
+      .in('id', overrideServiceIds);
+    if (overrideServicesError) {
+      context.log?.error?.('calendar/generate failed to load override services', { message: overrideServicesError.message });
+      return respond(context, 500, { message: 'failed_to_load_services' });
+    }
+    for (const row of overrideServiceRows || []) {
+      serviceNameById.set(row.id, buildServiceName(row));
+    }
   }
 
   const overrideMap = resolveOverrideMap(overridesRows);
@@ -755,6 +837,7 @@ export default async function calendarGenerate(context, req) {
 
       const finalInstructorId = override?.new_instructor_employee_id || template.instructor_employee_id;
       const finalServiceId = override?.new_service_id || template.service_id;
+      const finalServiceName = serviceNameById.get(finalServiceId) || '';
       const finalTime = normalizeTimeHms(override?.new_time_of_day || template.time_of_day);
       const finalDuration = Number(override?.new_duration_minutes || template.duration_minutes);
       const participantClientProfileId = template.student_id
@@ -771,6 +854,7 @@ export default async function calendarGenerate(context, req) {
           student_id: template.student_id,
           student_name: studentName,
           client_profile_id: participantClientProfileId,
+          service_name: finalServiceName,
           target_date: date,
           message: 'נתוני תבנית/חריגה לא תקינים ולכן הדור לא בוצע עבור המופע הזה.',
           retry_item: buildRetryItem(template.id, date),
@@ -785,6 +869,7 @@ export default async function calendarGenerate(context, req) {
           student_id: template.student_id,
           student_name: studentName,
           client_profile_id: null,
+          service_name: finalServiceName,
           target_date: date,
           message: 'לתלמיד/ה בתבנית אין client_profile_id ולכן אי אפשר ליצור משתתף לשיעור.',
           retry_item: buildRetryItem(template.id, date),
@@ -799,6 +884,7 @@ export default async function calendarGenerate(context, req) {
           student_id: template.student_id,
           student_name: studentName,
           client_profile_id: participantClientProfileId,
+          service_name: finalServiceName,
           target_date: date,
           time_of_day: finalTime,
           reason: 'matching_template_instance_exists',
@@ -815,6 +901,7 @@ export default async function calendarGenerate(context, req) {
           student_id: template.student_id,
           student_name: studentName,
           client_profile_id: participantClientProfileId,
+          service_name: finalServiceName,
           target_date: date,
           time_of_day: finalTime,
           message: 'תאריך/שעה לא תקינים עבור יצירת מופע.',
@@ -828,6 +915,7 @@ export default async function calendarGenerate(context, req) {
         student_id: template.student_id,
         student_name: studentName,
         client_profile_id: participantClientProfileId,
+        service_name: finalServiceName,
         instructor_employee_id: finalInstructorId,
         service_id: finalServiceId,
         datetime_start: datetimeStartIso,
@@ -847,6 +935,7 @@ export default async function calendarGenerate(context, req) {
           student_id: template.student_id,
           student_name: studentName,
           client_profile_id: participantClientProfileId,
+          service_name: finalServiceName,
           target_date: date,
           message: 'תאריך/שעה לא תקינים עבור יצירת מופע.',
           retry_item: buildRetryItem(template.id, date),
@@ -863,6 +952,7 @@ export default async function calendarGenerate(context, req) {
           student_id: template.student_id,
           student_name: studentName,
           client_profile_id: participantClientProfileId,
+          service_name: finalServiceName,
           datetime_start: candidate.datetime_start,
           target_date: candidate.target_date,
           time_of_day: candidate.time_of_day,
@@ -939,6 +1029,7 @@ export default async function calendarGenerate(context, req) {
           student_id: proposal.student_id,
           student_name: proposal.student_name || '',
           client_profile_id: proposal.client_profile_id || null,
+          service_name: proposal.service_name || '',
           datetime_start: proposal.datetime_start,
           target_date: proposal.target_date,
           time_of_day: proposal.time_of_day,
@@ -960,6 +1051,7 @@ export default async function calendarGenerate(context, req) {
           student_id: proposal.student_id,
           student_name: proposal.student_name || '',
           client_profile_id: proposal.client_profile_id || null,
+          service_name: proposal.service_name || '',
           datetime_start: proposal.datetime_start,
           target_date: proposal.target_date,
           time_of_day: proposal.time_of_day,
@@ -994,6 +1086,7 @@ export default async function calendarGenerate(context, req) {
           student_id: proposal.student_id,
           student_name: proposal.student_name || '',
           client_profile_id: proposal.client_profile_id || null,
+          service_name: proposal.service_name || '',
           datetime_start: proposal.datetime_start,
           target_date: proposal.target_date,
           time_of_day: proposal.time_of_day,

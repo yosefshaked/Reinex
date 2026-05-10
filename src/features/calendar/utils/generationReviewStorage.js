@@ -87,6 +87,7 @@ function normalizeIssue(entry, source) {
     student_id: entry.student_id || null,
     student_name: entry.student_name || '',
     client_profile_id: entry.client_profile_id || null,
+    service_name: entry.service_name || '',
     datetime_start: entry.datetime_start || null,
     target_date: entry.target_date || null,
     time_of_day: entry.time_of_day || null,

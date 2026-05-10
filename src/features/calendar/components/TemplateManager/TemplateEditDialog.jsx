@@ -280,9 +280,9 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
               : apiError === 'invalid_service_duration'
                 ? 'לשירות שנבחר אין משך תקין. יש לעדכן את משך השירות לפני שמירת התבנית.'
               : apiError === 'instructor_template_time_conflict'
-                ? 'למדריך/ה כבר קיימת תבנית שחופפת לשעה הזאת. אם זו קבוצה, בחרו בדיוק את אותו שירות ושעה; אחרת בחרו חלון פנוי.'
+                ? 'למדריך/ה כבר קיימת תבנית שחופפת לשעה הזאת. בחרו חלון פנוי אחר או ערכו את התבנית הקיימת.'
               : apiError === 'template_group_capacity_exceeded'
-                ? 'הקבוצה בשעה הזאת כבר מלאה לפי מגבלת התלמידים של השירות אצל המדריך/ה.'
+                ? 'למדריך/ה כבר קיימת תבנית שחופפת לשעה הזאת. בחרו חלון פנוי אחר או ערכו את התבנית הקיימת.'
           : apiError,
       );
       return;
@@ -329,6 +329,8 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
       setError(
         apiError === 'duplicate_template_conflict'
           ? 'לא ניתן להפעיל תבנית זהה וחופפת (תלמיד+מדריך+יום+שעה) כאשר כבר קיימת תבנית פעילה.'
+          : apiError === 'instructor_template_time_conflict' || apiError === 'template_group_capacity_exceeded'
+            ? 'למדריך/ה כבר קיימת תבנית שחופפת לשעה הזאת. בחרו טווח תוקף אחר או ערכו את התבנית הקיימת.'
           : apiError === 'reactivation_requires_new_valid_range'
             ? 'כדי להפעיל תבנית לא פעילה יש לבחור טווח תוקף חדש.'
             : apiError,

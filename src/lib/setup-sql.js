@@ -1321,15 +1321,21 @@ BEGIN
     FROM public.lesson_templates existing
     WHERE existing.id IS DISTINCT FROM NEW.id
       AND existing.org_id = NEW.org_id
-      AND existing.student_id = NEW.student_id
       AND existing.instructor_employee_id = NEW.instructor_employee_id
       AND existing.day_of_week = NEW.day_of_week
-      AND existing.time_of_day = NEW.time_of_day
       AND existing.is_active = true
       AND NEW.valid_from <= COALESCE(existing.valid_until, DATE '9999-12-31')
       AND existing.valid_from <= COALESCE(NEW.valid_until, DATE '9999-12-31')
+      AND (
+        ((EXTRACT(HOUR FROM existing.time_of_day)::int * 60) + EXTRACT(MINUTE FROM existing.time_of_day)::int)
+          < ((EXTRACT(HOUR FROM NEW.time_of_day)::int * 60) + EXTRACT(MINUTE FROM NEW.time_of_day)::int + NEW.duration_minutes)
+      )
+      AND (
+        ((EXTRACT(HOUR FROM NEW.time_of_day)::int * 60) + EXTRACT(MINUTE FROM NEW.time_of_day)::int)
+          < ((EXTRACT(HOUR FROM existing.time_of_day)::int * 60) + EXTRACT(MINUTE FROM existing.time_of_day)::int + existing.duration_minutes)
+      )
   ) THEN
-    RAISE EXCEPTION 'duplicate_template_conflict'
+    RAISE EXCEPTION 'instructor_template_time_conflict'
       USING ERRCODE = '23P01',
             DETAIL = 'lesson_templates_active_overlap';
   END IF;

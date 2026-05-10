@@ -562,7 +562,6 @@ export default function CalendarPage() {
       <ManualGenerationDialog
         open={showGenerationDialog}
         onClose={() => setShowGenerationDialog(false)}
-        defaultDate={currentDate}
         onApplied={handleGenerationApplied}
         onReviewStateChange={setSavedGenerationReview}
       />

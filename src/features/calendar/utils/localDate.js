@@ -88,6 +88,19 @@ export function getWeekRangeDateStrings(value, weekStartsOn = CALENDAR_WEEK_STAR
   };
 }
 
+export function getNextWeekRangeDateStrings(value = new Date(), weekStartsOn = CALENDAR_WEEK_START) {
+  const currentWeekStart = getWeekStartDate(value, weekStartsOn);
+  const nextWeekStart = addLocalDays(currentWeekStart, 7);
+  if (!nextWeekStart) {
+    return { start: null, end: null };
+  }
+  const end = addLocalDays(nextWeekStart, 6);
+  return {
+    start: toLocalDateString(nextWeekStart),
+    end: toLocalDateString(end),
+  };
+}
+
 export function getTodayLocalDateString() {
   return toLocalDateString(new Date());
 }
