@@ -97,6 +97,45 @@ function getHmoApprovalStatusLabel(status) {
   }
 }
 
+function getAuthorizationUsageBadge(usage) {
+  if (!usage?.authorization_id) return null;
+  const reference = usage.authorization_reference || shortId(usage.authorization_id);
+  switch (usage.usage_bucket) {
+    case 'consumed':
+      return {
+        label: `נספר באישור ${reference}`,
+        className: 'border-indigo-300 bg-indigo-50 text-indigo-900',
+      };
+    case 'planned':
+      return {
+        label: `מתוכנן באישור ${reference}`,
+        className: 'border-sky-300 bg-sky-50 text-sky-900',
+      };
+    default:
+      return {
+        label: `לא נספר במכסה ${reference}`,
+        className: 'border-slate-200 bg-white text-slate-600',
+      };
+  }
+}
+
+function getAuthorizationUsageTooltip(usage) {
+  if (!usage?.authorization_id) return '';
+  const parts = [
+    usage.provider_name,
+    usage.provider_track_name,
+    usage.authorization_reference ? `אישור ${usage.authorization_reference}` : `אישור #${shortId(usage.authorization_id)}`,
+  ].filter(Boolean);
+  const prefix = parts.join(' • ');
+  if (usage.usage_bucket === 'consumed') {
+    return `${prefix} — השיעור נספר כניצול זכאות באישור הזה.`;
+  }
+  if (usage.usage_bucket === 'planned') {
+    return `${prefix} — השיעור שומר מקום מתוכנן במכסת האישור.`;
+  }
+  return `${prefix} — יש קשר לאישור, אבל השיעור לא נספר במכסה.`;
+}
+
 function computeDisplayedRowBalances(entries, currentBalanceAgorot) {
   let rollingBalance = coerceAgorot(currentBalanceAgorot);
   return entries.map((entry) => {
@@ -657,6 +696,8 @@ export default function StudentBillingWorkspace({
                     && !coerceAgorot(row.student_charge_amount)
                     && !coerceAgorot(row.hmo_charge_amount);
                   const coverageBadge = getCoveragePresentation(row);
+                  const authorizationUsageBadge = getAuthorizationUsageBadge(row.hmo_authorization_usage);
+                  const authorizationUsageTooltip = getAuthorizationUsageTooltip(row.hmo_authorization_usage);
                   const coverageReasonLabel = getCoverageReasonLabel(row.coverage_reason || row.billing_reason);
                   return (
                     <div key={row.id} className="rounded-xl border border-border bg-slate-50/70 p-4">
@@ -687,6 +728,18 @@ export default function StudentBillingWorkspace({
                             <Badge variant="outline" className={coverageBadge.className}>
                               {coverageBadge.label}
                             </Badge>
+                          ) : null}
+                          {authorizationUsageBadge ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge variant="outline" className={`${authorizationUsageBadge.className} cursor-help`}>
+                                  {authorizationUsageBadge.label}
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-xs text-xs">
+                                {authorizationUsageTooltip}
+                              </TooltipContent>
+                            </Tooltip>
                           ) : null}
                           <Badge variant="outline">{formatCurrency(row.student_charge_amount || 0)}</Badge>
                           {row.hmo_charge_amount ? (

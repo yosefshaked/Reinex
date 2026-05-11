@@ -762,6 +762,86 @@ describe('BillingLedgerService.getStudentAuthorizationLessonCounts', () => {
       remaining_lessons: 8,
     });
   });
+
+  it('does not keep cancelled or no-show HMO participants planned after charge sync', async () => {
+    const authorization = makeAuthorization({ authorized_lessons: 10 });
+    const service = new BillingLedgerService({
+      tenantClient: createMockClient({ hmo_authorizations: [authorization] }),
+      orgId: 'org-1',
+      clock: () => '2025-04-10T08:00:00.000Z',
+    });
+
+    const attendedParticipant = makeParticipant({
+      id: 'part-attended',
+      participant_status: 'attended',
+      lesson_instance: makeInstance({ id: 'instance-attended', datetime_start: '2025-04-01T10:00:00.000Z' }),
+    });
+    const futureScheduledParticipant = makeParticipant({
+      id: 'part-future-scheduled',
+      participant_status: 'scheduled',
+      lesson_instance: makeInstance({ id: 'instance-future-scheduled', datetime_start: '2025-04-20T10:00:00.000Z' }),
+    });
+    const noShowParticipant = makeParticipant({
+      id: 'part-no-show',
+      participant_status: 'no_show',
+      lesson_instance: makeInstance({ id: 'instance-no-show', datetime_start: '2025-04-05T10:00:00.000Z' }),
+    });
+    const cancelledParticipant = makeParticipant({
+      id: 'part-cancelled',
+      participant_status: 'cancelled_student',
+      lesson_instance: makeInstance({ id: 'instance-cancelled', datetime_start: '2025-04-22T10:00:00.000Z' }),
+    });
+
+    const counts = await service.getStudentAuthorizationLessonCounts({
+      studentId: 'student-1',
+      authorizations: [authorization],
+      participants: [attendedParticipant, futureScheduledParticipant, noShowParticipant, cancelledParticipant],
+      lessonLedgerRows: [
+        {
+          id: 'tx-attended-hmo',
+          org_id: 'org-1',
+          lesson_participant_id: 'part-attended',
+          hmo_provider_id: 'hmo-1',
+          hmo_authorization_id: 'auth-1',
+          source_type: 'lesson_charge',
+          direction: 'DEBIT',
+          amount: 2000,
+          reverses_transaction_id: null,
+        },
+        {
+          id: 'tx-no-show-hmo-covered-before-policy-flip',
+          org_id: 'org-1',
+          lesson_participant_id: 'part-no-show',
+          hmo_provider_id: 'hmo-1',
+          hmo_authorization_id: 'auth-1',
+          source_type: 'lesson_charge',
+          direction: 'DEBIT',
+          amount: 2000,
+          reverses_transaction_id: null,
+        },
+        {
+          id: 'tx-cancelled-private-charge',
+          org_id: 'org-1',
+          lesson_participant_id: 'part-cancelled',
+          hmo_provider_id: null,
+          hmo_authorization_id: null,
+          source_type: 'lesson_charge',
+          direction: 'DEBIT',
+          amount: 5000,
+          reverses_transaction_id: null,
+          student_id: 'student-1',
+        },
+      ],
+    });
+
+    assert.deepEqual(counts.get('auth-1'), {
+      total_authorized_lessons: 10,
+      consumed_lessons: 1,
+      reserved_lessons: 1,
+      available_lessons_to_book: 8,
+      remaining_lessons: 8,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

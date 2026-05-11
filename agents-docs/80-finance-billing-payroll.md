@@ -100,6 +100,7 @@
   future scheduled covered lessons reserve entitlement,
   HMO `no_show` never consumes entitlement even if the org bills the lesson privately,
   claim submission/payment status must never change entitlement counts.
+- Student billing lesson history may expose `hmo_authorization_usage` per row. Treat it as a read-model explanation only: `consumed` means the lesson counts against the authorization, `planned` means it reserves future capacity, and `not_counted` means the lesson has authorization context but does not affect the HMO lesson buckets.
 - HMO invoice batches are workflow metadata only. Balance changes happen only when explicit ledger credits or debits are appended.
 - HMO claim lifecycle v2 uses `hmo_invoice_batches` / `hmo_invoice_batch_items` as the operational submission model. New batches are created as `draft`, submitted via `BillingLedgerService.submitHmoInvoiceBatch(...)`, and payments must be recorded against submitted batches via `recordHmoInvoiceBatchPayment(...)`.
 - HMO claim batch creation must select active HMO receivable ledger rows, exclude reversed/already-batched rows, include `org_id` on both batch and item inserts, and enforce `hmo_authorizations.authorized_lessons` by selected/submitted claim count, not by paid claim count.

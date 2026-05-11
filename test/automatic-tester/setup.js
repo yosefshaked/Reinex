@@ -173,16 +173,30 @@ async function discoverSupabaseConfig() {
       }
     } catch { /* not JSON — try text parsing */ }
 
-    // Parse text output: "API URL: http://127.0.0.1:54321"
-    const apiMatch      = raw.match(/API URL:\s*(https?:\/\/[^\s]+)/i);
-    const srkMatch      = raw.match(/service_role key:\s*([^\s]+)/i);
-    const anonMatch     = raw.match(/anon key:\s*([^\s]+)/i);
+    // Parse text output — handles both old format ("service_role key: <jwt>")
+    // and new format ("Secret: sb_secret_..." / "Project URL: http://...")
+    const apiMatch    = raw.match(/Project URL[:\s]+(https?:\/\/[^\s\n]+)/im)
+                     || raw.match(/API URL[:\s]+(https?:\/\/[^\s\n]+)/im);
+    // New key format (Supabase CLI v2+): "Secret      │ sb_secret_..."
+    const srkNewMatch = raw.match(/Secret\s*[│|]\s*(sb_secret_\S+)/i)
+                     || raw.match(/\bsb_secret_(\S+)/i);
+    // Old key format: "service_role key: <jwt>"
+    const srkOldMatch = raw.match(/service_role key[:\s]+([^\s\n]+)/i);
+    const srkMatch    = srkNewMatch || srkOldMatch;
+    const anonMatch   = raw.match(/Publishable\s*[│|]\s*(sb_publishable_\S+)/i)
+                     || raw.match(/anon key[:\s]+([^\s\n]+)/i);
+
     if (apiMatch && srkMatch) {
       ok('Discovered via `supabase status` (text)');
+      const serviceRoleKey = srkNewMatch
+        ? (srkNewMatch[0].match(/sb_secret_\S+/)?.[0] ?? srkNewMatch[1])
+        : srkOldMatch[1];
       return {
-        supabaseUrl:    apiMatch[1],
-        serviceRoleKey: srkMatch[1],
-        anonKey:        anonMatch?.[1] || '',
+        supabaseUrl:    apiMatch[1].trim(),
+        serviceRoleKey: serviceRoleKey.trim(),
+        anonKey:        anonMatch
+          ? (anonMatch[0].match(/sb_publishable_\S+/)?.[0] ?? anonMatch[1]).trim()
+          : '',
         source:         'supabase-cli',
       };
     }
@@ -764,6 +778,225 @@ async function deleteTestOrg(supabaseUrl, serviceKey) {
   ok(`Deleted test organisation`);
 }
 
+// ─── HTTP API availability check ─────────────────────────────────────────
+
+/**
+ * Quick check: can we reach the Supabase HTTP API (Kong) from this machine?
+ * On Windows with Docker Desktop + WSL2, port-forwarding sometimes silently
+ * drops HTTP traffic even though the port appears open in netstat.
+ *
+ * @returns {Promise<boolean>}
+ */
+async function isHttpApiWorking(supabaseUrl, serviceKey) {
+  try {
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
+    const res = await fetch(`${supabaseUrl}/rest/v1/`, {
+      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    // Any real HTTP response (even 4xx) means Kong is reachable
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ─── SQL-based fallback helpers ───────────────────────────────────────────
+//
+// These functions bypass the HTTP API entirely by running SQL directly
+// inside the Supabase PostgreSQL Docker container via `docker exec`.
+// Used automatically when Kong/HTTP is not reachable from the host (common
+// on Windows + Docker Desktop + WSL2 due to port-forwarding limitations).
+
+function escapeSql(s) {
+  return String(s ?? '').replace(/'/g, "''");
+}
+
+/**
+ * Create (or find) an auth user by running SQL inside the DB container.
+ * Returns the user's UUID string.
+ */
+function createOrFindUserViaSQL(dbContainer, { email, password, firstName, lastName }) {
+  const e = escapeSql;
+
+  // Check if user already exists
+  const existingId = psqlQuery(
+    dbContainer,
+    `SELECT id::text FROM auth.users WHERE email = '${e(email)}' LIMIT 1;`
+  ).trim();
+
+  if (existingId) {
+    ok(`User already exists: ${email}  ${C.grey('(id: ' + existingId.slice(0, 8) + '...)')}`);
+    return existingId;
+  }
+
+  // Insert into auth.users
+  const userId = psqlQuery(
+    dbContainer,
+    `INSERT INTO auth.users (
+        id, instance_id, aud, role, email, encrypted_password,
+        email_confirmed_at, created_at, updated_at,
+        raw_app_meta_data, raw_user_meta_data
+      ) VALUES (
+        gen_random_uuid(),
+        '00000000-0000-0000-0000-000000000000',
+        'authenticated', 'authenticated',
+        '${e(email)}',
+        crypt('${e(password)}', gen_salt('bf')),
+        NOW(), NOW(), NOW(),
+        '{"provider":"email","providers":["email"]}',
+        '{"first_name":"${e(firstName)}","last_name":"${e(lastName)}"}'
+      ) RETURNING id::text;`
+  ).trim();
+
+  if (!userId) throw new Error(`SQL user creation returned no id for ${email}`);
+
+  // Insert into auth.identities (required for email/password login)
+  psqlQuery(
+    dbContainer,
+    `INSERT INTO auth.identities (id, user_id, provider_id, provider, identity_data, created_at, updated_at)
+      VALUES (
+        gen_random_uuid(), '${e(userId)}', '${e(email)}', 'email',
+        ('{"sub":"' || '${e(userId)}' || '","email":"${e(email)}"}')::jsonb,
+        NOW(), NOW()
+      ) ON CONFLICT DO NOTHING;`
+  );
+
+  ok(`Created user: ${email}  ${C.grey('(id: ' + userId.slice(0, 8) + '...)')}`);
+  return userId;
+}
+
+/**
+ * Upsert a profile row to mark the user's account setup as complete.
+ */
+function ensureProfileCompleteViaSQL(dbContainer, userId, { firstName, lastName, phone, identityNumber }) {
+  const e = escapeSql;
+  psqlQuery(
+    dbContainer,
+    `INSERT INTO public.profiles (id, first_name, last_name, phone, identity_number,
+        setup_completed_at, account_status, updated_at)
+      VALUES (
+        '${e(userId)}', '${e(firstName)}', '${e(lastName)}', '${e(phone)}', '${e(identityNumber)}',
+        NOW(), 'active', NOW()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        first_name          = EXCLUDED.first_name,
+        last_name           = EXCLUDED.last_name,
+        phone               = EXCLUDED.phone,
+        identity_number     = EXCLUDED.identity_number,
+        setup_completed_at  = COALESCE(profiles.setup_completed_at, NOW()),
+        account_status      = 'active',
+        updated_at          = NOW();`
+  );
+  ok(`Profile ready: ${firstName} ${lastName}`);
+}
+
+/**
+ * Find or create the test organisation.  Returns the org UUID string.
+ */
+function findOrCreateOrgViaSQL(dbContainer, adminUserId) {
+  const e = escapeSql;
+
+  let orgId = psqlQuery(
+    dbContainer,
+    `SELECT id::text FROM public.organizations WHERE name = '${e(TEST_ORG_NAME)}' LIMIT 1;`
+  ).trim();
+
+  if (orgId) {
+    ok(`Organisation already exists  ${C.grey('(id: ' + orgId.slice(0, 8) + '...)')}`);
+    // Ensure setup_completed = true
+    psqlQuery(dbContainer,
+      `UPDATE public.organizations SET setup_completed = true, updated_at = NOW()
+        WHERE id = '${e(orgId)}';`
+    );
+    ok('Organisation setup_completed = true');
+    return orgId;
+  }
+
+  const slug = TEST_ORG_NAME.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  orgId = psqlQuery(
+    dbContainer,
+    `INSERT INTO public.organizations (name, slug, setup_completed, created_by, created_at, updated_at)
+      VALUES (
+        '${e(TEST_ORG_NAME)}', '${e(slug)}', true,
+        '${e(adminUserId)}', NOW(), NOW()
+      ) RETURNING id::text;`
+  ).trim();
+
+  if (!orgId) throw new Error('SQL org creation returned no id');
+  ok(`Created organisation: "${TEST_ORG_NAME}"  ${C.grey('(id: ' + orgId.slice(0, 8) + '...)')}`);
+  return orgId;
+}
+
+/**
+ * Insert or update an org_memberships row.
+ */
+function ensureMembershipViaSQL(dbContainer, orgId, userId, role) {
+  const e = escapeSql;
+  psqlQuery(
+    dbContainer,
+    `INSERT INTO public.org_memberships (org_id, user_id, role, created_at)
+      VALUES ('${e(orgId)}', '${e(userId)}', '${e(role)}', NOW())
+      ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;`
+  );
+}
+
+/**
+ * Ensure at least one active service exists for the test org.
+ */
+function ensureTestServiceViaSQL(dbContainer, orgId) {
+  const e = escapeSql;
+
+  const existing = psqlQuery(
+    dbContainer,
+    `SELECT id FROM public."Services" WHERE org_id = '${e(orgId)}' AND is_active = true LIMIT 1;`
+  ).trim();
+
+  if (existing) {
+    ok('Service already exists');
+    return;
+  }
+
+  psqlQuery(
+    dbContainer,
+    `INSERT INTO public."Services" (org_id, name, duration_minutes, is_active)
+      VALUES ('${e(orgId)}', 'שיעור ניסיון', 45, true);`
+  );
+  ok('Created test service: "שיעור ניסיון"');
+}
+
+/**
+ * Remove test students (by known identity numbers) so deduplication guards
+ * do not block the student-lifecycle test script on re-runs.
+ */
+function ensureTestStudentCleanViaSQL(dbContainer, orgId) {
+  const e = escapeSql;
+  const testIdentityNumbers = ['999000001', '999000002', '999000005'];
+
+  for (const identityNumber of testIdentityNumbers) {
+    const rows = psqlQuery(
+      dbContainer,
+      `SELECT id::text FROM public.students
+        WHERE org_id = '${e(orgId)}' AND identity_number = '${identityNumber}';`
+    ).trim();
+
+    const studentIds = rows.split('\n').filter(Boolean);
+    for (const sid of studentIds) {
+      for (const table of ['waiting_list_entries', 'form_submissions', 'hmo_authorizations', 'commitments', 'lesson_templates']) {
+        try {
+          psqlQuery(dbContainer, `DELETE FROM public.${table} WHERE student_id = '${e(sid)}';`);
+        } catch { /* table may not exist — not critical */ }
+      }
+      psqlQuery(dbContainer, `DELETE FROM public.students WHERE id = '${e(sid)}';`);
+    }
+    if (studentIds.length > 0) {
+      ok(`Cleaned up test student (identity_number: ${identityNumber})`);
+    }
+  }
+}
+
 // ─── 6. Ensure test service exists ────────────────────────────────────────
 
 async function ensureTestService(supabaseUrl, serviceKey, orgId) {
@@ -886,6 +1119,36 @@ async function main() {
   // 3. Probe app URL
   const baseUrl = await probeAppUrl();
 
+  // ── Detect whether the Supabase HTTP API is reachable from this machine ──
+  //
+  // On Windows + Docker Desktop + WSL2 the port-forwarding layer sometimes
+  // accepts TCP connections but never forwards HTTP traffic, causing every
+  // fetch() to throw "other side closed / UND_ERR_SOCKET".  When that
+  // happens we fall back to running SQL directly inside the DB container
+  // (the same mechanism the schema-check step already uses reliably).
+
+  section('── Checking Supabase HTTP API Accessibility');
+  const httpWorks = !DRY_RUN && await isHttpApiWorking(supabaseUrl, serviceRoleKey);
+
+  let dbContainer = null;
+  if (!DRY_RUN) {
+    if (httpWorks) {
+      ok('Supabase HTTP API is reachable — using REST/Auth endpoints.');
+    } else {
+      warn('Supabase HTTP API is NOT reachable from this host.');
+      warn('This is common on Windows + Docker Desktop (WSL2 port-forwarding issue).');
+      step('Falling back to direct SQL via Docker exec psql...');
+
+      dbContainer = findDbContainer(supabaseUrl);
+      if (!dbContainer) {
+        fail('Could not find the Supabase database Docker container for SQL fallback.');
+        fail('Make sure Docker is running:  docker ps | grep supabase_db');
+        process.exit(1);
+      }
+      ok(`Using container: ${dbContainer}`);
+    }
+  }
+
   // Write .env now with what we know — so credentials are saved even if later steps fail.
   // TEST_ORG_ID will be blank until org creation succeeds; re-running setup fills it in.
   section('── Writing .env (early — updated again after org creation)');
@@ -903,8 +1166,13 @@ async function main() {
   // 4. (Optional) Reset existing test data
   if (RESET && !DRY_RUN) {
     section('── Resetting Existing Test Data');
-    await deleteTestOrg(supabaseUrl, serviceRoleKey);
-    await deleteTestUsers(supabaseUrl, serviceRoleKey);
+    if (httpWorks) {
+      await deleteTestOrg(supabaseUrl, serviceRoleKey);
+      await deleteTestUsers(supabaseUrl, serviceRoleKey);
+    } else {
+      warn('[SQL fallback] Reset via SQL is not yet implemented — skipping reset.');
+      warn('To fully reset, run:  supabase db reset --local  (in the supabase-tenant directory)');
+    }
   }
 
   // 5. Create test users
@@ -914,8 +1182,15 @@ async function main() {
     if (DRY_RUN) {
       ok(`[dry-run] Would create/find: ${user.email}`);
       userIds[user.key] = `dry-run-${user.key}-id`;
-    } else {
+    } else if (httpWorks) {
       userIds[user.key] = await createOrFindUser(supabaseUrl, serviceRoleKey, user);
+    } else {
+      userIds[user.key] = createOrFindUserViaSQL(dbContainer, {
+        email:     user.email,
+        password:  PASSWORD,
+        firstName: user.firstName,
+        lastName:  user.lastName,
+      });
     }
   }
 
@@ -924,9 +1199,11 @@ async function main() {
   for (const user of TEST_USERS) {
     if (DRY_RUN) {
       ok(`[dry-run] Would mark profile complete: ${user.email}`);
-    } else {
+    } else if (httpWorks) {
       await ensureProfileComplete(supabaseUrl, serviceRoleKey, userIds[user.key], user);
       ok(`Profile ready: ${user.email}`);
+    } else {
+      ensureProfileCompleteViaSQL(dbContainer, userIds[user.key], user);
     }
   }
 
@@ -935,13 +1212,23 @@ async function main() {
   let orgId = 'dry-run-org-id';
 
   if (!DRY_RUN) {
-    orgId = await createOrg(supabaseUrl, serviceRoleKey, userIds.admin);
-    for (const user of TEST_USERS) {
-      await ensureMembership(supabaseUrl, serviceRoleKey, orgId, userIds[user.key], user.role);
-      ok(`${user.role.padEnd(12)} membership: ${user.email}`);
+    if (httpWorks) {
+      orgId = await createOrg(supabaseUrl, serviceRoleKey, userIds.admin);
+      for (const user of TEST_USERS) {
+        await ensureMembership(supabaseUrl, serviceRoleKey, orgId, userIds[user.key], user.role);
+        ok(`${user.role.padEnd(12)} membership: ${user.email}`);
+      }
+      await ensureTestService(supabaseUrl, serviceRoleKey, orgId);
+      await ensureTestStudentClean(supabaseUrl, serviceRoleKey, orgId);
+    } else {
+      orgId = findOrCreateOrgViaSQL(dbContainer, userIds.admin);
+      for (const user of TEST_USERS) {
+        ensureMembershipViaSQL(dbContainer, orgId, userIds[user.key], user.role);
+        ok(`${user.role.padEnd(12)} membership: ${user.email}`);
+      }
+      ensureTestServiceViaSQL(dbContainer, orgId);
+      ensureTestStudentCleanViaSQL(dbContainer, orgId);
     }
-    await ensureTestService(supabaseUrl, serviceRoleKey, orgId);
-    await ensureTestStudentClean(supabaseUrl, serviceRoleKey, orgId);
   } else {
     ok('[dry-run] Would create org and 3 memberships');
   }

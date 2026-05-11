@@ -209,6 +209,10 @@ describe('finance/calendar self-seeded workflows', () => {
     assert.equal(snapshot.lesson_history[0].participant_status, 'no_show');
     assert.equal(snapshot.lesson_history[0].student_charge_amount, 9500);
     assert.equal(snapshot.lesson_history[0].hmo_charge_amount, 0);
+    assert.equal(snapshot.lesson_history[0].hmo_authorization_usage.authorization_id, AUTHORIZATION_ID);
+    assert.equal(snapshot.lesson_history[0].hmo_authorization_usage.authorization_reference, 'AUTH-WORKFLOW');
+    assert.equal(snapshot.lesson_history[0].hmo_authorization_usage.usage_bucket, 'not_counted');
+    assert.equal(snapshot.lesson_history[0].hmo_authorization_usage.counts_toward_authorization, false);
     assert.equal(snapshot.authorizations[0].lesson_counts.consumed_lessons, 0);
 
     const audit = auditFinanceCalendarInvariants({
@@ -324,6 +328,12 @@ describe('finance/calendar self-seeded workflows', () => {
     assert.equal(snapshot.summary.balance, 0);
     assert.equal(snapshot.lesson_history[0].student_charge_amount, 4500);
     assert.equal(snapshot.lesson_history[0].hmo_charge_amount, 5000);
+    assert.equal(snapshot.lesson_history[0].hmo_authorization_usage.authorization_id, AUTHORIZATION_ID);
+    assert.equal(snapshot.lesson_history[0].hmo_authorization_usage.authorization_reference, 'AUTH-WORKFLOW');
+    assert.equal(snapshot.lesson_history[0].hmo_authorization_usage.provider_name, 'קופת בדיקה');
+    assert.equal(snapshot.lesson_history[0].hmo_authorization_usage.provider_track_name, 'מסלול בדיקה');
+    assert.equal(snapshot.lesson_history[0].hmo_authorization_usage.usage_bucket, 'consumed');
+    assert.equal(snapshot.lesson_history[0].hmo_authorization_usage.counts_toward_authorization, true);
     assert.equal(snapshot.authorizations[0].lesson_counts.consumed_lessons, 1);
   });
 });

@@ -198,6 +198,55 @@ function isFutureScheduledParticipant(participant, nowIso) {
   return lessonStart > nowIso;
 }
 
+function resolveHmoUsageBucket({ participantStatus, isFutureLesson = false, coverageStatus = '' } = {}) {
+  const delta = resolveEntitlementUsageDelta({
+    entitlementType: 'hmo',
+    participantStatus,
+    isFutureLesson,
+    isBillable: false,
+    coverageStatus,
+  });
+  if (delta.consumed_lessons > 0) {
+    return 'consumed';
+  }
+  if (delta.reserved_lessons > 0) {
+    return 'planned';
+  }
+  return 'not_counted';
+}
+
+function buildHmoAuthorizationUsageReadModel({
+  authorizationId = '',
+  authorization = null,
+  metadataAuthorization = null,
+  usageBucket = 'not_counted',
+  coverageStatus = '',
+  coverageReason = '',
+} = {}) {
+  const normalizedAuthorizationId = normalizeString(authorizationId || authorization?.id || metadataAuthorization?.id);
+  if (!normalizedAuthorizationId) {
+    return null;
+  }
+
+  const provider = authorization?.provider || null;
+  const providerTrack = authorization?.provider_track || null;
+  return {
+    authorization_id: normalizedAuthorizationId,
+    authorization_reference: normalizeString(
+      authorization?.authorization_reference
+      || metadataAuthorization?.authorization_reference,
+    ) || null,
+    provider_id: normalizeString(authorization?.provider_id || metadataAuthorization?.provider_id) || null,
+    provider_name: normalizeString(provider?.name) || null,
+    provider_track_id: normalizeString(authorization?.provider_track_id || metadataAuthorization?.provider_track_id) || null,
+    provider_track_name: normalizeString(providerTrack?.name) || null,
+    usage_bucket: usageBucket,
+    counts_toward_authorization: usageBucket === 'consumed' || usageBucket === 'planned',
+    coverage_status: normalizeString(coverageStatus) || null,
+    coverage_reason: normalizeString(coverageReason) || null,
+  };
+}
+
 function buildLedgerEntrySignature(row) {
   return JSON.stringify({
     ledger_account_id: row.ledger_account_id || null,
@@ -3023,8 +3072,12 @@ export default class BillingLedgerService {
       this.orgId,
       (participants || []).map((row) => row?.lesson_instance?.service_id).filter(Boolean),
     );
+    const authorizationMap = new Map(authorizations.map((authorization) => [normalizeString(authorization?.id), authorization]));
+    const authorizationUsageOffsets = new Map();
+    const nowIso = toIsoOrNow(null, this.clock);
 
-    const lessonHistory = (participants || []).map((participant) => {
+    const lessonHistoryRows = [];
+    for (const participant of participants || []) {
       const activeRows = extractActiveLessonChargeRows(lessonRowsByParticipant.get(participant.id) || []);
       const studentChargeAmount = activeRows
         .filter((row) => row.student_id === normalizedStudentId && normalizeDirection(row.direction) === 'DEBIT')
@@ -3035,10 +3088,68 @@ export default class BillingLedgerService {
       const coverageMetadata = activeRows.find((row) => isPlainObject(row?.metadata) && row.metadata.coverage_status)?.metadata
         || null;
       const service = serviceMap.get(participant?.lesson_instance?.service_id) || null;
-      return {
+      const participantStatus = normalizeString(participant?.participant_status).toLowerCase();
+      const activeAuthorizationRow = activeRows.find((row) => normalizeString(row?.hmo_authorization_id) && normalizeString(row?.hmo_provider_id))
+        || activeRows.find((row) => normalizeString(row?.hmo_authorization_id))
+        || null;
+      const activeAuthorizationId = normalizeString(activeAuthorizationRow?.hmo_authorization_id);
+      const metadataAuthorization = coverageMetadata?.authorization && typeof coverageMetadata.authorization === 'object'
+        ? coverageMetadata.authorization
+        : null;
+      let hmoAuthorizationUsage = null;
+
+      if (activeAuthorizationId || metadataAuthorization?.id) {
+        const authorizationId = activeAuthorizationId || normalizeString(metadataAuthorization?.id);
+        const coverageStatus = normalizeString(coverageMetadata?.coverage_status) || (activeAuthorizationId ? 'covered' : '');
+        hmoAuthorizationUsage = buildHmoAuthorizationUsageReadModel({
+          authorizationId,
+          authorization: authorizationMap.get(authorizationId) || null,
+          metadataAuthorization,
+          usageBucket: resolveHmoUsageBucket({
+            participantStatus,
+            isFutureLesson: false,
+            coverageStatus,
+          }),
+          coverageStatus,
+          coverageReason: coverageMetadata?.coverage_reason,
+        });
+      } else if (isFutureScheduledParticipant(participant, nowIso)) {
+        const coverageDecision = await resolveLessonCoverageDecision(this.tenantClient, {
+          orgId: this.orgId,
+          studentId: normalizedStudentId,
+          serviceId: participant?.lesson_instance?.service_id,
+          lessonDate: participant?.lesson_instance?.datetime_start,
+          lessonParticipantId: participant.id,
+          usageOffsetsByAuthorizationId: authorizationUsageOffsets,
+        });
+        const authorizationId = normalizeString(coverageDecision?.authorization_id);
+        const usageBucket = resolveHmoUsageBucket({
+          participantStatus,
+          isFutureLesson: true,
+          coverageStatus: coverageDecision?.status,
+        });
+        if (authorizationId) {
+          hmoAuthorizationUsage = buildHmoAuthorizationUsageReadModel({
+            authorizationId,
+            authorization: coverageDecision?.authorization || authorizationMap.get(authorizationId) || null,
+            metadataAuthorization: null,
+            usageBucket,
+            coverageStatus: coverageDecision?.status,
+            coverageReason: coverageDecision?.reason,
+          });
+          if (usageBucket === 'planned') {
+            authorizationUsageOffsets.set(
+              authorizationId,
+              Number(authorizationUsageOffsets.get(authorizationId) || 0) + 1,
+            );
+          }
+        }
+      }
+
+      lessonHistoryRows.push({
         id: participant.id,
         student_id: normalizedStudentId,
-        participant_status: participant.participant_status,
+        participant_status: participantStatus || participant.participant_status,
         lesson_instance_id: participant?.lesson_instance?.id || null,
         lesson_instance: participant.lesson_instance || null,
         service,
@@ -3049,8 +3160,11 @@ export default class BillingLedgerService {
         coverage_status: normalizeString(coverageMetadata?.coverage_status) || null,
         coverage_reason: normalizeString(coverageMetadata?.coverage_reason) || null,
         post_coverage_policy: normalizeString(coverageMetadata?.post_coverage_policy) || null,
-      };
-    }).filter((row) => {
+        hmo_authorization_usage: hmoAuthorizationUsage,
+      });
+    }
+
+    const lessonHistory = lessonHistoryRows.filter((row) => {
       const lessonDate = toDateKey(row?.lesson_instance?.datetime_start);
       if (normalizeString(startDate) && lessonDate && lessonDate < startDate) {
         return false;

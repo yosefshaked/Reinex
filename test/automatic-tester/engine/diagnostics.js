@@ -171,13 +171,19 @@ const ERROR_PATTERNS = [
   },
   {
     match: 'net::ERR_EMPTY_RESPONSE',
-    heading: 'The browser received no response from a server (likely Supabase is down).',
+    heading: 'The browser received no response from Supabase (ERR_EMPTY_RESPONSE).',
     hints: [
-      'Supabase (the backend) is not responding.',
-      'Fix: start the local Supabase stack:',
-      '  supabase start       (in the repo root)',
-      'Then re-run setup.js to refresh credentials:',
-      '  node setup.js',
+      'The Supabase API port is open but not responding to HTTP — classic Docker Desktop + WSL2 issue.',
+      'Fix options (try in order):',
+      '  1. Restart Docker Desktop  (Settings → Restart)',
+      '     Then re-run: node setup.js',
+      '  2. Restart WSL2 from an admin PowerShell:',
+      '       wsl --shutdown',
+      '     Then restart Docker Desktop.',
+      '  3. As a workaround, run the SWA emulator instead of Vite:',
+      '       swa start    (in the repo root)',
+      '     Then update .env:  BASE_URL=http://localhost:4280',
+      '  Supabase containers are running — this is a Windows networking quirk, not a code bug.',
     ],
   },
   {
@@ -186,7 +192,7 @@ const ERROR_PATTERNS = [
     hints: [
       'Either Supabase or the app itself is not listening on the expected port.',
       'Fix:',
-      '  1.  supabase start   (in the repo root)',
+      '  1.  supabase start   (in the supabase-tenant directory)',
       '  2.  npm run dev      (start the Reinex app)',
       '  3.  node setup.js    (refresh credentials in .env)',
     ],
@@ -254,9 +260,12 @@ export function diagnoseFailure(step, workflow, env) {
 
     // Surface Supabase-specific hints from console errors
     const allConsole = consoleErrors.join('\n');
-    if (allConsole.includes('ERR_EMPTY_RESPONSE') || allConsole.includes('ERR_CONNECTION_REFUSED')) {
-      lines.push('  Supabase appears to be offline (network error in signInWithPassword).');
-      lines.push('    Fix: run  supabase start  (in the repo root), then retry.');
+    if (allConsole.includes('ERR_EMPTY_RESPONSE')) {
+      lines.push('  Root cause: Supabase port is open but silently dropping HTTP (Docker WSL2 bug).');
+      lines.push('    Fix: restart Docker Desktop, then re-run: node setup.js');
+      lines.push('    Or restart WSL2 (admin PowerShell):  wsl --shutdown  → restart Docker Desktop');
+    } else if (allConsole.includes('ERR_CONNECTION_REFUSED')) {
+      lines.push('  Supabase is not running. Start it:  supabase start  (in supabase-tenant dir)');
     } else if (allConsole.includes('signInWithPassword') || allConsole.includes('Failed to fetch')) {
       lines.push('  Supabase auth call failed. Check that supabase is running and credentials are correct.');
     }
