@@ -562,6 +562,7 @@ export async function runWorkflow(page, workflow, script, sharedVars, reportDir,
         duration: 0,
         error: null,
         screenshot: null,
+        failureUrl: null,
       });
       continue;
     }
