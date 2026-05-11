@@ -4,6 +4,7 @@
 - [`../implementations/finance/ledger/finance-workflow-contract-v1.md`](../implementations/finance/ledger/finance-workflow-contract-v1.md)
 - This contract is the frozen baseline for finance flow behavior across ledger, attendance, HMO authorization coupling, and calendar preview consumption.
 - If a change intentionally diverges from this contract, update the contract and acceptance criteria in the same implementation batch.
+- Calendar/finance changes must also satisfy [`finance-calendar-change-checklist.md`](finance-calendar-change-checklist.md).
 
 ## Release hardening baseline (must read before finance rollout)
 - [`../implementations/finance/ledger/finance-workflow-release-hardening-v1.md`](../implementations/finance/ledger/finance-workflow-release-hardening-v1.md)
@@ -86,6 +87,9 @@
   `post_coverage_policy = explicit_customer_charge` means charge the stored explicit post-coverage customer amount
   `post_coverage_policy = manual_block` means billing must stop with a clear blocked reason after entitlement exhaustion
   overlapping matching active authorizations are treated as a data conflict and billing is blocked until resolved
+- Org setting `hmo_non_attendance_billing_policy` controls billable non-attendance statuses (`no_show`, `cancelled_student`, `cancelled_clinic`) for students with HMO coverage:
+  `student_private_rate` (default) charges only the student, using the service list price while coverage is active and the authorization post-coverage policy after entitlement exhaustion;
+  `hmo_coverage` preserves covered HMO split pricing for those statuses.
 - Student/HMO lesson-balance UI must not expose only a single ambiguous "lessons left" number when operational counting matters. Preferred output is the 3-bucket model:
   `consumed_lessons` (`נוצלו`),
   `reserved_lessons` (`מתוכננים`),

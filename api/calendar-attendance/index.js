@@ -766,7 +766,7 @@ async function buildParticipantStatusPreview(client, orgId, body, {
         policies,
       });
   const projectedChargeAmount = coerceAgorot(projectedBillingDecision?.chargeAmount);
-  const projectedHasHmoSplit = projectedCoverageDecision?.status === 'covered';
+  const projectedHasHmoSplit = projectedBillingDecision?.usageType === 'hmo_split';
   const projectedHmoProvider = projectedCoverageDecision?.authorization?.provider || null;
   const projectedHmoTrack = projectedCoverageDecision?.authorization?.provider_track || null;
   const projectedPricingBreakdown = projectedBillingDecision?.pricingBreakdown && typeof projectedBillingDecision.pricingBreakdown === 'object'

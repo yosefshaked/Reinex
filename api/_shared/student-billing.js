@@ -178,16 +178,17 @@ export async function buildBillingDecision({
     coverageDecision,
     policies,
   });
-  const splitAmounts = resolveHmoSplitAmounts({ coverageDecision });
+  const hasHmoEntry = detail.entries.some((entry) => entry.accountType === 'hmo_provider');
+  const splitAmounts = hasHmoEntry ? resolveHmoSplitAmounts({ coverageDecision }) : null;
   const studentEntry = detail.entries.find((entry) => entry.accountType === 'student' || entry.accountType === 'client_profile') || null;
   return {
     shouldCharge: detail.entries.length > 0,
-    chargeAmount: studentEntry?.amount ?? null,
+    chargeAmount: studentEntry?.amount ?? (detail.entries.length > 0 ? 0 : null),
     coverage: coverageDecision,
     billingStatus: detail.billingStatus,
     billingReason: detail.billingReason,
     requiresAttention: detail.status === 'blocked',
-    usageType: coverageDecision?.status === 'covered'
+    usageType: hasHmoEntry
       ? 'hmo_split'
       : (coverageDecision?.status === 'post_coverage' ? 'post_coverage' : 'standard'),
     splitAmounts,
@@ -399,6 +400,7 @@ export async function fetchBillingSnapshot(tenantClient, {
   return {
     policies: {
       billing_consumption_policy: policies.billingConsumptionPolicy,
+      hmo_non_attendance_billing_policy: policies.hmoNonAttendanceBillingPolicy,
       instructor_earnings_policy: policies.instructorEarningsPolicy,
     },
     student_summaries: studentSummaries,

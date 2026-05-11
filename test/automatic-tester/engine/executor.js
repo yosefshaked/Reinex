@@ -514,6 +514,21 @@ export async function runWorkflow(page, workflow, script, sharedVars, reportDir,
 
   const continueOnStepFailure = script.config?.continue_on_step_failure ?? false;
 
+  // ── Capture browser console errors for diagnostics ───────────────────────
+  const consoleErrors = [];
+  const consoleMsgHandler = msg => {
+    if (msg.type() === 'error') {
+      consoleErrors.push(msg.text());
+    }
+  };
+  const pageErrorHandler = err => {
+    consoleErrors.push(`[uncaught] ${err.message || String(err)}`);
+  };
+  try {
+    page.on('console', consoleMsgHandler);
+    page.on('pageerror', pageErrorHandler);
+  } catch { /* page might already be closed */ }
+
   // Build a context object that steps can mutate (e.g. via `store`)
   const ctx = {
     vars: sharedVars,         // reference — mutations are visible to caller
@@ -529,6 +544,7 @@ export async function runWorkflow(page, workflow, script, sharedVars, reportDir,
     status: 'pass',
     duration: 0,
     steps: [],
+    consoleErrors,            // browser console errors captured during this workflow
     vars: sharedVars,         // updated vars returned to runner
   };
 
@@ -564,7 +580,10 @@ export async function runWorkflow(page, workflow, script, sharedVars, reportDir,
       workflowFailed = true;
       result.status = 'fail';
 
-      // Always take a failure screenshot
+      // Always take a failure screenshot and capture the current URL
+      let failureUrl = null;
+      try { failureUrl = page.url(); } catch { /* page may be closed */ }
+
       try {
         stepScreenshot = await takeScreenshot(
           page,
@@ -572,6 +591,18 @@ export async function runWorkflow(page, workflow, script, sharedVars, reportDir,
           ctx
         );
       } catch { /* screenshot failed too — not critical */ }
+
+      result.steps.push({
+        id: step.id || step.action,
+        description: step.description || step.action,
+        action: step.action,
+        status: stepStatus,
+        duration: Date.now() - stepStart,
+        error: stepError,
+        screenshot: stepScreenshot,
+        failureUrl,
+      });
+      continue;
     }
 
     result.steps.push({
@@ -582,8 +613,15 @@ export async function runWorkflow(page, workflow, script, sharedVars, reportDir,
       duration: Date.now() - stepStart,
       error: stepError,
       screenshot: stepScreenshot,
+      failureUrl: null,
     });
   }
+
+  // Remove console listeners to avoid leaking handlers across workflows
+  try {
+    page.off('console', consoleMsgHandler);
+    page.off('pageerror', pageErrorHandler);
+  } catch { /* page may already be closed */ }
 
   result.duration = Date.now() - workflowStart;
   return result;

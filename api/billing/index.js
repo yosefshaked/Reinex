@@ -766,6 +766,14 @@ export default async function (context, req) {
       return respond(context, 201, result);
     }
 
+    if (method === 'POST' && action === 'resync_billing_policy_participants') {
+      const result = await billingService.resyncBillingPolicyParticipants({
+        actorUserId: userId,
+        reasonCode: 'billing_policy_updated',
+      });
+      return respond(context, 200, result);
+    }
+
     if (method === 'POST' && (action === 'create_hmo_invoice_batch' || action === 'create_hmo_claim_batch')) {
       // Temporary Debugging: trace the raw billing action payload at the API boundary.
       context.log?.info?.('Temporary Debugging:billing:create_hmo_claim_batch:request', {

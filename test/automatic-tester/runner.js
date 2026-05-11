@@ -36,9 +36,10 @@ try {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-import { validateScript } from './engine/validator.js';
-import { runWorkflow }    from './engine/executor.js';
-import { generateReport } from './engine/reporter.js';
+import { validateScript }              from './engine/validator.js';
+import { runWorkflow }                 from './engine/executor.js';
+import { generateReport }              from './engine/reporter.js';
+import { preflightCheck, diagnoseFailure } from './engine/diagnostics.js';
 
 // ─── CLI argument parsing ─────────────────────────────────────────────────
 
@@ -101,6 +102,35 @@ const env = {
   SERVICE_ROLE_KEY:   process.env.SERVICE_ROLE_KEY   || '',
 };
 
+// ─── Pre-flight checks ────────────────────────────────────────────────────
+
+async function runPreflight(env) {
+  console.log(C.bold('\n── Pre-flight Checks ───────────────────────────────────\n'));
+
+  const { issues, warnings, hints } = await preflightCheck(env);
+
+  for (const w of warnings) {
+    console.log(`  ${C.yellow('⚠')} ${w}`);
+  }
+  for (const i of issues) {
+    console.log(`  ${C.red('✗')} ${i}`);
+  }
+  if (hints.length > 0 && (issues.length > 0 || warnings.length > 0)) {
+    console.log('');
+    for (const h of hints) {
+      console.log(`  ${C.grey(h)}`);
+    }
+  }
+
+  if (issues.length > 0) {
+    console.log(C.red(`\n  ${issues.length} critical issue(s) detected — aborting.\n`));
+    process.exit(1);
+  }
+  if (warnings.length === 0 && issues.length === 0) {
+    console.log(`  ${C.green('✓')} Environment looks good.`);
+  }
+}
+
 // ─── Script loading ───────────────────────────────────────────────────────
 
 const scriptsDir = join(__dirname, 'scripts');
@@ -144,6 +174,12 @@ async function main() {
       console.log(`Available script IDs:\n  ${allScripts.map(s => s.script.meta?.id).join('\n  ')}`);
       process.exit(1);
     }
+  }
+
+  // ── Phase 0: Pre-flight ───────────────────────────────────────────────
+
+  if (!opts.validateOnly) {
+    await runPreflight(env);
   }
 
   // ── Phase 1: Validation ───────────────────────────────────────────────
@@ -288,6 +324,16 @@ async function main() {
         if (failStep) {
           const errLines = (failStep.error || '').split('\n').slice(0, 3).join('\n    ');
           console.log(`    ${C.red('↳')} ${failStep.description}: ${C.red(errLines)}`);
+
+          // Self-diagnosis: print actionable hints
+          const diagLines = diagnoseFailure(failStep, wfResult, env);
+          if (diagLines.length > 0) {
+            console.log(`\n    ${C.yellow('What to do:')}`);
+            for (const line of diagLines) {
+              console.log(C.yellow(line));
+            }
+            console.log('');
+          }
         }
       }
     }

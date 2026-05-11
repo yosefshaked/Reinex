@@ -33,6 +33,13 @@ export const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = Object.freeze({
   cancelled_clinic: false,
 });
 
+export const HMO_NON_ATTENDANCE_BILLING_POLICIES = new Set([
+  'hmo_coverage',
+  'student_private_rate',
+]);
+
+export const DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY = 'student_private_rate';
+
 export const ATTENDANCE_STATUSES = new Set(['present', 'partial', 'absent', 'remote']);
 export const LEAVE_TYPES = new Set(['employee_paid', 'system_paid', 'unpaid', 'half_day']);
 export const LEAVE_ENTRY_STATUSES = new Set(['approved', 'cancelled']);
@@ -126,6 +133,14 @@ function normalizeBooleanPolicy(raw, defaults) {
   );
 }
 
+function normalizeHmoNonAttendanceBillingPolicy(raw) {
+  const parsed = parseJsonValue(raw, DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY);
+  const normalized = normalizeString(parsed).toLowerCase();
+  return HMO_NON_ATTENDANCE_BILLING_POLICIES.has(normalized)
+    ? normalized
+    : DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY;
+}
+
 function normalizeLeavePolicy(raw) {
   const parsed = parseJsonValue(raw, DEFAULT_LEAVE_POLICY);
   const source = isPlainObject(parsed) ? parsed : DEFAULT_LEAVE_POLICY;
@@ -185,6 +200,7 @@ export async function loadFinancePolicies(tenantClient, orgId) {
     'leave_policy',
     'leave_pay_policy',
     'billing_consumption_policy',
+    'hmo_non_attendance_billing_policy',
     'instructor_earnings_policy',
   ]);
 
@@ -192,6 +208,7 @@ export async function loadFinancePolicies(tenantClient, orgId) {
     leavePolicy: normalizeLeavePolicy(settingsMap.leave_policy),
     leavePayPolicy: normalizeLeavePayPolicy(settingsMap.leave_pay_policy),
     billingConsumptionPolicy: normalizeBooleanPolicy(settingsMap.billing_consumption_policy, DEFAULT_BILLING_CONSUMPTION_POLICY),
+    hmoNonAttendanceBillingPolicy: normalizeHmoNonAttendanceBillingPolicy(settingsMap.hmo_non_attendance_billing_policy),
     instructorEarningsPolicy: normalizeBooleanPolicy(settingsMap.instructor_earnings_policy, DEFAULT_INSTRUCTOR_EARNINGS_POLICY),
   };
 }

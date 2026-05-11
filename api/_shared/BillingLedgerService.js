@@ -8,6 +8,7 @@ import { createDashboardTask, resolveDashboardTask } from './dashboard-tasks.js'
 import { buildLessonCountBuckets, resolveEntitlementUsageDelta } from './commitment-behavior.js';
 
 const RESOLVED_PARTICIPANT_STATUSES = new Set(['attended', 'no_show', 'cancelled_student', 'cancelled_clinic']);
+const HMO_NON_ATTENDANCE_STATUSES = new Set(['no_show', 'cancelled_student', 'cancelled_clinic']);
 const STUDENT_ACCOUNT_TYPE = 'student';
 const CLIENT_ACCOUNT_TYPE = 'client_profile';
 const HMO_ACCOUNT_TYPE = 'hmo_provider';
@@ -718,6 +719,10 @@ export function buildDesiredChargeDescriptors({
       authorization_id: null,
       authorization: null,
     };
+  const usePrivateRateForHmoNonAttendance = (
+    HMO_NON_ATTENDANCE_STATUSES.has(participantStatus)
+    && normalizeString(policies?.hmoNonAttendanceBillingPolicy || 'student_private_rate') === 'student_private_rate'
+  );
 
   if (effectiveCoverageDecision.status === 'blocked') {
     return {
@@ -726,6 +731,23 @@ export function buildDesiredChargeDescriptors({
       billingReason: effectiveCoverageDecision.reason || 'billing_blocked',
       warnings: [effectiveCoverageDecision.reason || 'billing_blocked'],
       entries: [],
+    };
+  }
+
+  if (usePrivateRateForHmoNonAttendance && effectiveCoverageDecision.status === 'covered') {
+    return {
+      status: 'debited',
+      billingStatus: 'charged',
+      billingReason: 'hmo_non_attendance_service_rate_charge',
+      warnings: [],
+      entries: [{
+        accountType: STUDENT_ACCOUNT_TYPE,
+        accountRefId: participant.student_id,
+        direction: 'DEBIT',
+        amount: coerceAgorot(serviceRate),
+        rateSource: 'service_rate',
+        hmoAuthorizationId: null,
+      }],
     };
   }
 
@@ -1085,6 +1107,69 @@ export default class BillingLedgerService {
       createdTransactionCount: participantResults.reduce((sum, row) => sum + row.createdTransactionIds.length, 0),
       reversedTransactionCount: participantResults.reduce((sum, row) => sum + row.reversedTransactionIds.length, 0),
       blockedParticipantIds: participantResults.filter((row) => row.status === 'blocked').map((row) => row.lessonParticipantId),
+    };
+  }
+
+  async resyncBillingPolicyParticipants({
+    actorUserId,
+    reasonCode = 'billing_policy_updated',
+    limit = 2000,
+  } = {}) {
+    const pageLimit = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Math.min(Number(limit), 5000) : 2000;
+    const { data: participants, error } = await this.tenantClient
+      .from('lesson_participants')
+      .select('id')
+      .eq('org_id', this.orgId)
+      .in('participant_status', Array.from(RESOLVED_PARTICIPANT_STATUSES))
+      .limit(pageLimit);
+
+    if (error) {
+      throw error;
+    }
+
+    const participantIds = (participants || []).map((row) => normalizeString(row?.id)).filter(Boolean);
+    const { data: locks, error: locksError } = participantIds.length > 0
+      ? await this.tenantClient
+        .from('participant_locks')
+        .select('lesson_participant_id')
+        .eq('org_id', this.orgId)
+        .in('lesson_participant_id', participantIds)
+      : { data: [], error: null };
+
+    if (locksError && locksError.code !== '42P01') {
+      throw locksError;
+    }
+
+    const lockedParticipantIds = new Set((locks || [])
+      .map((row) => normalizeString(row?.lesson_participant_id))
+      .filter(Boolean));
+    const participantResults = [];
+    for (const lessonParticipantId of participantIds) {
+      if (lockedParticipantIds.has(lessonParticipantId)) {
+        participantResults.push({
+          lessonParticipantId,
+          status: 'skipped_locked',
+          createdTransactionIds: [],
+          reversedTransactionIds: [],
+          warnings: ['participant_locked'],
+        });
+        continue;
+      }
+      participantResults.push(await this.syncLessonParticipantCharge({
+        lessonParticipantId,
+        actorUserId,
+        reasonCode,
+      }));
+    }
+
+    return {
+      scannedParticipantCount: participantIds.length,
+      syncedParticipantCount: participantResults.filter((row) => row.status !== 'skipped_locked').length,
+      skippedLockedParticipantIds: Array.from(lockedParticipantIds),
+      createdTransactionCount: participantResults.reduce((sum, row) => sum + (row.createdTransactionIds?.length || 0), 0),
+      reversedTransactionCount: participantResults.reduce((sum, row) => sum + (row.reversedTransactionIds?.length || 0), 0),
+      blockedParticipantIds: participantResults.filter((row) => row.status === 'blocked').map((row) => row.lessonParticipantId),
+      participantResults,
     };
   }
 

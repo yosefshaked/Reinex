@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
 import HmoSetupWorkspace from '@/features/finance/components/HmoSetupWorkspace.jsx';
 
 const BILLING_POLICY_FIELDS = [
@@ -33,6 +34,8 @@ export default function BillingSettingsWorkspace({
   setBillingPolicy,
   instructorPolicy,
   setInstructorPolicy,
+  hmoNonAttendanceBillingPolicy = 'student_private_rate',
+  setHmoNonAttendanceBillingPolicy,
   canMutateBillingPolicy,
   savingPolicy = false,
   loadingPolicy = false,
@@ -97,6 +100,36 @@ export default function BillingSettingsWorkspace({
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-border bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-2xl">
+            <h3 className="text-lg font-semibold text-zinc-900">חיוב תלמיד במסלול גורם מממן כשאין נוכחות</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              קובע איך לחייב שיעור שלא התקיים או שהתלמיד לא הגיע, כאשר במדיניות למעלה הסטטוס עדיין מחויב ויש לתלמיד מסלול גורם מממן פעיל.
+            </p>
+          </div>
+          <div className="w-full max-w-sm">
+            <Label className="mb-2 block text-xs text-slate-600">לוגיקת חיוב</Label>
+            <Select
+              value={hmoNonAttendanceBillingPolicy || 'student_private_rate'}
+              onValueChange={(value) => setHmoNonAttendanceBillingPolicy?.(value)}
+              disabled={!canMutateBillingPolicy || savingPolicy || loadingPolicy}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="student_private_rate">חיוב פרטי לתלמיד</SelectItem>
+                <SelectItem value="hmo_coverage">לפי פיצול גורם מממן</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="mt-2 text-xs text-muted-foreground">
+              חיוב פרטי משתמש במחיר השירות הרגיל, ובמצב אחרי מיצוי זכויות משתמש במדיניות ההמשך של המסלול.
+            </p>
+          </div>
         </div>
       </section>
 

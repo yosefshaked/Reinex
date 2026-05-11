@@ -407,6 +407,51 @@ describe('buildDesiredChargeDescriptors', () => {
     assert.equal(hmoEntry.rateSource, 'hmo_authorization');
   });
 
+  it('HMO non-attendance default — charges student privately without HMO debit', () => {
+    const result = buildDesiredChargeDescriptors({
+      participant: makeParticipant({ participant_status: 'no_show' }),
+      service: makeService({ default_customer_charge_amount: 5000 }),
+      coverageDecision: {
+        status: 'covered',
+        reason: 'authorization_applies',
+        authorization_id: 'auth-1',
+        authorization: makeAuthorization(),
+        covered_customer_charge_amount: 3000,
+        covered_insurer_claim_amount: 2000,
+      },
+      policies: basePolicies,
+    });
+    assert.equal(result.status, 'debited');
+    assert.equal(result.billingReason, 'hmo_non_attendance_service_rate_charge');
+    assert.equal(result.entries.length, 1);
+    assert.equal(result.entries[0].accountType, 'student');
+    assert.equal(result.entries[0].amount, 5000);
+    assert.equal(result.entries[0].rateSource, 'service_rate');
+    assert.equal(result.entries[0].hmoAuthorizationId, null);
+  });
+
+  it('HMO non-attendance policy can keep HMO split logic', () => {
+    const result = buildDesiredChargeDescriptors({
+      participant: makeParticipant({ participant_status: 'no_show' }),
+      service: makeService({ default_customer_charge_amount: 5000 }),
+      coverageDecision: {
+        status: 'covered',
+        reason: 'authorization_applies',
+        authorization_id: 'auth-1',
+        authorization: makeAuthorization(),
+        covered_customer_charge_amount: 3000,
+        covered_insurer_claim_amount: 2000,
+      },
+      policies: {
+        ...basePolicies,
+        hmoNonAttendanceBillingPolicy: 'hmo_coverage',
+      },
+    });
+    assert.equal(result.billingReason, 'covered_hmo_charge');
+    assert.equal(result.entries.length, 2);
+    assert.ok(result.entries.some((entry) => entry.accountType === 'hmo_provider'));
+  });
+
   it('HMO split — copay floored at zero when contracted_rate >= service_rate', () => {
     const result = buildDesiredChargeDescriptors({
       participant: makeParticipant(),
@@ -1005,6 +1050,38 @@ describe('BillingLedgerService.syncLessonParticipantCharge', () => {
     const hmoAccount = client._store.ledger_accounts.find((account) => account.id === hmoTx.ledger_account_id);
     assert.equal(hmoAccount?.account_type, 'hmo_provider');
     assert.equal(hmoAccount?.hmo_provider_id, 'hmo-1');
+  });
+
+  it('HMO no-show uses private student rate by default and does not create HMO receivable', async () => {
+    client._store.Settings = [{
+      org_id: 'org-1',
+      key: 'billing_consumption_policy',
+      settings_value: {
+        attended: true,
+        no_show: true,
+        cancelled_student: false,
+        cancelled_clinic: false,
+      },
+    }];
+    client._store.hmo_authorizations = [makeAuthorization()];
+    client._store.lesson_participants = [makeParticipant({ participant_status: 'no_show' })];
+
+    const result = await service.syncLessonParticipantCharge({
+      lessonParticipantId: 'part-1',
+      actorUserId: 'u1',
+      reasonCode: 'attendance_changed',
+    });
+
+    assert.equal(result.status, 'debited');
+    assert.equal(result.createdTransactionIds.length, 1);
+    const tx = client._store.ledger_transactions[0];
+    assert.equal(tx.source_type, 'lesson_charge');
+    assert.equal(tx.direction, 'DEBIT');
+    assert.equal(tx.amount, 5000);
+    assert.equal(tx.student_id, 'student-1');
+    assert.equal(tx.hmo_provider_id, null);
+    assert.equal(tx.hmo_authorization_id, null);
+    assert.equal(tx.rate_source, 'service_rate');
   });
 
   it('attendance reversal — original rows remain, reversing credits appended, no mutation', async () => {

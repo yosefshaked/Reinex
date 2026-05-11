@@ -13,6 +13,45 @@ const BASE_POLICIES = {
   },
 };
 
+const BILLABLE_NON_ATTENDANCE_POLICIES = {
+  billingConsumptionPolicy: {
+    attended: true,
+    no_show: true,
+    cancelled_student: true,
+    cancelled_clinic: true,
+  },
+};
+
+function activeLessonCharges(rows = []) {
+  const reversedIds = new Set((Array.isArray(rows) ? rows : [])
+    .filter((row) => row.source_type === 'reversal' && row.reverses_transaction_id)
+    .map((row) => row.reverses_transaction_id));
+  return (Array.isArray(rows) ? rows : []).filter((row) => (
+    row.source_type === 'lesson_charge'
+    && !row.reverses_transaction_id
+    && !reversedIds.has(row.id)
+  ));
+}
+
+function assertNoDuplicateActiveChargeSignatures(rows = []) {
+  const seen = new Set();
+  for (const row of activeLessonCharges(rows)) {
+    const signature = [
+      row.lesson_participant_id || '',
+      row.ledger_account_id || '',
+      row.student_id || '',
+      row.client_profile_id || '',
+      row.hmo_provider_id || '',
+      row.hmo_authorization_id || '',
+      row.direction || '',
+      row.amount || 0,
+      row.rate_source || '',
+    ].join(':');
+    assert.ok(!seen.has(signature), `duplicate active lesson charge signature: ${signature}`);
+    seen.add(signature);
+  }
+}
+
 function service(amount) {
   return { default_customer_charge_amount: amount };
 }
@@ -205,6 +244,91 @@ describe('finance preview contract - billing descriptors', () => {
     assert.equal(result.entries[0].amount, 18000);
   });
 
+  for (const status of ['no_show', 'cancelled_student', 'cancelled_clinic']) {
+    it(`charges ${status} with private student service rate by default for active HMO coverage`, async () => {
+      const participant = {
+        participant_status: status,
+        client_profile_id: 'cp-1',
+        student_id: 'st-1',
+      };
+      const instance = {
+        service_id: 'svc-1',
+        datetime_start: '2026-04-14T10:00:00.000Z',
+        status: status === 'no_show' ? 'completed' : status,
+      };
+      const decision = await buildBillingDecision({
+        participant,
+        instance,
+        service: service(18000),
+        coverageDecision: coverageDecision(),
+        policies: BILLABLE_NON_ATTENDANCE_POLICIES,
+      });
+
+      assert.equal(decision.shouldCharge, true);
+      assert.equal(decision.usageType, 'standard');
+      assert.equal(decision.chargeAmount, 18000);
+      assert.equal(decision.billingReason, 'hmo_non_attendance_service_rate_charge');
+      assert.equal(decision.splitAmounts, null);
+      assert.equal(decision.pricingBreakdown.student_charge_amount, 18000);
+      assert.equal(decision.pricingBreakdown.insurer_claim_amount, 0);
+      assert.equal(decision.pricingBreakdown.hmo_authorization_id, 'auth-1');
+    });
+  }
+
+  it('keeps HMO split for billable no-show only when org policy explicitly asks for HMO coverage', async () => {
+    const participant = {
+      participant_status: 'no_show',
+      client_profile_id: 'cp-1',
+      student_id: 'st-1',
+    };
+    const decision = await buildBillingDecision({
+      participant,
+      instance: {
+        service_id: 'svc-1',
+        datetime_start: '2026-04-14T10:00:00.000Z',
+        status: 'completed',
+      },
+      service: service(18000),
+      coverageDecision: coverageDecision(),
+      policies: {
+        ...BILLABLE_NON_ATTENDANCE_POLICIES,
+        hmoNonAttendanceBillingPolicy: 'hmo_coverage',
+      },
+    });
+
+    assert.equal(decision.usageType, 'hmo_split');
+    assert.equal(decision.chargeAmount, 1000);
+    assert.equal(decision.splitAmounts.insurerClaimAmount, 12000);
+    assert.equal(decision.pricingBreakdown.insurer_claim_amount, 12000);
+  });
+
+  it('uses post-coverage explicit student amount for non-attendance after entitlement exhaustion', async () => {
+    const result = buildDesiredChargeDescriptors({
+      participant: {
+        participant_status: 'cancelled_student',
+        client_profile_id: 'cp-1',
+        student_id: 'st-1',
+      },
+      service: service(18000),
+      coverageDecision: coverageDecision({
+        status: 'post_coverage',
+        reason: 'authorization_exhausted',
+        covered_customer_charge_amount: 1000,
+        covered_insurer_claim_amount: 12000,
+        post_coverage_policy: 'explicit_customer_charge',
+        post_coverage_customer_charge_amount: 4500,
+      }),
+      policies: BILLABLE_NON_ATTENDANCE_POLICIES,
+    });
+
+    assert.equal(result.status, 'debited');
+    assert.equal(result.billingReason, 'post_coverage_explicit_customer_charge');
+    assert.equal(result.entries.length, 1);
+    assert.equal(result.entries[0].accountType, 'student');
+    assert.equal(result.entries[0].amount, 4500);
+    assert.equal(result.entries[0].hmoAuthorizationId, 'auth-1');
+  });
+
   it('returns not chargeable for scheduled status (restore baseline)', () => {
     const participant = {
       participant_status: 'scheduled',
@@ -222,6 +346,78 @@ describe('finance preview contract - billing descriptors', () => {
     assert.equal(result.status, 'noop');
     assert.equal(result.billingStatus, 'not_chargeable');
     assert.equal(result.entries.length, 0);
+  });
+});
+
+describe('finance calendar ledger invariants', () => {
+  it('excludes reversed lesson charges and rejects duplicate active charge signatures', () => {
+    const rows = [
+      {
+        id: 'tx-1',
+        source_type: 'lesson_charge',
+        lesson_participant_id: 'part-1',
+        ledger_account_id: 'acct-student',
+        student_id: 'st-1',
+        direction: 'DEBIT',
+        amount: 18000,
+        rate_source: 'service_rate',
+        reverses_transaction_id: null,
+      },
+      {
+        id: 'tx-2',
+        source_type: 'reversal',
+        lesson_participant_id: 'part-1',
+        ledger_account_id: 'acct-student',
+        student_id: 'st-1',
+        direction: 'CREDIT',
+        amount: 18000,
+        rate_source: 'service_rate',
+        reverses_transaction_id: 'tx-1',
+      },
+      {
+        id: 'tx-3',
+        source_type: 'lesson_charge',
+        lesson_participant_id: 'part-1',
+        ledger_account_id: 'acct-student',
+        student_id: 'st-1',
+        direction: 'DEBIT',
+        amount: 4500,
+        rate_source: 'post_coverage_policy',
+        reverses_transaction_id: null,
+      },
+    ];
+
+    assert.deepEqual(activeLessonCharges(rows).map((row) => row.id), ['tx-3']);
+    assertNoDuplicateActiveChargeSignatures(rows);
+  });
+
+  it('fails when two active lesson charges have the same financial signature', () => {
+    const duplicateRows = [
+      {
+        id: 'tx-1',
+        source_type: 'lesson_charge',
+        lesson_participant_id: 'part-1',
+        ledger_account_id: 'acct-student',
+        student_id: 'st-1',
+        direction: 'DEBIT',
+        amount: 18000,
+        rate_source: 'service_rate',
+        reverses_transaction_id: null,
+      },
+      {
+        id: 'tx-2',
+        source_type: 'lesson_charge',
+        lesson_participant_id: 'part-1',
+        ledger_account_id: 'acct-student',
+        student_id: 'st-1',
+        direction: 'DEBIT',
+        amount: 18000,
+        rate_source: 'service_rate',
+        reverses_transaction_id: null,
+      },
+    ];
+
+    assert.throws(() => assertNoDuplicateActiveChargeSignatures(duplicateRows), /duplicate active lesson charge signature/);
   });
 });
 

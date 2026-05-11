@@ -59,6 +59,8 @@ const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = {
   cancelled_clinic: false,
 };
 
+const DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY = 'student_private_rate';
+
 function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
@@ -302,6 +304,7 @@ export default function FinancialsPage() {
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
   const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
+  const [hmoNonAttendanceBillingPolicy, setHmoNonAttendanceBillingPolicy] = useState(DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [processingClaimBatch, setProcessingClaimBatch] = useState(false);
   const [savingProviderPolicy, setSavingProviderPolicy] = useState(false);
@@ -360,6 +363,7 @@ export default function FinancialsPage() {
       setBillingSnapshot(null);
       setBillingPolicy(DEFAULT_BILLING_POLICY);
       setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
+      setHmoNonAttendanceBillingPolicy(DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY);
       return;
     }
 
@@ -378,12 +382,16 @@ export default function FinancialsPage() {
         ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
         ...(payload?.policies?.instructor_earnings_policy || {}),
       });
+      setHmoNonAttendanceBillingPolicy(
+        payload?.policies?.hmo_non_attendance_billing_policy || DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY,
+      );
     } catch (error) {
       console.error('Failed to load billing overview', error);
       toast.error(error?.message || 'טעינת נתוני החיובים נכשלה.');
       setBillingSnapshot(null);
       setBillingPolicy(DEFAULT_BILLING_POLICY);
       setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
+      setHmoNonAttendanceBillingPolicy(DEFAULT_HMO_NON_ATTENDANCE_BILLING_POLICY);
     } finally {
       setLoadingBilling(false);
     }
@@ -573,8 +581,29 @@ export default function FinancialsPage() {
         key: 'instructor_earnings_policy',
         value: instructorEarningsPolicy,
       });
+      await upsertSetting({
+        session,
+        orgId: activeOrgId,
+        key: 'hmo_non_attendance_billing_policy',
+        value: hmoNonAttendanceBillingPolicy,
+      });
+      const resyncResult = await authenticatedFetch('billing', {
+        session,
+        method: 'POST',
+        body: {
+          org_id: activeOrgId,
+          action: 'resync_billing_policy_participants',
+        },
+      });
       await loadBillingOverview();
-      toast.success('מדיניות החיוב נשמרה.');
+      const skippedCount = Array.isArray(resyncResult?.skippedLockedParticipantIds)
+        ? resyncResult.skippedLockedParticipantIds.length
+        : 0;
+      toast.success(
+        skippedCount > 0
+          ? `מדיניות החיוב נשמרה. ${skippedCount} שיעורים נעולים לא סונכרנו אוטומטית.`
+          : 'מדיניות החיוב נשמרה והחיובים סונכרנו.',
+      );
     } catch (error) {
       console.error('Failed to save billing policy', error);
       toast.error(error?.message || 'שמירת מדיניות החיוב נכשלה.');
@@ -1677,6 +1706,8 @@ export default function FinancialsPage() {
               setBillingPolicy={setBillingPolicy}
               instructorPolicy={instructorEarningsPolicy}
               setInstructorPolicy={setInstructorEarningsPolicy}
+              hmoNonAttendanceBillingPolicy={hmoNonAttendanceBillingPolicy}
+              setHmoNonAttendanceBillingPolicy={setHmoNonAttendanceBillingPolicy}
               canMutateBillingPolicy={canMutateBillingPolicy}
               savingPolicy={savingPolicy}
               loadingPolicy={loadingBilling}

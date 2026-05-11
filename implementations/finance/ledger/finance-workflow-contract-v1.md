@@ -81,6 +81,9 @@ Source: `api/_shared/BillingLedgerService.js`
 	- student DEBIT entry on `student` only if the covered customer amount is greater than `0`
 	- insurer DEBIT entry on `hmo_provider` only if the covered insurer amount is greater than `0`
 	- reason is `covered_hmo_charge`
+- Billable non-attendance statuses (`no_show`, `cancelled_student`, `cancelled_clinic`) use org setting `hmo_non_attendance_billing_policy`:
+	- `student_private_rate` (default): if coverage is still active, charge the student the service list price and do not create an HMO receivable or consume HMO entitlement
+	- `hmo_coverage`: preserve the normal covered HMO split pricing for those statuses
 - `post_coverage`:
 	- applies only when a matching active in-range authorization has no remaining entitlement
 	- `post_coverage_policy = service_default` charges the service list price on `student`
