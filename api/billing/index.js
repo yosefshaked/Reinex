@@ -440,8 +440,8 @@ async function buildHmoClaimsReadModel({
     const remainingAmount = Math.max(0, Number(batch?.total_amount || 0) - Number(batch?.paid_amount || 0));
     return sum + remainingAmount;
   }, 0);
-  const paymentReceivedTotal = providerReceivables.reduce(
-    (sum, provider) => sum + Number(provider?.summary?.payment_total || 0),
+  const paymentReceivedTotal = Array.from(batchMap.values()).reduce(
+    (sum, batch) => sum + Number(batch?.paid_amount || 0),
     0,
   );
 
