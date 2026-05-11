@@ -1486,6 +1486,30 @@ describe('BillingLedgerService.createHmoInvoiceBatch', () => {
     assert.equal(cancelledItem?.status, 'cancelled');
     assert.equal(replacementItem?.status, 'draft');
   });
+
+  it('claim capacity ignores active batch items whose ledger charge was later reversed', async () => {
+    const client = createMockClient({
+      hmo_authorizations: [
+        { id: 'auth-1', org_id: 'org-1', authorized_lessons: 1 },
+      ],
+      ledger_transactions: [
+        { id: 'tx-reversed', org_id: 'org-1', hmo_authorization_id: 'auth-1', hmo_provider_id: 'hmo-1', lesson_participant_id: 'part-1', source_type: 'lesson_charge', direction: 'DEBIT', amount: 4500, reverses_transaction_id: null },
+        { id: 'tx-reversal', org_id: 'org-1', hmo_authorization_id: 'auth-1', hmo_provider_id: 'hmo-1', lesson_participant_id: 'part-1', source_type: 'reversal', direction: 'CREDIT', amount: 4500, reverses_transaction_id: 'tx-reversed' },
+        { id: 'tx-selected', org_id: 'org-1', hmo_authorization_id: 'auth-1', hmo_provider_id: 'hmo-1', lesson_participant_id: 'part-2', source_type: 'lesson_charge', direction: 'DEBIT', amount: 4500, reverses_transaction_id: null },
+      ],
+      hmo_invoice_batches: [
+        { id: 'batch-1', org_id: 'org-1', status: 'submitted' },
+      ],
+      hmo_invoice_batch_items: [
+        { id: 'item-1', org_id: 'org-1', batch_id: 'batch-1', ledger_transaction_id: 'tx-reversed', status: 'submitted' },
+      ],
+    });
+    const service = new BillingLedgerService({ tenantClient: client, orgId: 'org-1', clock: FIXED_CLOCK });
+
+    await assert.doesNotReject(() => service.assertHmoAuthorizationClaimCapacity([
+      { id: 'tx-selected', hmo_authorization_id: 'auth-1' },
+    ]));
+  });
 });
 
 // ---------------------------------------------------------------------------

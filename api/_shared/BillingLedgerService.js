@@ -1371,7 +1371,23 @@ export default class BillingLedgerService {
     }
 
     const rowsByParticipantId = new Map();
+    const participantLedgerIds = (participantLedgerRows || []).map((row) => normalizeString(row?.id)).filter(Boolean);
+    const { data: participantReversalRows, error: participantReversalError } = participantLedgerIds.length > 0
+      ? await this.tenantClient
+        .from('ledger_transactions')
+        .select('id, reverses_transaction_id')
+        .eq('org_id', this.orgId)
+        .in('reverses_transaction_id', participantLedgerIds)
+      : { data: [], error: null };
+    if (participantReversalError) {
+      throw participantReversalError;
+    }
+    const reversedParticipantLedgerIds = new Set((participantReversalRows || [])
+      .map((row) => normalizeString(row?.reverses_transaction_id))
+      .filter(Boolean));
+
     for (const row of participantLedgerRows || []) {
+      if (reversedParticipantLedgerIds.has(normalizeString(row?.id))) continue;
       const participantId = normalizeString(row?.lesson_participant_id);
       if (!participantId) continue;
       if (!rowsByParticipantId.has(participantId)) {
@@ -2216,6 +2232,18 @@ export default class BillingLedgerService {
     const ledgerIds = Array.from(ledgerAuthorizationMap.keys());
     if (ledgerIds.length === 0) return;
 
+    const { data: reversalRows, error: reversalError } = await this.tenantClient
+      .from('ledger_transactions')
+      .select('id, reverses_transaction_id')
+      .eq('org_id', this.orgId)
+      .in('reverses_transaction_id', ledgerIds);
+    if (reversalError) {
+      throw reversalError;
+    }
+    const reversedLedgerIds = new Set((reversalRows || [])
+      .map((row) => normalizeString(row?.reverses_transaction_id))
+      .filter(Boolean));
+
     const { data: items, error: itemsError } = await this.tenantClient
       .from('hmo_invoice_batch_items')
       .select('ledger_transaction_id, batch_id, status')
@@ -2242,6 +2270,7 @@ export default class BillingLedgerService {
       .map((batch) => batch.id));
     const existingCounts = new Map();
     for (const item of items || []) {
+      if (reversedLedgerIds.has(normalizeString(item?.ledger_transaction_id))) continue;
       if (!activeBatchIds.has(item.batch_id)) continue;
       if (!ACTIVE_HMO_BATCH_ITEM_STATUSES.has(normalizeString(item.status).toLowerCase())) continue;
       const authorizationId = ledgerAuthorizationMap.get(item.ledger_transaction_id);
