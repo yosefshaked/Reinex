@@ -4,7 +4,7 @@
     "name": "HMO Claiming – End to End",
     "description": "Full HMO claiming flow: create provider + track → assign authorization to student → create lesson → mark attended → open financials claims tab → create draft batch → submit batch.",
     "version": "1.0.0",
-    "last_validated_at": "2026-04-29T00:00:00Z",
+    "last_validated_at": "2026-05-11T00:00:00Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -36,7 +36,6 @@
     "HMO_STUDENT_PHONE": "0501234502",
     "HMO_PROVIDER_NAME": "קופת חולים בדיקה",
     "HMO_TRACK_NAME": "מסלול בדיקה",
-    "LESSON_DATETIME": "2026-04-01T08:00:00.000Z",
     "LESSON_DURATION": "45"
   },
   "workflows": [
@@ -237,39 +236,78 @@
       ]
     },
     {
-      "id": "api-setup-lesson",
-      "name": "API – Create lesson instance and mark student as attended",
-      "description": "Creates a past lesson with the HMO student, marks them attended, which triggers the billing ledger entry that will be claimed.",
+      "id": "api-setup-lesson-current",
+      "name": "API – Create lesson in current month and mark attended",
+      "description": "Creates a lesson on the first of the current month ({{CURRENT_MONTH_START}}), marks the HMO student attended. This lesson will be claimable without navigating away from the default month view.",
       "steps": [
         {
-          "id": "create-lesson",
+          "id": "create-lesson-current",
           "action": "apiCall",
-          "description": "Create a lesson instance with the HMO student as participant",
+          "description": "Create a lesson instance in the current month",
           "method": "POST",
           "endpoint": "/api/lesson-instances",
           "body": {
             "org_id": "{{TEST_ORG_ID}}",
-            "datetime_start": "{{LESSON_DATETIME}}",
+            "datetime_start": "{{CURRENT_MONTH_START}}",
             "duration_minutes": 45,
             "instructor_employee_id": "{{INSTRUCTOR_ID}}",
             "service_id": "{{SERVICE_ID}}",
             "student_ids": ["{{HMO_STUDENT_UUID}}"]
           },
           "stores": [
-            { "variable": "LESSON_INSTANCE_ID", "field": "id" },
-            { "variable": "LESSON_PARTICIPANT_ID", "field": "participants.0.id" }
+            { "variable": "CURR_INSTANCE_ID",   "field": "id" },
+            { "variable": "CURR_PARTICIPANT_ID", "field": "participants.0.id" }
           ]
         },
         {
-          "id": "mark-attended",
+          "id": "mark-attended-current",
           "action": "apiCall",
-          "description": "Mark the student as attended – triggers HMO billing ledger entry creation",
+          "description": "Mark the student attended for the current-month lesson",
           "method": "POST",
           "endpoint": "/api/calendar/attendance",
           "body": {
             "org_id": "{{TEST_ORG_ID}}",
-            "instance_id": "{{LESSON_INSTANCE_ID}}",
-            "participant_id": "{{LESSON_PARTICIPANT_ID}}",
+            "instance_id": "{{CURR_INSTANCE_ID}}",
+            "participant_id": "{{CURR_PARTICIPANT_ID}}",
+            "participant_status": "attended"
+          }
+        }
+      ]
+    },
+    {
+      "id": "api-setup-lesson-prev",
+      "name": "API – Create lesson in previous month and mark attended",
+      "description": "Creates a lesson on the first of the previous month ({{PREV_MONTH_START}}), marks the HMO student attended. This lesson will only be visible after clicking 'הקודם' in the UI.",
+      "steps": [
+        {
+          "id": "create-lesson-prev",
+          "action": "apiCall",
+          "description": "Create a lesson instance in the previous month",
+          "method": "POST",
+          "endpoint": "/api/lesson-instances",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "datetime_start": "{{PREV_MONTH_START}}",
+            "duration_minutes": 45,
+            "instructor_employee_id": "{{INSTRUCTOR_ID}}",
+            "service_id": "{{SERVICE_ID}}",
+            "student_ids": ["{{HMO_STUDENT_UUID}}"]
+          },
+          "stores": [
+            { "variable": "PREV_INSTANCE_ID",   "field": "id" },
+            { "variable": "PREV_PARTICIPANT_ID", "field": "participants.0.id" }
+          ]
+        },
+        {
+          "id": "mark-attended-prev",
+          "action": "apiCall",
+          "description": "Mark the student attended for the previous-month lesson",
+          "method": "POST",
+          "endpoint": "/api/calendar/attendance",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "instance_id": "{{PREV_INSTANCE_ID}}",
+            "participant_id": "{{PREV_PARTICIPANT_ID}}",
             "participant_status": "attended"
           }
         },
@@ -277,14 +315,14 @@
           "id": "wait-for-ledger",
           "action": "sleep",
           "ms": 2000,
-          "description": "Allow billing sync to complete before checking the claims UI"
+          "description": "Allow both billing ledger entries to sync before opening the UI"
         }
       ]
     },
     {
       "id": "ui-claims-navigate",
       "name": "UI – Open financials claims tab",
-      "description": "Navigates to the financials page and switches to the HMO claims tab.",
+      "description": "Navigates to the financials page and switches to the funder claims tab. The page defaults to the current month.",
       "steps": [
         {
           "id": "navigate-to-financials",
@@ -295,109 +333,196 @@
         {
           "id": "click-claims-tab",
           "action": "click",
-          "selector": "button[role='tab']:has-text('תביעות HMO')",
-          "description": "Switch to the HMO claims tab"
+          "selector": "button[role='tab']:has-text('תביעות גורם מממן')",
+          "description": "Switch to the funder claims tab"
         },
         {
           "id": "wait-claims-loaded",
           "action": "waitForSelector",
-          "selector": "h3:has-text('יצירת דרישת HMO')",
-          "description": "Wait for the claim creation panel to appear"
+          "selector": "h3:has-text('שורות מוכנות לדרישה')",
+          "description": "Wait for the claimable rows panel to appear"
         },
         {
           "id": "screenshot-claims-tab",
           "action": "screenshot",
-          "name": "hmo-claims-tab"
+          "name": "hmo-claims-tab-current-month"
         }
       ]
     },
     {
-      "id": "ui-claims-create-batch",
-      "name": "UI – Select claimable rows and create draft batch",
-      "description": "Clicks the provider card to select its claimable rows, then creates a draft batch.",
+      "id": "ui-claims-current-month",
+      "name": "UI – Claim current month's lesson",
+      "description": "Selects the current-month claimable row, creates a draft batch, submits it, and verifies no draft remains. Page is already on the current month.",
       "steps": [
         {
-          "id": "click-provider-rows",
+          "id": "curr-select-all",
           "action": "click",
-          "selector": "button:has-text('{{HMO_PROVIDER_NAME}}')",
-          "first": true,
-          "description": "Click the provider card to select all claimable rows for our test provider"
+          "selector": "div:has(button:has-text('{{HMO_PROVIDER_NAME}}')) button:has-text('בחר הכל')",
+          "description": "Select all claimable rows for the HMO provider in the current month"
         },
         {
-          "id": "wait-rows-selected",
+          "id": "curr-wait-create-button",
           "action": "waitForSelector",
           "selector": "button:has-text('צור טיוטה מ')",
-          "description": "Wait for the 'create draft' button to show selected row count"
+          "description": "Wait for the create-draft button to appear with a row count"
         },
         {
-          "id": "click-create-batch",
+          "id": "curr-create-batch",
           "action": "click",
           "selector": "button:has-text('צור טיוטה מ')",
-          "description": "Click to create the draft batch"
+          "description": "Create the draft batch for current month"
         },
         {
-          "id": "sleep-after-create",
+          "id": "curr-sleep-after-create",
           "action": "sleep",
           "ms": 1500,
-          "description": "Wait for the batch to appear in the list after creation"
+          "description": "Wait for the batch to appear in the list"
         },
         {
-          "id": "assert-batch-visible",
+          "id": "curr-assert-submit-visible",
           "action": "assert",
           "type": "visible",
-          "selector": "button:has-text('סמן כנשלח')",
-          "description": "Assert that the newly created draft batch shows the submit button"
+          "selector": "button:has-text('שלח לגורם מממן')",
+          "description": "Assert the newly created draft batch shows the submit button"
         },
         {
-          "id": "screenshot-batch-created",
-          "action": "screenshot",
-          "name": "hmo-batch-created"
-        }
-      ]
-    },
-    {
-      "id": "ui-claims-submit-batch",
-      "name": "UI – Submit the draft batch",
-      "description": "Opens the submit dialog, confirms, and verifies the batch is no longer in draft state.",
-      "steps": [
-        {
-          "id": "click-submit-batch",
+          "id": "curr-click-submit",
           "action": "click",
-          "selector": "button:has-text('סמן כנשלח')",
+          "selector": "button:has-text('שלח לגורם מממן')",
           "first": true,
-          "description": "Click 'סמן כנשלח' on the draft batch to open the submit dialog"
+          "description": "Open the submit dialog for the current-month draft batch"
         },
         {
-          "id": "wait-submit-dialog",
+          "id": "curr-wait-dialog",
           "action": "waitForSelector",
           "selector": "[role='dialog']",
           "description": "Wait for the submit dialog to open"
         },
         {
-          "id": "confirm-submit",
+          "id": "curr-confirm-submit",
           "action": "click",
           "selector": "[role='dialog'] button:has-text('סמן כנשלח')",
           "description": "Confirm submission in the dialog"
         },
         {
-          "id": "wait-dialog-closed",
+          "id": "curr-wait-dialog-closed",
           "action": "waitForSelector",
           "selector": "[role='dialog']",
           "state": "hidden",
-          "description": "Wait for the dialog to close after successful submission"
+          "description": "Wait for the dialog to close after submission"
         },
         {
-          "id": "assert-no-draft-button",
+          "id": "curr-assert-no-submit",
           "action": "assert",
           "type": "visible",
-          "selector": "button:has-text('סמן כנשלח')",
+          "selector": "button:has-text('שלח לגורם מממן')",
           "not": true,
-          "description": "After submission, no more draft batches remain with the submit button"
+          "description": "No more draft batches with a submit button remain in the current month"
         },
         {
-          "id": "screenshot-batch-submitted",
+          "id": "screenshot-current-submitted",
           "action": "screenshot",
-          "name": "hmo-batch-submitted"
+          "name": "hmo-current-month-submitted"
+        }
+      ]
+    },
+    {
+      "id": "ui-claims-prev-month",
+      "name": "UI – Navigate to previous month and claim its lesson",
+      "description": "Clicks 'הקודם' to go to the previous month, verifies the prev-month lesson appears as claimable, then creates and submits a draft batch. This validates that month navigation works correctly.",
+      "steps": [
+        {
+          "id": "click-prev-month",
+          "action": "click",
+          "selector": "button:has-text('הקודם')",
+          "description": "Navigate to the previous month"
+        },
+        {
+          "id": "sleep-month-load",
+          "action": "sleep",
+          "ms": 1500,
+          "description": "Wait for the previous month's claim data to load"
+        },
+        {
+          "id": "prev-assert-claimable-row",
+          "action": "waitForSelector",
+          "selector": "div:has(button:has-text('{{HMO_PROVIDER_NAME}}')) button:has-text('בחר הכל')",
+          "description": "Assert that the previous month's lesson appears as a claimable row"
+        },
+        {
+          "id": "screenshot-prev-month",
+          "action": "screenshot",
+          "name": "hmo-claims-tab-prev-month"
+        },
+        {
+          "id": "prev-select-all",
+          "action": "click",
+          "selector": "div:has(button:has-text('{{HMO_PROVIDER_NAME}}')) button:has-text('בחר הכל')",
+          "description": "Select all claimable rows for the HMO provider in the previous month"
+        },
+        {
+          "id": "prev-wait-create-button",
+          "action": "waitForSelector",
+          "selector": "button:has-text('צור טיוטה מ')",
+          "description": "Wait for the create-draft button to appear with a row count"
+        },
+        {
+          "id": "prev-create-batch",
+          "action": "click",
+          "selector": "button:has-text('צור טיוטה מ')",
+          "description": "Create the draft batch for previous month"
+        },
+        {
+          "id": "prev-sleep-after-create",
+          "action": "sleep",
+          "ms": 1500,
+          "description": "Wait for the batch to appear in the list"
+        },
+        {
+          "id": "prev-assert-submit-visible",
+          "action": "assert",
+          "type": "visible",
+          "selector": "button:has-text('שלח לגורם מממן')",
+          "description": "Assert the newly created draft batch shows the submit button"
+        },
+        {
+          "id": "prev-click-submit",
+          "action": "click",
+          "selector": "button:has-text('שלח לגורם מממן')",
+          "first": true,
+          "description": "Open the submit dialog for the previous-month draft batch"
+        },
+        {
+          "id": "prev-wait-dialog",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "description": "Wait for the submit dialog to open"
+        },
+        {
+          "id": "prev-confirm-submit",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('סמן כנשלח')",
+          "description": "Confirm submission in the dialog"
+        },
+        {
+          "id": "prev-wait-dialog-closed",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden",
+          "description": "Wait for the dialog to close after submission"
+        },
+        {
+          "id": "prev-assert-no-submit",
+          "action": "assert",
+          "type": "visible",
+          "selector": "button:has-text('שלח לגורם מממן')",
+          "not": true,
+          "description": "No more draft batches with a submit button remain in the previous month"
+        },
+        {
+          "id": "screenshot-prev-submitted",
+          "action": "screenshot",
+          "name": "hmo-prev-month-submitted"
         }
       ]
     }

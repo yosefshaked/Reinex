@@ -151,6 +151,23 @@ function loadAllScripts() {
     .filter(Boolean);
 }
 
+// ─── Dynamic runtime variables ────────────────────────────────────────────
+
+/**
+ * Returns variables that are computed fresh at the start of every test run.
+ * Scripts can reference these as {{CURRENT_MONTH_START}} / {{PREV_MONTH_START}}.
+ * A script's own `variables` block can override them for debugging purposes.
+ */
+function buildDynamicVars() {
+  const now = new Date();
+  const y   = now.getUTCFullYear();
+  const m   = now.getUTCMonth(); // 0-based; Date.UTC handles m=-1 → December correctly
+  return {
+    CURRENT_MONTH_START: new Date(Date.UTC(y, m,     1, 8, 0, 0)).toISOString(),
+    PREV_MONTH_START:    new Date(Date.UTC(y, m - 1, 1, 8, 0, 0)).toISOString(),
+  };
+}
+
 // ─── Colour helpers ───────────────────────────────────────────────────────
 
 const C = {
@@ -271,8 +288,10 @@ async function main() {
     });
     const page = await browserCtx.newPage();
 
-    // Shared variable map: start with script-level variables, then overlay env
+    // Shared variable map: dynamic date helpers < script variables < env credentials
+    // Scripts can override dynamic vars (e.g. to pin a date while debugging).
     const sharedVars = {
+      ...buildDynamicVars(),
       ...(script.variables || {}),
       ...env,
     };
