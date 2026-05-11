@@ -21,7 +21,7 @@
     "lint:api-responses:strict-ux": "node scripts/validate-api-response-contracts.js --strict-ux",
     "lint:fix": "eslint . --fix",
     "validate:api": "node scripts/validate-api-endpoints.js",
-    "test:finance-calendar": "node --test test/finance-preview-contract.test.js test/finance-calendar-workflows.test.js api/_shared/BillingLedgerService.test.js api/_shared/student-billing.test.js",
+    "test:finance-calendar": "node --test test/finance-preview-contract.test.js test/finance-calendar-workflows.test.js test/ledger-presentation.test.js api/_shared/BillingLedgerService.test.js api/_shared/student-billing.test.js",
     "audit:finance-calendar:fixture": "node scripts/audit-finance-calendar-invariants.js",
     "verify:beta": "npm run test:finance-calendar && npm run audit:finance-calendar:fixture && npm run build",
     "test:isolation-stress-test": "node --test implementations/database/one-db-refactor/isolation-stress-test.js",

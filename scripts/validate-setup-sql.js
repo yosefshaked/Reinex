@@ -24,6 +24,7 @@ const RULES = {
   TABLE_OPERATION_ORDER: 'SQL014',
   FRONTEND_RPC_COVERAGE: 'SQL015',
   UNQUALIFIED_JOIN_AGGREGATE: 'SQL016',
+  UNQUALIFIED_CTE_ID_REFERENCE: 'SQL017',
   BROAD_EXCEPTION_SWALLOW: 'SQL101',
   DESTRUCTIVE_DROP_TABLE: 'SQL102',
 };
@@ -514,6 +515,31 @@ function validateUnqualifiedJoinAggregates() {
   }
 }
 
+function validateUnqualifiedCteIdReferences() {
+  const riskyReferences = [
+    {
+      pattern: /\bSELECT\s+id\s+FROM\s+participants_before\b/gi,
+      replacement: 'SELECT participants_before.id FROM participants_before',
+      contextPattern: /\bUPDATE\s+public\.lesson_participants\b/i,
+    },
+  ];
+
+  for (const { pattern, replacement, contextPattern } of riskyReferences) {
+    for (const match of sql.matchAll(pattern)) {
+      const surroundingSql = sql.slice(Math.max(0, (match.index ?? 0) - 1200), (match.index ?? 0) + 1200);
+      if (!contextPattern.test(surroundingSql)) {
+        continue;
+      }
+
+      addError(
+        RULES.UNQUALIFIED_CTE_ID_REFERENCE,
+        `Unqualified CTE column "id" can become ambiguous inside SQL RPC UPDATE scopes. Use "${replacement}".`,
+        offsetToPosition(match.index),
+      );
+    }
+  }
+}
+
 function validateWarnings() {
   const broadSwallows = Array.from(sql.matchAll(/WHEN others THEN NULL;/gi));
   for (const match of broadSwallows) {
@@ -677,6 +703,7 @@ function main() {
     validateTableOperationOrder();
     validateFrontendRpcCoverage();
     validateUnqualifiedJoinAggregates();
+    validateUnqualifiedCteIdReferences();
     validateWarnings();
   }
 

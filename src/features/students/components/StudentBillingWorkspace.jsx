@@ -16,7 +16,12 @@ import HmoAuthorizationManager from '@/features/students/components/HmoAuthoriza
 import { isAdminOrOffice, isAdminRole, normalizeMembershipRole } from '@/features/students/utils/endpoints.js';
 import { coerceAgorot, formatCurrency, toAgorot } from '@/lib/currency.js';
 import { groupLedgerEntries, sumByDirection } from '@/features/finance/utils/ledgerGrouping.js';
-import { formatLedgerNote } from '@/features/finance/utils/ledgerPresentation.js';
+import {
+  formatLedgerNote,
+  getCoveragePresentation,
+  getLessonChargePresentation,
+  getParticipantStatusLabel,
+} from '@/features/finance/utils/ledgerPresentation.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -35,23 +40,6 @@ function getServiceName(services, serviceId) {
     || 'שירות';
 }
 
-function getParticipantStatusLabel(status) {
-  switch (status) {
-    case 'attended':
-      return 'נכח';
-    case 'no_show':
-      return 'לא הגיע';
-    case 'cancelled_student':
-      return 'בוטל על ידי תלמיד';
-    case 'cancelled_clinic':
-      return 'בוטל על ידי המכון';
-    case 'scheduled':
-      return 'מתוכנן';
-    default:
-      return status || 'לא ידוע';
-  }
-}
-
 function getEntryTypeLabel(entry) {
   switch (entry?.source_type) {
     case 'manual_payment':
@@ -59,26 +47,13 @@ function getEntryTypeLabel(entry) {
     case 'manual_adjustment':
       return 'התאמה ידנית';
     case 'lesson_charge':
-      return 'חיוב שיעור';
+      return getLessonChargePresentation(entry).label || 'חיוב שיעור';
     case 'reversal':
       return 'פעולת היפוך';
     case 'hmo_invoice_payment':
       return 'תשלום גורם מממן';
     default:
       return 'תנועה';
-  }
-}
-
-function getCoverageBadge(row) {
-  switch (row?.coverage_status) {
-    case 'covered':
-      return { label: 'כיסוי פעיל', className: 'border-indigo-200 bg-indigo-50 text-indigo-900' };
-    case 'post_coverage':
-      return { label: 'אחרי מיצוי זכאות', className: 'border-amber-200 bg-amber-50 text-amber-900' };
-    case 'standard_uncovered':
-      return { label: 'ללא כיסוי', className: 'border-slate-200 bg-slate-50 text-slate-700' };
-    default:
-      return null;
   }
 }
 
@@ -360,7 +335,8 @@ export default function StudentBillingWorkspace({
     function buildRowFromEntry(entry, index, { dimmed = false, hideReverseAction = false } = {}) {
       const isReversed = reversalMap.has(entry.id);
       const isReversal = entry.source_type === 'reversal';
-      const coverageBadge = getCoverageBadge(entry?.metadata || {});
+      const chargePresentation = getLessonChargePresentation(entry);
+      const coverageBadge = getCoveragePresentation(entry?.metadata || {});
       const coverageReasonLabel = getCoverageReasonLabel(entry?.metadata?.coverage_reason);
       const direction = String(entry?.direction || '').toUpperCase();
       const descriptionLines = [
@@ -387,6 +363,7 @@ export default function StudentBillingWorkspace({
             label: 'הופך',
             className: 'border-amber-200 bg-amber-50 text-amber-800',
           }] : []),
+          ...(chargePresentation.statusBadge ? [chargePresentation.statusBadge] : []),
           ...(coverageBadge ? [coverageBadge] : []),
         ],
         debit: direction === 'DEBIT' ? formatCurrency(entry.amount) : '—',
@@ -679,7 +656,7 @@ export default function StudentBillingWorkspace({
                   const isUnbilled = row.billing_status === 'not_chargeable'
                     && !coerceAgorot(row.student_charge_amount)
                     && !coerceAgorot(row.hmo_charge_amount);
-                  const coverageBadge = getCoverageBadge(row);
+                  const coverageBadge = getCoveragePresentation(row);
                   const coverageReasonLabel = getCoverageReasonLabel(row.coverage_reason || row.billing_reason);
                   return (
                     <div key={row.id} className="rounded-xl border border-border bg-slate-50/70 p-4">

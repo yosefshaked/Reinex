@@ -2929,7 +2929,7 @@ BEGIN
                 )
             )
         )
-    WHERE participant.id IN (SELECT id FROM participants_before)
+    WHERE participant.id IN (SELECT participants_before.id FROM participants_before)
     RETURNING participant.id, to_jsonb(participant.*) AS after_state
   )
   SELECT
@@ -3156,7 +3156,7 @@ BEGIN
                 )
             )
         )
-    WHERE participant.id IN (SELECT id FROM participants_before)
+    WHERE participant.id IN (SELECT participants_before.id FROM participants_before)
     RETURNING participant.id, to_jsonb(participant.*) AS after_state
   )
   SELECT
@@ -3428,7 +3428,7 @@ BEGIN
                 )
             )
         )
-    WHERE participant.id IN (SELECT id FROM participants_before)
+    WHERE participant.id IN (SELECT participants_before.id FROM participants_before)
     RETURNING participant.id, to_jsonb(participant.*) AS after_state
   )
   SELECT

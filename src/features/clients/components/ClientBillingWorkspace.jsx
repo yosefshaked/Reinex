@@ -15,7 +15,11 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useServices } from '@/hooks/useOrgData.js';
 import { coerceAgorot, formatCurrency, toAgorot } from '@/lib/currency.js';
 import { groupLedgerEntries, sumByDirection } from '@/features/finance/utils/ledgerGrouping.js';
-import { formatLedgerNote } from '@/features/finance/utils/ledgerPresentation.js';
+import {
+  formatLedgerNote,
+  getLessonChargePresentation,
+  getParticipantStatusLabel,
+} from '@/features/finance/utils/ledgerPresentation.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -34,23 +38,6 @@ function getServiceName(services, serviceId) {
     || 'שירות';
 }
 
-function getParticipantStatusLabel(status) {
-  switch (status) {
-    case 'attended':
-      return 'נכח/ה';
-    case 'no_show':
-      return 'לא הגיע/ה';
-    case 'cancelled_student':
-      return 'בוטל על ידי הלקוח/ה';
-    case 'cancelled_clinic':
-      return 'בוטל על ידי הארגון';
-    case 'scheduled':
-      return 'מתוכנן';
-    default:
-      return status || 'לא ידוע';
-  }
-}
-
 function getEntryTypeLabel(entry) {
   switch (entry?.source_type) {
     case 'manual_payment':
@@ -58,7 +45,7 @@ function getEntryTypeLabel(entry) {
     case 'manual_adjustment':
       return 'התאמה ידנית';
     case 'lesson_charge':
-      return 'חיוב שיעור';
+      return getLessonChargePresentation(entry).label || 'חיוב שיעור';
     case 'reversal':
       return 'פעולת היפוך';
     default:
@@ -237,6 +224,7 @@ export default function ClientBillingWorkspace({ clientProfile }) {
     function buildRowFromEntry(entry, index, { dimmed = false, hideReverseAction = false } = {}) {
       const isReversed = reversalMap.has(entry.id);
       const isReversal = entry.source_type === 'reversal';
+      const chargePresentation = getLessonChargePresentation(entry);
       const direction = String(entry?.direction || '').toUpperCase();
       const descriptionLines = [
         entry.notes ? `הערות: ${formatLedgerNote(entry.notes)}` : '',
@@ -261,6 +249,7 @@ export default function ClientBillingWorkspace({ clientProfile }) {
             label: 'הופך',
             className: 'border-amber-200 bg-amber-50 text-amber-800',
           }] : []),
+          ...(chargePresentation.statusBadge ? [chargePresentation.statusBadge] : []),
         ],
         debit: direction === 'DEBIT' ? formatCurrency(entry.amount) : '—',
         credit: direction === 'CREDIT' ? formatCurrency(entry.amount) : '—',
