@@ -77,7 +77,6 @@ export default function LedgerEntriesTable({
                 <TableRow className={cn('hover:bg-slate-50/80', row.dimmed ? 'bg-slate-50/50 text-slate-500' : '')}>
                   <TableCell className="px-5 py-4 text-right align-top text-sm text-slate-700 sm:px-6">
                     <div className="flex items-start justify-between gap-2">
-                      <span>{row.date}</span>
                       {canExpand ? (
                         <Button
                           type="button"
@@ -90,6 +89,7 @@ export default function LedgerEntriesTable({
                           <span className="sr-only">פירוט</span>
                         </Button>
                       ) : null}
+                      <span>{row.date}</span>
                     </div>
                   </TableCell>
 

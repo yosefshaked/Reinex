@@ -296,6 +296,8 @@ export default function ClientBillingWorkspace({ clientProfile }) {
       const original = group.originalEntry;
       const reversal = group.reversalEntry;
       const originalIndex = ledgerIndexById.get(original.id) || 0;
+      const reversalIndex = ledgerIndexById.get(reversal.id) || originalIndex;
+      const pairAnchorIndex = Math.min(originalIndex, reversalIndex);
       const pairEntries = [original, reversal];
       const totalDebit = sumByDirection(pairEntries, 'DEBIT');
       const totalCredit = sumByDirection(pairEntries, 'CREDIT');
@@ -306,8 +308,6 @@ export default function ClientBillingWorkspace({ clientProfile }) {
         date: formatDateTime(original.effective_at || original.posted_at),
         primaryText: `${getEntryTypeLabel(original)} • בוצע היפוך`,
         detailLines: [
-          `תנועה מקורית #${shortId(original.id)}`,
-          `תנועת היפוך #${shortId(reversal.id)}`,
           reversal.notes ? `סיבת היפוך: ${formatLedgerNote(reversal.notes)}` : '',
         ].filter(Boolean),
         statusBadges: [
@@ -322,11 +322,11 @@ export default function ClientBillingWorkspace({ clientProfile }) {
         ],
         debit: totalDebit > 0 ? formatCurrency(totalDebit) : '—',
         credit: totalCredit > 0 ? formatCurrency(totalCredit) : '—',
-        balance: formatCurrency(displayedBalances[originalIndex] || 0),
+        balance: formatCurrency(displayedBalances[pairAnchorIndex] || 0),
         dimmed: false,
         childRows: [
           buildRowFromEntry(original, originalIndex, { dimmed: false, hideReverseAction: true }),
-          buildRowFromEntry(reversal, ledgerIndexById.get(reversal.id) || originalIndex, { dimmed: false, hideReverseAction: true }),
+          buildRowFromEntry(reversal, reversalIndex, { dimmed: false, hideReverseAction: true }),
         ],
         actions: [
           {
