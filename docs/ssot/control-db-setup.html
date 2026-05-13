@@ -703,16 +703,6 @@ INSERT INTO public.permission_registry (
     true
   ),
   (
-    &#39;backup_cooldown_override&#39;,
-    &#39;Backup Cooldown Override&#39;,
-    &#39;עקיפת המתנה לגיבוי&#39;,
-    &#39;One-time override of the 7-day backup cooldown (automatically resets after use)&#39;,
-    &#39;עקיפה חד-פעמית של תקופת ההמתנה של 7 ימים (מתאפסת אוטומטית לאחר שימוש)&#39;,
-    &#39;false&#39;::jsonb,
-    &#39;backup&#39;,
-    true
-  ),
-  (
     &#39;backup_oauth_enabled&#39;,
     &#39;Cloud Backup (OAuth)&#39;,
     &#39;גיבוי ענן (Google Drive, OneDrive)&#39;,
@@ -1485,16 +1475,6 @@ INSERT INTO public.permission_registry (
   category,
   requires_approval
 ) VALUES
-  (
-    &#39;backup_cooldown_override&#39;,
-    &#39;Backup Cooldown Override&#39;,
-    &#39;עקיפת המתנה לגיבוי&#39;,
-    &#39;One-time override of the 7-day backup cooldown (automatically resets after use)&#39;,
-    &#39;עקיפה חד-פעמית של תקופת ההמתנה של 7 ימים (מתאפסת אוטומטית לאחר שימוש)&#39;,
-    &#39;false&#39;::jsonb,
-    &#39;backup&#39;,
-    true
-  ),
   (
     &#39;backup_local_enabled&#39;,
     &#39;Local Backup&#39;,

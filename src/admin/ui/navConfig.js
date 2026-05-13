@@ -25,6 +25,7 @@ import {
   ShieldEllipsis,
   Sparkles,
   Bug,
+  ArchiveRestore,
 } from 'lucide-react';
 
 /**
@@ -232,6 +233,13 @@ export const ADMIN_NAV = [
   {
     group: 'Settings',
     items: [
+      {
+        to: '/system-admin/backups',
+        label: 'Backups',
+        icon: ArchiveRestore,
+        status: 'live',
+        description: 'Inspect and control tenant backup availability, history, and restores.',
+      },
       {
         to: '/system-admin/global-settings',
         label: 'Global Settings',

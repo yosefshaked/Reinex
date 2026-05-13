@@ -4154,16 +4154,6 @@ INSERT INTO public.permission_registry (
   requires_approval
 ) VALUES
   (
-    'backup_cooldown_override',
-    'Backup Cooldown Override',
-    'עקיפת המתנה לגיבוי',
-    'One-time override of the 7-day backup cooldown (automatically resets after use)',
-    'עקיפה חד-פעמית של תקופת ההמתנה של 7 ימים (מתאפסת אוטומטית לאחר שימוש)',
-    'false'::jsonb,
-    'backup',
-    true
-  ),
-  (
     'backup_local_enabled',
     'Local Backup',
     'גיבוי מקומי',

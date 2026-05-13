@@ -159,6 +159,41 @@ export function createS3Driver(config) {
       return Buffer.concat(chunks);
     },
 
+          /**
+           * List all files under a prefix.
+           *
+           * @param {string} prefix - Path prefix to list.
+           * @returns {Promise<Array<{ key: string, size: number, lastModified: string | null }>>}
+           */
+          async listByPrefix(prefix) {
+            const items = [];
+            let continuationToken = null;
+
+            do {
+              const listCommand = new ListObjectsV2Command({
+                Bucket: bucket,
+                Prefix: prefix,
+                ContinuationToken: continuationToken,
+              });
+
+              const listResponse = await s3Client.send(listCommand);
+              const contents = listResponse.Contents || [];
+
+              for (const item of contents) {
+                if (!item?.Key) continue;
+                items.push({
+                  key: item.Key,
+                  size: item.Size || 0,
+                  lastModified: item.LastModified ? new Date(item.LastModified).toISOString() : null,
+                });
+              }
+
+              continuationToken = listResponse.NextContinuationToken;
+            } while (continuationToken);
+
+            return items;
+          },
+
     /**
      * Delete all files with a given prefix (for bulk cleanup)
      * 

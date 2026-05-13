@@ -856,8 +856,8 @@ async function buildParticipantStatusPreview(client, orgId, body, {
       post_coverage_policy: projectedCoverageDecision.post_coverage_policy,
       amount: projectedPostCoverageChargeAmount,
       message: projectedCoverageDecision.post_coverage_policy === 'explicit_customer_charge'
-        ? `הזכאות נוצלה במלואה, ולכן השיעור הבא יחויב במחיר המשך מפורש של ₪${fmtILS(projectedPostCoverageChargeAmount)}.`
-        : `הזכאות נוצלה במלואה, ולכן השיעור הבא יחויב במחיר השירות הרגיל של ₪${fmtILS(projectedPostCoverageChargeAmount)}.`,
+        ? `הזכאות נוצלה במלואה, ולכן השיעור יחויב במחיר המשך מפורש של ₪${fmtILS(projectedPostCoverageChargeAmount)}.`
+        : `הזכאות נוצלה במלואה, ולכן השיעור יחויב במחיר השירות הרגיל של ₪${fmtILS(projectedPostCoverageChargeAmount)}.`,
     });
   }
   if (projectedBillingDecision?.requiresAttention) {

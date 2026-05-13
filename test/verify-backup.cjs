@@ -1,38 +1,51 @@
-// Usage: node test/verify-backup.js <backup-file-path> <password>
-// Example: node test/verify-backup.js ./backup-2025-10-28.tuttiud.enc ABCD-EF12-3456-7890-ABCD
-
-const fs = require('fs');
-const path = require('path');
-const { decryptBackup } = require('../api/_shared/backup-utils');
+// Usage: node test/verify-backup.cjs <orgId> <YYYY-MM-DD>
+// Example: node test/verify-backup.cjs 550e8400-e29b-41d4-a716-446655440000 2026-05-13
 
 async function main() {
-  const [,, filePath, password] = process.argv;
-  if (!filePath || !password) {
-    console.error('Usage: node test/verify-backup.js <backup-file-path> <password>');
+  const [,, orgId, backupDate] = process.argv;
+  if (!orgId || !backupDate) {
+    console.error('Usage: node test/verify-backup.cjs <orgId> <YYYY-MM-DD>');
     process.exit(1);
   }
 
   try {
-    const absPath = path.resolve(filePath);
-    const encryptedData = fs.readFileSync(absPath);
-    console.log('Loaded backup file:', absPath);
+    const [storageModule, backupModule] = await Promise.all([
+      import('../api/cross-platform/storage-drivers/index.js'),
+      import('../api/_shared/backup-utils.js'),
+    ]);
 
-    const manifest = await decryptBackup(encryptedData, password);
+    const { getStorageDriver } = storageModule;
+    const { decryptBackup, validateBackupManifest } = backupModule;
+
+    const storageDriver = getStorageDriver('managed', null, process.env);
+    const filename = `backups/${orgId}/${backupDate}.enc`;
+    const encryptedData = await storageDriver.getFile(filename);
+    console.log('Loaded backup file:', filename);
+
+    const manifest = await decryptBackup(encryptedData, process.env);
     if (!manifest || typeof manifest !== 'object') {
       throw new Error('Decryption succeeded but manifest is invalid');
     }
 
-    console.log('Backup file is valid and decrypted successfully!');
-    console.log('Manifest summary:');
+    const validation = validateBackupManifest(manifest);
+    if (!validation.valid) {
+      throw new Error(validation.error || 'invalid_manifest');
+    }
+
+    console.log('Backup file is valid and decrypted successfully.');
     console.log(JSON.stringify({
       version: manifest.version,
       org_id: manifest.org_id,
-      created_at: manifest.created_at,
+      exported_at: manifest.exported_at,
       schema_version: manifest.schema_version,
-      tables: manifest.tables?.map(t => ({ name: t.name, records: Array.isArray(t.records) ? t.records.length : 0 }))
+      total_records: manifest.metadata?.total_records ?? 0,
+      table_count: manifest.tables ? Object.keys(manifest.tables).length : 0,
+      tables: Object.fromEntries(
+        Object.entries(manifest.tables || {}).map(([name, rows]) => [name, Array.isArray(rows) ? rows.length : 0])
+      ),
     }, null, 2));
   } catch (err) {
-    console.error('Backup file is invalid or password is incorrect:', err.message);
+    console.error('Backup verification failed:', err.message);
     process.exit(2);
   }
 }

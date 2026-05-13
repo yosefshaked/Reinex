@@ -244,30 +244,30 @@
 - Future phases will introduce per-key quotas and pruning/archival for history-like settings. Until then, do not hard-reject large settings writes without product sign-off. Document changes in PRs and update this section when enforcement is enabled.
 
 ### Backup and restore (2025-01)
-- `/api/backup` (POST) creates encrypted local backups with weekly cooldown (7 days). Requires admin/owner role and `permissions.backup_local_enabled = true` in `org_settings`.
-- `/api/restore` (POST) decrypts and restores backups. Requires admin/owner role and same permission flag. Supports optional `clear_existing` flag for clean restore.
+- `/api/backup-run` (POST) creates encrypted local backups for all orgs using the service key and uploads them to storage under `backups/{orgId}/{YYYY-MM-DD}.enc`.
+- `/api/backup-list` (GET) lists the current org's backups for org admins when `backup_local_enabled = true`.
+- `/api/restore` (POST) decrypts and restores a single org backup from storage. Requires admin/owner role and the same permission flag.
 - Shared backup utilities in `api/_shared/backup-utils.js`:
-  - `encryptBackup(data, password)`: AES-256-GCM + gzip compression, returns encrypted Buffer
-  - `decryptBackup(encryptedData, password)`: reverses encryption, returns manifest object
-  - `exportTenantData(tenantClient, orgId)`: queries all tenant tables (Students, Instructors, SessionRecords, Settings), returns manifest v1.0
-  - `validateBackupManifest(manifest)`: checks version/schema compatibility
-  - `restoreTenantData(tenantClient, manifest, options)`: transactional restore with optional `clearExisting` flag in dependency order
-- Backup manifests are JSON with structure: `{ version: '1.0', schema_version: 'tuttiud_v1', org_id, created_at, metadata: { total_records }, tables: [{ name, records }] }`
-- Password generation: System auto-generates a human-friendly product-key style password (e.g., ABCD-EF12-3456-7890-ABCD, ~80-bit entropy). The user must save it from the response to decrypt later.
-- Cooldown enforcement: checks `org_settings.backup_history` array for last successful backup within 7 days; 429 response includes `next_allowed_at` and `days_remaining`. Can be bypassed once by setting `permissions.backup_cooldown_override = true` in control DB; the flag is automatically reset to `false` after a successful backup.
-- Audit trail: all backup/restore operations appended to `org_settings.backup_history` JSONB array (last 100 entries kept) with type, status, timestamp, initiated_by, size_bytes/records_restored, error_message.
-- Control DB schema: run `scripts/control-db-backup-schema.sql` to add `org_settings.permissions` (jsonb) and `org_settings.backup_history` (jsonb) columns.
+-  - `encryptBackup(data, env)`: AES-256-GCM + gzip compression with `BACKUP_ENCRYPTION_KEY`, returns encrypted Buffer
+-  - `decryptBackup(encryptedData, env)`: reverses encryption, returns manifest object
+-  - `exportTenantData(tenantClient, orgId)`: queries all tenant tables in dependency order with org scoping, returns manifest v2.0
+-  - `validateBackupManifest(manifest)`: accepts the current backup manifest schema and rejects legacy formats
+-  - `restoreTenantData(tenantClient, manifest, options)`: additive restore with org-scoped upserts in dependency order
+- Backup manifests are JSON with structure: `{ version: '2.0', schema_version: 'reinex_v2', org_id, exported_at, metadata: { total_records }, tables: { tableName: rows[] } }`
+- Encryption key generation: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` and store it as `BACKUP_ENCRYPTION_KEY`.
+- Backup history lives on `organizations.backup_history` JSONB (last 100 entries kept) with type, status, timestamp, filename, size_bytes, records_restored, error_message.
+- No cooldown gate: `backup_local_enabled` is the only user-facing backup permission; nightly `backup-run` ignores it and runs for all orgs.
 - Permissions model: Centralized in `permission_registry` table (control DB). Run `scripts/control-db-permissions-table.sql` to create the registry with default permissions for all features. Use `initialize_org_permissions(org_id)` DB function to auto-populate `org_settings.permissions` from registry defaults when null/empty.
-  - Available permissions: `backup_local_enabled`, `backup_cooldown_override`, `backup_oauth_enabled`, `logo_enabled`.
+  - Available permissions: `backup_local_enabled`, `backup_oauth_enabled`, `logo_enabled`.
   - Shared utilities: `api/_shared/permissions-utils.js` provides `ensureOrgPermissions()`, `getDefaultPermissions()`, `getPermissionRegistry()`.
   - API endpoint: `GET /api/permissions-registry` returns permission metadata (optionally filtered by category) or defaults-only JSON.
   - New (2025-10): `session_form_preanswers_enabled` (boolean) and `session_form_preanswers_cap` (number, default 50) control the preconfigured answers feature and per-question cap. The registry now stores `default_value` as JSONB to support non-boolean defaults.
 - Frontend: Backup card in Settings page shows grayed-out state when `backup_local_enabled = false` with message "גיבוי אינו זמין. נא לפנות לתמיכה על מנת לבחון הפעלת הפונקציה". Uses `initialize_org_permissions` RPC on load to ensure permissions exist.
- - Frontend: Backup card now consumes `GET /api/backup-status` to determine `enabled`, cooldown, and one-time override; the card is disabled with the above message when `enabled=false`, and shows a cooldown banner with an "override available" badge when applicable.
+- Frontend: Backup card now consumes `GET /api/backup-list` to show stored backups for the active org; restore is additive and requires the same permission gate.
 - OAuth backup destinations (Google Drive, OneDrive, Dropbox) planned but not yet implemented; permission flags reserved.
-- Admin tool: `test/verify-backup.cjs` allows super admins to verify backup file integrity and decryptability.
-  - Usage: `node test/verify-backup.cjs <backup-file-path> <password>`
-  - Prints manifest summary if successful, error if invalid or wrong password.
+- Admin tool: `test/verify-backup.cjs` verifies backup file integrity and decryptability by org/date.
+  - Usage: `node test/verify-backup.cjs <orgId> <YYYY-MM-DD>`
+  - Prints manifest summary if successful, error if invalid or key/config is wrong.
   - Use for compliance, restore validation, and support troubleshooting.
 
 ### Custom Logo Feature (2025-10)

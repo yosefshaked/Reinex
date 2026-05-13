@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { EnhancedDialogHeader } from '@/components/ui/DialogHeader';
 import { Sparkles, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History } from 'lucide-react';
 import LocalExportImportManager from '@/components/settings/LocalExportImportManager.jsx';
+import BackupManager from '@/components/settings/BackupManager.jsx';
 import LogoManager from '@/components/settings/LogoManager.jsx';
 import TagsManager from '@/components/settings/TagsManager.jsx';
 import StudentVisibilitySettings from '@/components/settings/StudentVisibilitySettings.jsx';
@@ -46,7 +47,7 @@ export default function Settings() {
   const canManageSessionForm = normalizedRole === 'admin' || normalizedRole === 'owner';
   const orgIdSyncCompletedRef = useRef(new Set());
   const orgIdSyncInFlightRef = useRef(new Set());
-  const [selectedModule, setSelectedModule] = useState(null); // 'localExport' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
+  const [selectedModule, setSelectedModule] = useState(null); // 'backup' | 'localExport' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
   const [localExportEnabled, setLocalExportEnabled] = useState(false);
   const [logoEnabled, setLogoEnabled] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
@@ -621,6 +622,34 @@ export default function Settings() {
             </CardContent>
           </Card>
 
+          {localExportEnabled ? (
+            <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 flex flex-col hover:scale-[1.02] hover:shadow-xl">
+              <CardHeader className="space-y-2 pb-3 flex-1">
+                <div className="flex items-start gap-2">
+                  <div className="rounded-lg bg-cyan-100 p-2 text-cyan-600 transition-colors group-hover:bg-cyan-600 group-hover:text-white">
+                    <HardDrive className="h-5 w-5" aria-hidden="true" />
+                  </div>
+                  <CardTitle className="text-lg font-bold text-slate-900">
+                    גיבויים ושחזור
+                  </CardTitle>
+                </div>
+                <p className="min-h-[2.5rem] text-sm leading-relaxed text-slate-600">
+                  צפייה בגיבויים מוצפנים ושחזור additive של הארגון.
+                </p>
+              </CardHeader>
+              <CardContent className="mt-auto pt-0">
+                <Button
+                  size="sm"
+                  className="w-full gap-2"
+                  onClick={() => setSelectedModule('backup')}
+                  disabled={!canManageSessionForm}
+                >
+                  <HardDrive className="h-4 w-4" /> ניהול גיבויים
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+
           {/* Custom Logo Card */}
           <Card className={`group relative w-full overflow-hidden border-0 shadow-md transition-all duration-200 flex flex-col ${
             logoEnabled ? 'bg-white/80 hover:shadow-xl hover:scale-[1.02]' : 'bg-slate-50 opacity-75'
@@ -887,6 +916,7 @@ export default function Settings() {
             <EnhancedDialogHeader
               icon={
                 selectedModule === 'localExport' ? <ShieldCheck /> :
+                  selectedModule === 'backup' ? <HardDrive /> :
                 selectedModule === 'logo' ? <Sparkles /> :
                 selectedModule === 'tags' ? <Tag /> :
                 selectedModule === 'studentVisibility' ? <EyeOff /> :
@@ -900,6 +930,7 @@ export default function Settings() {
               }
               title={
                 selectedModule === 'localExport' ? 'ייצוא וייבוא מקומי' :
+                  selectedModule === 'backup' ? 'גיבויים ושחזור' :
                 selectedModule === 'logo' ? 'לוגו מותאם אישית' :
                 selectedModule === 'tags' ? 'ניהול תגיות וסיווגים' :
                 selectedModule === 'studentVisibility' ? 'תצוגת תלמידים לא פעילים' :
@@ -924,6 +955,9 @@ export default function Settings() {
               <div className="mx-auto max-w-4xl">
                 {selectedModule === 'localExport' && (
                   <LocalExportImportManager session={session} orgId={activeOrgId} />
+                )}
+                {selectedModule === 'backup' && (
+                  <BackupManager session={session} orgId={activeOrgId} />
                 )}
                 {selectedModule === 'logo' && (
                   <LogoManager session={session} orgId={activeOrgId} />

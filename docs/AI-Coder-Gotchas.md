@@ -98,7 +98,9 @@ const handleDialogInteractOutside = useCallback((event) => {
 - For OAuth and password reset flows, always pass a redirect URL (see AGENTS.md for exact routes).
 
 ## Backups
-- `/api/backup` has a 7-day cooldown and optional override. Reflect state via `/api/backup-status`.
+- `/api/backup-run` is service-key protected and runs nightly backups for all orgs.
+- `/api/backup-list` is the org-admin backup browser and only shows data when `backup_local_enabled` is true.
+- `/api/restore` restores a single org backup from storage using the org-scoped filename.
 
 ## Azure Functions route naming (SWA)
 - Never start custom API route names with `admin` in `function.json`.

@@ -44,6 +44,7 @@
 - For employee/instructor documents, `entity_type='instructor'` is historical naming only; the canonical entity id is the `Employees.id` row, and self-service permission checks must resolve through `Employees.user_id`.
 - Storage supports managed mode and BYOS through the driver factory; do not branch provider logic in every endpoint.
 - Backup permissions and cooldown live in control DB `org_settings` and are enforced server-side.
+- Backup export in `api/_shared/backup-utils.js` now performs a runtime schema coverage check before each export by comparing `information_schema.tables` (`public` `BASE TABLE`) minus explicit platform/system tables against `EXPORT_TABLES`; missing live tenant tables in `EXPORT_TABLES` must hard-fail export, while `EXPORT_TABLES` entries missing from live schema only warn (for pending migrations).
 - Local export/import is an MVP data portability aid, not a full backup/restore mechanism. UI copy must use `ייצוא מקומי` / `ייבוא מקומי`, not backup/restore claims.
 - Local export/import endpoints must remain org-scoped, owner/admin only, audit-logged, and non-destructive. Import must dry-run first, must never trust file `org_id`, must force the current authorized org, and must not implement `clearExisting`.
 - Document binary files are excluded from local export/import v1. Only `Documents` metadata may be included, and imported metadata must not point to the original provider URL/path as if the binary was available.

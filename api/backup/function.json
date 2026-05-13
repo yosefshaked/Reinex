@@ -6,7 +6,7 @@
       "direction": "in",
       "name": "req",
       "methods": ["post"],
-      "route": "backup"
+      "route": "backup-run"
     },
     {
       "type": "http",

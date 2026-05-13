@@ -5,8 +5,8 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": ["get"],
-      "route": "backup-status"
+      "methods": ["get", "post"],
+      "route": "system-admin-backups"
     },
     {
       "type": "http",
