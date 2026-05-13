@@ -184,7 +184,10 @@ Disposition legend: keep = leave as-is, update = rewrite to the new flow, delete
 ## Verification
 - Search for `backup_cooldown_override`, `generateProductKeyPassword`, `tuttiud_v1`, `tuttiud-backup`, and `incorrect_password` returned no matches in the codebase.
 - `api/backup-status/` no longer exists.
-- `api/_shared/backup-utils.js` now runs a runtime schema coverage self-check before every export: it reads `information_schema.tables` for `public` `BASE TABLE` rows, subtracts explicit platform tables, and aborts when live tenant tables are missing from `EXPORT_TABLES`.
+- `src/lib/setup-sql.js` now defines `public.get_public_base_tables()` as a `SECURITY DEFINER` RPC helper (`SET search_path = public`) that reads `information_schema.tables` for `public` `BASE TABLE` rows.
+- Execute permission for `public.get_public_base_tables()` is restricted to `service_role` only (no `authenticated` / `app_user`) because this helper is infrastructure-only and should not be callable from client-scoped roles.
+- `api/_shared/backup-utils.js` now performs runtime schema coverage through `rpc('get_public_base_tables')` instead of querying `information_schema` directly through PostgREST.
+- The prior fallback that silently skipped the coverage check when `information_schema` was not exposed has been removed. If the RPC fails, backup hard-fails because this is treated as an infrastructure/configuration problem.
 - When `EXPORT_TABLES` contains tables missing from the current live schema, backup logs a warning and continues (supports environments with pending migrations).
 - `api/_shared/backup-utils.js` uses `withOrgScope(...)` for both export and restore table queries.
 - `BACKUP_SERVICE_KEY` is only read server-side from `process.env` / Azure Function env and is not referenced in `src/`.

@@ -292,6 +292,16 @@ export default async function systemAdminBackups(context, req) {
   if (action === 'run_backup_now') {
     try {
       const result = await proxyBackupRun(env);
+      const failed = Number(result?.body?.failed || 0);
+      if (failed > 0) {
+        context.log?.warn?.('system-admin-backups: backup run completed with failures', {
+          userId: admin.userId,
+          failed,
+          succeeded: Number(result?.body?.succeeded || 0),
+          errors: result?.body?.errors || [],
+        });
+      }
+
       return respond(context, result.status || 200, result.body || { message: 'backup_run_complete' });
     } catch (error) {
       context.log?.error?.('system-admin-backups: backup run proxy failed', {

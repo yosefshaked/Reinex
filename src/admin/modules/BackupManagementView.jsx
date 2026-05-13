@@ -1,6 +1,6 @@
 import React from 'react';
 import { toast } from 'sonner';
-import { ArchiveRestore, Loader2, RefreshCw, RotateCw, ShieldCheck, Upload } from 'lucide-react';
+import { ArchiveRestore, Loader2, RotateCw, ShieldCheck, Upload } from 'lucide-react';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import SystemAdminModuleShell from './SystemAdminModuleShell.jsx';
 import { Button } from '@/components/ui/button';
@@ -98,8 +98,16 @@ export default function BackupManagementView() {
       });
       const succeeded = Number(payload?.succeeded || 0);
       const failed = Number(payload?.failed || 0);
+      const firstError = Array.isArray(payload?.errors)
+        ? payload.errors.find((entry) => typeof entry?.message === 'string' && entry.message.trim().length > 0)?.message
+        : '';
+
       if (failed > 0) {
-        toast.warning(`Backup run completed with ${failed} failures and ${succeeded} successes.`);
+        toast.warning(
+          firstError
+            ? `Backup run completed with ${failed} failures and ${succeeded} successes. First error: ${firstError}`
+            : `Backup run completed with ${failed} failures and ${succeeded} successes.`
+        );
       } else {
         toast.success(`Backup run completed with ${succeeded} successful org backups.`);
       }
@@ -280,7 +288,16 @@ export default function BackupManagementView() {
                             <td className="px-4 py-3 text-slate-700">{formatDate(entry.timestamp)}</td>
                             <td className="px-4 py-3 font-mono text-xs text-slate-600">{entry.filename || '—'}</td>
                             <td className="px-4 py-3 text-slate-700">{formatBytes(entry.size_bytes)}</td>
-                            <td className="px-4 py-3 text-slate-700">{entry.status || '—'}</td>
+                            <td className="px-4 py-3 text-slate-700">
+                              <span className={entry.status === 'failed' ? 'font-medium text-rose-700' : ''}>
+                                {entry.status || '—'}
+                              </span>
+                              {entry.error_message ? (
+                                <div className="mt-1 max-w-md break-words text-xs text-rose-600" title={entry.error_message}>
+                                  {entry.error_message}
+                                </div>
+                              ) : null}
+                            </td>
                             <td className="px-4 py-3">
                               {entry.filename ? (
                                 <Button
@@ -294,7 +311,12 @@ export default function BackupManagementView() {
                                   Restore
                                 </Button>
                               ) : (
-                                <span className="text-slate-400">No file</span>
+                                <span
+                                  className="text-slate-400"
+                                  title={entry.error_message || 'No backup file was created for this failed run.'}
+                                >
+                                  No file
+                                </span>
                               )}
                             </td>
                           </tr>

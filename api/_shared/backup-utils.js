@@ -139,14 +139,14 @@ export const EXPORT_TABLES = [
 
 async function assertBackupTableCoverage(tenantClient) {
   const { data: liveTableRows, error: liveTablesError } = await tenantClient
-    .schema('information_schema')
-    .from('tables')
-    .select('table_name')
-    .eq('table_schema', 'public')
-    .eq('table_type', 'BASE TABLE');
+    .rpc('get_public_base_tables');
 
   if (liveTablesError) {
-    throw new Error(`Backup aborted: failed to read information_schema.tables: ${liveTablesError.message}`);
+    throw new Error(`Backup aborted: get_public_base_tables RPC failed: ${liveTablesError.message}`);
+  }
+
+  if (!Array.isArray(liveTableRows)) {
+    throw new Error('Backup aborted: get_public_base_tables RPC returned an invalid payload');
   }
 
   const livePublicTables = new Set(

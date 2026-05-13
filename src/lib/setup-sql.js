@@ -3735,6 +3735,21 @@ AS $$
   WHERE user_id = auth.uid();
 $$;
 
+-- get_public_base_tables()
+-- Returns all BASE TABLE names from the public schema via SECURITY DEFINER,
+-- so backend RPC callers do not depend on direct information_schema exposure.
+CREATE OR REPLACE FUNCTION public.get_public_base_tables()
+RETURNS TABLE(table_name text)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT table_name::text
+  FROM information_schema.tables
+  WHERE table_schema = 'public'
+    AND table_type = 'BASE TABLE';
+$$;
+
 -- Enable RLS on control tables
 ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -4081,6 +4096,7 @@ END $$;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT EXECUTE ON FUNCTION public.get_active_org_id() TO authenticated, app_user;
 GRANT EXECUTE ON FUNCTION public.get_my_org_ids() TO authenticated, app_user;
+GRANT EXECUTE ON FUNCTION public.get_public_base_tables() TO service_role;
 GRANT EXECUTE ON FUNCTION public.ensure_my_profile_exists(text, text, text, text) TO authenticated, app_user;
 GRANT EXECUTE ON FUNCTION public.create_organization(text) TO authenticated, app_user;
 GRANT EXECUTE ON FUNCTION public.cancel_lesson_instance_with_participants(uuid, uuid, uuid, integer, text) TO app_user;

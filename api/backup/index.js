@@ -84,10 +84,11 @@ export default async function backupRun(context, req) {
         continue;
       }
 
+      const filename = buildBackupFilename(orgId);
+
       try {
         const manifest = await exportTenantData(supabase, orgId);
         const encrypted = await encryptBackup(manifest, env);
-        const filename = buildBackupFilename(orgId);
 
         await storageDriver.upload(filename, encrypted, 'application/octet-stream');
 
@@ -120,17 +121,38 @@ export default async function backupRun(context, req) {
 
         results.succeeded += 1;
       } catch (error) {
+        context.log?.error?.('backup-run org backup failed', {
+          orgId,
+          filename,
+          message: error?.message || 'backup_failed',
+          code: error?.code,
+        });
+
         results.failed += 1;
-        results.errors.push({ org_id: orgId, stage: 'backup', message: error?.message || 'backup_failed' });
+        results.errors.push({
+          org_id: orgId,
+          stage: 'backup',
+          filename,
+          message: error?.message || 'backup_failed',
+        });
 
         try {
           await appendBackupHistory(supabase, orgId, {
             type: 'backup',
             status: 'failed',
             timestamp: new Date().toISOString(),
+            filename,
+            size_bytes: 0,
             error_message: error?.message || 'unknown_error',
           });
         } catch (historyError) {
+          context.log?.error?.('backup-run history append failed', {
+            orgId,
+            filename,
+            message: historyError?.message || 'history_append_failed',
+            code: historyError?.code,
+          });
+
           results.errors.push({ org_id: orgId, stage: 'history', message: historyError?.message || 'history_append_failed' });
         }
       }
@@ -157,8 +179,21 @@ export default async function backupRun(context, req) {
         }
       }
     } catch (cleanupError) {
+      context.log?.error?.('backup-run retention cleanup failed', {
+        message: cleanupError?.message || 'retention_cleanup_failed',
+        code: cleanupError?.code,
+      });
+
       results.failed += 1;
       results.errors.push({ stage: 'retention', message: cleanupError?.message || 'retention_cleanup_failed' });
+    }
+
+    if (results.failed > 0) {
+      context.log?.warn?.('backup-run completed with failures', {
+        failed: results.failed,
+        succeeded: results.succeeded,
+        errors: results.errors,
+      });
     }
 
     return respond(context, 200, results, { 'Cache-Control': 'no-store' });
