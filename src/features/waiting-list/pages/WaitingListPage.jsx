@@ -31,6 +31,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/features/students/utils/endpoints.js';
 import AddStudentForm, { AddStudentFormFooter } from '@/features/admin/components/AddStudentForm.jsx';
+import ReadOnlyFormAnswersPreview from '@/features/forms/components/ReadOnlyFormAnswersPreview.jsx';
 import { toast } from 'sonner';
 import { toAgorot } from '@/lib/currency.js';
 import { normalizePreferredTimeRangeToGrid, ceilClockTimeToGrid } from '@/lib/time-grid.js';
@@ -327,6 +328,7 @@ function entryMatchesSearch(entry, query) {
   if (!query) return true;
   const person = resolveEntryPerson(entry);
   const intakeMeta = getEntryIntakeMeta(entry);
+  const intakeSubmission = getEntryIntakeSubmission(entry);
   const haystack = [
     buildStudentName(person),
     person?.phone,
@@ -336,6 +338,8 @@ function entryMatchesSearch(entry, query) {
     entry?.notes,
     intakeMeta.contact_name,
     intakeMeta.hmo_provider_name,
+    intakeSubmission.form_name,
+    intakeSubmission.answer_search_text,
   ].filter(Boolean).join(' ').toLowerCase();
   return haystack.includes(query);
 }
@@ -346,6 +350,20 @@ function getStatusLabel(status) {
 
 function getEntryIntakeMeta(entry) {
   return entry?.metadata && typeof entry.metadata === 'object' ? entry.metadata : {};
+}
+
+function getEntryIntakeSubmission(entry) {
+  return entry?.intake_submission && typeof entry.intake_submission === 'object' ? entry.intake_submission : {};
+}
+
+function getEntryAdditionalAnswerCount(entry) {
+  const value = Number(getEntryIntakeSubmission(entry).answer_count);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function getEntryAlertAnswerCount(entry) {
+  const value = Number(getEntryIntakeSubmission(entry).alert_count);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function getPaymentPathLabel(meta) {
@@ -453,9 +471,12 @@ export default function WaitingListPage() {
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
   const [createError, setCreateError] = useState('');
   const [addSubmitDisabled, setAddSubmitDisabled] = useState(false);
+  const [pendingAnswersScrollEntryId, setPendingAnswersScrollEntryId] = useState('');
+  const [highlightAnswersSection, setHighlightAnswersSection] = useState(false);
 
   const openSelectCountRef = useRef(0);
   const isClosingSelectRef = useRef(false);
+  const answersSectionRef = useRef(null);
 
   const canFetch = Boolean(session && activeOrgId && canManage);
   const canCreateStudent = isAdminRole(membershipRole);
@@ -583,6 +604,25 @@ export default function WaitingListPage() {
   }, [loadEntries]);
 
   useEffect(() => {
+    if (!pendingAnswersScrollEntryId || selectedEntryId !== pendingAnswersScrollEntryId) {
+      return undefined;
+    }
+
+    let highlightTimer = 0;
+    const timer = window.setTimeout(() => {
+      answersSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setHighlightAnswersSection(true);
+      highlightTimer = window.setTimeout(() => setHighlightAnswersSection(false), 1400);
+      setPendingAnswersScrollEntryId('');
+    }, 80);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(highlightTimer);
+    };
+  }, [pendingAnswersScrollEntryId, selectedEntryId]);
+
+  useEffect(() => {
     if (!sortedEntries.length) {
       setSelectedEntryId('');
       return;
@@ -659,6 +699,13 @@ export default function WaitingListPage() {
     setFormError('');
     setDialogOpen(true);
   };
+
+  const jumpToAdditionalAnswers = useCallback((entry) => {
+    if (!entry?.id) return;
+    setSelectedEntryId(entry.id);
+    setAutoReviewEligibleEntryId(entry.id);
+    setPendingAnswersScrollEntryId(entry.id);
+  }, []);
 
   const openEditDialog = (entry) => {
     setFormValues(buildInitialForm(entry, studentOptionMap));
@@ -1286,6 +1333,8 @@ export default function WaitingListPage() {
                 const isSelected = selectedEntryId === entry.id;
                 const person = resolveEntryPerson(entry);
                 const waitingDays = getWaitingDays(entry.created_at);
+                const additionalAnswerCount = getEntryAdditionalAnswerCount(entry);
+                const alertAnswerCount = getEntryAlertAnswerCount(entry);
 
                 return (
                   <button
@@ -1328,6 +1377,32 @@ export default function WaitingListPage() {
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       {!entry?.student_id ? <Badge variant="outline">טרם הומר/ה לתלמיד/ה</Badge> : null}
                       {intakeMeta.source === 'waiting_list_intake' ? <Badge variant="secondary">נוצר מטופס</Badge> : null}
+                      {additionalAnswerCount > 0 ? (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            jumpToAdditionalAnswers(entry);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              jumpToAdditionalAnswers(entry);
+                            }
+                          }}
+                          className={cn(
+                            'inline-flex h-6 items-center rounded-full border px-2 text-xs font-medium hover:bg-muted',
+                            alertAnswerCount > 0
+                              ? 'border-amber-300 bg-amber-50 text-amber-900'
+                              : 'border-border bg-background text-foreground',
+                          )}
+                        >
+                          {additionalAnswerCount} תשובות נוספות
+                        </span>
+                      ) : null}
+                      {alertAnswerCount > 0 ? <Badge variant="destructive">דורש תשומת לב</Badge> : null}
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {entry.status === 'new' ? (
@@ -1412,6 +1487,9 @@ export default function WaitingListPage() {
                 const paymentPathLabel = getPaymentPathLabel(intakeMeta);
                 const contactRelationshipLabel = getContactRelationshipLabel(intakeMeta);
                 const hmoApprovalLabel = getHmoApprovalLabel(intakeMeta);
+                const intakeSubmission = getEntryIntakeSubmission(selectedEntry);
+                const additionalAnswerCount = getEntryAdditionalAnswerCount(selectedEntry);
+                const alertAnswerCount = getEntryAlertAnswerCount(selectedEntry);
 
                 return (
                   <div className="space-y-5">
@@ -1429,6 +1507,21 @@ export default function WaitingListPage() {
                           {selectedEntry.priority_flag ? <Badge variant="destructive">עדיפות גבוהה</Badge> : null}
                           {!selectedEntry?.student_id ? <Badge variant="outline">טרם הומר/ה לתלמיד/ה</Badge> : null}
                           {intakeMeta.source === 'waiting_list_intake' ? <Badge variant="secondary">נוצר מטופס</Badge> : null}
+                          {additionalAnswerCount > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => jumpToAdditionalAnswers(selectedEntry)}
+                              className={cn(
+                                'inline-flex h-6 items-center rounded-full border px-2 text-xs font-medium hover:bg-muted',
+                                alertAnswerCount > 0
+                                  ? 'border-amber-300 bg-amber-50 text-amber-900'
+                                  : 'border-border bg-background text-foreground',
+                              )}
+                            >
+                              {additionalAnswerCount} תשובות נוספות
+                            </button>
+                          ) : null}
+                          {alertAnswerCount > 0 ? <Badge variant="destructive">דורש תשומת לב</Badge> : null}
                           {autoReviewPendingEntryId === selectedEntry.id ? (
                             <span className="text-xs text-muted-foreground">יסומן כנבדק בעוד רגע</span>
                           ) : null}
@@ -1517,6 +1610,36 @@ export default function WaitingListPage() {
                         {selectedEntry.notes?.trim() ? selectedEntry.notes : 'אין הערות נוספות ברשומה זו.'}
                       </div>
                     </div>
+
+                    {additionalAnswerCount > 0 ? (
+                      <div
+                        ref={answersSectionRef}
+                        className={cn(
+                          'rounded-2xl border border-border/70 bg-background p-4 transition-colors',
+                          highlightAnswersSection && 'border-primary bg-primary/5',
+                        )}
+                      >
+                        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-medium text-foreground">תשובות נוספות מהטופס</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {intakeSubmission.form_name || 'טופס רשימת המתנה'}
+                              {intakeSubmission.published_version ? ` · גרסה ${intakeSubmission.published_version}` : ''}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge variant="outline">{additionalAnswerCount} תשובות</Badge>
+                            {alertAnswerCount > 0 ? <Badge variant="destructive">{alertAnswerCount} דגלים</Badge> : null}
+                          </div>
+                        </div>
+                        <ReadOnlyFormAnswersPreview
+                          schema={intakeSubmission.schema_snapshot}
+                          visibilityRules={intakeSubmission.visibility_rules_snapshot}
+                          answers={intakeSubmission.custom_answers}
+                          alertFlags={intakeSubmission.alert_flags}
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 );
               })()

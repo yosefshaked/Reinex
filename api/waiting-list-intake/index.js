@@ -885,7 +885,7 @@ async function submitPublicInvite(context, req, { controlClient }) {
   }
 
   const [{ data: form }, services] = await Promise.all([
-    withOrgScope(client, 'forms', orgId).select('id, form_schema, alert_rules, visibility_rules, metadata, form_usage').eq('id', submission.form_id).maybeSingle(),
+    withOrgScope(client, 'forms', orgId).select('id, name, version, form_schema, alert_rules, visibility_rules, metadata, form_usage, published_at').eq('id', submission.form_id).maybeSingle(),
     listActiveServices(client, orgId),
   ]);
 
@@ -1139,6 +1139,10 @@ async function submitPublicInvite(context, req, { controlClient }) {
         contact_relationship: contactRelationship,
         guardian_id: guardianId || null,
         hmo_provider_name: effectiveHmoProviderName,
+        form_name_snapshot: normalizeString(form.name) || null,
+        form_version_at_submission: Number.isFinite(Number(form.version)) ? Number(form.version) : null,
+        published_version_at_submission: Number.isFinite(Number(publicFormState.published_version)) ? Number(publicFormState.published_version) : null,
+        published_at_snapshot_at_submission: normalizeString(publicFormState.published_at || form.published_at) || null,
         schema_snapshot: materializeSchemaForSnapshot(publicFormState.form_schema),
         visibility_rules_snapshot: publicFormState.visibility_rules,
         alert_rules_snapshot: publicFormState.alert_rules,

@@ -15,6 +15,11 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { normalizePreferredTimesToGrid } from '../_shared/time-grid.js';
+import {
+  hydrateAnswersForReview,
+  normalizeFormSchema,
+  normalizeVisibilityRules,
+} from '../_shared/forms-runtime.js';
 
 const STATUS_OPTIONS = new Set(['new', 'open', 'matched', 'closed', 'active', 'all']);
 
@@ -71,6 +76,116 @@ function normalizeBoolean(value, defaultValue = false) {
     return value === 1;
   }
   return defaultValue;
+}
+
+function normalizeJsonObject(value, fallback = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
+function hasReviewableAnswer(value) {
+  if (value === null || value === undefined || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') {
+    if (value._type === 'signature') {
+      return Boolean(
+        value.encrypted_payload
+        || (Array.isArray(value.preview_strokes) && value.preview_strokes.length > 0)
+        || (Array.isArray(value.strokes) && value.strokes.length > 0),
+      );
+    }
+    return Object.keys(value).length > 0;
+  }
+  return true;
+}
+
+function serializeAnswerForSearch(value) {
+  if (!hasReviewableAnswer(value)) return '';
+  if (Array.isArray(value)) return value.map(serializeAnswerForSearch).filter(Boolean).join(' ');
+  if (typeof value === 'object') {
+    if (value._type === 'signature') return 'חתימה';
+    return Object.values(value).map(serializeAnswerForSearch).filter(Boolean).join(' ');
+  }
+  return String(value);
+}
+
+async function enrichWaitingListEntriesWithIntakeSubmissions(client, orgId, entries, env) {
+  const rows = Array.isArray(entries) ? entries : [];
+  const submissionIds = Array.from(new Set(
+    rows
+      .map((entry) => normalizeUuid(entry?.latest_submission_id || entry?.metadata?.form_submission_id))
+      .filter(Boolean),
+  ));
+
+  if (submissionIds.length === 0) {
+    return rows;
+  }
+
+  const { data: submissions, error } = await withOrgScope(client, 'form_submissions', orgId)
+    .select('id, form_id, answers, alert_flags, metadata, submitted_at')
+    .in('id', submissionIds);
+
+  if (error) {
+    throw error;
+  }
+
+  const submissionRows = Array.isArray(submissions) ? submissions : [];
+  const formIds = Array.from(new Set(submissionRows.map((row) => normalizeUuid(row?.form_id)).filter(Boolean)));
+  let formsById = new Map();
+  if (formIds.length > 0) {
+    const { data: forms, error: formsError } = await withOrgScope(client, 'forms', orgId)
+      .select('id, name')
+      .in('id', formIds);
+
+    if (formsError) {
+      throw formsError;
+    }
+    formsById = new Map((Array.isArray(forms) ? forms : []).map((form) => [form.id, form]));
+  }
+
+  const submissionsById = new Map(submissionRows.map((submission) => [submission.id, submission]));
+
+  return rows.map((entry) => {
+    const submissionId = normalizeUuid(entry?.latest_submission_id || entry?.metadata?.form_submission_id);
+    const submission = submissionsById.get(submissionId);
+    if (!submission) {
+      return entry;
+    }
+
+    const metadata = normalizeJsonObject(submission.metadata, {});
+    const answers = normalizeJsonObject(submission.answers, {});
+    const customAnswers = normalizeJsonObject(answers.custom_answers, {});
+    const schemaSnapshot = normalizeFormSchema(normalizeJsonObject(metadata.schema_snapshot, {}));
+    const hydratedCustomAnswers = hydrateAnswersForReview({
+      formSchema: schemaSnapshot,
+      answers: customAnswers,
+      env,
+    });
+    const answerCount = Object.values(hydratedCustomAnswers).filter(hasReviewableAnswer).length;
+    const alertFlags = normalizeJsonObject(submission.alert_flags, {});
+    const alertHits = Array.isArray(alertFlags.hits) ? alertFlags.hits : [];
+
+    return {
+      ...entry,
+      intake_submission: {
+        id: submission.id,
+        form_id: submission.form_id || null,
+        form_name: formsById.get(submission.form_id)?.name || null,
+        submitted_at: submission.submitted_at || metadata.submitted_at || null,
+        published_version: Number.isFinite(Number(metadata.published_version_at_submission))
+          ? Number(metadata.published_version_at_submission)
+          : Number.isFinite(Number(metadata.published_version))
+            ? Number(metadata.published_version)
+            : null,
+        schema_snapshot: schemaSnapshot,
+        visibility_rules_snapshot: normalizeVisibilityRules(metadata.visibility_rules_snapshot),
+        alert_flags: alertFlags,
+        alert_count: alertHits.length || (alertFlags.has_red_flags ? 1 : 0),
+        answer_count: answerCount,
+        custom_answers: hydratedCustomAnswers,
+        answer_search_text: Object.values(hydratedCustomAnswers).map(serializeAnswerForSearch).filter(Boolean).join(' '),
+      },
+    };
+  });
 }
 
 function buildWaitingListSelect() {
@@ -192,7 +307,13 @@ export default async function waitingList(context, req) {
       return respond(context, 500, { message: 'failed_to_load_waiting_list' });
     }
 
-    return respond(context, 200, Array.isArray(data) ? data : []);
+    try {
+      const enrichedRows = await enrichWaitingListEntriesWithIntakeSubmissions(supabase, orgId, data, env);
+      return respond(context, 200, enrichedRows);
+    } catch (submissionError) {
+      context.log?.error?.('waiting-list failed to enrich intake submissions', { message: submissionError?.message });
+      return respond(context, 500, { message: 'failed_to_load_waiting_list' });
+    }
   }
 
   if (method === 'POST') {
