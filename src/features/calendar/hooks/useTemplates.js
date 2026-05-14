@@ -195,12 +195,58 @@ export function useTemplateMutations() {
     [activeOrgId, beginSubmitting, finishSubmitting],
   );
 
+  const addTemplateParticipant = useCallback(
+    async (templateId, studentId) => {
+      beginSubmitting();
+      try {
+        const data = await authenticatedFetch(`lesson-templates/${templateId}`, {
+          method: 'PUT',
+          body: {
+            template_id: templateId,
+            org_id: activeOrgId,
+            add_student_ids: [studentId],
+          },
+        });
+        return { data, error: null };
+      } catch (err) {
+        return { data: null, error: err?.message || 'Failed to add participant' };
+      } finally {
+        finishSubmitting();
+      }
+    },
+    [activeOrgId, beginSubmitting, finishSubmitting],
+  );
+
+  const removeTemplateParticipant = useCallback(
+    async (templateId, studentId) => {
+      beginSubmitting();
+      try {
+        const data = await authenticatedFetch(`lesson-templates/${templateId}`, {
+          method: 'PUT',
+          body: {
+            template_id: templateId,
+            org_id: activeOrgId,
+            remove_student_ids: [studentId],
+          },
+        });
+        return { data, error: null };
+      } catch (err) {
+        return { data: null, error: err?.message || 'Failed to remove participant' };
+      } finally {
+        finishSubmitting();
+      }
+    },
+    [activeOrgId, beginSubmitting, finishSubmitting],
+  );
+
   return {
     createTemplate,
     updateTemplate,
     deleteTemplate,
     createTemplateOverride,
     deleteTemplateOverride,
+    addTemplateParticipant,
+    removeTemplateParticipant,
     isSubmitting,
   };
 }

@@ -1,4 +1,5 @@
 import React from 'react';
+import { toast } from 'sonner';
 import { BookOpen, Plus, Trash2, Search, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -97,7 +98,8 @@ export default function KnowledgeBaseView() {
     const tags = editing.tags.split(',').map((t) => t.trim()).filter(Boolean);
     if (editing.id) {
       const existing = articles.find((a) => a.id === editing.id);
-      upsert({ ...existing, title, tags, body: editing.body, updated_at: new Date().toISOString() });
+      upsert({ ...existing, title, tags, body: editing.body, updated_at: new Date().toISOString() })
+        .catch(() => toast.error('Failed to save article. Check your connection and try again.'));
       captureAdminEvent('kb_article_updated', {
         has_article_id: Boolean(editing.id),
         title_length: title.length,
@@ -105,7 +107,8 @@ export default function KnowledgeBaseView() {
         body_length: editing.body.length,
       });
     } else {
-      upsert({ id: `kb-${Date.now().toString(36)}`, title, tags, body: editing.body, updated_at: new Date().toISOString() });
+      upsert({ id: `kb-${Date.now().toString(36)}`, title, tags, body: editing.body, updated_at: new Date().toISOString() })
+        .catch(() => toast.error('Failed to save article. Check your connection and try again.'));
       captureAdminEvent('kb_article_created', {
         title_length: title.length,
         tag_count: tags.length,
@@ -117,7 +120,8 @@ export default function KnowledgeBaseView() {
 
   const deleteSelected = () => {
     if (!selected) return;
-    removeArticle(selected.id);
+    removeArticle(selected.id)
+      .catch(() => toast.error('Failed to delete article. Check your connection and try again.'));
     setDeleteOpen(false);
     setSelected(null);
   };

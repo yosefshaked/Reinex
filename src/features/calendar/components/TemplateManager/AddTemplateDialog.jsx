@@ -3,14 +3,13 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { useStudents } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../../hooks/useCalendar';
 import { useTemplateMutations } from '../../hooks/useTemplates';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, UserPlus, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { ComboBoxField } from '@/components/ui/forms-ui';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { DAY_OPTIONS, normalizeDayToken } from '@/lib/day-of-week.js';
@@ -38,12 +37,6 @@ function dayLabel(day) {
 function personName(person) {
   if (!person) return '—';
   return [person.first_name, person.middle_name, person.last_name].filter(Boolean).join(' ') || '—';
-}
-
-function normalizeTemplateTimeForCompare(timeString) {
-  if (!timeString) return '';
-  const [hours = '00', minutes = '00'] = String(timeString).split(':');
-  return `${hours}:${minutes}`;
 }
 
 function rangeOverlap(startA, endA, startB, endB) {
@@ -91,7 +84,7 @@ export function AddTemplateDialog({
 
   const [services, setServices] = useState([]);
   const [servicesLoading, setServicesLoading] = useState(false);
-  const [existingTemplates, setExistingTemplates] = useState([]);
+  const [existingTemplatesByStudentId, setExistingTemplatesByStudentId] = useState({});
   const [existingTemplatesLoading, setExistingTemplatesLoading] = useState(false);
 
   const { students, loadingStudents: studentsLoading } = useStudents({
@@ -101,10 +94,14 @@ export function AddTemplateDialog({
   });
   const [waitingListProfile, setWaitingListProfile] = useState(null);
 
-  const [studentLabel, setStudentLabel] = useState('');
+  // Multi-student state
+  const [selectedStudents, setSelectedStudents] = useState([]);
+  const [isAddingStudent, setIsAddingStudent] = useState(false);
+  const [addStudentQuery, setAddStudentQuery] = useState('');
+  const addStudentInputRef = useRef(null);
+
   const [formData, setFormData] = useState({
     client_profile_id: defaultClientProfileId || '',
-    student_id: defaultStudentId || '',
     instructor_employee_id: defaultInstructorId || '',
     service_id: defaultServiceId || '',
     day_of_week: normalizeDayToken(defaultDayOfWeek) || '',
@@ -125,8 +122,8 @@ export function AddTemplateDialog({
   );
   const selectedServiceDurationMinutes = Number(selectedService?.duration_minutes) || 0;
   const selectedServiceHasValidDuration = selectedServiceDurationMinutes > 0;
-  const selectedStudent = students.find((student) => student.id === formData.student_id) || null;
-  const selectedClientProfile = selectedStudent || (waitingListProfile?.id === formData.client_profile_id ? waitingListProfile : null);
+  // For waiting-list client profile display
+  const selectedClientProfile = selectedStudents[0] || (waitingListProfile?.id === formData.client_profile_id ? waitingListProfile : null);
   const selectedInstructor = (instructors || []).find((instructor) => instructor.id === formData.instructor_employee_id) || null;
   const selectedCapability = (selectedInstructor?.service_capabilities || []).find((capability) => capability.service_id === formData.service_id) || null;
   const availableDayTokens = getAvailabilityDayTokens(selectedCapability?.availability_windows || []);
@@ -191,13 +188,14 @@ export function AddTemplateDialog({
     ));
   }, [selectedService?.id, selectedServiceDurationMinutes, selectedServiceHasValidDuration]);
 
-  // Reset form when dialog opens with defaults
+  // Reset form when dialog opens
   useEffect(() => {
     if (open) {
-      setStudentLabel('');
+      setSelectedStudents([]);
+      setIsAddingStudent(false);
+      setAddStudentQuery('');
       setFormData({
         client_profile_id: defaultClientProfileId || '',
-        student_id: defaultStudentId || '',
         instructor_employee_id: defaultInstructorId || '',
         service_id: defaultServiceId || '',
         day_of_week: normalizeDayToken(defaultDayOfWeek) || '',
@@ -209,6 +207,15 @@ export function AddTemplateDialog({
       setError(null);
     }
   }, [open, defaultInstructorId, defaultDayOfWeek, defaultClientProfileId, defaultStudentId, defaultServiceId, defaultTimeOfDay, defaultDurationMinutes]);
+
+  // Once students load, pre-populate defaultStudentId
+  useEffect(() => {
+    if (!open || !defaultStudentId || !students.length || selectedStudents.length > 0) return;
+    const match = students.find((s) => s.id === defaultStudentId);
+    if (match) {
+      setSelectedStudents([match]);
+    }
+  }, [open, defaultStudentId, students, selectedStudents.length]);
 
   useEffect(() => {
     if (!open || !activeOrgId || !session || !defaultClientProfileId || defaultStudentId) {
@@ -263,10 +270,11 @@ export function AddTemplateDialog({
     return () => { isMounted = false; };
   }, [open, activeOrgId, session]);
 
-  // Auto-fill service/instructor from student defaults
+  // Auto-fill service/instructor from first selected student's defaults
+  const firstStudentId = selectedStudents[0]?.id;
   useEffect(() => {
-    if (!formData.student_id) return;
-    const student = students.find((s) => s.id === formData.student_id);
+    if (!firstStudentId) return;
+    const student = students.find((s) => s.id === firstStudentId);
     if (!student) return;
 
     const serviceIds = new Set((services || []).map((s) => String(s?.id || '')));
@@ -275,7 +283,7 @@ export function AddTemplateDialog({
     setFormData((prev) => ({
       ...prev,
       service_id:
-        student.service_id && serviceIds.has(String(student.service_id))
+        !prev.service_id && student.service_id && serviceIds.has(String(student.service_id))
           ? String(student.service_id)
           : prev.service_id,
       instructor_employee_id:
@@ -283,56 +291,97 @@ export function AddTemplateDialog({
           ? String(student.instructor_employee_id)
           : prev.instructor_employee_id,
     }));
-  }, [formData.student_id, students, services, instructors]);
+  }, [firstStudentId, students, services, instructors]);
 
-  // Warn when selected student already has templates
+  // Warn when any selected student already has active templates
+  const selectedStudentIds = selectedStudents.map((s) => s.id).join(',');
   useEffect(() => {
-    if (!open || !activeOrgId || !formData.student_id) {
-      setExistingTemplates([]);
+    if (!open || !activeOrgId || !selectedStudents.length) {
+      setExistingTemplatesByStudentId({});
       setExistingTemplatesLoading(false);
       return;
     }
 
     let isMounted = true;
+    setExistingTemplatesLoading(true);
 
-    async function fetchExistingTemplates() {
-      setExistingTemplatesLoading(true);
-      try {
-        const payload = await authenticatedFetch('lesson-templates', {
-          session,
-          params: {
-            org_id: activeOrgId,
-            student_id: formData.student_id,
-          },
-        });
-
-        if (isMounted) {
-          setExistingTemplates(Array.isArray(payload) ? payload : []);
-        }
-      } catch {
-        if (isMounted) {
-          setExistingTemplates([]);
-        }
-      } finally {
-        if (isMounted) {
-          setExistingTemplatesLoading(false);
-        }
+    async function fetchAll() {
+      const results = {};
+      await Promise.all(
+        selectedStudents.map(async (student) => {
+          try {
+            const payload = await authenticatedFetch('lesson-templates', {
+              session,
+              params: { org_id: activeOrgId, student_id: student.id },
+            });
+            results[student.id] = Array.isArray(payload) ? payload : [];
+          } catch {
+            results[student.id] = [];
+          }
+        }),
+      );
+      if (isMounted) {
+        setExistingTemplatesByStudentId(results);
+        setExistingTemplatesLoading(false);
       }
     }
 
-    fetchExistingTemplates();
+    fetchAll();
+    return () => { isMounted = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, activeOrgId, selectedStudentIds, session]);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [open, activeOrgId, formData.student_id, session]);
+  // Filtered student options for the inline search
+  const selectedStudentIdSet = useMemo(
+    () => new Set(selectedStudents.map((s) => s.id)),
+    [selectedStudents],
+  );
+  const addStudentResults = useMemo(() => {
+    const query = addStudentQuery.trim().toLowerCase();
+    return (students || [])
+      .filter((s) => !selectedStudentIdSet.has(s.id))
+      .filter((s) => {
+        if (!query) return true;
+        return `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''} ${s.identity_number || ''}`.toLowerCase().includes(query);
+      })
+      .slice(0, 12);
+  }, [students, selectedStudentIdSet, addStudentQuery]);
+
+  function handleAddStudent(student) {
+    setSelectedStudents((prev) => [...prev, student]);
+    setAddStudentQuery('');
+    setIsAddingStudent(false);
+  }
+
+  function handleRemoveStudent(studentId) {
+    setSelectedStudents((prev) => prev.filter((s) => s.id !== studentId));
+    setExistingTemplatesByStudentId((prev) => {
+      const next = { ...prev };
+      delete next[studentId];
+      return next;
+    });
+  }
+
+  // Aggregate active existing templates across all selected students
+  const activeExistingTemplatesByStudentId = useMemo(() => {
+    const result = {};
+    for (const [sid, tpls] of Object.entries(existingTemplatesByStudentId)) {
+      const active = (tpls || []).filter((t) => t.is_active);
+      if (active.length > 0) result[sid] = active;
+    }
+    return result;
+  }, [existingTemplatesByStudentId]);
+  const hasExistingTemplatesWarning = Object.keys(activeExistingTemplatesByStudentId).length > 0;
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError(null);
 
-    if (!formData.student_id && !formData.client_profile_id) {
-      setError('יש לבחור תלמיד/ה או רשומת לקוח/ה להמרה');
+    const hasStudents = selectedStudents.length > 0;
+    const hasClientProfile = Boolean(formData.client_profile_id && !hasStudents);
+
+    if (!hasStudents && !hasClientProfile) {
+      setError('יש לבחור לפחות תלמיד/ה אחד/ת');
       return;
     }
     if (!formData.instructor_employee_id) {
@@ -349,19 +398,6 @@ export function AddTemplateDialog({
     }
     if (formData.day_of_week === '' || formData.day_of_week === null) {
       setError('יש לבחור יום');
-      return;
-    }
-
-    const localConflict = activeExistingTemplates.find((template) => {
-      if (template.student_id !== formData.student_id) return false;
-      if (template.instructor_employee_id !== formData.instructor_employee_id) return false;
-      if (normalizeDayToken(template.day_of_week) !== normalizeDayToken(formData.day_of_week)) return false;
-      if (normalizeTemplateTimeForCompare(template.time_of_day) !== normalizeTemplateTimeForCompare(formData.time_of_day)) return false;
-      return rangeOverlap(template.valid_from, template.valid_until, formData.valid_from, formData.valid_until || null);
-    });
-
-    if (localConflict) {
-      setError('קיימת כבר תבנית פעילה זהה (תלמיד+מדריך+יום+שעה) בטווח תאריכים חופף.');
       return;
     }
 
@@ -387,7 +423,7 @@ export function AddTemplateDialog({
 
     const { data: createdTemplate, error: apiError } = await createTemplate({
       client_profile_id: formData.client_profile_id || null,
-      student_id: formData.student_id,
+      student_ids: hasStudents ? selectedStudents.map((s) => s.id) : undefined,
       instructor_employee_id: formData.instructor_employee_id,
       service_id: formData.service_id,
       day_of_week: formData.day_of_week,
@@ -419,6 +455,8 @@ export function AddTemplateDialog({
             ? 'למדריך/ה כבר קיימת תבנית שחופפת לשעה הזאת. בחרו חלון פנוי אחר או ערכו את התבנית הקיימת.'
           : apiError === 'template_group_capacity_exceeded'
             ? 'למדריך/ה כבר קיימת תבנית שחופפת לשעה הזאת. בחרו חלון פנוי אחר או ערכו את התבנית הקיימת.'
+          : apiError === 'student_template_conflict'
+            ? 'אחד/ת מהתלמידים כבר משובץ/ת בתבנית אחרת באותו יום ושעה.'
           : apiError === 'failed_to_activate_student_from_waiting_list'
             ? 'התבנית לא נשמרה כי לא הצלחנו להפעיל את התלמיד/ה מתוך רשומת ההמתנה. אפשר לנסות שוב.'
           : apiError === 'failed_to_link_waiting_list_entry'
@@ -442,21 +480,6 @@ export function AddTemplateDialog({
     onClose();
   }
 
-  const studentOptions = (students || []).map((s) => ({
-    value: s.id,
-    label: `${`${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.trim() || 'ללא שם'}${s.identity_number ? ` • ${s.identity_number}` : ''}${s.is_active === false ? ' • לא פעיל/ה' : ''}`,
-    searchText: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''} ${s.identity_number || ''}`.toLowerCase(),
-  }));
-
-  useEffect(() => {
-    if (!open || !formData.student_id || studentLabel) return;
-    const match = studentOptions.find((option) => option.value === formData.student_id);
-    if (match?.label) {
-      setStudentLabel(match.label);
-    }
-  }, [open, formData.student_id, studentLabel, studentOptions]);
-
-  const activeExistingTemplates = existingTemplates.filter((template) => template.is_active);
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -479,7 +502,7 @@ export function AddTemplateDialog({
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                {formData.student_id
+                {selectedStudents.length > 0
                   ? 'שמירת התבנית תעדכן את רשומת ההמתנה לשיבוץ. אפשר עדיין לשנות את פרטי התבנית לפני השמירה.'
                   : 'שמירת התבנית תיצור כרטיס תלמיד/ה מתוך רשומת הלקוח/ה ותעדכן את רשומת ההמתנה לשיבוץ.'}
               </AlertDescription>
@@ -506,7 +529,7 @@ export function AddTemplateDialog({
                       instructorId: formData.instructor_employee_id,
                       serviceId: formData.service_id,
                       clientProfileId: formData.client_profile_id,
-                      studentId: formData.student_id,
+                      studentId: selectedStudents[0]?.id || '',
                       waitingListEntryId,
                       waitingListContext,
                       fixType: missingCapability
@@ -541,7 +564,7 @@ export function AddTemplateDialog({
           ) : null}
 
           {/* Student / Client */}
-          {formData.client_profile_id && !formData.student_id ? (
+          {formData.client_profile_id && selectedStudents.length === 0 ? (
             <div className="rounded-md border border-border bg-muted/30 p-3">
               <Label className="mb-2 block">לקוח/ה להמרה</Label>
               <div className="text-sm font-medium">{personName(selectedClientProfile)}</div>
@@ -550,73 +573,129 @@ export function AddTemplateDialog({
               </div>
             </div>
           ) : (
-            <div>
-              <Label htmlFor="template-student">תלמיד *</Label>
-              {studentsLoading ? (
-                <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  טוען תלמידים...
-                </div>
-              ) : (
-                <ComboBoxField
-                  id="template-student"
-                  options={studentOptions}
-                  value={studentLabel}
-                  onChange={(value) => {
-                    setStudentLabel(value);
-                    const exactMatches = studentOptions.filter((opt) => opt.label === value);
-                    setFormData((prev) => ({
-                      ...prev,
-                      student_id: exactMatches.length === 1 ? exactMatches[0].value : '',
-                    }));
-                  }}
-                  onOptionSelect={(option) => {
-                    setStudentLabel(option?.label || '');
-                    setFormData((prev) => ({
-                      ...prev,
-                      student_id: option?.value || '',
-                    }));
-                  }}
-                  allowCustomValue={false}
-                  placeholder="חפש תלמיד..."
-                  emptyMessage="לא נמצאו תלמידים"
-                />
-              )}
-            </div>
-          )}
-
-          {formData.student_id && (
             <div className="space-y-2">
+              <Label>תלמידים *</Label>
+
+              {/* Selected students list */}
+              {selectedStudents.length > 0 && (
+                <div className="space-y-1">
+                  {selectedStudents.map((student) => (
+                    <div
+                      key={student.id}
+                      className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2 text-sm"
+                    >
+                      <span className="font-medium">{personName(student)}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveStudent(student.id)}
+                        className="ms-2 text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label={`הסר ${personName(student)}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Existing templates warning */}
               {existingTemplatesLoading ? (
                 <div className="text-sm text-gray-500 flex items-center gap-2">
                   <Loader2 className="h-3 w-3 animate-spin" />
                   בודק תבניות קיימות...
                 </div>
-              ) : activeExistingTemplates.length > 0 ? (
+              ) : hasExistingTemplatesWarning ? (
                 <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
                   <p className="text-sm font-medium text-amber-900">
-                    לתלמיד זה כבר קיימות {activeExistingTemplates.length} תבניות פעילות.
+                    לחלק מהתלמידים שנבחרו כבר קיימות תבניות פעילות.
                   </p>
                   <p className="text-xs text-amber-800 mt-1">
                     ניתן להמשיך וליצור תבנית נוספת, אבל חשוב לוודא שאין כפילויות לא רצויות.
                   </p>
-                  <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pe-1">
-                    {activeExistingTemplates.map((template) => (
-                      <div key={template.id} className="text-xs bg-white/70 border border-amber-200 rounded px-2 py-1">
-                        <span className="font-medium">{dayLabel(template.day_of_week)}</span>
-                        <span> • </span>
-                        <span>{formatTemplateTime(template.time_of_day)}</span>
-                        <span> • </span>
-                        <span>{template.duration_minutes} דק׳</span>
-                        <span> • </span>
-                        <span>{template.service?.name || 'ללא שירות'}</span>
-                        <span> • </span>
-                        <span>{personName(template.instructor)}</span>
-                      </div>
-                    ))}
+                  <div className="mt-2 space-y-2 max-h-40 overflow-y-auto pe-1">
+                    {Object.entries(activeExistingTemplatesByStudentId).map(([sid, tpls]) => {
+                      const student = selectedStudents.find((s) => s.id === sid);
+                      return (
+                        <div key={sid}>
+                          <p className="text-xs font-semibold text-amber-900 mb-1">{personName(student)}:</p>
+                          {tpls.map((template) => (
+                            <div key={template.id} className="text-xs bg-white/70 border border-amber-200 rounded px-2 py-1 mb-1">
+                              <span className="font-medium">{dayLabel(template.day_of_week)}</span>
+                              <span> • </span>
+                              <span>{formatTemplateTime(template.time_of_day)}</span>
+                              <span> • </span>
+                              <span>{template.duration_minutes} דק׳</span>
+                              <span> • </span>
+                              <span>{template.service?.name || 'ללא שירות'}</span>
+                              <span> • </span>
+                              <span>{personName(template.instructor)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}
+
+              {/* Add student inline search */}
+              {isAddingStudent ? (
+                <div className="relative">
+                  <Input
+                    ref={addStudentInputRef}
+                    autoFocus
+                    placeholder="חפש תלמיד לפי שם..."
+                    value={addStudentQuery}
+                    onChange={(e) => setAddStudentQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        setIsAddingStudent(false);
+                        setAddStudentQuery('');
+                      }
+                    }}
+                  />
+                  {studentsLoading ? (
+                    <div className="mt-1 rounded-md border border-border bg-background shadow-md p-3 text-sm text-muted-foreground flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      טוען תלמידים...
+                    </div>
+                  ) : addStudentResults.length > 0 ? (
+                    <div className="mt-1 rounded-md border border-border bg-background shadow-md max-h-48 overflow-y-auto">
+                      {addStudentResults.map((student) => (
+                        <button
+                          key={student.id}
+                          type="button"
+                          className="w-full text-start px-3 py-2 text-sm hover:bg-muted transition-colors border-b border-border last:border-0"
+                          onClick={() => handleAddStudent(student)}
+                        >
+                          <span className="font-medium">{personName(student)}</span>
+                          {student.identity_number ? (
+                            <span className="text-muted-foreground"> • {student.identity_number}</span>
+                          ) : null}
+                          {student.is_active === false ? (
+                            <span className="text-muted-foreground"> • לא פעיל/ה</span>
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  ) : addStudentQuery.trim() ? (
+                    <div className="mt-1 rounded-md border border-border bg-background shadow-md p-3 text-sm text-muted-foreground">
+                      לא נמצאו תלמידים
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsAddingStudent(true)}
+                  className="gap-1.5"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  הוסף תלמיד
+                </Button>
+              )}
             </div>
           )}
 

@@ -14,9 +14,9 @@ import { useAdminStore } from '../lib/useAdminStore.js';
 /**
  * Future Ideas — a parking lot for deferred modules and concepts.
  *
- * Uses localStorage as a zero-backend store so the surface is immediately
- * useful during the admin-console buildout. When an idea is ready to graduate
- * it gets promoted to the roadmap and lifted out of here.
+ * Persisted in admin_data via useAdminStore. Seed ideas are shown while
+ * the initial fetch is in flight; they are replaced by actual DB records
+ * once the fetch completes.
  */
 
 

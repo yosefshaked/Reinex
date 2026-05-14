@@ -125,6 +125,7 @@ export const EXPORT_TABLES = [
   'ledger_transactions',
   'lesson_templates',
   'lesson_template_overrides',
+  'lesson_template_participants',
   'lesson_instances',
   'lesson_participants',
   'lesson_earnings',

@@ -61,7 +61,12 @@ function getPersonName(person) {
 }
 
 function getTemplateStudentName(template) {
-  return getPersonName(template?.student || template?.client_profile);
+  const participants = template?.participants || [];
+  if (participants.length === 0) {
+    return getPersonName(template?.student || template?.client_profile);
+  }
+  const first = getPersonName(participants[0]?.student);
+  return participants.length > 1 ? `${first} +${participants.length - 1}` : first;
 }
 
 function getServiceName(template) {

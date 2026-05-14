@@ -1348,6 +1348,37 @@ CREATE TABLE IF NOT EXISTS public.lesson_templates (
 CREATE INDEX IF NOT EXISTS lesson_templates_student_id_idx ON public.lesson_templates (org_id, student_id);
 CREATE INDEX IF NOT EXISTS lesson_templates_instructor_day_time_idx ON public.lesson_templates (org_id, instructor_employee_id, day_of_week, time_of_day);
 
+-- -----------------------------------------------------------------
+-- public.lesson_template_participants
+-- Tracks which students belong to a template (many-to-many).
+-- lesson_templates.student_id is kept for backward compat but is
+-- no longer the source of truth — use this table instead.
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.lesson_template_participants (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id),
+  template_id uuid NOT NULL REFERENCES public.lesson_templates(id) ON DELETE CASCADE,
+  student_id uuid NOT NULL REFERENCES public.students(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT lesson_template_participants_unique UNIQUE (template_id, student_id)
+);
+
+CREATE INDEX IF NOT EXISTS lesson_template_participants_template_idx ON public.lesson_template_participants (org_id, template_id);
+CREATE INDEX IF NOT EXISTS lesson_template_participants_student_idx ON public.lesson_template_participants (org_id, student_id);
+
+-- Migrate existing single-student templates into the participants table.
+-- ON CONFLICT ensures this is safe to re-run.
+INSERT INTO public.lesson_template_participants (org_id, template_id, student_id)
+SELECT org_id, id AS template_id, student_id
+FROM public.lesson_templates
+WHERE student_id IS NOT NULL
+ON CONFLICT (template_id, student_id) DO NOTHING;
+
+-- Make student_id nullable now that lesson_template_participants is the SSOT.
+-- Existing rows retain their value; new templates set it to NULL.
+ALTER TABLE public.lesson_templates ALTER COLUMN student_id DROP NOT NULL;
+
 CREATE OR REPLACE FUNCTION public.validate_lesson_template_no_active_overlap()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -3996,6 +4027,7 @@ ALTER TABLE public.instructor_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instructor_service_capabilities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_template_overrides ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.lesson_template_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lesson_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grace_cancellation_requests ENABLE ROW LEVEL SECURITY;
@@ -4044,6 +4076,7 @@ BEGIN
     'instructor_service_capabilities',
     'lesson_templates',
     'lesson_template_overrides',
+    'lesson_template_participants',
     'lesson_instances',
     'lesson_participants',
     'grace_cancellation_requests',
@@ -4141,6 +4174,7 @@ GRANT ALL ON TABLE public.instructor_profiles TO app_user;
 GRANT ALL ON TABLE public.instructor_service_capabilities TO app_user;
 GRANT ALL ON TABLE public.lesson_templates TO app_user;
 GRANT ALL ON TABLE public.lesson_template_overrides TO app_user;
+GRANT ALL ON TABLE public.lesson_template_participants TO app_user;
 GRANT ALL ON TABLE public.lesson_instances TO app_user;
 GRANT ALL ON TABLE public.lesson_participants TO app_user;
 GRANT ALL ON TABLE public.grace_cancellation_requests TO app_user;
@@ -4405,6 +4439,7 @@ DECLARE
     'instructor_service_capabilities',
     'lesson_templates',
     'lesson_template_overrides',
+    'lesson_template_participants',
     'lesson_instances',
     'lesson_participants',
     'grace_cancellation_requests',

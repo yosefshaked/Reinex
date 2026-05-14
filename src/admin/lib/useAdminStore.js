@@ -41,19 +41,19 @@ export function useAdminStore(module, { seed = [] } = {}) {
         : [record, ...prev];
     });
 
-    authenticatedFetch('system-admin-store', {
+    return authenticatedFetch('system-admin-store', {
       method: 'POST',
       body: { module, record_id: record.id, data: record },
-    }).catch(() => {});
+    });
   }, [module]);
 
   const remove = React.useCallback((id) => {
     setItems((prev) => prev.filter((i) => i.id !== id));
 
-    authenticatedFetch('system-admin-store', {
+    return authenticatedFetch('system-admin-store', {
       method: 'DELETE',
       params: { module, record_id: id },
-    }).catch(() => {});
+    });
   }, [module]);
 
   return { items, loading, error, upsert, remove };

@@ -434,13 +434,19 @@ function collectCandidateConflicts(candidate, candidateIntervalValue, intervals,
       });
     }
 
-    if (interval.studentIds.includes(candidate.student_id)) {
-      found.push({
-        type: 'student_overlap',
-        instance_id: interval.id,
-        student_id: candidate.student_id,
-        message: 'התלמיד כבר משובץ בשיעור אחר בזמן זה.',
-      });
+    // Check all template participants — any student already booked is a conflict.
+    const participantIds = Array.isArray(candidate.template_participants)
+      ? candidate.template_participants.map((p) => p.student_id).filter(Boolean)
+      : (candidate.student_id ? [candidate.student_id] : []);
+    for (const sid of participantIds) {
+      if (interval.studentIds.includes(sid)) {
+        found.push({
+          type: 'student_overlap',
+          instance_id: interval.id,
+          student_id: sid,
+          message: 'התלמיד כבר משובץ בשיעור אחר בזמן זה.',
+        });
+      }
     }
   }
 
@@ -661,7 +667,36 @@ export default async function calendarGenerate(context, req) {
     }));
   }
 
-  const templateStudentIds = Array.from(new Set(templateRows.map((row) => normalizeString(row?.student_id)).filter(Boolean)));
+  // Load lesson_template_participants for all templates (new SSOT for multi-student).
+  // Fall back to template.student_id for old records not yet migrated.
+  const { data: templateParticipantRows, error: templateParticipantsError } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+    .select('template_id, student_id')
+    .in('template_id', templateRows.map((r) => r.id));
+
+  if (templateParticipantsError) {
+    context.log?.error?.('calendar/generate failed to load template participants', { message: templateParticipantsError.message });
+    return respond(context, 500, { message: 'failed_to_load_students' });
+  }
+
+  // Build templateId -> [student_id, ...] map.
+  // If a template has no rows in lesson_template_participants, fall back to student_id column.
+  const participantsByTemplateId = new Map();
+  for (const row of templateParticipantRows || []) {
+    if (!row?.template_id || !row?.student_id) continue;
+    const existing = participantsByTemplateId.get(row.template_id) || [];
+    existing.push(row.student_id);
+    participantsByTemplateId.set(row.template_id, existing);
+  }
+  // Apply fallback for templates with no participant rows (pre-migration)
+  for (const template of templateRows) {
+    if (!participantsByTemplateId.has(template.id) && template.student_id) {
+      participantsByTemplateId.set(template.id, [template.student_id]);
+    }
+  }
+
+  const templateStudentIds = Array.from(new Set(
+    [...participantsByTemplateId.values()].flat().filter(Boolean),
+  ));
   const { data: templateStudentRows, error: templateStudentsError } = templateStudentIds.length > 0
     ? await withOrgScope(supabase, 'students', orgId)
       .select('id, client_profile_id')
@@ -842,20 +877,27 @@ export default async function calendarGenerate(context, req) {
       const finalServiceName = serviceNameById.get(finalServiceId) || '';
       const finalTime = normalizeTimeHms(override?.new_time_of_day || template.time_of_day);
       const finalDuration = Number(override?.new_duration_minutes || template.duration_minutes);
-      const participantClientProfileId = template.student_id
-        ? clientProfileIdByStudentId.get(template.student_id) || null
-        : null;
-      const studentName = template.student_id
-        ? studentNameByStudentId.get(template.student_id) || ''
-        : '';
+
+      // Resolve all participants for this template.
+      const templateStudentList = participantsByTemplateId.get(template.id) || [];
+      const resolvedParticipants = templateStudentList.map((sid) => ({
+        student_id: sid,
+        client_profile_id: clientProfileIdByStudentId.get(sid) || null,
+        student_name: studentNameByStudentId.get(sid) || '',
+      }));
+
+      // For backward-compat display fields on errors, use the first participant.
+      const primaryStudentId = resolvedParticipants[0]?.student_id || template.student_id || null;
+      const primaryClientProfileId = resolvedParticipants[0]?.client_profile_id || null;
+      const primaryStudentName = resolvedParticipants[0]?.student_name || '';
 
       if (!finalInstructorId || !finalServiceId || !finalTime || !Number.isFinite(finalDuration) || finalDuration <= 0) {
         conflicts.push({
           type: 'invalid_template_data',
           template_id: template.id,
-          student_id: template.student_id,
-          student_name: studentName,
-          client_profile_id: participantClientProfileId,
+          student_id: primaryStudentId,
+          student_name: primaryStudentName,
+          client_profile_id: primaryClientProfileId,
           service_name: finalServiceName,
           target_date: date,
           message: 'נתוני תבנית/חריגה לא תקינים ולכן הדור לא בוצע עבור המופע הזה.',
@@ -864,18 +906,22 @@ export default async function calendarGenerate(context, req) {
         continue;
       }
 
-      if (template.student_id && !participantClientProfileId) {
-        conflicts.push({
-          type: 'missing_client_profile_link',
-          template_id: template.id,
-          student_id: template.student_id,
-          student_name: studentName,
-          client_profile_id: null,
-          service_name: finalServiceName,
-          target_date: date,
-          message: 'לתלמיד/ה בתבנית אין client_profile_id ולכן אי אפשר ליצור משתתף לשיעור.',
-          retry_item: buildRetryItem(template.id, date),
-        });
+      // Every participant must have a client_profile_id to be inserted as a lesson_participant.
+      const participantsMissingProfile = resolvedParticipants.filter((p) => !p.client_profile_id);
+      if (participantsMissingProfile.length > 0) {
+        for (const missing of participantsMissingProfile) {
+          conflicts.push({
+            type: 'missing_client_profile_link',
+            template_id: template.id,
+            student_id: missing.student_id,
+            student_name: missing.student_name,
+            client_profile_id: null,
+            service_name: finalServiceName,
+            target_date: date,
+            message: 'לתלמיד/ה בתבנית אין client_profile_id ולכן אי אפשר ליצור משתתף לשיעור.',
+            retry_item: buildRetryItem(template.id, date),
+          });
+        }
         continue;
       }
 
@@ -883,9 +929,9 @@ export default async function calendarGenerate(context, req) {
       if (existingTemplateSlotKeys.has(slotKey)) {
         skippedExisting.push({
           template_id: template.id,
-          student_id: template.student_id,
-          student_name: studentName,
-          client_profile_id: participantClientProfileId,
+          student_id: primaryStudentId,
+          student_name: primaryStudentName,
+          client_profile_id: primaryClientProfileId,
           service_name: finalServiceName,
           target_date: date,
           time_of_day: finalTime,
@@ -900,9 +946,9 @@ export default async function calendarGenerate(context, req) {
         conflicts.push({
           type: 'invalid_datetime',
           template_id: template.id,
-          student_id: template.student_id,
-          student_name: studentName,
-          client_profile_id: participantClientProfileId,
+          student_id: primaryStudentId,
+          student_name: primaryStudentName,
+          client_profile_id: primaryClientProfileId,
           service_name: finalServiceName,
           target_date: date,
           time_of_day: finalTime,
@@ -914,9 +960,12 @@ export default async function calendarGenerate(context, req) {
 
       const candidate = {
         template_id: template.id,
-        student_id: template.student_id,
-        student_name: studentName,
-        client_profile_id: participantClientProfileId,
+        // Legacy single-student display fields (first participant)
+        student_id: primaryStudentId,
+        student_name: primaryStudentName,
+        client_profile_id: primaryClientProfileId,
+        // All participants for this template slot
+        template_participants: resolvedParticipants,
         service_name: finalServiceName,
         instructor_employee_id: finalInstructorId,
         service_id: finalServiceId,
@@ -934,9 +983,9 @@ export default async function calendarGenerate(context, req) {
         conflicts.push({
           type: 'invalid_datetime',
           template_id: template.id,
-          student_id: template.student_id,
-          student_name: studentName,
-          client_profile_id: participantClientProfileId,
+          student_id: primaryStudentId,
+          student_name: primaryStudentName,
+          client_profile_id: primaryClientProfileId,
           service_name: finalServiceName,
           target_date: date,
           message: 'תאריך/שעה לא תקינים עבור יצירת מופע.',
@@ -966,24 +1015,32 @@ export default async function calendarGenerate(context, req) {
       }
 
       proposals.push(candidate);
-      const coverageDecision = candidate.student_id
-        ? await resolveLessonCoverageDecision(supabase, {
+      // Check HMO coverage for every participant.
+      const participantsForCoverage = Array.isArray(candidate.template_participants) && candidate.template_participants.length > 0
+        ? candidate.template_participants
+        : (candidate.student_id ? [{ student_id: candidate.student_id }] : []);
+      for (const participant of participantsForCoverage) {
+        if (!participant.student_id) continue;
+        const coverageDecision = await resolveLessonCoverageDecision(supabase, {
           orgId,
-          studentId: candidate.student_id,
+          studentId: participant.student_id,
           serviceId: candidate.service_id,
           lessonDate: candidate.datetime_start,
           usageOffsetsByAuthorizationId: projectedCoveredUsageOffsets,
-        })
-        : null;
-      const hmoWarning = buildCoverageWarningFromDecision(candidate, coverageDecision);
-      if (hmoWarning) {
-        warnings.push(hmoWarning);
-      }
-      if (coverageDecision?.status === 'covered' && coverageDecision.authorization_id) {
-        projectedCoveredUsageOffsets.set(
-          coverageDecision.authorization_id,
-          Number(projectedCoveredUsageOffsets.get(coverageDecision.authorization_id) || 0) + 1,
+        });
+        const hmoWarning = buildCoverageWarningFromDecision(
+          { ...candidate, student_id: participant.student_id },
+          coverageDecision,
         );
+        if (hmoWarning) {
+          warnings.push(hmoWarning);
+        }
+        if (coverageDecision?.status === 'covered' && coverageDecision.authorization_id) {
+          projectedCoveredUsageOffsets.set(
+            coverageDecision.authorization_id,
+            Number(projectedCoveredUsageOffsets.get(coverageDecision.authorization_id) || 0) + 1,
+          );
+        }
       }
       planningIntervals.push(interval);
     }
@@ -1041,79 +1098,84 @@ export default async function calendarGenerate(context, req) {
         continue;
       }
 
-      const participantClientProfileId = proposal.client_profile_id || null;
-      if (!participantClientProfileId) {
-        await withOrgScope(supabase, 'lesson_instances', orgId)
-          .delete()
-          .eq('id', insertedInstance.id);
+      // Insert one lesson_participant per template participant.
+      const participantsToInsert = Array.isArray(proposal.template_participants) && proposal.template_participants.length > 0
+        ? proposal.template_participants
+        : (proposal.student_id ? [{ student_id: proposal.student_id, client_profile_id: proposal.client_profile_id }] : []);
 
-        applied.errors.push({
-          type: 'participant_insert_failed',
-          template_id: proposal.template_id,
-          student_id: proposal.student_id,
-          student_name: proposal.student_name || '',
-          client_profile_id: proposal.client_profile_id || null,
-          service_name: proposal.service_name || '',
-          datetime_start: proposal.datetime_start,
-          target_date: proposal.target_date,
-          time_of_day: proposal.time_of_day,
-          message: 'missing_client_profile_link',
-          retry_item: proposal.retry_item,
-        });
-        continue;
-      }
+      let instanceHadError = false;
+      for (const participant of participantsToInsert) {
+        const participantClientProfileId = participant.client_profile_id || null;
+        if (!participantClientProfileId) {
+          applied.errors.push({
+            type: 'participant_insert_failed',
+            template_id: proposal.template_id,
+            student_id: participant.student_id,
+            student_name: participant.student_name || '',
+            client_profile_id: null,
+            service_name: proposal.service_name || '',
+            datetime_start: proposal.datetime_start,
+            target_date: proposal.target_date,
+            time_of_day: proposal.time_of_day,
+            message: 'missing_client_profile_link',
+            retry_item: proposal.retry_item,
+          });
+          instanceHadError = true;
+          continue;
+        }
 
-      const { data: insertedParticipant, error: insertParticipantError } = await withOrgScope(supabase, 'lesson_participants', orgId)
-        .insert({
+        const { data: insertedParticipant, error: insertParticipantError } = await withOrgScope(supabase, 'lesson_participants', orgId)
+          .insert({
+            lesson_instance_id: insertedInstance.id,
+            client_profile_id: participantClientProfileId,
+            student_id: participant.student_id,
+            participant_status: 'scheduled',
+            metadata: {
+              generation_run_id: generationRunId,
+              generation_mode: 'manual',
+            },
+          })
+          .select('id')
+          .single();
+
+        if (insertParticipantError || !insertedParticipant?.id) {
+          applied.errors.push({
+            type: 'participant_insert_failed',
+            template_id: proposal.template_id,
+            student_id: participant.student_id,
+            student_name: participant.student_name || '',
+            client_profile_id: participantClientProfileId,
+            service_name: proposal.service_name || '',
+            datetime_start: proposal.datetime_start,
+            target_date: proposal.target_date,
+            time_of_day: proposal.time_of_day,
+            message: insertParticipantError?.message || 'failed_to_insert_participant',
+            retry_item: proposal.retry_item,
+          });
+          instanceHadError = true;
+          continue;
+        }
+
+        applied.createdParticipants.push({
+          id: insertedParticipant.id,
           lesson_instance_id: insertedInstance.id,
+          student_id: participant.student_id,
+          student_name: participant.student_name || '',
           client_profile_id: participantClientProfileId,
-          student_id: proposal.student_id,
-          participant_status: 'scheduled',
-          metadata: {
-            generation_run_id: generationRunId,
-            generation_mode: 'manual',
-          },
-        })
-        .select('id')
-        .single();
+        });
+      } // end for participant
 
-      if (insertParticipantError || !insertedParticipant?.id) {
-        await withOrgScope(supabase, 'lesson_instances', orgId)
-          .delete()
-          .eq('id', insertedInstance.id);
-
-        applied.errors.push({
-          type: 'participant_insert_failed',
+      if (!instanceHadError) {
+        applied.createdInstances.push({
+          id: insertedInstance.id,
           template_id: proposal.template_id,
           student_id: proposal.student_id,
           student_name: proposal.student_name || '',
-          client_profile_id: proposal.client_profile_id || null,
-          service_name: proposal.service_name || '',
           datetime_start: proposal.datetime_start,
           target_date: proposal.target_date,
           time_of_day: proposal.time_of_day,
-          message: insertParticipantError?.message || 'failed_to_insert_participant',
-          retry_item: proposal.retry_item,
         });
-        continue;
       }
-
-      applied.createdInstances.push({
-        id: insertedInstance.id,
-        template_id: proposal.template_id,
-        student_id: proposal.student_id,
-        student_name: proposal.student_name || '',
-        datetime_start: proposal.datetime_start,
-        target_date: proposal.target_date,
-        time_of_day: proposal.time_of_day,
-      });
-      applied.createdParticipants.push({
-        id: insertedParticipant.id,
-        lesson_instance_id: insertedInstance.id,
-        student_id: proposal.student_id,
-        student_name: proposal.student_name || '',
-        client_profile_id: proposal.client_profile_id || null,
-      });
     }
   }
 

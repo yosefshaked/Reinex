@@ -73,8 +73,11 @@ function timeRangesOverlap(startA, durationA, startB, durationB) {
   return startMinutesA < startMinutesB + safeDurationB && startMinutesB < startMinutesA + safeDurationA;
 }
 
-async function findExactTemplateConflict(client, orgId, {
-  studentId,
+// Checks whether any of the given students already appear in an active template
+// at the same instructor + day + exact time slot, with an overlapping date range.
+// Returns the first conflicting (template_id, student_id) pair found, or null.
+async function findStudentTemplateConflicts(client, orgId, {
+  studentIds,
   instructorEmployeeId,
   dayOfWeek,
   timeOfDay,
@@ -82,9 +85,13 @@ async function findExactTemplateConflict(client, orgId, {
   validUntil,
   excludeTemplateId = null,
 }) {
+  if (!studentIds || studentIds.length === 0) {
+    return { conflict: null, error: null };
+  }
+
+  // Step 1: find active templates at this instructor + day + time
   let query = withOrgScope(client, 'lesson_templates', orgId)
     .select('id, valid_from, valid_until')
-    .eq('student_id', studentId)
     .eq('instructor_employee_id', instructorEmployeeId)
     .eq('day_of_week', dayOfWeek)
     .eq('time_of_day', timeOfDay)
@@ -94,16 +101,32 @@ async function findExactTemplateConflict(client, orgId, {
     query = query.neq('id', excludeTemplateId);
   }
 
-  const { data, error } = await query;
-  if (error) {
-    return { conflict: null, error };
+  const { data: scheduleMatches, error: scheduleError } = await query;
+  if (scheduleError) {
+    return { conflict: null, error: scheduleError };
   }
 
-  const overlappingTemplate = (data || []).find((existing) =>
-    rangesOverlap(existing.valid_from, existing.valid_until, validFrom, validUntil),
-  );
+  // Keep only those whose date range overlaps
+  const overlappingIds = (scheduleMatches || [])
+    .filter((t) => rangesOverlap(t.valid_from, t.valid_until, validFrom, validUntil))
+    .map((t) => t.id);
 
-  return { conflict: overlappingTemplate || null, error: null };
+  if (overlappingIds.length === 0) {
+    return { conflict: null, error: null };
+  }
+
+  // Step 2: check whether any of our students are already in those templates
+  const { data: participantMatches, error: participantError } = await withOrgScope(client, 'lesson_template_participants', orgId)
+    .select('template_id, student_id')
+    .in('template_id', overlappingIds)
+    .in('student_id', studentIds)
+    .limit(1);
+
+  if (participantError) {
+    return { conflict: null, error: participantError };
+  }
+
+  return { conflict: participantMatches?.[0] || null, error: null };
 }
 
 async function findInstructorSlotConflict(client, orgId, {
@@ -148,8 +171,8 @@ async function findInstructorSlotConflict(client, orgId, {
   };
 }
 
-function buildTemplateSelect({ includeStudent = false } = {}) {
-  const fields = [
+function buildTemplateSelect() {
+  return [
     'id',
     'student_id',
     'instructor_employee_id',
@@ -168,36 +191,38 @@ function buildTemplateSelect({ includeStudent = false } = {}) {
     'metadata',
     'instructor:Employees(id, first_name, middle_name, last_name, email)',
     'service:Services(id, name, duration_minutes, color)',
-  ];
-  if (includeStudent) {
-    fields.push('student:students(id, client_profile_id, client_profile:client_profiles(id, first_name, middle_name, last_name))');
-  }
-  return fields.join(',');
+    'participants:lesson_template_participants(id, student_id, student:students(id, client_profile_id, client_profile:client_profiles(id, first_name, middle_name, last_name)))',
+  ].join(',');
 }
 
-function normalizeTemplateStudent(student) {
-  if (!student || typeof student !== 'object') {
-    return student;
-  }
-
-  const profile = student.client_profile || null;
+function normalizeTemplateParticipant(row) {
+  if (!row || typeof row !== 'object') return row;
+  const student = row.student || null;
+  const profile = student?.client_profile || null;
   return {
-    id: student.id,
-    client_profile_id: student.client_profile_id || profile?.id || null,
-    first_name: profile?.first_name || '',
-    middle_name: profile?.middle_name || null,
-    last_name: profile?.last_name || '',
+    id: row.id,
+    student_id: row.student_id,
+    student: student
+      ? {
+          id: student.id,
+          client_profile_id: student.client_profile_id || profile?.id || null,
+          first_name: profile?.first_name || '',
+          middle_name: profile?.middle_name || null,
+          last_name: profile?.last_name || '',
+        }
+      : null,
   };
 }
 
 function normalizeTemplateRecord(template) {
-  if (!template || typeof template !== 'object') {
-    return template;
-  }
-
+  if (!template || typeof template !== 'object') return template;
+  const participants = Array.isArray(template.participants)
+    ? template.participants.map(normalizeTemplateParticipant)
+    : [];
   return {
     ...template,
-    student: normalizeTemplateStudent(template.student),
+    // Keep legacy student_id field for backward compat with generator fallback.
+    participants,
   };
 }
 
@@ -449,8 +474,9 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 200, rows);
     }
 
-    // Mode 2: Student-scoped (existing behavior — student detail page)
+    // Mode 2: Student-scoped (student detail page)
     if (!isAdmin) {
+      // Verify the requesting user is an instructor assigned to this student
       const {
         ids: instructorEmployeeIds,
         error: instructorLookupError,
@@ -468,30 +494,46 @@ export default async function lessonTemplates(context, req) {
         return respond(context, 403, { message: 'student_not_assigned_to_user' });
       }
 
-      const { data: assignmentRows, error: assignmentError } = await withOrgScope(supabase, 'lesson_templates', orgId)
-        .select('id')
+      const { data: participantCheck, error: participantCheckError } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+        .select('template_id')
         .eq('student_id', studentId)
-        .in('instructor_employee_id', instructorEmployeeIds)
-        .eq('is_active', true)
         .limit(1);
 
-      if (assignmentError) {
-        context.log?.error?.('lesson-templates failed to check instructor assignment', {
-          message: assignmentError.message,
+      if (participantCheckError) {
+        context.log?.error?.('lesson-templates failed to check student assignment', {
+          message: participantCheckError.message,
           studentId,
           userId,
         });
         return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
       }
 
-      if (!assignmentRows || assignmentRows.length === 0) {
+      if (!participantCheck || participantCheck.length === 0) {
         return respond(context, 403, { message: 'student_not_assigned_to_user' });
       }
     }
 
+    // Resolve template IDs for this student via lesson_template_participants
+    const { data: studentParticipantRows, error: participantLookupError } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+      .select('template_id')
+      .eq('student_id', studentId);
+
+    if (participantLookupError) {
+      context.log?.error?.('lesson-templates failed to resolve student template ids', {
+        message: participantLookupError.message,
+        studentId,
+      });
+      return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
+    }
+
+    const studentTemplateIds = (studentParticipantRows || []).map((row) => row.template_id).filter(Boolean);
+    if (studentTemplateIds.length === 0) {
+      return respond(context, 200, []);
+    }
+
     const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .select(buildTemplateSelect())
-      .eq('student_id', studentId)
+      .in('id', studentTemplateIds)
       .order('is_active', { ascending: false })
       .order('valid_from', { ascending: false })
       .order('created_at', { ascending: false });
@@ -509,7 +551,12 @@ export default async function lessonTemplates(context, req) {
   }
 
   if (method === 'POST') {
-    const studentId = normalizeUuid(body?.student_id || body?.studentId);
+    // student_ids[] is the new multi-student API; student_id (singular) is
+    // the legacy single-student path still used by the waiting-list flow.
+    const rawStudentIds = Array.isArray(body?.student_ids)
+      ? body.student_ids.map(normalizeUuid).filter(Boolean)
+      : [];
+    const singleStudentId = normalizeUuid(body?.student_id || body?.studentId);
     const clientProfileIdFromBody = normalizeUuid(body?.client_profile_id || body?.clientProfileId);
     const instructorEmployeeId = normalizeUuid(body?.instructor_employee_id || body?.instructorEmployeeId);
     const serviceId = normalizeUuid(body?.service_id || body?.serviceId);
@@ -519,7 +566,11 @@ export default async function lessonTemplates(context, req) {
     const validFrom = normalizeString(body?.valid_from || body?.validFrom);
     const validUntil = normalizeString(body?.valid_until || body?.validUntil);
 
-    if (!studentId && !clientProfileIdFromBody && !waitingListEntryId) {
+    // Resolve the canonical student list for this request.
+    // Waiting-list / legacy paths may only supply a single student_id.
+    const studentId = singleStudentId || (rawStudentIds.length === 1 ? rawStudentIds[0] : null);
+
+    if (rawStudentIds.length === 0 && !studentId && !clientProfileIdFromBody && !waitingListEntryId) {
       return respond(context, 400, { message: 'invalid_student_id' });
     }
 
@@ -699,8 +750,13 @@ export default async function lessonTemplates(context, req) {
       }
     }
 
-    const { conflict, error: conflictCheckError } = await findExactTemplateConflict(supabase, orgId, {
-      studentId: effectiveStudentId,
+    // Build the full list of students being enrolled.
+    const allStudentIds = rawStudentIds.length > 0
+      ? rawStudentIds
+      : (effectiveStudentId ? [effectiveStudentId] : []);
+
+    const { conflict: studentConflict, error: conflictCheckError } = await findStudentTemplateConflicts(supabase, orgId, {
+      studentIds: allStudentIds,
       instructorEmployeeId,
       dayOfWeek,
       timeOfDay,
@@ -711,15 +767,16 @@ export default async function lessonTemplates(context, req) {
     if (conflictCheckError) {
       context.log?.error?.('lesson-templates failed to check duplicate conflict', {
         message: conflictCheckError.message,
-        studentId: effectiveStudentId,
+        studentIds: allStudentIds,
       });
       return respond(context, 500, { message: 'failed_to_create_lesson_template' });
     }
 
-    if (conflict) {
+    if (studentConflict) {
       return respond(context, 409, {
         message: 'duplicate_template_conflict',
-        conflicting_template_id: conflict.id,
+        conflicting_template_id: studentConflict.template_id,
+        conflicting_student_id: studentConflict.student_id,
       });
     }
 
@@ -750,7 +807,8 @@ export default async function lessonTemplates(context, req) {
 
     const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
       .insert({
-        student_id: effectiveStudentId,
+        // student_id is kept null for new templates; lesson_template_participants is the SSOT.
+        student_id: null,
         instructor_employee_id: instructorEmployeeId,
         service_id: serviceId,
         day_of_week: dayOfWeek,
@@ -771,8 +829,30 @@ export default async function lessonTemplates(context, req) {
         });
       }
 
-      context.log?.error?.('lesson-templates failed to create template', { message: error.message, studentId: effectiveStudentId });
+      context.log?.error?.('lesson-templates failed to create template', { message: error.message, studentIds: allStudentIds });
       return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+    }
+
+    // Insert all students as template participants.
+    if (allStudentIds.length > 0) {
+      const participantRows = allStudentIds.map((sid) => ({
+        org_id: orgId,
+        template_id: data.id,
+        student_id: sid,
+      }));
+      const { error: participantsError } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+        .insert(participantRows);
+
+      if (participantsError) {
+        context.log?.error?.('lesson-templates failed to insert template participants, rolling back template', {
+          message: participantsError.message,
+          templateId: data.id,
+        });
+        await rollbackCreatedTemplate(context, supabase, orgId, data.id, {
+          reason: 'participant_insert_failed',
+        });
+        return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+      }
     }
 
     let studentAfterActivation = null;
@@ -952,8 +1032,14 @@ export default async function lessonTemplates(context, req) {
       });
     }
 
+    // Re-fetch with participants included (the initial insert response pre-dates participant rows).
+    const { data: createdRecord } = await withOrgScope(supabase, 'lesson_templates', orgId)
+      .select(buildTemplateSelect())
+      .eq('id', data.id)
+      .single();
+
     return respond(context, 201, {
-      ...normalizeTemplateRecord(data),
+      ...normalizeTemplateRecord(createdRecord || data),
       waiting_list_match: waitingListEntry
         ? {
             waiting_list_entry_id: waitingListEntry.id,
@@ -991,13 +1077,13 @@ export default async function lessonTemplates(context, req) {
 
     const updates = {};
 
-    if (Object.prototype.hasOwnProperty.call(body, 'student_id') || Object.prototype.hasOwnProperty.call(body, 'studentId')) {
-      const studentId = normalizeUuid(body?.student_id || body?.studentId);
-      if (!studentId) {
-        return respond(context, 400, { message: 'invalid_student_id' });
-      }
-      updates.student_id = studentId;
-    }
+    // --- Participant management (add / remove students) ---
+    const addStudentIds = Array.isArray(body?.add_student_ids)
+      ? body.add_student_ids.map(normalizeUuid).filter(Boolean)
+      : [];
+    const removeStudentIds = Array.isArray(body?.remove_student_ids)
+      ? body.remove_student_ids.map(normalizeUuid).filter(Boolean)
+      : [];
 
     if (Object.prototype.hasOwnProperty.call(body, 'instructor_employee_id') || Object.prototype.hasOwnProperty.call(body, 'instructorEmployeeId')) {
       const instructorEmployeeId = normalizeUuid(body?.instructor_employee_id || body?.instructorEmployeeId);
@@ -1065,7 +1151,10 @@ export default async function lessonTemplates(context, req) {
       updates.is_active = Boolean(body?.is_active ?? body?.isActive);
     }
 
-    if (Object.keys(updates).length === 0) {
+    const hasScheduleUpdates = Object.keys(updates).length > 0;
+    const hasParticipantUpdates = addStudentIds.length > 0 || removeStudentIds.length > 0;
+
+    if (!hasScheduleUpdates && !hasParticipantUpdates) {
       return respond(context, 400, { message: 'missing_updates' });
     }
 
@@ -1151,29 +1240,43 @@ export default async function lessonTemplates(context, req) {
     }
 
     if (nextTemplateState.is_active) {
-      const { conflict, error: conflictCheckError } = await findExactTemplateConflict(supabase, orgId, {
-        studentId: nextTemplateState.student_id,
-        instructorEmployeeId: nextTemplateState.instructor_employee_id,
-        dayOfWeek: nextTemplateState.day_of_week,
-        timeOfDay: nextTemplateState.time_of_day,
-        validFrom: nextTemplateState.valid_from,
-        validUntil: nextTemplateState.valid_until,
-        excludeTemplateId: templateId,
-      });
+      // Collect all students currently in this template plus any being added.
+      const { data: existingParticipants } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+        .select('student_id')
+        .eq('template_id', templateId);
 
-      if (conflictCheckError) {
-        context.log?.error?.('lesson-templates failed to check duplicate conflict on update', {
-          message: conflictCheckError.message,
-          templateId,
-        });
-        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
-      }
+      const existingStudentIds = (existingParticipants || []).map((p) => p.student_id);
+      const allActiveStudentIds = Array.from(new Set([
+        ...existingStudentIds,
+        ...addStudentIds,
+      ])).filter((sid) => !removeStudentIds.includes(sid));
 
-      if (conflict) {
-        return respond(context, 409, {
-          message: 'duplicate_template_conflict',
-          conflicting_template_id: conflict.id,
+      if (allActiveStudentIds.length > 0) {
+        const { conflict: studentConflict, error: conflictCheckError } = await findStudentTemplateConflicts(supabase, orgId, {
+          studentIds: allActiveStudentIds,
+          instructorEmployeeId: nextTemplateState.instructor_employee_id,
+          dayOfWeek: nextTemplateState.day_of_week,
+          timeOfDay: nextTemplateState.time_of_day,
+          validFrom: nextTemplateState.valid_from,
+          validUntil: nextTemplateState.valid_until,
+          excludeTemplateId: templateId,
         });
+
+        if (conflictCheckError) {
+          context.log?.error?.('lesson-templates failed to check duplicate conflict on update', {
+            message: conflictCheckError.message,
+            templateId,
+          });
+          return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+        }
+
+        if (studentConflict) {
+          return respond(context, 409, {
+            message: 'duplicate_template_conflict',
+            conflicting_template_id: studentConflict.template_id,
+            conflicting_student_id: studentConflict.student_id,
+          });
+        }
       }
 
       const { conflict: instructorSlotConflict, error: instructorSlotConflictError } = await findInstructorSlotConflict(supabase, orgId, {
@@ -1202,27 +1305,89 @@ export default async function lessonTemplates(context, req) {
       }
     }
 
-    updates.updated_at = new Date().toISOString();
-
-    const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
-      .update(updates)
-      .eq('id', templateId)
-      .select(buildTemplateSelect())
-      .maybeSingle();
-
-    if (error) {
-      if (isDuplicateTemplateConstraintError(error)) {
-        return respond(context, 409, {
-          message: resolveTemplateConstraintMessage(error),
-        });
-      }
-
-      context.log?.error?.('lesson-templates failed to update template', { message: error.message, templateId });
-      return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+    if (hasScheduleUpdates) {
+      updates.updated_at = new Date().toISOString();
     }
 
+    let data;
+    if (hasScheduleUpdates) {
+      const { data: updatedData, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
+        .update(updates)
+        .eq('id', templateId)
+        .select(buildTemplateSelect())
+        .maybeSingle();
+
+      if (error) {
+        if (isDuplicateTemplateConstraintError(error)) {
+          return respond(context, 409, {
+            message: resolveTemplateConstraintMessage(error),
+          });
+        }
+
+        context.log?.error?.('lesson-templates failed to update template', { message: error.message, templateId });
+        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+      }
+
+      if (!updatedData) {
+        return respond(context, 404, { message: 'lesson_template_not_found' });
+      }
+      data = updatedData;
+    }
+
+    // Apply participant additions
+    if (addStudentIds.length > 0) {
+      const participantRows = addStudentIds.map((sid) => ({
+        org_id: orgId,
+        template_id: templateId,
+        student_id: sid,
+      }));
+      const { error: addError } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+        .insert(participantRows)
+        .select('id');
+
+      if (addError && !addError.message?.includes('duplicate')) {
+        context.log?.error?.('lesson-templates failed to add template participants', {
+          message: addError.message,
+          templateId,
+        });
+        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+      }
+    }
+
+    // Apply participant removals
+    if (removeStudentIds.length > 0) {
+      const { error: removeError } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+        .delete()
+        .eq('template_id', templateId)
+        .in('student_id', removeStudentIds);
+
+      if (removeError) {
+        context.log?.error?.('lesson-templates failed to remove template participants', {
+          message: removeError.message,
+          templateId,
+        });
+        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+      }
+    }
+
+    // Fetch the latest record (may not have been fetched above if only participant changes)
     if (!data) {
-      return respond(context, 404, { message: 'lesson_template_not_found' });
+      const { data: fetchedData, error: fetchError } = await withOrgScope(supabase, 'lesson_templates', orgId)
+        .select(buildTemplateSelect())
+        .eq('id', templateId)
+        .maybeSingle();
+
+      if (fetchError || !fetchedData) {
+        return respond(context, 404, { message: 'lesson_template_not_found' });
+      }
+      data = fetchedData;
+    } else {
+      // Re-fetch to include any participant changes
+      const { data: refreshedData } = await withOrgScope(supabase, 'lesson_templates', orgId)
+        .select(buildTemplateSelect())
+        .eq('id', templateId)
+        .maybeSingle();
+      if (refreshedData) data = refreshedData;
     }
 
     const actionType = !existingTemplate.is_active && data.is_active

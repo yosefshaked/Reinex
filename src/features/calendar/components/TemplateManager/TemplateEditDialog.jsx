@@ -7,9 +7,10 @@ import { useMemo, useState, useEffect } from 'react';
 import { useOrg } from '@/org/OrgContext';
 import { useCalendarInstructors } from '../../hooks/useCalendar';
 import { useTemplateMutations, useTemplateOverrides } from '../../hooks/useTemplates';
-import { Loader2, AlertCircle, Trash2, Pencil, X, RotateCcw } from 'lucide-react';
+import { Loader2, AlertCircle, Trash2, Pencil, X, RotateCcw, UserPlus } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { useStudents } from '@/hooks/useOrgData';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { DAY_OPTIONS, normalizeDayToken } from '@/lib/day-of-week.js';
 import {
@@ -42,8 +43,15 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
     deleteTemplate,
     createTemplateOverride,
     deleteTemplateOverride,
+    addTemplateParticipant,
+    removeTemplateParticipant,
     isSubmitting,
   } = useTemplateMutations();
+  const { students, loadingStudents: studentsLoading } = useStudents({
+    status: 'active',
+    enabled: open && !!activeOrgId,
+    orgId: activeOrgId,
+  });
   const {
     overrides,
     isLoading: overridesLoading,
@@ -56,6 +64,8 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
   const [isEditing, setIsEditing] = useState(false);
   const [isReactivating, setIsReactivating] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isAddingParticipant, setIsAddingParticipant] = useState(false);
+  const [addParticipantQuery, setAddParticipantQuery] = useState('');
 
   const [services, setServices] = useState([]);
   const [servicesLoading, setServicesLoading] = useState(false);
@@ -106,6 +116,8 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
       setIsEditing(false);
       setIsReactivating(false);
       setShowDeleteConfirm(false);
+      setIsAddingParticipant(false);
+      setAddParticipantQuery('');
       setReactivationRange({
         valid_from: '',
         valid_until: '',
@@ -139,7 +151,11 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
     return () => { isMounted = false; };
   }, [open, activeOrgId, session]);
 
-  const studentName = getPersonName(template?.student);
+  const participants = template?.participants || [];
+  const studentName = participants.length > 0
+    ? participants.map((p) => getPersonName(p?.student)).join(', ')
+    : getPersonName(template?.student);
+  const firstStudentId = participants[0]?.student_id || template?.student_id || '';
   const instructorName = getPersonName(template?.instructor);
   const serviceName = template?.service?.name || '—';
   const dayLabel = DAY_OPTIONS.find((d) => d.value === normalizeDayToken(template?.day_of_week))?.label || '—';
@@ -215,6 +231,43 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
       setFormData((prev) => ({ ...prev, time_of_day: availableTimeSlots[0] }));
     }
   }, [availableTimeSlots, formData.day_of_week, formData.time_of_day, selectedCapability]);
+
+  // Participants search: students not already in the template
+  const currentParticipantIdSet = new Set(participants.map((p) => p.student_id));
+  const addParticipantResults = (students || [])
+    .filter((s) => !currentParticipantIdSet.has(s.id))
+    .filter((s) => {
+      const q = addParticipantQuery.trim().toLowerCase();
+      if (!q) return true;
+      return `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''} ${s.identity_number || ''}`.toLowerCase().includes(q);
+    })
+    .slice(0, 12);
+
+  async function handleAddParticipant(student) {
+    setError(null);
+    const { error: apiError } = await addTemplateParticipant(template.id, student.id);
+    if (apiError) {
+      setError(apiError === 'student_template_conflict'
+        ? 'לתלמיד/ה הזה כבר קיימת תבנית חופפת ביום ובשעה האלה.'
+        : apiError);
+      return;
+    }
+    setIsAddingParticipant(false);
+    setAddParticipantQuery('');
+    onUpdate?.();
+  }
+
+  async function handleRemoveParticipant(studentId) {
+    setError(null);
+    const { error: apiError } = await removeTemplateParticipant(template.id, studentId);
+    if (apiError) {
+      setError(apiError === 'cannot_remove_last_participant'
+        ? 'לא ניתן להסיר את המשתתף/ת האחרון/ה מהתבנית.'
+        : apiError);
+      return;
+    }
+    onUpdate?.();
+  }
 
   async function handleSave() {
     setError(null);
@@ -403,10 +456,90 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
         {/* View Mode */}
         {!isEditing && !isReactivating && (
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-y-2 text-sm">
-              <span className="text-gray-500">תלמיד:</span>
-              <span className="font-medium">{studentName}</span>
+            {/* Participants */}
+            <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">משתתפים</p>
+              </div>
+              {participants.length === 0 && (
+                <p className="text-sm text-muted-foreground">אין משתתפים מוגדרים לתבנית זו.</p>
+              )}
+              {participants.map((p) => (
+                <div key={p.id} className="flex items-center justify-between rounded border border-border bg-background px-2 py-1.5 text-sm">
+                  <span className="font-medium">{getPersonName(p?.student)}</span>
+                  {template.is_active && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveParticipant(p.student_id)}
+                      disabled={isSubmitting}
+                      className="ms-2 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                      aria-label={`הסר ${getPersonName(p?.student)}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {template.is_active && (
+                isAddingParticipant ? (
+                  <div className="relative">
+                    <Input
+                      autoFocus
+                      placeholder="חפש תלמיד לפי שם..."
+                      value={addParticipantQuery}
+                      onChange={(e) => setAddParticipantQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          setIsAddingParticipant(false);
+                          setAddParticipantQuery('');
+                        }
+                      }}
+                    />
+                    {studentsLoading ? (
+                      <div className="mt-1 rounded-md border border-border bg-background shadow-md p-3 text-sm text-muted-foreground flex items-center gap-2">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        טוען תלמידים...
+                      </div>
+                    ) : addParticipantResults.length > 0 ? (
+                      <div className="mt-1 rounded-md border border-border bg-background shadow-md max-h-40 overflow-y-auto z-10 relative">
+                        {addParticipantResults.map((student) => (
+                          <button
+                            key={student.id}
+                            type="button"
+                            className="w-full text-start px-3 py-2 text-sm hover:bg-muted transition-colors border-b border-border last:border-0"
+                            onClick={() => handleAddParticipant(student)}
+                            disabled={isSubmitting}
+                          >
+                            <span className="font-medium">{getPersonName(student)}</span>
+                            {student.identity_number ? (
+                              <span className="text-muted-foreground"> • {student.identity_number}</span>
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    ) : addParticipantQuery.trim() ? (
+                      <div className="mt-1 rounded-md border border-border bg-background shadow-md p-3 text-sm text-muted-foreground">
+                        לא נמצאו תלמידים
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsAddingParticipant(true)}
+                    disabled={isSubmitting}
+                    className="gap-1.5"
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    הוסף משתתף
+                  </Button>
+                )
+              )}
+            </div>
 
+            <div className="grid grid-cols-2 gap-y-2 text-sm">
               <span className="text-gray-500">מדריך:</span>
               <span className="font-medium">{instructorName}</span>
 
@@ -548,7 +681,7 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
                       onClick={() => onFixAvailability({
                         instructorId: formData.instructor_employee_id,
                         serviceId: formData.service_id,
-                        studentId: template.student_id,
+                        studentId: firstStudentId,
                         waitingListContext: {
                           studentName,
                           serviceName,
@@ -609,8 +742,12 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
             </Alert>
 
             <div>
-              <Label>תלמיד</Label>
-              <Input value={studentName} disabled className="bg-gray-50" />
+              <Label>משתתפים</Label>
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                {participants.length > 0
+                  ? participants.map((p) => getPersonName(p?.student)).join(', ')
+                  : studentName || '—'}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -658,10 +795,14 @@ export function TemplateEditDialog({ template, open, onClose, onUpdate, onFixAva
         {/* Edit Mode */}
         {isEditing && (
           <div className="space-y-4">
-            {/* Student (read-only in edit) */}
+            {/* Participants (read-only in edit — managed from view mode) */}
             <div>
-              <Label>תלמיד</Label>
-              <Input value={studentName} disabled className="bg-gray-50" />
+              <Label>משתתפים</Label>
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                {participants.length > 0
+                  ? participants.map((p) => getPersonName(p?.student)).join(', ')
+                  : studentName || '—'}
+              </div>
             </div>
 
             {/* Instructor */}
