@@ -19,7 +19,7 @@ import { TemplateScheduleCalendar } from '../components/TemplateManager/Template
 import { AddTemplateDialog } from '../components/TemplateManager/AddTemplateDialog';
 import { TemplateEditDialog } from '../components/TemplateManager/TemplateEditDialog';
 import CalendarServicePalette from '../components/CalendarServicePalette.jsx';
-import { useTemplates } from '../hooks/useTemplates';
+import { useTemplates, useTemplateMutations } from '../hooks/useTemplates';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import EditServiceCapabilitiesDialog from '@/components/settings/employee-management/EditServiceCapabilitiesDialog.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -141,6 +141,8 @@ export default function TemplateManagerPage() {
 
   const { templates, isLoading: templatesLoading, error: templatesError, refetch: refetchTemplates } = useTemplates({ showInactive });
   const { instructors, isLoading: instructorsLoading, error: instructorsError } = useCalendarInstructors();
+  const { matchWaitingEntryToTemplate, isSubmitting: isAssigning } = useTemplateMutations();
+  const [capacityAssignError, setCapacityAssignError] = useState('');
 
   const isLoading = templatesLoading || instructorsLoading;
   const errorMsg = templatesError || instructorsError;
@@ -445,8 +447,32 @@ export default function TemplateManagerPage() {
     });
   }
 
+  async function handleCapacityAssign(candidate) {
+    setCapacityAssignError('');
+    const templateId = candidate.source_template_id;
+    const studentId = candidate.student_id;
+    const waitingListEntryId = candidate.waiting_list_entry_id || candidate.entry_id || '';
+
+    const { error } = await matchWaitingEntryToTemplate(templateId, { studentId, waitingListEntryId });
+    if (error) {
+      setCapacityAssignError('אירעה שגיאה בשיבוץ התלמיד/ה. נסו שנית.');
+      return;
+    }
+    setSelectedMatchContext(null);
+    setCapacityAssignError('');
+    refetchTemplates();
+  }
+
   function handleAssignWaitingCandidate(candidate) {
     if (!candidate) return;
+
+    // Capacity mode with an existing student — add directly to the existing template
+    if (selectedMatchContext?.mode === 'capacity' && candidate.student_id && candidate.source_template_id) {
+      handleCapacityAssign(candidate);
+      return;
+    }
+
+    // Clear-space mode or missing data — open AddTemplateDialog to create a new template
     setAddDefaults({
       instructorId: candidate.instructor_id || null,
       dayOfWeek: candidate.day_of_week || null,
@@ -544,8 +570,9 @@ export default function TemplateManagerPage() {
 
       {/* Error */}
       {errorMsg && !isLoading && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
-          שגיאה בטעינת הנתונים: {errorMsg}
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-destructive">
+          <p className="text-base font-semibold">אירעה שגיאה בטעינת הנתונים.</p>
+          <p className="mt-1 text-sm">נסו לרענן את הדף. אם הבעיה חוזרת, פנו לתמיכה.</p>
         </div>
       )}
 
@@ -739,16 +766,26 @@ export default function TemplateManagerPage() {
         onFixAvailability={handleFixAvailability}
       />
 
-      <Dialog open={Boolean(selectedMatchContext)} onOpenChange={(open) => !open && setSelectedMatchContext(null)}>
+      <Dialog
+        open={Boolean(selectedMatchContext)}
+        onOpenChange={(open) => { if (!open) { setSelectedMatchContext(null); setCapacityAssignError(''); } }}
+      >
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
               {selectedMatchContext?.mode === 'capacity' ? 'ממתינים שמתאימים לקבוצה קיימת' : 'ממתינים שמתאימים לשיבוץ נפרד'}
             </DialogTitle>
             <DialogDescription>
-              בחרו מתעניין/ת לשיבוץ. השמירה תעבור דרך יצירת תבנית ותמיר לקוח/ה לתלמיד/ה בצד השרת.
+              {selectedMatchContext?.mode === 'capacity'
+                ? 'לחצו "שבץ" כדי להוסיף את הממתין/ת ישירות לקבוצה הקיימת.'
+                : 'בחרו מתעניין/ת לשיבוץ. השמירה תעבור דרך יצירת תבנית ותמיר לקוח/ה לתלמיד/ה בצד השרת.'}
             </DialogDescription>
           </DialogHeader>
+          {capacityAssignError && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {capacityAssignError}
+            </div>
+          )}
           <div className="max-h-[60vh] space-y-3 overflow-y-auto py-2">
             {(selectedMatchContext?.candidates || []).map((candidate) => (
               <div key={`${candidate.waiting_list_entry_id}-${candidate.instructor_id}-${candidate.day_of_week}-${candidate.time_of_day}`} className="rounded-xl border border-border p-4">
@@ -769,8 +806,12 @@ export default function TemplateManagerPage() {
                       )}
                     </div>
                   </div>
-                  <Button type="button" onClick={() => handleAssignWaitingCandidate(candidate)}>
-                    שבץ
+                  <Button
+                    type="button"
+                    disabled={isAssigning}
+                    onClick={() => handleAssignWaitingCandidate(candidate)}
+                  >
+                    {isAssigning ? <Loader2 className="h-4 w-4 animate-spin" /> : 'שבץ'}
                   </Button>
                 </div>
                 <div className="mt-3 rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">

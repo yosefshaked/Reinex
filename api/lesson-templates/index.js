@@ -18,6 +18,7 @@ import {
 } from '../_shared/org-bff.js';
 import { ensureStudentForClientProfile } from '../_shared/client-profiles.js';
 import { ceilClockTimeToGrid } from '../_shared/time-grid.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
@@ -419,6 +420,10 @@ export default async function lessonTemplates(context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  // Convenience: log 500 to error_events and return a tracked error response.
+  const tracked500 = (message, error = null) =>
+    respondTrackedError(context, req, supabase, { status: 500, message, orgId, userId, error });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -428,7 +433,7 @@ export default async function lessonTemplates(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return tracked500('failed_to_verify_membership', membershipError);
   }
 
   if (!role) {
@@ -465,7 +470,7 @@ export default async function lessonTemplates(context, req) {
 
       if (error) {
         context.log?.error?.('lesson-templates failed to list all templates', { message: error.message });
-        return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
+        return tracked500('failed_to_load_lesson_templates', error);
       }
 
       const rows = (Array.isArray(data) ? [...data] : []).map(normalizeTemplateRecord);
@@ -487,7 +492,7 @@ export default async function lessonTemplates(context, req) {
           message: instructorLookupError.message,
           userId,
         });
-        return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
+        return tracked500('failed_to_load_lesson_templates', instructorLookupError);
       }
 
       if (instructorEmployeeIds.length === 0) {
@@ -505,7 +510,7 @@ export default async function lessonTemplates(context, req) {
           studentId,
           userId,
         });
-        return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
+        return tracked500('failed_to_load_lesson_templates', participantCheckError);
       }
 
       if (!participantCheck || participantCheck.length === 0) {
@@ -523,7 +528,7 @@ export default async function lessonTemplates(context, req) {
         message: participantLookupError.message,
         studentId,
       });
-      return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
+      return tracked500('failed_to_load_lesson_templates', participantLookupError);
     }
 
     const studentTemplateIds = (studentParticipantRows || []).map((row) => row.template_id).filter(Boolean);
@@ -540,7 +545,7 @@ export default async function lessonTemplates(context, req) {
 
     if (error) {
       context.log?.error?.('lesson-templates failed to load templates', { message: error.message, studentId });
-      return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
+      return tracked500('failed_to_load_lesson_templates', error);
     }
 
     return respond(context, 200, (Array.isArray(data) ? data : []).map(normalizeTemplateRecord));
@@ -594,7 +599,7 @@ export default async function lessonTemplates(context, req) {
         message: serviceLookupError.message,
         serviceId,
       });
-      return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+      return tracked500('failed_to_create_lesson_template');
     }
 
     const durationMinutes = resolveServiceDurationMinutes(selectedService);
@@ -640,7 +645,7 @@ export default async function lessonTemplates(context, req) {
         instructorEmployeeId,
         serviceId,
       });
-      return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+      return tracked500('failed_to_create_lesson_template');
     }
 
     let waitingListEntry = null;
@@ -659,7 +664,7 @@ export default async function lessonTemplates(context, req) {
           message: waitingListError.message,
           waitingListEntryId,
         });
-        return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+        return tracked500('failed_to_create_lesson_template');
       }
 
       if (!waitingListData) {
@@ -692,7 +697,7 @@ export default async function lessonTemplates(context, req) {
             waitingListEntryId,
             clientProfileId: resolvedClientProfileId,
           });
-          return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+          return tracked500('failed_to_create_lesson_template');
         }
         clientProfileBeforeMatch = clientProfileData;
       }
@@ -701,7 +706,7 @@ export default async function lessonTemplates(context, req) {
         try {
           const ensuredStudent = await ensureStudentForClientProfile(supabase, resolvedClientProfileId);
           if (ensuredStudent.error || !ensuredStudent.student?.id) {
-            return respond(context, 500, { message: 'failed_to_activate_student_from_waiting_list' });
+            return tracked500('failed_to_activate_student_from_waiting_list');
           }
           effectiveStudentId = ensuredStudent.student.id;
           studentCreated = ensuredStudent.created === true;
@@ -711,7 +716,7 @@ export default async function lessonTemplates(context, req) {
             waitingListEntryId,
             clientProfileId: resolvedClientProfileId,
           });
-          return respond(context, 500, { message: 'failed_to_activate_student_from_waiting_list' });
+          return tracked500('failed_to_activate_student_from_waiting_list');
         }
       }
 
@@ -726,7 +731,7 @@ export default async function lessonTemplates(context, req) {
           studentId: effectiveStudentId,
           waitingListEntryId,
         });
-        return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+        return tracked500('failed_to_create_lesson_template');
       }
 
       if (!studentData) {
@@ -737,7 +742,7 @@ export default async function lessonTemplates(context, req) {
       try {
         const ensuredStudent = await ensureStudentForClientProfile(supabase, resolvedClientProfileId);
         if (ensuredStudent.error || !ensuredStudent.student?.id) {
-          return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+          return tracked500('failed_to_create_lesson_template');
         }
         effectiveStudentId = ensuredStudent.student.id;
         studentCreated = ensuredStudent.created === true;
@@ -746,7 +751,7 @@ export default async function lessonTemplates(context, req) {
           message: studentEnsureError?.message,
           clientProfileId: resolvedClientProfileId,
         });
-        return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+        return tracked500('failed_to_create_lesson_template');
       }
     }
 
@@ -769,7 +774,7 @@ export default async function lessonTemplates(context, req) {
         message: conflictCheckError.message,
         studentIds: allStudentIds,
       });
-      return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+      return tracked500('failed_to_create_lesson_template');
     }
 
     if (studentConflict) {
@@ -795,7 +800,7 @@ export default async function lessonTemplates(context, req) {
         instructorEmployeeId,
         serviceId,
       });
-      return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+      return tracked500('failed_to_create_lesson_template');
     }
 
     if (instructorSlotConflict) {
@@ -830,7 +835,7 @@ export default async function lessonTemplates(context, req) {
       }
 
       context.log?.error?.('lesson-templates failed to create template', { message: error.message, studentIds: allStudentIds });
-      return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+      return tracked500('failed_to_create_lesson_template');
     }
 
     // Insert all students as template participants.
@@ -851,7 +856,7 @@ export default async function lessonTemplates(context, req) {
         await rollbackCreatedTemplate(context, supabase, orgId, data.id, {
           reason: 'participant_insert_failed',
         });
-        return respond(context, 500, { message: 'failed_to_create_lesson_template' });
+        return tracked500('failed_to_create_lesson_template');
       }
     }
 
@@ -898,10 +903,9 @@ export default async function lessonTemplates(context, req) {
           reason: 'student_activation_failed',
         });
 
-        return respond(
-          context,
-          500,
-          { message: rollbackTemplateResult.ok ? 'failed_to_activate_student_from_waiting_list' : 'failed_to_finalize_waiting_list_match' },
+        return tracked500(
+          rollbackTemplateResult.ok ? 'failed_to_activate_student_from_waiting_list' : 'failed_to_finalize_waiting_list_match',
+          activationError,
         );
       }
 
@@ -964,10 +968,9 @@ export default async function lessonTemplates(context, req) {
           }
         }
 
-        return respond(
-          context,
-          500,
-          { message: rollbackTemplateResult.ok && rollbackStudentOk ? 'failed_to_link_waiting_list_entry' : 'failed_to_finalize_waiting_list_match' },
+        return tracked500(
+          rollbackTemplateResult.ok && rollbackStudentOk ? 'failed_to_link_waiting_list_entry' : 'failed_to_finalize_waiting_list_match',
+          waitingListUpdateError,
         );
       }
 
@@ -1068,7 +1071,7 @@ export default async function lessonTemplates(context, req) {
         message: existingTemplateError.message,
         templateId,
       });
-      return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+      return tracked500('failed_to_update_lesson_template');
     }
 
     if (!existingTemplate) {
@@ -1084,6 +1087,7 @@ export default async function lessonTemplates(context, req) {
     const removeStudentIds = Array.isArray(body?.remove_student_ids)
       ? body.remove_student_ids.map(normalizeUuid).filter(Boolean)
       : [];
+    const waitingListEntryId = normalizeUuid(body?.waiting_list_entry_id || body?.waitingListEntryId);
 
     if (Object.prototype.hasOwnProperty.call(body, 'instructor_employee_id') || Object.prototype.hasOwnProperty.call(body, 'instructorEmployeeId')) {
       const instructorEmployeeId = normalizeUuid(body?.instructor_employee_id || body?.instructorEmployeeId);
@@ -1110,7 +1114,7 @@ export default async function lessonTemplates(context, req) {
           serviceId,
           templateId,
         });
-        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+        return tracked500('failed_to_update_lesson_template');
       }
       updates.service_id = serviceId;
     }
@@ -1158,6 +1162,34 @@ export default async function lessonTemplates(context, req) {
       return respond(context, 400, { message: 'missing_updates' });
     }
 
+    // Validate waiting list entry up front (capacity-mode assignment) before any DB writes
+    let waitingEntryToMatch = null;
+    if (waitingListEntryId) {
+      const { data: waitingEntry, error: waitingLoadError } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
+        .select('id, student_id, status, metadata')
+        .eq('id', waitingListEntryId)
+        .maybeSingle();
+
+      if (waitingLoadError) {
+        context.log?.error?.('lesson-templates failed to load waiting-list entry for capacity assign', {
+          message: waitingLoadError.message,
+          waitingListEntryId,
+          templateId,
+        });
+        return tracked500('failed_to_link_waiting_list_entry', waitingLoadError);
+      }
+
+      if (!waitingEntry) {
+        return respond(context, 404, { message: 'waiting_list_entry_not_found' });
+      }
+
+      if (!['new', 'open'].includes(String(waitingEntry.status).toLowerCase())) {
+        return respond(context, 409, { message: 'waiting_list_entry_not_open' });
+      }
+
+      waitingEntryToMatch = waitingEntry;
+    }
+
     const effectiveServiceId = updates.service_id ?? existingTemplate.service_id;
     let effectiveService = null;
     try {
@@ -1174,7 +1206,7 @@ export default async function lessonTemplates(context, req) {
         serviceId: effectiveServiceId,
         templateId,
       });
-      return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+      return tracked500('failed_to_update_lesson_template');
     }
 
     const effectiveDurationMinutes = resolveServiceDurationMinutes(effectiveService);
@@ -1221,7 +1253,7 @@ export default async function lessonTemplates(context, req) {
         message: availabilityError.message,
         templateId,
       });
-      return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+      return tracked500('failed_to_update_lesson_template');
     }
 
     const isReactivating = !existingTemplate.is_active && nextTemplateState.is_active;
@@ -1267,7 +1299,7 @@ export default async function lessonTemplates(context, req) {
             message: conflictCheckError.message,
             templateId,
           });
-          return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+          return tracked500('failed_to_update_lesson_template');
         }
 
         if (studentConflict) {
@@ -1294,7 +1326,7 @@ export default async function lessonTemplates(context, req) {
           message: instructorSlotConflictError.message,
           templateId,
         });
-        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+        return tracked500('failed_to_update_lesson_template');
       }
 
       if (instructorSlotConflict) {
@@ -1325,7 +1357,7 @@ export default async function lessonTemplates(context, req) {
         }
 
         context.log?.error?.('lesson-templates failed to update template', { message: error.message, templateId });
-        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+        return tracked500('failed_to_update_lesson_template');
       }
 
       if (!updatedData) {
@@ -1350,7 +1382,42 @@ export default async function lessonTemplates(context, req) {
           message: addError.message,
           templateId,
         });
-        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+        return tracked500('failed_to_update_lesson_template');
+      }
+    }
+
+    // Mark waiting list entry as matched (capacity-mode assignment)
+    if (waitingEntryToMatch) {
+      const matchTimestamp = new Date().toISOString();
+      const existingMeta = waitingEntryToMatch.metadata && typeof waitingEntryToMatch.metadata === 'object'
+        ? waitingEntryToMatch.metadata
+        : {};
+      const { error: matchError } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
+        .update({
+          status: 'matched',
+          metadata: {
+            ...existingMeta,
+            matched_template_id: templateId,
+            matched_at: matchTimestamp,
+            matched_by_user_id: userId,
+          },
+        })
+        .eq('id', waitingEntryToMatch.id);
+
+      if (matchError) {
+        context.log?.error?.('lesson-templates failed to mark waiting-list entry as matched on participant add', {
+          message: matchError.message,
+          waitingListEntryId: waitingEntryToMatch.id,
+          templateId,
+        });
+        // Rollback: remove the participant(s) we just inserted
+        if (addStudentIds.length > 0) {
+          await withOrgScope(supabase, 'lesson_template_participants', orgId)
+            .delete()
+            .eq('template_id', templateId)
+            .in('student_id', addStudentIds);
+        }
+        return tracked500('failed_to_link_waiting_list_entry', matchError);
       }
     }
 
@@ -1366,7 +1433,7 @@ export default async function lessonTemplates(context, req) {
           message: removeError.message,
           templateId,
         });
-        return respond(context, 500, { message: 'failed_to_update_lesson_template' });
+        return tracked500('failed_to_update_lesson_template');
       }
     }
 
@@ -1458,7 +1525,7 @@ export default async function lessonTemplates(context, req) {
         message: loadTemplateError.message,
         templateId,
       });
-      return respond(context, 500, { message: 'failed_to_deactivate_lesson_template' });
+      return tracked500('failed_to_deactivate_lesson_template');
     }
 
     if (!existingTemplate) {
@@ -1475,11 +1542,11 @@ export default async function lessonTemplates(context, req) {
 
     if (error) {
       context.log?.error?.('lesson-templates failed to deactivate template', { message: error.message, templateId });
-      return respond(context, 500, { message: 'failed_to_deactivate_lesson_template' });
+      return tracked500('failed_to_deactivate_lesson_template');
     }
 
     if (!data) {
-      return respond(context, 500, { message: 'failed_to_deactivate_lesson_template' });
+      return tracked500('failed_to_deactivate_lesson_template');
     }
 
     try {

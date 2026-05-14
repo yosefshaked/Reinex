@@ -239,6 +239,29 @@ export function useTemplateMutations() {
     [activeOrgId, beginSubmitting, finishSubmitting],
   );
 
+  const matchWaitingEntryToTemplate = useCallback(
+    async (templateId, { studentId, waitingListEntryId }) => {
+      beginSubmitting();
+      try {
+        const data = await authenticatedFetch(`lesson-templates/${templateId}`, {
+          method: 'PUT',
+          body: {
+            template_id: templateId,
+            org_id: activeOrgId,
+            add_student_ids: [studentId],
+            waiting_list_entry_id: waitingListEntryId,
+          },
+        });
+        return { data, error: null };
+      } catch (err) {
+        return { data: null, error: err?.message || 'Failed to assign waiting list entry' };
+      } finally {
+        finishSubmitting();
+      }
+    },
+    [activeOrgId, beginSubmitting, finishSubmitting],
+  );
+
   return {
     createTemplate,
     updateTemplate,
@@ -247,6 +270,7 @@ export function useTemplateMutations() {
     deleteTemplateOverride,
     addTemplateParticipant,
     removeTemplateParticipant,
+    matchWaitingEntryToTemplate,
     isSubmitting,
   };
 }
