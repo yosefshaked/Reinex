@@ -1000,9 +1000,9 @@ export default async function calendarGenerate(context, req) {
       if (candidateConflicts.length > 0) {
         conflicts.push({
           template_id: template.id,
-          student_id: template.student_id,
-          student_name: studentName,
-          client_profile_id: participantClientProfileId,
+          student_id: primaryStudentId,
+          student_name: primaryStudentName,
+          client_profile_id: primaryClientProfileId,
           service_name: finalServiceName,
           datetime_start: candidate.datetime_start,
           target_date: candidate.target_date,
