@@ -7,6 +7,7 @@ import heLocale from '@fullcalendar/core/locales/he';
 import { Clock, Loader2, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { DAY_OPTIONS, dayLabel, normalizeDayToken } from '@/lib/day-of-week.js';
 import { getAvailabilityWindowsForDay, isWithinAvailabilityWindows, timeToMinutes } from '@/lib/instructor-availability.js';
 import { cn } from '@/lib/utils';
@@ -330,8 +331,10 @@ function TemplateEventContent({ event }) {
     );
   }
 
+  const participants = template?.participants || [];
   const serviceColor = getServiceColor(template);
-  return (
+
+  const card = (
     <div
       className={cn('reinex-template-event-card', template?.is_active === false && 'reinex-template-event-card--inactive')}
       style={{ '--reinex-template-accent': serviceColor }}
@@ -351,6 +354,21 @@ function TemplateEventContent({ event }) {
         {formatClock(template?.time_of_day)} · {Number(template?.duration_minutes) || 0} דק׳
       </div>
     </div>
+  );
+
+  if (participants.length < 2) return card;
+
+  return (
+    <TooltipProvider delayDuration={1500}>
+      <Tooltip>
+        <TooltipTrigger asChild>{card}</TooltipTrigger>
+        <TooltipContent side="top" className="text-right">
+          {participants.map((p, i) => (
+            <div key={p.id || i}>{getPersonName(p?.student)}</div>
+          ))}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
