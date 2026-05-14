@@ -1,6 +1,6 @@
 # Smart Nuke — Complete Org Purge Tool
 
-**Version:** manifest-v1.1  
+**Version:** manifest-v1.2  
 **Scope:** System-admin console (`/system-admin/*`)  
 **Access gate:** AAL2 + `profiles.is_system_admin = true` + service-role key  
 **SSOT for schema:** `src/lib/setup-sql.js`
@@ -19,8 +19,8 @@ The Smart Nuke tool permanently and completely removes a single `organization_id
 
 ### What it does NOT do
 
-- It does **not** rely on `ON DELETE CASCADE` from the `organizations` row as its primary deletion mechanism. That approach is unreliable due to mixed cascade behaviour across 52 tables.
-- It does **not** delete platform-control records (`profiles`, `permission_registry`, `admin_data`, `email_log`) that are not owned by the org.
+- It does **not** rely on `ON DELETE CASCADE` from the `organizations` row as its primary deletion mechanism. That approach is unreliable due to mixed cascade behaviour across 54 tables.
+- It does **not** delete platform-control records (`profiles`, `permission_registry`, `admin_data`, `email_log`, `error_events`) that are not owned by the org.
 - It does **not** hard-delete the `organizations` row. The root record is **tombstoned** — all sensitive columns are wiped to NULL/empty defaults and the name is rewritten to `'PURGED: <original name>'`. The UUID is preserved to maintain referential integrity for system-level logs (see Section 3 Phase 14).
 - It does **not** hard-delete `audit_log` rows. Those are retention-governed and retain their `org_id` FK pointing to the tombstone row, providing a permanent archive link.
 - It does **not** run as a single transaction. Volumes may be large. It uses an advisory lock + phased deletion with row counts surfaced per phase.
@@ -70,6 +70,7 @@ These tables are **not touched** by the purge. They are listed here for complete
 | `public.permission_registry` | Global reference data, no `org_id` column. | `retain` |
 | `public.admin_data` | System-admin console store. No `org_id` FK to `organizations`. | `retain` |
 | `public.email_log` | Platform outbound email log. `org_id` is nullable, no hard FK constraint. Archived, never hard-deleted. | `retain` |
+| `public.error_events` | Operational support/debug events. `org_id REFERENCES organizations(id) ON DELETE SET NULL`. Rows are retained until their 90-day expiry; `org_id` continues to point to the tombstone row while retained. | `fk_points_to_tombstone` |
 | `public.audit_log` | Compliance/legal log. `org_id REFERENCES organizations(id) ON DELETE SET NULL`. Rows are retained; `org_id` continues to point to the tombstone row — the FK is satisfied and the archive link is preserved. | `fk_points_to_tombstone` |
 | `public.impersonation_sessions` | Admin audit trail. `target_org_id REFERENCES organizations(id) ON DELETE SET NULL`. Rows are retained; FK points to the tombstone row. | `fk_points_to_tombstone` |
 
@@ -118,8 +119,9 @@ Phases run sequentially. Within a phase, tables run in the listed row order. Eac
 
 | # | Table | FK dependencies | Notes |
 |---|-------|-----------------|-------|
-| 5.1 | `public.lesson_template_overrides` | `template_id → lesson_templates(id)`; `new_instructor_employee_id → "Employees"(id)`; `new_service_id → "Services"(id)` | Delete before templates. |
-| 5.2 | `public.lesson_templates` | `student_id → students(id)`; `instructor_employee_id → "Employees"(id)`; `service_id → "Services"(id)`; `supersedes_template_id → lesson_templates(id)` (self-ref) | Delete after overrides and instances. |
+| 5.1 | `public.lesson_template_participants` | `template_id → lesson_templates(id) ON DELETE CASCADE`; `student_id → students(id)` | Multi-student template membership SSOT. Delete before templates and students. |
+| 5.2 | `public.lesson_template_overrides` | `template_id → lesson_templates(id)`; `new_instructor_employee_id → "Employees"(id)`; `new_service_id → "Services"(id)` | Delete before templates. |
+| 5.3 | `public.lesson_templates` | `student_id → students(id)`; `instructor_employee_id → "Employees"(id)`; `service_id → "Services"(id)`; `supersedes_template_id → lesson_templates(id)` (self-ref) | Delete after participants, overrides, and instances. |
 
 #### Phase 6 — HMO records (RESTRICT constraints require careful ordering)
 
@@ -239,7 +241,7 @@ WHERE id = $1;
 | 2 | 7 | Financial leaf records |
 | 3 | 4 | Employee attendance & leave |
 | 4 | 3 | Calendar participants & instances |
-| 5 | 2 | Lesson templates & overrides |
+| 5 | 3 | Lesson templates, participants & overrides |
 | 6 | 2 | HMO records |
 | 7 | 6 | Forms & waiting list |
 | 8 | 1 | Documents (storage-aware) |
@@ -249,11 +251,11 @@ WHERE id = $1;
 | 12 | 4 | Core client/student entities |
 | 13 | 2 | Employee & service roots |
 | 14 | 4 | Org root — 3 hard deletes + 1 tombstone |
-| **Total** | **46 tables touched** | 45 hard-deleted + 1 tombstoned |
+| **Total** | **47 tables touched** | 46 hard-deleted + 1 tombstoned |
 
-**6 platform tables retained:** `profiles`, `permission_registry`, `admin_data`, `email_log`, `audit_log` (FK → tombstone), `impersonation_sessions` (FK → tombstone).
+**7 platform tables retained:** `profiles`, `permission_registry`, `admin_data`, `email_log`, `error_events` (FK → tombstone), `audit_log` (FK → tombstone), `impersonation_sessions` (FK → tombstone).
 
-Total manifest coverage: **52 tables** = 45 hard-deleted + 1 tombstoned (`organizations`) + 6 platform.
+Total manifest coverage: **54 tables** = 46 hard-deleted + 1 tombstoned (`organizations`) + 7 platform.
 
 ---
 
@@ -785,5 +787,6 @@ The `plan_id` and `row_counts` from prepare are stored **in memory / process-loc
 |---------|------|---------|
 | v1 | Initial | Full 52-table manifest. 46 tenant tables, 6 platform tables. 14 deletion phases. Hard-delete on organizations root. |
 | v1.1 | 2026-05-03 | **Tombstone pivot.** Phase 14.4 changed from `hard_delete` to `tombstone` UPDATE on organizations row. UUID preserved for FK integrity. Added Phase 14.5 (tombstone SQL contract). Updated platform table classification for audit_log and impersonation_sessions (FK → tombstone, not SET NULL). Added self-identifying archive requirement (original org name in export, filename, and audit entry). Updated API execute response shape (tombstoned_org field). |
+| v1.2 | 2026-05-14 | Added `lesson_template_participants` to Phase 5 as the multi-student template membership table. Classified `error_events` as retained platform/support data pointing to the tombstone while retained. Coverage is now 54 tables: 46 hard-deleted, 1 tombstoned, 7 retained platform tables. |
 
 > **Important:** When a new org-scoped table is added to `src/lib/setup-sql.js`, this manifest **must be updated before the table ships to production**. Failure to do so will cause the drift check (C1) to block all future org purge operations until the manifest is updated.

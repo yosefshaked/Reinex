@@ -433,8 +433,9 @@ async function fetchPrimarySchedulesByStudentIds(client, orgId, studentIds) {
     return { data: new Map(), error: null };
   }
 
-  const { data, error } = await withOrgScope(client, 'lesson_templates', orgId)
-    .select('student_id, instructor_employee_id, service_id, day_of_week, time_of_day')
+  // Direct single-student templates
+  const { data: directRows, error } = await withOrgScope(client, 'lesson_templates', orgId)
+    .select('id, student_id, instructor_employee_id, service_id, day_of_week, time_of_day')
     .in('student_id', studentIds)
     .eq('is_active', true);
 
@@ -442,8 +443,45 @@ async function fetchPrimarySchedulesByStudentIds(client, orgId, studentIds) {
     return { data: new Map(), error };
   }
 
+  // Multi-student templates via lesson_template_participants
+  let participantTemplateRows = [];
+  const { data: participantLinks } = await withOrgScope(client, 'lesson_template_participants', orgId)
+    .select('student_id, template_id')
+    .in('student_id', studentIds);
+
+  if (participantLinks?.length) {
+    const templateIds = [...new Set(participantLinks.map((p) => p.template_id).filter(Boolean))];
+    if (templateIds.length) {
+      const { data: tplRows } = await withOrgScope(client, 'lesson_templates', orgId)
+        .select('id, instructor_employee_id, service_id, day_of_week, time_of_day')
+        .in('id', templateIds)
+        .eq('is_active', true);
+
+      if (tplRows?.length) {
+        const tplMap = new Map(tplRows.map((t) => [t.id, t]));
+        participantTemplateRows = participantLinks
+          .map((p) => {
+            const tpl = tplMap.get(p.template_id);
+            return tpl ? { id: tpl.id, student_id: p.student_id, ...tpl } : null;
+          })
+          .filter(Boolean);
+      }
+    }
+  }
+
+  // Merge both sources, deduplicating by template_id + student_id
+  const seen = new Set();
+  const allRows = [];
+  for (const row of [...(directRows || []), ...participantTemplateRows]) {
+    const key = `${row.id}|${row.student_id}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      allRows.push(row);
+    }
+  }
+
   const schedules = new Map();
-  for (const row of data || []) {
+  for (const row of allRows) {
     const studentId = normalizeString(row?.student_id);
     if (!studentId) {
       continue;

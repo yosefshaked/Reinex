@@ -10,7 +10,7 @@
  *
  * "Rollback" semantics:
  *   Azure Functions + Supabase JS does NOT support distributed ACID transactions across
- *   all 46 tables. Instead, the manifest is ordered so that each delete is idempotent:
+ *   all manifest tables. Instead, the manifest is ordered so that each delete is idempotent:
  *   re-running execute on a partially-purged org will skip tables that already have 0 rows
  *   (the .delete().eq() succeeds with count=0, which is fine). This means recovery from
  *   a mid-run crash is: fix the blocker, call execute again.

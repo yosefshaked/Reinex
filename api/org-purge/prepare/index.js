@@ -8,7 +8,7 @@
  *   1. Verify the caller is an AAL2 system admin.
  *   2. Validate org_id is a known, non-tombstoned org.
  *   3. Run the seven drift checks (C1–C7).  Any blocking check returns 400.
- *   4. Collect preflight row counts for all 46 manifest tables.
+ *   4. Collect preflight row counts for all 47 manifest tables.
  *   5. Count storage files (Documents.path values) for the org.
  *   6. Generate an HMAC-SHA256 challenge token (15-min TTL).
  *   7. Persist the plan into active_routing (category='org_purge_plan');

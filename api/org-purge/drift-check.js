@@ -399,7 +399,7 @@ async function checkC5StorageHandlerIntegrity(snapshot, catalogError) {
 /**
  * C6 — Preflight row counts (never blocking).
  * Counts all rows for the target org in every manifest table.
- * Uses parallel queries for throughput — 46 tables run concurrently.
+ * Uses parallel queries for throughput — all manifest tables run concurrently.
  *
  * For the `organizations` table the filter is `WHERE id = $orgId`.
  * For all other tables the filter is `WHERE org_id = $orgId`.

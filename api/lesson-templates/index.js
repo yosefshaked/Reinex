@@ -1191,11 +1191,23 @@ export default async function lessonTemplates(context, req) {
 
       // Resolve the student to add from the entry when not already in add_student_ids
       if (addStudentIds.length === 0) {
+        const clientProfileId = waitingEntry.client_profile_id;
+
+        // Load the client profile up front so we can activate it if needed
+        let clientProfileSnapshot = null;
+        if (clientProfileId) {
+          const { data: cpData } = await withOrgScope(supabase, 'client_profiles', orgId)
+            .select('id, is_active, onboarding_status, metadata')
+            .eq('id', clientProfileId)
+            .maybeSingle();
+          clientProfileSnapshot = cpData;
+        }
+
         if (waitingEntry.student_id) {
           addStudentIds.push(waitingEntry.student_id);
-        } else if (waitingEntry.client_profile_id) {
+        } else if (clientProfileId) {
           try {
-            const ensured = await ensureStudentForClientProfile(supabase, waitingEntry.client_profile_id);
+            const ensured = await ensureStudentForClientProfile(supabase, clientProfileId);
             if (ensured.error || !ensured.student?.id) {
               return tracked500('failed_to_activate_student_from_waiting_list');
             }
@@ -1204,13 +1216,40 @@ export default async function lessonTemplates(context, req) {
             context.log?.error?.('lesson-templates failed to resolve student from client profile for capacity assign', {
               message: ensureError?.message,
               waitingListEntryId,
-              clientProfileId: waitingEntry.client_profile_id,
+              clientProfileId,
               templateId,
             });
             return tracked500('failed_to_activate_student_from_waiting_list');
           }
         } else {
           return respond(context, 400, { message: 'waiting_list_entry_has_no_student' });
+        }
+
+        // Activate the client profile if it was inactive (mirrors the POST waiting-list flow)
+        if (clientProfileSnapshot?.is_active === false) {
+          const activationMeta = {
+            ...(clientProfileSnapshot.metadata && typeof clientProfileSnapshot.metadata === 'object' ? clientProfileSnapshot.metadata : {}),
+            reactivated_from_waiting_list_entry_id: waitingEntry.id,
+            reactivated_from_template_id: templateId,
+            reactivated_at: new Date().toISOString(),
+            reactivated_by_user_id: userId,
+          };
+          const activationPayload = { is_active: true, metadata: activationMeta };
+          if (normalizeString(clientProfileSnapshot.onboarding_status) === 'pending_forms') {
+            activationPayload.onboarding_status = 'approved';
+          }
+          const { error: activationError } = await withOrgScope(supabase, 'client_profiles', orgId)
+            .update(activationPayload)
+            .eq('id', clientProfileId);
+          if (activationError) {
+            context.log?.error?.('lesson-templates failed to activate client profile during capacity assign', {
+              message: activationError.message,
+              waitingListEntryId: waitingEntry.id,
+              clientProfileId,
+              templateId,
+            });
+            return tracked500('failed_to_activate_student_from_waiting_list', activationError);
+          }
         }
       }
     }
