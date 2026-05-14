@@ -1158,7 +1158,7 @@ export default async function lessonTemplates(context, req) {
     const hasScheduleUpdates = Object.keys(updates).length > 0;
     const hasParticipantUpdates = addStudentIds.length > 0 || removeStudentIds.length > 0;
 
-    if (!hasScheduleUpdates && !hasParticipantUpdates) {
+    if (!hasScheduleUpdates && !hasParticipantUpdates && !waitingListEntryId) {
       return respond(context, 400, { message: 'missing_updates' });
     }
 
@@ -1166,7 +1166,7 @@ export default async function lessonTemplates(context, req) {
     let waitingEntryToMatch = null;
     if (waitingListEntryId) {
       const { data: waitingEntry, error: waitingLoadError } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
-        .select('id, student_id, status, metadata')
+        .select('id, student_id, client_profile_id, status, metadata')
         .eq('id', waitingListEntryId)
         .maybeSingle();
 
@@ -1188,6 +1188,31 @@ export default async function lessonTemplates(context, req) {
       }
 
       waitingEntryToMatch = waitingEntry;
+
+      // Resolve the student to add from the entry when not already in add_student_ids
+      if (addStudentIds.length === 0) {
+        if (waitingEntry.student_id) {
+          addStudentIds.push(waitingEntry.student_id);
+        } else if (waitingEntry.client_profile_id) {
+          try {
+            const ensured = await ensureStudentForClientProfile(supabase, waitingEntry.client_profile_id);
+            if (ensured.error || !ensured.student?.id) {
+              return tracked500('failed_to_activate_student_from_waiting_list');
+            }
+            addStudentIds.push(ensured.student.id);
+          } catch (ensureError) {
+            context.log?.error?.('lesson-templates failed to resolve student from client profile for capacity assign', {
+              message: ensureError?.message,
+              waitingListEntryId,
+              clientProfileId: waitingEntry.client_profile_id,
+              templateId,
+            });
+            return tracked500('failed_to_activate_student_from_waiting_list');
+          }
+        } else {
+          return respond(context, 400, { message: 'waiting_list_entry_has_no_student' });
+        }
+      }
     }
 
     const effectiveServiceId = updates.service_id ?? existingTemplate.service_id;

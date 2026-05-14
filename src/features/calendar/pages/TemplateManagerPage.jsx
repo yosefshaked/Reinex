@@ -450,10 +450,9 @@ export default function TemplateManagerPage() {
   async function handleCapacityAssign(candidate) {
     setCapacityAssignError('');
     const templateId = candidate.source_template_id;
-    const studentId = candidate.student_id;
     const waitingListEntryId = candidate.waiting_list_entry_id || candidate.entry_id || '';
 
-    const { error } = await matchWaitingEntryToTemplate(templateId, { studentId, waitingListEntryId });
+    const { error } = await matchWaitingEntryToTemplate(templateId, waitingListEntryId);
     if (error) {
       setCapacityAssignError('אירעה שגיאה בשיבוץ התלמיד/ה. נסו שנית.');
       return;
@@ -466,8 +465,8 @@ export default function TemplateManagerPage() {
   function handleAssignWaitingCandidate(candidate) {
     if (!candidate) return;
 
-    // Capacity mode with an existing student — add directly to the existing template
-    if (selectedMatchContext?.mode === 'capacity' && candidate.student_id && candidate.source_template_id) {
+    // Capacity mode — always add directly to the existing template (backend resolves the student)
+    if (selectedMatchContext?.mode === 'capacity' && candidate.source_template_id) {
       handleCapacityAssign(candidate);
       return;
     }

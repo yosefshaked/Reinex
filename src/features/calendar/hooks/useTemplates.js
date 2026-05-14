@@ -240,7 +240,7 @@ export function useTemplateMutations() {
   );
 
   const matchWaitingEntryToTemplate = useCallback(
-    async (templateId, { studentId, waitingListEntryId }) => {
+    async (templateId, waitingListEntryId) => {
       beginSubmitting();
       try {
         const data = await authenticatedFetch(`lesson-templates/${templateId}`, {
@@ -248,7 +248,6 @@ export function useTemplateMutations() {
           body: {
             template_id: templateId,
             org_id: activeOrgId,
-            add_student_ids: [studentId],
             waiting_list_entry_id: waitingListEntryId,
           },
         });
