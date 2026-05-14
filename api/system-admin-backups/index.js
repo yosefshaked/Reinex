@@ -16,6 +16,7 @@ import {
   decryptBackup,
   restoreTenantData,
 } from '../_shared/backup-utils.js';
+import { summarizeBackupHistory } from '../_shared/backup-history.js';
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 import { logAuditEvent, logSystemAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import backupRun from '../backup/index.js';
@@ -28,35 +29,6 @@ function toBoolean(value) {
     if (['false', '0', 'no', 'off'].includes(normalized)) return false;
   }
   return Boolean(value);
-}
-
-function summarizeBackupHistory(history) {
-  const entries = Array.isArray(history) ? history : [];
-  const latest = entries.length > 0 ? entries[entries.length - 1] : null;
-
-  return {
-    count: entries.length,
-    latest: latest
-      ? {
-          type: latest.type || null,
-          status: latest.status || null,
-          timestamp: latest.timestamp || null,
-          filename: latest.filename || null,
-          size_bytes: latest.size_bytes || null,
-          total_records: latest.total_records || null,
-          error_message: latest.error_message || null,
-        }
-      : null,
-    entries: entries.map((entry) => ({
-      type: entry?.type || null,
-      status: entry?.status || null,
-      timestamp: entry?.timestamp || null,
-      filename: entry?.filename || null,
-      size_bytes: entry?.size_bytes || null,
-      total_records: entry?.total_records || null,
-      error_message: entry?.error_message || null,
-    })),
-  };
 }
 
 function summarizeOrganization(row) {

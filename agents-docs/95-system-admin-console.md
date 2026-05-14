@@ -90,6 +90,7 @@ The destructive org purge flow lives under `/system-admin/org-purge` and uses `a
 - The deletion order is owned by `api/org-purge/purge-manifest.js`; update it whenever an org-scoped table is added.
 - `implementations/admin-page/org-nuke/README.md` is the design record and must be kept in sync with the manifest version, phase table, and retained platform table list.
 - `error_events`, `audit_log`, and `impersonation_sessions` are retained platform/support records whose org FK points to the tombstoned organization while retained.
+- The C7 backup guard reads `organizations.backup_history` through `api/_shared/backup-history.js` and verifies that the referenced encrypted backup file still exists in managed storage. Do not treat a stale history row as enough to unblock purge.
 - Run `node --test api/org-purge/purge-manifest.test.js` after manifest changes; it statically checks `src/lib/setup-sql.js` coverage so C1 drift is caught before deployment.
 
 ## Announcement Banner

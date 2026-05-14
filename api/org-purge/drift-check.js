@@ -26,6 +26,8 @@ import {
   RETENTION_TABLE_NAMES,
   MANIFEST_VERSION,
 } from './purge-manifest.js';
+import { findLatestCompletedBackup } from '../_shared/backup-history.js';
+import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 
 // The 30-day backup guard window (check C7).
 const BACKUP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -92,7 +94,7 @@ function getOrgForeignKeys(snapshot) {
  *
  * @param {import('@supabase/supabase-js').SupabaseClient} client  Service-role client.
  * @param {string} orgId  UUID of the org to be purged.
- * @param {{ forceSkipBackupCheck?: boolean }} [options]
+ * @param {{ forceSkipBackupCheck?: boolean, env?: Object, backupStorageDriver?: Object, verifyBackupStorage?: boolean }} [options]
  * @returns {Promise<DriftCheckResult>}
  *
  * @typedef {Object} DriftCheckResult
@@ -104,7 +106,12 @@ function getOrgForeignKeys(snapshot) {
  * @property {string}   manifestVersion
  */
 export async function runDriftChecks(client, orgId, options = {}) {
-  const { forceSkipBackupCheck = false } = options;
+  const {
+    forceSkipBackupCheck = false,
+    env = null,
+    backupStorageDriver = null,
+    verifyBackupStorage = true,
+  } = options;
 
   const blocking = [];
   const warnings = [];
@@ -112,7 +119,11 @@ export async function runDriftChecks(client, orgId, options = {}) {
   let orgName = null;
 
   // ── C7 / org existence: always run first (cheapest check, also confirms org exists)
-  const c7Result = await checkC7BackupGuard(client, orgId, forceSkipBackupCheck);
+  const c7Result = await checkC7BackupGuard(client, orgId, forceSkipBackupCheck, {
+    env,
+    backupStorageDriver,
+    verifyBackupStorage,
+  });
   orgName = c7Result.orgName;
   if (c7Result.blocking) {
     blocking.push(c7Result.issue);
@@ -440,16 +451,18 @@ async function checkC6PreflightCounts(client, orgId) {
  * C7 — Backup guard (blocking unless forceSkipBackupCheck is true).
  * Verifies:
  *   1. The org exists.
- *   2. A backup was created within the last 30 days.
+ *   2. A completed managed backup was recorded within the last 30 days.
+ *   3. The recorded encrypted backup object still exists in managed storage.
  *
  * Also resolves the org name for use in the prepare response.
  *
  * @param {import('@supabase/supabase-js').SupabaseClient} client
  * @param {string} orgId
  * @param {boolean} forceSkipBackupCheck
+ * @param {{ env?: Object, backupStorageDriver?: Object, verifyBackupStorage?: boolean }} [options]
  * @returns {Promise<{ orgNotFound: boolean, orgName: string|null, blocking: boolean, issue?: Object }>}
  */
-async function checkC7BackupGuard(client, orgId, forceSkipBackupCheck) {
+async function checkC7BackupGuard(client, orgId, forceSkipBackupCheck, options = {}) {
   const { data: org, error } = await client
     .from('organizations')
     .select('id, name, slug, backup_history')
@@ -486,25 +499,12 @@ async function checkC7BackupGuard(client, orgId, forceSkipBackupCheck) {
     return { orgNotFound: false, orgName: org.name, blocking: false };
   }
 
-  const backupHistory = Array.isArray(org.backup_history) ? org.backup_history : [];
-  const completedBackups = backupHistory
-    .filter((entry) => entry && entry.type === 'backup' && entry.status === 'completed')
-    .map((entry) => {
-      const rawTimestamp = entry.timestamp || entry.created_at || null;
-      const timestampMs = rawTimestamp ? new Date(rawTimestamp).getTime() : 0;
-      return {
-        rawTimestamp,
-        timestampMs,
-      };
-    })
-    .filter((entry) => Number.isFinite(entry.timestampMs) && entry.timestampMs > 0)
-    .sort((a, b) => b.timestampMs - a.timestampMs);
-
-  const now = Date.now();
-  const recentBackup = completedBackups.find((entry) => now - entry.timestampMs <= BACKUP_MAX_AGE_MS);
+  const { latest: lastEntry, recent: recentBackup } = findLatestCompletedBackup(org.backup_history, {
+    orgId,
+    maxAgeMs: BACKUP_MAX_AGE_MS,
+  });
 
   if (!recentBackup) {
-    const lastEntry = completedBackups[0] ?? null;
     return {
       orgNotFound: false,
       orgName: org.name,
@@ -516,6 +516,50 @@ async function checkC7BackupGuard(client, orgId, forceSkipBackupCheck) {
         hint: 'Create a backup first, or pass force_skip_backup_check: true in the request body to bypass (explicit acknowledgement required).',
       },
     };
+  }
+
+  const verifyBackupStorage = options.verifyBackupStorage !== false;
+  if (verifyBackupStorage) {
+    const filename = recentBackup.filename;
+    try {
+      const storageDriver = options.backupStorageDriver || getStorageDriver('managed', null, options.env || {});
+      if (!storageDriver || typeof storageDriver.listByPrefix !== 'function') {
+        throw new Error('backup_storage_driver_missing_list_support');
+      }
+
+      const backupPrefix = `backups/${orgId}/`;
+      const backupFiles = await storageDriver.listByPrefix(backupPrefix);
+      const matchingFile = (Array.isArray(backupFiles) ? backupFiles : []).find((file) => file?.key === filename);
+
+      if (!matchingFile || Number(matchingFile.size || 0) <= 0) {
+        return {
+          orgNotFound: false,
+          orgName: org.name,
+          blocking: true,
+          issue: {
+            check: 'C7_BACKUP_FILE_MISSING',
+            message: 'The latest recent backup is recorded in backup_history, but the encrypted backup file is missing from managed storage.',
+            last_backup_at: recentBackup.rawTimestamp ?? null,
+            filename,
+            hint: 'Run a fresh backup before purging, or pass force_skip_backup_check: true in the request body to bypass (explicit acknowledgement required).',
+          },
+        };
+      }
+    } catch (storageError) {
+      return {
+        orgNotFound: false,
+        orgName: org.name,
+        blocking: true,
+        issue: {
+          check: 'C7_BACKUP_STORAGE_UNVERIFIED',
+          message: 'The recent backup could not be verified against managed storage.',
+          last_backup_at: recentBackup.rawTimestamp ?? null,
+          filename,
+          detail: storageError?.message || 'backup_storage_verification_failed',
+          hint: 'Fix managed backup storage configuration or run a fresh backup, then retry prepare. Use force_skip_backup_check only with explicit risk acceptance.',
+        },
+      };
+    }
   }
 
   return { orgNotFound: false, orgName: org.name, blocking: false };

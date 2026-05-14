@@ -81,7 +81,7 @@ export default async function preparePurge(context, req) {
   // 3. Run drift checks (includes org existence check + C7 backup guard).
   let driftResult;
   try {
-    driftResult = await runDriftChecks(client, orgId, { forceSkipBackupCheck });
+    driftResult = await runDriftChecks(client, orgId, { forceSkipBackupCheck, env });
   } catch (err) {
     context.log?.error?.('[org-purge/prepare] drift check threw', { message: err?.message });
     return respond(context, 500, { error: 'INTERNAL_ERROR', detail: err?.message });

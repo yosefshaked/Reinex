@@ -273,7 +273,7 @@ The validator runs **before** the purge plan is returned to the caller (inside t
 | C4 | **Retention table guard:** The six platform tables (`profiles`, `permission_registry`, `admin_data`, `email_log`, `audit_log`, `impersonation_sessions`) must NOT appear as org-FK-referenced tables in pg_catalog with `ON DELETE CASCADE`. | Block prepare; return `{ check: 'C4_RETENTION_CASCADE_RISK', affected: [...] }` |
 | C5 | **External artifact check:** `public."Documents"` must exist and have a `path` column of type `text`. If the table or column is missing, the storage handler cannot run. | Block prepare; return `{ check: 'C5_STORAGE_HANDLER_BROKEN' }` |
 | C6 | **Preflight row count:** Count total tenant rows across all manifest tenant tables for the target org. Return counts per table in the plan. If any table that should be empty (e.g. `instance_locks`, `participant_locks`) has rows, surface as a warning in the plan so the operator can review before executing. | Never block — informational only. Counts included in `prepare` response. |
-| C7 | **Backup guard:** Verify that a backup of the org exists and was created within the last 30 days (check `organizations.backup_history` JSONB array). If no recent backup exists, block the prepare with `{ check: 'C7_NO_RECENT_BACKUP', last_backup_at: null }`. | Block prepare unless `force_skip_backup_check: true` is passed in the request (requires explicit acknowledgement). |
+| C7 | **Backup guard:** Verify that a completed managed backup of the org exists, was created within the last 30 days, and the referenced encrypted object still exists in managed storage (check `organizations.backup_history` plus `backups/<org_id>/YYYY-MM-DD.enc`). If no recent backup exists, block with `{ check: 'C7_NO_RECENT_BACKUP', last_backup_at: null }`. If history exists but the storage object is missing/unverified, block with `C7_BACKUP_FILE_MISSING` or `C7_BACKUP_STORAGE_UNVERIFIED`. | Block prepare unless `force_skip_backup_check: true` is passed in the request (requires explicit acknowledgement). |
 
 ### 5.2 SQL catalog queries for each check
 
@@ -408,7 +408,12 @@ SELECT
 FROM public.organizations
 WHERE id = $1;
 -- In JS: parse backup_history JSONB array, find entries within last 30 days.
--- Block if empty or all entries older than 30 days.
+-- In JS: use api/_shared/backup-history.js to find completed managed
+-- backup entries for this org within 30 days.
+-- Then list managed storage under backups/<org_id>/ and verify the exact
+-- encrypted file from backup_history still exists and has non-zero size.
+-- Block if history is empty, all entries are older than 30 days, or the
+-- referenced storage object is missing/unverified.
 ```
 
 ---

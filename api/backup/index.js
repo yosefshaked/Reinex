@@ -4,6 +4,7 @@ import {
   encryptBackup,
   exportTenantData,
 } from '../_shared/backup-utils.js';
+import { appendBackupHistory } from '../_shared/backup-history.js';
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 import { logSystemAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 
@@ -23,25 +24,6 @@ function buildBackupFilename(orgId, date = new Date()) {
 function extractBackupDate(key) {
   const match = /^backups\/[^/]+\/(\d{4}-\d{2}-\d{2})\.enc$/i.exec(key || '');
   return match ? match[1] : null;
-}
-
-async function appendBackupHistory(supabase, orgId, entry) {
-  const { data: current } = await supabase
-    .from('organizations')
-    .select('backup_history')
-    .eq('id', orgId)
-    .maybeSingle();
-
-  const history = current?.backup_history || [];
-  const updated = [...history, entry];
-
-  // Keep only last 100 entries
-  const trimmed = updated.slice(-100);
-
-  await supabase
-    .from('organizations')
-    .update({ backup_history: trimmed })
-    .eq('id', orgId);
 }
 
 export default async function backupRun(context, req) {

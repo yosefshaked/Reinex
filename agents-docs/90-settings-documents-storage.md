@@ -43,8 +43,10 @@
 - Documents are unified under `/api/documents` with `entity_type` + `entity_id`; do not add new student/instructor/org-specific file APIs.
 - For employee/instructor documents, `entity_type='instructor'` is historical naming only; the canonical entity id is the `Employees.id` row, and self-service permission checks must resolve through `Employees.user_id`.
 - Storage supports managed mode and BYOS through the driver factory; do not branch provider logic in every endpoint.
-- Backup permissions and cooldown live in control DB `org_settings` and are enforced server-side.
+- Backup permissions live on `organizations.permissions` and are enforced server-side.
+- Backup history lives on `organizations.backup_history`. Use `api/_shared/backup-history.js` for appending, summarizing, and deciding whether a history row represents a real managed encrypted backup.
 - Backup export in `api/_shared/backup-utils.js` performs a runtime schema coverage check before each export via `rpc('get_public_base_tables')` (defined in `src/lib/setup-sql.js` as `SECURITY DEFINER` with `SET search_path = public`). Missing live tenant tables in `EXPORT_TABLES` hard-fail export, while `EXPORT_TABLES` entries missing from live schema only warn (for pending migrations). If this RPC fails, backup hard-fails (no silent skip), because this is an infrastructure/configuration issue.
+- Org purge's C7 backup guard must verify both the recent completed `backup_history` row and the existence of the referenced encrypted object under `backups/<org_id>/YYYY-MM-DD.enc` in managed storage. History alone is not enough to prove the backup is restorable.
 - Execute permission for `public.get_public_base_tables()` is intentionally restricted to `service_role` only; do not grant it to `authenticated` or `app_user`.
 - Local export/import is an MVP data portability aid, not a full backup/restore mechanism. UI copy must use `ייצוא מקומי` / `ייבוא מקומי`, not backup/restore claims.
 - Local export/import endpoints must remain org-scoped, owner/admin only, audit-logged, and non-destructive. Import must dry-run first, must never trust file `org_id`, must force the current authorized org, and must not implement `clearExisting`.
