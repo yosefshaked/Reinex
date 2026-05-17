@@ -36,6 +36,9 @@ Read this first. Detailed task docs live in [`./agents-docs`](agents-docs/).
 - Settings, documents, storage, backup, audit: [`agents-docs/90-settings-documents-storage.md`](agents-docs/90-settings-documents-storage.md)
 - System-admin console (`/system-admin/*`), admin_data, email_log, announcement banner: [`agents-docs/95-system-admin-console.md`](agents-docs/95-system-admin-console.md)
 
+## User-Facing Workflow Reference
+- Complete page/action/dialog tree verified against pre-prod (May 2026): [`docs/app-workflow-tree.md`](docs/app-workflow-tree.md)
+
 ## Before Writing Code
 - Read the matching `agents-docs` file first; if the task spans domains, read more than one.
 - Check the helper docs before adding fetch, validation, date, currency, schema, or formatting utilities.

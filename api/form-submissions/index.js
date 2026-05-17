@@ -15,6 +15,7 @@ import {
   respond,
 } from '../_shared/org-bff.js';
 import { sendAndLogBrevoEmail } from '../_shared/email-log.js';
+import { fetchStudentIdsByInstructor } from '../_shared/instructor-student-scope.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import {
@@ -1064,23 +1065,6 @@ async function createSubmissionAccessArtifacts({
   return { otpCode, expiresAt };
 }
 
-async function fetchStudentIdsByInstructor(client, orgId, instructorEmployeeId) {
-  if (!instructorEmployeeId) {
-    return { studentIds: [], error: null };
-  }
-
-  const { data, error } = await withOrgScope(client, 'lesson_templates', orgId)
-    .select('student_id')
-    .eq('instructor_employee_id', instructorEmployeeId)
-    .eq('is_active', true);
-
-  if (error) {
-    return { studentIds: [], error };
-  }
-
-  const studentIds = Array.from(new Set((data || []).map((row) => row.student_id).filter(Boolean)));
-  return { studentIds, error: null };
-}
 
 async function listStudentSubmissions(context, req, { controlClient, env, orgId, userId, role }) {
   const canManageRoster = isAdminOrOffice(role);
@@ -1121,7 +1105,7 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
   }
 
   if (!canManageRoster) {
-    const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(controlClient, orgId, userId);
+    const { studentIds, error: lessonError } = await fetchStudentIdsByInstructor(controlClient, userId, { orgId });
     if (lessonError) {
       context.log?.error?.('form-submissions failed to resolve instructor student access', {
         message: lessonError?.message,
