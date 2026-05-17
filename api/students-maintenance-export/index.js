@@ -113,9 +113,9 @@ export default async function handler(context, req) {
 
   const { data: students, error: studentsError } = await withOrgScope(supabase, 'students', orgId)
     .select(
-      'id, name, national_id, contact_name, contact_phone, assigned_instructor_id, default_service, default_day_of_week, default_session_time, notes, tags, is_active',
+      'id, first_name, middle_name, last_name, identity_number, assigned_instructor_id, default_day_of_week, default_session_time, notes_internal, tags, is_active',
     )
-    .order('name', { ascending: true });
+    .order('first_name', { ascending: true });
 
   if (studentsError) {
     context.log?.error?.('students-maintenance-export failed to fetch students', { message: studentsError.message, orgId });
@@ -227,7 +227,7 @@ export default async function handler(context, req) {
       const reasons = [];
       
       // Missing national ID
-      if (!student.national_id) {
+      if (!student.identity_number) {
         reasons.push('חסר תעודת זהות');
       }
       
@@ -313,17 +313,6 @@ export default async function handler(context, req) {
         }
         // For 'all' exports, leave extraction_reason empty
         
-        // Format phone number with leading zero
-        // Prefix with = to force Excel to treat as text and preserve leading zero
-        let phoneNumber = student.contact_phone || '';
-        if (phoneNumber && !phoneNumber.startsWith('0') && phoneNumber.length === 9) {
-          phoneNumber = '0' + phoneNumber;
-        }
-        // Add ="..." to force text format in Excel
-        if (phoneNumber) {
-          phoneNumber = `="${phoneNumber}"`;
-        }
-        
         // Format time (remove timezone, show HH:MM)
         let sessionTime = student.default_session_time || '';
         if (sessionTime) {
@@ -336,18 +325,21 @@ export default async function handler(context, req) {
           ? DAYS_OF_WEEK_HEBREW[student.default_day_of_week] || ''
           : '';
         
+        const fullName = [student.first_name, student.middle_name, student.last_name]
+          .filter(Boolean).join(' ');
+
         return {
           extraction_reason: extractionReason,
           system_uuid: student.id || '',
-          name: student.name || '',
-          national_id: student.national_id || '',
-          contact_name: student.contact_name || '',
-          contact_phone: phoneNumber,
+          name: fullName,
+          national_id: student.identity_number || '',
+          contact_name: '',
+          contact_phone: '',
           assigned_instructor_name: instructorLookup.get(student.assigned_instructor_id) || '',
-          default_service: student.default_service || '',
+          default_service: '',
           default_day_of_week: dayOfWeek,
           default_session_time: sessionTime,
-          notes: student.notes || '',
+          notes: student.notes_internal || '',
           tags: tags.join('; '),
           is_active: student.is_active === false ? 'לא' : 'כן',
         };

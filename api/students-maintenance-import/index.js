@@ -19,7 +19,6 @@ import {
   coerceOptionalText,
   coerceSessionTime,
   coerceTags,
-  validateIsraeliPhone,
 } from '../_shared/student-validation.js';
 import { parseCsv } from '../_shared/csv.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
@@ -410,10 +409,7 @@ export default async function handler(context, req) {
     const updates = {};
     const displayName = normalizeString(raw?.name ?? raw?.['שם התלמיד']) || existing.name || '';
 
-    const name = normalizeString(raw?.name ?? raw?.['שם התלמיד']);
-    if (name) {
-      addIfChanged(updates, 'name', name, existing.name);
-    }
+    // name column is deprecated in Reinex (split into first_name/middle_name/last_name) — skip write
 
     const nationalIdRaw = raw?.national_id ?? raw?.NationalId ?? raw?.nationalId ?? raw?.['מספר זהות'];
     const national = coerceNationalId(nationalIdRaw);
@@ -428,36 +424,10 @@ export default async function handler(context, req) {
         }));
         continue;
       }
-      addIfChanged(updates, 'national_id', national.value, existing.national_id);
+      addIfChanged(updates, 'identity_number', national.value, existing.identity_number);
     }
 
-    const contactNameRaw = raw?.contact_name ?? raw?.ContactName ?? raw?.contactName ?? raw?.['שם איש קשר'];
-    if (!isEmptyCell(contactNameRaw)) {
-      if (shouldClearField(contactNameRaw)) {
-        addIfChanged(updates, 'contact_name', null, existing.contact_name);
-      } else {
-        const contactName = coerceOptionalText(contactNameRaw);
-        if (contactName.valid && contactName.value !== undefined && contactName.value !== null) {
-          addIfChanged(updates, 'contact_name', contactName.value, existing.contact_name);
-        }
-      }
-    }
-
-    const phoneRaw = raw?.contact_phone ?? raw?.phone ?? raw?.contactPhone ?? raw?.['טלפון'];
-    const phoneCheck = validateIsraeliPhone(phoneRaw);
-    if (!phoneCheck.valid) {
-      failures.push(formatFailure({
-        lineNumber,
-        studentId,
-        name: displayName,
-        code: 'invalid_contact_phone',
-        message: `ערך "${phoneRaw}" אינו חוקי עבור טלפון. דוגמה: 050-1234567 או 0501234567`,
-      }));
-      continue;
-    }
-    if (phoneCheck.value !== undefined && phoneCheck.value !== null) {
-      addIfChanged(updates, 'contact_phone', phoneCheck.value, existing.contact_phone);
-    }
+    // contact_name and contact_phone are deprecated in Reinex (moved to guardians table) — skip writes
 
     // Support both instructor UUID and instructor name
     const instructorInput = normalizeString(raw?.assigned_instructor_name ?? raw?.assigned_instructor_id ?? raw?.instructor_id ?? raw?.assignedInstructorId ?? raw?.instructor_name ?? raw?.instructorName ?? raw?.['שם מדריך']);
@@ -514,17 +484,7 @@ export default async function handler(context, req) {
       }
     }
 
-    const defaultServiceRaw = raw?.default_service ?? raw?.service ?? raw?.['שירות ברירת מחדל'];
-    if (!isEmptyCell(defaultServiceRaw)) {
-      if (shouldClearField(defaultServiceRaw)) {
-        addIfChanged(updates, 'default_service', null, existing.default_service);
-      } else {
-        const defaultService = coerceOptionalText(defaultServiceRaw);
-        if (defaultService.valid && defaultService.value !== undefined) {
-          addIfChanged(updates, 'default_service', defaultService.value, existing.default_service);
-        }
-      }
-    }
+    // default_service is deprecated in Reinex (moved to lesson_templates) — skip write
 
     const dayRaw = raw?.default_day_of_week ?? raw?.day ?? raw?.['יום ברירת מחדל'];
     const defaultDay = coerceDayOfWeek(dayRaw);
@@ -561,11 +521,11 @@ export default async function handler(context, req) {
     const notesRaw = raw?.notes ?? raw?.Notes ?? raw?.['הערות'];
     if (!isEmptyCell(notesRaw)) {
       if (shouldClearField(notesRaw)) {
-        addIfChanged(updates, 'notes', null, existing.notes);
+        addIfChanged(updates, 'notes_internal', null, existing.notes_internal);
       } else {
         const notes = coerceOptionalText(notesRaw);
         if (notes.valid && notes.value !== undefined) {
-          addIfChanged(updates, 'notes', notes.value, existing.notes);
+          addIfChanged(updates, 'notes_internal', notes.value, existing.notes_internal);
         }
       }
     }
@@ -622,9 +582,9 @@ export default async function handler(context, req) {
       addIfChanged(updates, 'is_active', isActive.value, existing.is_active);
     }
 
-    const desiredNationalId = Object.prototype.hasOwnProperty.call(updates, 'national_id')
-      ? updates.national_id
-      : existing.national_id;
+    const desiredNationalId = Object.prototype.hasOwnProperty.call(updates, 'identity_number')
+      ? updates.identity_number
+      : existing.identity_number;
     candidates.push({
       lineNumber,
       studentId,
@@ -667,14 +627,14 @@ export default async function handler(context, req) {
   const filteredCandidates = candidates.filter((candidate) => !nationalConflicts.has(candidate.studentId));
   const nationalIdsToCheck = Array.from(new Set(
     filteredCandidates
-      .filter((candidate) => candidate.desiredNationalId && candidate.desiredNationalId !== candidate.existing.national_id)
+      .filter((candidate) => candidate.desiredNationalId && candidate.desiredNationalId !== candidate.existing.identity_number)
       .map((candidate) => candidate.desiredNationalId),
   ));
 
   if (nationalIdsToCheck.length) {
     const { data: conflicts, error: nationalLookupError } = await withOrgScope(supabase, 'students', orgId)
-      .select('id, name, national_id')
-      .in('national_id', nationalIdsToCheck);
+      .select('id, first_name, last_name, identity_number')
+      .in('identity_number', nationalIdsToCheck);
 
     if (nationalLookupError) {
       context.log?.error?.('students-maintenance-import failed to validate national ids', { message: nationalLookupError.message, orgId });
@@ -683,8 +643,8 @@ export default async function handler(context, req) {
 
     const conflictMap = new Map();
     for (const conflict of conflicts || []) {
-      if (conflict?.national_id) {
-        conflictMap.set(conflict.national_id, conflict);
+      if (conflict?.identity_number) {
+        conflictMap.set(conflict.identity_number, conflict);
       }
     }
 
