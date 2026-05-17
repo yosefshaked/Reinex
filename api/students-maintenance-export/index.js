@@ -143,7 +143,7 @@ export default async function handler(context, req) {
   });
 
   const { data: instructors, error: instructorsError } = await withOrgScope(supabase, 'Employees', orgId)
-    .select('id, name, email, is_active, employee_type')
+    .select('id, first_name, last_name, email, is_active, employee_type')
     .or('employee_type.is.null,employee_type.eq.instructor');
 
   if (instructorsError) {
@@ -172,7 +172,7 @@ export default async function handler(context, req) {
     for (const instructor of instructors) {
       const id = typeof instructor?.id === 'string' ? instructor.id : '';
       if (!id || instructorLookup.has(id)) continue;
-      const name = normalizeString(instructor?.name) || normalizeString(instructor?.email) || id;
+      const name = [normalizeString(instructor?.first_name), normalizeString(instructor?.last_name)].filter(Boolean).join(' ') || normalizeString(instructor?.email) || id;
       instructorLookup.set(id, name);
     }
   }

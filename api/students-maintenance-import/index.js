@@ -269,7 +269,7 @@ export default async function handler(context, req) {
 
   // Fetch all instructors for name matching
   const { data: instructors, error: instructorsError } = await withOrgScope(supabase, 'Employees', orgId)
-    .select('id, name, email, is_active, employee_type')
+    .select('id, first_name, last_name, email, is_active, employee_type')
     .or('employee_type.is.null,employee_type.eq.instructor');
 
   if (instructorsError) {
@@ -286,7 +286,7 @@ export default async function handler(context, req) {
     if (!instructor?.id) continue;
     instructorById.set(instructor.id, instructor);
     
-    const name = normalizeString(instructor.name) || normalizeString(instructor.email);
+    const name = [normalizeString(instructor.first_name), normalizeString(instructor.last_name)].filter(Boolean).join(' ') || normalizeString(instructor.email);
     if (name) {
       instructorByName.set(name.toLowerCase(), instructor);
       if (instructor.is_active !== false) {
