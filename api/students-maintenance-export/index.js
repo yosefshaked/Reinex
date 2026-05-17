@@ -46,13 +46,13 @@ const HEBREW_HEADERS = {
 };
 
 const DAYS_OF_WEEK_HEBREW = {
-  1: 'ראשון',
-  2: 'שני',
-  3: 'שלישי',
-  4: 'רביעי',
-  5: 'חמישי',
-  6: 'שישי',
-  7: 'שבת',
+  sunday: 'ראשון',
+  monday: 'שני',
+  tuesday: 'שלישי',
+  wednesday: 'רביעי',
+  thursday: 'חמישי',
+  friday: 'שישי',
+  saturday: 'שבת',
 };
 
 export default async function handler(context, req) {
@@ -113,13 +113,26 @@ export default async function handler(context, req) {
 
   const { data: students, error: studentsError } = await withOrgScope(supabase, 'students', orgId)
     .select(
-      'id, first_name, middle_name, last_name, identity_number, assigned_instructor_id, default_day_of_week, default_session_time, notes_internal, tags, is_active',
+      'id, notes_internal, client_profile_id, client_profiles!client_profile_id(first_name, middle_name, last_name, identity_number, is_active, tags)',
     )
-    .order('first_name', { ascending: true });
+    .order('first_name', { referencedTable: 'client_profiles', ascending: true });
 
   if (studentsError) {
     context.log?.error?.('students-maintenance-export failed to fetch students', { message: studentsError.message, orgId });
     return respond(context, 500, { message: 'failed_to_fetch_students' });
+  }
+
+  // Fetch active lesson templates via participants to get instructor/day/time per student
+  const { data: ltpData } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+    .select('student_id, lesson_templates!inner(instructor_employee_id, day_of_week, time_of_day, is_active)');
+
+  const studentTemplateMap = new Map();
+  for (const ltp of ltpData || []) {
+    const template = ltp.lesson_templates;
+    if (!template?.is_active) continue;
+    if (!studentTemplateMap.has(ltp.student_id)) {
+      studentTemplateMap.set(ltp.student_id, template);
+    }
   }
 
   context.log?.info?.('Fetched students', {
@@ -164,6 +177,25 @@ export default async function handler(context, req) {
     }
   }
 
+  // Helper: extract resolved fields for a student from joined data
+  function resolveStudent(student) {
+    const profile = student.client_profiles || {};
+    const template = studentTemplateMap.get(student.id) || {};
+    return {
+      id: student.id,
+      notes_internal: student.notes_internal,
+      first_name: profile.first_name,
+      middle_name: profile.middle_name,
+      last_name: profile.last_name,
+      identity_number: profile.identity_number,
+      is_active: profile.is_active,
+      tags: profile.tags,
+      assigned_instructor_id: template.instructor_employee_id,
+      default_day_of_week: template.day_of_week,
+      default_session_time: template.time_of_day,
+    };
+  }
+
   let filteredStudents = students;
 
   // Apply filter if specified
@@ -171,177 +203,96 @@ export default async function handler(context, req) {
     const activeInstructorIds = new Set(
       instructors.filter(i => i.is_active !== false).map(i => i.id)
     );
-    
-    // Build schedule conflict detection map: instructor_id -> day_of_week -> time -> [student_ids]
+
+    // Build schedule conflict map using template data: instructor -> day -> time -> [student_ids]
     const scheduleMap = new Map();
     for (const student of students) {
-      // Only count active students for schedule conflicts
-      if (student.is_active === false ||
-          !student.assigned_instructor_id || 
-          student.default_day_of_week == null || 
-          !student.default_session_time) {
-        continue;
-      }
-      
-      const instructorId = student.assigned_instructor_id;
-      const day = student.default_day_of_week;
-      const time = student.default_session_time;
-      
-      if (!scheduleMap.has(instructorId)) {
-        scheduleMap.set(instructorId, new Map());
-      }
-      const instructorSchedule = scheduleMap.get(instructorId);
-      
-      if (!instructorSchedule.has(day)) {
-        instructorSchedule.set(day, new Map());
-      }
-      const daySchedule = instructorSchedule.get(day);
-      
-      if (!daySchedule.has(time)) {
-        daySchedule.set(time, []);
-      }
-      daySchedule.get(time).push(student.id);
+      const s = resolveStudent(student);
+      if (s.is_active === false || !s.assigned_instructor_id || !s.default_day_of_week || !s.default_session_time) continue;
+      if (!scheduleMap.has(s.assigned_instructor_id)) scheduleMap.set(s.assigned_instructor_id, new Map());
+      const byDay = scheduleMap.get(s.assigned_instructor_id);
+      if (!byDay.has(s.default_day_of_week)) byDay.set(s.default_day_of_week, new Map());
+      const byTime = byDay.get(s.default_day_of_week);
+      if (!byTime.has(s.default_session_time)) byTime.set(s.default_session_time, []);
+      byTime.get(s.default_session_time).push(s.id);
     }
-    
-    // Find students with schedule conflicts (same instructor, day, and time)
+
     const studentsWithConflicts = new Set();
-    const conflictReasons = new Map(); // student_id -> reason
-    for (const instructorSchedule of scheduleMap.values()) {
-      for (const daySchedule of instructorSchedule.values()) {
-        for (const studentIds of daySchedule.values()) {
-          if (studentIds.length > 1) {
-            // Multiple students scheduled at same time with same instructor
-            for (const studentId of studentIds) {
-              studentsWithConflicts.add(studentId);
-              conflictReasons.set(studentId, 'התנגשות בלוח זמנים');
-            }
-          }
+    for (const byDay of scheduleMap.values()) {
+      for (const byTime of byDay.values()) {
+        for (const ids of byTime.values()) {
+          if (ids.length > 1) ids.forEach(id => studentsWithConflicts.add(id));
         }
       }
     }
-    
-    // Build reasons map for all problematic students
+
     const problemReasons = new Map();
-    
     filteredStudents = students.filter(student => {
+      const s = resolveStudent(student);
       const reasons = [];
-      
-      // Missing national ID
-      if (!student.identity_number) {
-        reasons.push('חסר תעודת זהות');
-      }
-      
-      // Inactive or missing instructor
-      if (!student.assigned_instructor_id) {
-        reasons.push('חסר מדריך');
-      } else if (!activeInstructorIds.has(student.assigned_instructor_id)) {
-        reasons.push('מדריך לא פעיל');
-      }
-      
-      // Schedule conflict with another student
-      if (studentsWithConflicts.has(student.id)) {
-        reasons.push('התנגשות בלוח זמנים');
-      }
-      
-      if (reasons.length > 0) {
-        problemReasons.set(student.id, reasons.join(', '));
-        return true;
-      }
-      
+      if (!s.identity_number) reasons.push('חסר תעודת זהות');
+      if (!s.assigned_instructor_id) reasons.push('חסר מדריך');
+      else if (!activeInstructorIds.has(s.assigned_instructor_id)) reasons.push('מדריך לא פעיל');
+      if (studentsWithConflicts.has(s.id)) reasons.push('התנגשות בלוח זמנים');
+      if (reasons.length > 0) { problemReasons.set(s.id, reasons.join(', ')); return true; }
       return false;
     });
-    
-    // Store problem reasons for later use in row mapping
     filteredStudents.problemReasons = problemReasons;
+
   } else if (filter === 'custom' && Array.isArray(students)) {
     const filterReasons = new Map();
-    
     filteredStudents = students.filter(student => {
+      const s = resolveStudent(student);
       const reasons = [];
-      
-      // Filter by instructor
-      if (instructorIds.length > 0 && !instructorIds.includes(student.assigned_instructor_id)) {
-        return false;
-      }
-      if (instructorIds.length > 0) {
-        const instructorName = instructorLookup.get(student.assigned_instructor_id) || 'מדריך לא ידוע';
-        reasons.push(`מדריך: ${instructorName}`);
-      }
-      
-      // Filter by tags (student must have at least one matching tag)
+      if (instructorIds.length > 0 && !instructorIds.includes(s.assigned_instructor_id)) return false;
+      if (instructorIds.length > 0) reasons.push(`מדריך: ${instructorLookup.get(s.assigned_instructor_id) || 'מדריך לא ידוע'}`);
       if (tagIds.length > 0) {
-        const studentTags = Array.isArray(student.tags) ? student.tags : [];
-        const matchingTags = tagIds.filter(tagId => studentTags.includes(tagId));
-        if (matchingTags.length === 0) return false;
-        
-        const tagNames = matchingTags.map(tagId => tagLookup.get(tagId) || tagId).join(', ');
-        reasons.push(`תגית: ${tagNames}`);
+        const studentTags = Array.isArray(s.tags) ? s.tags : [];
+        const matching = tagIds.filter(t => studentTags.includes(t));
+        if (matching.length === 0) return false;
+        reasons.push(`תגית: ${matching.map(t => tagLookup.get(t) || t).join(', ')}`);
       }
-      
-      // Filter by day
-      if (dayFilter != null && student.default_day_of_week !== dayFilter) {
-        return false;
-      }
-      if (dayFilter != null) {
-        const dayName = DAYS_OF_WEEK_HEBREW[dayFilter] || dayFilter;
-        reasons.push(`יום: ${dayName}`);
-      }
-      
-      if (reasons.length > 0) {
-        filterReasons.set(student.id, reasons.join(', '));
-      }
-      
+      if (dayFilter != null && s.default_day_of_week !== dayFilter) return false;
+      if (dayFilter != null) reasons.push(`יום: ${DAYS_OF_WEEK_HEBREW[dayFilter] || dayFilter}`);
+      if (reasons.length > 0) filterReasons.set(s.id, reasons.join(', '));
       return true;
     });
-    
-    // Store filter reasons for later use in row mapping
     filteredStudents.filterReasons = filterReasons;
   }
 
   const rows = Array.isArray(filteredStudents)
     ? filteredStudents.map((student) => {
-        const tagIds = Array.isArray(student?.tags) ? student.tags.filter(Boolean) : [];
-        // Convert tag IDs to tag names using lookup map
-        const tags = tagIds.map(tagId => tagLookup.get(tagId) || tagId);
-        
-        // Determine extraction reason based on filter type
+        const s = resolveStudent(student);
+        const tagIdList = Array.isArray(s.tags) ? s.tags.filter(Boolean) : [];
+        const tags = tagIdList.map(tagId => tagLookup.get(tagId) || tagId);
+
         let extractionReason = '';
         if (filter === 'problematic' && filteredStudents.problemReasons) {
-          extractionReason = filteredStudents.problemReasons.get(student.id) || '';
+          extractionReason = filteredStudents.problemReasons.get(s.id) || '';
         } else if (filter === 'custom' && filteredStudents.filterReasons) {
-          extractionReason = filteredStudents.filterReasons.get(student.id) || '';
+          extractionReason = filteredStudents.filterReasons.get(s.id) || '';
         }
-        // For 'all' exports, leave extraction_reason empty
-        
-        // Format time (remove timezone, show HH:MM)
-        let sessionTime = student.default_session_time || '';
-        if (sessionTime) {
-          // Handle formats like "16:00:00+00" or "16:00:00"
-          sessionTime = sessionTime.split('+')[0].split(':').slice(0, 2).join(':');
-        }
-        
-        // Convert day number to Hebrew day name
-        const dayOfWeek = student.default_day_of_week != null
-          ? DAYS_OF_WEEK_HEBREW[student.default_day_of_week] || ''
-          : '';
-        
-        const fullName = [student.first_name, student.middle_name, student.last_name]
-          .filter(Boolean).join(' ');
+
+        let sessionTime = s.default_session_time || '';
+        if (sessionTime) sessionTime = sessionTime.split('+')[0].split(':').slice(0, 2).join(':');
+
+        const dayOfWeek = s.default_day_of_week ? (DAYS_OF_WEEK_HEBREW[s.default_day_of_week] || '') : '';
+        const fullName = [s.first_name, s.middle_name, s.last_name].filter(Boolean).join(' ');
 
         return {
           extraction_reason: extractionReason,
-          system_uuid: student.id || '',
+          system_uuid: s.id || '',
           name: fullName,
-          national_id: student.identity_number || '',
+          national_id: s.identity_number || '',
           contact_name: '',
           contact_phone: '',
-          assigned_instructor_name: instructorLookup.get(student.assigned_instructor_id) || '',
+          assigned_instructor_name: instructorLookup.get(s.assigned_instructor_id) || '',
           default_service: '',
           default_day_of_week: dayOfWeek,
           default_session_time: sessionTime,
-          notes: student.notes_internal || '',
+          notes: s.notes_internal || '',
           tags: tags.join('; '),
-          is_active: student.is_active === false ? 'לא' : 'כן',
+          is_active: s.is_active === false ? 'לא' : 'כן',
         };
       })
     : [];

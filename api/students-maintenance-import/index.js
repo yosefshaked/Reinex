@@ -334,7 +334,7 @@ export default async function handler(context, req) {
   let existingStudents = [];
   if (validIds.length > 0) {
     const { data, error: fetchError } = await withOrgScope(supabase, 'students', orgId)
-      .select('*')
+      .select('id, client_profile_id, notes_internal, client_profiles!client_profile_id(identity_number, is_active, tags)')
       .in('id', validIds);
 
     if (fetchError) {
@@ -348,7 +348,14 @@ export default async function handler(context, req) {
   const existingMap = new Map();
   for (const student of existingStudents || []) {
     if (student?.id) {
-      existingMap.set(student.id, student);
+      // Flatten client_profiles into existing for easy access
+      const profile = student.client_profiles || {};
+      existingMap.set(student.id, {
+        ...student,
+        identity_number: profile.identity_number,
+        is_active: profile.is_active,
+        tags: profile.tags,
+      });
     }
   }
 
@@ -704,12 +711,23 @@ export default async function handler(context, req) {
     actionableCandidates = actionableCandidates.filter((candidate) => !excludedSet.has(candidate.studentId));
   }
 
+  // Fields that live in client_profiles, not students
+  const PROFILE_FIELDS = new Set(['identity_number', 'is_active', 'tags']);
+
   const successes = [];
   for (const candidate of actionableCandidates) {
     const { updates, studentId, displayName, existing } = candidate;
     if (!updates || Object.keys(updates).length === 0) {
       // Skip students with no actual changes (don't count as success)
       continue;
+    }
+
+    // Split updates by target table
+    const studentUpdates = {};
+    const profileUpdates = {};
+    for (const [key, val] of Object.entries(updates)) {
+      if (PROFILE_FIELDS.has(key)) profileUpdates[key] = val;
+      else studentUpdates[key] = val;
     }
 
     const updatedMetadata = {
@@ -719,21 +737,42 @@ export default async function handler(context, req) {
       updated_role: role,
     };
 
-    const payload = { ...updates, metadata: updatedMetadata };
+    // Update students table (notes_internal, assigned_instructor_id, etc.)
+    if (Object.keys(studentUpdates).length > 0) {
+      const { error: updateError } = await withOrgScope(supabase, 'students', orgId)
+        .update({ ...studentUpdates, metadata: updatedMetadata })
+        .eq('id', studentId);
 
-    const { error: updateError } = await withOrgScope(supabase, 'students', orgId)
-      .update(payload)
-      .eq('id', studentId);
+      if (updateError) {
+        failures.push(formatFailure({
+          lineNumber: candidate.lineNumber,
+          studentId,
+          name: displayName,
+          code: 'update_failed',
+          message: 'עדכון התלמיד נכשל.',
+        }));
+        continue;
+      }
+    }
 
-    if (updateError) {
-      failures.push(formatFailure({
-        lineNumber: candidate.lineNumber,
-        studentId,
-        name: displayName,
-        code: 'update_failed',
-        message: 'עדכון התלמיד נכשל.',
-      }));
-      continue;
+    // Update client_profiles table (identity_number, is_active, tags)
+    if (Object.keys(profileUpdates).length > 0 && existing.client_profile_id) {
+      const { error: profileUpdateError } = await supabase
+        .from('client_profiles')
+        .update({ ...profileUpdates, updated_at: new Date().toISOString() })
+        .eq('id', existing.client_profile_id)
+        .eq('org_id', orgId);
+
+      if (profileUpdateError) {
+        failures.push(formatFailure({
+          lineNumber: candidate.lineNumber,
+          studentId,
+          name: displayName,
+          code: 'profile_update_failed',
+          message: 'עדכון פרופיל הלקוח נכשל.',
+        }));
+        continue;
+      }
     }
 
     successes.push({
