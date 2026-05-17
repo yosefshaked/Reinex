@@ -940,10 +940,9 @@ export default function StudentsPage() {
       {isAdmin && (
         <DataMaintenanceModal
           open={isMaintenanceOpen}
-          onOpenChange={setIsMaintenanceOpen}
-          instructors={instructors}
-          tags={tagOptions}
-          onImportCompleted={handleMaintenanceCompleted}
+          onClose={() => setIsMaintenanceOpen(false)}
+          orgId={activeOrgId}
+          onRefresh={handleMaintenanceCompleted}
         />
       )}
 

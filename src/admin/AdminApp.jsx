@@ -8,7 +8,6 @@ import MfaPage from './MfaPage.jsx';
 import SystemHealthView from './SystemHealthView.jsx';
 import SupabaseConnectionView from './SupabaseConnectionView.jsx';
 import GlobalSettingsView from './modules/GlobalSettingsView.jsx';
-import OperationsSupportView from './modules/OperationsSupportView.jsx';
 import ProductAnalyticsView from './modules/ProductAnalyticsView.jsx';
 import UsersView from './modules/UsersView.jsx';
 import ImpersonationQueueView from './modules/ImpersonationQueueView.jsx';
@@ -114,8 +113,6 @@ const LIVE_ELEMENTS = {
   'error-events': <ErrorEventsView />,
   'org-purge': <OrgPurgeView />,
   'backups': <BackupManagementView />,
-  // Legacy aggregate view retained while its sub-modules are built out.
-  'operations-support': <OperationsSupportView />,
 };
 
 function ComingSoonRoute({ path }) {
@@ -298,9 +295,6 @@ export default function AdminApp() {
             <Route path="error-events" element={LIVE_ELEMENTS['error-events']} />
             <Route path="org-purge" element={LIVE_ELEMENTS['org-purge']} />
             <Route path="backups" element={LIVE_ELEMENTS['backups']} />
-
-            {/* Legacy aggregate view kept reachable while sub-modules are built. */}
-            <Route path="operations-support" element={LIVE_ELEMENTS['operations-support']} />
 
             {/* Coming-soon placeholders — designed, queued for wiring. */}
             {COMING_SOON_PATHS.map((p) => (
