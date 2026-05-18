@@ -33,6 +33,14 @@ const ALLOWED_MIME_TYPES = [
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
+function trackedResult(status, body, error, metadata = {}) {
+  return {
+    status,
+    body,
+    tracking: { error, metadata },
+  };
+}
+
 /**
  * Validate entity type and permissions
  * @param {string} operation - 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -138,12 +146,15 @@ async function handleGet(req, supabase, client, orgId, userId, userRole, isAdmin
       };
     }
     
-    return { 
-      status: 500, 
-      body: { 
-        error: 'fetch_failed'
-      } 
-    };
+    return trackedResult(500, { error: 'fetch_failed' }, error, {
+      action: 'list_documents',
+      orgId,
+      userId,
+      entityType: entity_type,
+      entityId: entity_id,
+      table: 'Documents',
+      operation: 'select',
+    });
   }
 
   return { status: 200, body: { documents: documents || [] } };
@@ -556,7 +567,16 @@ async function handlePut(req, supabase, client, orgId, userId, userEmail, userRo
 
   if (updateError) {
     console.error('Document update error:', updateError);
-    return { status: 500, body: { error: 'update_failed' } };
+    return trackedResult(500, { error: 'update_failed' }, updateError, {
+      action: 'update_document_metadata',
+      orgId,
+      userId,
+      documentId,
+      entityType: existingDoc.entity_type,
+      entityId: existingDoc.entity_id,
+      table: 'Documents',
+      operation: 'update',
+    });
   }
 
   // Audit log
@@ -659,7 +679,15 @@ async function handleDelete(req, supabase, client, orgId, userId, userEmail, use
     }
   } catch (err) {
     console.error('Storage driver initialization error:', err);
-    return { status: 500, body: { error: 'storage_init_failed' } };
+    return trackedResult(500, { error: 'storage_init_failed' }, err, {
+      action: 'initialize_storage_driver',
+      orgId,
+      userId,
+      documentId,
+      entityType: existingDoc.entity_type,
+      entityId: existingDoc.entity_id,
+      storageMode: storageProfile?.mode || null,
+    });
   }
 
   // Delete from storage
@@ -667,12 +695,16 @@ async function handleDelete(req, supabase, client, orgId, userId, userEmail, use
     await driver.delete(existingDoc.path);
   } catch (err) {
     console.error('Storage deletion error:', err);
-    return {
-      status: 502,
-      body: {
-        error: 'storage_delete_failed'
-      },
-    };
+    return trackedResult(502, { error: 'storage_delete_failed' }, err, {
+      action: 'delete_storage_object',
+      orgId,
+      userId,
+      documentId,
+      entityType: existingDoc.entity_type,
+      entityId: existingDoc.entity_id,
+      path: existingDoc.path || null,
+      storageMode: storageProfile?.mode || null,
+    });
   }
 
   // Delete from Documents table
@@ -682,7 +714,17 @@ async function handleDelete(req, supabase, client, orgId, userId, userEmail, use
 
   if (deleteError) {
     console.error('Document deletion error:', deleteError);
-    return { status: 500, body: { error: 'delete_failed' } };
+    return trackedResult(500, { error: 'delete_failed' }, deleteError, {
+      action: 'delete_document_record',
+      orgId,
+      userId,
+      documentId,
+      entityType: existingDoc.entity_type,
+      entityId: existingDoc.entity_id,
+      table: 'Documents',
+      operation: 'delete',
+      storageDeleted: true,
+    });
   }
 
   // Audit log
@@ -834,6 +876,12 @@ export default async function handler(context, req) {
         orgId,
         userId,
         error: membershipError,
+        metadata: {
+          endpoint: 'documents',
+          action: 'ensure_membership',
+          orgId,
+          userId,
+        },
       });
     }
 
@@ -859,6 +907,22 @@ export default async function handler(context, req) {
       return respond(context, 405, { error: 'method_not_allowed' });
     }
     
+    if (result.status >= 500) {
+      const message = result.body?.message || result.body?.error || 'internal_server_error';
+      return respondTrackedError(context, req, supabase, {
+        status: result.status,
+        message,
+        orgId,
+        userId,
+        error: result.tracking?.error || new Error(message),
+        metadata: {
+          endpoint: 'documents',
+          ...(result.tracking?.metadata || {}),
+          response_body: result.body,
+        },
+      });
+    }
+
     return respond(context, result.status, result.body);
   } catch (error) {
     console.error('Unhandled error in documents API:', error);
@@ -872,6 +936,7 @@ export default async function handler(context, req) {
       orgId: trackingOrgId,
       userId: trackingUserId,
       error,
+      metadata: { endpoint: 'documents', action: 'unhandled_endpoint_failure' },
     });
   }
 }

@@ -27,9 +27,19 @@ import {
   toDateKey,
   upsertLeaveBalanceUsage,
 } from '../_shared/employee-finance.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MUTABLE_BALANCE_EVENT_TYPES = new Set(['allocation', 'carryover', 'adjustment', 'reversal', 'correction']);
+
+async function respondTrackedLeaveError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+    orgId: metadata.orgId || null,
+    userId: metadata.userId || metadata.actorUserId || null,
+  });
+}
 
 function normalizeLeaveType(value) {
   const normalized = normalizeString(value).toLowerCase();
@@ -188,6 +198,12 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'employee-leave' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -197,7 +213,11 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTrackedLeaveError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'ensure_membership',
+      orgId,
+      userId,
+    });
   }
 
   if (!role) {
@@ -206,29 +226,47 @@ export default async function (context, req) {
 
   const canManageAll = canManageEmployeeOps(role);
 
-  if (method === 'GET') {
-    return handleGet(context, req, supabase, orgId, userId, canManageAll);
-  }
-
-  if (!canManageAll) {
-    return respond(context, 403, { message: 'forbidden' });
-  }
-
-  if (method === 'POST' || method === 'PUT') {
-    if (isBalanceEventRequest(body)) {
-      return handleBalanceEventUpsert(context, supabase, orgId, body, userId, method);
+  try {
+    if (method === 'GET') {
+      return await handleGet(context, req, supabase, orgId, userId, canManageAll);
     }
-    return handleUpsert(context, supabase, orgId, body, userId, method);
-  }
 
-  if (method === 'DELETE') {
-    if (isBalanceEventRequest(body)) {
-      return handleBalanceEventDelete(context, supabase, orgId, body);
+    if (!canManageAll) {
+      return respond(context, 403, { message: 'forbidden' });
     }
-    return handleDelete(context, supabase, orgId, body, userId);
-  }
 
-  return respond(context, 405, { message: 'method_not_allowed' });
+    if (method === 'POST' || method === 'PUT') {
+      if (isBalanceEventRequest(body)) {
+        return await handleBalanceEventUpsert(context, supabase, orgId, body, userId, method);
+      }
+      return await handleUpsert(context, supabase, orgId, body, userId, method);
+    }
+
+    if (method === 'DELETE') {
+      if (isBalanceEventRequest(body)) {
+        return await handleBalanceEventDelete(context, supabase, orgId, body, userId);
+      }
+      return await handleDelete(context, supabase, orgId, body, userId);
+    }
+
+    return respond(context, 405, { message: 'method_not_allowed' });
+  } catch (unhandledError) {
+    context.log?.error?.('employee-leave unhandled endpoint failure', {
+      method,
+      orgId,
+      userId,
+      message: unhandledError?.message,
+    });
+    if (!context.res) {
+      return respondTrackedLeaveError(context, 500, 'internal_error', unhandledError, {
+        action: 'unhandled_endpoint_failure',
+        method,
+        orgId,
+        userId,
+      });
+    }
+    return undefined;
+  }
 }
 
 async function handleGet(context, req, client, orgId, userId, canManageAll) {
@@ -246,7 +284,12 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
     if (employeeResult.error === 'employee_not_found') return respond(context, 404, { message: 'employee_not_found' });
     if (employeeResult.error === 'forbidden') return respond(context, 403, { message: 'forbidden' });
     context.log?.error?.('employee-leave failed to resolve employee', { employeeIdParam, message: employeeResult.error.message });
-    return respond(context, 500, { message: 'failed_to_load_employee' });
+    return respondTrackedLeaveError(context, 500, 'failed_to_load_employee', employeeResult.error, {
+      action: 'resolve_employee_record',
+      orgId,
+      userId,
+      employeeIdParam,
+    });
   }
 
   const employee = employeeResult.employee;
@@ -268,7 +311,14 @@ async function handleGet(context, req, client, orgId, userId, canManageAll) {
     ]);
   } catch (error) {
     context.log?.error?.('employee-leave GET failed to load data', { employeeId: employee.id, message: error?.message, code: error?.code });
-    return respond(context, 500, { message: 'failed_to_load_leave_data' });
+    return respondTrackedLeaveError(context, 500, 'failed_to_load_leave_data', error, {
+      action: 'load_leave_data',
+      orgId,
+      userId,
+      employeeId: employee.id,
+      startDate,
+      endDate,
+    });
   }
 
   const summary = computeLeaveSummary({
@@ -445,7 +495,16 @@ async function handleUpsert(context, client, orgId, body, userId, method) {
     if (!existingEntry && leaveEntryId) {
       await withOrgScope(client, 'employee_leave_entries', orgId).delete().eq('id', leaveEntryId);
     }
-    return respond(context, 500, { message: 'failed_to_save_leave_entry' });
+    return respondTrackedLeaveError(context, 500, 'failed_to_save_leave_entry', error, {
+      action: existingEntry ? 'update_leave_entry' : 'create_leave_entry',
+      orgId,
+      userId,
+      employeeId,
+      leaveEntryId: leaveEntryId || null,
+      table: 'employee_leave_entries',
+      operation: existingEntry ? 'update' : 'insert',
+      cleanupAttempted: Boolean(!existingEntry && leaveEntryId),
+    });
   }
 
   const savedEntry = await fetchLeaveEntry(client, orgId, leaveEntryId);
@@ -482,7 +541,14 @@ async function handleDelete(context, client, orgId, body, userId) {
     return respond(context, 200, data);
   } catch (error) {
     context.log?.error?.('employee-leave failed to cancel leave entry', { message: error.message });
-    return respond(context, 500, { message: 'failed_to_cancel_leave_entry' });
+    return respondTrackedLeaveError(context, 500, 'failed_to_cancel_leave_entry', error, {
+      action: 'cancel_leave_entry',
+      orgId,
+      userId,
+      leaveEntryId,
+      table: 'employee_leave_entries',
+      operation: 'update',
+    });
   }
 }
 
@@ -576,11 +642,19 @@ async function handleBalanceEventUpsert(context, client, orgId, body, userId, me
       message: error.message,
       code: error.code,
     });
-    return respond(context, 500, { message: 'failed_to_save_balance_event' });
+    return respondTrackedLeaveError(context, 500, 'failed_to_save_balance_event', error, {
+      action: existingEvent ? 'update_balance_event' : 'create_balance_event',
+      orgId,
+      userId,
+      employeeId,
+      balanceEventId: existingEvent?.id || body?.id || null,
+      table: 'employee_leave_balance_events',
+      operation: existingEvent ? 'update' : 'insert',
+    });
   }
 }
 
-async function handleBalanceEventDelete(context, client, orgId, body) {
+async function handleBalanceEventDelete(context, client, orgId, body, userId) {
   const balanceEventId = normalizeString(body?.id);
   if (!balanceEventId) {
     return respond(context, 400, { message: 'missing_balance_event_id' });
@@ -614,6 +688,13 @@ async function handleBalanceEventDelete(context, client, orgId, body) {
       message: error.message,
       code: error.code,
     });
-    return respond(context, 500, { message: 'failed_to_delete_balance_event' });
+    return respondTrackedLeaveError(context, 500, 'failed_to_delete_balance_event', error, {
+      action: 'delete_balance_event',
+      orgId,
+      userId,
+      balanceEventId,
+      table: 'employee_leave_balance_events',
+      operation: 'delete',
+    });
   }
 }

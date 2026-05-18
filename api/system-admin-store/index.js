@@ -16,6 +16,7 @@
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { ensureSystemAdmin, normalizeString, readEnv, respond, parseRequestBody } from '../_shared/org-bff.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 
 const ALLOWED_MODULES = new Set(['incidents', 'knowledge_base', 'future_ideas', 'compliance', 'announcements']);
 
@@ -29,10 +30,23 @@ function isTableMissingError(error) {
   );
 }
 
+async function respondTrackedStoreError(context, req, supabase, status, message, error, metadata = {}) {
+  return respondTrackedError(context, req, supabase, {
+    status,
+    message,
+    error,
+    userId: metadata.userId || null,
+    metadata: {
+      endpoint: 'system-admin-store',
+      ...metadata,
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // GET — list all records for a module
 // ---------------------------------------------------------------------------
-async function handleGet(context, req, supabase) {
+async function handleGet(context, req, supabase, admin) {
   const module = normalizeString(req?.query?.module);
   if (!module || !ALLOWED_MODULES.has(module)) {
     return respond(context, 400, { message: 'invalid_module' });
@@ -46,10 +60,22 @@ async function handleGet(context, req, supabase) {
 
   if (error) {
     if (isTableMissingError(error)) {
-      return respond(context, 501, { message: 'table_not_found', hint: 'Re-run setup-sql.js to create the admin_data table.' });
+      return respondTrackedStoreError(context, req, supabase, 501, 'table_not_found', error, {
+        action: 'list_admin_data',
+        userId: admin?.userId || null,
+        module,
+        table: 'admin_data',
+        operation: 'select',
+      });
     }
     context.log?.error?.('system-admin-store GET: query failed', { message: error.message, module });
-    return respond(context, 500, { message: 'query_failed' });
+    return respondTrackedStoreError(context, req, supabase, 500, 'query_failed', error, {
+      action: 'list_admin_data',
+      userId: admin?.userId || null,
+      module,
+      table: 'admin_data',
+      operation: 'select',
+    });
   }
 
   // Return the `data` JSONB blob directly — it contains the full record as
@@ -106,10 +132,24 @@ async function handlePost(context, req, supabase, admin) {
 
   if (error) {
     if (isTableMissingError(error)) {
-      return respond(context, 501, { message: 'table_not_found' });
+      return respondTrackedStoreError(context, req, supabase, 501, 'table_not_found', error, {
+        action: 'upsert_admin_data',
+        userId: admin.userId,
+        module,
+        recordId,
+        table: 'admin_data',
+        operation: 'upsert',
+      });
     }
     context.log?.error?.('system-admin-store POST: upsert failed', { message: error.message, module, recordId });
-    return respond(context, 500, { message: 'upsert_failed' });
+    return respondTrackedStoreError(context, req, supabase, 500, 'upsert_failed', error, {
+      action: 'upsert_admin_data',
+      userId: admin.userId,
+      module,
+      recordId,
+      table: 'admin_data',
+      operation: 'upsert',
+    });
   }
 
   return respond(context, 200, {
@@ -120,7 +160,7 @@ async function handlePost(context, req, supabase, admin) {
 // ---------------------------------------------------------------------------
 // DELETE — remove a record
 // ---------------------------------------------------------------------------
-async function handleDelete(context, req, supabase) {
+async function handleDelete(context, req, supabase, admin) {
   const module = normalizeString(req?.query?.module);
   if (!module || !ALLOWED_MODULES.has(module)) {
     return respond(context, 400, { message: 'invalid_module' });
@@ -139,10 +179,24 @@ async function handleDelete(context, req, supabase) {
 
   if (error) {
     if (isTableMissingError(error)) {
-      return respond(context, 501, { message: 'table_not_found' });
+      return respondTrackedStoreError(context, req, supabase, 501, 'table_not_found', error, {
+        action: 'delete_admin_data',
+        userId: admin?.userId || null,
+        module,
+        recordId,
+        table: 'admin_data',
+        operation: 'delete',
+      });
     }
     context.log?.error?.('system-admin-store DELETE: failed', { message: error.message, module, recordId });
-    return respond(context, 500, { message: 'delete_failed' });
+    return respondTrackedStoreError(context, req, supabase, 500, 'delete_failed', error, {
+      action: 'delete_admin_data',
+      userId: admin?.userId || null,
+      module,
+      recordId,
+      table: 'admin_data',
+      operation: 'delete',
+    });
   }
 
   return respond(context, 200, { deleted: true, record_id: recordId });
@@ -181,9 +235,13 @@ export default async function systemAdminStore(context, req) {
   try {
     if (method === 'GET') return await handleGet(context, req, supabase, admin);
     if (method === 'POST') return await handlePost(context, req, supabase, admin);
-    return await handleDelete(context, req, supabase);
+    return await handleDelete(context, req, supabase, admin);
   } catch (error) {
     context.log?.error?.('system-admin-store: unexpected error', { message: error?.message });
-    return respond(context, 500, { message: 'internal_error' });
+    return respondTrackedStoreError(context, req, supabase, 500, 'internal_error', error, {
+      action: 'unhandled_endpoint_failure',
+      userId: admin?.userId || null,
+      method,
+    });
   }
 }

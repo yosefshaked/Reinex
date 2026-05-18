@@ -24,25 +24,74 @@ function escapeHtml(value) {
 }
 
 function buildNotificationHtml({ name, orgName, email, phone, message }) {
+  const preheader = escapeHtml(`בקשת גישה חדשה מ-${orgName}`);
+  const safeEmail = escapeHtml(email);
+  const safePhone = escapeHtml(phone);
+  const safeName = escapeHtml(name);
+  const safeOrg = escapeHtml(orgName);
+  const safeMessage = escapeHtml(message);
+
+  function fieldRow(label, value, ltr = false) {
+    const cellStyle = `padding:14px 0;border-bottom:1px solid #edf2f7;font-size:15px;line-height:1.6;`;
+    const valueAttr = ltr ? ' dir="ltr"' : '';
+    return `<tr>
+      <td style="${cellStyle}font-weight:600;color:#4a5568;width:110px;vertical-align:top;">${label}</td>
+      <td style="${cellStyle}color:#1a202c;"${valueAttr}>${value || '—'}</td>
+    </tr>`;
+  }
+
   return `<!DOCTYPE html>
 <html lang="he" dir="rtl">
-<body style="margin:0;padding:0;background:#f7fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#1a202c;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7fafc;padding:24px 0;">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0;padding:0;background:#f0f4f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#1a202c;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">${preheader}</div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:32px 0;">
     <tr>
       <td align="center">
-        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+
+          <!-- Brand header -->
           <tr>
-            <td style="padding:32px 40px 16px;text-align:right;">
-              <h2 style="margin:0 0 16px;font-size:20px;">בקשת גישה חדשה — ריינקס</h2>
-              <table style="width:100%;border-collapse:collapse;font-size:15px;line-height:1.8;">
-                <tr><td style="padding:6px 0;font-weight:600;width:100px;">שם:</td><td style="padding:6px 0;">${escapeHtml(name)}</td></tr>
-                <tr><td style="padding:6px 0;font-weight:600;">ארגון:</td><td style="padding:6px 0;">${escapeHtml(orgName)}</td></tr>
-                <tr><td style="padding:6px 0;font-weight:600;">אימייל:</td><td style="padding:6px 0;" dir="ltr">${escapeHtml(email)}</td></tr>
-                <tr><td style="padding:6px 0;font-weight:600;">טלפון:</td><td style="padding:6px 0;" dir="ltr">${escapeHtml(phone) || '—'}</td></tr>
-                <tr><td style="padding:6px 0;font-weight:600;vertical-align:top;">הודעה:</td><td style="padding:6px 0;">${escapeHtml(message) || '—'}</td></tr>
+            <td style="background:#2c5282;border-radius:12px 12px 0 0;padding:24px 40px;text-align:right;">
+              <span style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">ריינקס</span>
+              <span style="font-size:14px;color:#bee3f8;margin-right:10px;">מערכת ניהול מפגשים</span>
+            </td>
+          </tr>
+
+          <!-- Card body -->
+          <tr>
+            <td style="background:#ffffff;padding:32px 40px 8px;text-align:right;">
+              <!-- Badge + title -->
+              <div style="margin-bottom:20px;">
+                <span style="display:inline-block;background:#ebf8ff;color:#2b6cb0;font-size:12px;font-weight:600;padding:4px 12px;border-radius:20px;letter-spacing:0.3px;">בקשת גישה חדשה</span>
+              </div>
+              <h1 style="margin:0 0 6px;font-size:22px;font-weight:700;color:#1a202c;line-height:1.3;">${safeOrg}</h1>
+              <p style="margin:0 0 24px;font-size:14px;color:#718096;">התקבלה בקשת גישה דרך טופס האתר</p>
+
+              <!-- Fields table -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                ${fieldRow('שם', safeName)}
+                ${fieldRow('ארגון', safeOrg)}
+                ${fieldRow('אימייל', `<a href="mailto:${safeEmail}" style="color:#2b6cb0;text-decoration:none;">${safeEmail}</a>`, true)}
+                ${fieldRow('טלפון', safePhone, true)}
+                ${fieldRow('הודעה', safeMessage ? safeMessage.replace(/\n/g, '<br>') : '')}
               </table>
             </td>
           </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#ffffff;border-radius:0 0 12px 12px;padding:20px 40px 28px;border-top:1px solid #edf2f7;text-align:right;">
+              <p style="margin:0;font-size:12px;color:#a0aec0;line-height:1.7;">
+                הודעה זו נשלחה אוטומטית ממערכת ריינקס. אין להשיב למייל זה.
+              </p>
+            </td>
+          </tr>
+
         </table>
       </td>
     </tr>

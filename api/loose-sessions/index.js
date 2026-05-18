@@ -13,8 +13,16 @@ import {
 } from '../_shared/org-bff.js';
 import { isUUID, parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const MAX_BODY_BYTES = 64 * 1024; // observe-only
+
+function respondLooseSessionError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 export default async function (context, req) {
   const method = String(req.method || 'GET').toUpperCase();
@@ -55,6 +63,12 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'loose-sessions' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -64,7 +78,9 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondLooseSessionError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   // For GET: allow instructors to view their own reports, admins to view all
@@ -114,7 +130,9 @@ export default async function (context, req) {
 
       if (error) {
         context.log?.error?.('loose-sessions failed to list instructor records', { message: error.message });
-        return respond(context, 500, { message: 'failed_to_load_sessions' });
+        return respondLooseSessionError(context, 500, 'failed_to_load_sessions', error, {
+          action: 'list_mine',
+        });
       }
 
       // Mark rejected reports for easy identification
@@ -152,7 +170,9 @@ export default async function (context, req) {
 
       if (error) {
         context.log?.error?.('loose-sessions failed to list pending records', { message: error.message });
-        return respond(context, 500, { message: 'failed_to_load_sessions' });
+        return respondLooseSessionError(context, 500, 'failed_to_load_sessions', error, {
+          action: 'list_pending',
+        });
       }
 
       return respond(context, 200, Array.isArray(data) ? data : []);
@@ -181,7 +201,10 @@ export default async function (context, req) {
 
   if (sessionError) {
     context.log?.error?.('loose-sessions failed to load session', { message: sessionError.message });
-    return respond(context, 500, { message: 'failed_to_load_session' });
+    return respondLooseSessionError(context, 500, 'failed_to_load_session', sessionError, {
+      action: 'load_session',
+      session_id: sessionId,
+    });
   }
 
   if (!sessionRow) {
@@ -222,7 +245,10 @@ export default async function (context, req) {
 
     if (deleteError) {
       context.log?.error?.('loose-sessions failed to reject session', { message: deleteError.message });
-      return respond(context, 500, { message: 'failed_to_reject_session' });
+      return respondLooseSessionError(context, 500, 'failed_to_reject_session', deleteError, {
+        action: 'reject_session',
+        session_id: sessionId,
+      });
     }
 
     try {
@@ -260,7 +286,11 @@ export default async function (context, req) {
 
     if (studentError) {
       context.log?.error?.('loose-sessions failed to load student', { message: studentError.message });
-      return respond(context, 500, { message: 'failed_to_load_student' });
+      return respondLooseSessionError(context, 500, 'failed_to_load_student', studentError, {
+        action: 'load_student_for_assignment',
+        session_id: sessionId,
+        student_id: studentId,
+      });
     }
 
     if (!studentRow) {
@@ -291,7 +321,11 @@ export default async function (context, req) {
 
     if (updateError) {
       context.log?.error?.('loose-sessions failed to assign session', { message: updateError.message });
-      return respond(context, 500, { message: 'failed_to_assign_session' });
+      return respondLooseSessionError(context, 500, 'failed_to_assign_session', updateError, {
+        action: 'assign_existing_student',
+        session_id: sessionId,
+        student_id: studentId,
+      });
     }
 
     try {
@@ -336,7 +370,11 @@ export default async function (context, req) {
 
   if (instructorError) {
     context.log?.error?.('loose-sessions failed to load instructor', { message: instructorError.message });
-    return respond(context, 500, { message: 'failed_to_load_instructor' });
+    return respondLooseSessionError(context, 500, 'failed_to_load_instructor', instructorError, {
+      action: 'load_instructor_for_create_and_assign',
+      session_id: sessionId,
+      instructor_id: assignedInstructorId,
+    });
   }
 
   if (!instructorRow) {
@@ -363,7 +401,10 @@ export default async function (context, req) {
 
   if (checkError && checkError.code !== 'PGRST116') {
     context.log?.error?.('loose-sessions failed to check national_id', { message: checkError.message });
-    return respond(context, 500, { message: 'failed_to_check_national_id' });
+    return respondLooseSessionError(context, 500, 'failed_to_check_national_id', checkError, {
+      action: 'check_national_id',
+      session_id: sessionId,
+    });
   }
 
   if (existingStudent) {
@@ -395,7 +436,11 @@ export default async function (context, req) {
 
   if (createError) {
     context.log?.error?.('loose-sessions failed to create student', { message: createError.message });
-    return respond(context, 500, { message: 'failed_to_create_student' });
+    return respondLooseSessionError(context, 500, 'failed_to_create_student', createError, {
+      action: 'create_student_for_loose_session',
+      session_id: sessionId,
+      instructor_id: assignedInstructorId,
+    });
   }
 
   const newServiceContext = sessionRow.service_context ?? newStudent.default_service ?? null;
@@ -422,7 +467,11 @@ export default async function (context, req) {
 
   if (resolveError) {
     context.log?.error?.('loose-sessions failed to assign new student', { message: resolveError.message });
-    return respond(context, 500, { message: 'failed_to_assign_session' });
+    return respondLooseSessionError(context, 500, 'failed_to_assign_session', resolveError, {
+      action: 'assign_new_student',
+      session_id: sessionId,
+      student_id: newStudent.id,
+    });
   }
 
   try {

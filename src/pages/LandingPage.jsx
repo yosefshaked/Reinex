@@ -183,7 +183,7 @@ export default function LandingPage() {
                       <div className="rounded-lg bg-primary/10 p-3">
                         <uc.icon className="h-6 w-6 text-primary" />
                       </div>
-                      <div className="flex-1 text-end">
+                      <div className="flex-1">
                         <h3 className="text-lg font-semibold text-foreground">{uc.title}</h3>
                         <p className="mt-2 text-sm text-neutral-600">{uc.description}</p>
                       </div>
@@ -213,7 +213,7 @@ export default function LandingPage() {
                     <div className="rounded-lg bg-primary/10 p-3">
                       <feature.icon className="h-6 w-6 text-primary" />
                     </div>
-                    <div className="flex-1 text-end">
+                    <div className="flex-1">
                       <h3 className="text-lg font-semibold text-foreground">{feature.title}</h3>
                       <p className="mt-2 text-sm text-neutral-600">{feature.description}</p>
                     </div>

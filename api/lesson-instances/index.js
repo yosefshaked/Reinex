@@ -36,6 +36,14 @@ import {
   completeLessonInstanceWithParticipants,
   normalizeLessonInstanceStatus,
 } from '../_shared/lesson-instance-status.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+function respondLessonInstanceError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 function isIsoDate(value) {
   if (typeof value !== 'string') return false;
@@ -227,6 +235,12 @@ export default async function lessonInstances(context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'lesson-instances' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -236,7 +250,9 @@ export default async function lessonInstances(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondLessonInstanceError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   if (!role) {
@@ -252,7 +268,9 @@ export default async function lessonInstances(context, req) {
     const { instructorId, error: instructorError } = await resolveActorInstructorId(supabase, userId);
     if (instructorError) {
       context.log?.error?.('lesson-instances failed to resolve actor instructor', { message: instructorError.message, userId });
-      return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
+      return respondLessonInstanceError(context, 500, 'failed_to_resolve_actor_instructor', instructorError, {
+        action: 'resolve_actor_instructor',
+      });
     }
     actorInstructorId = instructorId;
   }
@@ -279,14 +297,28 @@ export default async function lessonInstances(context, req) {
       const { data, error } = await builder.maybeSingle();
       if (error) {
         context.log?.error?.('lesson-instances failed to fetch lesson instance', { message: error.message, lessonInstanceId });
-        return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
+        return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instance', error, {
+          action: 'load_lesson_instance',
+          lesson_instance_id: lessonInstanceId,
+        });
       }
       if (!data) {
         return respond(context, 404, { message: 'lesson_instance_not_found' });
       }
 
-      const [enriched] = await enrichLessonInstanceRecordsForResponse(supabase, orgId, data);
-      return respond(context, 200, enriched || data);
+      try {
+        const [enriched] = await enrichLessonInstanceRecordsForResponse(supabase, orgId, data);
+        return respond(context, 200, enriched || data);
+      } catch (enrichError) {
+        context.log?.error?.('lesson-instances failed to enrich lesson instance', {
+          message: enrichError?.message,
+          lessonInstanceId,
+        });
+        return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instance', enrichError, {
+          action: 'enrich_lesson_instance',
+          lesson_instance_id: lessonInstanceId,
+        });
+      }
     }
 
     if (!date || !isIsoDate(date)) {
@@ -327,11 +359,25 @@ export default async function lessonInstances(context, req) {
     const { data, error } = await builder;
     if (error) {
       context.log?.error?.('lesson-instances failed to fetch schedule', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_load_lesson_instances' });
+      return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instances', error, {
+        action: 'load_lesson_instances',
+        date,
+        instructor_id: requestedInstructorId || null,
+        student_id: requestedStudentId || null,
+        client_profile_id: requestedClientProfileId || null,
+      });
     }
 
-    const enrichedData = await enrichLessonInstanceRecordsForResponse(supabase, orgId, data || []);
-    return respond(context, 200, enrichedData);
+    try {
+      const enrichedData = await enrichLessonInstanceRecordsForResponse(supabase, orgId, data || []);
+      return respond(context, 200, enrichedData);
+    } catch (enrichError) {
+      context.log?.error?.('lesson-instances failed to enrich schedule', { message: enrichError?.message, date });
+      return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instances', enrichError, {
+        action: 'enrich_lesson_instances',
+        date,
+      });
+    }
   }
 
   if (method === 'POST') {
@@ -419,7 +465,11 @@ export default async function lessonInstances(context, req) {
 
     if (instanceError || !instanceRow?.id) {
       context.log?.error?.('lesson-instances failed to create instance', { message: instanceError?.message });
-      return respond(context, 500, { message: 'failed_to_create_lesson_instance' });
+      return respondLessonInstanceError(context, 500, 'failed_to_create_lesson_instance', instanceError || new Error('lesson instance insert returned no id'), {
+        action: 'create_lesson_instance',
+        instructor_employee_id: instructorEmployeeId,
+        service_id: serviceId,
+      });
     }
 
     const participantsPayload = [
@@ -491,7 +541,12 @@ export default async function lessonInstances(context, req) {
           lessonInstanceId: instanceRow.id,
         });
       }
-      return respond(context, 500, { message: 'failed_to_create_lesson_participants' });
+      return respondLessonInstanceError(context, 500, 'failed_to_create_lesson_participants', participantsError, {
+        action: 'create_lesson_participants',
+        lesson_instance_id: instanceRow.id,
+        participant_count: participantsPayload.length,
+        cleanup_failed: Boolean(cleanupError),
+      });
     }
 
     try {
@@ -607,7 +662,10 @@ export default async function lessonInstances(context, req) {
 
     if (stateError) {
       context.log?.error?.('lesson-instances failed to load mutation state', { message: stateError.message, lessonInstanceId });
-      return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
+      return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instance', stateError, {
+        action: 'load_mutation_state',
+        lesson_instance_id: lessonInstanceId,
+      });
     }
 
     if (!mutationState.instance) {
@@ -696,7 +754,10 @@ export default async function lessonInstances(context, req) {
                 message: refreshedError.message,
                 lessonInstanceId,
               });
-              return respond(context, 500, { message: 'failed_to_cancel_instance' });
+              return respondLessonInstanceError(context, 500, 'failed_to_cancel_instance', refreshedError, {
+                action: 'refresh_locked_cancellation_state',
+                lesson_instance_id: lessonInstanceId,
+              });
             }
             return respondWithLockedMutation(context, {
               instanceId: lessonInstanceId,
@@ -710,7 +771,11 @@ export default async function lessonInstances(context, req) {
               outcome: cancellationResult.outcome,
               lessonInstanceId,
             });
-            return respond(context, 500, { message: 'failed_to_cancel_instance' });
+            return respondLessonInstanceError(context, 500, 'failed_to_cancel_instance', new Error(`unexpected cancellation outcome: ${cancellationResult.outcome}`), {
+              action: 'cancel_lesson_instance',
+              lesson_instance_id: lessonInstanceId,
+              outcome: cancellationResult.outcome,
+            });
           }
 
           cancelledParticipantIds = cancellationResult.cancelledParticipantIds;
@@ -737,7 +802,10 @@ export default async function lessonInstances(context, req) {
             message: cancelError?.message,
             lessonInstanceId,
           });
-          return respond(context, 500, { message: 'failed_to_cancel_instance' });
+          return respondLessonInstanceError(context, 500, 'failed_to_cancel_instance', cancelError, {
+            action: 'cancel_lesson_instance',
+            lesson_instance_id: lessonInstanceId,
+          });
         }
       }
       if (nextStatus === 'completed') {
@@ -772,7 +840,10 @@ export default async function lessonInstances(context, req) {
                 message: refreshedError.message,
                 lessonInstanceId,
               });
-              return respond(context, 500, { message: 'failed_to_complete_instance' });
+              return respondLessonInstanceError(context, 500, 'failed_to_complete_instance', refreshedError, {
+                action: 'refresh_locked_completion_state',
+                lesson_instance_id: lessonInstanceId,
+              });
             }
             return respondWithLockedMutation(context, {
               instanceId: lessonInstanceId,
@@ -786,7 +857,11 @@ export default async function lessonInstances(context, req) {
               outcome: completionResult.outcome,
               lessonInstanceId,
             });
-            return respond(context, 500, { message: 'failed_to_complete_instance' });
+            return respondLessonInstanceError(context, 500, 'failed_to_complete_instance', new Error(`unexpected completion outcome: ${completionResult.outcome}`), {
+              action: 'complete_lesson_instance',
+              lesson_instance_id: lessonInstanceId,
+              outcome: completionResult.outcome,
+            });
           }
 
           completedParticipantAuditRows = normalizeCancelledParticipantAuditRows(completionResult.promotedParticipantAuditRows);
@@ -812,7 +887,10 @@ export default async function lessonInstances(context, req) {
             message: completionError?.message,
             lessonInstanceId,
           });
-          return respond(context, 500, { message: 'failed_to_complete_instance' });
+          return respondLessonInstanceError(context, 500, 'failed_to_complete_instance', completionError, {
+            action: 'complete_lesson_instance',
+            lesson_instance_id: lessonInstanceId,
+          });
         }
       }
       if (nextStatus && nextStatus !== 'cancelled' && nextStatus !== 'completed') {
@@ -841,7 +919,11 @@ export default async function lessonInstances(context, req) {
 
       if (updateError) {
         context.log?.error?.('lesson-instances failed to update instance', { message: updateError.message });
-        return respond(context, 500, { message: 'failed_to_update_lesson_instance' });
+        return respondLessonInstanceError(context, 500, 'failed_to_update_lesson_instance', updateError, {
+          action: 'update_lesson_instance',
+          lesson_instance_id: lessonInstanceId,
+          updated_fields: Object.keys(updates),
+        });
       }
 
       if (!updatedInstanceRows) {
@@ -850,7 +932,10 @@ export default async function lessonInstances(context, req) {
         });
         if (refreshedError) {
           context.log?.error?.('lesson-instances failed to refresh instance after conflict', { message: refreshedError.message, lessonInstanceId });
-          return respond(context, 500, { message: 'failed_to_update_lesson_instance' });
+          return respondLessonInstanceError(context, 500, 'failed_to_update_lesson_instance', refreshedError, {
+            action: 'refresh_lesson_instance_after_conflict',
+            lesson_instance_id: lessonInstanceId,
+          });
         }
         return respondWithVersionConflict(context, {
           resourceType: 'lesson_instance',
@@ -895,7 +980,10 @@ export default async function lessonInstances(context, req) {
 
     if (error) {
       context.log?.error?.('lesson-instances failed to load updated instance', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
+      return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instance', error, {
+        action: 'load_updated_lesson_instance',
+        lesson_instance_id: lessonInstanceId,
+      });
     }
 
     try {
@@ -968,8 +1056,19 @@ export default async function lessonInstances(context, req) {
       }
     }
 
-    const [enriched] = await enrichLessonInstanceRecordsForResponse(supabase, orgId, data);
-    return respond(context, 200, enriched || data);
+    try {
+      const [enriched] = await enrichLessonInstanceRecordsForResponse(supabase, orgId, data);
+      return respond(context, 200, enriched || data);
+    } catch (enrichError) {
+      context.log?.error?.('lesson-instances failed to enrich updated instance', {
+        message: enrichError?.message,
+        lessonInstanceId,
+      });
+      return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instance', enrichError, {
+        action: 'enrich_updated_lesson_instance',
+        lesson_instance_id: lessonInstanceId,
+      });
+    }
   }
 
   // PATCH: Bulk operations (admin only)
@@ -995,7 +1094,10 @@ export default async function lessonInstances(context, req) {
       const { error: addStateError, result: addMutationState } = await fetchLessonMutationState(supabase, { instanceId });
       if (addStateError) {
         context.log?.error?.('lesson-instances add-participant failed to load state', { message: addStateError.message });
-        return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
+        return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instance', addStateError, {
+          action: 'load_add_participant_state',
+          lesson_instance_id: instanceId,
+        });
       }
       if (!addMutationState.instance) return respond(context, 404, { message: 'lesson_instance_not_found' });
       if (isLockedState(addMutationState)) {
@@ -1046,7 +1148,10 @@ export default async function lessonInstances(context, req) {
 
       if (countError) {
         context.log?.error?.('lesson-instances add-participant capacity check failed', { message: countError.message });
-        return respond(context, 500, { message: 'failed_to_check_capacity' });
+        return respondLessonInstanceError(context, 500, 'failed_to_check_capacity', countError, {
+          action: 'check_add_participant_capacity',
+          lesson_instance_id: instanceId,
+        });
       }
 
       if (capability?.max_students) {
@@ -1073,7 +1178,12 @@ export default async function lessonInstances(context, req) {
       if (insertError) {
         if (insertError.code === '23505') return respond(context, 409, { message: 'participant_already_exists' });
         context.log?.error?.('lesson-instances add-participant failed', { message: insertError.message });
-        return respond(context, 500, { message: 'failed_to_add_participant' });
+        return respondLessonInstanceError(context, 500, 'failed_to_add_participant', insertError, {
+          action: 'add_participant',
+          lesson_instance_id: instanceId,
+          student_id: resolvedStudentId || null,
+          client_profile_id: resolvedClientProfileId,
+        });
       }
 
       try {
@@ -1106,9 +1216,21 @@ export default async function lessonInstances(context, req) {
 
       const { data: addedRefreshed, error: addedRefreshError } = await withOrgScope(supabase, 'lesson_instances', orgId)
         .select(buildInstanceSelect()).eq('id', instanceId).single();
-      if (addedRefreshError) return respond(context, 500, { message: 'failed_to_load_lesson_instance' });
-      const [addedEnriched] = await enrichLessonInstanceRecordsForResponse(supabase, orgId, addedRefreshed);
-      return respond(context, 200, addedEnriched || addedRefreshed);
+      if (addedRefreshError) {
+        return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instance', addedRefreshError, {
+          action: 'refresh_after_add_participant',
+          lesson_instance_id: instanceId,
+        });
+      }
+      try {
+        const [addedEnriched] = await enrichLessonInstanceRecordsForResponse(supabase, orgId, addedRefreshed);
+        return respond(context, 200, addedEnriched || addedRefreshed);
+      } catch (enrichError) {
+        return respondLessonInstanceError(context, 500, 'failed_to_load_lesson_instance', enrichError, {
+          action: 'enrich_after_add_participant',
+          lesson_instance_id: instanceId,
+        });
+      }
     }
 
     // bulk-cancel: Cancel all future lesson instances for a student from a given date
@@ -1142,7 +1264,12 @@ export default async function lessonInstances(context, req) {
 
     if (fetchErr) {
       context.log?.error?.('lesson-instances bulk-cancel failed to find instances', { message: fetchErr.message });
-      return respond(context, 500, { message: 'failed_to_find_instances' });
+      return respondLessonInstanceError(context, 500, 'failed_to_find_instances', fetchErr, {
+        action: 'find_bulk_cancel_instances',
+        student_id: studentId || null,
+        client_profile_id: clientProfileId || null,
+        from_date: fromDate,
+      });
     }
 
     // Filter out rows where the join didn't match (Supabase returns nulls)
@@ -1183,7 +1310,11 @@ export default async function lessonInstances(context, req) {
           message: instanceCancelError?.message,
           instanceId: instId,
         });
-        return respond(context, 500, { message: 'failed_to_cancel_participants' });
+        return respondLessonInstanceError(context, 500, 'failed_to_cancel_participants', instanceCancelError, {
+          action: 'bulk_cancel_participants',
+          lesson_instance_id: instId,
+          participant_count: targetedParticipantIds.length,
+        });
       }
 
       if (cancellationResult.outcome === 'updated') {
@@ -1254,7 +1385,10 @@ export default async function lessonInstances(context, req) {
             message: syncError?.message,
             instanceId: instId,
           });
-          return respond(context, 500, { message: 'failed_to_sync_financial_artifacts' });
+          return respondLessonInstanceError(context, 500, 'failed_to_sync_financial_artifacts', syncError, {
+            action: 'bulk_cancel_sync_financial_artifacts',
+            lesson_instance_id: instId,
+          });
         }
 
         continue;
@@ -1273,7 +1407,11 @@ export default async function lessonInstances(context, req) {
         outcome: cancellationResult.outcome,
         instanceId: instId,
       });
-      return respond(context, 500, { message: 'failed_to_cancel_participants' });
+      return respondLessonInstanceError(context, 500, 'failed_to_cancel_participants', new Error(`unexpected bulk-cancel outcome: ${cancellationResult.outcome}`), {
+        action: 'bulk_cancel_participants',
+        lesson_instance_id: instId,
+        outcome: cancellationResult.outcome,
+      });
     }
 
     // Audit log

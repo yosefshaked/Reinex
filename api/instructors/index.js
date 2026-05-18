@@ -18,8 +18,18 @@ import { normalizeAvailabilityWindows, hasConfiguredAvailability } from '../_sha
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { getAuthUserById } from '../_shared/auth-users.js';
 import { buildAccountDisplayName } from '../_shared/account-profile.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const EMPLOYEE_SELECT_COLUMNS = 'id, user_id, first_name, middle_name, last_name, employee_id, employee_type, payroll_model, current_rate, monthly_salary_amount, phone, email, start_date, is_active, notes, working_days, annual_leave_days, leave_pay_method, leave_fixed_day_rate, employment_scope, metadata, instructor_types';
+
+async function respondTrackedInstructorError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+    orgId: metadata.orgId || null,
+    userId: metadata.userId || metadata.actorUserId || null,
+  });
+}
 
 function resolveDefaultPayrollModel(employeeType) {
   if (employeeType === 'instructor') {
@@ -430,6 +440,12 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'instructors' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -439,7 +455,11 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTrackedInstructorError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'ensure_membership',
+      orgId,
+      userId,
+    });
   }
 
   if (!role) {
@@ -469,7 +489,14 @@ export default async function (context, req) {
 
     if (rosterResult.error) {
       context.log?.error?.('instructors failed to fetch roster', { message: rosterResult.error.message });
-      return respond(context, 500, { message: 'failed_to_load_instructors' });
+      return respondTrackedInstructorError(context, 500, 'failed_to_load_instructors', rosterResult.error, {
+        action: 'load_instructors',
+        orgId,
+        userId,
+        table: 'Employees',
+        operation: 'select',
+        includeInactive,
+      });
     }
 
     const employees = Array.isArray(rosterResult.data) ? rosterResult.data : [];
@@ -488,7 +515,11 @@ export default async function (context, req) {
         });
       } catch (error) {
         context.log?.error?.('instructors failed to load unlinked members', { message: error.message });
-        return respond(context, 500, { message: 'failed_to_load_org_members' });
+        return respondTrackedInstructorError(context, 500, 'failed_to_load_org_members', error, {
+          action: 'load_unlinked_members',
+          orgId,
+          userId,
+        });
       }
     }
 
@@ -525,7 +556,14 @@ export default async function (context, req) {
 
       if (membershipError) {
         context.log?.error?.('instructors failed to verify target membership', { message: membershipError.message });
-        return respond(context, 500, { message: 'failed_to_verify_target_membership' });
+        return respondTrackedInstructorError(context, 500, 'failed_to_verify_target_membership', membershipError, {
+          action: 'verify_target_membership',
+          orgId,
+          userId,
+          targetUserId: validation.userId,
+          table: 'org_memberships',
+          operation: 'select',
+        });
       }
 
       if (!membership) {
@@ -597,7 +635,14 @@ export default async function (context, req) {
 
     if (error) {
       context.log?.error?.('instructors failed to insert employee', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_save_instructor' });
+      return respondTrackedInstructorError(context, 500, 'failed_to_save_instructor', error, {
+        action: 'create_employee',
+        orgId,
+        userId,
+        table: 'Employees',
+        operation: 'insert',
+        employeeType,
+      });
     }
 
     if (employeeType === 'instructor' && body?.break_time_minutes !== undefined) {
@@ -611,7 +656,14 @@ export default async function (context, req) {
 
       if (profileError) {
         context.log?.error?.('instructors failed to create instructor profile', { message: profileError.message });
-        return respond(context, 500, { message: 'failed_to_save_instructor_profile' });
+        return respondTrackedInstructorError(context, 500, 'failed_to_save_instructor_profile', profileError, {
+          action: 'create_instructor_profile',
+          orgId,
+          userId,
+          instructorId: data.id,
+          table: 'instructor_profiles',
+          operation: 'upsert',
+        });
       }
     }
 
@@ -634,7 +686,15 @@ export default async function (context, req) {
         });
       } catch (serviceError) {
         context.log?.error?.('instructors failed to save instructor services', { message: serviceError.message });
-        return respond(context, 500, { message: 'failed_to_save_service_capabilities' });
+        return respondTrackedInstructorError(context, 500, 'failed_to_save_service_capabilities', serviceError, {
+          action: 'create_service_capabilities',
+          orgId,
+          userId,
+          instructorId: data.id,
+          table: 'instructor_service_capabilities',
+          operation: 'write',
+          rollbackFailed: Boolean(serviceError?.rollbackError),
+        });
       }
     }
 
@@ -667,7 +727,13 @@ export default async function (context, req) {
 
     if (permError) {
       context.log?.error?.('instructors failed to load permissions', { message: permError.message });
-      return respond(context, 500, { message: 'failed_to_load_permissions' });
+      return respondTrackedInstructorError(context, 500, 'failed_to_load_permissions', permError, {
+        action: 'load_org_permissions',
+        orgId,
+        userId,
+        table: 'organizations',
+        operation: 'select',
+      });
     }
 
     let permissions = orgSettings?.permissions;
@@ -706,7 +772,14 @@ export default async function (context, req) {
 
     if (fetchError) {
       context.log?.error?.('instructors failed to fetch existing employee', { message: fetchError.message, instructorId });
-      return respond(context, 500, { message: 'failed_to_fetch_instructor' });
+      return respondTrackedInstructorError(context, 500, 'failed_to_fetch_instructor', fetchError, {
+        action: 'fetch_existing_employee',
+        orgId,
+        userId,
+        instructorId,
+        table: 'Employees',
+        operation: 'select',
+      });
     }
     if (!existingEmployee) {
       return respond(context, 404, { message: 'instructor_not_found' });
@@ -794,7 +867,15 @@ export default async function (context, req) {
 
       if (error) {
         context.log?.error?.('instructors failed to update employee', { message: error.message, instructorId });
-        return respond(context, 500, { message: 'failed_to_update_instructor' });
+        return respondTrackedInstructorError(context, 500, 'failed_to_update_instructor', error, {
+          action: 'update_employee',
+          orgId,
+          userId,
+          instructorId,
+          table: 'Employees',
+          operation: 'update',
+          changedFields,
+        });
       }
       if (!data) {
         return respond(context, 404, { message: 'instructor_not_found' });
@@ -813,7 +894,14 @@ export default async function (context, req) {
 
       if (profileError) {
         context.log?.error?.('instructors failed to upsert instructor profile', { message: profileError.message, instructorId });
-        return respond(context, 500, { message: 'failed_to_update_instructor_profile' });
+        return respondTrackedInstructorError(context, 500, 'failed_to_update_instructor_profile', profileError, {
+          action: 'update_instructor_profile',
+          orgId,
+          userId,
+          instructorId,
+          table: 'instructor_profiles',
+          operation: 'upsert',
+        });
       }
       changedFields.push('instructor_profile');
     }
@@ -845,9 +933,24 @@ export default async function (context, req) {
             message: serviceError.rollbackError.message,
             instructorId,
           });
-          return respond(context, 500, { message: 'failed_to_restore_service_capabilities' });
+          return respondTrackedInstructorError(context, 500, 'failed_to_restore_service_capabilities', serviceError.rollbackError, {
+            action: 'rollback_service_capabilities',
+            orgId,
+            userId,
+            instructorId,
+            table: 'instructor_service_capabilities',
+            operation: 'rollback',
+            originalError: serviceError?.message || null,
+          });
         }
-        return respond(context, 500, { message: 'failed_to_update_service_capabilities' });
+        return respondTrackedInstructorError(context, 500, 'failed_to_update_service_capabilities', serviceError, {
+          action: 'update_service_capabilities',
+          orgId,
+          userId,
+          instructorId,
+          table: 'instructor_service_capabilities',
+          operation: 'write',
+        });
       }
     }
 
@@ -878,7 +981,20 @@ export default async function (context, req) {
         message: refreshedEmployeeError?.message,
         instructorId,
       });
-      return respond(context, 500, { message: 'failed_to_refresh_instructor' });
+      return respondTrackedInstructorError(
+        context,
+        500,
+        'failed_to_refresh_instructor',
+        refreshedEmployeeError || new Error('missing refreshed employee'),
+        {
+          action: 'refresh_employee_after_update',
+          orgId,
+          userId,
+          instructorId,
+          table: 'Employees',
+          operation: 'select',
+        },
+      );
     }
 
     const [enriched] = await enrichEmployees({ client: supabase, orgId, employees: [refreshedEmployee] });
@@ -903,7 +1019,14 @@ export default async function (context, req) {
 
     if (error) {
       context.log?.error?.('instructors failed to disable instructor', { message: error.message, instructorId });
-      return respond(context, 500, { message: 'failed_to_disable_instructor' });
+      return respondTrackedInstructorError(context, 500, 'failed_to_disable_instructor', error, {
+        action: 'disable_employee',
+        orgId,
+        userId,
+        instructorId,
+        table: 'Employees',
+        operation: 'update',
+      });
     }
     if (!data) {
       return respond(context, 404, { message: 'instructor_not_found' });

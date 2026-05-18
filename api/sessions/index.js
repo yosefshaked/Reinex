@@ -14,8 +14,16 @@ import { isUUID, parseJsonBodyWithLimit, validateSessionWrite } from '../_shared
 import { buildSessionMetadata } from '../_shared/session-metadata.js';
 import { mergeMetadata } from '../_shared/metadata-utils.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const MAX_BODY_BYTES = 128 * 1024; // observe-only for now
+
+function respondSessionError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 // validation moved to _shared/validation.js (SOT)
 
@@ -62,6 +70,12 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'sessions' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -71,7 +85,9 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondSessionError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   if (!role) {
@@ -119,7 +135,10 @@ export default async function (context, req) {
 
     if (studentResult.error) {
       context.log?.error?.('sessions failed to load student', { message: studentResult.error.message });
-      return respond(context, 500, { message: 'failed_to_load_student' });
+      return respondSessionError(context, 500, 'failed_to_load_student', studentResult.error, {
+        action: 'load_student',
+        student_id: validation.studentId,
+      });
     }
 
     if (!studentResult.data) {
@@ -165,7 +184,9 @@ export default async function (context, req) {
 
         if (adminInstructorCheck.error) {
           context.log?.error?.('sessions failed to verify admin is instructor', { message: adminInstructorCheck.error.message });
-          return respond(context, 500, { message: 'failed_to_verify_instructor' });
+          return respondSessionError(context, 500, 'failed_to_verify_instructor', adminInstructorCheck.error, {
+            action: 'verify_admin_instructor',
+          });
         }
 
         if (!adminInstructorCheck.data) {
@@ -189,7 +210,9 @@ export default async function (context, req) {
 
     if (instructorLookup.error) {
       context.log?.error?.('sessions failed to verify acting user is instructor', { message: instructorLookup.error.message });
-      return respond(context, 500, { message: 'failed_to_verify_instructor' });
+      return respondSessionError(context, 500, 'failed_to_verify_instructor', instructorLookup.error, {
+        action: 'verify_acting_user_instructor',
+      });
     }
 
     if (instructorLookup.data && instructorLookup.data.id) {
@@ -206,7 +229,10 @@ export default async function (context, req) {
 
     if (instructorCheck.error) {
       context.log?.error?.('sessions failed to verify instructor existence', { message: instructorCheck.error.message });
-      return respond(context, 500, { message: 'failed_to_verify_instructor' });
+      return respondSessionError(context, 500, 'failed_to_verify_instructor', instructorCheck.error, {
+        action: 'verify_instructor_exists',
+        instructor_id: sessionInstructorId,
+      });
     }
 
     if (!instructorCheck.data) {
@@ -274,7 +300,12 @@ export default async function (context, req) {
 
   if (error) {
     context.log?.error?.('sessions failed to create session record', { message: error.message });
-    return respond(context, 500, { message: 'failed_to_create_session' });
+    return respondSessionError(context, 500, 'failed_to_create_session', error, {
+      action: 'create_session',
+      student_id: validation.studentId || null,
+      instructor_id: sessionInstructorId || null,
+      is_loose: isLoose,
+    });
   }
 
   // If this is a resubmission of a previously rejected loose report, mark the original as resubmitted.

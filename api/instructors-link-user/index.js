@@ -17,8 +17,18 @@ import { findAuthUserByEmail, getAuthUserById } from '../_shared/auth-users.js';
 import { buildPublicAppHashRouteUrl } from '../_shared/public-app-url.js';
 import { deliverInvitationEmail } from '../_shared/invitation-email.js';
 import { buildAccountDisplayName } from '../_shared/account-profile.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const DEFAULT_INVITATION_TTL_DAYS = 3;
+
+async function respondTrackedLinkError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+    orgId: metadata.orgId || null,
+    userId: metadata.userId || metadata.actorUserId || null,
+  });
+}
 
 async function loadEmployee(client, orgId, employeeId) {
   const { data, error } = await withOrgScope(client, 'Employees', orgId)
@@ -427,9 +437,22 @@ async function sendInvitationFlow({
     },
   };
 
-  await withOrgScope(supabase, 'Employees', orgId)
+  const { error: updateEmployeeError } = await withOrgScope(supabase, 'Employees', orgId)
     .update({ metadata: updatedMetadata, email })
     .eq('id', employeeId);
+
+  if (updateEmployeeError) {
+    await logInvitationSendFailed(supabase, {
+      orgId,
+      actor: { userId, userEmail: authResult.data.user.email || '', userRole: role },
+      invitationId,
+      email,
+      employeeId,
+      stage: 'update_employee_invitation_metadata',
+      reason: updateEmployeeError.message,
+    });
+    throw new Error(`failed_to_update_employee_invitation:${updateEmployeeError.message}`);
+  }
 
   await logAuditEvent(supabase, {
     orgId,
@@ -490,7 +513,15 @@ async function directLinkFlow({
       orgId,
       memberUserId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_target_member' });
+    return respondTrackedLinkError(context, 500, 'failed_to_verify_target_member', membershipLookupError, {
+      action: 'verify_target_member',
+      orgId,
+      userId,
+      employeeId,
+      memberUserId,
+      table: 'org_memberships',
+      operation: 'select',
+    });
   }
 
   if (!membership) {
@@ -509,7 +540,15 @@ async function directLinkFlow({
       orgId,
       memberUserId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_existing_link' });
+    return respondTrackedLinkError(context, 500, 'failed_to_verify_existing_link', conflictError, {
+      action: 'verify_existing_employee_link',
+      orgId,
+      userId,
+      employeeId,
+      memberUserId,
+      table: 'Employees',
+      operation: 'select',
+    });
   }
 
   if (conflictingEmployee) {
@@ -537,7 +576,21 @@ async function directLinkFlow({
       employeeId,
       memberUserId,
     });
-    return respond(context, 500, { message: 'failed_to_link_member_to_employee' });
+    return respondTrackedLinkError(
+      context,
+      500,
+      'failed_to_link_member_to_employee',
+      updateError || new Error('missing updated employee'),
+      {
+        action: 'direct_link_employee',
+        orgId,
+        userId,
+        employeeId,
+        memberUserId,
+        table: 'Employees',
+        operation: 'update',
+      },
+    );
   }
 
   const { data: memberProfile } = await supabase
@@ -631,6 +684,12 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'instructors-link-user' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -640,7 +699,11 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTrackedLinkError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'ensure_membership',
+      orgId,
+      userId,
+    });
   }
 
   if (!role) {
@@ -663,7 +726,14 @@ export default async function (context, req) {
   const { employee, error: fetchError } = await loadEmployee(supabase, orgId, employeeId);
   if (fetchError) {
     context.log?.error?.('instructors-link-user failed to fetch employee', { message: fetchError.message });
-    return respond(context, 500, { message: 'failed_to_fetch_employee' });
+    return respondTrackedLinkError(context, 500, 'failed_to_fetch_employee', fetchError, {
+      action: 'fetch_employee',
+      orgId,
+      userId,
+      employeeId,
+      table: 'Employees',
+      operation: 'select',
+    });
   }
 
   if (!employee) {
@@ -712,6 +782,13 @@ export default async function (context, req) {
     });
   } catch (error) {
     context.log?.error?.('instructors-link-user failed to send invitation', { message: error?.message });
-    return respond(context, 500, { message: 'failed_to_send_invitation' });
+    return respondTrackedLinkError(context, 500, 'failed_to_send_invitation', error, {
+      action: 'send_invitation_flow',
+      orgId,
+      userId,
+      employeeId,
+      email,
+      resendPending,
+    });
   }
 }

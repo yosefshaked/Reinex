@@ -4,6 +4,7 @@ import { readEnv, respond as _respond } from '../_shared/org-bff.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { getAuthUsersByIds } from '../_shared/auth-users.js';
 import { buildAccountDisplayName } from '../_shared/account-profile.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 function resolveAdminConfig(context) {
   return readSupabaseAdminConfig(readEnv(context));
@@ -19,6 +20,15 @@ function getAdminClient(context) {
 
 function respond(context, status, body, extraHeaders = {}) {
   return _respond(context, status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
+}
+
+async function respondTrackedDirectoryError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+    orgId: metadata.orgId || null,
+    userId: metadata.userId || metadata.actorUserId || null,
+  });
 }
 
 function normalizeUuid(value) {
@@ -75,7 +85,13 @@ async function requireOrgMembership(context, supabase, orgId, userId) {
       userId,
       message: membershipResult.error.message,
     });
-    respond(context, 500, { message: 'failed_to_verify_membership' });
+    await respondTrackedDirectoryError(context, 500, 'failed_to_verify_membership', membershipResult.error, {
+      action: 'verify_membership',
+      orgId,
+      userId,
+      table: 'org_memberships',
+      operation: 'select',
+    });
     return null;
   }
 
@@ -124,7 +140,13 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
 
     if (membershipsResult.error) {
       logSupabaseQueryFailure(context, req, userId, 'fetching membership rows', membershipsResult.error);
-      respond(context, 500, { message: 'failed_to_load_members' });
+      await respondTrackedDirectoryError(context, 500, 'failed_to_load_members', membershipsResult.error, {
+        action: 'fetch_membership_rows',
+        orgId,
+        userId,
+        table: 'org_memberships',
+        operation: 'select',
+      });
       return null;
     }
 
@@ -147,7 +169,14 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
 
       if (profilesResult.error) {
         logSupabaseQueryFailure(context, req, userId, 'fetching member profiles', profilesResult.error);
-        respond(context, 500, { message: 'failed_to_load_members' });
+        await respondTrackedDirectoryError(context, 500, 'failed_to_load_members', profilesResult.error, {
+          action: 'fetch_member_profiles',
+          orgId,
+          userId,
+          memberCount: userIds.length,
+          table: 'profiles',
+          operation: 'select',
+        });
         return null;
       }
 
@@ -157,7 +186,13 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
         authUsersById = await getAuthUsersByIds(supabase, userIds);
       } catch (error) {
         logSupabaseQueryFailure(context, req, userId, 'fetching member auth users', error);
-        respond(context, 500, { message: 'failed_to_load_members' });
+        await respondTrackedDirectoryError(context, 500, 'failed_to_load_members', error, {
+          action: 'fetch_member_auth_users',
+          orgId,
+          userId,
+          memberCount: userIds.length,
+          provider: 'supabase_auth_admin',
+        });
         return null;
       }
     }
@@ -188,7 +223,11 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
     }));
   } catch (error) {
     logSupabaseQueryFailure(context, req, userId, 'fetching members', error);
-    respond(context, 500, { message: 'failed_to_load_members' });
+    await respondTrackedDirectoryError(context, 500, 'failed_to_load_members', error, {
+      action: 'fetch_org_members',
+      orgId,
+      userId,
+    });
     return null;
   }
 }
@@ -206,14 +245,24 @@ async function fetchPendingInvitations(context, req, supabase, orgId, userId) {
 
     if (result.error) {
       logSupabaseQueryFailure(context, req, userId, 'fetching invitations', result.error);
-      respond(context, 500, { message: 'failed_to_load_invitations' });
+      await respondTrackedDirectoryError(context, 500, 'failed_to_load_invitations', result.error, {
+        action: 'fetch_pending_invitations',
+        orgId,
+        userId,
+        table: 'org_invitations',
+        operation: 'select',
+      });
       return null;
     }
 
     return Array.isArray(result.data) ? result.data : [];
   } catch (error) {
     logSupabaseQueryFailure(context, req, userId, 'fetching invitations', error);
-    respond(context, 500, { message: 'failed_to_load_invitations' });
+    await respondTrackedDirectoryError(context, 500, 'failed_to_load_invitations', error, {
+      action: 'fetch_pending_invitations',
+      orgId,
+      userId,
+    });
     return null;
   }
 }
@@ -236,6 +285,12 @@ export default async function directory(context, req) {
     respond(context, 400, { message: 'missing_orgid' });
     return;
   }
+
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId: authUser.id,
+    metadata: { endpoint: 'directory' },
+  });
 
   const membership = await requireOrgMembership(context, supabase, orgId, authUser.id);
   if (!membership) {

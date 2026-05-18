@@ -5,6 +5,7 @@ import { readEnv, respond as _respond, isAdminRole } from '../_shared/org-bff.js
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { getAuthUserById } from '../_shared/auth-users.js';
 import { splitDisplayName } from '../_shared/account-profile.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 function getAdminClient(context) {
   const cfg = readSupabaseAdminConfig(readEnv(context));
   if (!cfg.supabaseUrl || !cfg.serviceRoleKey) return { client: null, error: new Error('missing_admin_credentials') };
@@ -12,6 +13,14 @@ function getAdminClient(context) {
 }
 function respond(context, status, body, extraHeaders = {}) {
   return _respond(context, status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
+}
+async function respondTrackedMembershipError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+    orgId: metadata.orgId || null,
+    userId: metadata.userId || metadata.actorUserId || null,
+  });
 }
 function parseSegments(context) {
   const raw = context?.bindingData?.restOfPath; if (!raw || typeof raw !== 'string') return [];
@@ -53,13 +62,30 @@ async function getAuthUser(context, req, supabase){
 }
 async function requireActorRole(context, supabase, orgId, userId){
   const result = await supabase.from('org_memberships').select('id, role').eq('org_id', orgId).eq('user_id', userId).maybeSingle();
-  if (result.error){ respond(context,500,{message: 'failed_to_verify_membership'}); return null; }
+  if (result.error){
+    await respondTrackedMembershipError(context,500,'failed_to_verify_membership',result.error,{
+      action: 'verify_actor_membership',
+      orgId,
+      userId,
+      table: 'org_memberships',
+      operation: 'select',
+    });
+    return null;
+  }
   if (!result.data || !isAdminRole(result.data.role)){ respond(context,403,{message:'forbidden'}); return null; }
   return result.data;
 }
 async function loadTargetMembership(context, supabase, membershipId){
   const result = await supabase.from('org_memberships').select('id, org_id, user_id, role').eq('id', membershipId).maybeSingle();
-  if (result.error){ respond(context,500,{message: 'failed_to_load_membership'}); return null; }
+  if (result.error){
+    await respondTrackedMembershipError(context,500,'failed_to_load_membership',result.error,{
+      action: 'load_target_membership',
+      membershipId,
+      table: 'org_memberships',
+      operation: 'select',
+    });
+    return null;
+  }
   if (!result.data){ respond(context,404,{message: 'membership_not_found'}); return null; }
   return result.data;
 }
@@ -74,7 +100,19 @@ async function handleDelete(context, req, supabase, membershipId){
   if (!actorIsOwner && targetRole === 'admin'){ respond(context,403,{message: 'admin_cannot_remove_admin'}); return; }
   if (target.user_id === authUser.id){ respond(context,403,{message: 'cannot_remove_yourself'}); return; }
   const del = await supabase.from('org_memberships').delete().eq('id', membershipId);
-  if (del.error){ respond(context,500,{message: 'failed_to_remove_member'}); return; }
+  if (del.error){
+    await respondTrackedMembershipError(context,500,'failed_to_remove_member',del.error,{
+      action: 'remove_member',
+      orgId: target.org_id,
+      userId: authUser.id,
+      membershipId,
+      targetUserId: target.user_id,
+      targetRole,
+      table: 'org_memberships',
+      operation: 'delete',
+    });
+    return;
+  }
   
   // Audit log: member removed
   await logAuditEvent(supabase, {
@@ -120,7 +158,20 @@ async function handlePatch(context, req, supabase, membershipId){
     if (!actorIsOwner && targetRole === 'admin' && role === 'member'){ respond(context,403,{message: 'admin_cannot_demote_admin'}); return; }
     if (role !== targetRole){
       const upd = await supabase.from('org_memberships').update({ role }).eq('id', membershipId);
-      if (upd.error){ respond(context,500,{message: 'failed_to_update_role'}); return; }
+      if (upd.error){
+        await respondTrackedMembershipError(context,500,'failed_to_update_role',upd.error,{
+          action: 'update_member_role',
+          orgId: target.org_id,
+          userId: authUser.id,
+          membershipId,
+          targetUserId: target.user_id,
+          oldRole: targetRole,
+          newRole: role,
+          table: 'org_memberships',
+          operation: 'update',
+        });
+        return;
+      }
       
       // Audit log: role changed
       await logAuditEvent(supabase, {
@@ -150,7 +201,15 @@ async function handlePatch(context, req, supabase, membershipId){
       previousMetadata = authUserRecord?.user_metadata ? { ...authUserRecord.user_metadata } : {};
     } catch (error){
       context.log?.error?.('org-memberships failed to load auth user for name update', { membershipId, userId: target.user_id, message: error?.message });
-      respond(context,500,{message: 'failed_to_load_account'}); return;
+      await respondTrackedMembershipError(context,500,'failed_to_load_account',error,{
+        action: 'load_account_for_name_update',
+        orgId: target.org_id,
+        userId: authUser.id,
+        membershipId,
+        targetUserId: target.user_id,
+        provider: 'supabase_auth_admin',
+      });
+      return;
     }
 
     const nextMetadata = {
@@ -163,7 +222,15 @@ async function handlePatch(context, req, supabase, membershipId){
     const metadataResult = await supabase.auth.admin.updateUserById(target.user_id, { user_metadata: nextMetadata });
     if (metadataResult.error){
       context.log?.error?.('org-memberships failed to update auth metadata', { membershipId, userId: target.user_id, message: metadataResult.error.message });
-      respond(context,500,{message: 'failed_to_update_account_name'}); return;
+      await respondTrackedMembershipError(context,500,'failed_to_update_account_name',metadataResult.error,{
+        action: 'update_account_name_metadata',
+        orgId: target.org_id,
+        userId: authUser.id,
+        membershipId,
+        targetUserId: target.user_id,
+        provider: 'supabase_auth_admin',
+      });
+      return;
     }
     accountUpdated = true;
 
@@ -188,7 +255,16 @@ async function handlePatch(context, req, supabase, membershipId){
       } catch (revertError){
         context.log?.error?.('org-memberships failed to revert auth metadata after profile error', { membershipId, userId: target.user_id, message: revertError?.message });
       }
-      respond(context,500,{message: 'failed_to_update_profile_name'}); return;
+      await respondTrackedMembershipError(context,500,'failed_to_update_profile_name',profileUpdate.error,{
+        action: 'update_profile_name',
+        orgId: target.org_id,
+        userId: authUser.id,
+        membershipId,
+        targetUserId: target.user_id,
+        table: 'profiles',
+        operation: 'upsert',
+      });
+      return;
     }
 
     profileUpdated = true;
@@ -200,6 +276,7 @@ async function handlePatch(context, req, supabase, membershipId){
 export default async function orgMemberships(context, req){
   const { client: supabase, error } = getAdminClient(context);
   if (!supabase || error){ respond(context,500,{message:'server_misconfigured'}); return; }
+  attachErrorTracking(context, req, supabase, { metadata: { endpoint: 'org-memberships' } });
   const method = String(req.method||'GET').toUpperCase();
   const segments = parseSegments(context);
   if (segments.length !== 1){ respond(context,404,{message: 'not_found'}); return; }
