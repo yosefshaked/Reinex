@@ -21,6 +21,7 @@ import {
   normalizeMatchMode,
   parseIsoDateInTimezone,
 } from '../_shared/waiting-list-matching.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const VALID_SCOPES = new Set(['dashboard', 'template_manager']);
 
@@ -90,6 +91,12 @@ export default async function waitingListMatches(context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'waiting-list-matches', scope, mode },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -99,7 +106,10 @@ export default async function waitingListMatches(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, {
+      error: membershipError,
+      metadata: { action: 'verify_membership' },
+    });
   }
 
   if (!role || !isAdminOrOffice(role)) {
@@ -112,7 +122,10 @@ export default async function waitingListMatches(context, req) {
 
   if (entriesError) {
     context.log?.error?.('waiting-list-matches failed to load waiting-list entries', { message: entriesError.message });
-    return respond(context, 500, { message: 'failed_to_load_waiting_list' });
+    return respondTracked(context, 500, { message: 'failed_to_load_waiting_list' }, undefined, {
+      error: entriesError,
+      metadata: { action: 'load_waiting_list_entries', statuses: ['new', 'open'] },
+    });
   }
 
   const activeEntries = Array.isArray(entries) ? entries.filter((entry) => entry.desired_service_id) : [];
@@ -140,7 +153,10 @@ export default async function waitingListMatches(context, req) {
 
   if (instructorError) {
     context.log?.error?.('waiting-list-matches failed to load instructors', { message: instructorError.message });
-    return respond(context, 500, { message: 'failed_to_load_instructors' });
+    return respondTracked(context, 500, { message: 'failed_to_load_instructors' }, undefined, {
+      error: instructorError,
+      metadata: { action: 'load_active_instructors' },
+    });
   }
 
   const instructorIds = Array.isArray(instructorRows) ? instructorRows.map((row) => row.id).filter(Boolean) : [];
@@ -173,12 +189,25 @@ export default async function waitingListMatches(context, req) {
 
   if (capabilityResult.error) {
     context.log?.error?.('waiting-list-matches failed to load service capabilities', { message: capabilityResult.error.message });
-    return respond(context, 500, { message: 'failed_to_load_instructor_capabilities' });
+    return respondTracked(context, 500, { message: 'failed_to_load_instructor_capabilities' }, undefined, {
+      error: capabilityResult.error,
+      metadata: {
+        action: 'load_instructor_capabilities',
+        service_ids: serviceIds,
+        instructor_ids: instructorIds,
+      },
+    });
   }
 
   if (templateResult.error) {
     context.log?.error?.('waiting-list-matches failed to load lesson templates', { message: templateResult.error.message });
-    return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
+    return respondTracked(context, 500, { message: 'failed_to_load_lesson_templates' }, undefined, {
+      error: templateResult.error,
+      metadata: {
+        action: 'load_lesson_templates',
+        instructor_ids: instructorIds,
+      },
+    });
   }
 
   const today = parseIsoDateInTimezone();

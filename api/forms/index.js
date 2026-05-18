@@ -13,7 +13,7 @@ import {
 } from '../_shared/org-bff.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
-import { respondTrackedError } from '../_shared/error-events.js';
+import { attachErrorTracking, respondTracked, respondTrackedError } from '../_shared/error-events.js';
 import {
   buildSharedBlockMap,
   collectSharedBlockIds,
@@ -264,6 +264,12 @@ export default async function forms(context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'forms' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -273,7 +279,10 @@ export default async function forms(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, {
+      error: membershipError,
+      metadata: { action: 'verify_membership' },
+    });
   }
 
   if (!role) {
@@ -304,7 +313,10 @@ export default async function forms(context, req) {
 
       if (error) {
         context.log?.error?.('forms failed to load template', { message: error.message, formId });
-        return respond(context, 500, { message: 'failed_to_load_form' });
+        return respondTracked(context, 500, { message: 'failed_to_load_form' }, undefined, {
+          error,
+          metadata: { action: 'load_form', form_id: formId },
+        });
       }
 
       if (!data) {
@@ -319,7 +331,10 @@ export default async function forms(context, req) {
           message: sharedBlocksError?.message,
           formId,
         });
-        return respond(context, 500, { message: 'failed_to_load_form' });
+        return respondTracked(context, 500, { message: 'failed_to_load_form' }, undefined, {
+          error: sharedBlocksError,
+          metadata: { action: 'resolve_shared_blocks', form_id: formId },
+        });
       }
     }
 
@@ -345,7 +360,10 @@ export default async function forms(context, req) {
 
     if (error) {
       context.log?.error?.('forms failed to load templates', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_load_forms' });
+      return respondTracked(context, 500, { message: 'failed_to_load_forms' }, undefined, {
+        error,
+        metadata: { action: 'load_forms', usage_filter: usageFilter || null, selection_mode: selectionMode || null },
+      });
     }
 
     let rows = Array.isArray(data) ? data : [];
@@ -409,7 +427,10 @@ export default async function forms(context, req) {
 
     if (error) {
       context.log?.error?.('forms failed to create template', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_create_form' });
+      return respondTracked(context, 500, { message: 'failed_to_create_form' }, undefined, {
+        error,
+        metadata: { action: 'create_form', form_usage: formUsage },
+      });
     }
 
     try {
@@ -434,7 +455,10 @@ export default async function forms(context, req) {
           metadata: { form_id: data.id, cleanup_failed: true },
         });
       }
-      return respond(context, 500, { message: 'failed_to_create_form' });
+      return respondTracked(context, 500, { message: 'failed_to_create_form' }, undefined, {
+        error: linksError,
+        metadata: { action: 'sync_shared_block_links_after_create', form_id: data.id, cleanup_failed: false },
+      });
     }
 
     await logAuditEvent(supabase, {
@@ -466,7 +490,10 @@ export default async function forms(context, req) {
         message: sharedBlocksError?.message,
         formId: data.id,
       });
-      return respond(context, 500, { message: 'failed_to_create_form' });
+      return respondTracked(context, 500, { message: 'failed_to_create_form' }, undefined, {
+        error: sharedBlocksError,
+        metadata: { action: 'resolve_shared_blocks_after_create', form_id: data.id },
+      });
     }
   }
 
@@ -485,7 +512,10 @@ export default async function forms(context, req) {
 
     if (fetchError) {
       context.log?.error?.('forms failed to fetch template for update', { message: fetchError.message, formId });
-      return respond(context, 500, { message: 'failed_to_fetch_form' });
+      return respondTracked(context, 500, { message: 'failed_to_fetch_form' }, undefined, {
+        error: fetchError,
+        metadata: { action: 'fetch_form_for_update', form_id: formId },
+      });
     }
 
     if (!existing) {
@@ -494,14 +524,25 @@ export default async function forms(context, req) {
 
     if (body?.action === 'migrate_publish_structure') {
       if (isPublishedMetadata(existing?.metadata)) {
-        const responseBody = await buildFormResponse(supabase, orgId, {
-          ...existing,
-          metadata: existing.metadata,
-        });
-        return respond(context, 200, {
-          ...responseBody,
-          migration_status: 'already_migrated',
-        });
+        try {
+          const responseBody = await buildFormResponse(supabase, orgId, {
+            ...existing,
+            metadata: existing.metadata,
+          });
+          return respond(context, 200, {
+            ...responseBody,
+            migration_status: 'already_migrated',
+          });
+        } catch (sharedBlocksError) {
+          context.log?.error?.('forms failed to resolve shared blocks for migrated publish structure', {
+            message: sharedBlocksError?.message,
+            formId,
+          });
+          return respondTracked(context, 500, { message: 'failed_to_migrate_publish_structure' }, undefined, {
+            error: sharedBlocksError,
+            metadata: { action: 'resolve_shared_blocks_for_existing_publish_migration', form_id: formId },
+          });
+        }
       }
 
       if (!requiresPublishMigration(existing)) {
@@ -547,13 +588,27 @@ export default async function forms(context, req) {
           message: migratedError?.message,
           formId,
         });
-        return respond(context, 500, { message: 'failed_to_migrate_publish_structure' });
+        return respondTracked(context, 500, { message: 'failed_to_migrate_publish_structure' }, undefined, {
+          error: migratedError || new Error('migrate_publish_structure returned no row'),
+          metadata: { action: 'migrate_publish_structure', form_id: formId, returned_row: Boolean(migrated) },
+        });
       }
 
-      await syncFormSharedBlockLinks(supabase, orgId, formId, {
-        draftSchema: normalizedSchema,
-        publishedSchema: normalizedSchema,
-      });
+      try {
+        await syncFormSharedBlockLinks(supabase, orgId, formId, {
+          draftSchema: normalizedSchema,
+          publishedSchema: normalizedSchema,
+        });
+      } catch (linksError) {
+        context.log?.error?.('forms failed to sync shared block links after publish migration', {
+          message: linksError?.message,
+          formId,
+        });
+        return respondTracked(context, 500, { message: 'failed_to_migrate_publish_structure' }, undefined, {
+          error: linksError,
+          metadata: { action: 'sync_shared_block_links_after_publish_migration', form_id: formId },
+        });
+      }
 
       await logAuditEvent(supabase, {
         orgId,
@@ -587,11 +642,22 @@ export default async function forms(context, req) {
         },
       });
 
-      const responseBody = await buildFormResponse(supabase, orgId, migrated);
-      return respond(context, 200, {
-        ...responseBody,
-        migration_status: 'migrated',
-      });
+      try {
+        const responseBody = await buildFormResponse(supabase, orgId, migrated);
+        return respond(context, 200, {
+          ...responseBody,
+          migration_status: 'migrated',
+        });
+      } catch (sharedBlocksError) {
+        context.log?.error?.('forms failed to resolve shared blocks after publish migration', {
+          message: sharedBlocksError?.message,
+          formId,
+        });
+        return respondTracked(context, 500, { message: 'failed_to_migrate_publish_structure' }, undefined, {
+          error: sharedBlocksError,
+          metadata: { action: 'resolve_shared_blocks_after_publish_migration', form_id: formId },
+        });
+      }
     }
 
     const updates = {
@@ -696,7 +762,10 @@ export default async function forms(context, req) {
 
     if (error) {
       context.log?.error?.('forms failed to update template', { message: error.message, formId });
-      return respond(context, 500, { message: 'failed_to_update_form' });
+      return respondTracked(context, 500, { message: 'failed_to_update_form' }, undefined, {
+        error,
+        metadata: { action: 'update_form', form_id: formId, updated_fields: Object.keys(updates).filter((k) => k !== 'updated_at') },
+      });
     }
 
     if (!data) {
@@ -714,7 +783,10 @@ export default async function forms(context, req) {
         formId,
       });
       await revertFormAfterFailedLinkSync(supabase, orgId, context, formId, existing);
-      return respond(context, 500, { message: 'failed_to_update_form' });
+      return respondTracked(context, 500, { message: 'failed_to_update_form' }, undefined, {
+        error: linksError,
+        metadata: { action: 'sync_shared_block_links_after_update', form_id: formId, rollback_attempted: true },
+      });
     }
 
     await logAuditEvent(supabase, {
@@ -776,7 +848,10 @@ export default async function forms(context, req) {
         message: sharedBlocksError?.message,
         formId,
       });
-      return respond(context, 500, { message: 'failed_to_update_form' });
+      return respondTracked(context, 500, { message: 'failed_to_update_form' }, undefined, {
+        error: sharedBlocksError,
+        metadata: { action: 'resolve_shared_blocks_after_update', form_id: formId },
+      });
     }
   }
 
@@ -795,7 +870,10 @@ export default async function forms(context, req) {
 
     if (error) {
       context.log?.error?.('forms failed to deactivate template', { message: error.message, formId });
-      return respond(context, 500, { message: 'failed_to_delete_form' });
+      return respondTracked(context, 500, { message: 'failed_to_delete_form' }, undefined, {
+        error,
+        metadata: { action: 'deactivate_form', form_id: formId },
+      });
     }
 
     if (!data) {

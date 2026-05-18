@@ -17,6 +17,14 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { fetchStudentIdsByInstructor } from '../_shared/instructor-student-scope.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+function respondStudentsSearchError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 export default async function (context, req) {
   const method = String(req.method || 'GET').toUpperCase();
@@ -62,6 +70,12 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'students-search' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -71,7 +85,9 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondStudentsSearchError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   if (!role) {
@@ -115,7 +131,9 @@ export default async function (context, req) {
         orgId,
         userId,
       });
-      return respond(context, 500, { message: 'failed_to_search_students' });
+      return respondStudentsSearchError(context, 500, 'failed_to_search_students', lessonError, {
+        action: 'load_instructor_student_ids',
+      });
     }
 
     if (!studentIds.length) {
@@ -133,7 +151,10 @@ export default async function (context, req) {
 
   if (profileSearchError) {
     context.log?.error?.('students-search failed to query client profiles', { message: profileSearchError.message, orgId });
-    return respond(context, 500, { message: 'failed_to_search_students' });
+    return respondStudentsSearchError(context, 500, 'failed_to_search_students', profileSearchError, {
+      action: 'search_client_profiles',
+      query_length: query.length,
+    });
   }
 
   if (!matchingClientProfileIds.length) {
@@ -146,7 +167,10 @@ export default async function (context, req) {
 
   if (error) {
     context.log?.error?.('students-search failed to query roster', { message: error.message, orgId });
-    return respond(context, 500, { message: 'failed_to_search_students' });
+    return respondStudentsSearchError(context, 500, 'failed_to_search_students', error, {
+      action: 'load_search_roster',
+      matching_client_profile_count: matchingClientProfileIds.length,
+    });
   }
 
   const results = (Array.isArray(data) ? data : []).map((row) => ({

@@ -2,6 +2,14 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { ensureMembership, readEnv, respond, withOrgScope } from '../_shared/org-bff.js';
 import { validateIsraeliPhone, coerceOptionalString, coerceOptionalEmail } from '../_shared/student-validation.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+function respondGuardiansError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 function normalizeStoredText(value) {
   if (value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'value')) {
@@ -64,6 +72,12 @@ export default async function handler(context, req) {
     return respond(context, 400, { error: 'missing_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'guardians' },
+  });
+
   // Verify user is a member of the organization
   let role;
   try {
@@ -74,7 +88,9 @@ export default async function handler(context, req) {
       userId,
       orgId
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondGuardiansError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   if (!role) {
@@ -99,7 +115,11 @@ export default async function handler(context, req) {
     }
   } catch (error) {
     context.log.error('[guardians] Handler error:', error);
-    return respond(context, 500, { error: 'internal_server_error' });
+    return respondGuardiansError(context, 500, 'internal_server_error', error, {
+      action: 'handler',
+      method,
+      guardian_id: guardianId || null,
+    });
   }
 }
 
@@ -114,7 +134,9 @@ async function handleGet(context, client, orgId) {
 
   if (error) {
     context.log.error('[guardians/GET] Query error:', error);
-    return respond(context, 500, { error: 'database_error' });
+    return respondGuardiansError(context, 500, 'database_error', error, {
+      action: 'list_guardians',
+    });
   }
 
   // Destructure out the internal encryption bucket column so it is never
@@ -139,7 +161,10 @@ async function handleGet(context, client, orgId) {
 
   if (linksError) {
     context.log.error('[guardians/GET] client_guardians query error:', linksError);
-    return respond(context, 500, { error: 'database_error' });
+    return respondGuardiansError(context, 500, 'database_error', linksError, {
+      action: 'load_guardian_links',
+      guardian_ids: guardianIds,
+    });
   }
 
   const linkedProfileIds = Array.from(new Set((links || []).map((link) => link?.client_profile_id).filter(Boolean)));
@@ -151,7 +176,10 @@ async function handleGet(context, client, orgId) {
 
   if (studentsError) {
     context.log.error('[guardians/GET] students query error:', studentsError);
-    return respond(context, 500, { error: 'database_error' });
+    return respondGuardiansError(context, 500, 'database_error', studentsError, {
+      action: 'load_linked_students',
+      client_profile_ids: linkedProfileIds,
+    });
   }
 
   const studentIdByClientProfile = new Map((students || []).map((student) => [student.client_profile_id, student.id]));
@@ -241,7 +269,9 @@ async function handlePost(context, req, client, orgId, userId) {
 
   if (error) {
     context.log.error('[guardians/POST] Insert error:', error);
-    return respond(context, 500, { error: 'database_error' });
+    return respondGuardiansError(context, 500, 'database_error', error, {
+      action: 'create_guardian',
+    });
   }
 
   context.log.info('[guardians/POST] Guardian created:', data.id);
@@ -311,7 +341,10 @@ async function handlePut(context, req, client, orgId, guardianId, userId) {
 
   if (fetchError) {
     context.log.error('[guardians/PUT] Fetch existing error:', fetchError);
-    return respond(context, 500, { error: 'database_error' });
+    return respondGuardiansError(context, 500, 'database_error', fetchError, {
+      action: 'fetch_guardian_for_update',
+      guardian_id: guardianId,
+    });
   }
   if (!existing) {
     return respond(context, 404, { error: 'guardian_not_found' });
@@ -333,7 +366,11 @@ async function handlePut(context, req, client, orgId, guardianId, userId) {
 
   if (error) {
     context.log.error('[guardians/PUT] Update error:', error);
-    return respond(context, 500, { error: 'database_error' });
+    return respondGuardiansError(context, 500, 'database_error', error, {
+      action: 'update_guardian',
+      guardian_id: guardianId,
+      updated_fields: Object.keys(updates).filter((key) => key !== 'metadata'),
+    });
   }
 
   if (!data) {
@@ -356,7 +393,10 @@ async function handleDelete(context, client, orgId, guardianId) {
 
   if (checkError) {
     context.log.error('[guardians/DELETE] Check error:', checkError);
-    return respond(context, 500, { error: 'database_error' });
+    return respondGuardiansError(context, 500, 'database_error', checkError, {
+      action: 'check_guardian_links_before_delete',
+      guardian_id: guardianId,
+    });
   }
 
   if (links && links.length > 0) {
@@ -375,7 +415,10 @@ async function handleDelete(context, client, orgId, guardianId) {
 
   if (error) {
     context.log.error('[guardians/DELETE] Delete error:', error);
-    return respond(context, 500, { error: 'database_error' });
+    return respondGuardiansError(context, 500, 'database_error', error, {
+      action: 'delete_guardian',
+      guardian_id: guardianId,
+    });
   }
 
   if (!data) {

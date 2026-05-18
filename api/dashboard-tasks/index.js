@@ -15,6 +15,7 @@ import { parseJsonBodyWithLimit } from '../_shared/validation.js';
 import { listDashboardTasks, resolveDashboardTask } from '../_shared/dashboard-tasks.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const MAX_BODY_BYTES = 48 * 1024;
 
@@ -54,12 +55,21 @@ export default async function dashboardTasks(context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'dashboard-tasks' },
+  });
+
   let role = null;
   try {
     role = await ensureMembership(supabase, orgId, userId);
   } catch (membershipError) {
     context.log?.error?.('dashboard-tasks failed to verify membership', { message: membershipError?.message });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, {
+      error: membershipError,
+      metadata: { action: 'verify_membership' },
+    });
   }
 
   if (!role) {
@@ -81,7 +91,15 @@ export default async function dashboardTasks(context, req) {
       return respond(context, 200, { entries });
     } catch (error) {
       context.log?.error?.('dashboard-tasks failed to list tasks', { message: error?.message });
-      return respond(context, 500, { message: 'failed_to_load_dashboard_tasks' });
+      return respondTracked(context, 500, { message: 'failed_to_load_dashboard_tasks' }, undefined, {
+        error,
+        metadata: {
+          action: 'list_dashboard_tasks',
+          status: normalizeString(req?.query?.status) || 'open',
+          resource_type: normalizeString(req?.query?.resource_type) || null,
+          resource_id: normalizeString(req?.query?.resource_id) || null,
+        },
+      });
     }
   }
 
@@ -156,7 +174,10 @@ export default async function dashboardTasks(context, req) {
       return respond(context, 200, resolvedTask);
     } catch (error) {
       context.log?.error?.('dashboard-tasks failed to resolve task', { message: error?.message, taskId });
-      return respond(context, 500, { message: 'failed_to_resolve_dashboard_task' });
+      return respondTracked(context, 500, { message: 'failed_to_resolve_dashboard_task' }, undefined, {
+        error,
+        metadata: { action: 'resolve_dashboard_task', task_id: taskId || null },
+      });
     }
   }
 

@@ -18,6 +18,7 @@ import { sendAndLogBrevoEmail } from '../_shared/email-log.js';
 import { fetchStudentIdsByInstructor } from '../_shared/instructor-student-scope.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import {
   buildSharedBlockMap,
   collectSharedBlockIds,
@@ -40,6 +41,13 @@ const INVALID_VERIFY_MESSAGE = 'מזהה או קוד אימות שגויים';
 const OTP_INVALID_OR_EXPIRED_MESSAGE = 'קוד האימות שגוי או שפג תוקפו';
 const VERIFY_LOCKDOWN_MESSAGE = 'מטעמי אבטחה, כל הקישורים הפעילים עבור תלמיד זה בוטלו עקב יותר מדי נסיונות כושלים. יש ליצור קשר עם המרפאה לקבלת קוד חדש.';
 const WAITING_LIST_ROUTING_CATEGORY = 'waiting_list_intake';
+
+function respondFormSubmissionError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 function normalizeDeliveryMethod(value) {
   const normalized = normalizeString(value).toLowerCase();
@@ -860,7 +868,10 @@ async function resendWaitingListIntakeSubmission(context, req, {
       message: routingLookupError?.message,
       submissionId: submission.id,
     });
-    return respond(context, 500, { message: 'failed_to_prepare_resend' });
+    return respondFormSubmissionError(context, 500, 'failed_to_prepare_resend', routingLookupError, {
+      action: 'lookup_waiting_list_invite_for_resend',
+      submission_id: submission.id,
+    });
   }
 
   if (!reusedExistingInvite) {
@@ -887,7 +898,10 @@ async function resendWaitingListIntakeSubmission(context, req, {
         message,
         submissionId: submission.id,
       });
-      return respond(context, 500, { message: 'failed_to_create_active_routing' });
+      return respondFormSubmissionError(context, 500, 'failed_to_create_active_routing', routingError, {
+        action: 'create_waiting_list_invite_routing',
+        submission_id: submission.id,
+      });
     }
   }
 
@@ -929,7 +943,10 @@ async function resendWaitingListIntakeSubmission(context, req, {
       message: updateSubmissionError?.message,
       submissionId: submission.id,
     });
-    return respond(context, 500, { message: 'failed_to_update_submission' });
+    return respondFormSubmissionError(context, 500, 'failed_to_update_submission', updateSubmissionError, {
+      action: 'update_waiting_list_submission_for_resend',
+      submission_id: submission.id,
+    });
   }
 
   if (deliveryMethod === 'email') {
@@ -953,7 +970,11 @@ async function resendWaitingListIntakeSubmission(context, req, {
         message: emailError?.message,
         submissionId: submission.id,
       });
-      return respond(context, 502, { message: 'failed_to_send_email' });
+      return respondFormSubmissionError(context, 502, 'failed_to_send_email', emailError, {
+        action: 'send_waiting_list_resend_email',
+        submission_id: submission.id,
+        delivery_method: deliveryMethod,
+      });
     }
   }
 
@@ -1083,7 +1104,9 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
       message: cleanupError?.message,
       orgId,
     });
-    return respond(context, 500, { message: 'failed_to_load_form_submissions' });
+    return respondFormSubmissionError(context, 500, 'failed_to_load_form_submissions', cleanupError, {
+      action: 'expire_pending_otps_before_list',
+    });
   }
 
   let studentId = UUID_PATTERN.test(requestedStudentId) ? requestedStudentId : '';
@@ -1099,7 +1122,10 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
         message: studentError?.message,
         studentId,
       });
-      return respond(context, 500, { message: 'failed_to_load_form_submissions' });
+      return respondFormSubmissionError(context, 500, 'failed_to_load_form_submissions', studentError, {
+        action: 'resolve_student_client_profile',
+        student_id: studentId,
+      });
     }
     clientProfileId = student?.client_profile_id || '';
   }
@@ -1111,7 +1137,9 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
         message: lessonError?.message,
         userId,
       });
-      return respond(context, 500, { message: 'failed_to_check_student_access' });
+      return respondFormSubmissionError(context, 500, 'failed_to_check_student_access', lessonError, {
+        action: 'resolve_instructor_student_access',
+      });
     }
     if (!studentId || !studentIds.includes(studentId)) {
       return respond(context, 403, { message: 'forbidden' });
@@ -1137,7 +1165,12 @@ async function listStudentSubmissions(context, req, { controlClient, env, orgId,
       studentId,
       clientProfileId,
     });
-    return respond(context, 500, { message: 'failed_to_load_form_submissions' });
+    return respondFormSubmissionError(context, 500, 'failed_to_load_form_submissions', submissionsError, {
+      action: 'load_student_submissions',
+      student_id: studentId || null,
+      client_profile_id: clientProfileId || null,
+      limit,
+    });
   }
 
   const rows = Array.isArray(submissions) ? submissions : [];
@@ -1219,7 +1252,10 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
 
   if (formError) {
     context.log?.error?.('form-submissions failed to load form', { message: formError?.message, formId });
-    return respond(context, 500, { message: 'failed_to_load_form' });
+    return respondFormSubmissionError(context, 500, 'failed_to_load_form', formError, {
+      action: 'load_form_for_initiate',
+      form_id: formId,
+    });
   }
   if (!form || !form.is_active) return respond(context, 404, { message: 'form_not_found' });
   if (!isPublishedFormRecord(form)) {
@@ -1233,7 +1269,12 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
       clientProfileId: requestedClientProfileId,
       studentId: requestedStudentId,
     });
-    return respond(context, 500, { message: 'failed_to_load_client_profile' });
+    return respondFormSubmissionError(context, 500, 'failed_to_load_client_profile', subject.error, {
+      action: 'resolve_subject_for_initiate',
+      form_id: formId,
+      client_profile_id: requestedClientProfileId || null,
+      student_id: requestedStudentId || null,
+    });
   }
   if (!subject.profile) return respond(context, 404, { message: 'client_profile_not_found' });
 
@@ -1250,7 +1291,11 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
     }
   } catch (error) {
     context.log?.error?.('form-submissions failed resolving destination', { message: error?.message, clientProfileId: subject.clientProfileId });
-    return respond(context, 500, { message: 'failed_to_resolve_destination' });
+    return respondFormSubmissionError(context, 500, 'failed_to_resolve_destination', error, {
+      action: 'resolve_destination_for_initiate',
+      client_profile_id: subject.clientProfileId,
+      delivery_method: deliveryMethod,
+    });
   }
 
   const nowIso = getNowIso();
@@ -1285,7 +1330,12 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
       studentId: subject.studentId,
       clientProfileId: subject.clientProfileId,
     });
-    return respond(context, 500, { message: 'failed_to_create_submission' });
+    return respondFormSubmissionError(context, 500, 'failed_to_create_submission', submissionError || new Error('submission insert returned no id'), {
+      action: 'create_submission',
+      form_id: formId,
+      student_id: subject.studentId || null,
+      client_profile_id: subject.clientProfileId,
+    });
   }
 
   let otpCode;
@@ -1312,7 +1362,10 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
         message: message.slice('failed_to_create_otp:'.length),
         submissionId: submission.id,
       });
-      return respond(context, 500, { message: 'failed_to_create_otp' });
+      return respondFormSubmissionError(context, 500, 'failed_to_create_otp', artifactError, {
+        action: 'create_otp_for_initiate',
+        submission_id: submission.id,
+      });
     }
 
     context.log?.error?.('form-submissions failed to create active routing row', {
@@ -1320,7 +1373,10 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
       orgId,
       submissionId: submission.id,
     });
-    return respond(context, 500, { message: 'failed_to_create_active_routing' });
+    return respondFormSubmissionError(context, 500, 'failed_to_create_active_routing', artifactError, {
+      action: 'create_active_routing_for_initiate',
+      submission_id: submission.id,
+    });
   }
 
   const { error: updateSubmissionExpirationError } = await withOrgScope(controlClient, 'form_submissions', orgId)
@@ -1363,7 +1419,11 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
       context.log?.error?.('form-submissions failed sending email via smtp connector', {
         message: emailError?.message,
       });
-      return respond(context, 502, { message: 'failed_to_send_email' });
+      return respondFormSubmissionError(context, 502, 'failed_to_send_email', emailError, {
+        action: 'send_initiate_email',
+        submission_id: submission.id,
+        delivery_method: deliveryMethod,
+      });
     }
   }
 
@@ -1425,7 +1485,10 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
       message: submissionError?.message,
       submissionId,
     });
-    return respond(context, 500, { message: 'failed_to_load_submission' });
+    return respondFormSubmissionError(context, 500, 'failed_to_load_submission', submissionError, {
+      action: 'load_submission_for_resend',
+      submission_id: submissionId,
+    });
   }
   if (!submission) return respond(context, 404, { message: 'submission_not_found' });
 
@@ -1448,7 +1511,11 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
       submissionId,
       formId: submission.form_id,
     });
-    return respond(context, 500, { message: 'failed_to_load_form' });
+    return respondFormSubmissionError(context, 500, 'failed_to_load_form', formError, {
+      action: 'load_form_for_resend',
+      submission_id: submissionId,
+      form_id: submission.form_id,
+    });
   }
   if (!form || !form.is_active) return respond(context, 404, { message: 'form_not_found' });
   if (!isPublishedFormRecord(form)) {
@@ -1462,7 +1529,12 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
       clientProfileId: submission.client_profile_id,
       studentId: submission.student_id,
     });
-    return respond(context, 500, { message: 'failed_to_load_client_profile' });
+    return respondFormSubmissionError(context, 500, 'failed_to_load_client_profile', subject.error, {
+      action: 'resolve_subject_for_resend',
+      submission_id: submissionId,
+      client_profile_id: submission.client_profile_id || null,
+      student_id: submission.student_id || null,
+    });
   }
   if (!subject.profile) return respond(context, 404, { message: 'client_profile_not_found' });
 
@@ -1486,7 +1558,12 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
       submissionId,
       clientProfileId: subject.clientProfileId,
     });
-    return respond(context, 500, { message: 'failed_to_resolve_destination' });
+    return respondFormSubmissionError(context, 500, 'failed_to_resolve_destination', destinationError, {
+      action: 'resolve_destination_for_resend',
+      submission_id: submissionId,
+      client_profile_id: subject.clientProfileId,
+      delivery_method: deliveryMethod,
+    });
   }
 
   if (isWaitingListIntake) {
@@ -1532,7 +1609,10 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
       orgId,
       submissionId,
     });
-    return respond(context, 500, { message: 'failed_to_prepare_resend' });
+    return respondFormSubmissionError(context, 500, 'failed_to_prepare_resend', cleanupError, {
+      action: 'expire_pending_otps_before_resend',
+      submission_id: submissionId,
+    });
   }
 
   const existingOtpMetadata = normalizeJsonObject(submission.otp_metadata, {});
@@ -1564,7 +1644,10 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
       orgId,
       submissionId,
     });
-    return respond(context, 500, { message: 'failed_to_prepare_resend' });
+    return respondFormSubmissionError(context, 500, 'failed_to_prepare_resend', reuseLookupError, {
+      action: 'lookup_reusable_otp_for_resend',
+      submission_id: submissionId,
+    });
   }
 
   if (!reusedExistingOtp) {
@@ -1605,14 +1688,20 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
           message: message.slice('failed_to_create_otp:'.length),
           submissionId,
         });
-        return respond(context, 500, { message: 'failed_to_create_otp' });
+        return respondFormSubmissionError(context, 500, 'failed_to_create_otp', artifactError, {
+          action: 'create_otp_for_resend',
+          submission_id: submissionId,
+        });
       }
       context.log?.error?.('form-submissions failed to create active routing row during resend', {
         message: message.startsWith('failed_to_create_active_routing:') ? message.slice('failed_to_create_active_routing:'.length) : message,
         orgId,
         submissionId,
       });
-      return respond(context, 500, { message: 'failed_to_create_active_routing' });
+      return respondFormSubmissionError(context, 500, 'failed_to_create_active_routing', artifactError, {
+        action: 'create_active_routing_for_resend',
+        submission_id: submissionId,
+      });
     }
   }
 
@@ -1652,7 +1741,11 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
       message: updateSubmissionError?.message,
       submissionId,
     });
-    return respond(context, 500, { message: 'failed_to_update_submission' });
+    return respondFormSubmissionError(context, 500, 'failed_to_update_submission', updateSubmissionError, {
+      action: 'update_submission_for_resend',
+      submission_id: submissionId,
+      reused_existing_otp: reusedExistingOtp,
+    });
   }
 
   if (deliveryMethod === 'email') {
@@ -1674,7 +1767,11 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
         message: emailError?.message,
         submissionId,
       });
-      return respond(context, 502, { message: 'failed_to_send_email' });
+      return respondFormSubmissionError(context, 502, 'failed_to_send_email', emailError, {
+        action: 'send_resend_email',
+        submission_id: submissionId,
+        delivery_method: deliveryMethod,
+      });
     }
   }
 
@@ -1727,7 +1824,9 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
     routingRow = await findActiveRoutingByIdentity(controlClient, identityNumber, otpCode);
   } catch (error) {
     context.log?.error?.('form-submissions verify failed querying active_routing', { message: error?.message });
-    return respond(context, 500, { message: 'failed_to_verify_otp' });
+    return respondFormSubmissionError(context, 500, 'failed_to_verify_otp', error, {
+      action: 'find_active_routing_by_identity',
+    });
   }
 
   if (!routingRow) {
@@ -1769,6 +1868,11 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
     return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
   }
 
+  attachErrorTracking(context, req, controlClient, {
+    orgId,
+    metadata: { public_flow: 'verify', submission_id: submissionId },
+  });
+
   try {
     await expirePendingOtps(controlClient, orgId, controlClient, context.log);
   } catch (cleanupError) {
@@ -1777,7 +1881,10 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
       orgId,
       submissionId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_otp' });
+    return respondFormSubmissionError(context, 500, 'failed_to_verify_otp', cleanupError, {
+      action: 'expire_pending_otps_before_verify',
+      submission_id: submissionId,
+    });
   }
 
   const { data: submission, error: submissionError } = await withOrgScope(controlClient, 'form_submissions', orgId)
@@ -1814,7 +1921,12 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
       submissionId,
       clientProfileId: submission.client_profile_id,
     });
-    return respond(context, 500, { message: 'failed_to_verify_otp' });
+    return respondFormSubmissionError(context, 500, 'failed_to_verify_otp', subject.error, {
+      action: 'resolve_subject_for_verify',
+      submission_id: submissionId,
+      client_profile_id: submission.client_profile_id || null,
+      student_id: submission.student_id || null,
+    });
   }
 
   if (!subject.profile || subject.identityNumber !== identityNumber) {
@@ -1845,7 +1957,10 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
     });
   } catch (error) {
     context.log?.error?.('form-submissions verify failed querying tenant otp', { message: error?.message });
-    return respond(context, 500, { message: 'failed_to_verify_otp' });
+    return respondFormSubmissionError(context, 500, 'failed_to_verify_otp', error, {
+      action: 'find_tenant_pending_otp',
+      submission_id: submissionId,
+    });
   }
 
   if (!otpChallenge) {
@@ -1884,7 +1999,10 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
       message: updateVerifyMetaError?.message,
       submissionId: submission.id,
     });
-    return respond(context, 500, { message: 'failed_to_verify_otp' });
+    return respondFormSubmissionError(context, 500, 'failed_to_verify_otp', updateVerifyMetaError, {
+      action: 'update_verify_metadata',
+      submission_id: submission.id,
+    });
   }
 
   const { data: form, error: formError } = await withOrgScope(controlClient, 'forms', orgId)
@@ -1892,7 +2010,20 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
     .eq('id', submission.form_id)
     .maybeSingle();
 
-  if (formError || !form || !form.is_active) {
+  if (formError) {
+    context.log?.error?.('form-submissions verify failed loading form', {
+      message: formError?.message,
+      formId: submission.form_id,
+      submissionId,
+    });
+    return respondFormSubmissionError(context, 500, 'failed_to_load_form', formError, {
+      action: 'load_form_for_verify',
+      form_id: submission.form_id,
+      submission_id: submissionId,
+    });
+  }
+
+  if (!form || !form.is_active) {
     return respond(context, 404, { message: 'form_not_found' });
   }
 
@@ -1903,7 +2034,16 @@ async function verifySubmissionAccess(context, req, { controlClient }) {
     if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
       return respond(context, 409, { message: 'form_unavailable' });
     }
-    throw error;
+    context.log?.error?.('form-submissions verify failed resolving public form state', {
+      message: error?.message,
+      formId: form.id,
+      submissionId,
+    });
+    return respondFormSubmissionError(context, 500, 'failed_to_verify_otp', error, {
+      action: 'resolve_public_form_state_for_verify',
+      form_id: form.id,
+      submission_id: submissionId,
+    });
   }
   if (!publicFormState.is_published) {
     return respond(context, 409, { message: 'form_not_published' });
@@ -1935,7 +2075,10 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     routingRow = await findActiveRoutingBySubmission(controlClient, submissionId, otpCode);
   } catch (error) {
     context.log?.error?.('form-submissions submit failed querying active_routing', { message: error?.message });
-    return respond(context, 500, { message: 'failed_to_submit_form' });
+    return respondFormSubmissionError(context, 500, 'failed_to_submit_form', error, {
+      action: 'find_active_routing_by_submission',
+      submission_id: submissionId,
+    });
   }
 
   if (!routingRow) {
@@ -1947,12 +2090,28 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     return respond(context, 401, { message: INVALID_VERIFY_MESSAGE });
   }
 
+  attachErrorTracking(context, req, controlClient, {
+    orgId,
+    metadata: { public_flow: 'submit', submission_id: submissionId },
+  });
+
   const { data: submission, error: submissionError } = await withOrgScope(controlClient, 'form_submissions', orgId)
     .select('id, client_profile_id, student_id, form_id, metadata, otp_metadata, submitted_at')
     .eq('id', submissionId)
     .maybeSingle();
 
-  if (submissionError || !submission) {
+  if (submissionError) {
+    context.log?.error?.('form-submissions submit failed loading submission', {
+      message: submissionError?.message,
+      submissionId,
+    });
+    return respondFormSubmissionError(context, 500, 'failed_to_submit_form', submissionError, {
+      action: 'load_submission_for_submit',
+      submission_id: submissionId,
+    });
+  }
+
+  if (!submission) {
     return respond(context, 404, { message: 'submission_not_found' });
   }
 
@@ -1972,7 +2131,10 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
     });
   } catch (error) {
     context.log?.error?.('form-submissions submit failed querying tenant otp', { message: error?.message });
-    return respond(context, 500, { message: 'failed_to_submit_form' });
+    return respondFormSubmissionError(context, 500, 'failed_to_submit_form', error, {
+      action: 'find_tenant_otp_for_submit',
+      submission_id: submissionId,
+    });
   }
 
   if (!otpChallenge) {
@@ -1989,10 +2151,22 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
   };
   let formVersionMetadataAtSubmission = {};
   if (submission.form_id && UUID_PATTERN.test(String(submission.form_id))) {
-    const { data: formRecord } = await withOrgScope(controlClient, 'forms', orgId)
+    const { data: formRecord, error: formError } = await withOrgScope(controlClient, 'forms', orgId)
       .select('id, name, is_active, version, form_schema, alert_rules, visibility_rules, metadata, published_at')
       .eq('id', submission.form_id)
       .maybeSingle();
+    if (formError) {
+      context.log?.error?.('form-submissions submit failed loading form', {
+        message: formError?.message,
+        formId: submission.form_id,
+        submissionId,
+      });
+      return respondFormSubmissionError(context, 500, 'failed_to_submit_form', formError, {
+        action: 'load_form_for_submit',
+        form_id: submission.form_id,
+        submission_id: submissionId,
+      });
+    }
     if (formRecord) {
       if (!formRecord.is_active) {
         return respond(context, 404, { message: 'form_not_found' });
@@ -2004,7 +2178,16 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
         if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
           return respond(context, 409, { message: 'form_unavailable' });
         }
-        throw error;
+        context.log?.error?.('form-submissions submit failed resolving public form state', {
+          message: error?.message,
+          formId: formRecord.id,
+          submissionId,
+        });
+        return respondFormSubmissionError(context, 500, 'failed_to_submit_form', error, {
+          action: 'resolve_public_form_state_for_submit',
+          form_id: formRecord.id,
+          submission_id: submissionId,
+        });
       }
       if (!publicFormState.is_published) {
         return respond(context, 409, { message: 'form_not_published' });
@@ -2054,7 +2237,10 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
       message: updateSubmissionError?.message,
       submissionId,
     });
-    return respond(context, 500, { message: 'failed_to_submit_form' });
+    return respondFormSubmissionError(context, 500, 'failed_to_submit_form', updateSubmissionError, {
+      action: 'update_submission_for_submit',
+      submission_id: submissionId,
+    });
   }
 
   const { error: updateOtpError } = await withOrgScope(controlClient, 'otp_challenges', orgId)
@@ -2074,7 +2260,11 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
       message: updateOtpError?.message,
       challengeId: otpChallenge.id,
     });
-    return respond(context, 500, { message: 'failed_to_submit_form' });
+    return respondFormSubmissionError(context, 500, 'failed_to_submit_form', updateOtpError, {
+      action: 'update_otp_for_submit',
+      submission_id: submissionId,
+      challenge_id: otpChallenge.id,
+    });
   }
 
   const { error: cleanupError } = await controlClient
@@ -2089,7 +2279,11 @@ async function finalizeSubmission(context, req, { controlClient, env }) {
       message: cleanupError?.message,
       routingId: routingRow.id,
     });
-    return respond(context, 500, { message: 'failed_to_cleanup_routing' });
+    return respondFormSubmissionError(context, 500, 'failed_to_cleanup_routing', cleanupError, {
+      action: 'cleanup_active_routing_after_submit',
+      submission_id: submissionId,
+      routing_id: routingRow.id,
+    });
   }
 
   try {
@@ -2145,6 +2339,10 @@ export default async function formSubmissions(context, req) {
     global: { headers: { 'Cache-Control': 'no-store' } },
   });
 
+  attachErrorTracking(context, req, controlClient, {
+    metadata: { endpoint: 'form-submissions', action: action || null },
+  });
+
   if ((method === 'POST' && (!action || action === 'resend')) || (method === 'GET' && !action)) {
     const authorization = resolveBearerAuthorization(req);
     if (!authorization?.token) return respond(context, 401, { message: 'missing_bearer' });
@@ -2168,6 +2366,12 @@ export default async function formSubmissions(context, req) {
     const userId = authResult.data.user.id;
     const userEmail = authResult.data.user.email || '';
 
+    attachErrorTracking(context, req, controlClient, {
+      orgId,
+      userId,
+      metadata: { authenticated: true },
+    });
+
     let role;
     try {
       role = await ensureMembership(controlClient, orgId, userId);
@@ -2177,7 +2381,9 @@ export default async function formSubmissions(context, req) {
         orgId,
         userId,
       });
-      return respond(context, 500, { message: 'failed_to_verify_membership' });
+      return respondFormSubmissionError(context, 500, 'failed_to_verify_membership', membershipError, {
+        action: 'verify_membership',
+      });
     }
 
     if (!role) return respond(context, 403, { message: 'forbidden' });

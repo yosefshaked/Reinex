@@ -13,6 +13,7 @@ import {
 } from '../_shared/org-bff.js';
 import { logAuditEvent, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import { normalizeSharedBlockContent } from '../_shared/forms-runtime.js';
 
 const SELECT_FIELDS = 'id, block_type, name, content_schema, is_active, created_by, created_at, updated_at, metadata';
@@ -195,6 +196,12 @@ export default async function formBlocks(context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'form-blocks' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -204,7 +211,10 @@ export default async function formBlocks(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, {
+      error: membershipError,
+      metadata: { action: 'verify_membership' },
+    });
   }
 
   if (!role || !isAdminRole(role)) {
@@ -226,7 +236,10 @@ export default async function formBlocks(context, req) {
 
       if (error) {
         context.log?.error?.('form-blocks failed to load shared block', { message: error?.message, blockId });
-        return respond(context, 500, { message: 'failed_to_load_form_block' });
+        return respondTracked(context, 500, { message: 'failed_to_load_form_block' }, undefined, {
+          error,
+          metadata: { action: 'load_form_block', block_id: blockId },
+        });
       }
 
       if (!data) {
@@ -242,7 +255,10 @@ export default async function formBlocks(context, req) {
         });
       } catch (usageError) {
         context.log?.error?.('form-blocks failed to load usage', { message: usageError?.message, blockId });
-        return respond(context, 500, { message: 'failed_to_load_form_block' });
+        return respondTracked(context, 500, { message: 'failed_to_load_form_block' }, undefined, {
+          error: usageError,
+          metadata: { action: 'load_form_block_usage', block_id: blockId },
+        });
       }
     }
 
@@ -263,7 +279,10 @@ export default async function formBlocks(context, req) {
     const { data, error } = await query;
     if (error) {
       context.log?.error?.('form-blocks failed to list shared blocks', { message: error?.message });
-      return respond(context, 500, { message: 'failed_to_load_form_blocks' });
+      return respondTracked(context, 500, { message: 'failed_to_load_form_blocks' }, undefined, {
+        error,
+        metadata: { action: 'list_form_blocks', block_type: typeFilter || null, include_inactive: includeInactive },
+      });
     }
 
     const blocks = Array.isArray(data) ? data : [];
@@ -275,7 +294,10 @@ export default async function formBlocks(context, req) {
         .in('shared_block_id', ids);
       if (usageError) {
         context.log?.error?.('form-blocks failed to count usage', { message: usageError?.message });
-        return respond(context, 500, { message: 'failed_to_load_form_blocks' });
+        return respondTracked(context, 500, { message: 'failed_to_load_form_blocks' }, undefined, {
+          error: usageError,
+          metadata: { action: 'count_form_block_usage', block_ids: ids },
+        });
       }
       usageCounts = (Array.isArray(usageRows) ? usageRows : []).reduce((accumulator, row) => {
         const key = row?.shared_block_id;
@@ -323,7 +345,10 @@ export default async function formBlocks(context, req) {
 
     if (error) {
       context.log?.error?.('form-blocks failed to create shared block', { message: error?.message });
-      return respond(context, 500, { message: 'failed_to_create_form_block' });
+      return respondTracked(context, 500, { message: 'failed_to_create_form_block' }, undefined, {
+        error,
+        metadata: { action: 'create_form_block', block_type: blockType },
+      });
     }
 
     await logAuditEvent(supabase, {
@@ -366,7 +391,10 @@ export default async function formBlocks(context, req) {
 
     if (existingError) {
       context.log?.error?.('form-blocks failed to fetch shared block for update', { message: existingError?.message, blockId });
-      return respond(context, 500, { message: 'failed_to_update_form_block' });
+      return respondTracked(context, 500, { message: 'failed_to_update_form_block' }, undefined, {
+        error: existingError,
+        metadata: { action: 'fetch_form_block_for_update', block_id: blockId },
+      });
     }
 
     if (!existing) {
@@ -404,7 +432,10 @@ export default async function formBlocks(context, req) {
         usage = await loadUsage(supabase, orgId, blockId);
       } catch (usageError) {
         context.log?.error?.('form-blocks failed to load usage before deactivate update', { message: usageError?.message, blockId });
-        return respond(context, 500, { message: 'failed_to_update_form_block' });
+        return respondTracked(context, 500, { message: 'failed_to_update_form_block' }, undefined, {
+          error: usageError,
+          metadata: { action: 'load_usage_before_deactivate_update', block_id: blockId },
+        });
       }
 
       if (hasActiveUsage(usage)) {
@@ -423,7 +454,10 @@ export default async function formBlocks(context, req) {
 
     if (error) {
       context.log?.error?.('form-blocks failed to update shared block', { message: error?.message, blockId });
-      return respond(context, 500, { message: 'failed_to_update_form_block' });
+      return respondTracked(context, 500, { message: 'failed_to_update_form_block' }, undefined, {
+        error,
+        metadata: { action: 'update_form_block', block_id: blockId, updated_fields: Object.keys(updates).filter((key) => key !== 'updated_at') },
+      });
     }
 
     if (!usage.length) {
@@ -431,7 +465,10 @@ export default async function formBlocks(context, req) {
         usage = await loadUsage(supabase, orgId, blockId);
       } catch (usageError) {
         context.log?.error?.('form-blocks failed to load usage after update', { message: usageError?.message, blockId });
-        return respond(context, 500, { message: 'failed_to_update_form_block' });
+        return respondTracked(context, 500, { message: 'failed_to_update_form_block' }, undefined, {
+          error: usageError,
+          metadata: { action: 'load_usage_after_update', block_id: blockId },
+        });
       }
     }
 
@@ -491,7 +528,10 @@ export default async function formBlocks(context, req) {
       usage = await loadUsage(supabase, orgId, blockId);
     } catch (usageError) {
       context.log?.error?.('form-blocks failed to load usage before deactivate', { message: usageError?.message, blockId });
-      return respond(context, 500, { message: 'failed_to_update_form_block' });
+      return respondTracked(context, 500, { message: 'failed_to_update_form_block' }, undefined, {
+        error: usageError,
+        metadata: { action: 'load_usage_before_deactivate', block_id: blockId },
+      });
     }
 
     if (hasActiveUsage(usage)) {
@@ -509,7 +549,10 @@ export default async function formBlocks(context, req) {
 
     if (error) {
       context.log?.error?.('form-blocks failed to deactivate shared block', { message: error?.message, blockId });
-      return respond(context, 500, { message: 'failed_to_update_form_block' });
+      return respondTracked(context, 500, { message: 'failed_to_update_form_block' }, undefined, {
+        error,
+        metadata: { action: 'deactivate_form_block', block_id: blockId },
+      });
     }
 
     if (!data) {

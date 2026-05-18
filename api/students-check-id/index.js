@@ -11,6 +11,14 @@ import {
   withOrgScope,
   UUID_PATTERN,
 } from '../_shared/org-bff.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+function respondStudentsCheckIdError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 export default async function (context, req) {
   const method = String(req.method || 'GET').toUpperCase();
@@ -56,6 +64,12 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'students-check-id' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -65,7 +79,9 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondStudentsCheckIdError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   if (!role) {
@@ -115,7 +131,10 @@ export default async function (context, req) {
         message: excludedStudentError.message,
         excludeId,
       });
-      return respond(context, 500, { message: 'failed_to_validate_identity_number' });
+      return respondStudentsCheckIdError(context, 500, 'failed_to_validate_identity_number', excludedStudentError, {
+        action: 'resolve_excluded_student_profile',
+        exclude_id: excludeId,
+      });
     }
 
     if (excludedStudent?.client_profile_id) {
@@ -134,7 +153,10 @@ export default async function (context, req) {
       orgId,
       identityNumber,
     });
-    return respond(context, 500, { message: 'failed_to_validate_identity_number' });
+    return respondStudentsCheckIdError(context, 500, 'failed_to_validate_identity_number', error, {
+      action: 'query_identity_number',
+      exclude_id: excludeId || null,
+    });
   }
 
   if (!profile) {
@@ -156,7 +178,10 @@ export default async function (context, req) {
       message: studentError.message,
       clientProfileId: profile.id,
     });
-    return respond(context, 500, { message: 'failed_to_validate_identity_number' });
+    return respondStudentsCheckIdError(context, 500, 'failed_to_validate_identity_number', studentError, {
+      action: 'resolve_student_by_client_profile',
+      client_profile_id: profile.id,
+    });
   }
 
   context.log?.info?.('[students-check-id] Duplicate found', {

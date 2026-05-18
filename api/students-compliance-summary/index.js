@@ -10,7 +10,7 @@ import {
   resolveOrgId,
   withOrgScope,
 } from '../_shared/org-bff.js';
-import { respondTrackedError } from '../_shared/error-events.js';
+import { attachErrorTracking, respondTracked, respondTrackedError } from '../_shared/error-events.js';
 
 /**
  * GET /api/students/compliance-summary
@@ -64,6 +64,12 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'students-compliance-summary' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -73,7 +79,10 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, {
+      error: membershipError,
+      metadata: { action: 'verify_membership' },
+    });
   }
 
   if (!role) {
@@ -156,6 +165,12 @@ export default async function (context, req) {
       message: error?.message,
       stack: error?.stack,
     });
-    return respond(context, 500, { message: 'internal_server_error' });
+    return respondTracked(context, 500, { message: 'internal_server_error' }, undefined, {
+      error,
+      metadata: {
+        action: 'compliance_summary',
+        student_count: studentIdsFilter?.length || null,
+      },
+    });
   }
 }

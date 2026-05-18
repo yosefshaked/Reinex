@@ -190,6 +190,14 @@ function mapOtpErrorMessage(code) {
   }
 }
 
+function resolvePublicApiErrorMessage(payload, status, mapMessage) {
+  const supportCode = String(payload?.error_id || payload?.support_code || '').trim();
+  if (Number(status) >= 500 && supportCode) {
+    return `הפעולה נכשלה. קוד תמיכה: ${supportCode}`;
+  }
+  return mapMessage(payload?.message || payload?.error);
+}
+
 const LEGAL_NOTICE_DISMISSED_KEY = 'reinex_submit_legal_notice_dismissed';
 
 function RequiredLabel({ htmlFor, children, required = false }) {
@@ -312,7 +320,7 @@ export default function SubmitFormPage() {
         const response = await fetch(`/api/waiting-list-intake/load?invite=${encodeURIComponent(invite)}`);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(mapInviteLoadErrorMessage(payload?.message));
+          throw new Error(resolvePublicApiErrorMessage(payload, response.status, mapInviteLoadErrorMessage));
         }
         if (cancelled) return;
 
@@ -412,7 +420,7 @@ export default function SubmitFormPage() {
 
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(mapOtpErrorMessage(payload?.message));
+        throw new Error(resolvePublicApiErrorMessage(payload, response.status, mapOtpErrorMessage));
       }
 
       setSubmissionId(String(payload?.submission_id || submissionId || ''));
@@ -482,7 +490,7 @@ export default function SubmitFormPage() {
 
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(mapInviteSubmitErrorMessage(payload?.message));
+          throw new Error(resolvePublicApiErrorMessage(payload, response.status, mapInviteSubmitErrorMessage));
         }
 
         setSuccessMessage('הטופס נקלט בהצלחה. נציג יחזור אליך בהקדם.');
@@ -522,7 +530,7 @@ export default function SubmitFormPage() {
 
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(mapPublicFormSubmitErrorMessage(payload?.message));
+        throw new Error(resolvePublicApiErrorMessage(payload, response.status, mapPublicFormSubmitErrorMessage));
       }
 
       setSuccessMessage('הטופס נקלט בהצלחה. אפשר לסגור את החלון.');

@@ -9,6 +9,14 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+function respondStudentsRemoveTagError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 export default async function (context, req) {
   const authorization = resolveBearerAuthorization(req);
@@ -45,11 +53,20 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'missing_org_or_tag' });
   }
 
+  const userId = authResult.data.user.id;
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'students-remove-tag', tag_id: tagId },
+  });
+
   let role;
   try {
-    role = await ensureMembership(supabase, orgId, authResult.data.user.id);
-  } catch {
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    role = await ensureMembership(supabase, orgId, userId);
+  } catch (membershipError) {
+    return respondStudentsRemoveTagError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
   if (!isAdminRole(role)) {
     return respond(context, 403, { message: 'forbidden' });
@@ -61,7 +78,9 @@ export default async function (context, req) {
 
   if (fetchError) {
     context.log?.error?.('students-remove-tag: failed to fetch client profiles', { message: fetchError.message });
-    return respond(context, 500, { message: 'failed_to_fetch_students' });
+    return respondStudentsRemoveTagError(context, 500, 'failed_to_fetch_students', fetchError, {
+      action: 'fetch_client_profiles_by_tag',
+    });
   }
   if (!clientProfiles || clientProfiles.length === 0) {
     return respond(context, 200, { message: 'tag_removed_no_students', tag_id: tagId, students_updated: 0 });
@@ -82,7 +101,11 @@ export default async function (context, req) {
   }
 
   if (updated === 0 && failures.length > 0) {
-    return respond(context, 500, { message: 'failed_to_update_students', failures });
+    return respondStudentsRemoveTagError(context, 500, 'failed_to_update_students', new Error('failed to update any client profile tags'), {
+      action: 'remove_tag_from_client_profiles',
+      failure_count: failures.length,
+      failures,
+    });
   }
 
   return respond(context, 200, { message: 'tag_removed_profiles', tag_id: tagId, students_updated: updated, failures });

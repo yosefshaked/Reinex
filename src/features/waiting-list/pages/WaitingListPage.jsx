@@ -691,7 +691,7 @@ export default function WaitingListPage() {
     return () => {
       cancelled = true;
     };
-  }, [canFetch, selectedEntry?.id, selectedEntry?.status, suggestionMode, session, activeOrgId]);
+  }, [canFetch, selectedEntry?.id, selectedEntry?.status, selectedEntry?.desired_service_id, selectedEntry?.preferred_days?.join(','), JSON.stringify(selectedEntry?.preferred_times), suggestionMode, session, activeOrgId]);
 
   const openCreateDialog = () => {
     setFormValues(buildInitialForm(null, studentOptionMap));

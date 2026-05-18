@@ -34,6 +34,7 @@ import {
 } from '../_shared/client-profiles.js';
 import { resolvePublicAppBaseUrl } from '../_shared/public-app-url.js';
 import { normalizePreferredTimesToGrid } from '../_shared/time-grid.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const ROUTING_CATEGORY = 'waiting_list_intake';
 const DEFAULT_INVITE_TTL_MINUTES = 10080;
@@ -43,6 +44,13 @@ const PAYMENT_PATH_INTENTS = new Set(['private', 'hmo', 'unsure']);
 const HMO_APPROVAL_STATUSES = new Set(['no_approval_yet', 'send_separately']);
 const GUARDIAN_RELATIONSHIPS = new Set(['father', 'mother', 'self', 'caretaker', 'other']);
 const REVIEWABLE_WAITING_LIST_STATUSES = ['new', 'open'];
+
+function respondWaitingListIntakeError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 function normalizeIdentityNumber(value) {
   return String(value || '').replace(/\D/g, '').trim();
@@ -428,7 +436,10 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
     const message = String(error?.message || '');
     if (message.startsWith('failed_to_load_form:')) {
       context.log?.error?.('waiting-list-intake failed to load form', { message: message.slice('failed_to_load_form:'.length), formId });
-      return respond(context, 500, { message: 'failed_to_load_form' });
+      return respondWaitingListIntakeError(context, 500, 'failed_to_load_form', error, {
+        action: 'load_form_for_invite',
+        form_id: formId,
+      });
     }
     if (message === 'form_requires_publish_migration') {
       return respond(context, 409, { message: 'form_requires_publish_migration' });
@@ -438,9 +449,16 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
     }
     if (message.startsWith('failed_to_load_service:')) {
       context.log?.error?.('waiting-list-intake failed to load service', { message: message.slice('failed_to_load_service:'.length), desiredServiceId });
-      return respond(context, 500, { message: 'failed_to_load_service' });
+      return respondWaitingListIntakeError(context, 500, 'failed_to_load_service', error, {
+        action: 'load_service_for_invite',
+        service_id: desiredServiceId,
+      });
     }
-    throw error;
+    return respondWaitingListIntakeError(context, 500, 'failed_to_prepare_invite', error, {
+      action: 'load_invite_dependencies',
+      form_id: formId,
+      service_id: desiredServiceId,
+    });
   }
 
   if (!form) return respond(context, 404, { message: 'form_not_found' });
@@ -465,22 +483,36 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
     const message = String(error?.message || '');
     if (message.startsWith('failed_to_lookup_student:')) {
       context.log?.error?.('waiting-list-intake failed to lookup student', { message: message.slice('failed_to_lookup_student:'.length), orgId });
-      return respond(context, 500, { message: 'failed_to_lookup_student' });
+      return respondWaitingListIntakeError(context, 500, 'failed_to_lookup_student', error, {
+        action: 'lookup_prospect_student',
+        identity_number_present: Boolean(identityNumber),
+      });
     }
     if (message.startsWith('failed_to_update_student:')) {
       context.log?.error?.('waiting-list-intake failed to update student', { message: message.slice('failed_to_update_student:'.length), orgId });
-      return respond(context, 500, { message: 'failed_to_update_student' });
+      return respondWaitingListIntakeError(context, 500, 'failed_to_update_student', error, {
+        action: 'update_prospect_student',
+        identity_number_present: Boolean(identityNumber),
+      });
     }
     if (message.startsWith('failed_to_create_student:')) {
       context.log?.error?.('waiting-list-intake failed to create student', { message: message.slice('failed_to_create_student:'.length), orgId });
-      return respond(context, 500, { message: 'failed_to_create_student' });
+      return respondWaitingListIntakeError(context, 500, 'failed_to_create_student', error, {
+        action: 'create_prospect_student',
+        identity_number_present: Boolean(identityNumber),
+      });
     }
-    throw error;
+    return respondWaitingListIntakeError(context, 500, 'failed_to_resolve_client_profile', error, {
+      action: 'create_or_reuse_prospect_student',
+      identity_number_present: Boolean(identityNumber),
+    });
   }
 
   if (!clientProfileId) {
     context.log?.error?.('waiting-list-intake failed to resolve client profile id', { orgId });
-    return respond(context, 500, { message: 'failed_to_resolve_client_profile' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_resolve_client_profile', new Error('missing client profile id after prospect resolution'), {
+      action: 'resolve_client_profile_id',
+    });
   }
 
   const nowIso = getNowIso();
@@ -588,7 +620,13 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
       formId,
       desiredServiceId,
     });
-    return respond(context, 500, { message: 'failed_to_prepare_invite' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_prepare_invite', error, {
+      action: 'resolve_reusable_invite',
+      student_id: studentId || null,
+      client_profile_id: clientProfileId,
+      form_id: formId,
+      service_id: desiredServiceId,
+    });
   }
 
   const { data: submission, error: submissionError } = await withOrgScope(client, 'form_submissions', orgId)
@@ -627,7 +665,12 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
       studentId,
       formId,
     });
-    return respond(context, 500, { message: 'failed_to_create_submission' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_create_submission', submissionError || new Error('submission insert returned no id'), {
+      action: 'create_submission_shell',
+      student_id: studentId || null,
+      client_profile_id: clientProfileId,
+      form_id: formId,
+    });
   }
   submissionId = submission.id;
 
@@ -695,7 +738,11 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
       submissionId,
       orgId,
     });
-    return respond(context, 500, { message: 'failed_to_create_active_routing' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_create_active_routing', routingError || new Error('active routing insert returned no id'), {
+      action: 'create_invite_routing',
+      submission_id: submissionId,
+      cleanup_attempted: Boolean(submissionId),
+    });
   }
 
   const inviteUrl = buildInviteLink(req, env, routingRow.id);
@@ -768,7 +815,10 @@ async function loadPublicInvite(context, req, { controlClient }) {
     routingRow = await loadInviteRouting(controlClient, inviteToken);
   } catch (error) {
     context.log?.error?.('waiting-list-intake failed to load active routing row', { message: error?.message, inviteToken });
-    return respond(context, 500, { message: 'failed_to_load_invite' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_load_invite', error, {
+      action: 'load_invite_routing',
+      invite_token: inviteToken,
+    });
   }
 
   if (!routingRow?.org_id) return respond(context, 404, { message: 'invite_not_found' });
@@ -779,6 +829,11 @@ async function loadPublicInvite(context, req, { controlClient }) {
   const submissionId = normalizeUuid(routingRow?.routing_info?.submission_id);
   if (!submissionId) return respond(context, 404, { message: 'invite_not_found' });
 
+  attachErrorTracking(context, req, controlClient, {
+    orgId,
+    metadata: { public_flow: 'load_invite', submission_id: submissionId, invite_token: inviteToken },
+  });
+
   const { data: submission, error: submissionError } = await withOrgScope(client, 'form_submissions', orgId)
     .select('id, client_profile_id, student_id, form_id, answers, metadata, submitted_at')
     .eq('id', submissionId)
@@ -786,7 +841,10 @@ async function loadPublicInvite(context, req, { controlClient }) {
 
   if (submissionError) {
     context.log?.error?.('waiting-list-intake failed to load submission shell', { message: submissionError?.message, submissionId });
-    return respond(context, 500, { message: 'failed_to_load_invite' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_load_invite', submissionError, {
+      action: 'load_invite_submission',
+      submission_id: submissionId,
+    });
   }
   if (!submission) return respond(context, 404, { message: 'invite_not_found' });
   const submissionMetadata = submission?.metadata && typeof submission.metadata === 'object' ? submission.metadata : {};
@@ -794,11 +852,36 @@ async function loadPublicInvite(context, req, { controlClient }) {
     return respond(context, 409, { message: 'invite_already_completed' });
   }
 
-  const [{ data: form }, { data: clientProfile }, services] = await Promise.all([
-    withOrgScope(client, 'forms', orgId).select('id, name, description, form_schema, alert_rules, visibility_rules, metadata, form_usage').eq('id', submission.form_id).maybeSingle(),
-    withOrgScope(client, 'client_profiles', orgId).select('id, first_name, last_name, identity_number, phone, email').eq('id', submission.client_profile_id).maybeSingle(),
-    listActiveServices(client, orgId),
-  ]);
+  let form;
+  let clientProfile;
+  let services;
+  try {
+    const [formResult, clientProfileResult, serviceRows] = await Promise.all([
+      withOrgScope(client, 'forms', orgId).select('id, name, description, form_schema, alert_rules, visibility_rules, metadata, form_usage').eq('id', submission.form_id).maybeSingle(),
+      withOrgScope(client, 'client_profiles', orgId).select('id, first_name, last_name, identity_number, phone, email').eq('id', submission.client_profile_id).maybeSingle(),
+      listActiveServices(client, orgId),
+    ]);
+    if (formResult.error) {
+      throw new Error(`failed_to_load_form:${formResult.error.message}`);
+    }
+    if (clientProfileResult.error) {
+      throw new Error(`failed_to_load_client_profile:${clientProfileResult.error.message}`);
+    }
+    form = formResult.data;
+    clientProfile = clientProfileResult.data;
+    services = serviceRows;
+  } catch (error) {
+    context.log?.error?.('waiting-list-intake failed to load invite dependencies', {
+      message: error?.message,
+      submissionId,
+    });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_load_invite', error, {
+      action: 'load_invite_dependencies',
+      submission_id: submissionId,
+      form_id: submission.form_id || null,
+      client_profile_id: submission.client_profile_id || null,
+    });
+  }
 
   if (!form || form.form_usage !== 'waiting_list_intake') {
     return respond(context, 404, { message: 'form_not_found' });
@@ -811,7 +894,16 @@ async function loadPublicInvite(context, req, { controlClient }) {
     if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
       return respond(context, 409, { message: 'form_unavailable' });
     }
-    throw error;
+    context.log?.error?.('waiting-list-intake failed resolving public form state for load', {
+      message: error?.message,
+      submissionId,
+      formId: form.id,
+    });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_load_invite', error, {
+      action: 'resolve_public_form_state_for_load',
+      submission_id: submissionId,
+      form_id: form.id,
+    });
   }
   if (!publicFormState.is_published) {
     return respond(context, 409, { message: 'form_not_published' });
@@ -858,7 +950,10 @@ async function submitPublicInvite(context, req, { controlClient }) {
     routingRow = await loadInviteRouting(controlClient, inviteToken);
   } catch (error) {
     context.log?.error?.('waiting-list-intake failed to resolve invite token on submit', { message: error?.message, inviteToken });
-    return respond(context, 500, { message: 'failed_to_submit_intake' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_submit_intake', error, {
+      action: 'load_invite_routing_for_submit',
+      invite_token: inviteToken,
+    });
   }
 
   if (!routingRow?.org_id) return respond(context, 404, { message: 'invite_not_found' });
@@ -869,6 +964,11 @@ async function submitPublicInvite(context, req, { controlClient }) {
   const submissionId = normalizeUuid(routingRow?.routing_info?.submission_id);
   if (!submissionId) return respond(context, 404, { message: 'invite_not_found' });
 
+  attachErrorTracking(context, req, controlClient, {
+    orgId,
+    metadata: { public_flow: 'submit_invite', submission_id: submissionId, invite_token: inviteToken },
+  });
+
   const { data: submission, error: submissionError } = await withOrgScope(client, 'form_submissions', orgId)
     .select('id, client_profile_id, student_id, form_id, answers, metadata, submitted_at')
     .eq('id', submissionId)
@@ -876,7 +976,10 @@ async function submitPublicInvite(context, req, { controlClient }) {
 
   if (submissionError) {
     context.log?.error?.('waiting-list-intake failed to load submission for submit', { message: submissionError?.message, submissionId });
-    return respond(context, 500, { message: 'failed_to_submit_intake' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_submit_intake', submissionError, {
+      action: 'load_submission_for_submit',
+      submission_id: submissionId,
+    });
   }
   if (!submission) return respond(context, 404, { message: 'invite_not_found' });
   const currentSubmissionMetadata = submission?.metadata && typeof submission.metadata === 'object' ? submission.metadata : {};
@@ -884,10 +987,30 @@ async function submitPublicInvite(context, req, { controlClient }) {
     return respond(context, 409, { message: 'invite_already_completed' });
   }
 
-  const [{ data: form }, services] = await Promise.all([
-    withOrgScope(client, 'forms', orgId).select('id, name, version, form_schema, alert_rules, visibility_rules, metadata, form_usage, published_at').eq('id', submission.form_id).maybeSingle(),
-    listActiveServices(client, orgId),
-  ]);
+  let form;
+  let services;
+  try {
+    const [formResult, serviceRows] = await Promise.all([
+      withOrgScope(client, 'forms', orgId).select('id, name, version, form_schema, alert_rules, visibility_rules, metadata, form_usage, published_at').eq('id', submission.form_id).maybeSingle(),
+      listActiveServices(client, orgId),
+    ]);
+    if (formResult.error) {
+      throw new Error(`failed_to_load_form:${formResult.error.message}`);
+    }
+    form = formResult.data;
+    services = serviceRows;
+  } catch (error) {
+    context.log?.error?.('waiting-list-intake failed to load submit dependencies', {
+      message: error?.message,
+      submissionId,
+      formId: submission.form_id,
+    });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_submit_intake', error, {
+      action: 'load_submit_dependencies',
+      submission_id: submissionId,
+      form_id: submission.form_id || null,
+    });
+  }
 
   if (!form || form.form_usage !== 'waiting_list_intake') {
     return respond(context, 404, { message: 'form_not_found' });
@@ -900,7 +1023,16 @@ async function submitPublicInvite(context, req, { controlClient }) {
     if (String(error?.message || '').startsWith('missing_shared_blocks:')) {
       return respond(context, 409, { message: 'form_unavailable' });
     }
-    throw error;
+    context.log?.error?.('waiting-list-intake failed resolving public form state for submit', {
+      message: error?.message,
+      submissionId,
+      formId: form.id,
+    });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_submit_intake', error, {
+      action: 'resolve_public_form_state_for_submit',
+      submission_id: submissionId,
+      form_id: form.id,
+    });
   }
   if (!publicFormState.is_published) {
     return respond(context, 409, { message: 'form_not_published' });
@@ -984,7 +1116,11 @@ async function submitPublicInvite(context, req, { controlClient }) {
         message: error.message,
         clientProfileId: submission.client_profile_id,
       });
-      return respond(context, 500, { message: 'failed_to_validate_identity_number' });
+      return respondWaitingListIntakeError(context, 500, 'failed_to_validate_identity_number', error, {
+        action: 'validate_identity_number',
+        submission_id: submissionId,
+        client_profile_id: submission.client_profile_id,
+      });
     }
     if (conflictProfile?.id) {
       const { data: conflictStudent } = await withOrgScope(client, 'students', orgId)
@@ -1015,7 +1151,11 @@ async function submitPublicInvite(context, req, { controlClient }) {
       message: updateStudentError.message,
       clientProfileId: submission.client_profile_id,
     });
-    return respond(context, 500, { message: 'failed_to_update_student' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_update_student', updateStudentError, {
+      action: 'update_client_profile_from_submit',
+      submission_id: submissionId,
+      client_profile_id: submission.client_profile_id,
+    });
   }
 
   await writeTenantAudit(context, client, {
@@ -1058,7 +1198,11 @@ async function submitPublicInvite(context, req, { controlClient }) {
         message,
         clientProfileId: submission.client_profile_id,
       });
-      return respond(context, 500, { message: 'failed_to_link_guardian' });
+      return respondWaitingListIntakeError(context, 500, 'failed_to_link_guardian', error, {
+        action: 'create_or_link_guardian',
+        submission_id: submissionId,
+        client_profile_id: submission.client_profile_id,
+      });
     }
   }
 
@@ -1160,7 +1304,10 @@ async function submitPublicInvite(context, req, { controlClient }) {
       message: updateSubmissionError.message,
       submissionId,
     });
-    return respond(context, 500, { message: 'failed_to_submit_intake' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_submit_intake', updateSubmissionError, {
+      action: 'finalize_intake_submission',
+      submission_id: submissionId,
+    });
   }
 
   await writeTenantAudit(context, client, {
@@ -1214,7 +1361,12 @@ async function submitPublicInvite(context, req, { controlClient }) {
         clientProfileId: submission.client_profile_id,
         serviceId,
       });
-      return respond(context, 500, { message: 'failed_to_create_waiting_list' });
+      return respondWaitingListIntakeError(context, 500, 'failed_to_create_waiting_list', existingEntryError, {
+        action: 'load_existing_waiting_list_entry',
+        submission_id: submissionId,
+        client_profile_id: submission.client_profile_id,
+        service_id: serviceId,
+      });
     }
 
     if (existingEntry?.id) {
@@ -1237,7 +1389,12 @@ async function submitPublicInvite(context, req, { controlClient }) {
           message: updateEntryError.message,
           entryId: existingEntry.id,
         });
-        return respond(context, 500, { message: 'failed_to_create_waiting_list' });
+        return respondWaitingListIntakeError(context, 500, 'failed_to_create_waiting_list', updateEntryError, {
+          action: 'update_waiting_list_entry_from_intake',
+          submission_id: submissionId,
+          entry_id: existingEntry.id,
+          service_id: serviceId,
+        });
       }
 
       await writeTenantAudit(context, client, {
@@ -1283,7 +1440,12 @@ async function submitPublicInvite(context, req, { controlClient }) {
           clientProfileId: submission.client_profile_id,
           serviceId,
         });
-        return respond(context, 500, { message: 'failed_to_create_waiting_list' });
+        return respondWaitingListIntakeError(context, 500, 'failed_to_create_waiting_list', insertEntryError || new Error('waiting-list insert returned no id'), {
+          action: 'insert_waiting_list_entry_from_intake',
+          submission_id: submissionId,
+          client_profile_id: submission.client_profile_id,
+          service_id: serviceId,
+        });
       }
 
       await writeTenantAudit(context, client, {
@@ -1311,7 +1473,11 @@ async function submitPublicInvite(context, req, { controlClient }) {
       message: cleanupError.message,
       inviteToken,
     });
-    return respond(context, 500, { message: 'failed_to_submit_intake' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_submit_intake', cleanupError, {
+      action: 'cleanup_invite_routing_after_submit',
+      submission_id: submissionId,
+      invite_token: inviteToken,
+    });
   }
 
   return respond(context, 200, {
@@ -1337,6 +1503,10 @@ export default async function waitingListIntake(context, req) {
 
   const controlClient = createSupabaseAdminClient(adminConfig, {
     global: { headers: { 'Cache-Control': 'no-store' } },
+  });
+
+  attachErrorTracking(context, req, controlClient, {
+    metadata: { endpoint: 'waiting-list-intake', action: action || null },
   });
 
   if (method === 'GET' && (!action || action === 'load')) {
@@ -1373,6 +1543,12 @@ export default async function waitingListIntake(context, req) {
   const userId = authResult.data.user.id;
   const userEmail = authResult.data.user.email || '';
 
+  attachErrorTracking(context, req, controlClient, {
+    orgId,
+    userId,
+    metadata: { authenticated: true },
+  });
+
   let role;
   try {
     role = await ensureMembership(controlClient, orgId, userId);
@@ -1382,7 +1558,9 @@ export default async function waitingListIntake(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondWaitingListIntakeError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   if (!role || !isAdminOrOffice(role)) {

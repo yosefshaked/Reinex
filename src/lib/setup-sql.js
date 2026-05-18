@@ -5922,4 +5922,26 @@ BEGIN
 EXCEPTION
   WHEN others THEN NULL;
 END $$;
+
+-- -----------------------------------------------------------------
+-- public.contact_requests
+-- Landing page access-request form submissions.
+-- Written by service_role only (public endpoint, no auth).
+-- No org_id — these are pre-org inquiries from prospective customers.
+-- -----------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.contact_requests (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       text        NOT NULL,
+  org_name   text        NOT NULL,
+  email      text        NOT NULL,
+  phone      text,
+  message    text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS contact_requests_email_created_idx
+  ON public.contact_requests (email, created_at DESC);
+
+-- No RLS grant to app_user — service_role only.
 `;

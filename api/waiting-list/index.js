@@ -20,8 +20,16 @@ import {
   normalizeFormSchema,
   normalizeVisibilityRules,
 } from '../_shared/forms-runtime.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const STATUS_OPTIONS = new Set(['new', 'open', 'matched', 'closed', 'active', 'all']);
+
+function respondWaitingListError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
@@ -262,6 +270,12 @@ export default async function waitingList(context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'waiting-list' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -271,7 +285,9 @@ export default async function waitingList(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondWaitingListError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   if (!role) {
@@ -304,7 +320,10 @@ export default async function waitingList(context, req) {
     const { data, error } = await builder;
     if (error) {
       context.log?.error?.('waiting-list failed to fetch entries', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_load_waiting_list' });
+      return respondWaitingListError(context, 500, 'failed_to_load_waiting_list', error, {
+        action: 'load_waiting_list',
+        status_filter: statusFilter,
+      });
     }
 
     try {
@@ -312,7 +331,10 @@ export default async function waitingList(context, req) {
       return respond(context, 200, enrichedRows);
     } catch (submissionError) {
       context.log?.error?.('waiting-list failed to enrich intake submissions', { message: submissionError?.message });
-      return respond(context, 500, { message: 'failed_to_load_waiting_list' });
+      return respondWaitingListError(context, 500, 'failed_to_load_waiting_list', submissionError, {
+        action: 'enrich_intake_submissions',
+        status_filter: statusFilter,
+      });
     }
   }
 
@@ -357,7 +379,12 @@ export default async function waitingList(context, req) {
 
     if (error) {
       context.log?.error?.('waiting-list failed to create entry', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_create_waiting_list' });
+      return respondWaitingListError(context, 500, 'failed_to_create_waiting_list', error, {
+        action: 'create_waiting_list_entry',
+        client_profile_id: clientProfileId || null,
+        student_id: studentId || null,
+        service_id: serviceId,
+      });
     }
 
     await writeTenantAudit(context, supabase, {
@@ -444,7 +471,10 @@ export default async function waitingList(context, req) {
 
   if (existingEntryError) {
     context.log?.error?.('waiting-list failed to load entry before update', { message: existingEntryError.message });
-    return respond(context, 500, { message: 'failed_to_load_waiting_list' });
+    return respondWaitingListError(context, 500, 'failed_to_load_waiting_list', existingEntryError, {
+      action: 'load_waiting_list_entry_before_update',
+      entry_id: entryId,
+    });
   }
 
   if (!existingEntry) {
@@ -459,7 +489,11 @@ export default async function waitingList(context, req) {
 
   if (error) {
     context.log?.error?.('waiting-list failed to update entry', { message: error.message });
-    return respond(context, 500, { message: 'failed_to_update_waiting_list' });
+    return respondWaitingListError(context, 500, 'failed_to_update_waiting_list', error, {
+      action: 'update_waiting_list_entry',
+      entry_id: entryId,
+      updated_fields: Object.keys(updates),
+    });
   }
 
   const auditEventType = updates.status === 'open' && existingEntry.status === 'new'

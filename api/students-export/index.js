@@ -14,10 +14,18 @@ import {
 } from '../_shared/org-bff.js';
 import { ensureOrgPermissions } from '../_shared/permissions-utils.js';
 import { extractQuestionsForVersion } from '../_shared/version-lookup.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 import { format, parseISO } from 'date-fns';
 import { he } from 'date-fns/locale';
+
+function respondStudentsExportError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 /**
  * Parse session content from JSON or text
@@ -538,6 +546,12 @@ export default async function (context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'students-export' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -547,7 +561,9 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondStudentsExportError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   if (!role || !isAdminRole(role)) {
@@ -563,7 +579,9 @@ export default async function (context, req) {
       message: permError?.message,
       orgId,
     });
-    return respond(context, 500, { message: 'failed_to_load_permissions' });
+    return respondStudentsExportError(context, 500, 'failed_to_load_permissions', permError, {
+      action: 'load_permissions',
+    });
   }
 
   if (!permissions?.can_export_pdf_reports) {
@@ -589,7 +607,10 @@ export default async function (context, req) {
 
     if (error) {
       context.log?.error?.('students-export failed to fetch student', { message: error.message, studentId });
-      return respond(context, 500, { message: 'failed_to_load_student' });
+      return respondStudentsExportError(context, 500, 'failed_to_load_student', error, {
+        action: 'load_student',
+        student_id: studentId,
+      });
     }
 
     if (!data) {
@@ -599,7 +620,10 @@ export default async function (context, req) {
   student = data;
   } catch (error) {
     context.log?.error?.('students-export failed to fetch student', { message: error?.message, studentId });
-    return respond(context, 500, { message: 'failed_to_load_student' });
+    return respondStudentsExportError(context, 500, 'failed_to_load_student', error, {
+      action: 'load_student',
+      student_id: studentId,
+    });
   }
 
   // Fetch session records
@@ -612,13 +636,19 @@ export default async function (context, req) {
 
     if (error) {
       context.log?.error?.('students-export failed to fetch sessions', { message: error.message, studentId });
-      return respond(context, 500, { message: 'failed_to_load_sessions' });
+      return respondStudentsExportError(context, 500, 'failed_to_load_sessions', error, {
+        action: 'load_sessions',
+        student_id: studentId,
+      });
     }
 
   sessions = Array.isArray(data) ? data : [];
   } catch (error) {
     context.log?.error?.('students-export failed to fetch sessions', { message: error?.message, studentId });
-    return respond(context, 500, { message: 'failed_to_load_sessions' });
+    return respondStudentsExportError(context, 500, 'failed_to_load_sessions', error, {
+      action: 'load_sessions',
+      student_id: studentId,
+    });
   }
 
   // Fetch session form config (complete with version history)
@@ -713,7 +743,11 @@ export default async function (context, req) {
       stack: error?.stack,
       studentId,
     });
-    return respond(context, 500, { message: 'failed_to_generate_pdf' });
+    return respondStudentsExportError(context, 500, 'failed_to_generate_pdf', error, {
+      action: 'generate_pdf',
+      student_id: studentId,
+      session_count: Array.isArray(sessions) ? sessions.length : null,
+    });
   } finally {
     if (browser) {
       try {

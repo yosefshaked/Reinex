@@ -24,8 +24,16 @@ import {
   normalizeMatchMode,
   parseIsoDateInTimezone,
 } from '../_shared/waiting-list-matching.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const MAX_SUGGESTIONS = 18;
+
+function respondWaitingListSuggestionError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 function normalizeUuid(value) {
   const normalized = normalizeString(value);
@@ -82,6 +90,12 @@ export default async function waitingListSuggestions(context, req) {
     return respond(context, 400, { message: 'invalid_entry_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'waiting-list-suggestions', entry_id: entryId, mode },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -91,7 +105,9 @@ export default async function waitingListSuggestions(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondWaitingListSuggestionError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   if (!role || !isAdminOrOffice(role)) {
@@ -105,7 +121,10 @@ export default async function waitingListSuggestions(context, req) {
 
   if (entryError) {
     context.log?.error?.('waiting-list-suggestions failed to load entry', { message: entryError.message, entryId });
-    return respond(context, 500, { message: 'failed_to_load_waiting_list_entry' });
+    return respondWaitingListSuggestionError(context, 500, 'failed_to_load_waiting_list_entry', entryError, {
+      action: 'load_waiting_list_entry',
+      entry_id: entryId,
+    });
   }
 
   if (!entry) {
@@ -124,7 +143,10 @@ export default async function waitingListSuggestions(context, req) {
 
   if (instructorError) {
     context.log?.error?.('waiting-list-suggestions failed to load instructors', { message: instructorError.message });
-    return respond(context, 500, { message: 'failed_to_load_instructors' });
+    return respondWaitingListSuggestionError(context, 500, 'failed_to_load_instructors', instructorError, {
+      action: 'load_active_instructors',
+      entry_id: entryId,
+    });
   }
 
   const instructorIds = Array.isArray(instructorRows) ? instructorRows.map((row) => row.id).filter(Boolean) : [];
@@ -154,12 +176,21 @@ export default async function waitingListSuggestions(context, req) {
 
   if (capabilityResult.error) {
     context.log?.error?.('waiting-list-suggestions failed to load service capabilities', { message: capabilityResult.error.message });
-    return respond(context, 500, { message: 'failed_to_load_instructor_capabilities' });
+    return respondWaitingListSuggestionError(context, 500, 'failed_to_load_instructor_capabilities', capabilityResult.error, {
+      action: 'load_instructor_capabilities',
+      entry_id: entryId,
+      service_id: entry.desired_service_id,
+      instructor_ids: instructorIds,
+    });
   }
 
   if (templateResult.error) {
     context.log?.error?.('waiting-list-suggestions failed to load lesson templates', { message: templateResult.error.message });
-    return respond(context, 500, { message: 'failed_to_load_lesson_templates' });
+    return respondWaitingListSuggestionError(context, 500, 'failed_to_load_lesson_templates', templateResult.error, {
+      action: 'load_lesson_templates',
+      entry_id: entryId,
+      instructor_ids: instructorIds,
+    });
   }
 
   const instructorMap = buildInstructorMap(instructorRows || []);

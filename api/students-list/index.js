@@ -42,6 +42,7 @@ import {
   buildClientProfileDisplayName,
   maskIfAnonymized,
 } from '../_shared/client-profiles.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 const CLIENT_PROFILE_FIELD_NAMES = new Set([
   'first_name',
@@ -56,6 +57,13 @@ const CLIENT_PROFILE_FIELD_NAMES = new Set([
   'onboarding_status',
   'is_active',
 ]);
+
+function respondStudentsListError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 function mergeStudentWithClientProfile(studentRow, clientProfileRow, guardian = null) {
   const student = studentRow || {};
@@ -1067,6 +1075,12 @@ export default async function handler(context, req) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
 
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'students-list' },
+  });
+
   let role;
   try {
     role = await ensureMembership(supabase, orgId, userId);
@@ -1076,7 +1090,9 @@ export default async function handler(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondStudentsListError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   if (!role) {
@@ -1101,7 +1117,10 @@ export default async function handler(context, req) {
           message: singleError.message,
           studentId: singleStudentId,
         });
-        return respond(context, 500, { message: 'failed_to_load_student' });
+        return respondStudentsListError(context, 500, 'failed_to_load_student', singleError, {
+          action: 'load_single_student',
+          student_id: singleStudentId,
+        });
       }
 
       if (!singleStudent) {
@@ -1112,7 +1131,18 @@ export default async function handler(context, req) {
       if (!canManageRoster) {
         const { studentIds: instructorStudentIds, error: accessError } =
           await fetchStudentIdsByInstructor(supabase, userId);
-        if (accessError || !instructorStudentIds.includes(singleStudentId)) {
+        if (accessError) {
+          context.log?.error?.('students-list failed to verify instructor student access', {
+            message: accessError.message,
+            studentId: singleStudentId,
+            userId,
+          });
+          return respondStudentsListError(context, 500, 'failed_to_load_student', accessError, {
+            action: 'verify_instructor_student_access',
+            student_id: singleStudentId,
+          });
+        }
+        if (!instructorStudentIds.includes(singleStudentId)) {
           return respond(context, 403, { message: 'forbidden' });
         }
       }
@@ -1127,7 +1157,11 @@ export default async function handler(context, req) {
           message: clientProfileError.message,
           studentId: singleStudentId,
         });
-        return respond(context, 500, { message: 'failed_to_load_student' });
+        return respondStudentsListError(context, 500, 'failed_to_load_student', clientProfileError, {
+          action: 'load_single_student_client_profile',
+          student_id: singleStudentId,
+          client_profile_id: singleStudent.client_profile_id || null,
+        });
       }
 
       // Join primary guardian
@@ -1217,7 +1251,10 @@ export default async function handler(context, req) {
           message: lessonError.message,
           instructorEmployeeId: instructorFilterId,
         });
-        return respond(context, 500, { message: 'failed_to_load_students' });
+        return respondStudentsListError(context, 500, 'failed_to_load_students', lessonError, {
+          action: 'load_instructor_student_ids',
+          instructor_employee_id: instructorFilterId,
+        });
       }
 
       if (!studentIds.length) {
@@ -1266,7 +1303,10 @@ export default async function handler(context, req) {
         const { ids, error: searchError } = await fetchMatchingStudentClientProfileIds(supabase, studentSearch, { limit: 5000 });
         if (searchError) {
           context.log?.error?.('students-list failed to query client profiles for search', { message: searchError.message });
-          return respond(context, 500, { message: 'failed_to_load_students' });
+          return respondStudentsListError(context, 500, 'failed_to_load_students', searchError, {
+            action: 'search_client_profiles',
+            search_present: true,
+          });
         }
         matchingClientProfileIds = ids;
       }
@@ -1274,7 +1314,11 @@ export default async function handler(context, req) {
       const { data: filteredProfiles, error: filteredProfilesError } = await profileQuery;
       if (filteredProfilesError) {
         context.log?.error?.('students-list failed to load filtered client profiles', { message: filteredProfilesError.message });
-        return respond(context, 500, { message: 'failed_to_load_students' });
+        return respondStudentsListError(context, 500, 'failed_to_load_students', filteredProfilesError, {
+          action: 'load_filtered_client_profiles',
+          status_filter: statusFilter || null,
+          tag_count: normalizedTags.length,
+        });
       }
 
       let filteredProfileIds = (filteredProfiles || []).map((profile) => profile.id).filter(Boolean);
@@ -1309,7 +1353,10 @@ export default async function handler(context, req) {
 
     if (error) {
       context.log?.error?.('students-list failed to fetch roster', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_load_students' });
+      return respondStudentsListError(context, 500, 'failed_to_load_students', error, {
+        action: 'load_students_roster',
+        pagination_requested: paginationRequested,
+      });
     }
 
     let normalizedData = Array.isArray(data) ? data : [];
@@ -1321,7 +1368,10 @@ export default async function handler(context, req) {
 
     if (profilesError) {
       context.log?.error?.('students-list failed to load client profiles for roster', { message: profilesError.message });
-      return respond(context, 500, { message: 'failed_to_load_students' });
+      return respondStudentsListError(context, 500, 'failed_to_load_students', profilesError, {
+        action: 'load_roster_client_profiles',
+        student_count: normalizedData.length,
+      });
     }
 
     const { data: guardiansByClientProfileId, error: guardiansError } = await fetchPrimaryGuardiansByClientProfileIds(
@@ -1357,7 +1407,10 @@ export default async function handler(context, req) {
       context.log?.error?.('students-list failed to load lesson templates for roster schedule', {
         message: scheduleError.message,
       });
-      return respond(context, 500, { message: 'failed_to_load_students' });
+      return respondStudentsListError(context, 500, 'failed_to_load_students', scheduleError, {
+        action: 'load_roster_primary_schedules',
+        student_count: studentIds.length,
+      });
     }
 
     normalizedData = mergeStudentSchedules(normalizedData, scheduleMap);
@@ -1479,7 +1532,9 @@ export default async function handler(context, req) {
 
       if (identityLookupError) {
         context.log?.error?.('students-list failed to check identity number uniqueness', { message: identityLookupError.message });
-        return respond(context, 500, { message: 'failed_to_validate_identity_number' });
+        return respondStudentsListError(context, 500, 'failed_to_validate_identity_number', identityLookupError, {
+          action: 'validate_identity_number_before_create',
+        });
       }
 
       if (existingByIdentityNumber) {
@@ -1508,7 +1563,9 @@ export default async function handler(context, req) {
       });
     } catch (profileError) {
       context.log?.error?.('students-list failed to create or reuse client profile', { message: profileError.message });
-      return respond(context, 500, { message: 'failed_to_create_student' });
+      return respondStudentsListError(context, 500, 'failed_to_create_student', profileError, {
+        action: 'create_or_reuse_client_profile',
+      });
     }
 
     const recordToInsert = {
@@ -1527,7 +1584,10 @@ export default async function handler(context, req) {
 
     if (error) {
       context.log?.error?.('students-list failed to create student', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_create_student' });
+      return respondStudentsListError(context, 500, 'failed_to_create_student', error, {
+        action: 'create_student',
+        client_profile_id: clientProfileResult.clientProfileId,
+      });
     }
 
     // If guardian provided, create the relationship in client_guardians table
@@ -1646,7 +1706,10 @@ export default async function handler(context, req) {
 
   if (fetchError) {
     context.log?.error?.('students-list failed to fetch existing student', { message: fetchError.message, studentId });
-    return respond(context, 500, { message: 'failed_to_fetch_student' });
+    return respondStudentsListError(context, 500, 'failed_to_fetch_student', fetchError, {
+      action: 'fetch_student_for_update',
+      student_id: studentId,
+    });
   }
 
   if (!existingStudent) {
@@ -1664,7 +1727,11 @@ export default async function handler(context, req) {
       studentId,
       clientProfileId: existingStudent.client_profile_id,
     });
-    return respond(context, 500, { message: 'failed_to_fetch_student' });
+    return respondStudentsListError(context, 500, 'failed_to_fetch_student', existingClientProfileError, {
+      action: 'fetch_client_profile_for_update',
+      student_id: studentId,
+      client_profile_id: existingStudent.client_profile_id,
+    });
   }
 
   if (!existingClientProfile) {
@@ -1672,7 +1739,11 @@ export default async function handler(context, req) {
       studentId,
       clientProfileId: existingStudent.client_profile_id,
     });
-    return respond(context, 500, { message: 'failed_to_fetch_student' });
+    return respondStudentsListError(context, 500, 'failed_to_fetch_student', new Error('student points at missing client profile'), {
+      action: 'fetch_client_profile_for_update',
+      student_id: studentId,
+      client_profile_id: existingStudent.client_profile_id,
+    });
   }
 
   if (Object.prototype.hasOwnProperty.call(normalizedUpdates.updates, 'identity_number')) {
@@ -1688,7 +1759,10 @@ export default async function handler(context, req) {
           message: lookupError.message,
           studentId,
         });
-        return respond(context, 500, { message: 'failed_to_validate_identity_number' });
+        return respondStudentsListError(context, 500, 'failed_to_validate_identity_number', lookupError, {
+          action: 'validate_identity_number_before_update',
+          student_id: studentId,
+        });
       }
 
       if (conflict) {
@@ -1755,7 +1829,12 @@ export default async function handler(context, req) {
         studentId,
         clientProfileId: existingStudent.client_profile_id,
       });
-      return respond(context, 500, { message: 'failed_to_update_student' });
+      return respondStudentsListError(context, 500, 'failed_to_update_student', clientProfileUpdateError, {
+        action: 'update_client_profile',
+        student_id: studentId,
+        client_profile_id: existingStudent.client_profile_id,
+        updated_fields: Object.keys(clientProfileUpdates),
+      });
     }
 
     if (!updatedClientProfile) {
@@ -1764,7 +1843,12 @@ export default async function handler(context, req) {
         clientProfileId: existingStudent.client_profile_id,
         updatedFields: Object.keys(clientProfileUpdates),
       });
-      return respond(context, 500, { message: 'failed_to_update_student' });
+      return respondStudentsListError(context, 500, 'failed_to_update_student', new Error('client profile update returned no row'), {
+        action: 'update_client_profile',
+        student_id: studentId,
+        client_profile_id: existingStudent.client_profile_id,
+        updated_fields: Object.keys(clientProfileUpdates),
+      });
     }
 
     clientProfileAfterUpdate = updatedClientProfile;
@@ -1780,7 +1864,11 @@ export default async function handler(context, req) {
 
     if (error) {
       context.log?.error?.('students-list failed to update student', { message: error.message, studentId });
-      return respond(context, 500, { message: 'failed_to_update_student' });
+      return respondStudentsListError(context, 500, 'failed_to_update_student', error, {
+        action: 'update_student',
+        student_id: studentId,
+        updated_fields: Object.keys(studentUpdates),
+      });
     }
 
     if (!updatedStudent) {
@@ -1916,7 +2004,11 @@ export default async function handler(context, req) {
       studentId,
       clientProfileId: existingStudent.client_profile_id,
     });
-    return respond(context, 500, { message: 'failed_to_update_student' });
+    return respondStudentsListError(context, 500, 'failed_to_update_student', clientProfileReloadError, {
+      action: 'reload_client_profile_after_update',
+      student_id: studentId,
+      client_profile_id: existingStudent.client_profile_id,
+    });
   }
 
   const mergedResponse = mergeStudentWithClientProfile(
@@ -1935,7 +2027,13 @@ export default async function handler(context, req) {
       expected: normalizedUpdates.updates.is_active,
       actual: mergedResponse.is_active,
     });
-    return respond(context, 500, { message: 'failed_to_update_student_status' });
+    return respondStudentsListError(context, 500, 'failed_to_update_student_status', new Error('PUT status update verification failed'), {
+      action: 'verify_put_status_update',
+      student_id: studentId,
+      client_profile_id: existingStudent.client_profile_id,
+      expected: normalizedUpdates.updates.is_active,
+      actual: mergedResponse.is_active,
+    });
   }
 
   // Audit log: student updated
@@ -1977,7 +2075,10 @@ export default async function handler(context, req) {
       message: fetchError.message,
       studentId,
     });
-    return respond(context, 500, { message: 'failed_to_fetch_student' });
+    return respondStudentsListError(context, 500, 'failed_to_fetch_student', fetchError, {
+      action: 'fetch_student_for_status_update',
+      student_id: studentId,
+    });
   }
 
   if (!existingStudent) {
@@ -1995,7 +2096,11 @@ export default async function handler(context, req) {
       studentId,
       clientProfileId: existingStudent.client_profile_id,
     });
-    return respond(context, 500, { message: 'failed_to_fetch_student' });
+    return respondStudentsListError(context, 500, 'failed_to_fetch_student', existingClientProfileError || new Error('client profile missing for PATCH'), {
+      action: 'fetch_client_profile_for_status_update',
+      student_id: studentId,
+      client_profile_id: existingStudent.client_profile_id,
+    });
   }
 
   // Extract status change
@@ -2052,7 +2157,12 @@ export default async function handler(context, req) {
       message: updateError.message,
       studentId,
     });
-    return respond(context, 500, { message: 'failed_to_update_student' });
+    return respondStudentsListError(context, 500, 'failed_to_update_student', updateError, {
+      action: 'update_student_status',
+      student_id: studentId,
+      client_profile_id: existingStudent.client_profile_id,
+      requested_is_active: newIsActive,
+    });
   }
 
   if (!updatedProfile) {
@@ -2062,7 +2172,13 @@ export default async function handler(context, req) {
       statusBefore: oldIsActive,
       statusAfter: newIsActive,
     });
-    return respond(context, 500, { message: 'failed_to_update_student_status' });
+    return respondStudentsListError(context, 500, 'failed_to_update_student_status', new Error('status update returned no profile row'), {
+      action: 'update_student_status',
+      student_id: studentId,
+      client_profile_id: existingStudent.client_profile_id,
+      status_before: oldIsActive,
+      status_after: newIsActive,
+    });
   }
 
   const updated = mergeStudentWithClientProfile(existingStudent, updatedProfile);
@@ -2080,7 +2196,13 @@ export default async function handler(context, req) {
       expected: newIsActive,
       actual: updated.is_active,
     });
-    return respond(context, 500, { message: 'failed_to_update_student_status' });
+    return respondStudentsListError(context, 500, 'failed_to_update_student_status', new Error('PATCH status update verification failed'), {
+      action: 'verify_patch_status_update',
+      student_id: studentId,
+      client_profile_id: existingStudent.client_profile_id,
+      expected: newIsActive,
+      actual: updated.is_active,
+    });
   }
 
   // Audit: status changed
