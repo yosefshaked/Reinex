@@ -5943,5 +5943,7 @@ CREATE TABLE IF NOT EXISTS public.contact_requests (
 CREATE INDEX IF NOT EXISTS contact_requests_email_created_idx
   ON public.contact_requests (email, created_at DESC);
 
--- No RLS grant to app_user — service_role only.
+ALTER TABLE public.contact_requests ENABLE ROW LEVEL SECURITY;
+
+-- No GRANT to app_user — service_role only. Same pattern as admin_data.
 `;

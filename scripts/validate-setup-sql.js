@@ -149,6 +149,7 @@ function extractArrayTableNames() {
 // only. The hard permission denial is the intended security boundary.
 const TABLES_WITHOUT_APP_USER_GRANT = new Set([
   'admin_data',
+  'contact_requests',
   'email_log',
   'error_events',
 ]);
@@ -165,6 +166,7 @@ const TABLES_WITH_CUSTOM_RLS = new Set([
   'audit_log',
   'impersonation_sessions',
   'admin_data',
+  'contact_requests',
   'email_log',
   'error_events',
 ]);
