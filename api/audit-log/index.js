@@ -10,6 +10,8 @@ import {
   respond,
   resolveOrgId,
 } from '../_shared/org-bff.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -99,6 +101,7 @@ export default async function auditLog(context, req) {
   if (!orgId) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
+  attachErrorTracking(context, req, supabase, { orgId, userId, metadata: { endpoint: 'audit-log' } });
 
   let role;
   try {
@@ -109,7 +112,7 @@ export default async function auditLog(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, { error: membershipError });
   }
 
   if (!role) {
@@ -156,7 +159,7 @@ export default async function auditLog(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_load_audit_logs' });
+    return respondTracked(context, 500, { message: 'failed_to_load_audit_logs' }, undefined, { error });
   }
 
   const rows = Array.isArray(data) ? data : [];

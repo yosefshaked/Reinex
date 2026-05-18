@@ -17,6 +17,8 @@ import {
   fetchBillingSnapshot,
 } from '../_shared/student-billing.js';
 import { resolveDashboardTask } from '../_shared/dashboard-tasks.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
 
 const MAX_BODY_BYTES = 96 * 1024;
 
@@ -622,13 +624,14 @@ export default async function (context, req) {
   if (!orgId) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
+  attachErrorTracking(context, req, supabase, { orgId, userId, metadata: { endpoint: 'billing' } });
 
   let role = null;
   try {
     role = await ensureMembership(supabase, orgId, userId);
   } catch (membershipError) {
     context.log?.error?.('billing failed to verify membership', { message: membershipError?.message });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, { error: membershipError });
   }
   if (!role) {
     return respond(context, 403, { message: 'forbidden' });

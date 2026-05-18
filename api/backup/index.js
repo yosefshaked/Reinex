@@ -7,6 +7,8 @@ import {
 import { appendBackupHistory } from '../_shared/backup-history.js';
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 import { logSystemAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
 
 const SERVICE_KEY_HEADER = 'x-backup-service-key';
 const RETENTION_DAYS = 14;
@@ -42,6 +44,7 @@ export default async function backupRun(context, req) {
     }
 
     const supabase = createSingleClient(env);
+    attachErrorTracking(context, req, supabase, { metadata: { endpoint: 'backup' } });
     const storageDriver = getStorageDriver('managed', null, env);
 
     const { data: orgs, error: orgError } = await supabase
@@ -51,7 +54,7 @@ export default async function backupRun(context, req) {
 
     if (orgError) {
       context.log?.error?.('backup-run failed to load organizations', { message: orgError.message });
-      return respond(context, 500, { message: 'failed_to_load_organizations' });
+      return respondTracked(context, 500, { message: 'failed_to_load_organizations' }, undefined, { error: orgError });
     }
 
     const results = {
@@ -181,6 +184,6 @@ export default async function backupRun(context, req) {
     return respond(context, 200, results, { 'Cache-Control': 'no-store' });
   } catch (error) {
     context.log?.error?.('backup-run crashed', { message: error?.message, stack: error?.stack });
-    return respond(context, 500, { message: 'backup_run_failed' });
+    return respondTracked(context, 500, { message: 'backup_run_failed' }, undefined, { error });
   }
 }

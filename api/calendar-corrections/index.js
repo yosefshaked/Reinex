@@ -19,6 +19,8 @@ import { syncLessonClosureState } from '../_shared/calendar-workflow.js';
 import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
 import { ACTIVE_LESSON_INSTANCE_STATUSES, normalizeLessonInstanceStatus } from '../_shared/lesson-instance-status.js';
 import BillingLedgerService from '../_shared/BillingLedgerService.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -249,13 +251,14 @@ export default async function calendarCorrections(context, req) {
   if (!orgId) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
+  attachErrorTracking(context, req, supabase, { orgId, userId, metadata: { endpoint: 'calendar-corrections' } });
 
   let role = null;
   try {
     role = await ensureMembership(supabase, orgId, userId);
   } catch (membershipError) {
     context.log?.error?.('calendar-corrections failed to verify membership', { message: membershipError?.message });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, { error: membershipError });
   }
 
   if (!role) {
@@ -319,7 +322,10 @@ export default async function calendarCorrections(context, req) {
       });
     }
     context.log?.error?.('calendar-corrections failed to build preview', { message: error?.message, originalInstanceId });
-    return respond(context, 500, { message: 'failed_to_build_correction_preview' });
+    return respondTracked(context, 500, { message: 'failed_to_build_correction_preview' }, undefined, {
+      error,
+      metadata: { original_instance_id: originalInstanceId, action },
+    });
   }
 
   if (!preview) {
@@ -391,7 +397,10 @@ export default async function calendarCorrections(context, req) {
         message: error?.message,
         originalInstanceId,
       });
-      return respond(context, 500, { message: 'failed_to_register_blocked_attempt' });
+      return respondTracked(context, 500, { message: 'failed_to_register_blocked_attempt' }, undefined, {
+        error,
+        metadata: { original_instance_id: originalInstanceId, action },
+      });
     }
   }
 
@@ -515,6 +524,9 @@ export default async function calendarCorrections(context, req) {
     });
   } catch (error) {
     context.log?.error?.('calendar-corrections failed to apply correction', { message: error?.message, originalInstanceId });
-    return respond(context, 500, { message: 'failed_to_apply_correction' });
+    return respondTracked(context, 500, { message: 'failed_to_apply_correction' }, undefined, {
+      error,
+      metadata: { original_instance_id: originalInstanceId, action },
+    });
   }
 }

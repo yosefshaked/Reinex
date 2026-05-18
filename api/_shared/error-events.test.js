@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { respondTrackedError, trackErrorEvent } from './error-events.js';
+import { attachErrorTracking, respondTracked, respondTrackedError, trackErrorEvent } from './error-events.js';
 
 function createSupabaseMock({ failInsert = false } = {}) {
   const calls = [];
@@ -97,5 +97,38 @@ describe('error-events', () => {
     assert.equal(insert.payload.status, 400);
     assert.equal(insert.payload.severity, 'info');
   });
-});
 
+  it('respondTracked uses attached request/client context for nested handlers', async () => {
+    const context = { log: { warn() {} } };
+    const req = {
+      method: 'POST',
+      url: '/api/calendar-attendance',
+      headers: { 'x-request-id': 'req-1' },
+    };
+    const supabase = createSupabaseMock();
+
+    attachErrorTracking(context, req, supabase, {
+      orgId: '11111111-1111-1111-1111-111111111111',
+      userId: '22222222-2222-2222-2222-222222222222',
+      metadata: { endpoint: 'calendar-attendance' },
+    });
+
+    await respondTracked(context, 500, { message: 'failed_to_update_attendance' }, undefined, {
+      error: new Error('database update failed'),
+      supportCode: 'ERR-20260510-NESTED',
+      now: new Date('2026-05-10T10:00:00.000Z'),
+    });
+
+    assert.equal(context.res.status, 500);
+    assert.deepEqual(JSON.parse(context.res.body), {
+      message: 'failed_to_update_attendance',
+      error_id: 'ERR-20260510-NESTED',
+    });
+
+    const insert = supabase.calls.find((call) => call.action === 'insert');
+    assert.equal(insert.payload.org_id, '11111111-1111-1111-1111-111111111111');
+    assert.equal(insert.payload.actor_user_id, '22222222-2222-2222-2222-222222222222');
+    assert.equal(insert.payload.metadata.endpoint, 'calendar-attendance');
+    assert.equal(insert.payload.internal_error.message, 'database update failed');
+  });
+});

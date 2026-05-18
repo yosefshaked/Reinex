@@ -43,6 +43,8 @@ import { normalizeWorkflowDecision } from '../_shared/calendar-workflow-decision
 import { normalizeLessonInstanceStatus } from '../_shared/lesson-instance-status.js';
 import { buildUtcBoundsForTimezoneDateRange, getDateKeyInTimezone } from '../_shared/instructor-availability.js';
 import { buildAttendanceTransitionAuditChanges } from '../_shared/attendance-audit.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -369,6 +371,7 @@ export default async function (context, req) {
   if (!orgId) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
+  attachErrorTracking(context, req, supabase, { orgId, userId, metadata: { endpoint: 'calendar-attendance' } });
 
   let role;
   try {
@@ -379,7 +382,7 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, { error: membershipError });
   }
 
   if (!role) {
@@ -423,7 +426,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
 
   if (mutationStateError) {
     context.log?.error?.('calendar/attendance failed to load reminder mutation state', { message: mutationStateError.message });
-    return respond(context, 500, { message: 'failed_to_load_attendance_state' });
+    return respondTracked(context, 500, { message: 'failed_to_load_attendance_state' }, undefined, { error: mutationStateError });
   }
 
   if (!mutationState.instance || !mutationState.participant) {
@@ -480,7 +483,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
 
   if (error) {
     context.log?.error?.('calendar/attendance update-reminder failed', { message: error.message });
-    return respond(context, 500, { message: 'failed_to_update_reminder' });
+    return respondTracked(context, 500, { message: 'failed_to_update_reminder' }, undefined, { error });
   }
 
   if (!updatedRow) {
@@ -490,7 +493,7 @@ async function handleUpdateReminder(context, body, dbContext, userId) {
     });
     if (refreshedError) {
       context.log?.error?.('calendar/attendance failed to refresh reminder state after conflict', { message: refreshedError.message });
-      return respond(context, 500, { message: 'failed_to_update_reminder' });
+      return respondTracked(context, 500, { message: 'failed_to_update_reminder' }, undefined, { error: refreshedError });
     }
     return respondWithVersionConflict(context, {
       resourceType: 'lesson_participant',
@@ -970,7 +973,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
         message: error?.message,
         participantStatus: requestedStatus,
       });
-      return respond(context, 500, { message: 'failed_to_load_status_requirements' });
+      return respondTracked(context, 500, { message: 'failed_to_load_status_requirements' }, undefined, { error });
     }
   }
   const isRestorePreviewAction = body.action === 'preview-restore-to-scheduled';
@@ -1017,7 +1020,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
 
   if (mutationStateError) {
     context.log?.error?.('calendar/attendance failed to load mutation state', { message: mutationStateError.message });
-    return respond(context, 500, { message: 'failed_to_load_attendance_state' });
+    return respondTracked(context, 500, { message: 'failed_to_load_attendance_state' }, undefined, { error: mutationStateError });
   }
 
   const instance = mutationState.instance;
@@ -1060,7 +1063,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
     if (instructorError) {
       context.log?.error?.('calendar/attendance failed to resolve actor instructor', { message: instructorError.message, userId });
-      return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
+      return respondTracked(context, 500, { message: 'failed_to_resolve_actor_instructor' }, undefined, { error: instructorError });
     }
 
     if (!instructorId || instructorId !== instance.instructor_employee_id) {
@@ -1084,7 +1087,10 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
         instanceId: body.instance_id,
         participantId: body.participant_id,
       });
-      return respond(context, 500, { message: 'failed_to_build_restore_preview' });
+      return respondTracked(context, 500, { message: 'failed_to_build_restore_preview' }, undefined, {
+        error,
+        metadata: { instance_id: body.instance_id, participant_id: body.participant_id },
+      });
     }
   }
 
@@ -1118,7 +1124,10 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
         participantId: body.participant_id,
         targetStatus: previewTargetStatus,
       });
-      return respond(context, 500, { message: 'failed_to_build_status_change_preview' });
+      return respondTracked(context, 500, { message: 'failed_to_build_status_change_preview' }, undefined, {
+        error,
+        metadata: { instance_id: body.instance_id, participant_id: body.participant_id, target_status: previewTargetStatus },
+      });
     }
   }
 
@@ -1255,7 +1264,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
         message: participantRowsForRateError.message,
         instanceId: body.instance_id,
       });
-      return respond(context, 500, { message: 'failed_to_load_attendance_state' });
+      return respondTracked(context, 500, { message: 'failed_to_load_attendance_state' }, undefined, { error: participantRowsForRateError });
     }
 
     const rateError = await validateProjectedInstructorRate(client, orgId, instance, participantRowsForRate || [], {
@@ -1288,7 +1297,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
         participantId: body.participant_id,
         instanceId: body.instance_id,
       });
-      return respond(context, 500, { message: 'failed_to_record_grace_cancellation' });
+      return respondTracked(context, 500, { message: 'failed_to_record_grace_cancellation' }, undefined, { error: graceUpsertError });
     }
   }
 
@@ -1315,7 +1324,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     context.log?.error?.('calendar/attendance failed to update participant', { 
       message: updateError.message,
     });
-    return respond(context, 500, { message: 'failed_to_update_attendance' });
+    return respondTracked(context, 500, { message: 'failed_to_update_attendance' }, undefined, { error: updateError });
   }
 
   if (!updatedParticipant) {
@@ -1325,7 +1334,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
     });
     if (refreshedError) {
       context.log?.error?.('calendar/attendance failed to refresh participant after conflict', { message: refreshedError.message });
-      return respond(context, 500, { message: 'failed_to_update_attendance' });
+      return respondTracked(context, 500, { message: 'failed_to_update_attendance' }, undefined, { error: refreshedError });
     }
     return respondWithVersionConflict(context, {
       resourceType: 'lesson_participant',
@@ -1453,7 +1462,7 @@ async function handleMarkAttendance(context, body, dbContext, userId, isAdmin, a
       message: syncError?.message,
       instanceId: body.instance_id,
     });
-    return respond(context, 500, { message: 'failed_to_sync_financial_artifacts' });
+    return respondTracked(context, 500, { message: 'failed_to_sync_financial_artifacts' }, undefined, { error: syncError });
   }
 
   // HMO claim workflow task: when a participant is marked attended on an HMO commitment,

@@ -10,6 +10,8 @@ import {
   resolveOrgId,
   withOrgScope,
 } from '../_shared/org-bff.js';
+import { hasConfiguredAvailability } from '../_shared/instructor-availability.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 /**
  * GET /api/calendar/instructors
@@ -54,6 +56,7 @@ export default async function (context, req) {
   if (!orgId) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
+  attachErrorTracking(context, req, supabase, { orgId, userId, metadata: { endpoint: 'calendar-instructors' } });
 
   let role;
   try {
@@ -64,7 +67,7 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, { error: membershipError });
   }
 
   if (!role) {
@@ -97,7 +100,7 @@ export default async function (context, req) {
       message: instructorsError.message,
       code: instructorsError.code,
     });
-    return respond(context, 500, { message: 'failed_to_load_instructors' });
+    return respondTracked(context, 500, { message: 'failed_to_load_instructors' }, undefined, { error: instructorsError });
   }
 
   if (!instructors || instructors.length === 0) {
@@ -124,7 +127,7 @@ export default async function (context, req) {
       message: profilesResult.error.message,
       code: profilesResult.error.code,
     });
-    return respond(context, 500, { message: 'failed_to_load_instructor_profiles' });
+    return respondTracked(context, 500, { message: 'failed_to_load_instructor_profiles' }, undefined, { error: profilesResult.error });
   }
 
   if (capabilitiesResult.error) {
@@ -132,7 +135,7 @@ export default async function (context, req) {
       message: capabilitiesResult.error.message,
       code: capabilitiesResult.error.code,
     });
-    return respond(context, 500, { message: 'failed_to_load_instructor_capabilities' });
+    return respondTracked(context, 500, { message: 'failed_to_load_instructor_capabilities' }, undefined, { error: capabilitiesResult.error });
   }
 
   const profiles = profilesResult.data || [];
@@ -190,4 +193,3 @@ export default async function (context, req) {
 
   return respond(context, 200, transformedInstructors);
 }
-import { hasConfiguredAvailability } from '../_shared/instructor-availability.js';

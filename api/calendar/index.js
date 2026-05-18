@@ -39,7 +39,7 @@ import {
   completeLessonInstanceWithParticipants,
   normalizeLessonInstanceStatus,
 } from '../_shared/lesson-instance-status.js';
-import { respondTrackedError } from '../_shared/error-events.js';
+import { attachErrorTracking, respondTracked, respondTrackedError } from '../_shared/error-events.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -401,6 +401,7 @@ export default async function (context, req) {
   if (!orgId) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
+  attachErrorTracking(context, req, supabase, { orgId, userId, metadata: { endpoint: 'calendar' } });
 
   let role;
   try {
@@ -411,7 +412,7 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, { error: membershipError });
   }
 
   if (!role) {
@@ -581,7 +582,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
 
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to find instructor', { message: instructorError.message });
-      return respond(context, 500, { message: 'failed_to_load_instructor' });
+      return respondTracked(context, 500, { message: 'failed_to_load_instructor' }, undefined, { error: instructorError });
     }
 
     if (!instructorId) {
@@ -600,9 +601,7 @@ async function handleGetInstances(context, req, dbContext, userId, canManageAll)
       code: error.code,
       details: error.details,
     });
-    return respond(context, 500, { 
-      message: 'failed_to_load_instances'
-    });
+    return respondTracked(context, 500, { message: 'failed_to_load_instances' }, undefined, { error });
   }
 
   const clientProfileIds = Array.from(new Set(
@@ -812,7 +811,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     const { instructorId, error: instructorError } = await resolveActorInstructorId(client, userId);
     if (instructorError) {
       context.log?.error?.('calendar/instances failed to resolve actor instructor', { message: instructorError.message, userId });
-      return respond(context, 500, { message: 'failed_to_resolve_actor_instructor' });
+      return respondTracked(context, 500, { message: 'failed_to_resolve_actor_instructor' }, undefined, { error: instructorError });
     }
 
     if (!instructorId || instructorId !== body.instructor_employee_id) {
@@ -840,7 +839,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
       message: serviceError.message,
       serviceId: body.service_id,
     });
-    return respond(context, 500, { message: 'failed_to_load_service' });
+    return respondTracked(context, 500, { message: 'failed_to_load_service' }, undefined, { error: serviceError });
   }
 
   if (!service) {
@@ -887,7 +886,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
         orgId,
         studentIds,
       });
-      return respond(context, 500, { message: 'failed_to_validate_participants' });
+      return respondTracked(context, 500, { message: 'failed_to_validate_participants' }, undefined, { error: studentRowsError });
     }
 
     const studentById = new Map((studentRows || []).map((row) => [row.id, row]));
@@ -916,7 +915,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
         orgId,
         clientProfileIds,
       });
-      return respond(context, 500, { message: 'failed_to_validate_participants' });
+      return respondTracked(context, 500, { message: 'failed_to_validate_participants' }, undefined, { error: clientProfileRowsError });
     }
 
     const clientProfileById = new Map((clientProfileRows || []).map((row) => [row.id, row]));
@@ -935,7 +934,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
         orgId,
         clientProfileIds,
       });
-      return respond(context, 500, { message: 'failed_to_validate_participants' });
+      return respondTracked(context, 500, { message: 'failed_to_validate_participants' }, undefined, { error: linkedStudentsError });
     }
 
     const linkedStudentByClientProfile = new Map((linkedStudents || []).map((row) => [row.client_profile_id, row.id]));
@@ -987,7 +986,7 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
       instructorEmployeeId: body.instructor_employee_id,
       serviceId: body.service_id,
     });
-    return respond(context, 500, { message: 'failed_to_validate_instructor_availability' });
+    return respondTracked(context, 500, { message: 'failed_to_validate_instructor_availability' }, undefined, { error: availabilityError });
   }
 
   // Create lesson instance
@@ -1017,9 +1016,9 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
       details: instanceError.details,
       hint: instanceError.hint,
     });
-    return respond(context, 500, {
-      message: 'failed_to_create_instance',
-      error: instanceError.code || 'instance_insert_failed',
+    return respondTracked(context, 500, { message: 'failed_to_create_instance' }, undefined, {
+      error: instanceError,
+      metadata: { provider_code: instanceError.code || 'instance_insert_failed' },
     });
   }
 
@@ -1045,9 +1044,9 @@ async function handleCreateInstance(context, body, dbContext, supabase, authCont
     });
     // Rollback instance creation
     await withOrgScope(client, 'lesson_instances', orgId).delete().eq('id', instance.id);
-    return respond(context, 500, {
-      message: 'failed_to_create_participants',
-      error: participantsError.code || 'participants_insert_failed',
+    return respondTracked(context, 500, { message: 'failed_to_create_participants' }, undefined, {
+      error: participantsError,
+      metadata: { provider_code: participantsError.code || 'participants_insert_failed', instance_id: instance.id },
     });
   }
 

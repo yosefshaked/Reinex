@@ -113,7 +113,7 @@ export default async function handler(context, req) {
 
   const { data: students, error: studentsError } = await withOrgScope(supabase, 'students', orgId)
     .select(
-      'id, notes_internal, client_profile_id, client_profiles!client_profile_id(first_name, middle_name, last_name, identity_number, is_active, tags)',
+      'id, notes_internal, client_profile_id, client_profiles!client_profile_id(first_name, middle_name, last_name, identity_number, phone, is_active, tags)',
     )
     .order('first_name', { referencedTable: 'client_profiles', ascending: true });
 
@@ -124,7 +124,7 @@ export default async function handler(context, req) {
 
   // Fetch active lesson templates via participants to get instructor/day/time per student
   const { data: ltpData } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
-    .select('student_id, lesson_templates!inner(instructor_employee_id, day_of_week, time_of_day, is_active)');
+    .select('student_id, lesson_templates!inner(instructor_employee_id, service_id, day_of_week, time_of_day, is_active)');
 
   const studentTemplateMap = new Map();
   for (const ltp of ltpData || []) {
@@ -149,6 +149,32 @@ export default async function handler(context, req) {
   if (instructorsError) {
     context.log?.error?.('students-maintenance-export failed to fetch instructors', { message: instructorsError.message, orgId });
     return respond(context, 500, { message: 'failed_to_fetch_instructors' });
+  }
+
+  // Fetch services for name lookup
+  const { data: services } = await withOrgScope(supabase, 'Services', orgId)
+    .select('id, name');
+
+  const serviceLookup = new Map();
+  for (const svc of services || []) {
+    if (svc?.id && svc?.name) serviceLookup.set(svc.id, svc.name);
+  }
+
+  // Fetch primary guardians per client_profile for contact name/phone
+  const { data: guardianLinks } = await withOrgScope(supabase, 'client_guardians', orgId)
+    .select('client_profile_id, is_primary, guardians!guardian_id(first_name, middle_name, last_name, phone)');
+
+  const guardianByProfileId = new Map();
+  for (const link of guardianLinks || []) {
+    const g = link.guardians || {};
+    const existing = guardianByProfileId.get(link.client_profile_id);
+    // Prefer primary guardian; keep first found if no primary exists
+    if (!existing || link.is_primary) {
+      guardianByProfileId.set(link.client_profile_id, {
+        name: [g.first_name, g.middle_name, g.last_name].filter(Boolean).join(' '),
+        phone: g.phone || '',
+      });
+    }
   }
 
   // Fetch student tags for name lookup
@@ -181,6 +207,8 @@ export default async function handler(context, req) {
   function resolveStudent(student) {
     const profile = student.client_profiles || {};
     const template = studentTemplateMap.get(student.id) || {};
+    const fullName = [profile.first_name, profile.middle_name, profile.last_name].filter(Boolean).join(' ');
+    const guardian = guardianByProfileId.get(student.client_profile_id);
     return {
       id: student.id,
       notes_internal: student.notes_internal,
@@ -190,7 +218,11 @@ export default async function handler(context, req) {
       identity_number: profile.identity_number,
       is_active: profile.is_active,
       tags: profile.tags,
+      // Contact: prefer primary guardian; fall back to student's own info
+      contactName: guardian?.name || fullName,
+      contactPhone: guardian?.phone || profile.phone || '',
       assigned_instructor_id: template.instructor_employee_id,
+      service_id: template.service_id,
       default_day_of_week: template.day_of_week,
       default_session_time: template.time_of_day,
     };
@@ -271,6 +303,8 @@ export default async function handler(context, req) {
           extractionReason = filteredStudents.problemReasons.get(s.id) || '';
         } else if (filter === 'custom' && filteredStudents.filterReasons) {
           extractionReason = filteredStudents.filterReasons.get(s.id) || '';
+        } else {
+          extractionReason = 'ייצוא כל התלמידים';
         }
 
         let sessionTime = s.default_session_time || '';
@@ -279,15 +313,20 @@ export default async function handler(context, req) {
         const dayOfWeek = s.default_day_of_week ? (DAYS_OF_WEEK_HEBREW[s.default_day_of_week] || '') : '';
         const fullName = [s.first_name, s.middle_name, s.last_name].filter(Boolean).join(' ');
 
+        // Format contact phone for Excel (preserve leading zero)
+        let contactPhone = s.contactPhone || '';
+        if (contactPhone && !contactPhone.startsWith('0') && contactPhone.length === 9) contactPhone = '0' + contactPhone;
+        if (contactPhone) contactPhone = `="${contactPhone}"`;
+
         return {
           extraction_reason: extractionReason,
           system_uuid: s.id || '',
           name: fullName,
           national_id: s.identity_number || '',
-          contact_name: '',
-          contact_phone: '',
+          contact_name: s.contactName || '',
+          contact_phone: contactPhone,
           assigned_instructor_name: instructorLookup.get(s.assigned_instructor_id) || '',
-          default_service: '',
+          default_service: serviceLookup.get(s.service_id) || '',
           default_day_of_week: dayOfWeek,
           default_session_time: sessionTime,
           notes: s.notes_internal || '',

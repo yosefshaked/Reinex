@@ -21,6 +21,8 @@ import {
   getDateKeyInTimezone,
 } from '../_shared/instructor-availability.js';
 import { resolveLessonCoverageDecision } from '../_shared/hmo.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
 
 const MAX_BODY_BYTES = 128 * 1024;
 const MAX_GENERATION_DAYS = 31;
@@ -580,6 +582,7 @@ export default async function calendarGenerate(context, req) {
   if (!orgId) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
+  attachErrorTracking(context, req, supabase, { orgId, userId, metadata: { endpoint: 'calendar-generate' } });
 
   const { items: retryItems, valid: retryItemsValid } = normalizeRetryItems(body?.retry_items || body?.retryItems);
   if (!retryItemsValid) {
@@ -619,7 +622,7 @@ export default async function calendarGenerate(context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, { error: membershipError });
   }
 
   if (!role || !isAdminOrOffice(role)) {
@@ -646,7 +649,7 @@ export default async function calendarGenerate(context, req) {
 
   if (templatesError) {
     context.log?.error?.('calendar/generate failed to load templates', { message: templatesError.message });
-    return respond(context, 500, { message: 'failed_to_load_templates' });
+    return respondTracked(context, 500, { message: 'failed_to_load_templates' }, undefined, { error: templatesError });
   }
 
   const templateRows = Array.isArray(templates) ? templates : [];
@@ -675,7 +678,7 @@ export default async function calendarGenerate(context, req) {
 
   if (templateParticipantsError) {
     context.log?.error?.('calendar/generate failed to load template participants', { message: templateParticipantsError.message });
-    return respond(context, 500, { message: 'failed_to_load_students' });
+    return respondTracked(context, 500, { message: 'failed_to_load_students' }, undefined, { error: templateParticipantsError });
   }
 
   // Build templateId -> [student_id, ...] map.
@@ -705,7 +708,7 @@ export default async function calendarGenerate(context, req) {
 
   if (templateStudentsError) {
     context.log?.error?.('calendar/generate failed to load template students', { message: templateStudentsError.message });
-    return respond(context, 500, { message: 'failed_to_load_students' });
+    return respondTracked(context, 500, { message: 'failed_to_load_students' }, undefined, { error: templateStudentsError });
   }
 
   const templateClientProfileIds = Array.from(new Set((templateStudentRows || []).map((row) => normalizeString(row?.client_profile_id)).filter(Boolean)));
@@ -717,7 +720,7 @@ export default async function calendarGenerate(context, req) {
 
   if (templateClientProfilesError) {
     context.log?.error?.('calendar/generate failed to load template client profiles', { message: templateClientProfilesError.message });
-    return respond(context, 500, { message: 'failed_to_load_students' });
+    return respondTracked(context, 500, { message: 'failed_to_load_students' }, undefined, { error: templateClientProfilesError });
   }
 
   const clientProfileIdByStudentId = new Map(
@@ -741,7 +744,7 @@ export default async function calendarGenerate(context, req) {
 
   if (servicesError) {
     context.log?.error?.('calendar/generate failed to load services', { message: servicesError.message });
-    return respond(context, 500, { message: 'failed_to_load_services' });
+    return respondTracked(context, 500, { message: 'failed_to_load_services' }, undefined, { error: servicesError });
   }
 
   const serviceNameById = new Map(
@@ -771,17 +774,17 @@ export default async function calendarGenerate(context, req) {
 
   if (overridesError) {
     context.log?.error?.('calendar/generate failed to load overrides', { message: overridesError.message });
-    return respond(context, 500, { message: 'failed_to_load_template_overrides' });
+    return respondTracked(context, 500, { message: 'failed_to_load_template_overrides' }, undefined, { error: overridesError });
   }
 
   if (existingError) {
     context.log?.error?.('calendar/generate failed to load existing instances', { message: existingError.message });
-    return respond(context, 500, { message: 'failed_to_load_instances' });
+    return respondTracked(context, 500, { message: 'failed_to_load_instances' }, undefined, { error: existingError });
   }
 
   if (capabilitiesError) {
     context.log?.error?.('calendar/generate failed to load instructor capabilities', { message: capabilitiesError.message });
-    return respond(context, 500, { message: 'failed_to_load_capabilities' });
+    return respondTracked(context, 500, { message: 'failed_to_load_capabilities' }, undefined, { error: capabilitiesError });
   }
 
   const overrideServiceIds = Array.from(new Set(
@@ -795,7 +798,7 @@ export default async function calendarGenerate(context, req) {
       .in('id', overrideServiceIds);
     if (overrideServicesError) {
       context.log?.error?.('calendar/generate failed to load override services', { message: overrideServicesError.message });
-      return respond(context, 500, { message: 'failed_to_load_services' });
+      return respondTracked(context, 500, { message: 'failed_to_load_services' }, undefined, { error: overrideServicesError });
     }
     for (const row of overrideServiceRows || []) {
       serviceNameById.set(row.id, buildServiceName(row));

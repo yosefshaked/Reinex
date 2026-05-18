@@ -157,3 +157,39 @@ export async function respondTrackedError(context, req, supabase, options = {}) 
   return respond(context, status, { message, error_id: errorId });
 }
 
+export function attachErrorTracking(context, req, supabase, options = {}) {
+  if (!context || !supabase?.from) return;
+  context.__errorTracking = {
+    ...(context.__errorTracking || {}),
+    req: req || null,
+    supabase,
+    orgId: options.orgId || context.__errorTracking?.orgId || null,
+    userId: options.userId || context.__errorTracking?.userId || null,
+    metadata: {
+      ...(context.__errorTracking?.metadata || {}),
+      ...(options.metadata && typeof options.metadata === 'object' ? options.metadata : {}),
+    },
+  };
+}
+
+export async function respondTracked(context, status, body, extraHeaders, options = {}) {
+  const tracking = context?.__errorTracking || null;
+  if (!tracking?.supabase?.from) {
+    return respond(context, status, body, extraHeaders);
+  }
+
+  const responseBody = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  return respondTrackedError(context, tracking.req, tracking.supabase, {
+    ...options,
+    status,
+    message: responseBody.message || responseBody.error || 'internal_error',
+    orgId: options.orgId || tracking.orgId || null,
+    userId: options.userId || tracking.userId || null,
+    error: options.error || null,
+    metadata: {
+      ...(tracking.metadata && typeof tracking.metadata === 'object' ? tracking.metadata : {}),
+      ...(options.metadata && typeof options.metadata === 'object' ? options.metadata : {}),
+      response_body: responseBody,
+    },
+  });
+}

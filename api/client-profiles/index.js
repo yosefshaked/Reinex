@@ -24,6 +24,8 @@ import {
   validateIsraeliPhone,
 } from '../_shared/student-validation.js';
 import { createOrReuseClientProfile, fetchPrimaryGuardianForClientProfile, maskIfAnonymized } from '../_shared/client-profiles.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
 
 function buildDisplayName(row) {
   return [row?.first_name, row?.middle_name, row?.last_name].filter(Boolean).join(' ').trim() || 'ללא שם';
@@ -174,8 +176,19 @@ export default async function handler(context, req) {
   if (!orgId) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
+  attachErrorTracking(context, req, supabase, { orgId, userId, metadata: { endpoint: 'client-profiles' } });
 
-  const role = await ensureMembership(supabase, orgId, userId);
+  let role;
+  try {
+    role = await ensureMembership(supabase, orgId, userId);
+  } catch (membershipError) {
+    context.log?.error?.('client-profiles failed to verify membership', {
+      message: membershipError?.message,
+      orgId,
+      userId,
+    });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, { error: membershipError });
+  }
   if (!role) {
     return respond(context, 403, { message: 'forbidden' });
   }
@@ -192,7 +205,7 @@ export default async function handler(context, req) {
         .select('*')
         .eq('id', clientProfileId)
         .maybeSingle();
-      if (error) return respond(context, 500, { message: 'failed_to_load_client_profile' });
+      if (error) return respondTracked(context, 500, { message: 'failed_to_load_client_profile' }, undefined, { error });
       if (!profile) return respond(context, 404, { message: 'client_profile_not_found' });
       const { data: student } = await withOrgScope(supabase, 'students', orgId).select('id').eq('client_profile_id', clientProfileId).maybeSingle();
       const { guardian } = await fetchPrimaryGuardianForClientProfile(supabase, clientProfileId);
@@ -216,7 +229,7 @@ export default async function handler(context, req) {
     }
 
     const { data: profiles, error } = await query;
-    if (error) return respond(context, 500, { message: 'failed_to_load_client_profiles' });
+    if (error) return respondTracked(context, 500, { message: 'failed_to_load_client_profiles' }, undefined, { error });
 
     let rows = Array.isArray(profiles) ? profiles : [];
 
@@ -351,7 +364,7 @@ export default async function handler(context, req) {
         orgId,
         userId,
       });
-      return respond(context, 500, { message: 'failed_to_create_client_profile' });
+      return respondTracked(context, 500, { message: 'failed_to_create_client_profile' }, undefined, { error: createError });
     }
 
     const { data: profile, error: profileError } = await withOrgScope(supabase, 'client_profiles', orgId)
@@ -360,7 +373,7 @@ export default async function handler(context, req) {
       .maybeSingle();
 
     if (profileError || !profile) {
-      return respond(context, 500, { message: 'failed_to_load_client_profile' });
+      return respondTracked(context, 500, { message: 'failed_to_load_client_profile' }, undefined, { error: profileError });
     }
 
     const { data: student } = await withOrgScope(supabase, 'students', orgId)
@@ -413,7 +426,7 @@ export default async function handler(context, req) {
     .eq('id', clientProfileId)
     .maybeSingle();
 
-  if (beforeError) return respond(context, 500, { message: 'failed_to_load_client_profile' });
+  if (beforeError) return respondTracked(context, 500, { message: 'failed_to_load_client_profile' }, undefined, { error: beforeError });
   if (!beforeProfile) return respond(context, 404, { message: 'client_profile_not_found' });
 
   const { data: updated, error } = await withOrgScope(supabase, 'client_profiles', orgId)
@@ -425,7 +438,7 @@ export default async function handler(context, req) {
     .select('*')
     .maybeSingle();
 
-  if (error) return respond(context, 500, { message: 'failed_to_update_client_profile' });
+  if (error) return respondTracked(context, 500, { message: 'failed_to_update_client_profile' }, undefined, { error });
   if (!updated) return respond(context, 404, { message: 'client_profile_not_found' });
 
   const { data: student } = await withOrgScope(supabase, 'students', orgId).select('id').eq('client_profile_id', clientProfileId).maybeSingle();

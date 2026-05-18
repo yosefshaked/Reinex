@@ -9,6 +9,8 @@ import {
   withOrgScope,
 } from '../_shared/org-bff.js';
 import { parseJsonBodyWithLimit } from '../_shared/validation.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -61,6 +63,7 @@ export default async function (context, req) {
   if (!orgId) {
     return respond(context, 400, { message: 'invalid_org_id' });
   }
+  attachErrorTracking(context, req, supabase, { orgId, userId, metadata: { endpoint: 'calendar-conflicts' } });
 
   let role;
   try {
@@ -71,7 +74,7 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, { error: membershipError });
   }
 
   if (!role) {
@@ -139,7 +142,7 @@ async function handleConflictCheck(context, body, supabase, orgId) {
 
   if (error) {
     context.log?.error?.('calendar/conflicts failed to fetch instances', { message: error.message });
-    return respond(context, 500, { message: 'failed_to_check_conflicts' });
+    return respondTracked(context, 500, { message: 'failed_to_check_conflicts' }, undefined, { error });
   }
 
   const conflicts = [];
