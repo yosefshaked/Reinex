@@ -91,7 +91,7 @@ if (!opts.all && !opts.scriptId && !opts.validateOnly) {
 // ─── Environment / credentials ────────────────────────────────────────────
 
 const env = {
-  BASE_URL:           process.env.BASE_URL           || 'http://localhost:4280',
+  BASE_URL:           process.env.BASE_URL           || 'http://localhost:5173',
   ADMIN_EMAIL:        process.env.ADMIN_EMAIL        || '',
   ADMIN_PASSWORD:     process.env.ADMIN_PASSWORD     || '',
   OFFICE_EMAIL:       process.env.OFFICE_EMAIL       || '',

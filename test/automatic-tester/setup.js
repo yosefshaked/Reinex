@@ -270,18 +270,18 @@ async function probeAppUrl() {
   section('── Step 2 / 5  Detect Running App');
 
   // Detect the React app by checking that the root URL serves the Reinex HTML shell
-  // (contains <div id="root">). This works whether SWA (4280) or Vite (5173) is running,
+  // (contains <div id="root">). This works whether Vite (5173) or SWA (4280) is running,
   // and does NOT depend on the /api proxy being configured — that's irrelevant for navigation.
   // Try IPv6 variants because Vite on Windows often binds to [::1] only.
   const candidates = [
-    'http://localhost:4280',   // SWA emulator — preferred (serves app + API on one port)
-    'http://127.0.0.1:4280',
-    'http://localhost:5173',   // Vite dev server
+    'http://localhost:5173',   // Vite dev server — preferred (faster)
     'http://127.0.0.1:5173',
     'http://[::1]:5173',       // Vite on IPv6-only
     'http://localhost:5174',   // Vite alternate port
     'http://127.0.0.1:5174',
     'http://[::1]:5174',
+    'http://localhost:4280',   // SWA emulator — fallback (serves app + API on one port)
+    'http://127.0.0.1:4280',
   ];
 
   for (const url of candidates) {
