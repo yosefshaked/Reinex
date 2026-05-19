@@ -1063,10 +1063,10 @@ export async function syncInstructorAttendanceFromLessons(
   if (!dayBounds?.startIso || !dayBounds?.endExclusiveIso) {
     throw new Error('invalid_lesson_date_bounds');
   }
-  const dayLessonsScope = instance?.org_id
-    ? withOrgScope(tenantClient, 'lesson_instances', instance.org_id)
-    : tenantClient.from('lesson_instances');
-  const { data: dayLessons, error: dayLessonsError } = await dayLessonsScope
+  if (!instance?.org_id) {
+    throw new Error('instance_missing_org_id');
+  }
+  const { data: dayLessons, error: dayLessonsError } = await withOrgScope(tenantClient, 'lesson_instances', instance.org_id)
     .select('id, duration_minutes, status')
     .eq('instructor_employee_id', instance.instructor_employee_id)
     .gte('datetime_start', dayBounds.startIso)
@@ -1089,11 +1089,8 @@ export async function syncInstructorAttendanceFromLessons(
 
   const dayLessonIds = dayLessonRows.map((lesson) => lesson.id).filter(Boolean);
   const policies = await loadFinancePolicies(tenantClient, instance.org_id);
-  const dayParticipantsScope = instance?.org_id
-    ? withOrgScope(tenantClient, 'lesson_participants', instance.org_id)
-    : tenantClient.from('lesson_participants');
   const { data: dayParticipants, error: dayParticipantsError } = dayLessonIds.length > 0
-    ? await dayParticipantsScope
+    ? await withOrgScope(tenantClient, 'lesson_participants', instance.org_id)
       .select('lesson_instance_id, participant_status, metadata')
       .in('lesson_instance_id', dayLessonIds)
     : { data: [], error: null };

@@ -113,7 +113,6 @@ CREATE TABLE IF NOT EXISTS public.organizations (
   name text NOT NULL,
   slug text NOT NULL UNIQUE,
   created_by uuid NOT NULL,
-  setup_completed boolean NOT NULL DEFAULT false,
   verified_at timestamptz NULL,
   -- Merged from org_settings
   permissions jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -3780,6 +3779,9 @@ AS $$
   WHERE table_schema = 'public'
     AND table_type = 'BASE TABLE';
 $$;
+
+-- Remove deprecated setup_completed column (replaced by verified_at)
+ALTER TABLE public.organizations DROP COLUMN IF EXISTS setup_completed;
 
 -- Enable RLS on control tables
 ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;

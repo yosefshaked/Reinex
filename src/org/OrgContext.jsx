@@ -649,10 +649,7 @@ export function OrgProvider({ children }) {
 
   const recordVerification = useCallback(
     async (orgId, verifiedAt) => {
-      await updateOrganizationMetadata(orgId, {
-        setup_completed: true,
-        verified_at: verifiedAt,
-      });
+      await updateOrganizationMetadata(orgId, { verified_at: verifiedAt });
     },
     [updateOrganizationMetadata],
   );

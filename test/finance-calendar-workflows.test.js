@@ -336,4 +336,25 @@ describe('finance/calendar self-seeded workflows', () => {
     assert.equal(snapshot.lesson_history[0].hmo_authorization_usage.counts_toward_authorization, true);
     assert.equal(snapshot.authorizations[0].lesson_counts.consumed_lessons, 1);
   });
+
+  it('fetchBillingSnapshot all-students mode only returns students from the requested org', async () => {
+    const OTHER_ORG = 'org-other';
+    const client = createMockSupabaseClient({
+      Settings: [],
+      students: [
+        { id: 'student-org-a', org_id: ORG_ID, client_profile_id: 'cp-a' },
+        { id: 'student-org-b', org_id: OTHER_ORG, client_profile_id: 'cp-b' },
+      ],
+      client_profiles: [
+        { id: 'cp-a', org_id: ORG_ID, first_name: 'תלמיד', last_name: 'א' },
+        { id: 'cp-b', org_id: OTHER_ORG, first_name: 'תלמיד', last_name: 'ב' },
+      ],
+    });
+
+    const result = await fetchBillingSnapshot(client, { orgId: ORG_ID });
+
+    const returnedIds = (result.student_summaries || []).map((s) => s.student_id);
+    assert.ok(returnedIds.includes('student-org-a'), 'should include own-org student');
+    assert.ok(!returnedIds.includes('student-org-b'), 'must not include other-org student');
+  });
 });

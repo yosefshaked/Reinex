@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils"
 import { Megaphone, LogOut, PanelRightOpen, PanelRightClose, RefreshCw, UserCog, X } from "lucide-react"
 import { Toaster, toast } from "sonner"
 
-import OrgConfigBanner from "@/components/OrgConfigBanner.jsx"
 import OrgSelectionBanner from "@/components/OrgSelectionBanner.jsx"
 import ChangelogModal from "@/components/ChangelogModal"
 import PageLayout from "@/components/ui/PageLayout.jsx"
@@ -271,7 +270,6 @@ export default function AppShell({ children }) {
 
           <ImpersonationBanner />
           <OrgSelectionBanner />
-          <OrgConfigBanner />
           {showRefreshSuggestion ? (
             <div className="mx-sm mt-2 rounded-2xl border border-blue-200 bg-blue-50 px-sm py-sm text-sm text-blue-950 md:mx-md">
               <div className="flex flex-wrap items-center justify-between gap-3">

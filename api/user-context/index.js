@@ -41,7 +41,6 @@ function mapOrganizationRecord(record, membership) {
     slug: record.slug || null,
     policy_links: Array.isArray(record.policy_links) ? record.policy_links : [],
     legal_settings: record.legal_settings || {},
-    setup_completed: Boolean(record.setup_completed),
     verified_at: record.verified_at || null,
     created_at: record.created_at,
     updated_at: record.updated_at,
@@ -205,7 +204,7 @@ export default async function userContext(context, req) {
       organizationsResponse = await supabase
         .from('organizations')
         .select(
-          'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at, permissions, storage_profile',
+          'id, name, slug, policy_links, legal_settings, verified_at, created_at, updated_at, permissions, storage_profile',
         )
         .in('id', idsArray);
     } catch (error) {

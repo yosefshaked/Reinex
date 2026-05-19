@@ -362,8 +362,7 @@ export async function fetchBillingSnapshot(tenantClient, {
   }
 
   const policies = await loadFinancePolicies(tenantClient, orgId);
-  const { data: students, error } = await tenantClient
-    .from('students')
+  const { data: students, error } = await withOrgScope(tenantClient, 'students', orgId)
     .select(`
       id,
       client_profile:client_profiles(
