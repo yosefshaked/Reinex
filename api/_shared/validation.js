@@ -1,6 +1,6 @@
 /* eslint-env node */
 import { Buffer } from 'node:buffer';
-import { UUID_PATTERN, normalizeString } from './org-bff.js';
+import { UUID_PATTERN, normalizeNullableId, normalizeString } from './org-bff.js';
 
 // Utility: estimate bytes of a JS value by JSON stringification
 function estimateBytes(value) {
@@ -149,7 +149,7 @@ function coerceSessionTime(value) {
 }
 
 export function validateSessionWrite(body) {
-  const studentIdRaw = normalizeString(body?.student_id || body?.studentId);
+  const studentIdRaw = normalizeNullableId(body?.student_id || body?.studentId);
   const hasStudentId = Boolean(studentIdRaw);
   if (hasStudentId && !isUUID(studentIdRaw)) {
     return { error: 'invalid_student_id' };
@@ -222,14 +222,70 @@ export function validateSessionWrite(body) {
 
 // ----- Instructors write validation (SOT) -----
 const PHONE_PATTERN = /^[0-9+\-()\s]{6,20}$/;
+const SIMPLE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const PAYROLL_MODELS = new Set(['hourly', 'monthly_salary', 'lesson_based']);
+const LEAVE_PAY_METHODS = new Set(['legal', 'avg_hourly_x_avg_day_hours', 'fixed_rate']);
+
+function normalizePayrollModel(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return PAYROLL_MODELS.has(normalized) ? normalized : '';
+}
+
+function normalizeLeavePayMethod(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return LEAVE_PAY_METHODS.has(normalized) ? normalized : '';
+}
+
+function coerceOptionalDateString(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return { valid: true, value: null };
+  }
+  if (!SIMPLE_DATE_PATTERN.test(normalized)) {
+    return { valid: false, value: null };
+  }
+  return { valid: true, value: normalized };
+}
+
+function coerceOptionalNumberValue(value) {
+  if (value === undefined) {
+    return { present: false, valid: true, value: null };
+  }
+  if (value === null) {
+    return { present: true, valid: true, value: null };
+  }
+
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return { present: true, valid: true, value: null };
+  }
+
+  const numeric = Number(normalized);
+  if (!Number.isFinite(numeric)) {
+    return { present: true, valid: false, value: null };
+  }
+
+  return { present: true, valid: true, value: numeric };
+}
 
 export function validateInstructorCreate(body) {
   const userId = normalizeString(body?.user_id || body?.userId);
-  if (!isUUID(userId)) {
-    return { error: 'missing_user_id' };
+  const isManual = !userId;
+
+  if (userId && !isUUID(userId)) {
+    return { error: 'invalid_user_id' };
   }
 
-  const name = normalizeString(body?.name) || '';
+  // Support both camelCase and snake_case for name fields
+  const firstName = normalizeString(body?.first_name || body?.firstName) || '';
+  const middleName = normalizeString(body?.middle_name || body?.middleName) || '';
+  const lastName = normalizeString(body?.last_name || body?.lastName) || '';
+
+  // For manual employees, name is required
+  if (isManual && !firstName) {
+    return { error: 'first_name_required_for_manual_employee' };
+  }
+
   const emailRaw = normalizeString(body?.email).toLowerCase();
   const email = emailRaw ? (isEmail(emailRaw) ? emailRaw : null) : '';
   const phoneRaw = normalizeString(body?.phone);
@@ -238,28 +294,110 @@ export function validateInstructorCreate(body) {
   if (!notesResult.valid) {
     return { error: 'invalid_notes' };
   }
+  const startDateResult = coerceOptionalDateString(body?.start_date ?? body?.startDate);
+  if (!startDateResult.valid) {
+    return { error: 'invalid_start_date' };
+  }
+  const currentRateResult = coerceOptionalNumberValue(body?.current_rate ?? body?.currentRate);
+  if (!currentRateResult.valid) {
+    return { error: 'invalid_current_rate' };
+  }
+  const annualLeaveDaysResult = coerceOptionalNumberValue(body?.annual_leave_days ?? body?.annualLeaveDays);
+  if (!annualLeaveDaysResult.valid) {
+    return { error: 'invalid_annual_leave_days' };
+  }
+  const monthlySalaryAmountResult = coerceOptionalNumberValue(body?.monthly_salary_amount ?? body?.monthlySalaryAmount);
+  if (!monthlySalaryAmountResult.valid) {
+    return { error: 'invalid_monthly_salary_amount' };
+  }
+  const leaveFixedDayRateResult = coerceOptionalNumberValue(body?.leave_fixed_day_rate ?? body?.leaveFixedDayRate);
+  if (!leaveFixedDayRateResult.valid) {
+    return { error: 'invalid_leave_fixed_day_rate' };
+  }
+  const employeeType = normalizeString(body?.employee_type ?? body?.employeeType).toLowerCase() || '';
+  const payrollModel = normalizePayrollModel(body?.payroll_model ?? body?.payrollModel);
+  const leavePayMethod = normalizeLeavePayMethod(body?.leave_pay_method ?? body?.leavePayMethod);
+  const employmentScope = normalizeString(body?.employment_scope ?? body?.employmentScope) || '';
+
+  // employee_id is required (national ID or worker number)
+  const employeeId = normalizeString(body?.employee_id || body?.employeeId);
+  if (!employeeId) {
+    return { error: 'employee_id_required' };
+  }
 
   return {
-    userId,
+    userId, // null for manual
+    isManual,
     // empty strings mean "not provided"; nulls mean "provided but invalid"
-    name,
+    firstName,
+    middleName,
+    lastName,
     email,
     phone,
     notes: notesResult.value,
+    employeeId,
+    employeeType,
+    startDate: startDateResult.value,
+    currentRate: currentRateResult.value,
+    payrollModel,
+    monthlySalaryAmount: monthlySalaryAmountResult.value,
+    annualLeaveDays: annualLeaveDaysResult.value,
+    leavePayMethod,
+    leaveFixedDayRate: leaveFixedDayRateResult.value,
+    employmentScope,
   };
 }
 
-export function validateInstructorUpdate(body) {
+export function validateInstructorUpdate(body, orgPermissions = {}) {
   const instructorId = normalizeString(body?.id || body?.instructor_id || body?.instructorId);
   if (!isUUID(instructorId)) {
     return { error: 'missing_instructor_id' };
   }
 
   const updates = {};
+  const metadataUpdates = {};
 
-  if (Object.prototype.hasOwnProperty.call(body, 'name')) {
-    const v = normalizeString(body.name);
-    updates['name'] = v || null;
+  const normalizePreanswersMap = (raw, orgPermissions) => {
+    const capRaw = orgPermissions?.session_form_preanswers_cap;
+    const cap = typeof capRaw === 'number' && capRaw > 0 ? capRaw : 50;
+    if (!raw || typeof raw !== 'object') return {};
+    const normalized = {};
+    for (const [key, list] of Object.entries(raw)) {
+      if (!key || !Array.isArray(list)) continue;
+      const unique = [];
+      const seen = new Set();
+      for (const rawEntry of list) {
+        if (typeof rawEntry !== 'string') continue;
+        const trimmed = rawEntry.trim();
+        if (!trimmed || seen.has(trimmed)) continue;
+        seen.add(trimmed);
+        unique.push(trimmed);
+        if (unique.length >= cap) break;
+      }
+      normalized[key] = unique;
+    }
+    return normalized;
+  };
+
+  if (Object.prototype.hasOwnProperty.call(body, 'first_name') || Object.prototype.hasOwnProperty.call(body, 'firstName')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'first_name') ? body.first_name : body.firstName
+    );
+    updates['first_name'] = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'middle_name') || Object.prototype.hasOwnProperty.call(body, 'middleName')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'middle_name') ? body.middle_name : body.middleName
+    );
+    updates['middle_name'] = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'last_name') || Object.prototype.hasOwnProperty.call(body, 'lastName')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'last_name') ? body.last_name : body.lastName
+    );
+    updates['last_name'] = v || null;
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'email')) {
@@ -280,6 +418,91 @@ export function validateInstructorUpdate(body) {
     updates.notes = notesResult.value;
   }
 
+  if (Object.prototype.hasOwnProperty.call(body, 'employee_id') || Object.prototype.hasOwnProperty.call(body, 'employeeId')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'employee_id') ? body.employee_id : body.employeeId
+    );
+    updates.employee_id = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'employee_type') || Object.prototype.hasOwnProperty.call(body, 'employeeType')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'employee_type') ? body.employee_type : body.employeeType
+    ).toLowerCase();
+    updates.employee_type = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'start_date') || Object.prototype.hasOwnProperty.call(body, 'startDate')) {
+    const result = coerceOptionalDateString(
+      Object.prototype.hasOwnProperty.call(body, 'start_date') ? body.start_date : body.startDate
+    );
+    if (!result.valid) {
+      return { error: 'invalid_start_date' };
+    }
+    updates.start_date = result.value;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'current_rate') || Object.prototype.hasOwnProperty.call(body, 'currentRate')) {
+    const result = coerceOptionalNumberValue(
+      Object.prototype.hasOwnProperty.call(body, 'current_rate') ? body.current_rate : body.currentRate
+    );
+    if (!result.valid) {
+      return { error: 'invalid_current_rate' };
+    }
+    updates.current_rate = result.value;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'payroll_model') || Object.prototype.hasOwnProperty.call(body, 'payrollModel')) {
+    const v = normalizePayrollModel(
+      Object.prototype.hasOwnProperty.call(body, 'payroll_model') ? body.payroll_model : body.payrollModel
+    );
+    updates.payroll_model = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'monthly_salary_amount') || Object.prototype.hasOwnProperty.call(body, 'monthlySalaryAmount')) {
+    const result = coerceOptionalNumberValue(
+      Object.prototype.hasOwnProperty.call(body, 'monthly_salary_amount') ? body.monthly_salary_amount : body.monthlySalaryAmount
+    );
+    if (!result.valid) {
+      return { error: 'invalid_monthly_salary_amount' };
+    }
+    updates.monthly_salary_amount = result.value;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'annual_leave_days') || Object.prototype.hasOwnProperty.call(body, 'annualLeaveDays')) {
+    const result = coerceOptionalNumberValue(
+      Object.prototype.hasOwnProperty.call(body, 'annual_leave_days') ? body.annual_leave_days : body.annualLeaveDays
+    );
+    if (!result.valid) {
+      return { error: 'invalid_annual_leave_days' };
+    }
+    updates.annual_leave_days = result.value;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'leave_pay_method') || Object.prototype.hasOwnProperty.call(body, 'leavePayMethod')) {
+    const v = normalizeLeavePayMethod(
+      Object.prototype.hasOwnProperty.call(body, 'leave_pay_method') ? body.leave_pay_method : body.leavePayMethod
+    );
+    updates.leave_pay_method = v || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'leave_fixed_day_rate') || Object.prototype.hasOwnProperty.call(body, 'leaveFixedDayRate')) {
+    const result = coerceOptionalNumberValue(
+      Object.prototype.hasOwnProperty.call(body, 'leave_fixed_day_rate') ? body.leave_fixed_day_rate : body.leaveFixedDayRate
+    );
+    if (!result.valid) {
+      return { error: 'invalid_leave_fixed_day_rate' };
+    }
+    updates.leave_fixed_day_rate = result.value;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'employment_scope') || Object.prototype.hasOwnProperty.call(body, 'employmentScope')) {
+    const v = normalizeString(
+      Object.prototype.hasOwnProperty.call(body, 'employment_scope') ? body.employment_scope : body.employmentScope
+    );
+    updates.employment_scope = v || null;
+  }
+
   if (Object.prototype.hasOwnProperty.call(body, 'is_active')) {
     updates.is_active = Boolean(body.is_active);
   }
@@ -294,6 +517,27 @@ export function validateInstructorUpdate(body) {
     } else {
       updates.instructor_types = null;
     }
+  }
+
+  if (body && typeof body === 'object') {
+    const rawMeta = body.metadata && typeof body.metadata === 'object' ? body.metadata : null;
+    const rawCustom = rawMeta && typeof rawMeta.custom_preanswers === 'object'
+      ? rawMeta.custom_preanswers
+      : null;
+    if (rawCustom) {
+      metadataUpdates.custom_preanswers = normalizePreanswersMap(rawCustom, orgPermissions);
+    }
+
+    const rawAlias = body.custom_preanswers && typeof body.custom_preanswers === 'object'
+      ? body.custom_preanswers
+      : null;
+    if (rawAlias) {
+      metadataUpdates.custom_preanswers = normalizePreanswersMap(rawAlias, orgPermissions);
+    }
+  }
+
+  if (Object.keys(metadataUpdates).length > 0) {
+    updates.__metadata_custom_preanswers = metadataUpdates.custom_preanswers || {};
   }
 
   return { instructorId, updates };

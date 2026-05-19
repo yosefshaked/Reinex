@@ -143,7 +143,7 @@ export default function UpdatePassword() {
 
   return (
     <AuthLayout>
-      <div className="bg-gradient-to-l from-blue-500 to-indigo-500 px-6 py-6 text-right text-white">
+      <div className="bg-gradient-to-l from-blue-500 to-indigo-500 px-6 py-6 text-end text-white">
         <div className="flex items-center justify-end gap-2 text-2xl font-bold">
           <span>עדכון סיסמה</span>
           <Lock className="h-7 w-7" aria-hidden="true" />
@@ -214,7 +214,7 @@ export default function UpdatePassword() {
               disabled={isLoading}
             />
 
-            <div className="flex flex-col gap-3 text-sm text-right">
+            <div className="flex flex-col gap-3 text-sm text-end">
               <Button type="submit" disabled={isLoading} className="w-full">
                 {isLoading ? (
                   <span className="inline-flex items-center gap-2">

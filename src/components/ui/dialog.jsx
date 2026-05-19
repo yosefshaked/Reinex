@@ -85,7 +85,7 @@ const DialogContent = React.forwardRef(({ className, children, footer, wide = fa
         )}
         {!hideDefaultClose && (
           <DialogPrimitive.Close
-            className="absolute left-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+            className="absolute start-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
             <X className="h-4 w-4" />
             <span className="sr-only">סגור</span>
           </DialogPrimitive.Close>
@@ -101,7 +101,7 @@ const DialogHeader = ({
   ...props
 }) => (
   <div
-    className={cn("flex flex-col space-y-1.5 text-right mb-6", className)}
+    className={cn("flex flex-col space-y-1.5 text-start mb-6", className)}
     {...props} />
 )
 DialogHeader.displayName = "DialogHeader"

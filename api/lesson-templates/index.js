@@ -1,0 +1,1651 @@
+/* eslint-env node */
+import { resolveBearerAuthorization } from '../_shared/http.js';
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
+import { logTenantAuditEvent, TENANT_AUDIT_RETENTION } from '../_shared/tenant-audit.js';
+import { normalizeDayToken, daySortValue } from '../_shared/day-of-week.js';
+import { hasConfiguredAvailability, isWithinAvailabilityWindows, timeToMinutes } from '../_shared/instructor-availability.js';
+import {
+  UUID_PATTERN,
+  ensureMembership,
+  isAdminOrOffice,
+  normalizeString,
+  parseRequestBody,
+  readEnv,
+  respond,
+  resolveOrgId,
+  withOrgScope,
+} from '../_shared/org-bff.js';
+import { ensureStudentForClientProfile } from '../_shared/client-profiles.js';
+import { ceilClockTimeToGrid } from '../_shared/time-grid.js';
+import { respondTrackedError } from '../_shared/error-events.js';
+
+function normalizeUuid(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return '';
+  return UUID_PATTERN.test(normalized) ? normalized : '';
+}
+
+function normalizeDayOfWeek(value) {
+  return normalizeDayToken(value);
+}
+
+function compareTemplatesByDayAndTime(left, right) {
+  const dayDiff = daySortValue(left?.day_of_week) - daySortValue(right?.day_of_week);
+  if (dayDiff !== 0) {
+    return dayDiff;
+  }
+
+  return String(left?.time_of_day || '').localeCompare(String(right?.time_of_day || ''));
+}
+
+function normalizeTime(value) {
+  return ceilClockTimeToGrid(value);
+}
+
+function isIsoDate(value) {
+  if (!value) return false;
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value).trim());
+}
+
+function normalizeDateForCompare(dateValue, fallback) {
+  const normalized = normalizeString(dateValue);
+  return normalized || fallback;
+}
+
+function rangesOverlap(startA, endA, startB, endB) {
+  const normalizedStartA = normalizeDateForCompare(startA, '0001-01-01');
+  const normalizedEndA = normalizeDateForCompare(endA, '9999-12-31');
+  const normalizedStartB = normalizeDateForCompare(startB, '0001-01-01');
+  const normalizedEndB = normalizeDateForCompare(endB, '9999-12-31');
+
+  return normalizedStartA <= normalizedEndB && normalizedStartB <= normalizedEndA;
+}
+
+function timeRangesOverlap(startA, durationA, startB, durationB) {
+  const startMinutesA = timeToMinutes(startA);
+  const startMinutesB = timeToMinutes(startB);
+  const safeDurationA = Number(durationA) || 0;
+  const safeDurationB = Number(durationB) || 0;
+  if (startMinutesA == null || startMinutesB == null || safeDurationA <= 0 || safeDurationB <= 0) {
+    return false;
+  }
+
+  return startMinutesA < startMinutesB + safeDurationB && startMinutesB < startMinutesA + safeDurationA;
+}
+
+// Checks whether any of the given students already appear in an active template
+// at the same instructor + day + exact time slot, with an overlapping date range.
+// Returns the first conflicting (template_id, student_id) pair found, or null.
+async function findStudentTemplateConflicts(client, orgId, {
+  studentIds,
+  instructorEmployeeId,
+  dayOfWeek,
+  timeOfDay,
+  validFrom,
+  validUntil,
+  excludeTemplateId = null,
+}) {
+  if (!studentIds || studentIds.length === 0) {
+    return { conflict: null, error: null };
+  }
+
+  // Step 1: find active templates at this instructor + day + time
+  let query = withOrgScope(client, 'lesson_templates', orgId)
+    .select('id, valid_from, valid_until')
+    .eq('instructor_employee_id', instructorEmployeeId)
+    .eq('day_of_week', dayOfWeek)
+    .eq('time_of_day', timeOfDay)
+    .eq('is_active', true);
+
+  if (excludeTemplateId) {
+    query = query.neq('id', excludeTemplateId);
+  }
+
+  const { data: scheduleMatches, error: scheduleError } = await query;
+  if (scheduleError) {
+    return { conflict: null, error: scheduleError };
+  }
+
+  // Keep only those whose date range overlaps
+  const overlappingIds = (scheduleMatches || [])
+    .filter((t) => rangesOverlap(t.valid_from, t.valid_until, validFrom, validUntil))
+    .map((t) => t.id);
+
+  if (overlappingIds.length === 0) {
+    return { conflict: null, error: null };
+  }
+
+  // Step 2: check whether any of our students are already in those templates
+  const { data: participantMatches, error: participantError } = await withOrgScope(client, 'lesson_template_participants', orgId)
+    .select('template_id, student_id')
+    .in('template_id', overlappingIds)
+    .in('student_id', studentIds)
+    .limit(1);
+
+  if (participantError) {
+    return { conflict: null, error: participantError };
+  }
+
+  return { conflict: participantMatches?.[0] || null, error: null };
+}
+
+async function findInstructorSlotConflict(client, orgId, {
+  instructorEmployeeId,
+  dayOfWeek,
+  timeOfDay,
+  durationMinutes,
+  validFrom,
+  validUntil,
+  excludeTemplateId = null,
+}) {
+  let query = withOrgScope(client, 'lesson_templates', orgId)
+    .select('id, time_of_day, duration_minutes, valid_from, valid_until')
+    .eq('instructor_employee_id', instructorEmployeeId)
+    .eq('day_of_week', dayOfWeek)
+    .eq('is_active', true);
+
+  if (excludeTemplateId) {
+    query = query.neq('id', excludeTemplateId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    return { conflict: null, error };
+  }
+
+  const overlappingTemplates = (data || []).filter((template) => (
+    rangesOverlap(template.valid_from, template.valid_until, validFrom, validUntil)
+    && timeRangesOverlap(template.time_of_day, template.duration_minutes, timeOfDay, durationMinutes)
+  ));
+
+  if (overlappingTemplates.length === 0) {
+    return { conflict: null, error: null };
+  }
+
+  return {
+    conflict: {
+      code: 'instructor_template_time_conflict',
+      templates: overlappingTemplates,
+    },
+    error: null,
+  };
+}
+
+function buildTemplateSelect() {
+  return [
+    'id',
+    'student_id',
+    'instructor_employee_id',
+    'service_id',
+    'day_of_week',
+    'time_of_day',
+    'duration_minutes',
+    'valid_from',
+    'valid_until',
+    'price_override',
+    'notes_internal',
+    'flags',
+    'is_active',
+    'created_at',
+    'updated_at',
+    'metadata',
+    'instructor:Employees(id, first_name, middle_name, last_name, email)',
+    'service:Services(id, name, duration_minutes, color)',
+    'participants:lesson_template_participants(id, student_id, student:students(id, client_profile_id, client_profile:client_profiles(id, first_name, middle_name, last_name)))',
+  ].join(',');
+}
+
+function normalizeTemplateParticipant(row) {
+  if (!row || typeof row !== 'object') return row;
+  const student = row.student || null;
+  const profile = student?.client_profile || null;
+  return {
+    id: row.id,
+    student_id: row.student_id,
+    student: student
+      ? {
+          id: student.id,
+          client_profile_id: student.client_profile_id || profile?.id || null,
+          first_name: profile?.first_name || '',
+          middle_name: profile?.middle_name || null,
+          last_name: profile?.last_name || '',
+        }
+      : null,
+  };
+}
+
+function normalizeTemplateRecord(template) {
+  if (!template || typeof template !== 'object') return template;
+  const participants = Array.isArray(template.participants)
+    ? template.participants.map(normalizeTemplateParticipant)
+    : [];
+  return {
+    ...template,
+    // Keep legacy student_id field for backward compat with generator fallback.
+    participants,
+  };
+}
+
+function isDuplicateTemplateConstraintError(error) {
+  const code = normalizeString(error?.code);
+  if (code === '23P01' || code === '23505') {
+    return true;
+  }
+
+  const text = [error?.message, error?.details, error?.hint]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return text.includes('lesson_templates_active_overlap') || text.includes('duplicate_template_conflict');
+}
+
+function resolveTemplateConstraintMessage(error) {
+  const text = [error?.message, error?.details, error?.hint]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (text.includes('instructor_template_time_conflict') || text.includes('lesson_templates_active_overlap')) {
+    return 'instructor_template_time_conflict';
+  }
+
+  return 'duplicate_template_conflict';
+}
+
+function computeSafeDeactivationUntil(existingTemplate, today) {
+  let safeValidUntil = today;
+
+  if (existingTemplate?.valid_until && existingTemplate.valid_until < safeValidUntil) {
+    safeValidUntil = existingTemplate.valid_until;
+  }
+
+  if (existingTemplate?.valid_from && safeValidUntil < existingTemplate.valid_from) {
+    safeValidUntil = existingTemplate.valid_from;
+  }
+
+  return safeValidUntil;
+}
+
+async function resolveInstructorEmployeeIdsForUser(client, orgId, userId) {
+  const { data, error } = await withOrgScope(client, 'Employees', orgId)
+    .select('id')
+    .eq('user_id', userId);
+
+  if (error) {
+    return { ids: [], error };
+  }
+
+  return {
+    ids: Array.isArray(data) ? data.map((row) => normalizeUuid(row?.id)).filter(Boolean) : [],
+    error: null,
+  };
+}
+
+async function loadServiceForTemplate(client, orgId, serviceId, { requireActive = false } = {}) {
+  if (!serviceId) {
+    return { service: null, error: null };
+  }
+
+  let query = withOrgScope(client, 'Services', orgId)
+    .select('id, duration_minutes, is_active')
+    .eq('id', serviceId);
+
+  if (requireActive) {
+    query = query.eq('is_active', true);
+  }
+
+  const { data, error } = await query.maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return { service: data || null, error: null };
+}
+
+function resolveServiceDurationMinutes(service) {
+  const durationMinutes = Number(service?.duration_minutes);
+  return Number.isFinite(durationMinutes) && durationMinutes > 0
+    ? Math.round(durationMinutes)
+    : 0;
+}
+
+async function validateInstructorServiceAvailability(client, orgId, {
+  instructorEmployeeId,
+  serviceId,
+  dayOfWeek,
+  timeOfDay,
+  durationMinutes,
+}) {
+  const { data, error } = await withOrgScope(client, 'instructor_service_capabilities', orgId)
+    .select('employee_id, service_id, availability_windows')
+    .eq('employee_id', instructorEmployeeId)
+    .eq('service_id', serviceId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return { ok: false, code: 'missing_instructor_service_capability' };
+  }
+
+  if (!hasConfiguredAvailability(data.availability_windows)) {
+    return { ok: false, code: 'missing_instructor_service_availability' };
+  }
+
+  if (!isWithinAvailabilityWindows({
+    availabilityWindows: data.availability_windows,
+    day: dayOfWeek,
+    startTime: timeOfDay,
+    durationMinutes,
+  })) {
+    return { ok: false, code: 'outside_instructor_service_availability' };
+  }
+
+  return { ok: true, code: null };
+}
+
+async function writeTenantAudit(context, client, params) {
+  try {
+    await logTenantAuditEvent(client, params);
+  } catch (auditError) {
+    context.log?.warn?.('lesson-templates failed to write tenant audit event', {
+      message: auditError?.message,
+      eventType: params?.eventType,
+      resourceType: params?.resourceType,
+      resourceId: params?.resourceId,
+    });
+  }
+}
+
+async function rollbackCreatedTemplate(context, client, orgId, templateId, details = {}) {
+  const rollbackResult = await withOrgScope(client, 'lesson_templates', orgId)
+    .delete()
+    .eq('id', templateId);
+
+  if (rollbackResult.error) {
+    context.log?.error?.('lesson-templates failed to rollback created template', {
+      message: rollbackResult.error.message,
+      templateId,
+      ...details,
+    });
+    return { ok: false, error: rollbackResult.error };
+  }
+
+  return { ok: true, error: null };
+}
+
+export default async function lessonTemplates(context, req) {
+  const method = String(req.method || 'GET').toUpperCase();
+
+  const env = readEnv(context);
+  const adminConfig = readSupabaseAdminConfig(env);
+
+  if (!adminConfig.supabaseUrl || !adminConfig.serviceRoleKey) {
+    context.log?.error?.('lesson-templates missing Supabase admin credentials');
+    return respond(context, 500, { message: 'server_misconfigured' });
+  }
+
+  const authorization = resolveBearerAuthorization(req);
+  if (!authorization?.token) {
+    return respond(context, 401, { message: 'missing_bearer' });
+  }
+
+  const supabase = createSupabaseAdminClient(adminConfig, {
+    global: { headers: { 'Cache-Control': 'no-store' } },
+  });
+
+  let authResult;
+  try {
+    authResult = await supabase.auth.getUser(authorization.token);
+  } catch (error) {
+    context.log?.error?.('lesson-templates failed to validate token', { message: error?.message });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
+  }
+
+  if (authResult.error || !authResult.data?.user?.id) {
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
+  }
+
+  const userId = authResult.data.user.id;
+  const userEmail = normalizeString(authResult.data.user.email) || `missing-email-${userId}`;
+  const body = parseRequestBody(req);
+  const orgId = resolveOrgId(req, body);
+
+  if (!orgId) {
+    return respond(context, 400, { message: 'invalid_org_id' });
+  }
+
+  // Convenience: log 500 to error_events and return a tracked error response.
+  const tracked500 = (message, error = null) =>
+    respondTrackedError(context, req, supabase, { status: 500, message, orgId, userId, error });
+
+  let role;
+  try {
+    role = await ensureMembership(supabase, orgId, userId);
+  } catch (membershipError) {
+    context.log?.error?.('lesson-templates failed to verify membership', {
+      message: membershipError?.message,
+      orgId,
+      userId,
+    });
+    return tracked500('failed_to_verify_membership', membershipError);
+  }
+
+  if (!role) {
+    return respond(context, 403, { message: 'forbidden' });
+  }
+
+  const isAdmin = isAdminOrOffice(role);
+
+  if (method === 'GET') {
+    const studentId = normalizeUuid(req?.query?.student_id || body?.student_id || body?.studentId);
+    const listAll = normalizeString(req?.query?.all) === 'true';
+
+    // Mode 1: List all templates (Template Manager grid view) — admin/office only
+    if (listAll || !studentId) {
+      if (!isAdmin) {
+        return respond(context, 403, { message: 'forbidden' });
+      }
+
+      const showInactive = normalizeString(req?.query?.show_inactive) === 'true';
+      const instructorId = normalizeUuid(req?.query?.instructor_id);
+
+      let query = withOrgScope(supabase, 'lesson_templates', orgId)
+        .select(buildTemplateSelect({ includeStudent: true }));
+
+      if (!showInactive) {
+        query = query.eq('is_active', true);
+      }
+
+      if (instructorId) {
+        query = query.eq('instructor_employee_id', instructorId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        context.log?.error?.('lesson-templates failed to list all templates', { message: error.message });
+        return tracked500('failed_to_load_lesson_templates', error);
+      }
+
+      const rows = (Array.isArray(data) ? [...data] : []).map(normalizeTemplateRecord);
+      rows.sort(compareTemplatesByDayAndTime);
+
+      return respond(context, 200, rows);
+    }
+
+    // Mode 2: Student-scoped (student detail page)
+    if (!isAdmin) {
+      // Verify the requesting user is an instructor assigned to this student
+      const {
+        ids: instructorEmployeeIds,
+        error: instructorLookupError,
+      } = await resolveInstructorEmployeeIdsForUser(supabase, orgId, userId);
+
+      if (instructorLookupError) {
+        context.log?.error?.('lesson-templates failed to resolve instructor mapping', {
+          message: instructorLookupError.message,
+          userId,
+        });
+        return tracked500('failed_to_load_lesson_templates', instructorLookupError);
+      }
+
+      if (instructorEmployeeIds.length === 0) {
+        return respond(context, 403, { message: 'student_not_assigned_to_user' });
+      }
+
+      const { data: participantCheck, error: participantCheckError } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+        .select('template_id')
+        .eq('student_id', studentId)
+        .limit(1);
+
+      if (participantCheckError) {
+        context.log?.error?.('lesson-templates failed to check student assignment', {
+          message: participantCheckError.message,
+          studentId,
+          userId,
+        });
+        return tracked500('failed_to_load_lesson_templates', participantCheckError);
+      }
+
+      if (!participantCheck || participantCheck.length === 0) {
+        return respond(context, 403, { message: 'student_not_assigned_to_user' });
+      }
+    }
+
+    // Resolve template IDs for this student via lesson_template_participants
+    const { data: studentParticipantRows, error: participantLookupError } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+      .select('template_id')
+      .eq('student_id', studentId);
+
+    if (participantLookupError) {
+      context.log?.error?.('lesson-templates failed to resolve student template ids', {
+        message: participantLookupError.message,
+        studentId,
+      });
+      return tracked500('failed_to_load_lesson_templates', participantLookupError);
+    }
+
+    const studentTemplateIds = (studentParticipantRows || []).map((row) => row.template_id).filter(Boolean);
+    if (studentTemplateIds.length === 0) {
+      return respond(context, 200, []);
+    }
+
+    const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
+      .select(buildTemplateSelect())
+      .in('id', studentTemplateIds)
+      .order('is_active', { ascending: false })
+      .order('valid_from', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      context.log?.error?.('lesson-templates failed to load templates', { message: error.message, studentId });
+      return tracked500('failed_to_load_lesson_templates', error);
+    }
+
+    return respond(context, 200, (Array.isArray(data) ? data : []).map(normalizeTemplateRecord));
+  }
+
+  if (!isAdmin) {
+    return respond(context, 403, { message: 'forbidden' });
+  }
+
+  if (method === 'POST') {
+    // student_ids[] is the new multi-student API; student_id (singular) is
+    // the legacy single-student path still used by the waiting-list flow.
+    const rawStudentIds = Array.isArray(body?.student_ids)
+      ? body.student_ids.map(normalizeUuid).filter(Boolean)
+      : [];
+    const singleStudentId = normalizeUuid(body?.student_id || body?.studentId);
+    const clientProfileIdFromBody = normalizeUuid(body?.client_profile_id || body?.clientProfileId);
+    const instructorEmployeeId = normalizeUuid(body?.instructor_employee_id || body?.instructorEmployeeId);
+    const serviceId = normalizeUuid(body?.service_id || body?.serviceId);
+    const waitingListEntryId = normalizeUuid(body?.waiting_list_entry_id || body?.waitingListEntryId);
+    const dayOfWeek = normalizeDayOfWeek(body?.day_of_week ?? body?.dayOfWeek);
+    const timeOfDay = normalizeTime(body?.time_of_day || body?.timeOfDay);
+    const validFrom = normalizeString(body?.valid_from || body?.validFrom);
+    const validUntil = normalizeString(body?.valid_until || body?.validUntil);
+
+    // Resolve the canonical student list for this request.
+    // Waiting-list / legacy paths may only supply a single student_id.
+    const studentId = singleStudentId || (rawStudentIds.length === 1 ? rawStudentIds[0] : null);
+
+    if (rawStudentIds.length === 0 && !studentId && !clientProfileIdFromBody && !waitingListEntryId) {
+      return respond(context, 400, { message: 'invalid_student_id' });
+    }
+
+    if (!instructorEmployeeId) {
+      return respond(context, 400, { message: 'invalid_instructor_id' });
+    }
+
+    if (!serviceId) {
+      return respond(context, 400, { message: 'invalid_service_id' });
+    }
+
+    let selectedService = null;
+    try {
+      const serviceLookup = await loadServiceForTemplate(supabase, orgId, serviceId, { requireActive: true });
+      selectedService = serviceLookup.service;
+      if (!selectedService) {
+        return respond(context, 400, { message: 'invalid_service_id' });
+      }
+    } catch (serviceLookupError) {
+      context.log?.error?.('lesson-templates failed to validate service on create', {
+        message: serviceLookupError.message,
+        serviceId,
+      });
+      return tracked500('failed_to_create_lesson_template');
+    }
+
+    const durationMinutes = resolveServiceDurationMinutes(selectedService);
+
+    if (dayOfWeek === null) {
+      return respond(context, 400, { message: 'invalid_day_of_week' });
+    }
+
+    if (!timeOfDay) {
+      return respond(context, 400, { message: 'invalid_time_of_day' });
+    }
+
+    if (durationMinutes <= 0) {
+      return respond(context, 400, { message: 'invalid_service_duration' });
+    }
+
+    if (!validFrom || !isIsoDate(validFrom)) {
+      return respond(context, 400, { message: 'invalid_valid_from' });
+    }
+
+    if (validUntil && !isIsoDate(validUntil)) {
+      return respond(context, 400, { message: 'invalid_valid_until' });
+    }
+
+    if (validUntil && validUntil < validFrom) {
+      return respond(context, 400, { message: 'invalid_valid_until' });
+    }
+
+    try {
+      const availabilityResult = await validateInstructorServiceAvailability(supabase, orgId, {
+        instructorEmployeeId,
+        serviceId,
+        dayOfWeek,
+        timeOfDay,
+        durationMinutes,
+      });
+      if (!availabilityResult.ok) {
+        return respond(context, 409, { message: availabilityResult.code });
+      }
+    } catch (availabilityError) {
+      context.log?.error?.('lesson-templates failed to validate instructor service availability on create', {
+        message: availabilityError.message,
+        instructorEmployeeId,
+        serviceId,
+      });
+      return tracked500('failed_to_create_lesson_template');
+    }
+
+    let waitingListEntry = null;
+    let clientProfileBeforeMatch = null;
+    let studentCreated = false;
+    let effectiveStudentId = studentId;
+    let resolvedClientProfileId = clientProfileIdFromBody;
+    if (waitingListEntryId) {
+      const { data: waitingListData, error: waitingListError } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
+        .select('id, client_profile_id, student_id, desired_service_id, status, metadata')
+        .eq('id', waitingListEntryId)
+        .maybeSingle();
+
+      if (waitingListError) {
+        context.log?.error?.('lesson-templates failed to load waiting-list entry for create', {
+          message: waitingListError.message,
+          waitingListEntryId,
+        });
+        return tracked500('failed_to_create_lesson_template');
+      }
+
+      if (!waitingListData) {
+        return respond(context, 404, { message: 'waiting_list_entry_not_found' });
+      }
+
+      if (!['new', 'open'].includes(normalizeString(waitingListData.status).toLowerCase())) {
+        return respond(context, 409, { message: 'waiting_list_entry_not_open' });
+      }
+
+      if (effectiveStudentId && waitingListData.student_id && waitingListData.student_id !== effectiveStudentId) {
+        return respond(context, 400, { message: 'waiting_list_student_mismatch' });
+      }
+
+      if (waitingListData.desired_service_id !== serviceId) {
+        return respond(context, 400, { message: 'waiting_list_service_mismatch' });
+      }
+
+      waitingListEntry = waitingListData;
+      resolvedClientProfileId = waitingListData.client_profile_id || resolvedClientProfileId;
+
+      if (resolvedClientProfileId) {
+        const { data: clientProfileData, error: clientProfileError } = await withOrgScope(supabase, 'client_profiles', orgId)
+          .select('id, first_name, middle_name, last_name, is_active, onboarding_status, metadata')
+          .eq('id', resolvedClientProfileId)
+          .maybeSingle();
+        if (clientProfileError) {
+          context.log?.error?.('lesson-templates failed to load client profile for waiting-list match', {
+            message: clientProfileError.message,
+            waitingListEntryId,
+            clientProfileId: resolvedClientProfileId,
+          });
+          return tracked500('failed_to_create_lesson_template');
+        }
+        clientProfileBeforeMatch = clientProfileData;
+      }
+
+      if (!effectiveStudentId && resolvedClientProfileId) {
+        try {
+          const ensuredStudent = await ensureStudentForClientProfile(supabase, resolvedClientProfileId);
+          if (ensuredStudent.error || !ensuredStudent.student?.id) {
+            return tracked500('failed_to_activate_student_from_waiting_list');
+          }
+          effectiveStudentId = ensuredStudent.student.id;
+          studentCreated = ensuredStudent.created === true;
+        } catch (studentEnsureError) {
+          context.log?.error?.('lesson-templates failed to convert client profile to student during waiting-list match', {
+            message: studentEnsureError?.message,
+            waitingListEntryId,
+            clientProfileId: resolvedClientProfileId,
+          });
+          return tracked500('failed_to_activate_student_from_waiting_list');
+        }
+      }
+
+      const { data: studentData, error: studentError } = await withOrgScope(supabase, 'students', orgId)
+        .select('id, client_profile_id')
+        .eq('id', effectiveStudentId)
+        .maybeSingle();
+
+      if (studentError) {
+        context.log?.error?.('lesson-templates failed to load student for waiting-list match', {
+          message: studentError.message,
+          studentId: effectiveStudentId,
+          waitingListEntryId,
+        });
+        return tracked500('failed_to_create_lesson_template');
+      }
+
+      if (!studentData) {
+        return respond(context, 400, { message: 'invalid_student_id' });
+      }
+
+    } else if (!effectiveStudentId && resolvedClientProfileId) {
+      try {
+        const ensuredStudent = await ensureStudentForClientProfile(supabase, resolvedClientProfileId);
+        if (ensuredStudent.error || !ensuredStudent.student?.id) {
+          return tracked500('failed_to_create_lesson_template');
+        }
+        effectiveStudentId = ensuredStudent.student.id;
+        studentCreated = ensuredStudent.created === true;
+      } catch (studentEnsureError) {
+        context.log?.error?.('lesson-templates failed to ensure student overlay from client profile on create', {
+          message: studentEnsureError?.message,
+          clientProfileId: resolvedClientProfileId,
+        });
+        return tracked500('failed_to_create_lesson_template');
+      }
+    }
+
+    // Build the full list of students being enrolled.
+    const allStudentIds = rawStudentIds.length > 0
+      ? rawStudentIds
+      : (effectiveStudentId ? [effectiveStudentId] : []);
+
+    const { conflict: studentConflict, error: conflictCheckError } = await findStudentTemplateConflicts(supabase, orgId, {
+      studentIds: allStudentIds,
+      instructorEmployeeId,
+      dayOfWeek,
+      timeOfDay,
+      validFrom,
+      validUntil,
+    });
+
+    if (conflictCheckError) {
+      context.log?.error?.('lesson-templates failed to check duplicate conflict', {
+        message: conflictCheckError.message,
+        studentIds: allStudentIds,
+      });
+      return tracked500('failed_to_create_lesson_template');
+    }
+
+    if (studentConflict) {
+      return respond(context, 409, {
+        message: 'duplicate_template_conflict',
+        conflicting_template_id: studentConflict.template_id,
+        conflicting_student_id: studentConflict.student_id,
+      });
+    }
+
+    const { conflict: instructorSlotConflict, error: instructorSlotConflictError } = await findInstructorSlotConflict(supabase, orgId, {
+      instructorEmployeeId,
+      dayOfWeek,
+      timeOfDay,
+      durationMinutes,
+      validFrom,
+      validUntil,
+    });
+
+    if (instructorSlotConflictError) {
+      context.log?.error?.('lesson-templates failed to check instructor slot conflict on create', {
+        message: instructorSlotConflictError.message,
+        instructorEmployeeId,
+        serviceId,
+      });
+      return tracked500('failed_to_create_lesson_template');
+    }
+
+    if (instructorSlotConflict) {
+      return respond(context, 409, {
+        message: instructorSlotConflict.code,
+        conflicting_template_ids: (instructorSlotConflict.templates || []).map((template) => template.id).filter(Boolean),
+      });
+    }
+
+    const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
+      .insert({
+        // student_id is kept null for new templates; lesson_template_participants is the SSOT.
+        student_id: null,
+        instructor_employee_id: instructorEmployeeId,
+        service_id: serviceId,
+        day_of_week: dayOfWeek,
+        time_of_day: timeOfDay,
+        duration_minutes: durationMinutes,
+        valid_from: validFrom,
+        valid_until: validUntil || null,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      })
+      .select(buildTemplateSelect())
+      .single();
+
+    if (error) {
+      if (isDuplicateTemplateConstraintError(error)) {
+        return respond(context, 409, {
+          message: resolveTemplateConstraintMessage(error),
+        });
+      }
+
+      context.log?.error?.('lesson-templates failed to create template', { message: error.message, studentIds: allStudentIds });
+      return tracked500('failed_to_create_lesson_template');
+    }
+
+    // Insert all students as template participants.
+    if (allStudentIds.length > 0) {
+      const participantRows = allStudentIds.map((sid) => ({
+        org_id: orgId,
+        template_id: data.id,
+        student_id: sid,
+      }));
+      const { error: participantsError } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+        .insert(participantRows);
+
+      if (participantsError) {
+        context.log?.error?.('lesson-templates failed to insert template participants, rolling back template', {
+          message: participantsError.message,
+          templateId: data.id,
+        });
+        await rollbackCreatedTemplate(context, supabase, orgId, data.id, {
+          reason: 'participant_insert_failed',
+        });
+        return tracked500('failed_to_create_lesson_template');
+      }
+    }
+
+    let studentAfterActivation = null;
+    let studentReactivated = false;
+
+    if (waitingListEntry && clientProfileBeforeMatch?.is_active === false) {
+      const activationTimestamp = new Date().toISOString();
+      const activationMetadata = clientProfileBeforeMatch?.metadata && typeof clientProfileBeforeMatch.metadata === 'object'
+        ? clientProfileBeforeMatch.metadata
+        : {};
+      const activationPayload = {
+        is_active: true,
+        metadata: {
+          ...activationMetadata,
+          reactivated_from_waiting_list_entry_id: waitingListEntry.id,
+          reactivated_from_template_id: data.id,
+          reactivated_at: activationTimestamp,
+          reactivated_by_user_id: userId,
+        },
+      };
+
+      if (normalizeString(clientProfileBeforeMatch.onboarding_status) === 'pending_forms') {
+        activationPayload.onboarding_status = 'approved';
+      }
+
+      const { data: activatedStudent, error: activationError } = await withOrgScope(supabase, 'client_profiles', orgId)
+        .update(activationPayload)
+        .eq('id', resolvedClientProfileId)
+        .select('id, first_name, middle_name, last_name, is_active, onboarding_status, metadata')
+        .single();
+
+      if (activationError) {
+        context.log?.error?.('lesson-templates failed to activate student during waiting-list match', {
+          message: activationError.message,
+          waitingListEntryId: waitingListEntry.id,
+          templateId: data.id,
+          clientProfileId: resolvedClientProfileId,
+        });
+
+        const rollbackTemplateResult = await rollbackCreatedTemplate(context, supabase, orgId, data.id, {
+          waitingListEntryId: waitingListEntry.id,
+          clientProfileId: resolvedClientProfileId,
+          reason: 'student_activation_failed',
+        });
+
+        return tracked500(
+          rollbackTemplateResult.ok ? 'failed_to_activate_student_from_waiting_list' : 'failed_to_finalize_waiting_list_match',
+          activationError,
+        );
+      }
+
+      studentAfterActivation = activatedStudent;
+      studentReactivated = true;
+    }
+
+    if (waitingListEntry) {
+      const matchTimestamp = new Date().toISOString();
+      const existingMetadata = waitingListEntry?.metadata && typeof waitingListEntry.metadata === 'object'
+        ? waitingListEntry.metadata
+        : {};
+      const nextMetadata = {
+        ...existingMetadata,
+        matched_template_id: data.id,
+        matched_at: matchTimestamp,
+        matched_by_user_id: userId,
+      };
+
+      const { data: matchedEntry, error: waitingListUpdateError } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
+        .update({
+          status: 'matched',
+          metadata: nextMetadata,
+        })
+        .eq('id', waitingListEntry.id)
+        .select('id, student_id, desired_service_id, status, metadata')
+        .single();
+
+      if (waitingListUpdateError) {
+        context.log?.error?.('lesson-templates failed to mark waiting-list entry as matched', {
+          message: waitingListUpdateError.message,
+          waitingListEntryId: waitingListEntry.id,
+          templateId: data.id,
+        });
+
+        const rollbackTemplateResult = await rollbackCreatedTemplate(context, supabase, orgId, data.id, {
+          waitingListEntryId: waitingListEntry.id,
+          studentId: effectiveStudentId,
+          reason: 'waiting_list_update_failed',
+        });
+        let rollbackStudentOk = true;
+
+        if (studentReactivated && clientProfileBeforeMatch) {
+          const { error: rollbackStudentError } = await withOrgScope(supabase, 'client_profiles', orgId)
+            .update({
+              is_active: clientProfileBeforeMatch?.is_active,
+              onboarding_status: clientProfileBeforeMatch?.onboarding_status,
+              metadata: clientProfileBeforeMatch?.metadata || null,
+            })
+            .eq('id', resolvedClientProfileId);
+
+          if (rollbackStudentError) {
+            rollbackStudentOk = false;
+            context.log?.error?.('lesson-templates failed to rollback student activation after waiting-list update failure', {
+              message: rollbackStudentError.message,
+              waitingListEntryId: waitingListEntry.id,
+              templateId: data.id,
+              clientProfileId: resolvedClientProfileId,
+            });
+          }
+        }
+
+        return tracked500(
+          rollbackTemplateResult.ok && rollbackStudentOk ? 'failed_to_link_waiting_list_entry' : 'failed_to_finalize_waiting_list_match',
+          waitingListUpdateError,
+        );
+      }
+
+      if (studentReactivated && studentAfterActivation) {
+        await writeTenantAudit(context, supabase, {
+          actorUserId: userId,
+          eventType: 'student.reactivated_from_waiting_list_match',
+          retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+          resourceType: 'client_profile',
+          resourceId: studentAfterActivation.id,
+          beforeState: clientProfileBeforeMatch,
+          afterState: studentAfterActivation,
+          details: {
+            origin: 'api/lesson-templates',
+            waiting_list_entry_id: waitingListEntry.id,
+            lesson_template_id: data.id,
+          },
+        });
+      }
+
+      await writeTenantAudit(context, supabase, {
+        actorUserId: userId,
+        eventType: 'waiting_list.entry.matched',
+        retentionCategory: TENANT_AUDIT_RETENTION.STANDARD,
+        resourceType: 'waiting_list_entry',
+        resourceId: matchedEntry.id,
+        beforeState: waitingListEntry,
+        afterState: matchedEntry,
+        details: {
+          origin: 'api/lesson-templates',
+          lesson_template_id: data.id,
+        },
+      });
+    }
+
+    try {
+      await logAuditEvent(supabase, {
+        orgId,
+        userId,
+        userEmail,
+        userRole: role,
+        actionType: AUDIT_ACTIONS.TEMPLATE_CREATED,
+        actionCategory: AUDIT_CATEGORIES.CALENDAR,
+        resourceType: 'lesson_template',
+        resourceId: data.id,
+        details: {
+          student_id: data.student_id,
+          instructor_employee_id: data.instructor_employee_id,
+          service_id: data.service_id,
+          day_of_week: data.day_of_week,
+          time_of_day: data.time_of_day,
+          valid_from: data.valid_from,
+          valid_until: data.valid_until,
+          duration_minutes: data.duration_minutes,
+          waiting_list_entry_id: waitingListEntryId || null,
+        },
+      });
+    } catch (auditError) {
+      context.log?.error?.('lesson-templates failed to write audit event (create)', {
+        message: auditError?.message,
+        templateId: data?.id,
+      });
+    }
+
+    // Re-fetch with participants included (the initial insert response pre-dates participant rows).
+    const { data: createdRecord } = await withOrgScope(supabase, 'lesson_templates', orgId)
+      .select(buildTemplateSelect())
+      .eq('id', data.id)
+      .single();
+
+    return respond(context, 201, {
+      ...normalizeTemplateRecord(createdRecord || data),
+      waiting_list_match: waitingListEntry
+        ? {
+            waiting_list_entry_id: waitingListEntry.id,
+            student_created: studentCreated,
+            student_reactivated: studentReactivated,
+          }
+        : null,
+    });
+  }
+
+  if (method === 'PUT') {
+    const templateId = normalizeUuid(
+      context?.bindingData?.templateId || body?.template_id || body?.templateId,
+    );
+    if (!templateId) {
+      return respond(context, 400, { message: 'invalid_template_id' });
+    }
+
+    const { data: existingTemplate, error: existingTemplateError } = await withOrgScope(supabase, 'lesson_templates', orgId)
+      .select('id, student_id, instructor_employee_id, service_id, day_of_week, time_of_day, duration_minutes, valid_from, valid_until, is_active')
+      .eq('id', templateId)
+      .maybeSingle();
+
+    if (existingTemplateError) {
+      context.log?.error?.('lesson-templates failed to load existing template for update', {
+        message: existingTemplateError.message,
+        templateId,
+      });
+      return tracked500('failed_to_update_lesson_template');
+    }
+
+    if (!existingTemplate) {
+      return respond(context, 404, { message: 'lesson_template_not_found' });
+    }
+
+    const updates = {};
+
+    // --- Participant management (add / remove students) ---
+    const addStudentIds = Array.isArray(body?.add_student_ids)
+      ? body.add_student_ids.map(normalizeUuid).filter(Boolean)
+      : [];
+    const removeStudentIds = Array.isArray(body?.remove_student_ids)
+      ? body.remove_student_ids.map(normalizeUuid).filter(Boolean)
+      : [];
+    const waitingListEntryId = normalizeUuid(body?.waiting_list_entry_id || body?.waitingListEntryId);
+
+    if (Object.prototype.hasOwnProperty.call(body, 'instructor_employee_id') || Object.prototype.hasOwnProperty.call(body, 'instructorEmployeeId')) {
+      const instructorEmployeeId = normalizeUuid(body?.instructor_employee_id || body?.instructorEmployeeId);
+      if (!instructorEmployeeId) {
+        return respond(context, 400, { message: 'invalid_instructor_id' });
+      }
+      updates.instructor_employee_id = instructorEmployeeId;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'service_id') || Object.prototype.hasOwnProperty.call(body, 'serviceId')) {
+      const serviceId = normalizeUuid(body?.service_id || body?.serviceId);
+      if (!serviceId) {
+        return respond(context, 400, { message: 'invalid_service_id' });
+      }
+
+      try {
+        const serviceLookup = await loadServiceForTemplate(supabase, orgId, serviceId, { requireActive: true });
+        if (!serviceLookup.service) {
+          return respond(context, 400, { message: 'invalid_service_id' });
+        }
+      } catch (serviceLookupError) {
+        context.log?.error?.('lesson-templates failed to validate service on update', {
+          message: serviceLookupError.message,
+          serviceId,
+          templateId,
+        });
+        return tracked500('failed_to_update_lesson_template');
+      }
+      updates.service_id = serviceId;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'day_of_week') || Object.prototype.hasOwnProperty.call(body, 'dayOfWeek')) {
+      const dayOfWeek = normalizeDayOfWeek(body?.day_of_week ?? body?.dayOfWeek);
+      if (dayOfWeek === null) {
+        return respond(context, 400, { message: 'invalid_day_of_week' });
+      }
+      updates.day_of_week = dayOfWeek;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'time_of_day') || Object.prototype.hasOwnProperty.call(body, 'timeOfDay')) {
+      const timeOfDay = normalizeTime(body?.time_of_day || body?.timeOfDay);
+      if (!timeOfDay) {
+        return respond(context, 400, { message: 'invalid_time_of_day' });
+      }
+      updates.time_of_day = timeOfDay;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'valid_from') || Object.prototype.hasOwnProperty.call(body, 'validFrom')) {
+      const validFrom = normalizeString(body?.valid_from || body?.validFrom);
+      if (!validFrom || !isIsoDate(validFrom)) {
+        return respond(context, 400, { message: 'invalid_valid_from' });
+      }
+      updates.valid_from = validFrom;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'valid_until') || Object.prototype.hasOwnProperty.call(body, 'validUntil')) {
+      const validUntil = normalizeString(body?.valid_until || body?.validUntil);
+      if (validUntil && !isIsoDate(validUntil)) {
+        return respond(context, 400, { message: 'invalid_valid_until' });
+      }
+      updates.valid_until = validUntil || null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'is_active') || Object.prototype.hasOwnProperty.call(body, 'isActive')) {
+      updates.is_active = Boolean(body?.is_active ?? body?.isActive);
+    }
+
+    const hasScheduleUpdates = Object.keys(updates).length > 0;
+    const hasParticipantUpdates = addStudentIds.length > 0 || removeStudentIds.length > 0;
+
+    if (!hasScheduleUpdates && !hasParticipantUpdates && !waitingListEntryId) {
+      return respond(context, 400, { message: 'missing_updates' });
+    }
+
+    // Validate waiting list entry up front (capacity-mode assignment) before any DB writes
+    let waitingEntryToMatch = null;
+    if (waitingListEntryId) {
+      const { data: waitingEntry, error: waitingLoadError } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
+        .select('id, student_id, client_profile_id, status, metadata')
+        .eq('id', waitingListEntryId)
+        .maybeSingle();
+
+      if (waitingLoadError) {
+        context.log?.error?.('lesson-templates failed to load waiting-list entry for capacity assign', {
+          message: waitingLoadError.message,
+          waitingListEntryId,
+          templateId,
+        });
+        return tracked500('failed_to_link_waiting_list_entry', waitingLoadError);
+      }
+
+      if (!waitingEntry) {
+        return respond(context, 404, { message: 'waiting_list_entry_not_found' });
+      }
+
+      if (!['new', 'open'].includes(String(waitingEntry.status).toLowerCase())) {
+        return respond(context, 409, { message: 'waiting_list_entry_not_open' });
+      }
+
+      waitingEntryToMatch = waitingEntry;
+
+      // Resolve the student to add from the entry when not already in add_student_ids
+      if (addStudentIds.length === 0) {
+        const clientProfileId = waitingEntry.client_profile_id;
+
+        // Load the client profile up front so we can activate it if needed
+        let clientProfileSnapshot = null;
+        if (clientProfileId) {
+          const { data: cpData } = await withOrgScope(supabase, 'client_profiles', orgId)
+            .select('id, is_active, onboarding_status, metadata')
+            .eq('id', clientProfileId)
+            .maybeSingle();
+          clientProfileSnapshot = cpData;
+        }
+
+        if (waitingEntry.student_id) {
+          addStudentIds.push(waitingEntry.student_id);
+        } else if (clientProfileId) {
+          try {
+            const ensured = await ensureStudentForClientProfile(supabase, clientProfileId);
+            if (ensured.error || !ensured.student?.id) {
+              return tracked500('failed_to_activate_student_from_waiting_list');
+            }
+            addStudentIds.push(ensured.student.id);
+          } catch (ensureError) {
+            context.log?.error?.('lesson-templates failed to resolve student from client profile for capacity assign', {
+              message: ensureError?.message,
+              waitingListEntryId,
+              clientProfileId,
+              templateId,
+            });
+            return tracked500('failed_to_activate_student_from_waiting_list');
+          }
+        } else {
+          return respond(context, 400, { message: 'waiting_list_entry_has_no_student' });
+        }
+
+        // Activate the client profile if it was inactive (mirrors the POST waiting-list flow)
+        if (clientProfileSnapshot?.is_active === false) {
+          const activationMeta = {
+            ...(clientProfileSnapshot.metadata && typeof clientProfileSnapshot.metadata === 'object' ? clientProfileSnapshot.metadata : {}),
+            reactivated_from_waiting_list_entry_id: waitingEntry.id,
+            reactivated_from_template_id: templateId,
+            reactivated_at: new Date().toISOString(),
+            reactivated_by_user_id: userId,
+          };
+          const activationPayload = { is_active: true, metadata: activationMeta };
+          if (normalizeString(clientProfileSnapshot.onboarding_status) === 'pending_forms') {
+            activationPayload.onboarding_status = 'approved';
+          }
+          const { error: activationError } = await withOrgScope(supabase, 'client_profiles', orgId)
+            .update(activationPayload)
+            .eq('id', clientProfileId);
+          if (activationError) {
+            context.log?.error?.('lesson-templates failed to activate client profile during capacity assign', {
+              message: activationError.message,
+              waitingListEntryId: waitingEntry.id,
+              clientProfileId,
+              templateId,
+            });
+            return tracked500('failed_to_activate_student_from_waiting_list', activationError);
+          }
+        }
+      }
+    }
+
+    const effectiveServiceId = updates.service_id ?? existingTemplate.service_id;
+    let effectiveService = null;
+    try {
+      const serviceLookup = await loadServiceForTemplate(supabase, orgId, effectiveServiceId, {
+        requireActive: Object.prototype.hasOwnProperty.call(updates, 'service_id'),
+      });
+      effectiveService = serviceLookup.service;
+      if (!effectiveService) {
+        return respond(context, 400, { message: 'invalid_service_id' });
+      }
+    } catch (serviceLookupError) {
+      context.log?.error?.('lesson-templates failed to load effective service on update', {
+        message: serviceLookupError.message,
+        serviceId: effectiveServiceId,
+        templateId,
+      });
+      return tracked500('failed_to_update_lesson_template');
+    }
+
+    const effectiveDurationMinutes = resolveServiceDurationMinutes(effectiveService);
+    if (effectiveDurationMinutes <= 0) {
+      return respond(context, 400, { message: 'invalid_service_duration' });
+    }
+    if (Number(existingTemplate.duration_minutes) !== effectiveDurationMinutes) {
+      updates.duration_minutes = effectiveDurationMinutes;
+    }
+
+    const nextTemplateState = {
+      student_id: updates.student_id ?? existingTemplate.student_id,
+      instructor_employee_id: updates.instructor_employee_id ?? existingTemplate.instructor_employee_id,
+      service_id: effectiveServiceId,
+      duration_minutes: effectiveDurationMinutes,
+      day_of_week: updates.day_of_week ?? existingTemplate.day_of_week,
+      time_of_day: updates.time_of_day ?? existingTemplate.time_of_day,
+      valid_from: updates.valid_from ?? existingTemplate.valid_from,
+      valid_until: Object.prototype.hasOwnProperty.call(updates, 'valid_until')
+        ? updates.valid_until
+        : existingTemplate.valid_until,
+      is_active: Object.prototype.hasOwnProperty.call(updates, 'is_active')
+        ? updates.is_active
+        : existingTemplate.is_active,
+    };
+
+    if (nextTemplateState.valid_until && nextTemplateState.valid_until < nextTemplateState.valid_from) {
+      return respond(context, 400, { message: 'invalid_valid_until' });
+    }
+
+    try {
+      const availabilityResult = await validateInstructorServiceAvailability(supabase, orgId, {
+        instructorEmployeeId: nextTemplateState.instructor_employee_id,
+        serviceId: nextTemplateState.service_id,
+        dayOfWeek: nextTemplateState.day_of_week,
+        timeOfDay: nextTemplateState.time_of_day,
+        durationMinutes: nextTemplateState.duration_minutes,
+      });
+      if (!availabilityResult.ok) {
+        return respond(context, 409, { message: availabilityResult.code });
+      }
+    } catch (availabilityError) {
+      context.log?.error?.('lesson-templates failed to validate instructor service availability on update', {
+        message: availabilityError.message,
+        templateId,
+      });
+      return tracked500('failed_to_update_lesson_template');
+    }
+
+    const isReactivating = !existingTemplate.is_active && nextTemplateState.is_active;
+    if (isReactivating) {
+      const hasValidFromUpdate = Object.prototype.hasOwnProperty.call(updates, 'valid_from');
+      const hasValidUntilUpdate = Object.prototype.hasOwnProperty.call(updates, 'valid_until');
+      const rangeChanged = (
+        (hasValidFromUpdate && updates.valid_from !== existingTemplate.valid_from)
+        || (hasValidUntilUpdate && updates.valid_until !== existingTemplate.valid_until)
+      );
+
+      // Prevent accidental re-activation with stale dates.
+      if (!hasValidFromUpdate || !rangeChanged) {
+        return respond(context, 400, { message: 'reactivation_requires_new_valid_range' });
+      }
+    }
+
+    if (nextTemplateState.is_active) {
+      // Collect all students currently in this template plus any being added.
+      const { data: existingParticipants } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+        .select('student_id')
+        .eq('template_id', templateId);
+
+      const existingStudentIds = (existingParticipants || []).map((p) => p.student_id);
+      const allActiveStudentIds = Array.from(new Set([
+        ...existingStudentIds,
+        ...addStudentIds,
+      ])).filter((sid) => !removeStudentIds.includes(sid));
+
+      if (allActiveStudentIds.length > 0) {
+        const { conflict: studentConflict, error: conflictCheckError } = await findStudentTemplateConflicts(supabase, orgId, {
+          studentIds: allActiveStudentIds,
+          instructorEmployeeId: nextTemplateState.instructor_employee_id,
+          dayOfWeek: nextTemplateState.day_of_week,
+          timeOfDay: nextTemplateState.time_of_day,
+          validFrom: nextTemplateState.valid_from,
+          validUntil: nextTemplateState.valid_until,
+          excludeTemplateId: templateId,
+        });
+
+        if (conflictCheckError) {
+          context.log?.error?.('lesson-templates failed to check duplicate conflict on update', {
+            message: conflictCheckError.message,
+            templateId,
+          });
+          return tracked500('failed_to_update_lesson_template');
+        }
+
+        if (studentConflict) {
+          return respond(context, 409, {
+            message: 'duplicate_template_conflict',
+            conflicting_template_id: studentConflict.template_id,
+            conflicting_student_id: studentConflict.student_id,
+          });
+        }
+      }
+
+      const { conflict: instructorSlotConflict, error: instructorSlotConflictError } = await findInstructorSlotConflict(supabase, orgId, {
+        instructorEmployeeId: nextTemplateState.instructor_employee_id,
+        dayOfWeek: nextTemplateState.day_of_week,
+        timeOfDay: nextTemplateState.time_of_day,
+        durationMinutes: nextTemplateState.duration_minutes,
+        validFrom: nextTemplateState.valid_from,
+        validUntil: nextTemplateState.valid_until,
+        excludeTemplateId: templateId,
+      });
+
+      if (instructorSlotConflictError) {
+        context.log?.error?.('lesson-templates failed to check instructor slot conflict on update', {
+          message: instructorSlotConflictError.message,
+          templateId,
+        });
+        return tracked500('failed_to_update_lesson_template');
+      }
+
+      if (instructorSlotConflict) {
+        return respond(context, 409, {
+          message: instructorSlotConflict.code,
+          conflicting_template_ids: (instructorSlotConflict.templates || []).map((template) => template.id).filter(Boolean),
+        });
+      }
+    }
+
+    if (hasScheduleUpdates) {
+      updates.updated_at = new Date().toISOString();
+    }
+
+    let data;
+    if (hasScheduleUpdates) {
+      const { data: updatedData, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
+        .update(updates)
+        .eq('id', templateId)
+        .select(buildTemplateSelect())
+        .maybeSingle();
+
+      if (error) {
+        if (isDuplicateTemplateConstraintError(error)) {
+          return respond(context, 409, {
+            message: resolveTemplateConstraintMessage(error),
+          });
+        }
+
+        context.log?.error?.('lesson-templates failed to update template', { message: error.message, templateId });
+        return tracked500('failed_to_update_lesson_template');
+      }
+
+      if (!updatedData) {
+        return respond(context, 404, { message: 'lesson_template_not_found' });
+      }
+      data = updatedData;
+    }
+
+    // Apply participant additions
+    if (addStudentIds.length > 0) {
+      const participantRows = addStudentIds.map((sid) => ({
+        org_id: orgId,
+        template_id: templateId,
+        student_id: sid,
+      }));
+      const { error: addError } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+        .insert(participantRows)
+        .select('id');
+
+      if (addError && !addError.message?.includes('duplicate')) {
+        context.log?.error?.('lesson-templates failed to add template participants', {
+          message: addError.message,
+          templateId,
+        });
+        return tracked500('failed_to_update_lesson_template');
+      }
+    }
+
+    // Mark waiting list entry as matched (capacity-mode assignment)
+    if (waitingEntryToMatch) {
+      const matchTimestamp = new Date().toISOString();
+      const existingMeta = waitingEntryToMatch.metadata && typeof waitingEntryToMatch.metadata === 'object'
+        ? waitingEntryToMatch.metadata
+        : {};
+      const { error: matchError } = await withOrgScope(supabase, 'waiting_list_entries', orgId)
+        .update({
+          status: 'matched',
+          metadata: {
+            ...existingMeta,
+            matched_template_id: templateId,
+            matched_at: matchTimestamp,
+            matched_by_user_id: userId,
+          },
+        })
+        .eq('id', waitingEntryToMatch.id);
+
+      if (matchError) {
+        context.log?.error?.('lesson-templates failed to mark waiting-list entry as matched on participant add', {
+          message: matchError.message,
+          waitingListEntryId: waitingEntryToMatch.id,
+          templateId,
+        });
+        // Rollback: remove the participant(s) we just inserted
+        if (addStudentIds.length > 0) {
+          await withOrgScope(supabase, 'lesson_template_participants', orgId)
+            .delete()
+            .eq('template_id', templateId)
+            .in('student_id', addStudentIds);
+        }
+        return tracked500('failed_to_link_waiting_list_entry', matchError);
+      }
+    }
+
+    // Apply participant removals
+    if (removeStudentIds.length > 0) {
+      const { error: removeError } = await withOrgScope(supabase, 'lesson_template_participants', orgId)
+        .delete()
+        .eq('template_id', templateId)
+        .in('student_id', removeStudentIds);
+
+      if (removeError) {
+        context.log?.error?.('lesson-templates failed to remove template participants', {
+          message: removeError.message,
+          templateId,
+        });
+        return tracked500('failed_to_update_lesson_template');
+      }
+    }
+
+    // Fetch the latest record (may not have been fetched above if only participant changes)
+    if (!data) {
+      const { data: fetchedData, error: fetchError } = await withOrgScope(supabase, 'lesson_templates', orgId)
+        .select(buildTemplateSelect())
+        .eq('id', templateId)
+        .maybeSingle();
+
+      if (fetchError || !fetchedData) {
+        return respond(context, 404, { message: 'lesson_template_not_found' });
+      }
+      data = fetchedData;
+    } else {
+      // Re-fetch to include any participant changes
+      const { data: refreshedData } = await withOrgScope(supabase, 'lesson_templates', orgId)
+        .select(buildTemplateSelect())
+        .eq('id', templateId)
+        .maybeSingle();
+      if (refreshedData) data = refreshedData;
+    }
+
+    const actionType = !existingTemplate.is_active && data.is_active
+      ? AUDIT_ACTIONS.TEMPLATE_REACTIVATED
+      : existingTemplate.is_active && !data.is_active
+        ? AUDIT_ACTIONS.TEMPLATE_DEACTIVATED
+        : AUDIT_ACTIONS.TEMPLATE_UPDATED;
+
+    try {
+      await logAuditEvent(supabase, {
+        orgId,
+        userId,
+        userEmail,
+        userRole: role,
+        actionType,
+        actionCategory: AUDIT_CATEGORIES.CALENDAR,
+        resourceType: 'lesson_template',
+        resourceId: data.id,
+        details: {
+          before: {
+            student_id: existingTemplate.student_id,
+            instructor_employee_id: existingTemplate.instructor_employee_id,
+            day_of_week: existingTemplate.day_of_week,
+            time_of_day: existingTemplate.time_of_day,
+            valid_from: existingTemplate.valid_from,
+            valid_until: existingTemplate.valid_until,
+            is_active: existingTemplate.is_active,
+          },
+          updates,
+          after: {
+            student_id: data.student_id,
+            instructor_employee_id: data.instructor_employee_id,
+            day_of_week: data.day_of_week,
+            time_of_day: data.time_of_day,
+            valid_from: data.valid_from,
+            valid_until: data.valid_until,
+            is_active: data.is_active,
+          },
+        },
+      });
+    } catch (auditError) {
+      context.log?.error?.('lesson-templates failed to write audit event (update)', {
+        message: auditError?.message,
+        templateId: data?.id,
+      });
+    }
+
+    return respond(context, 200, normalizeTemplateRecord(data));
+  }
+
+  if (method === 'DELETE') {
+    const templateId = normalizeUuid(
+      context?.bindingData?.templateId || body?.template_id || body?.templateId,
+    );
+    if (!templateId) {
+      return respond(context, 400, { message: 'invalid_template_id' });
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data: existingTemplate, error: loadTemplateError } = await withOrgScope(supabase, 'lesson_templates', orgId)
+      .select('id, student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active')
+      .eq('id', templateId)
+      .maybeSingle();
+
+    if (loadTemplateError) {
+      context.log?.error?.('lesson-templates failed to load template for deactivation', {
+        message: loadTemplateError.message,
+        templateId,
+      });
+      return tracked500('failed_to_deactivate_lesson_template');
+    }
+
+    if (!existingTemplate) {
+      return respond(context, 404, { message: 'lesson_template_not_found' });
+    }
+
+    const safeValidUntil = computeSafeDeactivationUntil(existingTemplate, today);
+
+    const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)
+      .update({ is_active: false, valid_until: safeValidUntil, updated_at: new Date().toISOString() })
+      .eq('id', templateId)
+      .select('id, student_id, instructor_employee_id, day_of_week, time_of_day, valid_from, valid_until, is_active')
+      .maybeSingle();
+
+    if (error) {
+      context.log?.error?.('lesson-templates failed to deactivate template', { message: error.message, templateId });
+      return tracked500('failed_to_deactivate_lesson_template');
+    }
+
+    if (!data) {
+      return tracked500('failed_to_deactivate_lesson_template');
+    }
+
+    try {
+      await logAuditEvent(supabase, {
+        orgId,
+        userId,
+        userEmail,
+        userRole: role,
+        actionType: AUDIT_ACTIONS.TEMPLATE_DEACTIVATED,
+        actionCategory: AUDIT_CATEGORIES.CALENDAR,
+        resourceType: 'lesson_template',
+        resourceId: data.id,
+        details: {
+          before: {
+            valid_from: existingTemplate.valid_from,
+            valid_until: existingTemplate.valid_until,
+            is_active: existingTemplate.is_active,
+          },
+          after: {
+            valid_from: data.valid_from,
+            valid_until: data.valid_until,
+            is_active: data.is_active,
+          },
+          deactivated_on: today,
+        },
+      });
+    } catch (auditError) {
+      context.log?.error?.('lesson-templates failed to write audit event (deactivate)', {
+        message: auditError?.message,
+        templateId: data?.id,
+      });
+    }
+
+    return respond(context, 200, { message: 'template_deactivated', id: data.id });
+  }
+
+  return respond(context, 405, { message: 'method_not_allowed' });
+}

@@ -1,0 +1,64 @@
+name: Nightly Backup
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  run_backup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Run backup job
+        shell: bash
+        env:
+          APP_API_BASE_URL: ${{ secrets.APP_API_BASE_URL }}
+          BACKUP_SERVICE_KEY: ${{ secrets.BACKUP_SERVICE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$APP_API_BASE_URL" ]; then
+            echo "APP_API_BASE_URL secret is missing"
+            exit 1
+          fi
+
+          if [ -z "$BACKUP_SERVICE_KEY" ]; then
+            echo "BACKUP_SERVICE_KEY secret is missing"
+            exit 1
+          fi
+
+          response_file="$(mktemp)"
+          http_status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+            -X POST \
+            -H "x-backup-service-key: ${BACKUP_SERVICE_KEY}" \
+            "${APP_API_BASE_URL%/}/api/backup-run")"
+
+          echo "Backup endpoint HTTP status: ${http_status}"
+          cat "$response_file"
+
+          node - "$response_file" <<'NODE'
+          const fs = require('node:fs');
+          const filePath = process.argv[2];
+          const raw = fs.readFileSync(filePath, 'utf8');
+          let payload;
+
+          try {
+            payload = JSON.parse(raw);
+          } catch (error) {
+            console.error('Backup response was not valid JSON');
+            console.error(raw);
+            process.exit(1);
+          }
+
+          const succeeded = Number(payload?.succeeded || 0);
+          const failed = Number(payload?.failed || 0);
+
+          console.log(`Backup summary: succeeded=${succeeded} failed=${failed}`);
+
+          if (failed > 0) {
+            console.error('Nightly backup completed with failures.');
+            process.exit(1);
+          }
+          NODE

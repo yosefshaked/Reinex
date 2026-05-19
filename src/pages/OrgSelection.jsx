@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +14,7 @@ import { buildInvitationSearch } from '@/lib/invite-tokens.js';
 
 function LoadingState() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50" dir="rtl">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
       <div className="flex flex-col items-center gap-4 text-slate-600">
         <div className="w-12 h-12 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin" aria-hidden="true" />
         <p className="text-sm font-medium">טוען ארגונים...</p>
@@ -23,26 +23,43 @@ function LoadingState() {
   );
 }
 
-function EmptyState({ onCreate }) {
+function EmptyState({ canCreate, onCreate }) {
   return (
     <Card className="max-w-2xl w-full">
-      <CardHeader className="space-y-2 text-right">
+      <CardHeader className="space-y-2">
         <CardTitle className="text-2xl font-bold text-slate-900">ברוך הבא!</CardTitle>
-        <p className="text-slate-600 text-sm">
-          עדיין אין ארגון המשויך לחשבון שלך. צור ארגון חדש או בקש ממנהל להזמין אותך.
-        </p>
+        {canCreate ? (
+          <p className="text-slate-600 text-sm">
+            עדיין אין ארגון המשויך לחשבון שלך. צור ארגון חדש או בקש ממנהל להזמין אותך.
+          </p>
+        ) : (
+          <p className="text-slate-600 text-sm">
+            עדיין אין ארגון המשויך לחשבון שלך ואין הזמנה ממתינה. בקש ממנהל ארגון לשלוח לך הזמנה.
+          </p>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
-        <Button onClick={onCreate} className="w-full" size="lg">
-          <Building2 className="w-4 h-4 ml-2" />
-          צור ארגון חדש
-        </Button>
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3 text-sm text-blue-900" role="status">
-          <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
-          <p>
-            לאחר יצירת הארגון ניתן יהיה להגדיר את חיבור ה-Supabase ולצרף מנהלים נוספים מתוך מסך ההגדרות.
-          </p>
-        </div>
+        {canCreate ? (
+          <>
+            <Button onClick={onCreate} className="w-full" size="lg">
+              <Building2 className="w-4 h-4 ms-2" />
+              צור ארגון חדש
+            </Button>
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3 text-sm text-blue-900" role="status">
+              <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
+              <p>
+                לאחר יצירת הארגון ניתן יהיה להגדיר את חיבור ה-Supabase ולצרף מנהלים נוספים מתוך מסך ההגדרות.
+              </p>
+            </div>
+          </>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3 text-sm text-amber-900" role="status">
+            <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
+            <p>
+              אין לך הרשאה ליצור ארגון חדש. פנה למנהל ארגון ובקש הזמנה לחשבון שלך דרך מסך הניהול.
+            </p>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -52,13 +69,13 @@ function InviteList({ invites, onAccept }) {
   if (!invites.length) return null;
   return (
     <Card className="w-full max-w-3xl">
-      <CardHeader className="text-right">
+      <CardHeader>
         <CardTitle className="text-lg font-semibold text-slate-900">הזמנות ממתינות</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {invites.map((invite) => (
           <div key={invite.id} className="border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div className="text-right">
+            <div>
               <p className="font-medium text-slate-900">{invite.organization?.name || 'ארגון ללא שם'}</p>
               <p className="text-sm text-slate-500">{invite.email}</p>
             </div>
@@ -80,7 +97,7 @@ function OrganizationList({ organizations, onSelect }) {
   if (!organizations.length) return null;
   return (
     <Card className="w-full max-w-3xl">
-      <CardHeader className="text-right">
+      <CardHeader>
         <CardTitle className="text-lg font-semibold text-slate-900">בחר ארגון</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -89,7 +106,7 @@ function OrganizationList({ organizations, onSelect }) {
             key={organization.id}
             type="button"
             onClick={() => onSelect(organization.id)}
-            className="w-full border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition rounded-xl p-4 text-right"
+            className="w-full border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition rounded-xl p-4"
           >
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -100,13 +117,13 @@ function OrganizationList({ organizations, onSelect }) {
                   <p className="text-xs text-slate-500 mt-1">חבר צוות</p>
                 )}
               </div>
-              {organization.has_connection ? (
+              {organization.setup_completed ? (
                 <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
-                  חיבור פעיל
+                  מוכן
                 </Badge>
               ) : (
                 <Badge variant="outline" className="text-amber-700 border-amber-200 bg-amber-50">
-                  נדרש חיבור Supabase
+                  נדרשת השלמת הגדרה
                 </Badge>
               )}
             </div>
@@ -150,7 +167,7 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
 
   return (
     <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <div className="bg-white rounded-3xl shadow-xl w-full max-w-lg" dir="rtl">
+      <div className="bg-white rounded-3xl shadow-xl w-full max-w-lg">
         <div className="px-6 py-5 border-b border-slate-200">
           <h2 className="text-xl font-semibold text-slate-900">יצירת ארגון חדש</h2>
           <p className="text-sm text-slate-500 mt-1">
@@ -158,7 +175,7 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
           </p>
         </div>
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          <div className="space-y-2 text-right">
+          <div className="space-y-2">
             <Label htmlFor="org-name">שם הארגון</Label>
             <Input
               id="org-name"
@@ -184,17 +201,20 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
 }
 
 export default function OrgSelection() {
-  const { organizations, incomingInvites, status, selectOrg, createOrganization } = useOrg();
+  const {
+    organizations,
+    incomingInvites,
+    status,
+    selectOrg,
+    createOrganization,
+    canCreateOrganizations,
+  } = useOrg();
   const { signOut } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   const hasOrganizations = organizations.length > 0;
   const hasInvites = incomingInvites.length > 0;
-  const returnTo = useMemo(() => {
-    return location.state?.from?.pathname || '/';
-  }, [location.state]);
 
   const handleSelect = async (orgId) => {
     try {
@@ -224,7 +244,7 @@ export default function OrgSelection() {
 
   const handleCreate = async ({ name }) => {
     await createOrganization({ name });
-    navigate(returnTo, { replace: true });
+    navigate('/dashboard', { replace: true });
   };
 
   const handleLogout = async () => {
@@ -243,8 +263,8 @@ export default function OrgSelection() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center px-4 py-10" dir="rtl">
-      <div className="absolute top-4 left-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center px-4 py-10">
+      <div className="absolute top-4 start-4">
         <Button variant="ghost" onClick={handleLogout} className="gap-2 text-slate-600 hover:text-slate-900">
           <LogOut className="w-4 h-4" />
           התנתק
@@ -254,16 +274,16 @@ export default function OrgSelection() {
         <InviteList invites={incomingInvites} onAccept={handleAcceptInvite} />
         <OrganizationList organizations={organizations} onSelect={handleSelect} />
         {!hasOrganizations && !hasInvites ? (
-          <EmptyState onCreate={() => setIsCreateOpen(true)} />
-        ) : (
+          <EmptyState canCreate={canCreateOrganizations} onCreate={() => setIsCreateOpen(true)} />
+        ) : canCreateOrganizations ? (
           <Button variant="outline" onClick={() => setIsCreateOpen(true)} className="gap-2">
             <Building2 className="w-4 h-4" />
             צור ארגון חדש
           </Button>
-        )}
+        ) : null}
       </div>
       <CreateOrgDialog
-        open={isCreateOpen}
+        open={isCreateOpen && canCreateOrganizations}
         onClose={() => setIsCreateOpen(false)}
         onCreate={handleCreate}
       />

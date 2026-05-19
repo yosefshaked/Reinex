@@ -19,6 +19,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { fetchLooseSessions, rejectLooseSession } from '@/features/sessions/api/loose-sessions.js';
 import { Checkbox } from '@/components/ui/checkbox';
 import ResolvePendingReportDialog from '../components/ResolvePendingReportDialog.jsx';
@@ -28,6 +29,7 @@ import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/
 import { mapLooseSessionError } from '@/lib/error-mapping.js';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { parseSessionFormConfig, ensureSessionFormFallback } from '@/features/sessions/utils/form-config.js';
+import { isSessionRecordsEnabled } from '@/features/sessions/config/session-records.js';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',
@@ -133,7 +135,9 @@ function buildAnswerList(content, questions) {
 }
 
 export default function PendingReportsPage() {
-  const { activeOrg, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const sessionRecordsEnabled = isSessionRecordsEnabled();
+  const { activeOrg } = useOrg();
+  const { session } = useSupabase();
   const [state, setState] = useState(REQUEST_STATE.idle);
   const [error, setError] = useState('');
   const [reports, setReports] = useState([]);
@@ -162,7 +166,7 @@ export default function PendingReportsPage() {
   const normalizedRole = useMemo(() => normalizeMembershipRole(membershipRole), [membershipRole]);
   const isAdminMember = isAdminRole(normalizedRole);
 
-  const canFetch = Boolean(activeOrgId && activeOrgHasConnection && tenantClientReady);
+  const canFetch = Boolean(session && activeOrgId);
 
   const loadQuestions = useCallback(async () => {
     if (!canFetch) return;
@@ -449,7 +453,7 @@ export default function PendingReportsPage() {
           <CardContent>
             <div className="flex items-center gap-2 text-neutral-600">
               <AlertCircle className="h-5 w-5" />
-              <p>יש לבחור ארגון בעל חיבור פעיל כדי לצפות בדיווחים ממתינים.</p>
+                <p>יש לבחור ארגון פעיל כדי לצפות בדיווחים ממתינים.</p>
             </div>
           </CardContent>
         </Card>
@@ -462,8 +466,12 @@ export default function PendingReportsPage() {
     return <Navigate to="/dashboard" replace />;
   }
 
+  if (!sessionRecordsEnabled) {
+    return <Navigate to="/students-list" replace />;
+  }
+
   return (
-    <div className="container mx-auto p-4 sm:p-6 max-w-7xl" dir="rtl">
+    <div className="container mx-auto p-4 sm:p-6 max-w-7xl">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
           <div>
@@ -480,7 +488,7 @@ export default function PendingReportsPage() {
         </CardHeader>
         <CardContent>
           {filteredReports.length > 0 && (
-            <div className="mb-4 p-3 border rounded-lg bg-muted/30" dir="rtl">
+            <div className="mb-4 p-3 border rounded-lg bg-muted/30">
               <div className="flex items-center gap-3 flex-wrap">
                 <Checkbox
                   checked={selectedReportIds.size === filteredReports.length && filteredReports.length > 0}
@@ -522,7 +530,7 @@ export default function PendingReportsPage() {
               placeholder="חיפוש לפי שם/סיבה/שירות/מדריך"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              dir="rtl"
+             
             />
           </div>
 
@@ -538,14 +546,14 @@ export default function PendingReportsPage() {
               <span>סינון מתקדם</span>
               {showFilters ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               {(serviceFilter || reasonFilter || fromDate || toDate) && (
-                <Badge variant="secondary" className="mr-2">פעיל</Badge>
+                <Badge variant="secondary" className="me-2">פעיל</Badge>
               )}
             </Button>
           </div>
 
           {/* Collapsible filter section */}
           {showFilters && (
-            <div className="mb-4 space-y-3 animate-in fade-in slide-in-from-top-2" dir="rtl">
+            <div className="mb-4 space-y-3 animate-in fade-in slide-in-from-top-2">
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <Select value={serviceFilter || 'all'} onValueChange={(val) => setServiceFilter(val === 'all' ? '' : val)}>
                   <SelectTrigger>
@@ -672,17 +680,17 @@ export default function PendingReportsPage() {
                                         </button>
                                       </TooltipTrigger>
                                     </PopoverTrigger>
-                                    <TooltipContent side="bottom" className="max-w-xs text-right">
-                                      <div dir="rtl" className="text-right whitespace-pre-wrap">
+                                    <TooltipContent side="bottom" className="max-w-xs text-end">
+                                      <div className="text-end whitespace-pre-wrap">
                                         {notesPreview}
                                       </div>
                                     </TooltipContent>
                                   </Tooltip>
                                 </TooltipProvider>
                                 <PopoverContent side="bottom" align="start" className="w-80 p-3">
-                                  <div dir="rtl" className="space-y-2">
-                                    <div className="text-xs font-semibold text-neutral-600 text-right">הערות מהמדריך</div>
-                                    <div className="text-sm text-neutral-900 text-right whitespace-pre-wrap break-words">
+                                  <div className="space-y-2">
+                                    <div className="text-xs font-semibold text-neutral-600 text-end">הערות מהמדריך</div>
+                                    <div className="text-sm text-neutral-900 text-end whitespace-pre-wrap break-words">
                                       {instructorNotes}
                                     </div>
                                   </div>
@@ -730,7 +738,7 @@ export default function PendingReportsPage() {
 
                         <div className="flex justify-end shrink-0 self-start">
                           {isAdminMember ? (
-                            <DropdownMenu dir="rtl">
+                            <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button
                                   variant="outline"
@@ -813,7 +821,7 @@ export default function PendingReportsPage() {
 
       {/* Report Content Viewer Dialog */}
       <Dialog open={reportViewOpen} onOpenChange={setReportViewOpen}>
-        <DialogContent className="max-w-3xl" dir="rtl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader className="space-y-3">
             <div className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" />

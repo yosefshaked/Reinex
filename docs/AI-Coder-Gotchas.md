@@ -98,7 +98,15 @@ const handleDialogInteractOutside = useCallback((event) => {
 - For OAuth and password reset flows, always pass a redirect URL (see AGENTS.md for exact routes).
 
 ## Backups
-- `/api/backup` has a 7-day cooldown and optional override. Reflect state via `/api/backup-status`.
+- `/api/backup-run` is service-key protected and runs nightly backups for all orgs.
+- `/api/backup-list` is the org-admin backup browser and only shows data when `backup_local_enabled` is true.
+- `/api/restore` restores a single org backup from storage using the org-scoped filename.
+
+## Azure Functions route naming (SWA)
+- Never start custom API route names with `admin` in `function.json`.
+- Azure Functions reserves `/admin/*` for host management APIs. A custom route like `admin-system-health` can fail registration with: `The specified route conflicts with one or more built in routes.`
+- Symptom pattern: endpoint returns `404` from SWA proxy and you do not see matching function request traces.
+- Safe pattern: use domain names that do not start with `admin` (for example `system-health-admin`).
 
 ## Lint/build checks (quick)
 - Lint only files you touch: `npx eslint <paths>`.

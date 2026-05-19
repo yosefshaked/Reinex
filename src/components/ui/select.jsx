@@ -14,10 +14,9 @@ const SelectTrigger = React.forwardRef(({ className, children, ...props }, ref) 
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      // RTL-friendly trigger: align value/placeholder text to the right and ensure the
-      // value span consumes full width so alignment actually takes effect. Also reverse
-      // row order in RTL so the chevron appears on the left.
-      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 rtl:flex-row-reverse rtl:text-right rtl:[&>span]:text-right rtl:[&>span]:w-full",
+      // RTL-friendly trigger: keep the chevron mirrored while aligning the selected
+      // value/placeholder to the logical start side, which is the right edge in RTL.
+      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 rtl:flex-row-reverse rtl:text-start rtl:[&>span]:text-start rtl:[&>span]:w-full",
       className
     )}
     {...props}>
@@ -54,7 +53,7 @@ const SelectContent = React.forwardRef(({ className, children, position = "poppe
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       ref={ref}
-      dir="rtl"
+     
       className={cn(
         // Keep overflow on the viewport (Radix handles scroll there). Content stays overflow-hidden.
         "relative z-[60] min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-select-content-transform-origin] pointer-events-auto touch-pan-y",
@@ -89,7 +88,7 @@ SelectContent.displayName = SelectPrimitive.Content.displayName
 const SelectLabel = React.forwardRef(({ className, ...props }, ref) => (
   <SelectPrimitive.Label
     ref={ref}
-    className={cn("py-1.5 pl-8 pr-2 text-sm font-semibold", className)}
+    className={cn("py-1.5 ps-8 pe-2 text-sm font-semibold", className)}
     {...props} />
 ))
 SelectLabel.displayName = SelectPrimitive.Label.displayName
@@ -98,13 +97,13 @@ const SelectItem = React.forwardRef(({ className, children, ...props }, ref) => 
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      // RTL-friendly item: mirror padding and align text to the right; also mirror the
-      // absolute position of the check indicator span.
-      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 rtl:text-right rtl:pr-8 rtl:pl-2",
+      // RTL-friendly item: mirror padding and align text to the logical start side;
+      // also mirror the absolute position of the check indicator span.
+      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 ps-8 pe-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 rtl:text-start rtl:pe-8 rtl:ps-2",
       className
     )}
     {...props}>
-    <span className="absolute left-2 rtl:left-auto rtl:right-2 flex h-3.5 w-3.5 items-center justify-center">
+    <span className="absolute start-2 rtl:start-auto rtl:end-2 flex h-3.5 w-3.5 items-center justify-center">
       <SelectPrimitive.ItemIndicator>
         <Check className="h-4 w-4" />
       </SelectPrimitive.ItemIndicator>

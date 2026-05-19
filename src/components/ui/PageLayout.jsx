@@ -20,11 +20,11 @@ function PageLayout({
     >
       <div
         className={cn(
-          "mx-auto flex w-full max-w-5xl flex-col px-sm py-md sm:px-md sm:py-lg lg:px-xl",
+          "mx-auto flex w-full max-w-5xl flex-col px-sm pt-sm pb-sm sm:px-md sm:pt-md sm:pb-md lg:px-xl",
           fullHeight ? "min-h-screen" : "min-h-full",
           className,
         )}
-        style={{ maxWidth: "min(1280px, 100vw)" }}
+        style={{ maxWidth: "min(1680px, calc(100vw - 1.5rem))" }}
         {...props}
       >
         {(title || description || actions) && (

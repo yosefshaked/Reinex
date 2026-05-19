@@ -1,8 +1,9 @@
 /* eslint-env node */
-import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { promisify } from 'node:util';
 import { gzip, gunzip } from 'node:zlib';
+import { withOrgScope } from './org-bff.js';
 
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
@@ -10,53 +11,71 @@ const gunzipAsync = promisify(gunzip);
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
-const SALT_LENGTH = 32;
+
+// Platform/control tables are intentionally excluded from tenant backups.
+// Update this set whenever platform tables are added in src/lib/setup-sql.js.
+const SYSTEM_TABLES = new Set([
+  'organizations',
+  'profiles',
+  'org_memberships',
+  'org_invitations',
+  'permission_registry',
+  'active_routing',
+  'audit_log',
+  'impersonation_sessions',
+  'admin_data',
+  'error_events',
+  'email_log',
+]);
 
 /**
- * Derive a 256-bit key from password using PBKDF2
+ * Read the server-managed backup encryption key from env.
  */
-function deriveKey(password, salt) {
-  return createHash('sha256')
-    .update(password)
-    .update(salt)
-    .digest();
+export function keyFromEnv(env = process.env ?? {}) {
+  const hex = env?.BACKUP_ENCRYPTION_KEY;
+  if (!hex || !/^[0-9a-fA-F]{64}$/.test(hex)) {
+    throw new Error('BACKUP_ENCRYPTION_KEY missing or invalid - must be 64 hex chars');
+  }
+  return Buffer.from(hex, 'hex');
 }
 
 /**
- * Encrypt JSON data with password protection
+ * Encrypt JSON data with server-managed key
  * @param {object} data - Plain JS object to encrypt
- * @param {string} password - User-provided password
+ * @param {object} env - Environment variables
  * @returns {Promise<Buffer>} - Encrypted buffer
  */
-export async function encryptBackup(data, password) {
+export async function encryptBackup(data, env = process.env ?? {}) {
   const jsonString = JSON.stringify(data);
   const compressed = await gzipAsync(Buffer.from(jsonString, 'utf8'));
   
-  const salt = randomBytes(SALT_LENGTH);
-  const key = deriveKey(password, salt);
+  const key = keyFromEnv(env);
   const iv = randomBytes(IV_LENGTH);
   
   const cipher = createCipheriv(ALGORITHM, key, iv);
   const encrypted = Buffer.concat([cipher.update(compressed), cipher.final()]);
   const authTag = cipher.getAuthTag();
   
-  // Format: [salt][iv][authTag][encrypted]
-  return Buffer.concat([salt, iv, authTag, encrypted]);
+  // Format: [iv][authTag][encrypted]
+  return Buffer.concat([iv, authTag, encrypted]);
 }
 
 /**
- * Decrypt backup file with password
+ * Decrypt backup file with server-managed key
  * @param {Buffer} encryptedData - Encrypted buffer
- * @param {string} password - User-provided password
+ * @param {object} env - Environment variables
  * @returns {Promise<object>} - Decrypted JSON object
  */
-export async function decryptBackup(encryptedData, password) {
-  const salt = encryptedData.subarray(0, SALT_LENGTH);
-  const iv = encryptedData.subarray(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
-  const authTag = encryptedData.subarray(SALT_LENGTH + IV_LENGTH, SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH);
-  const encrypted = encryptedData.subarray(SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH);
+export async function decryptBackup(encryptedData, env = process.env ?? {}) {
+  if (!Buffer.isBuffer(encryptedData) || encryptedData.length < IV_LENGTH + AUTH_TAG_LENGTH) {
+    throw new Error('invalid_backup_format');
+  }
+
+  const iv = encryptedData.subarray(0, IV_LENGTH);
+  const authTag = encryptedData.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
+  const encrypted = encryptedData.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
   
-  const key = deriveKey(password, salt);
+  const key = keyFromEnv(env);
   
   const decipher = createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(authTag);
@@ -68,23 +87,113 @@ export async function decryptBackup(encryptedData, password) {
 }
 
 /**
+ * Tenant backup allow-list, ordered parent-first for restore.
+ * Includes all org-scoped business tables from setup-sql.js and excludes
+ * control/system/auth-managed tables such as organizations, profiles,
+ * org_memberships, audit_log, and the other platform-only tables.
+ */
+export const EXPORT_TABLES = [
+  'Settings',
+  'Services',
+  'Employees',
+  'hmo_providers',
+  'guardians',
+  'client_profiles',
+  'payroll_runs',
+  'claim_batches',
+  'dashboard_tasks',
+  'forms',
+  'shared_form_blocks',
+  'Documents',
+  'instructor_profiles',
+  'instructor_service_capabilities',
+  'RateHistory',
+  'hmo_provider_tracks',
+  'client_guardians',
+  'students',
+  'form_shared_block_links',
+  'employee_attendance_records',
+  'employee_leave_entries',
+  'employee_leave_days',
+  'employee_leave_balance_events',
+  'finance_corrections',
+  'otp_challenges',
+  'form_submissions',
+  'hmo_authorizations',
+  'waiting_list_entries',
+  'commitments',
+  'ledger_transactions',
+  'lesson_templates',
+  'lesson_template_overrides',
+  'lesson_template_participants',
+  'lesson_instances',
+  'lesson_participants',
+  'lesson_earnings',
+  'grace_cancellation_requests',
+  'instance_locks',
+  'participant_locks',
+  'calendar_instance_corrections',
+  'ledger_accounts',
+  'hmo_invoice_batches',
+  'hmo_invoice_batch_items',
+];
+
+async function assertBackupTableCoverage(tenantClient) {
+  const { data: liveTableRows, error: liveTablesError } = await tenantClient
+    .rpc('get_public_base_tables');
+
+  if (liveTablesError) {
+    throw new Error(`Backup aborted: get_public_base_tables RPC failed: ${liveTablesError.message}`);
+  }
+
+  if (!Array.isArray(liveTableRows)) {
+    throw new Error('Backup aborted: get_public_base_tables RPC returned an invalid payload');
+  }
+
+  const livePublicTables = new Set(
+    (liveTableRows || [])
+      .map((row) => row?.table_name)
+      .filter((tableName) => typeof tableName === 'string' && tableName.length > 0)
+  );
+
+  const liveTenantTableSet = new Set(
+    [...livePublicTables].filter((tableName) => !SYSTEM_TABLES.has(tableName))
+  );
+
+  const backupTableSet = new Set(EXPORT_TABLES);
+  const missingFromBackup = [...liveTenantTableSet]
+    .filter((tableName) => !backupTableSet.has(tableName))
+    .sort((a, b) => a.localeCompare(b));
+
+  if (missingFromBackup.length > 0) {
+    throw new Error(
+      `Backup aborted: the following tables exist in the schema but are not included in the backup list: [${missingFromBackup.join(', ')}]. Update exportTenantData in backup-utils.js to include them.`
+    );
+  }
+
+  const missingFromLive = EXPORT_TABLES
+    .filter((tableName) => !liveTenantTableSet.has(tableName))
+    .sort((a, b) => a.localeCompare(b));
+
+  if (missingFromLive.length > 0) {
+    console.warn(
+      `[backup] The backup table list includes tables that are missing from the live schema (likely pending migration): [${missingFromLive.join(', ')}]`
+    );
+  }
+}
+
+/**
  * Export all tenant tables to a structured manifest
  *
- * Backed up tables and columns (as of 2025-10):
- * - Instructors: id, name, email, phone, is_active, notes, metadata
- * - Students: id, name, contact_info, contact_name, contact_phone, assigned_instructor_id, default_day_of_week, default_session_time, default_service, tags, notes, metadata
- * - SessionRecords: id, date, student_id, instructor_id, service_context, content, created_at, updated_at, deleted, deleted_at, is_legacy, metadata
- * - Settings: id, key, settings_value, metadata
- *
- * @param {object} tenantClient - Supabase tenant client
+ * @param {object} tenantClient - Supabase server-role client using ensureMembership or org mapping
  * @returns {Promise<object>} - Backup manifest
  */
 export async function exportTenantData(tenantClient, orgId) {
-  // Only include tables that actually exist in the public schema
-  const tables = ['Students', 'Instructors', 'SessionRecords', 'Settings'];
+  await assertBackupTableCoverage(tenantClient);
+
   const manifest = {
-    version: '1.0',
-    schema_version: 'public_v1',
+    version: '2.0',
+    schema_version: 'reinex_v2',
     org_id: orgId,
     exported_at: new Date().toISOString(),
     tables: {},
@@ -93,11 +202,9 @@ export async function exportTenantData(tenantClient, orgId) {
     },
   };
 
-  for (const table of tables) {
+  for (const table of EXPORT_TABLES) {
     try {
-      const { data, error } = await tenantClient
-        .from(table)
-        .select('*');
+      const { data, error } = await withOrgScope(tenantClient, table, orgId).select('*');
 
       if (error) {
         throw new Error(`Failed to export ${table}: ${error.message}`);
@@ -129,8 +236,8 @@ export function validateBackupManifest(manifest) {
     return { valid: false, error: 'missing_required_fields' };
   }
 
-  if (manifest.schema_version !== 'public_v1') {
-    return { valid: false, error: 'unsupported_schema_version' };
+  if (manifest.version !== '2.0') {
+    return { valid: false, error: 'unsupported_manifest_version' };
   }
 
   return { valid: true };
@@ -149,19 +256,15 @@ export async function restoreTenantData(tenantClient, manifest, { clearExisting 
     errors: [],
   };
 
-  // Restore in dependency order: Settings first (no FK deps), then Instructors, then Students (FK to Instructors), then SessionRecords (FK to Students and Instructors)
-  const tables = ['Settings', 'Instructors', 'Students', 'SessionRecords'];
+  const tablesToRestore = EXPORT_TABLES;
 
-  for (const table of tables) {
+  for (const table of tablesToRestore) {
     const rows = manifest.tables[table] || [];
     if (!rows.length) continue;
 
     try {
       if (clearExisting) {
-        const { error: deleteError } = await tenantClient
-          .from(table)
-          .delete()
-          .neq('id', '00000000-0000-0000-0000-000000000000'); // delete all
+        const { error: deleteError } = await withOrgScope(tenantClient, table, manifest.org_id).delete();
 
         if (deleteError) {
           results.errors.push({ table, operation: 'clear', message: deleteError.message });
@@ -169,8 +272,7 @@ export async function restoreTenantData(tenantClient, manifest, { clearExisting 
         }
       }
 
-      const { error: insertError } = await tenantClient
-        .from(table)
+      const { error: insertError } = await withOrgScope(tenantClient, table, manifest.org_id)
         .upsert(rows, { onConflict: 'id' });
 
       if (insertError) {

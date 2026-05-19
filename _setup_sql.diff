@@ -1,0 +1,1536 @@
+diff --git a/src/lib/setup-sql.js b/src/lib/setup-sql.js
+index 9b1036b..22dfb40 100644
+--- a/src/lib/setup-sql.js
++++ b/src/lib/setup-sql.js
+@@ -124,22 +124,6 @@ CREATE TABLE IF NOT EXISTS public.organizations (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.organizations
+-  ADD COLUMN IF NOT EXISTS name text,
+-  ADD COLUMN IF NOT EXISTS slug text,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS setup_completed boolean,
+-  ADD COLUMN IF NOT EXISTS verified_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS permissions jsonb,
+-  ADD COLUMN IF NOT EXISTS logo_url text,
+-  ADD COLUMN IF NOT EXISTS storage_profile jsonb,
+-  ADD COLUMN IF NOT EXISTS storage_grace_ends_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS backup_history jsonb,
+-  ADD COLUMN IF NOT EXISTS policy_links jsonb,
+-  ADD COLUMN IF NOT EXISTS legal_settings jsonb,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ CREATE INDEX IF NOT EXISTS organizations_slug_idx
+   ON public.organizations (slug);
+@@ -162,14 +146,6 @@ CREATE TABLE IF NOT EXISTS public.profiles (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.profiles
+-  ADD COLUMN IF NOT EXISTS full_name text,
+-  ADD COLUMN IF NOT EXISTS avatar_url text,
+-  ADD COLUMN IF NOT EXISTS phone text,
+-  ADD COLUMN IF NOT EXISTS locale text,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ -- -----------------------------------------------------------------
+ -- public.org_memberships
+@@ -185,13 +161,6 @@ CREATE TABLE IF NOT EXISTS public.org_memberships (
+   updated_at timestamptz NOT NULL DEFAULT now()
+ );
+ 
+-ALTER TABLE public.org_memberships
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS user_id uuid,
+-  ADD COLUMN IF NOT EXISTS role text,
+-  ADD COLUMN IF NOT EXISTS is_active boolean,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+ 
+ CREATE UNIQUE INDEX IF NOT EXISTS org_memberships_org_user_uidx
+   ON public.org_memberships (org_id, user_id);
+@@ -216,16 +185,6 @@ CREATE TABLE IF NOT EXISTS public.org_invitations (
+   updated_at timestamptz NOT NULL DEFAULT now()
+ );
+ 
+-ALTER TABLE public.org_invitations
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS email text,
+-  ADD COLUMN IF NOT EXISTS role text,
+-  ADD COLUMN IF NOT EXISTS invited_by uuid,
+-  ADD COLUMN IF NOT EXISTS status text,
+-  ADD COLUMN IF NOT EXISTS token text,
+-  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+ 
+ CREATE INDEX IF NOT EXISTS org_invitations_org_idx
+   ON public.org_invitations (org_id, status);
+@@ -245,11 +204,6 @@ CREATE TABLE IF NOT EXISTS public.permission_registry (
+   created_at timestamptz NOT NULL DEFAULT now()
+ );
+ 
+-ALTER TABLE public.permission_registry
+-  ADD COLUMN IF NOT EXISTS permission_key text,
+-  ADD COLUMN IF NOT EXISTS description text,
+-  ADD COLUMN IF NOT EXISTS category text,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz;
+ 
+ -- -----------------------------------------------------------------
+ -- public.active_routing (maps user → currently active org)
+@@ -261,9 +215,6 @@ CREATE TABLE IF NOT EXISTS public.active_routing (
+   updated_at timestamptz NOT NULL DEFAULT now()
+ );
+ 
+-ALTER TABLE public.active_routing
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+ 
+ CREATE INDEX IF NOT EXISTS active_routing_org_idx
+   ON public.active_routing (org_id);
+@@ -293,23 +244,6 @@ CREATE TABLE IF NOT EXISTS public.audit_log (
+   expires_at timestamptz NULL
+ );
+ 
+-ALTER TABLE public.audit_log
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS actor_user_id uuid,
+-  ADD COLUMN IF NOT EXISTS actor_email text,
+-  ADD COLUMN IF NOT EXISTS actor_role text,
+-  ADD COLUMN IF NOT EXISTS correlation_id uuid,
+-  ADD COLUMN IF NOT EXISTS event_type text,
+-  ADD COLUMN IF NOT EXISTS action_category text,
+-  ADD COLUMN IF NOT EXISTS retention_category text,
+-  ADD COLUMN IF NOT EXISTS resource_type text,
+-  ADD COLUMN IF NOT EXISTS resource_id text,
+-  ADD COLUMN IF NOT EXISTS before_state jsonb,
+-  ADD COLUMN IF NOT EXISTS after_state jsonb,
+-  ADD COLUMN IF NOT EXISTS details jsonb,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS expires_at timestamptz;
+ 
+ DO $$
+ BEGIN
+@@ -357,16 +291,6 @@ CREATE TABLE IF NOT EXISTS public.students (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.students
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
+-  ADD COLUMN IF NOT EXISTS notes_internal text,
+-  ADD COLUMN IF NOT EXISTS medical_provider text,
+-  ADD COLUMN IF NOT EXISTS special_rate integer,
+-  ADD COLUMN IF NOT EXISTS medical_flags jsonb,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -414,15 +338,6 @@ CREATE TABLE IF NOT EXISTS public.guardians (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.guardians
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS first_name text,
+-  ADD COLUMN IF NOT EXISTS middle_name text,
+-  ADD COLUMN IF NOT EXISTS last_name text,
+-  ADD COLUMN IF NOT EXISTS phone text,
+-  ADD COLUMN IF NOT EXISTS email text,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -457,22 +372,6 @@ CREATE TABLE IF NOT EXISTS public.client_profiles (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.client_profiles
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS first_name text,
+-  ADD COLUMN IF NOT EXISTS middle_name text,
+-  ADD COLUMN IF NOT EXISTS last_name text,
+-  ADD COLUMN IF NOT EXISTS identity_number text,
+-  ADD COLUMN IF NOT EXISTS phone text,
+-  ADD COLUMN IF NOT EXISTS email text,
+-  ADD COLUMN IF NOT EXISTS date_of_birth date,
+-  ADD COLUMN IF NOT EXISTS default_notification_method text,
+-  ADD COLUMN IF NOT EXISTS tags uuid[],
+-  ADD COLUMN IF NOT EXISTS onboarding_status text,
+-  ADD COLUMN IF NOT EXISTS is_active boolean,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -536,9 +435,6 @@ EXCEPTION
+   WHEN others THEN NULL;
+ END $$;
+ 
+-ALTER TABLE public.students
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS client_profile_id uuid;
+ 
+ DO $$
+ BEGIN
+@@ -559,124 +455,6 @@ EXCEPTION
+   WHEN others THEN NULL;
+ END $$;
+ 
+-DO $$
+-DECLARE
+-  student_row record;
+-  profile_id uuid;
+-BEGIN
+-  IF EXISTS (
+-    SELECT 1
+-    FROM information_schema.columns
+-    WHERE table_schema = 'public'
+-      AND table_name = 'students'
+-      AND column_name = 'first_name'
+-  ) THEN
+-    FOR student_row IN EXECUTE '
+-      SELECT id, first_name, middle_name, last_name, identity_number, phone, email, date_of_birth,
+-             default_notification_method, tags, onboarding_status, is_active, created_at, updated_at, metadata
+-      FROM public.students
+-      WHERE client_profile_id IS NULL
+-    '
+-    LOOP
+-      SELECT id
+-      INTO profile_id
+-      FROM public.client_profiles
+-      WHERE identity_number IS NOT DISTINCT FROM student_row.identity_number
+-        AND (
+-          student_row.identity_number IS NOT NULL
+-          OR (
+-            first_name IS NOT DISTINCT FROM student_row.first_name
+-            AND middle_name IS NOT DISTINCT FROM student_row.middle_name
+-            AND last_name IS NOT DISTINCT FROM student_row.last_name
+-            AND phone IS NOT DISTINCT FROM student_row.phone
+-            AND email IS NOT DISTINCT FROM student_row.email
+-          )
+-        )
+-      ORDER BY created_at
+-      LIMIT 1;
+-
+-      IF profile_id IS NULL THEN
+-        INSERT INTO public.client_profiles (
+-          first_name,
+-          middle_name,
+-          last_name,
+-          identity_number,
+-          phone,
+-          email,
+-          date_of_birth,
+-          default_notification_method,
+-          tags,
+-          onboarding_status,
+-          is_active,
+-          created_at,
+-          updated_at,
+-          metadata
+-        ) VALUES (
+-          student_row.first_name,
+-          student_row.middle_name,
+-          student_row.last_name,
+-          student_row.identity_number,
+-          student_row.phone,
+-          student_row.email,
+-          student_row.date_of_birth,
+-          COALESCE(student_row.default_notification_method, 'whatsapp'),
+-          student_row.tags,
+-          CASE
+-            WHEN student_row.onboarding_status = 'pending_wl_form' THEN 'pending_forms'
+-            ELSE COALESCE(student_row.onboarding_status, 'not_started')
+-          END,
+-          COALESCE(student_row.is_active, true),
+-          COALESCE(student_row.created_at, now()),
+-          COALESCE(student_row.updated_at, COALESCE(student_row.created_at, now())),
+-          student_row.metadata
+-        )
+-        RETURNING id INTO profile_id;
+-      END IF;
+-
+-      UPDATE public.students
+-      SET client_profile_id = profile_id
+-      WHERE id = student_row.id;
+-    END LOOP;
+-  END IF;
+-END $$;
+-
+-DO $$
+-BEGIN
+-  ALTER TABLE public.students ALTER COLUMN client_profile_id SET NOT NULL;
+-EXCEPTION
+-  WHEN others THEN NULL;
+-END $$;
+-
+-DROP TRIGGER IF EXISTS students_sync_person_fields_from_client_profile_trigger ON public.students;
+-DROP TRIGGER IF EXISTS client_profiles_sync_to_students_trigger ON public.client_profiles;
+-DROP FUNCTION IF EXISTS public.sync_student_person_fields_from_client_profile();
+-DROP FUNCTION IF EXISTS public.sync_client_profile_changes_to_students();
+-
+-DO $$
+-BEGIN
+-  IF EXISTS (
+-    SELECT 1
+-    FROM pg_constraint
+-    WHERE conname = 'students_default_notification_method_check'
+-      AND conrelid = 'public.students'::regclass
+-  ) THEN
+-    ALTER TABLE public.students DROP CONSTRAINT students_default_notification_method_check;
+-  END IF;
+-
+-  IF EXISTS (
+-    SELECT 1
+-    FROM pg_constraint
+-    WHERE conname = 'students_onboarding_status_check'
+-      AND conrelid = 'public.students'::regclass
+-  ) THEN
+-    ALTER TABLE public.students DROP CONSTRAINT students_onboarding_status_check;
+-  END IF;
+-END $$;
+-
+-DROP INDEX IF EXISTS public.students_identity_number_unique_idx;
+-DROP INDEX IF EXISTS public.students_is_active_idx;
+-DROP INDEX IF EXISTS public.students_name_idx;
+-
+ 
+ -- -----------------------------------------------------------------
+ -- public.client_guardians
+@@ -692,13 +470,6 @@ CREATE TABLE IF NOT EXISTS public.client_guardians (
+   created_at timestamptz NOT NULL DEFAULT now()
+ );
+ 
+-ALTER TABLE public.client_guardians
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
+-  ADD COLUMN IF NOT EXISTS guardian_id uuid,
+-  ADD COLUMN IF NOT EXISTS relationship text,
+-  ADD COLUMN IF NOT EXISTS is_primary boolean,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz;
+ 
+ DO $$
+ BEGIN
+@@ -736,20 +507,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS client_guardians_client_guardian_uidx
+ CREATE INDEX IF NOT EXISTS client_guardians_client_profile_id_idx
+   ON public.client_guardians (org_id, client_profile_id);
+ 
+-DO $$
+-BEGIN
+-  INSERT INTO public.client_guardians (client_profile_id, guardian_id, relationship, is_primary, created_at)
+-  SELECT s.client_profile_id, sg.guardian_id, sg.relationship, sg.is_primary, sg.created_at
+-  FROM public.student_guardians sg
+-  JOIN public.students s ON s.id = sg.student_id
+-  WHERE s.client_profile_id IS NOT NULL
+-  ON CONFLICT (client_profile_id, guardian_id) DO UPDATE
+-  SET relationship = EXCLUDED.relationship,
+-      is_primary = EXCLUDED.is_primary;
+-EXCEPTION
+-  WHEN others THEN NULL;
+-END $$;
+-
+ -- -----------------------------------------------------------------
+ -- public.Employees (complete table with payroll fields)
+ -- -----------------------------------------------------------------
+@@ -781,29 +538,6 @@ CREATE TABLE IF NOT EXISTS public."Employees" (
+   CONSTRAINT "Employees_pkey" PRIMARY KEY ("id")
+ );
+ 
+-ALTER TABLE public."Employees"
+-  ADD COLUMN IF NOT EXISTS "org_id" uuid,
+-  ADD COLUMN IF NOT EXISTS "user_id" uuid,
+-  ADD COLUMN IF NOT EXISTS "first_name" text,
+-  ADD COLUMN IF NOT EXISTS "middle_name" text,
+-  ADD COLUMN IF NOT EXISTS "last_name" text,
+-  ADD COLUMN IF NOT EXISTS "employee_id" text,
+-  ADD COLUMN IF NOT EXISTS "employee_type" text,
+-  ADD COLUMN IF NOT EXISTS "payroll_model" text,
+-  ADD COLUMN IF NOT EXISTS "current_rate" integer,
+-  ADD COLUMN IF NOT EXISTS "monthly_salary_amount" integer,
+-  ADD COLUMN IF NOT EXISTS "phone" text,
+-  ADD COLUMN IF NOT EXISTS "email" text,
+-  ADD COLUMN IF NOT EXISTS "start_date" date,
+-  ADD COLUMN IF NOT EXISTS "is_active" boolean,
+-  ADD COLUMN IF NOT EXISTS "notes" text,
+-  ADD COLUMN IF NOT EXISTS "working_days" jsonb,
+-  ADD COLUMN IF NOT EXISTS "annual_leave_days" numeric,
+-  ADD COLUMN IF NOT EXISTS "leave_pay_method" text,
+-  ADD COLUMN IF NOT EXISTS "leave_fixed_day_rate" integer,
+-  ADD COLUMN IF NOT EXISTS "employment_scope" text,
+-  ADD COLUMN IF NOT EXISTS "instructor_types" uuid[],
+-  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
+ 
+ CREATE INDEX IF NOT EXISTS "Employees_name_idx" ON public."Employees" ("org_id", "first_name", "last_name");
+ CREATE INDEX IF NOT EXISTS "Employees_user_id_idx" ON public."Employees" ("org_id", "user_id");
+@@ -835,15 +569,6 @@ CREATE TABLE IF NOT EXISTS public."Services" (
+   CONSTRAINT "Services_pkey" PRIMARY KEY ("id")
+ );
+ 
+-ALTER TABLE public."Services"
+-  ADD COLUMN IF NOT EXISTS "org_id" uuid,
+-  ADD COLUMN IF NOT EXISTS "name" text,
+-  ADD COLUMN IF NOT EXISTS "duration_minutes" bigint,
+-  ADD COLUMN IF NOT EXISTS "payment_model" text,
+-  ADD COLUMN IF NOT EXISTS "default_customer_charge_amount" integer,
+-  ADD COLUMN IF NOT EXISTS "color" text,
+-  ADD COLUMN IF NOT EXISTS "is_active" boolean,
+-  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -883,14 +608,6 @@ CREATE TABLE IF NOT EXISTS public."RateHistory" (
+   CONSTRAINT "RateHistory_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES public."Services"("id")
+ );
+ 
+-ALTER TABLE public."RateHistory"
+-  ADD COLUMN IF NOT EXISTS "org_id" uuid,
+-  ADD COLUMN IF NOT EXISTS "rate" integer,
+-  ADD COLUMN IF NOT EXISTS "effective_date" date,
+-  ADD COLUMN IF NOT EXISTS "notes" text,
+-  ADD COLUMN IF NOT EXISTS "employee_id" uuid,
+-  ADD COLUMN IF NOT EXISTS "service_id" uuid,
+-  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
+ 
+ -- Add unique constraint to prevent duplicates per employee/service/effective_date
+ DO $$
+@@ -954,20 +671,6 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance_records (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.employee_attendance_records
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS employee_id uuid,
+-  ADD COLUMN IF NOT EXISTS attendance_date date,
+-  ADD COLUMN IF NOT EXISTS status text,
+-  ADD COLUMN IF NOT EXISTS worked_minutes integer,
+-  ADD COLUMN IF NOT EXISTS notes text,
+-  ADD COLUMN IF NOT EXISTS source_type text,
+-  ADD COLUMN IF NOT EXISTS version int,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS updated_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -1037,24 +740,6 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_entries (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.employee_leave_entries
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS employee_id uuid,
+-  ADD COLUMN IF NOT EXISTS leave_type text,
+-  ADD COLUMN IF NOT EXISTS status text,
+-  ADD COLUMN IF NOT EXISTS duration_mode text,
+-  ADD COLUMN IF NOT EXISTS half_day_part text,
+-  ADD COLUMN IF NOT EXISTS start_date date,
+-  ADD COLUMN IF NOT EXISTS end_date date,
+-  ADD COLUMN IF NOT EXISTS reason text,
+-  ADD COLUMN IF NOT EXISTS notes text,
+-  ADD COLUMN IF NOT EXISTS source_type text,
+-  ADD COLUMN IF NOT EXISTS approved_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS updated_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -1127,17 +812,6 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_days (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.employee_leave_days
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS leave_entry_id uuid,
+-  ADD COLUMN IF NOT EXISTS employee_id uuid,
+-  ADD COLUMN IF NOT EXISTS leave_date date,
+-  ADD COLUMN IF NOT EXISTS day_portion text,
+-  ADD COLUMN IF NOT EXISTS leave_type text,
+-  ADD COLUMN IF NOT EXISTS balance_days_delta numeric,
+-  ADD COLUMN IF NOT EXISTS pay_fraction numeric,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -1205,19 +879,6 @@ CREATE TABLE IF NOT EXISTS public.employee_leave_balance_events (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.employee_leave_balance_events
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS employee_id uuid,
+-  ADD COLUMN IF NOT EXISTS leave_entry_id uuid,
+-  ADD COLUMN IF NOT EXISTS leave_day_id uuid,
+-  ADD COLUMN IF NOT EXISTS event_type text,
+-  ADD COLUMN IF NOT EXISTS leave_type text,
+-  ADD COLUMN IF NOT EXISTS quantity_days numeric,
+-  ADD COLUMN IF NOT EXISTS effective_date date,
+-  ADD COLUMN IF NOT EXISTS notes text,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -1282,19 +943,6 @@ CREATE TABLE IF NOT EXISTS public.finance_corrections (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.finance_corrections
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS employee_id uuid,
+-  ADD COLUMN IF NOT EXISTS correction_type text,
+-  ADD COLUMN IF NOT EXISTS amount integer,
+-  ADD COLUMN IF NOT EXISTS effective_date date,
+-  ADD COLUMN IF NOT EXISTS notes text,
+-  ADD COLUMN IF NOT EXISTS version int,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS updated_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -1330,11 +978,6 @@ CREATE TABLE IF NOT EXISTS public.instructor_profiles (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.instructor_profiles
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS employee_id uuid,
+-  ADD COLUMN IF NOT EXISTS break_time_minutes int,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ 
+ DO $$
+@@ -1362,14 +1005,6 @@ CREATE TABLE IF NOT EXISTS public.instructor_service_capabilities (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.instructor_service_capabilities
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS employee_id uuid,
+-  ADD COLUMN IF NOT EXISTS service_id uuid,
+-  ADD COLUMN IF NOT EXISTS max_students int,
+-  ADD COLUMN IF NOT EXISTS base_rate integer,
+-  ADD COLUMN IF NOT EXISTS availability_windows jsonb,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ UPDATE public.instructor_service_capabilities
+ SET availability_windows = '[]'::jsonb
+@@ -1437,25 +1072,6 @@ CREATE TABLE IF NOT EXISTS public.lesson_templates (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.lesson_templates
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS student_id uuid,
+-  ADD COLUMN IF NOT EXISTS instructor_employee_id uuid,
+-  ADD COLUMN IF NOT EXISTS service_id uuid,
+-  ADD COLUMN IF NOT EXISTS day_of_week text,
+-  ADD COLUMN IF NOT EXISTS time_of_day time,
+-  ADD COLUMN IF NOT EXISTS duration_minutes int,
+-  ADD COLUMN IF NOT EXISTS valid_from date,
+-  ADD COLUMN IF NOT EXISTS valid_until date,
+-  ADD COLUMN IF NOT EXISTS price_override integer,
+-  ADD COLUMN IF NOT EXISTS notes_internal text,
+-  ADD COLUMN IF NOT EXISTS flags jsonb,
+-  ADD COLUMN IF NOT EXISTS is_active boolean,
+-  ADD COLUMN IF NOT EXISTS version int,
+-  ADD COLUMN IF NOT EXISTS supersedes_template_id uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -1603,18 +1219,6 @@ CREATE TABLE IF NOT EXISTS public.lesson_template_overrides (
+   created_at timestamptz NOT NULL DEFAULT now()
+ );
+ 
+-ALTER TABLE public.lesson_template_overrides
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS template_id uuid,
+-  ADD COLUMN IF NOT EXISTS target_date date,
+-  ADD COLUMN IF NOT EXISTS override_type text,
+-  ADD COLUMN IF NOT EXISTS new_instructor_employee_id uuid,
+-  ADD COLUMN IF NOT EXISTS new_service_id uuid,
+-  ADD COLUMN IF NOT EXISTS new_time_of_day time,
+-  ADD COLUMN IF NOT EXISTS new_duration_minutes int,
+-  ADD COLUMN IF NOT EXISTS note text,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz;
+ 
+ DO $$
+ BEGIN
+@@ -1694,27 +1298,6 @@ CREATE TABLE IF NOT EXISTS public.lesson_instances (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.lesson_instances
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS template_id uuid,
+-  ADD COLUMN IF NOT EXISTS applied_override_id uuid,
+-  ADD COLUMN IF NOT EXISTS datetime_start timestamptz,
+-  ADD COLUMN IF NOT EXISTS duration_minutes int,
+-  ADD COLUMN IF NOT EXISTS instructor_employee_id uuid,
+-  ADD COLUMN IF NOT EXISTS service_id uuid,
+-  ADD COLUMN IF NOT EXISTS status text,
+-  ADD COLUMN IF NOT EXISTS documentation_status text,
+-  ADD COLUMN IF NOT EXISTS is_closed boolean,
+-  ADD COLUMN IF NOT EXISTS closed_reason text,
+-  ADD COLUMN IF NOT EXISTS closed_by uuid,
+-  ADD COLUMN IF NOT EXISTS closed_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS created_source text,
+-  ADD COLUMN IF NOT EXISTS version int,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS updated_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -1891,26 +1474,6 @@ CREATE TABLE IF NOT EXISTS public.lesson_participants (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.lesson_participants
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
+-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
+-  ADD COLUMN IF NOT EXISTS student_id uuid,
+-  ADD COLUMN IF NOT EXISTS participant_status text,
+-  ADD COLUMN IF NOT EXISTS price_charged integer,
+-  ADD COLUMN IF NOT EXISTS pricing_breakdown jsonb,
+-  ADD COLUMN IF NOT EXISTS commitment_id uuid,
+-  ADD COLUMN IF NOT EXISTS documentation_ref jsonb,
+-  ADD COLUMN IF NOT EXISTS reminder_sent boolean,
+-  ADD COLUMN IF NOT EXISTS reminder_seen boolean,
+-  ADD COLUMN IF NOT EXISTS attendance_confirmed_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS attendance_confirmed_by uuid,
+-  ADD COLUMN IF NOT EXISTS documented_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS documented_by uuid,
+-  ADD COLUMN IF NOT EXISTS locked_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS version int,
+-  ADD COLUMN IF NOT EXISTS updated_by uuid,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -2021,13 +1584,6 @@ CREATE TABLE IF NOT EXISTS public.grace_cancellation_requests (
+   status text NOT NULL DEFAULT 'manually_excused'
+ );
+ 
+-ALTER TABLE public.grace_cancellation_requests
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS reason text,
+-  ADD COLUMN IF NOT EXISTS status text;
+ 
+ DO $$
+ BEGIN
+@@ -2080,17 +1636,6 @@ CREATE TABLE IF NOT EXISTS public.payroll_runs (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.payroll_runs
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS period_start date,
+-  ADD COLUMN IF NOT EXISTS period_end date,
+-  ADD COLUMN IF NOT EXISTS status text,
+-  ADD COLUMN IF NOT EXISTS finalized_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS finalized_by uuid,
+-  ADD COLUMN IF NOT EXISTS version int,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -2125,20 +1670,6 @@ CREATE TABLE IF NOT EXISTS public.claim_batches (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.claim_batches
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS batch_type text,
+-  ADD COLUMN IF NOT EXISTS period_start date,
+-  ADD COLUMN IF NOT EXISTS period_end date,
+-  ADD COLUMN IF NOT EXISTS status text,
+-  ADD COLUMN IF NOT EXISTS submitted_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS submitted_by uuid,
+-  ADD COLUMN IF NOT EXISTS paid_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS paid_by uuid,
+-  ADD COLUMN IF NOT EXISTS version int,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -2177,15 +1708,6 @@ CREATE TABLE IF NOT EXISTS public.instance_locks (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.instance_locks
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
+-  ADD COLUMN IF NOT EXISTS lock_source_type text,
+-  ADD COLUMN IF NOT EXISTS lock_source_id uuid,
+-  ADD COLUMN IF NOT EXISTS lock_reason text,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -2227,15 +1749,6 @@ CREATE TABLE IF NOT EXISTS public.participant_locks (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.participant_locks
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
+-  ADD COLUMN IF NOT EXISTS lock_source_type text,
+-  ADD COLUMN IF NOT EXISTS lock_source_id uuid,
+-  ADD COLUMN IF NOT EXISTS lock_reason text,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -2286,24 +1799,6 @@ CREATE TABLE IF NOT EXISTS public.calendar_instance_corrections (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.calendar_instance_corrections
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS original_instance_id uuid,
+-  ADD COLUMN IF NOT EXISTS correction_mode text,
+-  ADD COLUMN IF NOT EXISTS reason_code text,
+-  ADD COLUMN IF NOT EXISTS reason_text text,
+-  ADD COLUMN IF NOT EXISTS status text,
+-  ADD COLUMN IF NOT EXISTS instance_patch jsonb,
+-  ADD COLUMN IF NOT EXISTS participant_patches jsonb,
+-  ADD COLUMN IF NOT EXISTS effective_state jsonb,
+-  ADD COLUMN IF NOT EXISTS impact_snapshot jsonb,
+-  ADD COLUMN IF NOT EXISTS blocked_by_paid_claim boolean,
+-  ADD COLUMN IF NOT EXISTS version int,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS updated_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -2362,24 +1857,6 @@ CREATE TABLE IF NOT EXISTS public.dashboard_tasks (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.dashboard_tasks
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS task_type text,
+-  ADD COLUMN IF NOT EXISTS title text,
+-  ADD COLUMN IF NOT EXISTS description text,
+-  ADD COLUMN IF NOT EXISTS priority text,
+-  ADD COLUMN IF NOT EXISTS status text,
+-  ADD COLUMN IF NOT EXISTS resource_type text,
+-  ADD COLUMN IF NOT EXISTS resource_id text,
+-  ADD COLUMN IF NOT EXISTS action_path text,
+-  ADD COLUMN IF NOT EXISTS version int,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS resolved_by uuid,
+-  ADD COLUMN IF NOT EXISTS resolved_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -2417,13 +1894,6 @@ CREATE TABLE IF NOT EXISTS public.hmo_providers (
+   updated_at timestamptz NOT NULL DEFAULT now()
+ );
+ 
+-ALTER TABLE public.hmo_providers
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS name text,
+-  ADD COLUMN IF NOT EXISTS is_active boolean,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+ 
+ CREATE UNIQUE INDEX IF NOT EXISTS hmo_providers_name_uidx
+   ON public.hmo_providers (org_id, lower(name));
+@@ -2448,19 +1918,6 @@ CREATE TABLE IF NOT EXISTS public.hmo_provider_tracks (
+   updated_at timestamptz NOT NULL DEFAULT now()
+ );
+ 
+-ALTER TABLE public.hmo_provider_tracks
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS provider_id uuid,
+-  ADD COLUMN IF NOT EXISTS service_id uuid,
+-  ADD COLUMN IF NOT EXISTS name text,
+-  ADD COLUMN IF NOT EXISTS payment_mode text,
+-  ADD COLUMN IF NOT EXISTS default_customer_charge_amount integer,
+-  ADD COLUMN IF NOT EXISTS default_insurer_claim_amount integer,
+-  ADD COLUMN IF NOT EXISTS default_workflow_notes text,
+-  ADD COLUMN IF NOT EXISTS is_active boolean,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+ 
+ DO $$
+ BEGIN
+@@ -2551,25 +2008,6 @@ CREATE TABLE IF NOT EXISTS public.hmo_authorizations (
+   updated_at timestamptz NOT NULL DEFAULT now()
+ );
+ 
+-ALTER TABLE public.hmo_authorizations
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS student_id uuid,
+-  ADD COLUMN IF NOT EXISTS service_id uuid,
+-  ADD COLUMN IF NOT EXISTS provider_id uuid,
+-  ADD COLUMN IF NOT EXISTS provider_track_id uuid,
+-  ADD COLUMN IF NOT EXISTS authorization_reference text,
+-  ADD COLUMN IF NOT EXISTS authorized_lessons int,
+-  ADD COLUMN IF NOT EXISTS valid_from date,
+-  ADD COLUMN IF NOT EXISTS expires_at date,
+-  ADD COLUMN IF NOT EXISTS reminder_date date,
+-  ADD COLUMN IF NOT EXISTS customer_charge_amount_override integer,
+-  ADD COLUMN IF NOT EXISTS insurer_claim_amount_override integer,
+-  ADD COLUMN IF NOT EXISTS workflow_notes_override text,
+-  ADD COLUMN IF NOT EXISTS status text,
+-  ADD COLUMN IF NOT EXISTS notes text,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+ 
+ DO $$
+ BEGIN
+@@ -2693,23 +2131,6 @@ CREATE TABLE IF NOT EXISTS public.commitments (
+   hmo_authorization_id uuid NULL
+ );
+ 
+-ALTER TABLE public.commitments
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS student_id uuid,
+-  ADD COLUMN IF NOT EXISTS service_id uuid,
+-  ADD COLUMN IF NOT EXISTS commitment_type text,
+-  ADD COLUMN IF NOT EXISTS total_amount integer,
+-  ADD COLUMN IF NOT EXISTS default_charge_amount integer,
+-  ADD COLUMN IF NOT EXISTS transfer_ref uuid,
+-  ADD COLUMN IF NOT EXISTS notes text,
+-  ADD COLUMN IF NOT EXISTS is_active boolean,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb,
+-  ADD COLUMN IF NOT EXISTS hmo_provider_id uuid,
+-  ADD COLUMN IF NOT EXISTS hmo_provider_track_id uuid,
+-  ADD COLUMN IF NOT EXISTS hmo_authorization_id uuid;
+ 
+ DO $$
+ BEGIN
+@@ -2832,21 +2253,6 @@ CREATE TABLE IF NOT EXISTS public.ledger_transactions (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.ledger_transactions
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
+-  ADD COLUMN IF NOT EXISTS student_id uuid,
+-  ADD COLUMN IF NOT EXISTS commitment_id uuid,
+-  ADD COLUMN IF NOT EXISTS transaction_type text,
+-  ADD COLUMN IF NOT EXISTS usage_type text,
+-  ADD COLUMN IF NOT EXISTS amount integer,
+-  ADD COLUMN IF NOT EXISTS source_ref uuid,
+-  ADD COLUMN IF NOT EXISTS invoice_id text,
+-  ADD COLUMN IF NOT EXISTS invoice_link text,
+-  ADD COLUMN IF NOT EXISTS notes text,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -3047,107 +2453,6 @@ ON public.ledger_transactions
+ FOR EACH ROW
+ EXECUTE FUNCTION public.validate_ledger_commitment_ownership();
+ 
+--- =================================================================
+--- Inline Data Migration: consumption_entries -> ledger_transactions
+--- Runs BEFORE dropping consumption_entries. Fully idempotent.
+--- =================================================================
+-
+--- 1) Migrate existing commitments as CREDIT (commitment_creation).
+---    Deterministic UUID derived from commitment id to ensure idempotency.
+-DO $$
+-BEGIN
+-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'commitments') THEN
+-    INSERT INTO public.ledger_transactions (id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata)
+-    SELECT
+-      md5('commitment-credit:' || c.id::text)::uuid,
+-      s.client_profile_id,
+-      c.student_id,
+-      c.id,
+-      'CREDIT',
+-      'commitment_creation',
+-      COALESCE(c.total_amount, 0),
+-      NULL,
+-      'יצירת התחייבות (מיגרציה)',
+-      c.created_at,
+-      COALESCE(c.updated_at, c.created_at),
+-      jsonb_build_object('migration', 'commitment_to_credit', 'original_commitment_id', c.id)
+-    FROM public.commitments c
+-    LEFT JOIN public.students s ON s.id = c.student_id
+-    WHERE c.total_amount > 0
+-    ON CONFLICT (id) DO UPDATE
+-      SET notes = EXCLUDED.notes
+-      WHERE ledger_transactions.notes = 'Migrated from commitment total_amount';
+-  END IF;
+-END $$;
+-
+--- 2) Migrate existing consumption_entries as DEBIT or CREDIT rows.
+---    Only rows with a non-null commitment_id can be migrated (strict FK).
+---    Uses the original consumption_entries.id as the new ledger id.
+-DO $$
+-BEGIN
+-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'consumption_entries') THEN
+-    INSERT INTO public.ledger_transactions (id, client_profile_id, student_id, commitment_id, transaction_type, usage_type, amount, source_ref, notes, created_at, updated_at, metadata)
+-    SELECT
+-      e.id,
+-      COALESCE(lp.client_profile_id, s.client_profile_id, cs.client_profile_id),
+-      COALESCE(e.student_id, lp.student_id, c.student_id),
+-      e.commitment_id,
+-      CASE WHEN e.amount_charged < 0 THEN 'CREDIT' ELSE 'DEBIT' END,
+-      CASE
+-        WHEN e.amount_charged < 0 THEN 'manual_topup'
+-        WHEN e.source_type = 'lesson' THEN 'standard'
+-        WHEN e.source_type = 'transfer' THEN 'manual_adjustment'
+-        WHEN e.source_type = 'adjustment' THEN 'manual_adjustment'
+-        ELSE 'manual_adjustment'
+-      END,
+-      ABS(e.amount_charged),
+-      e.lesson_participant_id,
+-      e.notes,
+-      e.created_at,
+-      e.created_at,
+-      COALESCE(e.metadata, '{}'::jsonb)
+-        || jsonb_build_object('migration', 'consumption_to_ledger', 'original_source_type', e.source_type)
+-        || CASE WHEN e.transfer_ref IS NOT NULL THEN jsonb_build_object('transfer_ref', e.transfer_ref) ELSE '{}'::jsonb END
+-        || CASE WHEN e.effective_date IS NOT NULL THEN jsonb_build_object('effective_date', e.effective_date::text) ELSE '{}'::jsonb END
+-    FROM public.consumption_entries e
+-    LEFT JOIN public.lesson_participants lp ON lp.id = e.lesson_participant_id
+-    LEFT JOIN public.commitments c ON c.id = e.commitment_id
+-    LEFT JOIN public.students s ON s.id = e.student_id
+-    LEFT JOIN public.students cs ON cs.id = c.student_id
+-    WHERE e.commitment_id IS NOT NULL
+-      AND COALESCE(lp.client_profile_id, s.client_profile_id, cs.client_profile_id) IS NOT NULL
+-    ON CONFLICT DO NOTHING;
+-  END IF;
+-END $$;
+-
+--- =================================================================
+--- Cleanup: drop consumption_entries and all related objects
+--- =================================================================
+-
+-DO $$
+-BEGIN
+-  IF to_regclass('public.consumption_entries') IS NOT NULL THEN
+-    DROP TRIGGER IF EXISTS consumption_entries_validate_commitment_ownership_trg ON public.consumption_entries;
+-  END IF;
+-END $$;
+-DROP FUNCTION IF EXISTS public.validate_consumption_commitment_ownership();
+-
+-DROP VIEW IF EXISTS public.commitment_balances;
+-
+--- Cleanup for deprecated precomputed balance model
+-DROP TRIGGER IF EXISTS commitments_recalculate_student_balance_trg ON public.commitments;
+-DO $$
+-BEGIN
+-  IF to_regclass('public.consumption_entries') IS NOT NULL THEN
+-    DROP TRIGGER IF EXISTS consumption_entries_recalculate_student_balance_trg ON public.consumption_entries;
+-  END IF;
+-END $$;
+-DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_commitments();
+-DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_consumption_entries();
+-DROP FUNCTION IF EXISTS public.trg_recalculate_student_balance_from_transfers();
+-DROP FUNCTION IF EXISTS public.recalculate_student_balance_account_by_commitment(uuid);
+-DROP FUNCTION IF EXISTS public.recalculate_student_balance_account(uuid);
+-
+ -- -----------------------------------------------------------------
+ -- Query-time balance computation helpers (ledger-based)
+ -- -----------------------------------------------------------------
+@@ -3198,14 +2503,6 @@ CREATE TABLE IF NOT EXISTS public.lesson_earnings (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.lesson_earnings
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS employee_id uuid,
+-  ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
+-  ADD COLUMN IF NOT EXISTS rate_used integer,
+-  ADD COLUMN IF NOT EXISTS payout_amount integer,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -3294,22 +2591,6 @@ CREATE TABLE IF NOT EXISTS public.forms (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.forms
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS name text,
+-  ADD COLUMN IF NOT EXISTS description text,
+-  ADD COLUMN IF NOT EXISTS form_usage text,
+-  ADD COLUMN IF NOT EXISTS form_schema jsonb,
+-  ADD COLUMN IF NOT EXISTS alert_rules jsonb,
+-  ADD COLUMN IF NOT EXISTS visibility_rules jsonb,
+-  ADD COLUMN IF NOT EXISTS version int,
+-  ADD COLUMN IF NOT EXISTS published_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS archived_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS is_active boolean,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -3363,16 +2644,6 @@ CREATE TABLE IF NOT EXISTS public.shared_form_blocks (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.shared_form_blocks
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS block_type text,
+-  ADD COLUMN IF NOT EXISTS name text,
+-  ADD COLUMN IF NOT EXISTS content_schema jsonb,
+-  ADD COLUMN IF NOT EXISTS is_active boolean,
+-  ADD COLUMN IF NOT EXISTS created_by uuid,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -3412,14 +2683,6 @@ CREATE TABLE IF NOT EXISTS public.form_shared_block_links (
+   created_at timestamptz NOT NULL DEFAULT now()
+ );
+ 
+-ALTER TABLE public.form_shared_block_links
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS form_id uuid,
+-  ADD COLUMN IF NOT EXISTS shared_block_id uuid,
+-  ADD COLUMN IF NOT EXISTS section_id text,
+-  ADD COLUMN IF NOT EXISTS item_id text,
+-  ADD COLUMN IF NOT EXISTS schema_scope text,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz;
+ 
+ UPDATE public.form_shared_block_links
+ SET schema_scope = 'draft'
+@@ -3537,21 +2800,6 @@ CREATE TABLE IF NOT EXISTS public.form_submissions (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.form_submissions
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS form_id uuid,
+-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
+-  ADD COLUMN IF NOT EXISTS student_id uuid,
+-  ADD COLUMN IF NOT EXISTS answers jsonb,
+-  ADD COLUMN IF NOT EXISTS alert_flags jsonb,
+-  ADD COLUMN IF NOT EXISTS otp_metadata jsonb,
+-  ADD COLUMN IF NOT EXISTS submitted_by_guardian_id uuid,
+-  ADD COLUMN IF NOT EXISTS source text,
+-  ADD COLUMN IF NOT EXISTS submitted_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS reviewed_by uuid,
+-  ADD COLUMN IF NOT EXISTS reviewed_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS locked_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -3644,19 +2892,6 @@ CREATE TABLE IF NOT EXISTS public.otp_challenges (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.otp_challenges
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
+-  ADD COLUMN IF NOT EXISTS student_id uuid,
+-  ADD COLUMN IF NOT EXISTS channel text,
+-  ADD COLUMN IF NOT EXISTS destination text,
+-  ADD COLUMN IF NOT EXISTS token_hash text,
+-  ADD COLUMN IF NOT EXISTS status text,
+-  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS verified_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS attempts int,
+-  ADD COLUMN IF NOT EXISTS ip text,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -3733,22 +2968,6 @@ CREATE TABLE IF NOT EXISTS public.waiting_list_entries (
+   metadata jsonb NULL
+ );
+ 
+-ALTER TABLE public.waiting_list_entries
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS client_profile_id uuid,
+-  ADD COLUMN IF NOT EXISTS student_id uuid,
+-  ADD COLUMN IF NOT EXISTS desired_service_id uuid,
+-  ADD COLUMN IF NOT EXISTS preferred_days int[],
+-  ADD COLUMN IF NOT EXISTS preferred_times jsonb,
+-  ADD COLUMN IF NOT EXISTS instructor_preferences uuid[],
+-  ADD COLUMN IF NOT EXISTS willing_to_pay_premium boolean,
+-  ADD COLUMN IF NOT EXISTS priority_flag boolean,
+-  ADD COLUMN IF NOT EXISTS priority_reason text,
+-  ADD COLUMN IF NOT EXISTS notes text,
+-  ADD COLUMN IF NOT EXISTS status text,
+-  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS latest_submission_id uuid,
+-  ADD COLUMN IF NOT EXISTS metadata jsonb;
+ 
+ DO $$
+ BEGIN
+@@ -3875,13 +3094,6 @@ CREATE TABLE IF NOT EXISTS public."Settings" (
+   "updated_at" timestamptz NOT NULL DEFAULT now()
+ );
+ 
+-ALTER TABLE public."Settings"
+-  ADD COLUMN IF NOT EXISTS "key" text,
+-  ADD COLUMN IF NOT EXISTS "settings_value" jsonb,
+-  ADD COLUMN IF NOT EXISTS "org_id" uuid,
+-  ADD COLUMN IF NOT EXISTS "metadata" jsonb,
+-  ADD COLUMN IF NOT EXISTS "created_at" timestamptz,
+-  ADD COLUMN IF NOT EXISTS "updated_at" timestamptz;
+ 
+ DO $$
+ BEGIN
+@@ -3918,307 +3130,6 @@ CROSS JOIN (
+ ) AS seed(key, settings_value)
+ ON CONFLICT ("org_id", "key") DO NOTHING;
+ 
+--- -----------------------------------------------------------------
+--- HMO provider / authorization compatibility backfill
+--- -----------------------------------------------------------------
+-
+-WITH legacy_provider_entries AS (
+-  SELECT
+-    CASE
+-      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'id'), '')
+-      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
+-    END AS legacy_key,
+-    CASE
+-      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'name'), '')
+-      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
+-    END AS provider_name
+-  FROM public."Settings" s
+-  CROSS JOIN LATERAL jsonb_array_elements(
+-    CASE
+-      WHEN jsonb_typeof(s.settings_value) = 'array' THEN s.settings_value
+-      WHEN jsonb_typeof(s.settings_value) = 'object' AND jsonb_typeof(s.settings_value->'providers') = 'array' THEN s.settings_value->'providers'
+-      ELSE '[]'::jsonb
+-    END
+-  ) AS entry
+-  WHERE s.key = 'medical_providers'
+-),
+-normalized_legacy_providers AS (
+-  SELECT DISTINCT
+-    COALESCE(legacy_key, provider_name) AS provider_seed,
+-    provider_name
+-  FROM legacy_provider_entries
+-  WHERE COALESCE(legacy_key, provider_name) IS NOT NULL
+-    AND provider_name IS NOT NULL
+-)
+-INSERT INTO public.hmo_providers (id, name, is_active, metadata)
+-SELECT
+-  (
+-    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 1, 8) || '-' ||
+-    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 9, 4) || '-' ||
+-    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 13, 4) || '-' ||
+-    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 17, 4) || '-' ||
+-    substr(md5('legacy-hmo-provider:' || lower(provider_seed)), 21, 12)
+-  )::uuid,
+-  provider_name,
+-  true,
+-  jsonb_build_object('legacy_source', 'settings.medical_providers', 'legacy_provider_seed', provider_seed)
+-FROM normalized_legacy_providers
+-ON CONFLICT DO NOTHING;
+-
+-WITH legacy_provider_entries AS (
+-  SELECT
+-    CASE
+-      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'id'), '')
+-      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
+-    END AS legacy_key,
+-    CASE
+-      WHEN jsonb_typeof(entry) = 'object' THEN NULLIF(trim(entry->>'name'), '')
+-      ELSE NULLIF(trim(trim(both '"' from entry::text)), '')
+-    END AS provider_name
+-  FROM public."Settings" s
+-  CROSS JOIN LATERAL jsonb_array_elements(
+-    CASE
+-      WHEN jsonb_typeof(s.settings_value) = 'array' THEN s.settings_value
+-      WHEN jsonb_typeof(s.settings_value) = 'object' AND jsonb_typeof(s.settings_value->'providers') = 'array' THEN s.settings_value->'providers'
+-      ELSE '[]'::jsonb
+-    END
+-  ) AS entry
+-  WHERE s.key = 'medical_providers'
+-)
+-UPDATE public.students st
+-SET medical_provider = (
+-  (
+-    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 1, 8) || '-' ||
+-    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 9, 4) || '-' ||
+-    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 13, 4) || '-' ||
+-    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 17, 4) || '-' ||
+-    substr(md5('legacy-hmo-provider:' || lower(COALESCE(lp.legacy_key, lp.provider_name))), 21, 12)
+-  )::uuid
+-)::text
+-FROM legacy_provider_entries lp
+-WHERE COALESCE(lp.legacy_key, lp.provider_name) IS NOT NULL
+-  AND (
+-    st.medical_provider = lp.legacy_key
+-    OR st.medical_provider = lp.provider_name
+-  );
+-
+-WITH legacy_hmo_commitments AS (
+-  SELECT
+-    c.id AS commitment_id,
+-    c.student_id,
+-    c.service_id,
+-    c.created_at,
+-    c.updated_at,
+-    c.expires_at,
+-    c.notes,
+-    c.is_active,
+-    c.default_charge_amount,
+-    c.metadata,
+-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'provider_name'), ''), 'גורם מממן') AS provider_name,
+-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'payment_mode'), ''), 'partially_paid_by_hmo') AS payment_mode,
+-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'customer_charge_amount'), '')::numeric, c.default_charge_amount, 0) AS customer_charge_amount,
+-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'insurer_claim_amount'), '')::numeric, 0) AS insurer_claim_amount,
+-    NULLIF(trim(c.metadata->'hmo'->>'workflow_notes'), '') AS workflow_notes,
+-    NULLIF(trim(c.metadata->'hmo'->>'authorization_reference'), '') AS authorization_reference,
+-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'authorized_lessons'), '')::int, 0) AS authorized_lessons,
+-    NULLIF(trim(c.metadata->'hmo'->>'reminder_date'), '')::date AS reminder_date,
+-    COALESCE(c.hmo_authorization_id, c.id) AS authorization_id
+-  FROM public.commitments c
+-  WHERE c.commitment_type = 'hmo'
+-),
+-provider_rows AS (
+-  SELECT DISTINCT
+-    provider_name,
+-    (
+-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 1, 8) || '-' ||
+-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 9, 4) || '-' ||
+-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 13, 4) || '-' ||
+-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 17, 4) || '-' ||
+-      substr(md5('legacy-hmo-provider:' || lower(provider_name)), 21, 12)
+-    )::uuid AS provider_id
+-  FROM legacy_hmo_commitments
+-),
+-inserted_providers AS (
+-  INSERT INTO public.hmo_providers (id, name, is_active, metadata)
+-  SELECT provider_id, provider_name, true, jsonb_build_object('legacy_source', 'commitments.metadata.hmo')
+-  FROM provider_rows
+-  ON CONFLICT (lower(name)) DO UPDATE
+-    SET metadata = EXCLUDED.metadata
+-  RETURNING id
+-),
+-track_rows AS (
+-  SELECT DISTINCT
+-    lhc.provider_name,
+-    COALESCE(hp.id, pr.provider_id) AS provider_id,
+-    lhc.service_id,
+-    lhc.payment_mode,
+-    lhc.customer_charge_amount,
+-    lhc.insurer_claim_amount,
+-    lhc.workflow_notes,
+-    (
+-      substr(md5(
+-        COALESCE(hp.id, pr.provider_id)::text || '|' ||
+-        COALESCE(lhc.service_id::text, '') || '|' ||
+-        lhc.payment_mode || '|' ||
+-        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
+-        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
+-        COALESCE(lhc.workflow_notes, '')
+-      ), 1, 8) || '-' ||
+-      substr(md5(
+-        COALESCE(hp.id, pr.provider_id)::text || '|' ||
+-        COALESCE(lhc.service_id::text, '') || '|' ||
+-        lhc.payment_mode || '|' ||
+-        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
+-        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
+-        COALESCE(lhc.workflow_notes, '')
+-      ), 9, 4) || '-' ||
+-      substr(md5(
+-        COALESCE(hp.id, pr.provider_id)::text || '|' ||
+-        COALESCE(lhc.service_id::text, '') || '|' ||
+-        lhc.payment_mode || '|' ||
+-        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
+-        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
+-        COALESCE(lhc.workflow_notes, '')
+-      ), 13, 4) || '-' ||
+-      substr(md5(
+-        COALESCE(hp.id, pr.provider_id)::text || '|' ||
+-        COALESCE(lhc.service_id::text, '') || '|' ||
+-        lhc.payment_mode || '|' ||
+-        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
+-        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
+-        COALESCE(lhc.workflow_notes, '')
+-      ), 17, 4) || '-' ||
+-      substr(md5(
+-        COALESCE(hp.id, pr.provider_id)::text || '|' ||
+-        COALESCE(lhc.service_id::text, '') || '|' ||
+-        lhc.payment_mode || '|' ||
+-        COALESCE(lhc.customer_charge_amount, 0)::text || '|' ||
+-        COALESCE(lhc.insurer_claim_amount, 0)::text || '|' ||
+-        COALESCE(lhc.workflow_notes, '')
+-      ), 21, 12)
+-    )::uuid AS track_id
+-  FROM legacy_hmo_commitments lhc
+-  JOIN provider_rows pr ON pr.provider_name = lhc.provider_name
+-  LEFT JOIN public.hmo_providers hp ON lower(hp.name) = lower(lhc.provider_name)
+-),
+-inserted_tracks AS (
+-  INSERT INTO public.hmo_provider_tracks (
+-    id,
+-    provider_id,
+-    service_id,
+-    name,
+-    payment_mode,
+-    default_customer_charge_amount,
+-    default_insurer_claim_amount,
+-    default_workflow_notes,
+-    is_active,
+-    metadata
+-  )
+-  SELECT
+-    track_id,
+-    provider_id,
+-    service_id,
+-    'מסלול שהוסב • ' ||
+-      CASE
+-        WHEN payment_mode = 'fully_paid_by_hmo' THEN 'ממומן מלא'
+-        WHEN payment_mode = 'fully_paid_by_customer' THEN 'לקוח משלם'
+-        ELSE 'מימון חלקי'
+-      END ||
+-      ' • לקוח ' || COALESCE(customer_charge_amount, 0)::text ||
+-      ' • קופה ' || COALESCE(insurer_claim_amount, 0)::text,
+-    payment_mode,
+-    COALESCE(customer_charge_amount, 0),
+-    COALESCE(insurer_claim_amount, 0),
+-    workflow_notes,
+-    true,
+-    jsonb_build_object('generated_from', 'legacy_hmo_commitment')
+-  FROM track_rows
+-  ON CONFLICT DO NOTHING
+-  RETURNING id
+-),
+-authorization_source AS (
+-  SELECT
+-    lhc.*,
+-    tr.provider_id,
+-    tr.track_id,
+-    CASE
+-      WHEN row_number() OVER (
+-        PARTITION BY lhc.student_id, lhc.service_id
+-        ORDER BY CASE WHEN lhc.is_active THEN 0 ELSE 1 END, COALESCE(lhc.updated_at, lhc.created_at) DESC, lhc.commitment_id DESC
+-      ) = 1 AND lhc.is_active THEN 'active'
+-      WHEN lhc.expires_at IS NOT NULL AND lhc.expires_at < now() THEN 'expired'
+-      WHEN lhc.is_active = false THEN 'cancelled'
+-      ELSE 'completed'
+-    END AS authorization_status
+-  FROM legacy_hmo_commitments lhc
+-  JOIN track_rows tr ON lower(tr.provider_name) = lower(lhc.provider_name)
+-    AND tr.service_id IS NOT DISTINCT FROM lhc.service_id
+-    AND tr.payment_mode = lhc.payment_mode
+-    AND tr.customer_charge_amount = lhc.customer_charge_amount
+-    AND tr.insurer_claim_amount = lhc.insurer_claim_amount
+-    AND COALESCE(tr.workflow_notes, '') = COALESCE(lhc.workflow_notes, '')
+-)
+-INSERT INTO public.hmo_authorizations (
+-  id,
+-  student_id,
+-  service_id,
+-  provider_id,
+-  provider_track_id,
+-  authorization_reference,
+-  authorized_lessons,
+-  valid_from,
+-  expires_at,
+-  reminder_date,
+-  status,
+-  notes,
+-  metadata
+-)
+-SELECT
+-  authorization_id,
+-  student_id,
+-  service_id,
+-  provider_id,
+-  track_id,
+-  authorization_reference,
+-  GREATEST(authorized_lessons, 0),
+-  created_at::date,
+-  expires_at::date,
+-  reminder_date,
+-  authorization_status,
+-  notes,
+-  jsonb_build_object('generated_from', 'legacy_hmo_commitment', 'legacy_commitment_id', commitment_id)
+-FROM authorization_source
+-ON CONFLICT DO NOTHING;
+-
+-WITH legacy_hmo_commitments AS (
+-  SELECT
+-    c.id AS commitment_id,
+-    c.service_id,
+-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'provider_name'), ''), 'גורם מממן') AS provider_name,
+-    COALESCE(NULLIF(trim(c.metadata->'hmo'->>'payment_mode'), ''), 'partially_paid_by_hmo') AS payment_mode,
+-    COALESCE((c.metadata->'hmo'->>'customer_charge_amount')::numeric, c.default_charge_amount, 0) AS customer_charge_amount,
+-    COALESCE((c.metadata->'hmo'->>'insurer_claim_amount')::numeric, 0) AS insurer_claim_amount,
+-    NULLIF(trim(c.metadata->'hmo'->>'workflow_notes'), '') AS workflow_notes,
+-    COALESCE(c.hmo_authorization_id, c.id) AS authorization_id
+-  FROM public.commitments c
+-  WHERE c.commitment_type = 'hmo'
+-)
+-UPDATE public.commitments c
+-SET
+-  hmo_provider_id = hp.id,
+-  hmo_provider_track_id = hpt.id,
+-  hmo_authorization_id = lhc.authorization_id
+-FROM legacy_hmo_commitments lhc
+-JOIN public.hmo_providers hp ON lower(hp.name) = lower(lhc.provider_name)
+-JOIN public.hmo_provider_tracks hpt
+-  ON hpt.provider_id = hp.id
+-  AND hpt.service_id IS NOT DISTINCT FROM lhc.service_id
+-  AND hpt.payment_mode = lhc.payment_mode
+-  AND hpt.default_customer_charge_amount = COALESCE(lhc.customer_charge_amount, 0)
+-  AND hpt.default_insurer_claim_amount = COALESCE(lhc.insurer_claim_amount, 0)
+-  AND COALESCE(hpt.default_workflow_notes, '') = COALESCE(lhc.workflow_notes, '')
+-WHERE c.id = lhc.commitment_id;
+-
+ -- -----------------------------------------------------------------
+ -- public."Documents" (polymorphic file metadata)
+ -- -----------------------------------------------------------------
+@@ -4246,9 +3157,6 @@ CREATE TABLE IF NOT EXISTS public."Documents" (
+   "metadata" jsonb
+ );
+ 
+-ALTER TABLE public."Documents"
+-  ADD COLUMN IF NOT EXISTS "org_id" uuid,
+-  ADD COLUMN IF NOT EXISTS "metadata" jsonb;
+ 
+ -- Drop entity_type CHECK constraint if it exists (moved to UI validation)
+ DO $$
+@@ -7047,9 +5955,6 @@ GRANT EXECUTE ON FUNCTION public.batch_sync_lesson_ledger_entries(
+ --   - adds HMO invoice metadata tables if missing
+ -- -----------------------------------------------------------------
+ 
+-ALTER TABLE public.hmo_authorizations
+-  ADD COLUMN IF NOT EXISTS org_id uuid,
+-  ADD COLUMN IF NOT EXISTS contracted_rate_amount integer;
+ 
+ UPDATE public.hmo_authorizations AS auth
+ SET contracted_rate_amount = COALESCE(
+@@ -7137,72 +6042,6 @@ CREATE TABLE IF NOT EXISTS public.ledger_transactions (
+   metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+ );
+ 
+--- Legacy compatibility: when an older ledger_transactions schema already exists,
+--- ensure all v2 columns exist before creating v2 indexes and policies.
+-ALTER TABLE public.ledger_transactions
+-  ADD COLUMN IF NOT EXISTS ledger_account_id uuid,
+-  ADD COLUMN IF NOT EXISTS direction text,
+-  ADD COLUMN IF NOT EXISTS effective_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS posted_at timestamptz,
+-  ADD COLUMN IF NOT EXISTS source_type text,
+-  ADD COLUMN IF NOT EXISTS source_id uuid,
+-  ADD COLUMN IF NOT EXISTS lesson_instance_id uuid,
+-  ADD COLUMN IF NOT EXISTS lesson_participant_id uuid,
+-  ADD COLUMN IF NOT EXISTS hmo_provider_id uuid,
+-  ADD COLUMN IF NOT EXISTS hmo_authorization_id uuid,
+-  ADD COLUMN IF NOT EXISTS service_id uuid,
+-  ADD COLUMN IF NOT EXISTS rate_source text,
+-  ADD COLUMN IF NOT EXISTS reverses_transaction_id uuid,
+-  ADD COLUMN IF NOT EXISTS external_reference text,
+-  ADD COLUMN IF NOT EXISTS posted_at_migrated boolean;
+-
+-UPDATE public.ledger_transactions
+-SET direction = COALESCE(direction, CASE WHEN transaction_type = 'CREDIT' THEN 'CREDIT' ELSE 'DEBIT' END)
+-WHERE direction IS NULL;
+-
+-UPDATE public.ledger_transactions
+-SET effective_at = COALESCE(effective_at, created_at, now())
+-WHERE effective_at IS NULL;
+-
+-UPDATE public.ledger_transactions
+-SET posted_at = COALESCE(posted_at, created_at, now())
+-WHERE posted_at IS NULL;
+-
+-UPDATE public.ledger_transactions
+-SET source_type = COALESCE(source_type, 'migration')
+-WHERE source_type IS NULL;
+-
+-DO $$
+-BEGIN
+-  ALTER TABLE public.ledger_transactions ALTER COLUMN direction SET NOT NULL;
+-EXCEPTION
+-  WHEN others THEN NULL;
+-END $$;
+-
+-DO $$
+-BEGIN
+-  ALTER TABLE public.ledger_transactions ALTER COLUMN effective_at SET NOT NULL;
+-EXCEPTION
+-  WHEN others THEN NULL;
+-END $$;
+-
+-DO $$
+-BEGIN
+-  ALTER TABLE public.ledger_transactions ALTER COLUMN posted_at SET NOT NULL;
+-EXCEPTION
+-  WHEN others THEN NULL;
+-END $$;
+-
+-DO $$
+-BEGIN
+-  ALTER TABLE public.ledger_transactions ALTER COLUMN source_type SET NOT NULL;
+-EXCEPTION
+-  WHEN others THEN NULL;
+-END $$;
+-
+-ALTER TABLE public.ledger_transactions
+-  DROP COLUMN IF EXISTS posted_at_migrated;
+-
+ CREATE INDEX IF NOT EXISTS ledger_transactions_account_effective_idx
+   ON public.ledger_transactions (org_id, ledger_account_id, effective_at);
+ 

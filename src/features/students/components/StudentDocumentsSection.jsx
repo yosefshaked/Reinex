@@ -21,6 +21,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -90,36 +100,35 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
 
   return (
     <Dialog open={!!file} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[500px]" dir="rtl">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle className="text-right">עריכת מסמך</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogTitle className="text-end">עריכת מסמך</DialogTitle>
+          <DialogDescription className="text-end">
             ערוך את פרטי המסמך
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="edit-doc-name" className="text-right block">
+            <Label htmlFor="edit-doc-name" className="block">
               שם המסמך <span className="text-red-500">*</span>
             </Label>
             <Input
               id="edit-doc-name"
-              dir="rtl"
+             
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="שם המסמך"
-              className="text-right"
             />
             {file.original_name && (
-              <p className="text-xs text-muted-foreground text-right">
+              <p className="text-xs text-muted-foreground">
                 קובץ מקורי: {file.original_name}
               </p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="edit-relevant-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="edit-relevant-date" className="flex items-center gap-2 justify-end">
               <span>תאריך רלוונטי</span>
               <Calendar className="h-4 w-4" />
             </Label>
@@ -129,12 +138,11 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
               dir="ltr"
               value={relevantDate}
               onChange={(e) => setRelevantDate(e.target.value)}
-              className="text-right"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="edit-expiration-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="edit-expiration-date" className="flex items-center gap-2 justify-end">
               <span>תאריך תפוגה</span>
               <CalendarX className="h-4 w-4" />
             </Label>
@@ -144,7 +152,6 @@ function EditFileDialog({ file, onConfirm, onCancel }) {
               dir="ltr"
               value={expirationDate}
               onChange={(e) => setExpirationDate(e.target.value)}
-              className="text-right"
             />
           </div>
         </div>
@@ -196,12 +203,12 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
 
   return (
     <Dialog open={files.length > 0} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[700px] max-h-[80vh]" dir="rtl">
+      <DialogContent className="sm:max-w-[700px] max-h-[80vh]">
         <DialogHeader>
-          <DialogTitle className="text-right">
+          <DialogTitle className="text-end">
             הגדרות {filesData.length} קבצים
           </DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogDescription className="text-end">
             ערוך את פרטי המסמכים לפני ההעלאה. שדות שאינם מסומנים ב-* הם אופציונליים
           </DialogDescription>
         </DialogHeader>
@@ -213,29 +220,28 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                 <div className="flex items-center gap-2 text-sm font-medium mb-2">
                   <FileText className="h-4 w-4" />
                   <span>קובץ {index + 1}</span>
-                  <Badge variant="outline" className="mr-auto">
+                  <Badge variant="outline" className="me-auto">
                     {fileData.file.name}
                   </Badge>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor={`name-${fileData.id}`} className="text-right block">
+                  <Label htmlFor={`name-${fileData.id}`} className="block">
                     שם המסמך <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     id={`name-${fileData.id}`}
-                    dir="rtl"
+                   
                     value={fileData.name}
                     onChange={(e) => handleFileChange(fileData.id, 'name', e.target.value)}
                     placeholder="לדוגמה: אישור רפואי"
-                    className="text-right"
                     disabled={!!definitionName}
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-2">
-                    <Label htmlFor={`relevant-${fileData.id}`} className="text-right flex items-center gap-1 justify-end text-xs">
+                    <Label htmlFor={`relevant-${fileData.id}`} className="flex items-center gap-1 justify-end text-xs">
                       <span>תאריך רלוונטי</span>
                       <Calendar className="h-3 w-3" />
                     </Label>
@@ -245,12 +251,12 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                       dir="ltr"
                       value={fileData.relevantDate}
                       onChange={(e) => handleFileChange(fileData.id, 'relevantDate', e.target.value)}
-                      className="text-right text-sm"
+                      className="text-sm"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor={`expiration-${fileData.id}`} className="text-right flex items-center gap-1 justify-end text-xs">
+                    <Label htmlFor={`expiration-${fileData.id}`} className="flex items-center gap-1 justify-end text-xs">
                       <span>תאריך תפוגה</span>
                       <CalendarX className="h-3 w-3" />
                     </Label>
@@ -260,7 +266,7 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
                       dir="ltr"
                       value={fileData.expirationDate}
                       onChange={(e) => handleFileChange(fileData.id, 'expirationDate', e.target.value)}
-                      className="text-right text-sm"
+                      className="text-sm"
                     />
                   </div>
                 </div>
@@ -271,7 +277,7 @@ function BulkPreUploadDialog({ files, definitionName, onConfirm, onCancel }) {
 
         <div className="flex gap-2 flex-row-reverse border-t pt-4">
           <Button onClick={handleConfirm} disabled={!allNamesValid}>
-            <Upload className="h-4 w-4 ml-2" />
+            <Upload className="h-4 w-4 ms-2" />
             העלה {filesData.length} קבצים
           </Button>
           <Button onClick={onCancel} variant="outline">
@@ -319,35 +325,34 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
 
   return (
     <Dialog open={!!file} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-[500px]" dir="rtl">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle className="text-right">הגדרות מסמך</DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogTitle className="text-end">הגדרות מסמך</DialogTitle>
+          <DialogDescription className="text-end">
             ערוך את פרטי המסמך לפני ההעלאה
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="doc-name" className="text-right block">
+            <Label htmlFor="doc-name" className="block">
               שם המסמך <span className="text-red-500">*</span>
             </Label>
             <Input
               id="doc-name"
-              dir="rtl"
+             
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="לדוגמה: אישור רפואי"
-              className="text-right"
               disabled={!!definitionName}
             />
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground">
               {definitionName ? `שם מוגדר מראש: ${definitionName}` : `קובץ מקורי: ${file.name}`}
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="relevant-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="relevant-date" className="flex items-center gap-2 justify-end">
               <span>תאריך רלוונטי</span>
               <Calendar className="h-4 w-4" />
             </Label>
@@ -357,15 +362,14 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
               dir="ltr"
               value={relevantDate}
               onChange={(e) => setRelevantDate(e.target.value)}
-              className="text-right"
             />
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground">
               תאריך הנפקה, אישור וכדומה
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="expiration-date" className="text-right flex items-center gap-2 justify-end">
+            <Label htmlFor="expiration-date" className="flex items-center gap-2 justify-end">
               <span>תאריך תפוגה</span>
               <CalendarX className="h-4 w-4" />
             </Label>
@@ -375,9 +379,8 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
               dir="ltr"
               value={expirationDate}
               onChange={(e) => setExpirationDate(e.target.value)}
-              className="text-right"
             />
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground">
               המסמך יסומן כפג תוקף לאחר תאריך זה
             </p>
           </div>
@@ -385,7 +388,7 @@ function PreUploadDialog({ file, definitionName, onConfirm, onCancel }) {
 
         <div className="flex gap-2 flex-row-reverse">
           <Button onClick={handleConfirm} disabled={!name.trim()}>
-            <Upload className="h-4 w-4 ml-2" />
+            <Upload className="h-4 w-4 ms-2" />
             העלה
           </Button>
           <Button onClick={onCancel} variant="outline">
@@ -420,6 +423,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
   const [pendingFiles, setPendingFiles] = useState([]); // Files awaiting metadata input
   const [pendingDefinitionId, setPendingDefinitionId] = useState(null); // Associated definition for pending files
   const [editingFile, setEditingFile] = useState(null); // File being edited post-upload
+  const [deleteDialogFile, setDeleteDialogFile] = useState(null);
 
   // Use documents from hook instead of student.files prop
   const studentFiles = documents;
@@ -594,7 +598,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         
         const confirmMessage = `הקובץ "${file.name}" כבר קיים במערכת:\n\n${duplicateList}\n\nהאם להעלות בכל זאת?`;
         
-        if (!confirm(confirmMessage)) {
+        if (!duplicateUploadApproved) {
           toast.info('העלאת הקובץ בוטלה');
           return;
         }
@@ -911,7 +915,6 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
   const handleFileDelete = useCallback(
     async (fileId) => {
       if (!session || !orgId) return;
-      if (!confirm('האם למחוק קובץ זה? פעולה זו אינה ניתנת לביטול.')) return;
 
       const token = session.access_token;
       if (!token) {
@@ -957,6 +960,17 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
     },
     [session, orgId, onRefresh, fetchDocuments]
   );
+
+  const requestFileDelete = useCallback((file) => {
+    setDeleteDialogFile(file);
+  }, []);
+
+  const confirmFileDelete = useCallback(async () => {
+    if (!deleteDialogFile?.id) return;
+    const fileId = deleteDialogFile.id;
+    setDeleteDialogFile(null);
+    await handleFileDelete(fileId);
+  }, [deleteDialogFile, handleFileDelete]);
 
   const handleToggleResolved = useCallback(
     async (fileId, currentResolved) => {
@@ -1356,9 +1370,26 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
         onConfirm={handleEditFile}
         onCancel={() => setEditingFile(null)}
       />
+      <AlertDialog open={Boolean(deleteDialogFile)} onOpenChange={(open) => !open && setDeleteDialogFile(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>מחיקת קובץ</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteDialogFile ? `האם למחוק את הקובץ "${deleteDialogFile.name}"? פעולה זו אינה ניתנת לביטול.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteState === REQUEST_STATE.loading}>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmFileDelete} disabled={deleteState === REQUEST_STATE.loading}>
+              {deleteState === REQUEST_STATE.loading ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}
+              מחק
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <Card dir="rtl" className="border-slate-200">
+      <Card className="border-slate-200">
         <CollapsibleTrigger asChild>
           <CardHeader className="cursor-pointer hover:bg-slate-50 transition-colors">
             <div className="flex items-center justify-between">
@@ -1383,7 +1414,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
           <CardContent className="space-y-6 pt-4">
             {/* Background Upload Indicator */}
             {backgroundUploads.length > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2" dir="rtl">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
                 <div className="flex items-center gap-2 text-sm font-medium text-blue-900">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   מעלה {backgroundUploads.length} קבצים ברקע
@@ -1415,7 +1446,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
             {loadState === REQUEST_STATE.idle && (
               <>
                 {/* Upload Guidelines */}
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-right" dir="rtl">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
                   <h4 className="font-semibold text-blue-900 mb-2">הנחיות העלאת קבצים</h4>
                   <ul className="space-y-1 text-blue-800">
                     <li>• גודל מקסימלי: 10MB</li>
@@ -1446,7 +1477,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
                                   {file && canDownloadFiles ? (
                                     <button
                                       onClick={() => handleFilePreview(file.id)}
-                                      className="font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-right"
+                                      className="font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-end"
                                     >
                                       {def.name}
                                     </button>
@@ -1484,12 +1515,12 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
                                           <CalendarX className="h-3 w-3" />
                                           {format(parseISO(file.expiration_date), 'dd/MM/yyyy')}
                                           {file.resolved ? (
-                                            <Badge variant="outline" className="text-xs mr-1 bg-green-50 text-green-700 border-green-300">
-                                              <CheckCircle className="h-3 w-3 ml-1" />
+                                            <Badge variant="outline" className="text-xs me-1 bg-green-50 text-green-700 border-green-300">
+                                              <CheckCircle className="h-3 w-3 ms-1" />
                                               טופל
                                             </Badge>
                                           ) : isExpired(file.expiration_date) ? (
-                                            <Badge variant="destructive" className="text-xs mr-1">
+                                            <Badge variant="destructive" className="text-xs me-1">
                                               פג תוקף
                                             </Badge>
                                           ) : null}
@@ -1554,7 +1585,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
                                         <Button
                                           size="sm"
                                           variant="ghost"
-                                          onClick={() => handleFileDelete(file.id)}
+                                          onClick={() => requestFileDelete(file)}
                                           disabled={deleteState === REQUEST_STATE.loading}
                                         >
                                           <Trash2 className="h-4 w-4 text-red-500" />
@@ -1651,7 +1682,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
                                   {canDownloadFiles ? (
                                     <button
                                       onClick={() => handleFilePreview(file.id)}
-                                      className="font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-right"
+                                      className="font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-end"
                                     >
                                       {displayName}
                                     </button>
@@ -1690,12 +1721,12 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
                                         <CalendarX className="h-3 w-3" />
                                         {format(parseISO(file.expiration_date), 'dd/MM/yyyy')}
                                         {file.resolved ? (
-                                          <Badge variant="outline" className="text-xs mr-1 bg-green-50 text-green-700 border-green-300">
-                                            <CheckCircle className="h-3 w-3 ml-1" />
+                                          <Badge variant="outline" className="text-xs me-1 bg-green-50 text-green-700 border-green-300">
+                                            <CheckCircle className="h-3 w-3 ms-1" />
                                             טופל
                                           </Badge>
                                         ) : isExpired(file.expiration_date) ? (
-                                          <Badge variant="destructive" className="text-xs mr-1">
+                                          <Badge variant="destructive" className="text-xs me-1">
                                             פג תוקף
                                           </Badge>
                                         ) : null}
@@ -1757,7 +1788,7 @@ export default function StudentDocumentsSection({ student, session, orgId, onRef
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    onClick={() => handleFileDelete(file.id)}
+                                    onClick={() => requestFileDelete(file)}
                                     disabled={deleteState === REQUEST_STATE.loading}
                                   >
                                     <Trash2 className="h-4 w-4 text-red-500" />

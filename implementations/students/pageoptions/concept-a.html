@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Concept A — The Modern SaaS Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Heebo', sans-serif; }
+    /* shadcn-style focus ring */
+    .ring-focus:focus-visible { outline: none; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #2563eb; border-radius: 0.375rem; }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            border: '#e4e4e7',
+            ring: '#2563eb',
+            muted: { DEFAULT: '#f4f4f5', foreground: '#71717a' },
+            accent: { DEFAULT: '#f4f4f5', foreground: '#18181b' },
+            destructive: { DEFAULT: '#ef4444', foreground: '#ffffff' },
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-gray-50/60 text-zinc-900 min-h-screen">
+
+  <!-- Top Navbar (stub) -->
+  <nav class="sticky top-0 z-50 bg-white border-b border-border px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-sm text-muted-foreground">תלמידים</span>
+      <svg class="w-4 h-4 text-muted-foreground rotate-180" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+      <span class="text-sm font-semibold">דני לוי</span>
+    </div>
+    <button class="text-sm text-muted-foreground hover:text-zinc-900 transition">← חזרה לרשימה</button>
+  </nav>
+
+  <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+
+    <!-- ===================== HEADER ===================== -->
+    <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
+      <!-- Left: Avatar + Name -->
+      <div class="flex items-center gap-5">
+        <div class="w-16 h-16 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-2xl font-bold shrink-0">דל</div>
+        <div>
+          <div class="flex items-center gap-3 flex-wrap">
+            <h1 class="text-2xl font-bold tracking-tight">דני לוי</h1>
+            <span class="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 text-xs font-medium">פעיל</span>
+            <span class="inline-flex items-center rounded-full bg-red-50 text-red-700 border border-red-200 px-2.5 py-0.5 text-xs font-medium">🚨 אלרגיה לבוטנים</span>
+            <span class="inline-flex items-center rounded-full bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-0.5 text-xs font-medium">⚠️ אסתמה</span>
+          </div>
+          <p class="text-sm text-muted-foreground mt-1">ת.ז. 012345678 · נרשם 12/01/2025 · מדריכה: יעל כהן</p>
+        </div>
+      </div>
+
+      <!-- Right: Actions -->
+      <div class="flex items-center gap-2 shrink-0">
+        <button class="inline-flex items-center gap-2 rounded-md border border-border bg-white px-4 py-2 text-sm font-medium hover:bg-accent transition ring-focus">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536M9 11l6-6 3 3-6 6H9v-3z"/><path d="M6 20h12"/></svg>
+          עריכה
+        </button>
+        <div class="relative">
+          <button class="inline-flex items-center gap-1 rounded-md border border-border bg-white px-3 py-2 text-sm font-medium hover:bg-accent transition ring-focus" onclick="document.getElementById('actions-menu').classList.toggle('hidden')">
+            פעולות
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div id="actions-menu" class="hidden absolute left-0 mt-1 w-48 rounded-md border border-border bg-white shadow-lg py-1 z-10">
+            <button class="w-full text-right px-3 py-2 text-sm hover:bg-accent transition">📋 העתק מזהה</button>
+            <button class="w-full text-right px-3 py-2 text-sm hover:bg-accent transition">📄 ייצוא PDF</button>
+            <hr class="my-1 border-border" />
+            <button class="w-full text-right px-3 py-2 text-sm text-amber-600 hover:bg-amber-50 transition">⏸ השעיה</button>
+            <button class="w-full text-right px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition">🗑 מחיקה</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== TABS ===================== -->
+    <div>
+      <div class="border-b border-border">
+        <nav class="flex gap-1 -mb-px" aria-label="Tabs">
+          <button class="px-4 py-2.5 text-sm font-medium border-b-2 border-zinc-900 text-zinc-900 transition">סקירה</button>
+          <button class="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-zinc-700 hover:border-zinc-300 transition">לוח שיעורים</button>
+          <button class="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-zinc-700 hover:border-zinc-300 transition">היסטוריה</button>
+          <button class="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-zinc-700 hover:border-zinc-300 transition">מסמכים</button>
+          <button class="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-zinc-700 hover:border-zinc-300 transition">כספים</button>
+          <button class="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-zinc-700 hover:border-zinc-300 transition">טפסים</button>
+        </nav>
+      </div>
+    </div>
+
+    <!-- ===================== OVERVIEW TAB CONTENT ===================== -->
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+
+      <!-- Card: Next Lesson -->
+      <div class="rounded-lg border border-border bg-white p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-zinc-700">השיעור הבא</h3>
+          <span class="text-xs text-muted-foreground">יום ג׳</span>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center text-lg">📅</div>
+            <div>
+              <p class="font-medium text-sm">שיעור שחייה — יעל כהן</p>
+              <p class="text-xs text-muted-foreground">יום שלישי, 21/01/2026 · 16:00–16:45</p>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 pt-1">
+          <span class="inline-flex items-center rounded-full bg-blue-50 text-blue-700 px-2.5 py-0.5 text-xs font-medium">שחייה</span>
+          <span class="inline-flex items-center rounded-full bg-gray-100 text-gray-600 px-2.5 py-0.5 text-xs font-medium">1:1</span>
+        </div>
+      </div>
+
+      <!-- Card: Personal Details -->
+      <div class="rounded-lg border border-border bg-white p-5 space-y-4">
+        <h3 class="text-sm font-semibold text-zinc-700">פרטים אישיים</h3>
+        <dl class="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+          <div>
+            <dt class="text-muted-foreground text-xs">שם מלא</dt>
+            <dd class="font-medium">דני לוי</dd>
+          </div>
+          <div>
+            <dt class="text-muted-foreground text-xs">תעודת זהות</dt>
+            <dd class="font-medium">012345678</dd>
+          </div>
+          <div>
+            <dt class="text-muted-foreground text-xs">תאריך לידה</dt>
+            <dd class="font-medium">15/03/2018</dd>
+          </div>
+          <div>
+            <dt class="text-muted-foreground text-xs">גיל</dt>
+            <dd class="font-medium">7</dd>
+          </div>
+          <div>
+            <dt class="text-muted-foreground text-xs">טלפון</dt>
+            <dd class="font-medium" dir="ltr">050-1234567</dd>
+          </div>
+          <div>
+            <dt class="text-muted-foreground text-xs">אימייל</dt>
+            <dd class="font-medium text-xs" dir="ltr">dani@example.com</dd>
+          </div>
+        </dl>
+      </div>
+
+      <!-- Card: Guardian -->
+      <div class="rounded-lg border border-border bg-white p-5 space-y-4">
+        <h3 class="text-sm font-semibold text-zinc-700">אפוטרופוס ראשי</h3>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-violet-100 text-violet-600 flex items-center justify-center text-base font-bold">רל</div>
+          <div>
+            <p class="font-medium text-sm">רחל לוי</p>
+            <p class="text-xs text-muted-foreground">אם</p>
+          </div>
+        </div>
+        <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm pt-1">
+          <div>
+            <dt class="text-muted-foreground text-xs">טלפון</dt>
+            <dd class="font-medium" dir="ltr">052-9876543</dd>
+          </div>
+          <div>
+            <dt class="text-muted-foreground text-xs">אימייל</dt>
+            <dd class="font-medium text-xs" dir="ltr">rachel@example.com</dd>
+          </div>
+        </dl>
+      </div>
+
+      <!-- Card: Weekly Schedule -->
+      <div class="rounded-lg border border-border bg-white p-5 space-y-4 md:col-span-2">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-zinc-700">לוח שבועי</h3>
+          <button class="text-xs text-blue-600 hover:underline">צפה בהכל →</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-border text-muted-foreground text-xs">
+                <th class="text-right pb-2 pr-2 font-medium">יום</th>
+                <th class="text-right pb-2 font-medium">שעה</th>
+                <th class="text-right pb-2 font-medium">שירות</th>
+                <th class="text-right pb-2 font-medium">מדריך/ה</th>
+                <th class="text-right pb-2 font-medium">סטטוס</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-b border-border/50">
+                <td class="py-2.5 pr-2 font-medium">יום שלישי</td>
+                <td class="py-2.5">16:00–16:45</td>
+                <td class="py-2.5">שחייה</td>
+                <td class="py-2.5">יעל כהן</td>
+                <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-xs font-medium">קבוע</span></td>
+              </tr>
+              <tr class="border-b border-border/50">
+                <td class="py-2.5 pr-2 font-medium">יום חמישי</td>
+                <td class="py-2.5">10:00–10:45</td>
+                <td class="py-2.5">פיזיותרפיה</td>
+                <td class="py-2.5">משה דוד</td>
+                <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-xs font-medium">קבוע</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Card: Financial Summary -->
+      <div class="rounded-lg border border-border bg-white p-5 space-y-4">
+        <h3 class="text-sm font-semibold text-zinc-700">סיכום כספי</h3>
+        <div class="grid grid-cols-2 gap-4">
+          <div class="rounded-md bg-gray-50 p-3 text-center">
+            <p class="text-2xl font-bold text-zinc-900">12</p>
+            <p class="text-xs text-muted-foreground mt-0.5">שיעורים החודש</p>
+          </div>
+          <div class="rounded-md bg-gray-50 p-3 text-center">
+            <p class="text-2xl font-bold text-emerald-600">₪2,400</p>
+            <p class="text-xs text-muted-foreground mt-0.5">יתרה</p>
+          </div>
+          <div class="rounded-md bg-gray-50 p-3 text-center">
+            <p class="text-2xl font-bold text-zinc-900">48</p>
+            <p class="text-xs text-muted-foreground mt-0.5">שיעורים (סה״כ)</p>
+          </div>
+          <div class="rounded-md bg-gray-50 p-3 text-center">
+            <p class="text-2xl font-bold text-amber-600">₪200</p>
+            <p class="text-xs text-muted-foreground mt-0.5">חוב</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card: Internal Notes -->
+      <div class="rounded-lg border border-border bg-white p-5 space-y-3 xl:col-span-2">
+        <h3 class="text-sm font-semibold text-zinc-700">הערות פנימיות</h3>
+        <p class="text-sm text-zinc-600 leading-relaxed">דני מגיב יפה לשחייה טיפולית. מומלץ להמשיך 2 פעמים בשבוע. יש לשים לב לרגישות בעור לאחר כלור — להודיע להורה אם יש תגובה.</p>
+        <p class="text-xs text-muted-foreground">עודכן לאחרונה ב-10/03/2026 ע״י יעל כהן</p>
+      </div>
+
+      <!-- Card: Tags -->
+      <div class="rounded-lg border border-border bg-white p-5 space-y-3">
+        <h3 class="text-sm font-semibold text-zinc-700">תגיות</h3>
+        <div class="flex flex-wrap gap-2">
+          <span class="inline-flex items-center rounded-full bg-blue-50 text-blue-700 px-3 py-1 text-xs font-medium">שחייה טיפולית</span>
+          <span class="inline-flex items-center rounded-full bg-purple-50 text-purple-700 px-3 py-1 text-xs font-medium">קופ״ח מכבי</span>
+          <span class="inline-flex items-center rounded-full bg-teal-50 text-teal-700 px-3 py-1 text-xs font-medium">פיזיותרפיה</span>
+          <span class="inline-flex items-center rounded-full bg-orange-50 text-orange-700 px-3 py-1 text-xs font-medium">ביטוח לאומי</span>
+        </div>
+      </div>
+
+    </div><!-- /grid -->
+
+  </main>
+</body>
+</html>

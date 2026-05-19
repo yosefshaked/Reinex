@@ -28,7 +28,7 @@
  * - Conditional enabled/disabled (settings dialogs)
  * - Refetch on demand (after mutations)
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -85,6 +85,7 @@ function useOrgDataResource({
   params = {},
   mapResponse,
 }) {
+  void resource;
   const { session: contextSession } = useAuth();
   const { activeOrgId } = useOrg();
 
@@ -93,24 +94,48 @@ function useOrgDataResource({
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const sessionRef = useRef(session);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   // Memoize mapResponse if provided as inline function
   const stableMapResponse = useCallback(
-    mapResponse || ((payload) => payload),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mapResponse ? String(mapResponse) : 'identity']
+    (payload) => (typeof mapResponse === 'function' ? mapResponse(payload) : payload),
+    [mapResponse]
   );
+
+  const paramsKey = useMemo(() => {
+    if (!params || typeof params !== 'object') return '';
+    const keys = Object.keys(params);
+    if (keys.length === 0) return '';
+    try {
+      return JSON.stringify(params);
+    } catch {
+      return '';
+    }
+  }, [params]);
+
+  const stableParamsRef = useRef({ key: null, value: {} });
+  const stableParams = useMemo(() => {
+    if (!paramsKey) {
+      stableParamsRef.current = { key: null, value: {} };
+      return stableParamsRef.current.value;
+    }
+
+    if (stableParamsRef.current.key === paramsKey) {
+      return stableParamsRef.current.value;
+    }
+
+    stableParamsRef.current = { key: paramsKey, value: params };
+    return stableParamsRef.current.value;
+  }, [paramsKey, params]);
 
   // Create stable query string from params - only changes when actual param values change
   const queryString = useMemo(() => {
-    if (!params || Object.keys(params).length === 0) return '';
-    return buildSearchParamsString(params, orgId);
-  }, [
-    // Serialize params to detect actual value changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    JSON.stringify(params),
-    orgId
-  ]);
+    return buildSearchParamsString(stableParams, orgId);
+  }, [stableParams, orgId]);
 
   // Fetch function - stable reference, only recreates when critical deps change
   const fetchResource = useCallback(async () => {
@@ -130,21 +155,21 @@ function useOrgDataResource({
 
     try {
       const url = `${path}${queryString ? `?${queryString}` : ''}`;
-      const payload = await authenticatedFetch(url, { session });
+      const payload = await authenticatedFetch(url, { session: sessionRef.current });
       const mapped = stableMapResponse(payload);
-      const normalized = Array.isArray(mapped) ? mapped : [];
+      // Keep objects as-is (e.g., { employees, unlinked_members }); normalize only primitives
+      const normalized = Array.isArray(mapped) ? mapped : (typeof mapped === 'object' && mapped !== null ? mapped : []);
       setData(normalized);
     } catch (err) {
       if (err?.name === 'AbortError') {
         return;
       }
-      console.error(`Failed to load ${resource}:`, err);
       setError(err?.message || 'Failed to load data');
       setData([]);
     } finally {
       setLoading(false);
     }
-  }, [enabled, orgId, resetOnDisable, queryString, session, stableMapResponse, resource, path]);
+  }, [enabled, orgId, resetOnDisable, queryString, stableMapResponse, path]);
 
   // Auto-fetch when dependencies change
   useEffect(() => {
@@ -160,8 +185,11 @@ function useOrgDataResource({
 }
 
 export function useInstructors(options = {}) {
-  const { includeInactive = false, enabled = true, orgId, session, resetOnDisable = true } = options;
-  const params = useMemo(() => ({ include_inactive: includeInactive ? 'true' : undefined }), [includeInactive]);
+  const { includeInactive = false, includeUnlinked = false, enabled = true, orgId, session, resetOnDisable = true } = options;
+  const params = useMemo(() => ({
+    include_inactive: includeInactive ? 'true' : undefined,
+    include_unlinked_members: includeUnlinked ? 'true' : undefined,
+  }), [includeInactive, includeUnlinked]);
 
   const { data, loading, error, refetch } = useOrgDataResource({
     resource: 'instructors',
@@ -173,8 +201,13 @@ export function useInstructors(options = {}) {
     params,
   });
 
+  // API returns either an array (legacy) or an object { employees, unlinked_members }
+  const instructors = Array.isArray(data) ? data : (data?.employees || []);
+  const unlinkedMembers = Array.isArray(data?.unlinked_members) ? data.unlinked_members : [];
+
   return {
-    instructors: data,
+    instructors,
+    unlinkedMembers,
     loadingInstructors: loading,
     instructorsError: error,
     refetchInstructors: refetch,
@@ -183,16 +216,27 @@ export function useInstructors(options = {}) {
 
 export function useServices(options = {}) {
   const { enabled = true, orgId, session, resetOnDisable = true } = options;
+  const mapResponse = useCallback((payload) => {
+    const rows = Array.isArray(payload) ? payload : [];
+    return rows.map((service) => {
+      const name = typeof service?.name === 'string' ? service.name.trim() : '';
+      return {
+        ...service,
+        name,
+        service_name: name || (typeof service?.service_name === 'string' ? service.service_name.trim() : ''),
+      };
+    });
+  }, []);
 
   const { data, loading, error, refetch } = useOrgDataResource({
     resource: 'services',
-    path: 'settings',
+    path: 'services',
     enabled,
     orgId,
     session,
     resetOnDisable,
-    params: { keys: 'available_services' },
-    mapResponse: (payload) => payload?.settings?.available_services,
+    params: {},
+    mapResponse,
   });
 
   return {
@@ -200,6 +244,9 @@ export function useServices(options = {}) {
     loadingServices: loading,
     servicesError: error,
     refetchServices: refetch,
+    isLoading: loading,
+    error,
+    refetch,
   };
 }
 
@@ -211,9 +258,24 @@ export function useStudents(options = {}) {
     session,
     resetOnDisable = true,
     extraParams = {},
+    pagination = false,
+    limit = 25,
+    offset = 0,
+    search = '',
+    tag = '',
+    day = '',
+    sortBy = 'schedule',
   } = options;
 
-  const params = useMemo(() => ({ status, ...extraParams }), [status, extraParams]);
+  const params = useMemo(() => ({
+    status,
+    ...(pagination ? { pagination: '1', limit, offset } : {}),
+    ...(search ? { search } : {}),
+    ...(tag ? { tag } : {}),
+    ...(day ? { day } : {}),
+    sort: sortBy,
+    ...extraParams,
+  }), [status, pagination, limit, offset, search, tag, day, sortBy, extraParams]);
 
   const { data, loading, error, refetch } = useOrgDataResource({
     resource: 'students',
@@ -225,10 +287,79 @@ export function useStudents(options = {}) {
     params,
   });
 
+  const students = pagination && data && typeof data === 'object' && Array.isArray(data.data)
+    ? data.data
+    : (Array.isArray(data) ? data : []);
+
+  const paginationInfo = pagination && data && typeof data === 'object'
+    ? {
+        total: Number.isFinite(data.total) ? data.total : students.length,
+        pageSize: Number.isFinite(data.page_size) ? data.page_size : limit,
+        page: Number.isFinite(data.page) ? data.page : (Math.floor(offset / Math.max(limit, 1)) + 1),
+        offset: Number.isFinite(data.offset) ? data.offset : offset,
+        hasMore: Boolean(data.has_more),
+      }
+    : null;
+
   return {
-    students: data,
+    students,
+    studentsPagination: paginationInfo,
     loadingStudents: loading,
     studentsError: error,
     refetchStudents: refetch,
+  };
+}
+
+export function useClientProfiles(options = {}) {
+  const {
+    status = 'non_student',
+    enabled = true,
+    orgId,
+    session,
+    resetOnDisable = true,
+    extraParams = {},
+    search = '',
+    pagination = false,
+    limit = 25,
+    offset = 0,
+  } = options;
+
+  const params = useMemo(() => ({
+    status,
+    ...(pagination ? { pagination: '1', limit, offset } : {}),
+    ...(search ? { search } : {}),
+    ...extraParams,
+  }), [status, pagination, limit, offset, search, extraParams]);
+
+  const { data, loading, error, refetch } = useOrgDataResource({
+    resource: 'client-profiles',
+    path: 'client-profiles',
+    enabled,
+    orgId,
+    session,
+    resetOnDisable,
+    params,
+  });
+
+  const clientProfiles = pagination && data && typeof data === 'object' && Array.isArray(data.data)
+    ? data.data
+    : (Array.isArray(data) ? data : []);
+
+  const paginationInfo = pagination && data && typeof data === 'object'
+    ? {
+        total: Number.isFinite(data.total) ? data.total : clientProfiles.length,
+        pageSize: Number.isFinite(data.page_size) ? data.page_size : limit,
+        page: Number.isFinite(data.page) ? data.page : (Math.floor(offset / Math.max(limit, 1)) + 1),
+        offset: Number.isFinite(data.offset) ? data.offset : offset,
+        hasMore: Boolean(data.has_more),
+      }
+    : null;
+
+  return {
+    clientProfiles,
+    clientProfilesPagination: paginationInfo,
+    loadingClientProfiles: loading,
+    clientProfilesError: error,
+    refetchClientProfiles: refetch,
   };
 }

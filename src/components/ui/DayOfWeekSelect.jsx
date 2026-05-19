@@ -1,17 +1,9 @@
 import React from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-
-const DAYS_OF_WEEK = [
-  { value: 1, label: 'ראשון' },
-  { value: 2, label: 'שני' },
-  { value: 3, label: 'שלישי' },
-  { value: 4, label: 'רביעי' },
-  { value: 5, label: 'חמישי' },
-  { value: 6, label: 'שישי' },
-  { value: 7, label: 'שבת' },
-];
+import { DAY_OPTIONS, normalizeDayToken } from '@/lib/day-of-week.js';
 
 export default function DayOfWeekSelect({
+  id,
   value,
   onChange,
   disabled,
@@ -24,14 +16,16 @@ export default function DayOfWeekSelect({
       onChange?.(null);
       return;
     }
-    onChange?.(newValue ? parseInt(newValue, 10) : null);
+    onChange?.(newValue || null);
   };
 
-  const hasSelection = value !== undefined && value !== null && value !== '';
-  const selectValue = hasSelection ? String(value) : includeAllOption ? 'all' : '';
+  const normalizedValue = normalizeDayToken(value);
+  const hasSelection = normalizedValue !== null;
+  const selectValue = hasSelection ? normalizedValue : includeAllOption ? 'all' : '';
 
   return (
     <Select
+      id={id}
       value={selectValue}
       onValueChange={handleValueChange}
       disabled={disabled}
@@ -42,8 +36,8 @@ export default function DayOfWeekSelect({
       </SelectTrigger>
       <SelectContent>
         {includeAllOption && <SelectItem value="all">כל הימים</SelectItem>}
-        {DAYS_OF_WEEK.map((day) => (
-          <SelectItem key={day.value} value={String(day.value)}>
+        {DAY_OPTIONS.map((day) => (
+          <SelectItem key={day.value} value={day.value}>
             {day.label}
           </SelectItem>
         ))}

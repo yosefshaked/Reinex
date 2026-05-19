@@ -1,4 +1,5 @@
-import { normalizeDay } from './schedule.js';
+import { daySortValue } from '@/lib/day-of-week.js';
+import { formatInstructorName, formatStudentName } from '@/lib/format-name.js';
 
 /**
  * Parse time string to minutes since midnight for comparison
@@ -31,8 +32,8 @@ function parseTimeToMinutes(timeStr) {
  * @returns {number} - Comparison result (-1, 0, 1)
  */
 function compareStudentNames(a, b) {
-  const nameA = String(a?.name || '').toLowerCase();
-  const nameB = String(b?.name || '').toLowerCase();
+  const nameA = String(a?.name || formatStudentName(a) || '').toLowerCase();
+  const nameB = String(b?.name || formatStudentName(b) || '').toLowerCase();
   return nameA.localeCompare(nameB, 'he');
 }
 
@@ -53,6 +54,10 @@ function compareInstructorNames(nameA, nameB) {
   return null; // Both empty
 }
 
+function resolveStudentInstructorId(student) {
+  return student?.instructor_employee_id || null;
+}
+
 /**
  * Compare function for sorting students by:
  * 1. Day of week (1-7, nulls last)
@@ -67,13 +72,10 @@ function compareInstructorNames(nameA, nameB) {
  */
 export function compareStudentsBySchedule(a, b, instructorMap = new Map()) {
   // 1. Compare by day of week
-  const dayA = normalizeDay(a?.default_day_of_week);
-  const dayB = normalizeDay(b?.default_day_of_week);
-  
-  // Nulls go to the end
-  if (dayA === null && dayB !== null) return 1;
-  if (dayA !== null && dayB === null) return -1;
-  if (dayA !== null && dayB !== null && dayA !== dayB) {
+  const dayA = daySortValue(a?.default_day_of_week);
+  const dayB = daySortValue(b?.default_day_of_week);
+
+  if (dayA !== dayB) {
     return dayA - dayB;
   }
   
@@ -86,11 +88,11 @@ export function compareStudentsBySchedule(a, b, instructorMap = new Map()) {
   }
   
   // 3. Compare by instructor name (for admins)
-  const instructorA = instructorMap.get(a?.assigned_instructor_id);
-  const instructorB = instructorMap.get(b?.assigned_instructor_id);
+  const instructorA = instructorMap.get(resolveStudentInstructorId(a));
+  const instructorB = instructorMap.get(resolveStudentInstructorId(b));
   
-  const instructorNameA = instructorA?.name || '';
-  const instructorNameB = instructorB?.name || '';
+  const instructorNameA = instructorA?.name || formatInstructorName(instructorA) || '';
+  const instructorNameB = instructorB?.name || formatInstructorName(instructorB) || '';
   
   const instructorCompare = compareInstructorNames(instructorNameA, instructorNameB);
   if (instructorCompare !== null && instructorCompare !== 0) {
@@ -136,21 +138,19 @@ export function getStudentComparator(sortBy, instructorMap = new Map()) {
     case STUDENT_SORT_OPTIONS.INSTRUCTOR:
       return (a, b) => {
         // 1. Compare by day of week
-        const dayA = normalizeDay(a?.default_day_of_week);
-        const dayB = normalizeDay(b?.default_day_of_week);
-        
-        if (dayA === null && dayB !== null) return 1;
-        if (dayA !== null && dayB === null) return -1;
-        if (dayA !== null && dayB !== null && dayA !== dayB) {
+        const dayA = daySortValue(a?.default_day_of_week);
+        const dayB = daySortValue(b?.default_day_of_week);
+
+        if (dayA !== dayB) {
           return dayA - dayB;
         }
         
         // 2. Compare by instructor name
-        const instructorA = instructorMap.get(a?.assigned_instructor_id);
-        const instructorB = instructorMap.get(b?.assigned_instructor_id);
+        const instructorA = instructorMap.get(resolveStudentInstructorId(a));
+        const instructorB = instructorMap.get(resolveStudentInstructorId(b));
         
-        const instructorNameA = instructorA?.name || '';
-        const instructorNameB = instructorB?.name || '';
+        const instructorNameA = instructorA?.name || formatInstructorName(instructorA) || '';
+        const instructorNameB = instructorB?.name || formatInstructorName(instructorB) || '';
         
         const instructorCompare = compareInstructorNames(instructorNameA, instructorNameB);
         if (instructorCompare !== null && instructorCompare !== 0) {

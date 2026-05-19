@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Date Picker Suggestion 01</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --line: #d9dfeb;
+      --text: #172033;
+      --muted: #6f7a90;
+      --primary: #5b5ce2;
+      --primary-soft: #eef0ff;
+      --shadow: 0 20px 50px rgba(26, 39, 80, 0.14);
+      --radius: 24px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background:
+        radial-gradient(circle at top right, #eef2ff 0, transparent 22rem),
+        linear-gradient(180deg, #f8f9fc 0%, var(--bg) 100%);
+      color: var(--text);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 32px;
+    }
+
+    .frame {
+      width: min(1100px, 100%);
+      background: var(--card);
+      border: 1px solid rgba(217, 223, 235, 0.8);
+      border-radius: 32px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 24px 28px;
+      border-bottom: 1px solid #edf1f7;
+      background: rgba(255, 255, 255, 0.88);
+    }
+
+    .actions,
+    .view-toggle,
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn,
+    .nav-btn,
+    .view-btn,
+    .date-pill {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 18px;
+      padding: 11px 16px;
+      font-size: 14px;
+      cursor: default;
+      white-space: nowrap;
+    }
+
+    .btn.primary,
+    .view-btn.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+
+    .date-area {
+      position: relative;
+      flex: 1;
+      display: flex;
+      justify-content: center;
+    }
+
+    .date-pill {
+      min-width: 330px;
+      padding: 14px 18px;
+      border-radius: 22px;
+      background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+      box-shadow: 0 8px 25px rgba(42, 59, 114, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      font-weight: 600;
+    }
+
+    .date-pill .sub {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .popover {
+      position: absolute;
+      top: calc(100% + 12px);
+      width: 360px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .month-head,
+    .weekdays,
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 8px;
+    }
+
+    .month-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .month-switch {
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      background: #fff;
+    }
+
+    .weekdays div {
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+      padding-bottom: 4px;
+    }
+
+    .day {
+      height: 42px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+      background: #f8faff;
+      color: var(--text);
+    }
+
+    .day.muted {
+      color: #a1abc0;
+      background: #fbfcfe;
+    }
+
+    .day.selected {
+      background: var(--primary);
+      color: #fff;
+      font-weight: 700;
+      box-shadow: 0 8px 18px rgba(91, 92, 226, 0.28);
+    }
+
+    .body {
+      height: 540px;
+      background:
+        linear-gradient(90deg, transparent 0 16%, rgba(226, 232, 243, 0.85) 16% 16.2%, transparent 16.2%),
+        repeating-linear-gradient(180deg, #ffffff 0 56px, #f4f7fb 56px 57px);
+      position: relative;
+    }
+
+    .note {
+      position: absolute;
+      inset-inline-start: 32px;
+      top: 24px;
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--line);
+      padding: 10px 14px;
+      border-radius: 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="header">
+      <div class="actions">
+        <div class="btn primary">שיעור חדש</div>
+        <div class="btn">יצירה מתבניות</div>
+        <div class="btn">תבניות</div>
+      </div>
+
+      <div class="date-area">
+        <div class="nav">
+          <div class="nav-btn">◀</div>
+          <div class="date-pill">
+            <div>
+              יום ראשון, 20 באפריל 2026
+              <div class="sub">לחיצה פותחת לוח חודש לניווט מהיר</div>
+            </div>
+            <div>▾</div>
+          </div>
+          <div class="nav-btn">▶</div>
+        </div>
+
+        <div class="popover">
+          <div class="month-bar">
+            <div class="month-switch">▶</div>
+            <strong>אפריל 2026</strong>
+            <div class="month-switch">◀</div>
+          </div>
+          <div class="weekdays">
+            <div>א'</div><div>ב'</div><div>ג'</div><div>ד'</div><div>ה'</div><div>ו'</div><div>ש'</div>
+          </div>
+          <div class="grid">
+            <div class="day muted">29</div><div class="day muted">30</div><div class="day muted">31</div><div class="day">1</div><div class="day">2</div><div class="day">3</div><div class="day">4</div>
+            <div class="day">5</div><div class="day">6</div><div class="day">7</div><div class="day">8</div><div class="day">9</div><div class="day">10</div><div class="day">11</div>
+            <div class="day">12</div><div class="day">13</div><div class="day">14</div><div class="day">15</div><div class="day">16</div><div class="day">17</div><div class="day">18</div>
+            <div class="day">19</div><div class="day selected">20</div><div class="day">21</div><div class="day">22</div><div class="day">23</div><div class="day">24</div><div class="day">25</div>
+            <div class="day">26</div><div class="day">27</div><div class="day">28</div><div class="day">29</div><div class="day">30</div><div class="day muted">1</div><div class="day muted">2</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="view-toggle">
+        <div class="view-btn active">יום</div>
+        <div class="view-btn">שבוע</div>
+      </div>
+    </div>
+
+    <div class="body">
+      <div class="note">הדוגמה הזאת שומרת הכל בתוך רכיב הניווט הנוכחי, כמעט בלי לשנות את מבנה הכותרת.</div>
+    </div>
+  </div>
+</body>
+</html>

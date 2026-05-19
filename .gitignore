@@ -14,6 +14,7 @@ release
 *.local
 
 # Editor directories and files
+.claude/
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -25,3 +26,12 @@ release
 *.sw?
 settings.json
 .env
+
+/supabase/.temp
+/api/local.settings.json
+/test/automatic-tester/reports
+/.aider-env
+.aider*
+/.cache
+/.pki
+/.github/agents

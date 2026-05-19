@@ -3,6 +3,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertTriangle, Check, Clock, MailPlus, Pencil, RefreshCw, Trash2, UserMinus, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -50,6 +60,8 @@ export default function OrgMembersCard() {
   const [editingMemberId, setEditingMemberId] = useState(null);
   const [editingName, setEditingName] = useState('');
   const [savingMemberId, setSavingMemberId] = useState(null);
+  const [pendingRoleChange, setPendingRoleChange] = useState(null);
+  const [pendingRemovalMember, setPendingRemovalMember] = useState(null);
   const activeOrgId = activeOrg?.id || null;
   const role = activeOrg?.membership?.role || '';
   const canManageOrgMembers = useMemo(() => {
@@ -131,9 +143,9 @@ export default function OrgMembersCard() {
       await refreshInvitations({ suppressToast: true });
     } catch (error) {
       console.error('Failed to send invitation', error);
-      if (error?.code === 'user already a member') {
+      if (error?.code === 'user_already_a_member') {
         toast.error('לא נשלחה הזמנה. המשתמש כבר חבר בארגון.');
-      } else if (error?.code === 'invitation already pending') {
+      } else if (error?.code === 'invitation_already_pending') {
         toast.error('כבר קיימת הזמנה בתוקף למשתמש זה.');
       } else {
         toast.error(error?.message || 'שליחת ההזמנה נכשלה. ודא שהכתובת תקינה ונסה שוב.');
@@ -168,7 +180,7 @@ export default function OrgMembersCard() {
     }
     setReinvitingEmail(email);
     try {
-      const result = await createInvitation(activeOrgId, email, { session });
+      const result = await createInvitation(activeOrgId, email, { session, resendPending: true });
       if (result?.userExists) {
         toast.success('הזמנה חדשה נוצרה בהצלחה. למשתמש זה כבר קיים חשבון.');
       } else {
@@ -177,9 +189,9 @@ export default function OrgMembersCard() {
       await refreshInvitations({ suppressToast: true });
     } catch (error) {
       console.error('Failed to resend invitation', error);
-      if (error?.code === 'invitation already pending' || error?.data?.message === 'invitation already pending') {
+      if (error?.code === 'invitation_already_pending' || error?.data?.message === 'invitation_already_pending') {
         toast.error('ההזמנה עדיין תקפה. לא ניתן לשלוח הזמנה נוספת.');
-      } else if (error?.code === 'user already a member' || error?.data?.message === 'user already a member') {
+      } else if (error?.code === 'user_already_a_member' || error?.data?.message === 'user_already_a_member') {
         toast.error('לא נשלחה הזמנה. המשתמש כבר חבר בארגון.');
       } else {
         toast.error(error?.message || 'שליחת ההזמנה החדשה נכשלה. נסה שוב.');
@@ -281,12 +293,32 @@ export default function OrgMembersCard() {
     [editingName, updateMemberName],
   );
 
+  const confirmRoleChange = useCallback(async () => {
+    if (!pendingRoleChange?.memberId || !pendingRoleChange?.nextRole) return;
+    const { memberId, nextRole } = pendingRoleChange;
+    setPendingRoleChange(null);
+    try {
+      await updateMemberRole(memberId, nextRole);
+      toast.success('תפקיד עודכן');
+    } catch (error) {
+      console.error('Failed to update role', error);
+      toast.error(error?.message || 'עדכון התפקיד נכשל');
+    }
+  }, [pendingRoleChange, updateMemberRole]);
+
+  const confirmMemberRemoval = useCallback(async () => {
+    if (!pendingRemovalMember?.id) return;
+    const membershipId = pendingRemovalMember.id;
+    setPendingRemovalMember(null);
+    await handleRemoveMember(membershipId);
+  }, [handleRemoveMember, pendingRemovalMember]);
+
   if (!activeOrg) {
     return null;
   }
 
   return (
-    <Card className="border-0 shadow-xl bg-white/90" dir="rtl">
+    <Card className="border-0 shadow-xl bg-white/90">
       <CardHeader className="border-b border-slate-200">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">
@@ -294,6 +326,15 @@ export default function OrgMembersCard() {
             <p className="text-sm text-slate-600 mt-2">
               כל המשתמשים בארגון חולקים את אותו חיבור Supabase. מנהלים יכולים להזמין ולנהל חברים נוספים.
             </p>
+            {/* Deprecation Notice */}
+            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-800">
+                  <strong>שים לב:</strong> כרטיס זה יוסר בגרסה הבאה. כדי להזמין משתמשים חדשים, השתמש בכפתור "הזמן משתמש" בדף <strong>הגדרות → עובדים ומדריכים</strong>.
+                </div>
+              </div>
+            </div>
           </div>
           {canManageOrgMembers && expiredInvitesCount > 0 ? (
             <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-100 gap-1 whitespace-nowrap">
@@ -319,7 +360,7 @@ export default function OrgMembersCard() {
                   key={member.id || member.user_id}
                   className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border border-slate-200 rounded-xl px-4 py-3"
                 >
-                  <div className="text-right space-y-2 flex-1">
+                  <div className="text-end space-y-2 flex-1">
                     {isEditing ? (
                       <div className="space-y-1">
                         <label htmlFor={`member-name-${member.id}`} className="sr-only">
@@ -402,19 +443,14 @@ export default function OrgMembersCard() {
                       <Select
                         value={roleNorm || 'member'}
                         disabled={isOwner || isCurrentUser || isSaving}
-                        onValueChange={async (nextRole) => {
+                        onValueChange={(nextRole) => {
                           const nextLabel = nextRole === 'admin' ? 'מנהל' : 'מדריך';
-                          const confirmed = window.confirm(`האם לשנות את התפקיד של ${member.name || member.email || 'המשתמש'} ל"${nextLabel}"?`);
-                          if (!confirmed) {
-                            return;
-                          }
-                          try {
-                            await updateMemberRole(member.id, nextRole);
-                            toast.success('תפקיד עודכן');
-                          } catch (error) {
-                            console.error('Failed to update role', error);
-                            toast.error(error?.message || 'עדכון התפקיד נכשל');
-                          }
+                          setPendingRoleChange({
+                            memberId: member.id,
+                            memberName: member.name || member.email || 'המשתמש',
+                            nextRole,
+                            nextLabel,
+                          });
                         }}
                       >
                         <SelectTrigger className="h-auto rounded-md px-2 py-1 text-xs">
@@ -431,11 +467,7 @@ export default function OrgMembersCard() {
                           variant="ghost"
                           className="text-red-600 hover:bg-red-50 gap-2"
                           disabled={isOwner || isSaving}
-                          onClick={() => {
-                            const confirmed = window.confirm(`האם להסיר את ${member.name || member.email || 'המשתמש'} מהארגון?`);
-                            if (!confirmed) return;
-                            void handleRemoveMember(member.id);
-                          }}
+                          onClick={() => setPendingRemovalMember(member)}
                         >
                           <UserMinus className="w-4 h-4" />
                           הסר מהארגון
@@ -505,7 +537,7 @@ export default function OrgMembersCard() {
                         expired ? 'border-amber-300 bg-amber-50' : 'border-slate-200'
                       }`}
                     >
-                      <div className="text-right space-y-1">
+                      <div className="text-end space-y-1">
                         <p className="text-sm font-medium text-slate-900" dir="ltr">{invite.email}</p>
                         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                           <span>נשלח: {formatDate(invite.createdAt || invite.created_at)}</span>
@@ -584,6 +616,34 @@ export default function OrgMembersCard() {
           </section>
         ) : null}
       </CardContent>
+      <AlertDialog open={Boolean(pendingRoleChange)} onOpenChange={(open) => !open && setPendingRoleChange(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>שינוי תפקיד</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRoleChange ? `האם לשנות את התפקיד של ${pendingRoleChange.memberName} ל"${pendingRoleChange.nextLabel}"?` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRoleChange}>אישור</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={Boolean(pendingRemovalMember)} onOpenChange={(open) => !open && setPendingRemovalMember(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>הסרת חבר מהארגון</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRemovalMember ? `האם להסיר את ${pendingRemovalMember.name || pendingRemovalMember.email || 'המשתמש'} מהארגון?` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmMemberRemoval}>הסר</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

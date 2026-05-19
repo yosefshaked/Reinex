@@ -8,11 +8,11 @@ import { ComboBoxField, TimeField } from '@/components/ui/forms-ui';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { describeSchedule, dayMatches, includesDayQuery } from '@/features/students/utils/schedule.js';
 import { sortStudentsBySchedule } from '@/features/students/utils/sorting.js';
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
 import { cn } from '@/lib/utils.js';
 import DayOfWeekSelect from '@/components/ui/DayOfWeekSelect.jsx';
 import PreanswersPickerDialog from './PreanswersPickerDialog.jsx';
 import { useLooseReportNameSuggestions } from '@/features/sessions/hooks/useLooseReportNameSuggestions.js';
-import { buildDisplayName } from '@/lib/person-name.js';
 
 export default function NewSessionForm({
   students = [],
@@ -20,6 +20,10 @@ export default function NewSessionForm({
   suggestions = {},
   services = [],
   instructors = [],
+  personalPreanswers = {},
+  onSavePersonalPreanswers,
+  canEditPersonalPreanswers = false,
+  preanswersCapLimit,
   canFilterByInstructor = false,
   userIsInstructor = false, // Whether the logged-in user is an instructor
   studentScope = 'all', // 'all' | 'mine' | `inst:<id>`
@@ -399,7 +403,7 @@ export default function NewSessionForm({
       ref={formRef}
       className="space-y-lg"
       onSubmit={handleSubmit}
-      dir="rtl"
+     
     >
       {successState && (
         <div className="rounded-lg bg-success-50 border-2 border-success-200 p-md text-center animate-in fade-in duration-300">
@@ -416,8 +420,8 @@ export default function NewSessionForm({
       <div className="space-y-sm">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <Label htmlFor="session-student" className="block text-right text-base font-semibold">בחרו תלמיד *</Label>
-            <p className="text-xs text-neutral-500 text-right mb-3">השתמשו במסננים למטה כדי לצמצם את הרשימה</p>
+            <Label htmlFor="session-student" className="block text-end text-base font-semibold">בחרו תלמיד *</Label>
+            <p className="text-xs text-neutral-500 text-end mb-3">השתמשו במסננים למטה כדי לצמצם את הרשימה</p>
           </div>
           <Button
             type="button"
@@ -447,7 +451,7 @@ export default function NewSessionForm({
         {/* Search Box with Collapsible Advanced Filters */}
         <div className="mb-3 space-y-2 p-3 bg-neutral-50 rounded-lg border border-neutral-200">
           <div className="flex items-center justify-between gap-2 mb-2">
-            <p className="text-xs font-medium text-neutral-600 text-right">🔍 חיפוש</p>
+            <p className="text-xs font-medium text-neutral-600 text-end">🔍 חיפוש</p>
             <Button
               type="button"
               variant="outline"
@@ -474,7 +478,7 @@ export default function NewSessionForm({
               placeholder="חיפוש לפי שם, יום או שעה..."
               value={studentQuery}
               onChange={(e) => setStudentQuery(e.target.value)}
-              className="w-full pr-3 text-sm"
+              className="w-full pe-3 text-sm"
               disabled={isSubmitting || students.length === 0}
               aria-label="חיפוש תלמיד"
             />
@@ -483,7 +487,7 @@ export default function NewSessionForm({
           {/* Advanced Filters - Collapsible within search box */}
           {showAdvancedFilters && (
             <div className="pt-2 border-t border-neutral-200 animate-in fade-in slide-in-from-top-2 duration-200">
-              <p className="text-xs font-medium text-neutral-600 text-right mb-2">⚙️ מסננים מתקדמים</p>
+              <p className="text-xs font-medium text-neutral-600 text-end mb-2">⚙️ מסננים מתקדמים</p>
               <div className="flex flex-wrap items-end gap-2">
                 {canFilterByInstructor ? (
                   <div className="min-w-[200px] flex-1 sm:flex-none">
@@ -500,9 +504,9 @@ export default function NewSessionForm({
                         <SelectItem value="all">כל התלמידים</SelectItem>
                         {/* 'mine' option is still useful for admins who are also instructors */}
                         <SelectItem value="mine">התלמידים שלי</SelectItem>
-                        {instructors.map((inst) => (
+                        {instructors.filter(inst => inst?.id).map((inst) => (
                           <SelectItem key={inst.id} value={`inst:${inst.id}`}>
-                            התלמידים של {inst.name || inst.email || inst.id}
+                            התלמידים של {inst.name?.trim() || inst.email?.trim() || inst.id}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -540,7 +544,7 @@ export default function NewSessionForm({
                   </div>
                 ) : null}
                 {hasActiveFilters ? (
-                  <div className="flex-shrink-0 ltr:ml-auto rtl:mr-auto">
+                  <div className="flex-shrink-0 ltr:ms-auto rtl:me-auto">
                     <Button
                       type="button"
                       variant="outline"
@@ -561,7 +565,7 @@ export default function NewSessionForm({
         </div>
         
         <div className="pt-2">
-          <Label htmlFor="session-student-select" className="block text-right text-sm font-medium text-primary mb-2">
+          <Label htmlFor="session-student-select" className="block text-end text-sm font-medium text-primary mb-2">
             ✓ בחירת תלמיד
           </Label>
           <Select
@@ -577,10 +581,9 @@ export default function NewSessionForm({
             <SelectContent className="max-h-[300px]">
               {filteredStudents.map((student) => {
                 const schedule = describeSchedule(student?.default_day_of_week, student?.default_session_time);
-                const studentDisplayName = buildDisplayName({ ...student, fallback: student.name });
                 return (
                   <SelectItem key={student.id} value={student.id}>
-                    {studentDisplayName || 'ללא שם'} — {schedule}
+                    {formatStudentName(student) || 'ללא שם'} — {schedule}
                   </SelectItem>
                 );
               })}
@@ -588,21 +591,21 @@ export default function NewSessionForm({
           </Select>
         </div>
         {looseMode ? (
-          <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-right text-sm text-amber-800">
+          <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-end text-sm text-amber-800">
             <p className="font-semibold">דיווח לא משויך</p>
             <p>הדיווח יישלח לאישור מנהל לפני שיוצמד לתלמיד קיים או חדש.</p>
           </div>
         ) : students.length === 0 ? (
-          <p className="text-xs text-neutral-500 text-right">אין תלמידים זמינים לשיוך מפגש חדש.</p>
+          <p className="text-xs text-neutral-500 text-end">אין תלמידים זמינים לשיוך מפגש חדש.</p>
         ) : filteredStudents.length === 0 ? (
-          <p className="text-xs text-neutral-500 text-right">לא נמצאו תלמידים התואמים את החיפוש.</p>
+          <p className="text-xs text-neutral-500 text-end">לא נמצאו תלמידים התואמים את החיפוש.</p>
         ) : null}
 
         {looseMode && (
           <div className="space-y-md">
             <div className="grid gap-md sm:grid-cols-2">
               <div className="space-y-sm">
-                <Label htmlFor="unassigned-name" className="block text-right">שם התלמיד *</Label>
+                <Label htmlFor="unassigned-name" className="block text-end">שם התלמיד *</Label>
                 <div className="relative">
                   <Input
                     id="unassigned-name"
@@ -613,7 +616,7 @@ export default function NewSessionForm({
                     placeholder="הקלידו שם"
                   />
                   {loadingNameSuggestions && (
-                    <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                    <div className="absolute start-3 top-1/2 -translate-y-1/2">
                       <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                     </div>
                   )}
@@ -632,12 +635,10 @@ export default function NewSessionForm({
                           key={student.id}
                           type="button"
                           onClick={() => handleSelectExistingStudent(student)}
-                          className="w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-md bg-white hover:bg-muted border border-transparent hover:border-border transition-all text-right group"
+                          className="w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-md bg-white hover:bg-muted border border-transparent hover:border-border transition-all text-end group"
                           disabled={isSubmitting}
                         >
-                          <span className="font-medium text-foreground group-hover:text-primary">
-                            {buildDisplayName({ ...student, fallback: student.name }) || 'ללא שם'}
-                          </span>
+                          <span className="font-medium text-foreground group-hover:text-primary">{formatStudentName(student)}</span>
                           <div className="flex items-center gap-2">
                             {student.is_active ? (
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-success/10 text-success border border-success/20">
@@ -652,14 +653,14 @@ export default function NewSessionForm({
                         </button>
                       ))}
                     </div>
-                    <div className="px-3 py-2 bg-amber-50/30 border-t border-amber-200 text-xs text-amber-800 text-right">
+                    <div className="px-3 py-2 bg-amber-50/30 border-t border-amber-200 text-xs text-amber-800 text-end">
                       💡 לחיצה על תלמיד תעביר לדיווח רגיל תוך שמירת כל התשובות
                     </div>
                   </div>
                 )}
               </div>
               <div className="space-y-sm">
-                <Label htmlFor="unassigned-reason" className="block text-right">סיבת הדיווח *</Label>
+                <Label htmlFor="unassigned-reason" className="block text-end">סיבת הדיווח *</Label>
                 <Select
                   value={unassignedReason}
                   onValueChange={setUnassignedReason}
@@ -691,7 +692,7 @@ export default function NewSessionForm({
             </div>
             {canFilterByInstructor && instructors.length > 0 && (
               <div className="space-y-sm">
-                <Label htmlFor="loose-instructor" className="block text-right">
+                <Label htmlFor="loose-instructor" className="block text-end">
                   מדריך מגיש {!userIsInstructor && '*'}
                 </Label>
                 <Select
@@ -712,7 +713,7 @@ export default function NewSessionForm({
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-neutral-500 text-right">
+                <p className="text-xs text-neutral-500 text-end">
                   {userIsInstructor 
                     ? "ללא בחירה, הדיווח יוצמד אליך כמגיש"
                     : "נדרש לבחור מדריך - אין לך הרשאות מדריך"}
@@ -725,7 +726,7 @@ export default function NewSessionForm({
 
       <div className="grid gap-md sm:grid-cols-2">
         <div className="space-y-sm">
-          <Label htmlFor="session-date" className="block text-right">תאריך המפגש *</Label>
+          <Label htmlFor="session-date" className="block text-end">תאריך המפגש *</Label>
           <Input
             id="session-date"
             type="date"
@@ -737,7 +738,7 @@ export default function NewSessionForm({
         </div>
         {looseMode && (
           <div className="space-y-sm">
-            <Label htmlFor="session-time" className="block text-right">שעת המפגש *</Label>
+            <Label htmlFor="session-time" className="block text-end">שעת המפגש *</Label>
             <TimeField
               id="session-time"
               value={sessionTime}
@@ -757,7 +758,7 @@ export default function NewSessionForm({
           options={services}
           placeholder="בחרו מהרשימה או הקלידו שירות"
           disabled={isSubmitting}
-          dir="rtl"
+         
           emptyMessage="לא נמצאו שירותים תואמים"
           description={looseMode ? 'חובה לבחור שירות לדיווח לא משויך.' : 'הערך מוצע לפי ברירת המחדל של התלמיד אך ניתן לעריכה.'}
           required={looseMode}
@@ -766,7 +767,7 @@ export default function NewSessionForm({
 
       {questions.length ? (
         <div className="space-y-md">
-          <h3 className="text-base font-semibold text-foreground text-right">שאלות המפגש</h3>
+          <h3 className="text-base font-semibold text-foreground text-end">שאלות המפגש</h3>
           <div className="space-y-md">
             {questions.map((question) => {
               const questionId = `question-${question.key}`;
@@ -786,16 +787,20 @@ export default function NewSessionForm({
               const placeholder = typeof question.placeholder === 'string' ? question.placeholder : '';
               const answerValue = answers[question.key];
 
+              const orgPreanswers = (() => {
+                const byKey = Array.isArray(suggestions?.[question.key]) ? suggestions[question.key] : [];
+                const byId = Array.isArray(suggestions?.[question.id]) ? suggestions[question.id] : [];
+                return byKey.length > 0 ? byKey : byId;
+              })();
+              // Show button if user is an instructor (can add personal answers) OR there are org answers to pick from
+              const showButton = canEditPersonalPreanswers || orgPreanswers.length > 0;
+              const showHelpMessage = !canEditPersonalPreanswers && orgPreanswers.length === 0;
+
               if (question.type === 'textarea') {
-                // Check for preanswers by both key and id
-                const preanswersByKey = Array.isArray(suggestions?.[question.key]) ? suggestions[question.key] : [];
-                const preanswersById = Array.isArray(suggestions?.[question.id]) ? suggestions[question.id] : [];
-                const preanswers = preanswersByKey.length > 0 ? preanswersByKey : preanswersById;
-                const hasPreanswers = preanswers.length > 0;
                 
                 return (
                   <div key={question.key} className="space-y-xs">
-                    <Label htmlFor={questionId} className="block text-right">
+                    <Label htmlFor={questionId} className="block text-end">
                       {question.label}
                       {required ? ' *' : ''}
                     </Label>
@@ -808,14 +813,14 @@ export default function NewSessionForm({
                         disabled={isSubmitting}
                         placeholder={placeholder}
                         required={required}
-                        className={hasPreanswers ? 'pl-12' : ''}
+                        className={showButton ? 'ps-12' : ''}
                       />
-                      {hasPreanswers && (
+                      {showButton && (
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="absolute left-1 top-1 h-8 px-2"
+                          className="absolute start-1 top-1 h-8 px-2"
                           onClick={() => {
                             setActiveQuestionKey(question.key);
                             setPreanswersDialogOpen(true);
@@ -827,8 +832,8 @@ export default function NewSessionForm({
                         </Button>
                       )}
                     </div>
-                    {!hasPreanswers && (
-                      <p className="text-xs text-neutral-500 text-right">
+                    {showHelpMessage && (
+                      <p className="text-xs text-neutral-500 text-end">
                         אין תשובות מוכנות לשאלה זו. בקשו ממנהלי המערכת להגדיר תשובות מוכנות.
                       </p>
                     )}
@@ -837,14 +842,9 @@ export default function NewSessionForm({
               }
 
               if (question.type === 'text') {
-                // Check for preanswers by both key and id
-                const preanswersByKey = Array.isArray(suggestions?.[question.key]) ? suggestions[question.key] : [];
-                const preanswersById = Array.isArray(suggestions?.[question.id]) ? suggestions[question.id] : [];
-                const preanswers = preanswersByKey.length > 0 ? preanswersByKey : preanswersById;
-                const hasPreanswers = preanswers.length > 0;
                 return (
                   <div key={question.key} className="space-y-xs">
-                    <Label htmlFor={questionId} className="block text-right">
+                    <Label htmlFor={questionId} className="block text-end">
                       {question.label}
                       {required ? ' *' : ''}
                     </Label>
@@ -856,14 +856,14 @@ export default function NewSessionForm({
                         disabled={isSubmitting}
                         placeholder={placeholder}
                         required={required}
-                        className={hasPreanswers ? 'pl-12' : ''}
+                        className={showButton ? 'ps-12' : ''}
                       />
-                      {hasPreanswers && (
+                      {showButton && (
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="absolute left-1 top-1/2 -translate-y-1/2 h-8 px-2"
+                          className="absolute start-1 top-1/2 -translate-y-1/2 h-8 px-2"
                           onClick={() => {
                             setActiveQuestionKey(question.key);
                             setPreanswersDialogOpen(true);
@@ -875,8 +875,8 @@ export default function NewSessionForm({
                         </Button>
                       )}
                     </div>
-                    {!hasPreanswers && (
-                      <p className="text-xs text-neutral-500 text-right">
+                    {showHelpMessage && (
+                      <p className="text-xs text-neutral-500 text-end">
                         אין תשובות מוכנות לשאלה זו. בקשו ממנהלי המערכת להגדיר תשובות מוכנות.
                       </p>
                     )}
@@ -887,7 +887,7 @@ export default function NewSessionForm({
               if (question.type === 'number') {
                 return (
                   <div key={question.key} className="space-y-xs">
-                    <Label htmlFor={questionId} className="block text-right">
+                    <Label htmlFor={questionId} className="block text-end">
                       {question.label}
                       {required ? ' *' : ''}
                     </Label>
@@ -907,7 +907,7 @@ export default function NewSessionForm({
               if (question.type === 'date') {
                 return (
                   <div key={question.key} className="space-y-xs">
-                    <Label htmlFor={questionId} className="block text-right">
+                    <Label htmlFor={questionId} className="block text-end">
                       {question.label}
                       {required ? ' *' : ''}
                     </Label>
@@ -926,7 +926,7 @@ export default function NewSessionForm({
               if (question.type === 'select') {
                 return (
                   <div key={question.key} className="space-y-xs">
-                    <Label htmlFor={questionId} className="block text-right">
+                    <Label htmlFor={questionId} className="block text-end">
                       {question.label}
                       {required ? ' *' : ''}
                     </Label>
@@ -1027,7 +1027,7 @@ export default function NewSessionForm({
                   : min;
                 return (
                   <div key={question.key} className="space-y-2">
-                    <Label htmlFor={questionId} className="block text-right">
+                    <Label htmlFor={questionId} className="block text-end">
                       {question.label}
                       {required ? ' *' : ''}
                     </Label>
@@ -1053,7 +1053,7 @@ export default function NewSessionForm({
 
               return (
                 <div key={question.key} className="space-y-xs">
-                  <Label htmlFor={questionId} className="block text-right">
+                  <Label htmlFor={questionId} className="block text-end">
                     {question.label}
                     {required ? ' *' : ''}
                   </Label>
@@ -1073,7 +1073,7 @@ export default function NewSessionForm({
       ) : null}
 
       {error ? (
-        <div className="rounded-lg bg-red-50 p-md text-sm text-red-700 text-right" role="alert">
+        <div className="rounded-lg bg-red-50 p-md text-sm text-red-700 text-end" role="alert">
           {error}
         </div>
       ) : null}
@@ -1105,11 +1105,24 @@ export default function NewSessionForm({
           if (!activeQuestionKey) return [];
           const question = questions.find((q) => q.key === activeQuestionKey);
           if (!question) return [];
-          // Check by both key and id
           const byKey = Array.isArray(suggestions?.[question.key]) ? suggestions[question.key] : [];
           const byId = Array.isArray(suggestions?.[question.id]) ? suggestions[question.id] : [];
           return byKey.length > 0 ? byKey : byId;
         })()}
+        personalAnswers={(() => {
+          if (!activeQuestionKey) return [];
+          const question = questions.find((q) => q.key === activeQuestionKey);
+          if (!question) return [];
+          const byKey = Array.isArray(personalPreanswers?.[question.key]) ? personalPreanswers[question.key] : [];
+          const byId = Array.isArray(personalPreanswers?.[question.id]) ? personalPreanswers[question.id] : [];
+          return byKey.length > 0 ? byKey : byId;
+        })()}
+        onSavePersonal={(list) => {
+          if (!activeQuestionKey) return;
+          onSavePersonalPreanswers?.(activeQuestionKey, list);
+        }}
+        canEditPersonal={canEditPersonalPreanswers}
+        preanswersCapLimit={preanswersCapLimit}
         onSelect={(answer) => {
           if (activeQuestionKey) {
             updateAnswer(activeQuestionKey, answer);
@@ -1129,7 +1142,7 @@ export default function NewSessionForm({
 export function NewSessionFormFooter({ onSubmit, onCancel, isSubmitting = false, isFormValid = false }) {
   return (
     <div className="flex flex-col-reverse gap-sm sm:flex-row-reverse sm:justify-end">
-      <Button type="submit" disabled={isSubmitting || !isFormValid} className="gap-xs shadow-md hover:shadow-lg transition-shadow" onClick={onSubmit}>
+      <Button type="button" disabled={isSubmitting || !isFormValid} className="gap-xs shadow-md hover:shadow-lg transition-shadow" onClick={onSubmit}>
         {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
         שמירת מפגש
       </Button>

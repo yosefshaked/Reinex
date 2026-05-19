@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Date Picker Suggestion 02</title>
+  <style>
+    :root {
+      --bg: #eef3f8;
+      --card: #ffffff;
+      --line: #d7e0ea;
+      --text: #162033;
+      --muted: #738099;
+      --primary: #2d6cdf;
+      --primary-soft: #e9f1ff;
+      --accent: #0f766e;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background:
+        radial-gradient(circle at left top, rgba(45,108,223,0.12), transparent 24rem),
+        linear-gradient(180deg, #f6f9fc 0%, var(--bg) 100%);
+      min-height: 100vh;
+      padding: 28px;
+      color: var(--text);
+    }
+
+    .shell {
+      max-width: 1180px;
+      margin: 0 auto;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(215, 224, 234, 0.85);
+      border-radius: 36px;
+      backdrop-filter: blur(14px);
+      overflow: hidden;
+      box-shadow: 0 22px 44px rgba(25, 48, 97, 0.12);
+    }
+
+    .header {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 24px;
+      padding: 22px 26px;
+      background: rgba(255, 255, 255, 0.88);
+      border-bottom: 1px solid #edf2f7;
+    }
+
+    .cluster,
+    .mode {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn,
+    .mode-btn,
+    .mini {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 14px;
+      cursor: default;
+    }
+
+    .btn.primary,
+    .mode-btn.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+
+    .navigator {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .rail {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px;
+      border-radius: 26px;
+      background: linear-gradient(180deg, #fff 0%, #f9fbff 100%);
+      border: 1px solid #e5ebf4;
+      box-shadow: 0 14px 30px rgba(36, 54, 94, 0.08);
+    }
+
+    .date-chip {
+      padding: 13px 18px;
+      min-width: 280px;
+      border-radius: 18px;
+      background: var(--primary-soft);
+      color: var(--primary);
+      text-align: center;
+      font-weight: 700;
+      line-height: 1.2;
+      position: relative;
+    }
+
+    .date-chip small {
+      display: block;
+      margin-top: 4px;
+      color: #5f7fb8;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .picker {
+      position: absolute;
+      top: calc(100% + 14px);
+      inset-inline-start: 50%;
+      transform: translateX(-50%);
+      width: 400px;
+      border-radius: 28px;
+      border: 1px solid var(--line);
+      background: #fff;
+      box-shadow: 0 26px 50px rgba(23, 38, 77, 0.18);
+      overflow: hidden;
+    }
+
+    .picker-head {
+      padding: 18px 20px 14px;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      border-bottom: 1px solid #edf2f7;
+    }
+
+    .picker-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .quick {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .quick span {
+      border-radius: 999px;
+      padding: 7px 11px;
+      background: #f5f8fc;
+      border: 1px solid #e3eaf3;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .quick .active {
+      background: #ecfdf5;
+      color: var(--accent);
+      border-color: #b7ebd7;
+    }
+
+    .weekdays,
+    .days {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 8px;
+      padding: 0 18px 18px;
+    }
+
+    .weekdays {
+      padding-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .day {
+      height: 44px;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      background: #f8fbff;
+      font-size: 14px;
+    }
+
+    .day.selected {
+      background: linear-gradient(180deg, #2d6cdf 0%, #2159be 100%);
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .day.today {
+      outline: 2px solid rgba(45,108,223,0.28);
+      outline-offset: -2px;
+    }
+
+    .day.muted {
+      color: #a0adbf;
+      background: #fcfdff;
+    }
+
+    .canvas {
+      height: 560px;
+      background:
+        linear-gradient(90deg, transparent 0 15%, rgba(226, 233, 242, 0.9) 15% 15.15%, transparent 15.15%),
+        repeating-linear-gradient(180deg, #ffffff 0 58px, #f4f7fb 58px 59px);
+      position: relative;
+    }
+
+    .caption {
+      position: absolute;
+      inset-inline-start: 26px;
+      top: 22px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.94);
+      border: 1px solid var(--line);
+      padding: 10px 14px;
+      color: var(--muted);
+      font-size: 13px;
+      max-width: 330px;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="header">
+      <div class="cluster">
+        <div class="btn primary">שיעור חדש</div>
+        <div class="btn">יצירה מתבניות</div>
+      </div>
+
+      <div class="navigator">
+        <div class="rail">
+          <div class="mini">◀</div>
+          <div class="mini">היום</div>
+          <div class="date-chip">
+            20 באפריל 2026
+            <small>הצ'יפ עצמו פותח את לוח החודש</small>
+          </div>
+          <div class="mini">▶</div>
+        </div>
+
+        <div class="picker">
+          <div class="picker-head">
+            <div class="picker-top">
+              <div class="mini">◀</div>
+              <strong>אפריל 2026</strong>
+              <div class="mini">▶</div>
+            </div>
+            <div class="quick">
+              <span class="active">היום</span>
+              <span>מחר</span>
+              <span>תחילת שבוע</span>
+              <span>סוף חודש</span>
+            </div>
+          </div>
+          <div class="weekdays">
+            <div>א'</div><div>ב'</div><div>ג'</div><div>ד'</div><div>ה'</div><div>ו'</div><div>ש'</div>
+          </div>
+          <div class="days">
+            <div class="day muted">29</div><div class="day muted">30</div><div class="day muted">31</div><div class="day">1</div><div class="day">2</div><div class="day">3</div><div class="day">4</div>
+            <div class="day">5</div><div class="day">6</div><div class="day">7</div><div class="day">8</div><div class="day">9</div><div class="day">10</div><div class="day">11</div>
+            <div class="day">12</div><div class="day">13</div><div class="day">14</div><div class="day">15</div><div class="day">16</div><div class="day">17</div><div class="day">18</div>
+            <div class="day today">19</div><div class="day selected">20</div><div class="day">21</div><div class="day">22</div><div class="day">23</div><div class="day">24</div><div class="day">25</div>
+            <div class="day">26</div><div class="day">27</div><div class="day">28</div><div class="day">29</div><div class="day">30</div><div class="day muted">1</div><div class="day muted">2</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mode">
+        <div class="mode-btn active">יום</div>
+        <div class="mode-btn">שבוע</div>
+      </div>
+    </div>
+
+    <div class="canvas">
+      <div class="caption">הדוגמה הזאת הופכת את התאריך ל"צ'יפ" מרכזי עם popover יותר עשיר ועם קיצורי דרך מהירים.</div>
+    </div>
+  </div>
+</body>
+</html>

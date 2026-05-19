@@ -13,8 +13,10 @@ export function StudentFilterSection({
   onSearchChange,
   statusFilter,
   onStatusChange,
+  onStatusFilterChange,
   dayFilter,
   onDayChange,
+  onDayFilterChange,
   instructorFilterId,
   onInstructorFilterChange,
   tagFilter,
@@ -30,6 +32,10 @@ export function StudentFilterSection({
   showMyStudentsOption = false, // Show 'My Students' option in instructor dropdown for admin instructors
   currentUserId = null, // Current user ID for 'My Students' option
 }) {
+  // Normalize handler props for backward compatibility
+  const handleStatusChange = onStatusChange || onStatusFilterChange || (() => {});
+  const handleDayChange = onDayChange || onDayFilterChange || (() => {});
+
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   const hasAdvancedFilters = useMemo(() => {
@@ -41,7 +47,7 @@ export function StudentFilterSection({
       {/* Search Box with Collapsible Advanced Filters - matching NewSessionForm design */}
       <div className="space-y-2 p-3 bg-neutral-50 rounded-lg border border-neutral-200">
         <div className="flex items-center justify-between gap-2 mb-2">
-          <p className="text-xs font-medium text-neutral-600 text-right">🔍 חיפוש</p>
+          <p className="text-xs font-medium text-neutral-600 text-end">🔍 חיפוש</p>
           <Button
             type="button"
             variant="outline"
@@ -62,30 +68,30 @@ export function StudentFilterSection({
           </Button>
         </div>
         <div className="relative">
-          <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" aria-hidden="true" />
+          <Search className="absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" aria-hidden="true" />
           <Input
             type="text"
             placeholder="חיפוש לפי שם, טלפון, תעודת זהות..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="pr-9 text-right"
-            dir="rtl"
+            className="pe-9 text-end"
+           
           />
         </div>
 
         {/* Advanced Filters - Collapsible within search box */}
         {showAdvancedFilters && (
           <div className="pt-2 border-t border-neutral-200 animate-in fade-in slide-in-from-top-2 duration-200">
-            <p className="text-xs font-medium text-neutral-600 text-right mb-2">⚙️ מסננים מתקדמים</p>
+            <p className="text-xs font-medium text-neutral-600 text-end mb-2">⚙️ מסננים מתקדמים</p>
             <div className="grid gap-sm sm:grid-cols-2 lg:grid-cols-4">
           {/* Status filter - only shown if showStatusFilter is true */}
           {showStatusFilter && (
             <div className="space-y-1">
-              <label className="block text-xs font-medium text-neutral-600 text-right">
+              <label className="block text-xs font-medium text-neutral-600 text-end">
                 סטטוס
               </label>
-              <Select value={statusFilter} onValueChange={onStatusChange}>
-                <SelectTrigger className="text-right">
+              <Select value={statusFilter} onValueChange={handleStatusChange}>
+                <SelectTrigger className="text-end">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -99,12 +105,12 @@ export function StudentFilterSection({
 
           {/* Day filter */}
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-neutral-600 text-right">
+            <label className="block text-xs font-medium text-neutral-600 text-end">
               יום בשבוע
             </label>
             <DayOfWeekSelect
               value={dayFilter}
-              onChange={onDayChange}
+              onChange={handleDayChange}
               placeholder="כל הימים"
             />
           </div>
@@ -112,11 +118,11 @@ export function StudentFilterSection({
           {/* Instructor filter - only shown if showInstructorFilter is true */}
           {showInstructorFilter && (
             <div className="space-y-1">
-              <label className="block text-xs font-medium text-neutral-600 text-right">
+              <label className="block text-xs font-medium text-neutral-600 text-end">
                 מדריך
               </label>
               <Select value={instructorFilterId || 'all-instructors'} onValueChange={(v) => onInstructorFilterChange(v === 'all-instructors' ? '' : v)}>
-                <SelectTrigger className="text-right">
+                <SelectTrigger className="text-end">
                   <SelectValue placeholder="כל המדריכים" />
                 </SelectTrigger>
                 <SelectContent>
@@ -124,7 +130,7 @@ export function StudentFilterSection({
                     <SelectItem value={currentUserId}>התלמידים שלי</SelectItem>
                   )}
                   <SelectItem value="all-instructors">כל המדריכים</SelectItem>
-                  {instructors.map((inst) => (
+                  {instructors.filter(inst => inst?.id).map((inst) => (
                     <SelectItem key={inst.id} value={inst.id}>
                       {inst.name || inst.email}
                     </SelectItem>
@@ -137,11 +143,11 @@ export function StudentFilterSection({
           {/* Tag filter */}
           {tags.length > 0 && (
             <div className="space-y-1">
-              <label className="block text-xs font-medium text-neutral-600 text-right">
+              <label className="block text-xs font-medium text-neutral-600 text-end">
                 תגית
               </label>
               <Select value={tagFilter || 'all-tags'} onValueChange={(v) => onTagFilterChange(v === 'all-tags' ? '' : v)}>
-                <SelectTrigger className="text-right">
+                <SelectTrigger className="text-end">
                   <SelectValue placeholder="כל התגיות" />
                 </SelectTrigger>
                 <SelectContent>
@@ -158,11 +164,11 @@ export function StudentFilterSection({
 
           {/* Sort option */}
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-neutral-600 text-right">
+            <label className="block text-xs font-medium text-neutral-600 text-end">
               מיין לפי
             </label>
             <Select value={sortBy} onValueChange={onSortChange}>
-              <SelectTrigger className="text-right">
+              <SelectTrigger className="text-end">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

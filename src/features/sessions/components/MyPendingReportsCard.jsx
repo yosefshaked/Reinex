@@ -7,8 +7,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
 import ResubmitRejectedReportDialog from './ResubmitRejectedReportDialog.jsx';
+import { isSessionRecordsEnabled } from '@/features/sessions/config/session-records.js';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',
@@ -59,7 +61,8 @@ function filterReportsByDateRange(reports, dateRangeDays) {
 }
 
 export default function MyPendingReportsCard() {
-  const { activeOrg, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrg } = useOrg();
+  const { session } = useSupabase();
   const [state, setState] = useState(REQUEST_STATE.idle);
   const [error, setError] = useState('');
   const [reports, setReports] = useState([]);
@@ -68,7 +71,8 @@ export default function MyPendingReportsCard() {
   const [dateRange, setDateRange] = useState('3months'); // Default to 3 months
 
   const activeOrgId = activeOrg?.id || null;
-  const canFetch = Boolean(activeOrgId && activeOrgHasConnection && tenantClientReady);
+  const sessionRecordsEnabled = isSessionRecordsEnabled();
+  const canFetch = Boolean(session && activeOrgId);
 
   const loadReports = useCallback(async (options = {}) => {
     if (!canFetch) return;
@@ -157,7 +161,6 @@ export default function MyPendingReportsCard() {
         pendingCount: pendingReports.length,
         rejectedCount: rejectedReports.length,
         resolvedCount: resolvedReports.length,
-        sampleResolved: resolvedReports.slice(0, 2).map(r => ({ id: r.id, name: r.metadata?.unassigned_details?.name, student_id: r.student_id, date: r.date })),
       });
     }
   }, [reports, filteredReports, pendingReports, rejectedReports, resolvedReports]);
@@ -166,10 +169,25 @@ export default function MyPendingReportsCard() {
     return null;
   }
 
+  if (!sessionRecordsEnabled) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-end">הדיווחים הממתינים שלי</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
+            מודול דיווחי המפגשים הושהה זמנית עד ליישום מחודש של Session Records.
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <Card dir="rtl">
+    <Card>
       <CardHeader>
-        <CardTitle className="text-right">הדיווחים הממתינים שלי</CardTitle>
+        <CardTitle className="text-end">הדיווחים הממתינים שלי</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Date Range Filter */}
@@ -179,7 +197,7 @@ export default function MyPendingReportsCard() {
             טווח תאריכים:
           </Label>
           <Select value={dateRange} onValueChange={setDateRange}>
-            <SelectTrigger id="dateRange" className="w-[200px]" dir="rtl">
+            <SelectTrigger id="dateRange" className="w-[200px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -203,7 +221,7 @@ export default function MyPendingReportsCard() {
           </div>
         ) : (
           <>
-            <div className="text-sm text-muted-foreground text-right">
+            <div className="text-sm text-muted-foreground text-end">
               דיווחים שהגשת ללא שיוך תלמיד. רק מנהל יכול לשייך דיווחים אלה לתלמידים.
             </div>
 
@@ -216,7 +234,7 @@ export default function MyPendingReportsCard() {
             )}
 
             {(pendingReports.length > 0 || rejectedReports.length > 0 || resolvedReports.length > 0) && (
-              <Tabs defaultValue="pending" dir="rtl">
+              <Tabs defaultValue="pending">
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="pending" className="flex items-center gap-2">
                     ממתינים
@@ -330,7 +348,7 @@ export default function MyPendingReportsCard() {
                                   <div className="flex items-center gap-2 flex-wrap mb-2">
                                     <h4 className="text-base font-semibold text-foreground">{name}</h4>
                                     <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300">
-                                      <XCircle className="h-3 w-3 ml-1" />
+                                      <XCircle className="h-3 w-3 ms-1" />
                                       נדחה
                                     </Badge>
                                   </div>

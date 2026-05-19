@@ -1,27 +1,44 @@
 {
   "name": "reinex-app",
-  "description": "Reinex Management System",
+  "description": "Reinex - Platform for Managing Schedules and Customer Relations",
   "author": "Shaked Yossef",
-  "main": "electron.cjs",
   "private": true,
-  "version": "1.8.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run lint:api && npm run lint:api-responses:strict-ux && npm run lint:sql && vite build",
     "dep:check": "madge --circular src --ts-config jsconfig.json",
     "check:schema": "node scripts/checkSchema.js",
     "lint": "eslint .",
     "lint:api": "eslint api/",
+    "lint:sql": "node scripts/validate-setup-sql.js --format=text",
+    "lint:sql:strict": "node scripts/validate-setup-sql.js --strict --format=text",
+    "lint:sql:json": "node scripts/validate-setup-sql.js --format=json",
+    "lint:sql:github": "node scripts/validate-setup-sql.js --format=github",
+    "lint:upsert-conflicts": "node scripts/validate-upsert-conflicts.js",
+    "lint:api-responses": "node scripts/validate-api-response-contracts.js",
+    "lint:api-responses:strict-ux": "node scripts/validate-api-response-contracts.js --strict-ux",
     "lint:fix": "eslint . --fix",
     "validate:api": "node scripts/validate-api-endpoints.js",
+    "test:finance-calendar": "node --test test/finance-preview-contract.test.js test/finance-calendar-workflows.test.js test/ledger-presentation.test.js api/_shared/BillingLedgerService.test.js api/_shared/student-billing.test.js",
+    "audit:finance-calendar:fixture": "node scripts/audit-finance-calendar-invariants.js",
+    "verify:beta": "npm run test:finance-calendar && npm run audit:finance-calendar:fixture && npm run build",
+    "test:isolation-stress-test": "node --test implementations/database/one-db-refactor/isolation-stress-test.js",
     "test:validator": "node scripts/test-validator.js",
-    "test:schema-migrations": "node scripts/test-schema-migrations.js",
-    "preview": "vite preview",
-    "electron:dev": "concurrently -k -s first \"npm run dev\" \"wait-on http://localhost:5173 && set ELECTRON_START_URL=http://localhost:5173 && electron .\"",
-    "electron:build": "npm run build && electron-builder"
+    "preview": "vite preview"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@fullcalendar/core": "^6.1.20",
+    "@fullcalendar/interaction": "^6.1.20",
+    "@fullcalendar/react": "^6.1.20",
+    "@fullcalendar/resource": "^6.1.20",
+    "@fullcalendar/resource-timegrid": "^6.1.20",
+    "@fullcalendar/resource-timeline": "^6.1.20",
+    "@fullcalendar/timegrid": "^6.1.20",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-checkbox": "^1.3.3",
@@ -36,6 +53,12 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@refinedev/core": "^5.0.12",
+    "@refinedev/react-router": "^2.0.4",
+    "@refinedev/simple-rest": "^6.0.1",
+    "@rjsf/core": "^6.4.1",
+    "@rjsf/utils": "^6.4.1",
+    "@rjsf/validator-ajv8": "^6.4.1",
     "@supabase/supabase-js": "^2.57.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -44,6 +67,7 @@
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.542.0",
     "next-themes": "^0.4.6",
+    "posthog-js": "^1.369.3",
     "react": "^19.1.1",
     "react-big-calendar": "^1.19.4",
     "react-day-picker": "^9.9.0",
@@ -51,7 +75,6 @@
     "react-router-dom": "^7.8.2",
     "recharts": "^3.1.2",
     "sonner": "^2.0.7",
-    "styled-components": "^6.1.19",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7"
   },
@@ -61,10 +84,8 @@
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.21",
-    "concurrently": "^9.2.1",
-    "electron": "^38.0.0",
-    "electron-builder": "^26.0.12",
     "eslint": "^9.33.0",
+    "eslint-formatter-unix": "^9.0.1",
     "eslint-import-resolver-alias": "^1.1.2",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",
@@ -75,26 +96,5 @@
     "tailwindcss": "^3.4.17",
     "vite": "^7.1.2",
     "wait-on": "^8.0.4"
-  },
-  "build": {
-    "appId": "com.HavatTut.salaryapp",
-    "productName": "Reinex",
-    "files": [
-      "dist/**/*",
-      "electron.cjs",
-      "public/**/*",
-      "preload.js"
-    ],
-    "directories": {
-      "output": "../release"
-    },
-    "win": {
-      "target": "portable",
-      "icon": "public/icon.ico"
-    },
-    "asar": true,
-    "asarUnpack": [
-      "dist/**"
-    ]
   }
 }

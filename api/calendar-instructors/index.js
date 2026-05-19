@@ -1,0 +1,195 @@
+/* eslint-env node */
+import { resolveBearerAuthorization } from '../_shared/http.js';
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import {
+  ensureMembership,
+  isAdminRole,
+  normalizeString,
+  readEnv,
+  respond,
+  resolveOrgId,
+  withOrgScope,
+} from '../_shared/org-bff.js';
+import { hasConfiguredAvailability } from '../_shared/instructor-availability.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+/**
+ * GET /api/calendar/instructors
+ * Query params:
+ *   - org_id (required)
+ *   - include_inactive (boolean, optional, defaults to false)
+ *
+ * Returns: Array of instructors (Employees) with service capabilities for calendar display
+ */
+export default async function (context, req) {
+  const env = readEnv(context);
+  const adminConfig = readSupabaseAdminConfig(env);
+
+  if (!adminConfig.supabaseUrl || !adminConfig.serviceRoleKey) {
+    context.log?.error?.('calendar/instructors missing Supabase admin credentials');
+    return respond(context, 500, { message: 'server_misconfigured' });
+  }
+
+  const authorization = resolveBearerAuthorization(req);
+  if (!authorization?.token) {
+    context.log?.warn?.('calendar/instructors missing bearer token');
+    return respond(context, 401, { message: 'missing_bearer' });
+  }
+
+  const supabase = createSupabaseAdminClient(adminConfig);
+
+  let authResult;
+  try {
+    authResult = await supabase.auth.getUser(authorization.token);
+  } catch (error) {
+    context.log?.error?.('calendar/instructors failed to validate token', { message: error?.message });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
+  }
+
+  if (authResult.error || !authResult.data?.user?.id) {
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
+  }
+
+  const userId = authResult.data.user.id;
+  const orgId = resolveOrgId(req, null);
+
+  if (!orgId) {
+    return respond(context, 400, { message: 'invalid_org_id' });
+  }
+  attachErrorTracking(context, req, supabase, { orgId, userId, metadata: { endpoint: 'calendar-instructors' } });
+
+  let role;
+  try {
+    role = await ensureMembership(supabase, orgId, userId);
+  } catch (membershipError) {
+    context.log?.error?.('calendar/instructors failed to verify membership', {
+      message: membershipError?.message,
+      orgId,
+      userId,
+    });
+    return respondTracked(context, 500, { message: 'failed_to_verify_membership' }, undefined, { error: membershipError });
+  }
+
+  if (!role) {
+    return respond(context, 403, { message: 'forbidden' });
+  }
+
+  const isAdmin = isAdminRole(role);
+
+  const query = req.query || {};
+  const includeInactive = normalizeString(query.include_inactive).toLowerCase() === 'true';
+
+  // Build query for instructors
+  let instructorsQuery = withOrgScope(supabase, 'Employees', orgId)
+    .select('id, first_name, middle_name, last_name, email, phone, metadata, employee_type')
+    .order('first_name', { ascending: true });
+
+  if (!includeInactive) {
+    instructorsQuery = instructorsQuery.eq('is_active', true);
+  }
+
+  // Non-admin users can only see their own instructor record
+  if (!isAdmin) {
+    instructorsQuery = instructorsQuery.eq('user_id', userId);
+  }
+
+  const { data: instructors, error: instructorsError } = await instructorsQuery;
+
+  if (instructorsError) {
+    context.log?.error?.('calendar/instructors failed to fetch instructors', { 
+      message: instructorsError.message,
+      code: instructorsError.code,
+    });
+    return respondTracked(context, 500, { message: 'failed_to_load_instructors' }, undefined, { error: instructorsError });
+  }
+
+  if (!instructors || instructors.length === 0) {
+    return respond(context, 200, []);
+  }
+
+  // Fetch instructor overlays for reliable instructor classification.
+  // We treat an employee as instructor if:
+  // 1) employee_type === 'instructor' OR
+  // 2) has instructor profile row OR
+  // 3) has at least one instructor service capability row.
+  const instructorIds = instructors.map(i => i.id);
+  const [profilesResult, capabilitiesResult] = await Promise.all([
+    withOrgScope(supabase, 'instructor_profiles', orgId)
+      .select('employee_id')
+      .in('employee_id', instructorIds),
+    withOrgScope(supabase, 'instructor_service_capabilities', orgId)
+      .select('employee_id, service_id, max_students, base_rate, availability_windows, metadata')
+      .in('employee_id', instructorIds),
+  ]);
+
+  if (profilesResult.error) {
+    context.log?.error?.('calendar/instructors failed to fetch instructor profiles', {
+      message: profilesResult.error.message,
+      code: profilesResult.error.code,
+    });
+    return respondTracked(context, 500, { message: 'failed_to_load_instructor_profiles' }, undefined, { error: profilesResult.error });
+  }
+
+  if (capabilitiesResult.error) {
+    context.log?.error?.('calendar/instructors failed to fetch instructor capabilities', {
+      message: capabilitiesResult.error.message,
+      code: capabilitiesResult.error.code,
+    });
+    return respondTracked(context, 500, { message: 'failed_to_load_instructor_capabilities' }, undefined, { error: capabilitiesResult.error });
+  }
+
+  const profiles = profilesResult.data || [];
+  const capabilities = capabilitiesResult.data || [];
+
+  const profileEmployeeIds = new Set((profiles || []).map((row) => row.employee_id).filter(Boolean));
+  const capabilityEmployeeIds = new Set((capabilities || []).map((row) => row.employee_id).filter(Boolean));
+
+  const normalizedEmployeeType = (value) => String(value || '').trim().toLowerCase();
+
+  const instructorEmployees = instructors.filter((employee) => {
+    const employeeId = employee?.id;
+    if (!employeeId) return false;
+    if (normalizedEmployeeType(employee.employee_type) === 'instructor') return true;
+    if (profileEmployeeIds.has(employeeId)) return true;
+    if (capabilityEmployeeIds.has(employeeId)) return true;
+    return false;
+  });
+
+  if (instructorEmployees.length === 0) {
+    return respond(context, 200, []);
+  }
+
+  // Build capabilities map
+  const capabilitiesMap = new Map();
+  (capabilities || []).forEach(cap => {
+    if (!capabilitiesMap.has(cap.employee_id)) {
+      capabilitiesMap.set(cap.employee_id, []);
+    }
+    capabilitiesMap.get(cap.employee_id).push({
+      service_id: cap.service_id,
+      max_students: cap.max_students,
+      base_rate: cap.base_rate,
+      availability_windows: Array.isArray(cap.availability_windows) ? cap.availability_windows : [],
+      setup_incomplete: !hasConfiguredAvailability(cap.availability_windows),
+      metadata: cap.metadata,
+    });
+  });
+
+  // Transform instructors with capabilities
+  const transformedInstructors = instructorEmployees.map(instructor => ({
+    id: instructor.id,
+    first_name: instructor.first_name,
+    middle_name: instructor.middle_name,
+    last_name: instructor.last_name,
+    full_name: [instructor.first_name, instructor.middle_name, instructor.last_name]
+      .filter(Boolean)
+      .join(' '),
+    email: instructor.email,
+    phone: instructor.phone || null,
+    metadata: instructor.metadata,
+    color: instructor.metadata?.color || null,
+    service_capabilities: capabilitiesMap.get(instructor.id) || [],
+  }));
+
+  return respond(context, 200, transformedInstructors);
+}

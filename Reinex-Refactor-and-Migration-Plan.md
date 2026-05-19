@@ -285,6 +285,7 @@ Indexes:
 - `student_id uuid NOT NULL REFERENCES public.students(id)`
 - `guardian_id uuid NOT NULL REFERENCES public.guardians(id)`
 - `relationship text NOT NULL CHECK (relationship IN ('father','mother','self','caretaker','other'))`
+  - **Required at link creation** (each student–guardian connection must include a relationship)
 - `is_primary boolean NOT NULL DEFAULT false`
 - `created_at timestamptz NOT NULL DEFAULT now()`
 
@@ -403,12 +404,20 @@ Indexes:
 - `created_at timestamptz NOT NULL DEFAULT now()`
 - `metadata jsonb NULL`
 
-**View:** `public.commitment_balances` (computed)
+**Balance computation:** query-time only (no precomputed balance table)
 
-- `commitment_id`
-- `total_amount`
-- `consumed_amount`
-- `remaining_balance`
+- Per-student remaining balance is computed from:
+  - credits: `SUM(commitments.total_amount)`
+  - debits: `SUM(consumption_entries.amount_charged)` by consumption owner student
+  - transfers are represented as one commitment credit + one consumption debit
+
+**Transfer handling via existing ledger tables:**
+
+- Create one `commitments` row for destination student (credit)
+- Create one `consumption_entries` row for source student (debit)
+- Keep ownership: `consumption_entries.commitment_id` references source student's commitment
+- Link transfer pair by shared `transfer_ref` value on both rows
+- `lesson_participant_id` remains required for lesson consumption and optional for transfer consumption
 
 #### 4.2.8 Earnings & payroll
 
@@ -779,6 +788,8 @@ This is designed to be incremental and non-breaking.
   - students, guardians, student_guardians
   - instructors/services read wrappers
   - lesson_templates CRUD
+- Add UX scaffolding: !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  - Student lifecycle flow progress indicator (create → schedule/instructor → onboarding)
 - Risks:
   - Name collisions; mitigate by explicitly documenting the conflict and selecting an alternative domain-generic name (no product/system prefixes).
 

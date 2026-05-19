@@ -74,19 +74,19 @@ export async function initializeOrgPermissions(supabaseClient, orgId) {
  * @returns {Promise<object>} - Permissions object
  */
 export async function ensureOrgPermissions(supabaseClient, orgId) {
-  // First try to get current permissions
-  const { data: orgSettings, error: fetchError } = await supabaseClient
-    .from('org_settings')
+  // First try to get current permissions from the organizations table
+  const { data: orgRow, error: fetchError } = await supabaseClient
+    .from('organizations')
     .select('permissions')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .single();
 
   if (fetchError) {
-    console.error('Failed to fetch org settings:', fetchError);
+    console.error('Failed to fetch org permissions:', fetchError);
     return null;
   }
 
-  const current = orgSettings?.permissions;
+  const current = orgRow?.permissions;
 
   // If empty/null initialize entirely from defaults via DB helper
   if (!current || typeof current !== 'object' || Object.keys(current).length === 0) {
@@ -110,9 +110,9 @@ export async function ensureOrgPermissions(supabaseClient, orgId) {
   // Persist only if we actually added new keys
   if (changed) {
     const { error: updateError } = await supabaseClient
-      .from('org_settings')
+      .from('organizations')
       .update({ permissions: merged, updated_at: new Date().toISOString() })
-      .eq('org_id', orgId);
+      .eq('id', orgId);
     if (updateError) {
       console.error('Failed to persist merged org permissions:', updateError);
       // return best-effort merged view even if persist failed

@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -20,20 +20,39 @@ import DataMaintenanceModal from '@/features/admin/components/DataMaintenanceMod
 import { DataMaintenanceMenu } from '@/features/admin/components/DataMaintenanceMenu.jsx';
 import { StudentFilterSection } from '@/features/students/components/StudentFilterSection.jsx';
 import PageLayout from '@/components/ui/PageLayout.jsx';
-import { DAY_NAMES, formatDefaultTime, dayMatches } from '@/features/students/utils/schedule.js';
+import { DAY_NAMES, formatDefaultTime } from '@/features/students/utils/schedule.js';
 import DayOfWeekSelect from '@/components/ui/DayOfWeekSelect.jsx';
-import { normalizeTagIdsForWrite } from '@/features/students/utils/tags.js';
+import { updateStudentFromForm } from '@/features/students/api/students.js';
 import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';
-import { getStudentComparator, STUDENT_SORT_OPTIONS } from '@/features/students/utils/sorting.js';
+import { STUDENT_SORT_OPTIONS } from '@/features/students/utils/sorting.js';
 import { saveFilterState, loadFilterState } from '@/features/students/utils/filter-state.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
 import { fetchLooseSessions } from '@/features/sessions/api/loose-sessions.js';
 import MyPendingReportsCard from '@/features/sessions/components/MyPendingReportsCard.jsx';
-import { buildDisplayName } from '@/lib/person-name.js';
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
+import { toAgorot } from '@/lib/currency.js';
+import { isSessionRecordsEnabled } from '@/features/sessions/config/session-records.js';
+
+function getPaymentSourceBadge(source) {
+  const type = String(source?.type || '').toLowerCase();
+  if (type === 'hmo') {
+    return {
+      label: source?.provider_name || source?.label || 'גורם מממן',
+      className: 'w-fit border-blue-200 bg-blue-50 text-blue-800',
+      title: 'לתלמיד/ה קיימת הרשאת גורם מממן פעילה.',
+    };
+  }
+
+  return {
+    label: 'תשלום רגיל',
+    className: 'w-fit border-neutral-200 bg-neutral-50 text-neutral-700',
+    title: 'לא נמצאה הרשאת גורם מממן פעילה. השיעורים יחויבו במסלול רגיל.',
+  };
+}
 
 export default function StudentsPage() {
-  const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg();
-  const { session, user, loading: supabaseLoading } = useSupabase();
+  const { activeOrg, activeOrgId } = useOrg();
+  const { session, loading: supabaseLoading } = useSupabase();
   const navigate = useNavigate();
 
   // All hooks must be called before any conditional returns
@@ -44,21 +63,24 @@ export default function StudentsPage() {
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
   const [createError, setCreateError] = useState('');
   const [studentForEdit, setStudentForEdit] = useState(null);
+  const [isLoadingStudentForEdit, setIsLoadingStudentForEdit] = useState(false);
   const [isUpdatingStudent, setIsUpdatingStudent] = useState(false);
   const [updateError, setUpdateError] = useState('');
   const [addSubmitDisabled, setAddSubmitDisabled] = useState(false);
   const [isMaintenanceOpen, setIsMaintenanceOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [dayFilter, setDayFilter] = useState(null);
-  const [instructorFilterId, setInstructorFilterId] = useState('');
   const [tagFilter, setTagFilter] = useState('');
   const [sortBy, setSortBy] = useState(STUDENT_SORT_OPTIONS.SCHEDULE); // Default sort by schedule
   const [statusFilter, setStatusFilter] = useState('active'); // 'active' | 'inactive' | 'all'
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
   const [filteredStudents, setFilteredStudents] = useState([]); // Local client-side filtered list
   const [filtersRestored, setFiltersRestored] = useState(false); // Track when filters have been restored from sessionStorage
   const [pendingReportsCount, setPendingReportsCount] = useState(0); // Count of loose reports awaiting assignment
   const [pendingReportsDialogOpen, setPendingReportsDialogOpen] = useState(false); // For instructor's pending reports dialog
   const [canViewInactive, setCanViewInactive] = useState(false); // For instructors - permission to view inactive students
+  const sessionRecordsEnabled = isSessionRecordsEnabled();
 
   // Mobile fix: prevent Dialog close when Select is open/closing
   const openSelectCountRef = useRef(0);
@@ -74,38 +96,36 @@ export default function StudentsPage() {
 
   const canFetch = Boolean(
     session &&
-      activeOrgId &&
-      tenantClientReady &&
-      activeOrgHasConnection,
+      activeOrgId,
   );
 
   // Instructors need to load visibility permission
   const canFetchVisibility = canFetch && !isAdmin;
 
   const { instructors } = useInstructors({
-    enabled: canFetch && isAdmin, // Only admins need the full instructor list
+    enabled: canFetch && isAdmin,
     orgId: activeOrgId,
   });
-
-  const instructorMap = useMemo(() => {
-    return instructors.reduce((map, instructor) => {
-      if (instructor?.id) {
-        map.set(instructor.id, instructor);
-      }
-      return map;
-    }, new Map());
-  }, [instructors]);
 
   // Determine effective status for API call
   const effectiveStatus = isAdmin 
     ? (statusFilter === 'all' ? 'all' : statusFilter)
     : (canViewInactive ? statusFilter : 'active');
 
-  const { students, loadingStudents, studentsError: hookStudentsError, refetchStudents } = useStudents({
+  const pageOffset = useMemo(() => (Math.max(currentPage, 1) - 1) * pageSize, [currentPage, pageSize]);
+
+  const { students, studentsPagination, loadingStudents, studentsError: hookStudentsError, refetchStudents } = useStudents({
     status: effectiveStatus,
     enabled: canFetch && filtersRestored,
     orgId: activeOrgId,
     session,
+    pagination: true,
+    limit: pageSize,
+    offset: pageOffset,
+    search: searchQuery.trim(),
+    tag: tagFilter,
+    day: dayFilter ?? '',
+    sortBy,
   });
 
   const fetchComplianceSummary = useCallback(async () => {
@@ -125,7 +145,8 @@ export default function StudentsPage() {
   }, [canFetch, isAdmin, activeOrgId, session]);
 
   const fetchPendingReportsCount = useCallback(async () => {
-    if (!canFetch) {
+    if (!canFetch || !sessionRecordsEnabled) {
+      setPendingReportsCount(0);
       return;
     }
 
@@ -141,7 +162,7 @@ export default function StudentsPage() {
       // Don't show error toast - this is supplementary data
       setPendingReportsCount(0);
     }
-  }, [canFetch, activeOrgId, session]);
+  }, [canFetch, activeOrgId, session, sessionRecordsEnabled]);
 
   const refreshRoster = useCallback(async () => {
     const promises = [
@@ -179,11 +200,12 @@ export default function StudentsPage() {
       if (savedFilters.dayFilter !== undefined) setDayFilter(savedFilters.dayFilter);
       if (savedFilters.tagFilter !== undefined) setTagFilter(savedFilters.tagFilter);
       if (savedFilters.sortBy !== undefined) setSortBy(savedFilters.sortBy);
+      if (savedFilters.pageSize !== undefined) setPageSize(savedFilters.pageSize);
+      if (savedFilters.currentPage !== undefined) setCurrentPage(savedFilters.currentPage);
       
       // Admin-only filters
-      if (isAdmin) {
-        if (savedFilters.instructorFilterId !== undefined) setInstructorFilterId(savedFilters.instructorFilterId);
-        if (savedFilters.statusFilter !== undefined) setStatusFilter(savedFilters.statusFilter);
+      if (isAdmin && savedFilters.statusFilter !== undefined) {
+        setStatusFilter(savedFilters.statusFilter);
       }
       // Instructor statusFilter will be restored after permission check
     }
@@ -278,23 +300,6 @@ export default function StudentsPage() {
     };
   }, [fetchPendingReportsCount]);
 
-  // Default the view for admins/owners who are also instructors to "mine" on first visit
-  useEffect(() => {
-    if (!isAdmin || !user || !Array.isArray(instructors) || instructors.length === 0 || !activeOrgId) return;
-    
-    // Check if this admin is also an instructor
-    const isInstructor = instructors.some((i) => i?.id === user.id);
-    if (!isInstructor) return;
-    
-    // Only set default if no saved 'admin' filter exists for this org at all (truly first visit)
-    const savedFilters = loadFilterState(activeOrgId, 'admin');
-    const isFirstVisit = !savedFilters || Object.keys(savedFilters).length === 0;
-    
-    if (isFirstVisit) {
-      setInstructorFilterId(user.id);
-    }
-  }, [isAdmin, user, instructors, activeOrgId]);
-
   // Save filter state whenever it changes
   useEffect(() => {
     if (activeOrgId) {
@@ -304,69 +309,18 @@ export default function StudentsPage() {
         tagFilter,
         sortBy,
         statusFilter,
+        pageSize,
+        currentPage,
       };
-      
-      // Admin-only filter
-      if (isAdmin) {
-        filterState.instructorFilterId = instructorFilterId;
-      }
-      
+
       saveFilterState(activeOrgId, filterMode, filterState);
     }
-  }, [activeOrgId, filterMode, isAdmin, searchQuery, dayFilter, instructorFilterId, tagFilter, sortBy, statusFilter]);
+  }, [activeOrgId, filterMode, isAdmin, searchQuery, dayFilter, tagFilter, sortBy, statusFilter, pageSize, currentPage]);
 
-  // Client-side filtering and sorting - applied to all fetched students
+  // Server handles search/tag/day/sort. Just mirror the response.
   useEffect(() => {
-    let result = [...students]; // Always copy to prevent mutation
-
-    // Filter by status
-    if (isAdmin && statusFilter !== 'all') {
-      result = result.filter((s) => {
-        const isActive = s.is_active !== false;
-        return statusFilter === 'active' ? isActive : !isActive;
-      });
-    } else if (!isAdmin && canViewInactive && statusFilter !== 'all') {
-      result = result.filter((s) => {
-        const isActive = s.is_active !== false;
-        return statusFilter === 'active' ? isActive : !isActive;
-      });
-    }
-
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      result = result.filter((s) => {
-        const name = (s.name || '').toLowerCase();
-        const phone = (s.contact_phone || '').toLowerCase();
-        const nationalId = (s.national_id || '').toLowerCase();
-        return name.includes(query) || phone.includes(query) || nationalId.includes(query);
-      });
-    }
-
-    // Filter by day of week
-    if (dayFilter !== null) {
-      result = result.filter((s) => dayMatches(s.default_day_of_week, dayFilter));
-    }
-
-    // Filter by instructor (admin only)
-    if (isAdmin && instructorFilterId) {
-      result = result.filter((s) => s.assigned_instructor_id === instructorFilterId);
-    }
-
-    // Filter by tag
-    if (tagFilter) {
-      result = result.filter((s) => {
-        const studentTags = s.tags || [];
-        return studentTags.includes(tagFilter);
-      });
-    }
-
-    // Sort
-    const comparator = getStudentComparator(sortBy);
-    result.sort(comparator);
-
-    setFilteredStudents(result);
-  }, [students, isAdmin, statusFilter, searchQuery, dayFilter, instructorFilterId, tagFilter, sortBy, canViewInactive]);
+    setFilteredStudents([...students]);
+  }, [students]);
 
   const handleResetFilters = () => {
     setSearchQuery('');
@@ -374,12 +328,47 @@ export default function StudentsPage() {
     setTagFilter('');
     setSortBy(STUDENT_SORT_OPTIONS.SCHEDULE);
     setStatusFilter('active');
+    setCurrentPage(1);
     
-    // Admin-only filter
-    if (isAdmin) {
-      setInstructorFilterId('');
-    }
   };
+
+  const handleSearchQueryChange = (value) => {
+    setSearchQuery(value);
+    setCurrentPage(1);
+  };
+
+  const handleDayFilterChange = (value) => {
+    setDayFilter(value);
+    setCurrentPage(1);
+  };
+
+  const handleTagFilterChange = (value) => {
+    setTagFilter(value);
+    setCurrentPage(1);
+  };
+
+  const handleStatusFilterChange = (value) => {
+    setStatusFilter(value);
+    setCurrentPage(1);
+  };
+
+  const handlePageSizeChange = (value) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return;
+    }
+    setPageSize(parsed);
+    setCurrentPage(1);
+  };
+
+  const totalStudents = Number.isFinite(studentsPagination?.total) ? studentsPagination.total : filteredStudents.length;
+  const totalPages = Math.max(1, Math.ceil(totalStudents / Math.max(pageSize, 1)));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   // Check if any filters are active
   const hasActiveFilters = useMemo(() => {
@@ -390,11 +379,10 @@ export default function StudentsPage() {
     );
     
     if (isAdmin) {
-      return commonFilters || instructorFilterId !== '' || statusFilter !== 'active';
-    } else {
-      return commonFilters || (canViewInactive && statusFilter !== 'active');
+      return commonFilters || statusFilter !== 'active';
     }
-  }, [isAdmin, searchQuery, dayFilter, instructorFilterId, tagFilter, statusFilter, canViewInactive]);
+    return commonFilters || (canViewInactive && statusFilter !== 'active');
+  }, [isAdmin, searchQuery, dayFilter, tagFilter, statusFilter, canViewInactive]);
 
   const handleOpenAddDialog = () => {
     setCreateError('');
@@ -413,7 +401,7 @@ export default function StudentsPage() {
   };
 
   const handleAddSubmit = async (formData) => {
-    if (!session || !activeOrgId || !tenantClientReady || !activeOrgHasConnection) {
+    if (!session || !activeOrgId) {
       setCreateError('חיבור לא זמין. ודא את החיבור וניסיון מחדש.');
       return;
     }
@@ -421,18 +409,27 @@ export default function StudentsPage() {
     setIsCreatingStudent(true);
     setCreateError('');
 
+    // AddStudentForm submits Reinex camelCase structure
     const body = {
       org_id: activeOrgId,
-      name: formData.name,
-      assigned_instructor_id: formData.assigned_instructor_id,
-      tags: normalizeTagIdsForWrite(formData.tags),
-      default_service: formData.default_service || '',
-      default_day_of_week: formData.default_day_of_week,
-      default_session_time: formData.default_session_time || '',
-      national_id: formData.national_id?.trim() || '',
-      contact_name: formData.contact_name?.trim() || '',
-      contact_phone: formData.contact_phone?.trim() || '',
-      notes: formData.notes?.trim() || '',
+      // Reinex structure: separate name fields
+      first_name: formData.firstName,
+      middle_name: formData.middleName,
+      last_name: formData.lastName,
+      identity_number: formData.identityNumber,
+      date_of_birth: formData.dateOfBirth,
+      guardian_id: formData.guardianId,
+      guardian_relationship: formData.guardianRelationship,
+      phone: formData.phone,
+      email: formData.email,
+      medical_provider: formData.medicalProvider,
+      default_notification_method: formData.notificationMethod,
+      special_rate: formData.specialRate === '' ? null : toAgorot(formData.specialRate),
+      medical_flags: formData.medicalFlags,
+      onboarding_status: formData.onboardingStatus,
+      notes_internal: formData.notesInternal,
+      tags: formData.tags,
+      is_active: formData.isActive,
     };
 
     try {
@@ -446,11 +443,21 @@ export default function StudentsPage() {
       await refreshRoster();
       setIsAddDialogOpen(false);
     } catch (error) {
-      console.error('Failed to create student:', error);
+      const apiMessage = error?.data?.message || error?.message;
+      const apiCode = error?.data?.error || error?.data?.code || error?.code;
+      console.error('[students-list][POST] Failed to create student', {
+        status: error?.status,
+        code: apiCode,
+        message: apiMessage,
+      });
       let message = 'הוספת תלמיד נכשלה.';
-      if (error?.code === 'national_id_duplicate') {
+      if (apiCode === 'identity_number_duplicate' || apiMessage === 'duplicate_identity_number') {
         message = 'תעודת זהות קיימת כבר במערכת.';
-      } else if (error?.code === 'schema_upgrade_required') {
+      } else if (apiMessage === 'missing national id') {
+        message = 'יש להזין מספר זהות.';
+      } else if (apiMessage === 'invalid national id') {
+        message = 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
+      } else if (apiCode === 'schema_upgrade_required') {
         message = 'נדרשת שדרוג לסכמת מסד הנתונים.';
       }
       setCreateError(message);
@@ -460,8 +467,31 @@ export default function StudentsPage() {
     }
   };
 
-  const handleEditStudent = (student) => {
-    setStudentForEdit(student);
+  const handleEditStudent = async (student) => {
+    if (!student?.id) {
+      return;
+    }
+
+    setUpdateError('');
+    setIsLoadingStudentForEdit(true);
+
+    try {
+      const searchParams = new URLSearchParams();
+      if (activeOrgId) {
+        searchParams.set('org_id', activeOrgId);
+      }
+      const endpoint = `students-list/${student.id}${searchParams.toString() ? `?${searchParams}` : ''}`;
+      const fullStudent = await authenticatedFetch(endpoint, { session });
+
+      setStudentForEdit(fullStudent?.id ? fullStudent : student);
+    } catch (error) {
+      console.error('Failed to load full student data for edit', error);
+      // Fallback to row data so editing remains available even if enrichment fails.
+      setStudentForEdit(student);
+      toast.error('טעינת פרטי תלמיד מלאים נכשלה. ניתן להמשיך לערוך, אך ייתכן שחלק מהשדות לא יוצגו.');
+    } finally {
+      setIsLoadingStudentForEdit(false);
+    }
   };
 
   const handleEditModalClose = () => {
@@ -469,8 +499,8 @@ export default function StudentsPage() {
     setUpdateError('');
   };
 
-  const handleEditSubmit = async (studentId, updates) => {
-    if (!session || !activeOrgId || !tenantClientReady || !activeOrgHasConnection) {
+  const handleEditSubmit = async (payload) => {
+    if (!payload?.id || !session || !activeOrgId) {
       setUpdateError('חיבור לא זמין. ודא את החיבור וניסיון מחדש.');
       return;
     }
@@ -478,28 +508,25 @@ export default function StudentsPage() {
     setIsUpdatingStudent(true);
     setUpdateError('');
 
-    const body = {
-      org_id: activeOrgId,
-      ...updates,
-      tags: normalizeTagIdsForWrite(updates.tags),
-    };
-
     try {
-      await authenticatedFetch(`students-list/${studentId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        session,
-      });
+      await updateStudentFromForm(payload, { orgId: activeOrgId, session });
       toast.success('פרטי התלמיד עודכנו בהצלחה');
       await refreshRoster();
       handleEditModalClose();
     } catch (error) {
-      console.error('Failed to update student:', error);
+      const apiMessage = error?.data?.message || error?.message;
+      const apiCode = error?.data?.error || error?.data?.code || error?.code;
+      console.error('[students-list][PUT] Failed to update student', {
+        status: error?.status,
+        code: apiCode,
+        message: apiMessage,
+      });
       let message = 'עדכון פרטי התלמיד נכשל.';
-      if (error?.code === 'national_id_duplicate') {
+      if (apiCode === 'identity_number_duplicate' || apiMessage === 'duplicate_identity_number') {
         message = 'תעודת זהות קיימת כבר במערכת.';
-      } else if (error?.code === 'schema_upgrade_required') {
+      } else if (apiMessage === 'invalid national id') {
+        message = 'מספר זהות לא תקין. יש להזין 5–12 ספרות.';
+      } else if (apiCode === 'schema_upgrade_required') {
         message = 'נדרשת שדרוג לסכמת מסד הנתונים.';
       }
       setUpdateError(message);
@@ -536,10 +563,6 @@ export default function StudentsPage() {
         <div className="rounded-xl bg-neutral-50 p-lg text-center text-neutral-600" role="status">
           בחרו ארגון כדי להציג את רשימת התלמידים.
         </div>
-      ) : !activeOrgHasConnection ? (
-        <div className="rounded-xl bg-amber-50 p-lg text-center text-amber-800" role="status">
-          דרוש חיבור מאומת למסד הנתונים של הארגון כדי להציג את רשימת התלמידים.
-        </div>
       ) : isError ? (
         <div className="rounded-xl bg-red-50 p-lg text-center text-red-700" role="alert">
           {errorMessage || 'טעינת רשימת התלמידים נכשלה. נסו שוב מאוחר יותר.'}
@@ -557,7 +580,7 @@ export default function StudentsPage() {
                 {isAdmin ? 'רשימת תלמידים' : 'רשימת התלמידים שלי'}
               </CardTitle>
               <div className="flex items-center gap-2">
-                {isAdmin && (
+                {isAdmin && sessionRecordsEnabled && (
                   <Button
                     type="button"
                     variant="outline"
@@ -573,7 +596,7 @@ export default function StudentsPage() {
                     )}
                   </Button>
                 )}
-                {!isAdmin && (
+                {!isAdmin && sessionRecordsEnabled && (
                   <Button
                     type="button"
                     variant="outline"
@@ -608,23 +631,20 @@ export default function StudentsPage() {
 
             <StudentFilterSection
               searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
+              onSearchChange={handleSearchQueryChange}
               dayFilter={dayFilter}
-              onDayFilterChange={setDayFilter}
-              instructorFilterId={instructorFilterId}
-              onInstructorFilterChange={setInstructorFilterId}
+              onDayFilterChange={handleDayFilterChange}
               tagFilter={tagFilter}
-              onTagFilterChange={setTagFilter}
+              onTagFilterChange={handleTagFilterChange}
               statusFilter={statusFilter}
-              onStatusFilterChange={setStatusFilter}
+              onStatusFilterChange={handleStatusFilterChange}
               sortBy={sortBy}
               onSortChange={setSortBy}
               hasActiveFilters={hasActiveFilters}
               onResetFilters={handleResetFilters}
-              instructors={instructors}
               tags={tagOptions}
-              showInstructorFilter={isAdmin}
-              canViewInactive={isAdmin || canViewInactive}
+              showInstructorFilter={false}
+              showStatusFilter={isAdmin || canViewInactive}
             />
           </CardHeader>
 
@@ -634,108 +654,217 @@ export default function StudentsPage() {
                 לא נמצאו תלמידים התואמים את הסינון.
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-right">שם</TableHead>
-                      <TableHead className="text-right">יום מפגש</TableHead>
-                      <TableHead className="text-right">שעת מפגש</TableHead>
-                      {isAdmin && <TableHead className="text-right">מדריך</TableHead>}
-                      <TableHead className="text-right">סטטוס</TableHead>
-                      <TableHead className="text-right">פעולות</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredStudents.map((student) => {
-                      const instructor = isAdmin ? instructorMap.get(student.assigned_instructor_id) : null;
-                      const isInactive = student.is_active === false;
-                      const missingNationalId = !student.national_id?.trim();
-                      const summary = complianceSummary[student.id] || {};
-                      const hasExpiredDocs = summary.expiredDocuments > 0;
-                      const studentDisplayName = buildDisplayName({
-                        ...student,
-                        fallback: student.name,
-                      });
+              <div>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>שם</TableHead>
+                        <TableHead>יום מפגש</TableHead>
+                        <TableHead>שעת מפגש</TableHead>
+                        <TableHead>סטטוס</TableHead>
+                        <TableHead>פעולות</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredStudents.map((student) => {
+                        const isInactive = student.is_active === false;
+                        const missingIdentityNumber = !(student.identity_number || student.national_id)?.trim();
+                        const summary = complianceSummary[student.id] || {};
+                        const hasExpiredDocs = summary.expiredDocuments > 0;
+                        const additionalTemplates = Array.isArray(student?.additional_templates)
+                          ? student.additional_templates
+                          : [];
+                        const activeTemplateCount = Number.parseInt(student?.active_template_count, 10);
+                        const extraTemplateCount = Number.isInteger(activeTemplateCount) && activeTemplateCount > 1
+                          ? activeTemplateCount - 1
+                          : 0;
+                        const paymentSourceBadge = getPaymentSourceBadge(student.finance_payment_source);
+                        const additionalTemplatesTitle = additionalTemplates.length
+                          ? additionalTemplates
+                            .map((template) => {
+                              const dayLabel = DAY_NAMES[template?.day_of_week] || 'יום לא מוגדר';
+                              const timeLabel = template?.time_of_day ? formatDefaultTime(template.time_of_day) : 'שעה לא מוגדרת';
+                              return `${dayLabel} • ${timeLabel}`;
+                            })
+                            .join('\n')
+                          : '';
 
-                      return (
-                        <TableRow key={student.id}>
-                          <TableCell className="text-right">
-                            <div className="flex flex-col gap-1">
-                              <Link
-                                to={`/students/${student.id}`}
-                                className="font-medium text-primary hover:underline"
-                              >
-                                {studentDisplayName || 'ללא שם'}
-                              </Link>
-                              {isInactive && (
-                                <Badge variant="secondary" className="w-fit bg-neutral-200 text-neutral-700">
-                                  לא פעיל
+                        return (
+                          <TableRow key={student.id}>
+                            <TableCell>
+                              <div className="flex flex-col gap-1">
+                                <Link
+                                  to={`/students/${student.id}`}
+                                  className="font-medium text-primary hover:underline"
+                                >
+                                  {formatStudentName(student)}
+                                </Link>
+                                {isInactive && (
+                                  <Badge variant="secondary" className="w-fit bg-neutral-200 text-neutral-700">
+                                    לא פעיל
+                                  </Badge>
+                                )}
+                                {missingIdentityNumber && (
+                                  <Badge variant="destructive" className="w-fit gap-1">
+                                    <AlertCircle className="h-3 w-3" />
+                                    <span>חסרה תעודת זהות</span>
+                                  </Badge>
+                                )}
+                                {hasExpiredDocs && (
+                                  <Badge variant="destructive" className="w-fit gap-1">
+                                    <FileWarning className="h-3 w-3" />
+                                    <span>{summary.expiredDocuments} מסמכים שפג תוקפם</span>
+                                  </Badge>
+                                )}
+                                <Badge
+                                  variant="outline"
+                                  className={paymentSourceBadge.className}
+                                  title={paymentSourceBadge.title}
+                                >
+                                  {paymentSourceBadge.label}
                                 </Badge>
-                              )}
-                              {missingNationalId && (
-                                <Badge variant="destructive" className="w-fit gap-1">
-                                  <AlertCircle className="h-3 w-3" />
-                                  <span>חסרה תעודת זהות</span>
-                                </Badge>
-                              )}
-                              {hasExpiredDocs && (
-                                <Badge variant="destructive" className="w-fit gap-1">
-                                  <FileWarning className="h-3 w-3" />
-                                  <span>{summary.expiredDocuments} מסמכים שפג תוקפם</span>
-                                </Badge>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {student.default_day_of_week
-                              ? DAY_NAMES[student.default_day_of_week]
-                              : '—'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {student.default_session_time
-                              ? formatDefaultTime(student.default_session_time)
-                              : '—'}
-                          </TableCell>
-                          {isAdmin && (
-                            <TableCell className="text-right">
-                              {instructor ? (
-                                <span>{instructor.name || instructor.email}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center justify-start gap-2">
+                                <span>
+                                  {student.default_day_of_week
+                                    ? DAY_NAMES[student.default_day_of_week] || '—'
+                                    : '—'}
+                                </span>
+                                {extraTemplateCount > 0 ? (
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 min-w-6 rounded-full px-2 text-[10px]"
+                                        title={additionalTemplatesTitle || 'תבניות נוספות'}
+                                      >
+                                        +{extraTemplateCount}
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent align="end" className="w-64">
+                                      <div className="space-y-2">
+                                        <p className="text-xs font-semibold text-neutral-700">
+                                          תבניות נוספות לתלמיד
+                                        </p>
+                                        {additionalTemplates.length ? (
+                                          <ul className="space-y-1 text-xs text-neutral-600">
+                                            {additionalTemplates.map((template, index) => {
+                                              const dayLabel = DAY_NAMES[template?.day_of_week] || 'יום לא מוגדר';
+                                              const timeLabel = template?.time_of_day
+                                                ? formatDefaultTime(template.time_of_day)
+                                                : 'שעה לא מוגדרת';
+
+                                              return (
+                                                <li key={`${student.id}-additional-template-${index}`} className="rounded border px-2 py-1">
+                                                  {dayLabel}
+                                                  {' '}
+                                                  •
+                                                  {' '}
+                                                  {timeLabel}
+                                                </li>
+                                              );
+                                            })}
+                                          </ul>
+                                        ) : (
+                                          <p className="text-xs text-neutral-500">לא נמצאו תבניות נוספות.</p>
+                                        )}
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {student.default_session_time
+                                ? formatDefaultTime(student.default_session_time)
+                                : '—'}
+                            </TableCell>
+                            <TableCell>
+                              {isInactive ? (
+                                <Badge variant="secondary">לא פעיל</Badge>
                               ) : (
-                                <span className="text-amber-600">לא משוייך</span>
+                                <Badge variant="success">פעיל</Badge>
                               )}
                             </TableCell>
-                          )}
-                          <TableCell className="text-right">
-                            {isInactive ? (
-                              <Badge variant="secondary">לא פעיל</Badge>
-                            ) : (
-                              <Badge variant="success">פעיל</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center gap-2">
-                              <Link to={`/students/${student.id}`}>
-                                <Button variant="ghost" size="icon">
-                                  <User className="h-4 w-4" />
-                                </Button>
-                              </Link>
-                              {isAdmin && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleEditStudent(student)}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Link to={`/students/${student.id}`}>
+                                  <Button variant="ghost" size="icon">
+                                    <User className="h-4 w-4" />
+                                  </Button>
+                                </Link>
+                                {isAdmin && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    disabled={isLoadingStudentForEdit || isUpdatingStudent}
+                                    onClick={() => handleEditStudent(student)}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    מציג
+                    {' '}
+                    {totalStudents === 0 ? 0 : pageOffset + 1}
+                    {' '}
+                    -
+                    {' '}
+                    {Math.min(pageOffset + filteredStudents.length, totalStudents)}
+                    {' '}
+                    מתוך
+                    {' '}
+                    {totalStudents}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
+                      <SelectTrigger className="w-[110px]">
+                        <SelectValue placeholder="כמות" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="25">25</SelectItem>
+                        <SelectItem value="50">50</SelectItem>
+                        <SelectItem value="100">100</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                    >
+                      הקודם
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      עמוד {currentPage} מתוך {totalPages}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!studentsPagination?.hasMore}
+                      onClick={() => setCurrentPage((prev) => prev + 1)}
+                    >
+                      הבא
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
           </CardContent>
@@ -754,10 +883,10 @@ export default function StudentsPage() {
             }}
             footer={
               <AddStudentFormFooter
-                isCreating={isCreatingStudent}
-                isSubmitDisabled={addSubmitDisabled}
+                isSubmitting={isCreatingStudent}
+                disableSubmit={addSubmitDisabled}
                 onCancel={() => setIsAddDialogOpen(false)}
-                onSubmitClick={() => {
+                onSubmit={() => {
                   document.getElementById('add-student-form')?.requestSubmit();
                 }}
               />
@@ -765,22 +894,29 @@ export default function StudentsPage() {
           >
             <DialogHeader>
               <DialogTitle>הוספת תלמיד חדש</DialogTitle>
+              <DialogDescription>
+                הזן את פרטי התלמיד. מספר זהות וטלפון (או אפוטרופוס) הם שדות חובה.
+              </DialogDescription>
             </DialogHeader>
             <AddStudentForm
-              formId="add-student-form"
-              instructors={instructors}
-              tagOptions={tagOptions}
               onSubmit={handleAddSubmit}
+              onCancel={() => setIsAddDialogOpen(false)}
+              isSubmitting={isCreatingStudent}
+              error={createError}
               onSubmitDisabledChange={setAddSubmitDisabled}
               renderFooterOutside
-              openSelectCountRef={openSelectCountRef}
-              isClosingSelectRef={isClosingSelectRef}
+              onSelectOpenChange={(open) => {
+                if (open) {
+                  openSelectCountRef.current++;
+                } else {
+                  isClosingSelectRef.current = true;
+                  setTimeout(() => {
+                    openSelectCountRef.current = Math.max(0, openSelectCountRef.current - 1);
+                    isClosingSelectRef.current = false;
+                  }, 100);
+                }
+              }}
             />
-            {createError && (
-              <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-                {createError}
-              </div>
-            )}
           </DialogContent>
         </Dialog>
       )}
@@ -788,13 +924,15 @@ export default function StudentsPage() {
       {/* Admin-only: Edit Student Modal */}
       {isAdmin && studentForEdit && (
         <EditStudentModal
+          open={Boolean(studentForEdit)}
           student={studentForEdit}
-          instructors={instructors}
-          tagOptions={tagOptions}
-          isUpdating={isUpdatingStudent}
-          updateError={updateError}
+          isSubmitting={isUpdatingStudent}
+          error={updateError}
           onClose={handleEditModalClose}
           onSubmit={handleEditSubmit}
+          orgId={activeOrgId}
+          session={session}
+          onSuspendSuccess={handleMaintenanceCompleted}
         />
       )}
 
@@ -802,15 +940,14 @@ export default function StudentsPage() {
       {isAdmin && (
         <DataMaintenanceModal
           open={isMaintenanceOpen}
-          onOpenChange={setIsMaintenanceOpen}
-          instructors={instructors}
-          tags={tagOptions}
-          onImportCompleted={handleMaintenanceCompleted}
+          onClose={() => setIsMaintenanceOpen(false)}
+          orgId={activeOrgId}
+          onRefresh={handleMaintenanceCompleted}
         />
       )}
 
       {/* Instructor-only: Pending Reports Dialog */}
-      {!isAdmin && (
+      {!isAdmin && sessionRecordsEnabled && (
         <Dialog open={pendingReportsDialogOpen} onOpenChange={setPendingReportsDialogOpen}>
           <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>

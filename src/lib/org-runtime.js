@@ -36,7 +36,7 @@ export function activateOrg(config) {
   const normalized = normalizeOrgConfig(config);
 
   if (!normalized) {
-    throw new MissingRuntimeConfigError('supabase_url ו-anon_key נדרשים להפעלת החיבור.');
+    throw new MissingRuntimeConfigError('נדרשים ערכי supabaseUrl ו-supabaseAnonKey להפעלת החיבור.');
   }
 
   currentOrg = normalized;

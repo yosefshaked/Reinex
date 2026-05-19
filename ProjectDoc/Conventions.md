@@ -101,7 +101,7 @@ src/features/<feature>/
 ### Session Entry Flow
 - New session modal and form: `src/features/sessions/components/`
 - Questions loaded from `settings.session_form_config.current.questions`
-- Services suggestions from `settings.available_services` with free-typing via `input` + `datalist`
+- Service suggestions loaded from `GET /api/services` backed by the `Services` table; free-typing may still be allowed in specific form fields
 
 ---
 
@@ -184,10 +184,10 @@ Prefer **validation errors (4xx)** with precise, machine-readable message codes:
   - Write new `current`; push previous `current` into `history` array with timestamp.
   - Frontend always reads `current.questions`; `history` is for admin UI and audits.
 
-### Available Services
-- **Key:** `available_services`
-- **Type:** Array of strings
-- **Usage:** Rendered as `datalist` suggestions in session form; allows free-typing.
+### Services Catalog
+- **Source of truth:** `Services` table
+- **API:** `GET /api/services`, `POST /api/services`, `PUT /api/services/{serviceId}`
+- **Usage:** All service pickers and service-management flows should use the services API rather than a settings row.
 
 ---
 

@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { requestPasswordReset } from '@/api/password-reset.js';
 import {
   extractSupabaseParams,
   removeSupabaseParams,
@@ -12,8 +13,6 @@ const FALLBACK_REDIRECT_URL = import.meta?.env?.VITE_PUBLIC_APP_URL
   || import.meta?.env?.VITE_APP_BASE_URL
   || import.meta?.env?.VITE_SITE_URL
   || null;
-
-const PASSWORD_RESET_HASH_PATH = '#/update-password';
 
 function extractProfile(session) {
   const user = session?.user;
@@ -71,25 +70,7 @@ function resolveRedirectUrl() {
   return undefined;
 }
 
-function resolvePasswordResetRedirectUrl() {
-  let baseUrl = null;
-
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    baseUrl = window.location.origin;
-  } else if (FALLBACK_REDIRECT_URL) {
-    baseUrl = FALLBACK_REDIRECT_URL;
-  }
-
-  if (!baseUrl) {
-    return undefined;
-  }
-
-  const sanitizedBase = baseUrl.split('#')[0].replace(/\/+$/, '');
-  return `${sanitizedBase}/${PASSWORD_RESET_HASH_PATH}`;
-}
-
 export function AuthProvider({ children }) {
-  console.log('[DEBUG 6] AuthProvider rendering.');
   const { authClient, session: supabaseSession, loading } = useSupabase();
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -135,17 +116,16 @@ export function AuthProvider({ children }) {
   }, [ensureAuthClient]);
 
   const resetPasswordForEmail = useCallback(async (email) => {
-    const client = ensureAuthClient();
-    const redirectTo = resolvePasswordResetRedirectUrl();
-    const options = redirectTo ? { redirectTo } : undefined;
-    const { data, error } = await client.auth.resetPasswordForEmail(email, options);
-    if (error) throw error;
-    return data;
-  }, [ensureAuthClient]);
+    return requestPasswordReset(email);
+  }, []);
 
-  const updatePassword = useCallback(async (password) => {
+  const updatePassword = useCallback(async (password, options = {}) => {
     const client = ensureAuthClient();
-    const { data, error } = await client.auth.updateUser({ password });
+    const attributes = { password };
+    if (options.currentPassword) {
+      attributes.current_password = options.currentPassword;
+    }
+    const { data, error } = await client.auth.updateUser(attributes);
     if (error) throw error;
     return data;
   }, [ensureAuthClient]);

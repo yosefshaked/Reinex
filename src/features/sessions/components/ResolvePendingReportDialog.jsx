@@ -14,7 +14,7 @@ import { assignLooseSession, createAndAssignLooseSession } from '@/features/sess
 import AddStudentForm from '@/features/admin/components/AddStudentForm.jsx';
 import { mapLooseSessionError } from '@/lib/error-mapping.js';
 import { DAY_NAMES } from '@/features/students/utils/schedule.js';
-import { buildDisplayName } from '@/lib/person-name.js';
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
 
 const REQUEST_STATE = Object.freeze({
   idle: 'idle',
@@ -173,7 +173,7 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
       await createAndAssignLooseSession({
         sessionId: report.id,
         name: studentPayload.name,
-        nationalId: studentPayload.nationalId,
+        identityNumber: studentPayload.identityNumber,
         assignedInstructorId: studentPayload.assignedInstructorId,
         defaultService: studentPayload.defaultService,
         orgId: activeOrgId,
@@ -205,7 +205,7 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
           <DialogTitle>שיוך דיווח ממתין</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 overflow-y-auto max-h-[calc(90vh-8rem)]" dir="rtl">
+        <div className="space-y-4 overflow-y-auto max-h-[calc(90vh-8rem)]">
           <div className="rounded-lg bg-neutral-50 p-3 text-sm">
             <p className="font-medium text-foreground">פרטי הדיווח:</p>
             <p className="text-neutral-600 mt-1 break-words">שם: {unassignedName}</p>
@@ -241,16 +241,16 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
           ) : currentMode === 'assign' ? (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="student-search" className="block text-right">חיפוש תלמיד</Label>
+                <Label htmlFor="student-search" className="block text-end">חיפוש תלמיד</Label>
                 <div className="relative">
-                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+                  <Search className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
                   <Input
                     id="student-search"
                     placeholder="חפשו לפי שם, איש קשר או טלפון..."
                     value={studentQuery}
                     onChange={(e) => setStudentQuery(e.target.value)}
                     disabled={isSubmitting}
-                    className="pr-10"
+                    className="pe-10"
                   />
                 </div>
               </div>
@@ -309,7 +309,7 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">כל המדריכים</SelectItem>
-                        {instructors.map((inst) => (
+                        {instructors.filter(inst => inst?.id).map((inst) => (
                           <SelectItem key={inst.id} value={inst.id}>
                             {inst.name}
                           </SelectItem>
@@ -374,7 +374,7 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="student-select" className="block text-right">בחרו תלמיד *</Label>
+                <Label htmlFor="student-select" className="block text-end">בחרו תלמיד *</Label>
                 <Select
                   value={selectedStudentId}
                   onValueChange={setSelectedStudentId}
@@ -385,24 +385,22 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
                   </SelectTrigger>
                   <SelectContent className="max-h-[250px] sm:max-h-[300px]">
                     {filteredStudents.map((student) => (
-                      <SelectItem key={student.id} value={student.id} className="text-right">
-                        <span className="block truncate">
-                          {buildDisplayName({ ...student, fallback: student.name }) || 'ללא שם'}
-                        </span>
+                      <SelectItem key={student.id} value={student.id} className="text-end">
+                        <span className="block truncate">{formatStudentName(student) || 'ללא שם'}</span>
                         {student.contact_name && <span className="text-xs text-neutral-500"> ({student.contact_name})</span>}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 {filteredStudents.length === 0 && (
-                  <p className="text-xs text-neutral-500 text-right">
+                  <p className="text-xs text-neutral-500 text-end">
                     לא נמצאו תלמידים. נסו חיפוש אחר או צרו תלמיד חדש.
                   </p>
                 )}
               </div>
 
               {error && (
-                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700 text-right">
+                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700 text-end">
                   {error}
                 </div>
               )}

@@ -1,23 +1,13 @@
 /* eslint-env node */
-import process from 'node:process';
-import { json, resolveBearerAuthorization } from '../_shared/http.js';
+import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
-
-function readEnv(context) {
-  return context?.env ?? process.env ?? {};
-}
+import { readEnv, respond } from '../_shared/org-bff.js';
 
 function normalizeMetadata(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
   }
   return value;
-}
-
-function respond(context, status, body, extraHeaders) {
-  const response = json(status, body, extraHeaders);
-  context.res = response;
-  return response;
 }
 
 export default async function (context, req) {
@@ -35,7 +25,7 @@ export default async function (context, req) {
 
   if (!hasBearer) {
     context.log?.warn?.('users-me missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
@@ -45,7 +35,7 @@ export default async function (context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('users-me getUser threw', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
@@ -53,7 +43,7 @@ export default async function (context, req) {
       hasBearer,
       status: 401,
     });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -66,7 +56,7 @@ export default async function (context, req) {
       userId,
       message: error?.message,
     });
-    return respond(context, 500, { message: 'failed to load user' });
+    return respond(context, 500, { message: 'failed_to_load_user' });
   }
 
   if (adminResult.error) {
@@ -76,15 +66,15 @@ export default async function (context, req) {
       status,
     });
     if (status === 404) {
-      return respond(context, 404, { message: 'user not found' });
+      return respond(context, 404, { message: 'user_not_found' });
     }
-    return respond(context, status, { message: 'failed to load user' });
+    return respond(context, status, { message: 'failed_to_load_user' });
   }
 
   const user = adminResult.data?.user;
   if (!user?.id) {
     context.log?.warn?.('users-me admin lookup returned no user', { userId });
-    return respond(context, 404, { message: 'user not found' });
+    return respond(context, 404, { message: 'user_not_found' });
   }
 
   const metadata = normalizeMetadata(user.raw_user_meta_data) ?? normalizeMetadata(user.user_metadata);

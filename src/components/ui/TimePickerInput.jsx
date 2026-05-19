@@ -176,7 +176,7 @@ export default function TimePickerInput({ id, name, value, onChange, disabled, r
           onKeyDown={onKeyDown}
           disabled={disabled}
           required={required}
-          className={cn(dir === 'rtl' ? 'text-right' : 'text-left', 'placeholder:text-right', className)}
+          className={cn(dir === 'rtl' ? 'text-end' : 'text-start', 'placeholder:text-end', className)}
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-controls={open ? `${id || name}-time-list` : undefined}
@@ -185,7 +185,7 @@ export default function TimePickerInput({ id, name, value, onChange, disabled, r
           <button
             type="button"
             aria-label="פתח רשימת שעות"
-            className="absolute inset-y-0 left-2 flex items-center text-muted-foreground hover:text-foreground pointer-events-auto"
+            className="absolute inset-y-0 start-2 flex items-center text-muted-foreground hover:text-foreground pointer-events-auto"
             tabIndex={-1}
             disabled={disabled}
           >

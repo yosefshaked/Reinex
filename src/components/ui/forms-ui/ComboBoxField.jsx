@@ -8,6 +8,7 @@ export default function ComboBoxField({
   label,
   value,
   onChange,
+  onOptionSelect,
   options = [],
   placeholder,
   required = false,
@@ -16,8 +17,12 @@ export default function ComboBoxField({
   error = '',
   dir = 'rtl',
   emptyMessage = 'לא נמצאו תוצאות',
+  emptyText,
+  allowCustomValue = true,
   className,
 }) {
+  const resolvedEmptyMessage = emptyText || emptyMessage;
+
   return (
     <FormField id={id} label={label} required={required} description={description} error={error}>
       <ComboBoxInput
@@ -25,12 +30,14 @@ export default function ComboBoxField({
         name={name}
         value={value}
         onChange={onChange}
+        onOptionSelect={onOptionSelect}
         options={options}
         placeholder={placeholder}
         required={required}
         disabled={disabled}
         dir={dir}
-        emptyMessage={emptyMessage}
+        emptyMessage={resolvedEmptyMessage}
+        allowCustomValue={allowCustomValue}
         className={className}
       />
     </FormField>

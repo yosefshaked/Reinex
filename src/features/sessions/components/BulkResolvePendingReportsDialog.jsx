@@ -18,9 +18,8 @@ import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';
 import { assignLooseSession, createAndAssignLooseSession } from '@/features/sessions/api/loose-sessions.js';
 import { mapLooseSessionError } from '@/lib/error-mapping.js';
 import AddStudentForm from '@/features/admin/components/AddStudentForm.jsx';
-import { buildDisplayName } from '@/lib/person-name.js';
-
-const DAY_NAMES = ['', 'ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+import { formatStudentName } from '@/features/students/utils/name-utils.js';
+import { DAY_NAMES } from '@/features/students/utils/schedule.js';
 
 const RESOLUTION_MODE = Object.freeze({
   SELECT: 'select',
@@ -197,7 +196,7 @@ export default function BulkResolvePendingReportsDialog({
         const result = await createAndAssignLooseSession({
           sessionId: report.id,
           name: studentData.name,
-          nationalId: studentData.nationalId,
+          identityNumber: studentData.identityNumber,
           assignedInstructorId: studentData.assignedInstructorId,
           defaultService: studentData.defaultService || null,
           orgId: activeOrgId,
@@ -265,15 +264,15 @@ export default function BulkResolvePendingReportsDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-right">שיוך מרובה - {reports.length} דיווחים</DialogTitle>
+          <DialogTitle className="text-end">שיוך מרובה - {reports.length} דיווחים</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           {/* Summary */}
           <div className="rounded-lg bg-neutral-50 p-3 space-y-2">
-            <p className="text-sm font-medium text-foreground text-right">דיווחים נבחרים:</p>
+            <p className="text-sm font-medium text-foreground text-end">דיווחים נבחרים:</p>
             <div className="flex flex-wrap gap-2">
               {reportNames.map((name) => (
                 <Badge key={name} variant="outline">
@@ -282,7 +281,7 @@ export default function BulkResolvePendingReportsDialog({
               ))}
             </div>
             {hasMultipleNames && (
-              <p className="text-xs text-neutral-600 text-right">
+              <p className="text-xs text-neutral-600 text-end">
                 ⚠️ שים לב: נבחרו דיווחים עם שמות שונים. כל הדיווחים ישוייכו לאותו תלמיד.
               </p>
             )}
@@ -291,7 +290,7 @@ export default function BulkResolvePendingReportsDialog({
           {/* Mode Selection */}
           {mode === RESOLUTION_MODE.SELECT && (
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground text-right">
+              <p className="text-sm text-muted-foreground text-end">
                 בחר פעולה לביצוע עבור כל הדיווחים הנבחרים:
               </p>
               <div className="grid grid-cols-1 gap-3">
@@ -299,13 +298,13 @@ export default function BulkResolvePendingReportsDialog({
                   variant="outline"
                   className="h-auto p-4 flex flex-col items-start gap-2"
                   onClick={() => handleModeSelect(RESOLUTION_MODE.ASSIGN_EXISTING)}
-                  dir="rtl"
+                 
                 >
                   <div className="flex items-center gap-2 w-full">
                     <Users className="h-5 w-5" />
                     <span className="font-semibold">שיוך לתלמיד קיים</span>
                   </div>
-                  <p className="text-xs text-muted-foreground text-right">
+                  <p className="text-xs text-muted-foreground text-end">
                     שייך את כל הדיווחים לתלמיד אחד מהרשימה
                   </p>
                 </Button>
@@ -314,13 +313,13 @@ export default function BulkResolvePendingReportsDialog({
                   variant="outline"
                   className="h-auto p-4 flex flex-col items-start gap-2"
                   onClick={() => handleModeSelect(RESOLUTION_MODE.CREATE_NEW)}
-                  dir="rtl"
+                 
                 >
                   <div className="flex items-center gap-2 w-full">
                     <UserPlus className="h-5 w-5" />
                     <span className="font-semibold">יצירת תלמיד חדש</span>
                   </div>
-                  <p className="text-xs text-muted-foreground text-right">
+                  <p className="text-xs text-muted-foreground text-end">
                     צור תלמיד חדש ושייך אליו את כל הדיווחים
                   </p>
                 </Button>
@@ -333,7 +332,7 @@ export default function BulkResolvePendingReportsDialog({
             <div className="space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="student-select" className="text-right block">
+                  <Label htmlFor="student-select" className="text-end block">
                     בחר תלמיד <span className="text-destructive">*</span>
                   </Label>
                   {!studentsLoading && (
@@ -350,9 +349,9 @@ export default function BulkResolvePendingReportsDialog({
                       value={studentSearchQuery}
                       onChange={(e) => setStudentSearchQuery(e.target.value)}
                       disabled={studentsLoading || isProcessing}
-                      className="pr-10"
+                      className="pe-10"
                     />
-                    <svg className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                   </div>
@@ -366,10 +365,8 @@ export default function BulkResolvePendingReportsDialog({
                     </SelectTrigger>
                     <SelectContent className="max-h-[250px] sm:max-h-[300px]">
                       {filteredStudents.map((student) => (
-                        <SelectItem key={student.id} value={student.id} className="text-right">
-                          <span className="block truncate">
-                            {buildDisplayName({ ...student, fallback: student.name }) || 'ללא שם'}
-                          </span>
+                        <SelectItem key={student.id} value={student.id} className="text-end">
+                          <span className="block truncate">{formatStudentName(student) || 'ללא שם'}</span>
                           {student.contact_name && <span className="text-xs text-neutral-500"> ({student.contact_name})</span>}
                         </SelectItem>
                       ))}
@@ -437,7 +434,7 @@ export default function BulkResolvePendingReportsDialog({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">כל המדריכים</SelectItem>
-                        {instructors.map((inst) => (
+                        {instructors.filter(inst => inst?.id).map((inst) => (
                           <SelectItem key={inst.id} value={inst.id}>
                             {inst.name}
                           </SelectItem>
@@ -455,14 +452,11 @@ export default function BulkResolvePendingReportsDialog({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">כל הימים</SelectItem>
-                        {DAY_NAMES.map((day, index) => {
-                          if (index === 0) return null;
-                          return (
-                            <SelectItem key={index} value={String(index)}>
-                              {day}
-                            </SelectItem>
-                          );
-                        })}
+                        {Object.entries(DAY_NAMES).map(([dayValue, dayLabel]) => (
+                          <SelectItem key={dayValue} value={dayValue}>
+                            {dayLabel}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -523,7 +517,7 @@ export default function BulkResolvePendingReportsDialog({
           {mode === RESOLUTION_MODE.CREATE_NEW && (
             <div className="space-y-4">
               <div className="rounded-lg bg-neutral-50 p-3">
-                <p className="text-sm text-neutral-600 text-right">
+                <p className="text-sm text-neutral-600 text-end">
                   תלמיד חדש ייווצר ו-{reports.length} דיווחים ישוייכו אליו.
                 </p>
               </div>
@@ -531,10 +525,9 @@ export default function BulkResolvePendingReportsDialog({
               <AddStudentForm
                 onSubmit={handleCreateAndAssign}
                 onCancel={() => setMode(RESOLUTION_MODE.SELECT)}
-                submitLabel={`צור ושייך ${reports.length} דיווחים`}
-                submitDisabled={isProcessing}
+                isSubmitting={isProcessing}
                 renderFooterOutside={false}
-                initialValues={suggestedInstructorId ? { assignedInstructorId: suggestedInstructorId } : {}}
+                initialValues={suggestedInstructorId ? { assignedInstructorId: suggestedInstructorId } : undefined}
               />
             </div>
           )}

@@ -243,7 +243,7 @@ export default function DataMaintenanceModal({ open, onClose, orgId, onRefresh }
           </DialogTitle>
           {showHelp ? (
             <DialogPrimitive.Close
-              className="absolute left-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
+              className="absolute start-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
             >
               <X className="h-4 w-4" />
               <span className="sr-only">סגור</span>
@@ -274,7 +274,7 @@ export default function DataMaintenanceModal({ open, onClose, orgId, onRefresh }
           />
         ) : unmatchedTags.length > 0 ? (
           // Tag Mapping UI
-          <div className="space-y-4 text-sm text-neutral-700 text-right" dir="rtl">
+          <div className="space-y-4 text-sm text-neutral-700 text-end">
             <p className="text-neutral-600">
               התוויות הבאות בקובץ CSV לא נמצאו בקטלוג. אנא מפו אותן לתוויות קיימות:
             </p>
@@ -331,7 +331,7 @@ export default function DataMaintenanceModal({ open, onClose, orgId, onRefresh }
             </div>
           </div>
         ) : (
-          <div className="space-y-4 text-sm text-neutral-700 text-right" dir="rtl">
+          <div className="space-y-4 text-sm text-neutral-700 text-end">
             <p className="text-neutral-600">
               הורידו את קובץ התחזוקה כדי למלא שדות חסרים (תעודת זהות, טלפון, מדריך, תוויות ועוד) ואז העלו את הקובץ המעודכן.
               מזהה המערכת (UUID) משמש להשוואת השורות, ולכן אין למחוק או לערוך אותו.
@@ -342,7 +342,7 @@ export default function DataMaintenanceModal({ open, onClose, orgId, onRefresh }
                 <p className="font-semibold text-neutral-900">2. העלאת CSV מעודכן</p>
                 <form className="space-y-2" onSubmit={handleImport}>
                   <div className="space-y-1">
-                    <Label htmlFor="maintenance-upload" className="block text-right">בחרו קובץ CSV</Label>
+                    <Label htmlFor="maintenance-upload" className="block text-end">בחרו קובץ CSV</Label>
                   <Input
                     id="maintenance-upload"
                     type="file"

@@ -9,10 +9,11 @@
  */
 
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
-import { ensureMembership, resolveTenantClient, readEnv, respond } from '../_shared/org-bff.js';
+import { ensureMembership, readEnv, respond, withOrgScope } from '../_shared/org-bff.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { decryptStorageProfile } from '../_shared/storage-encryption.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 import multipart from 'parse-multipart-data';
 import { createHash } from 'crypto';
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
@@ -31,6 +32,14 @@ const ALLOWED_MIME_TYPES = [
 ];
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+function trackedResult(status, body, error, metadata = {}) {
+  return {
+    status,
+    body,
+    tracking: { error, metadata },
+  };
+}
 
 /**
  * Validate entity type and permissions
@@ -64,25 +73,50 @@ function validateEntityAccess(entityType, userRole, userId, entityId, isAdmin, o
   return { valid: true };
 }
 
+async function validateEntityAccessForRequest(client, orgId, entityType, userId, entityId, isAdmin, operation = null) {
+  const baseValidation = validateEntityAccess(entityType, null, userId, entityId, isAdmin, operation);
+  if (!baseValidation.valid) {
+    return baseValidation;
+  }
+
+  if (entityType !== 'instructor' || isAdmin) {
+    return { valid: true };
+  }
+
+  const { data: employee, error } = await withOrgScope(client, 'Employees', orgId)
+    .select('id, user_id')
+    .eq('id', entityId)
+    .maybeSingle();
+
+  if (error) {
+    return { valid: false, error: 'failed_to_verify_entity_access' };
+  }
+
+  if (!employee || employee.user_id !== userId) {
+    return { valid: false, error: 'permission_denied' };
+  }
+
+  return { valid: true };
+}
+
 /**
  * GET - List documents for an entity
  */
-async function handleGet(req, supabase, tenantClient, orgId, userId, userRole, isAdmin) {
+async function handleGet(req, supabase, client, orgId, userId, userRole, isAdmin) {
   const { entity_type, entity_id } = req.query;
 
   if (!entity_type || !entity_id) {
-    return { status: 400, body: { error: 'entity_type and entity_id required' } };
+    return { status: 400, body: { error: 'entity_type_and_entity_id_required' } };
   }
 
-  const validation = validateEntityAccess(entity_type, userRole, userId, entity_id, isAdmin, 'GET');
+  const validation = await validateEntityAccessForRequest(client, orgId, entity_type, userId, entity_id, isAdmin, 'GET');
   if (!validation.valid) {
     return { status: 403, body: { error: validation.error } };
   }
 
   // For organization documents, check member visibility setting if user is not admin
   if (entity_type === 'organization' && !isAdmin) {
-    const { data: visibilitySetting } = await tenantClient
-      .from('Settings')
+    const { data: visibilitySetting } = await withOrgScope(client, 'Settings', orgId)
       .select('settings_value')
       .eq('key', 'org_documents_member_visibility')
       .single();
@@ -94,8 +128,7 @@ async function handleGet(req, supabase, tenantClient, orgId, userId, userRole, i
   }
 
   // Fetch documents from Documents table
-  const { data: documents, error } = await tenantClient
-    .from('Documents')
+  const { data: documents, error } = await withOrgScope(client, 'Documents', orgId)
     .select('*')
     .eq('entity_type', entity_type)
     .eq('entity_id', entity_id)
@@ -108,23 +141,20 @@ async function handleGet(req, supabase, tenantClient, orgId, userId, userRole, i
         status: 424, 
         body: { 
           error: 'documents_table_not_found', 
-          message: 'Documents table does not exist. Please run the setup script.', 
-          details: error.message,
-          hint: 'Run setup-sql.js on the tenant database to create the Documents table'
+          message: 'documents_table_does_not_exist_please_run_the_setup_script'
         } 
       };
     }
     
-    return { 
-      status: 500, 
-      body: { 
-        error: 'fetch_failed', 
-        message: error.message,
-        details: error.details,
-        code: error.code,
-        hint: error.hint
-      } 
-    };
+    return trackedResult(500, { error: 'fetch_failed' }, error, {
+      action: 'list_documents',
+      orgId,
+      userId,
+      entityType: entity_type,
+      entityId: entity_id,
+      table: 'Documents',
+      operation: 'select',
+    });
   }
 
   return { status: 200, body: { documents: documents || [] } };
@@ -133,7 +163,7 @@ async function handleGet(req, supabase, tenantClient, orgId, userId, userRole, i
 /**
  * POST - Upload document
  */
-async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail, userRole, isAdmin, context, env, multipartParts = null) {
+async function handlePost(req, supabase, client, orgId, userId, userEmail, userRole, isAdmin, context, env, multipartParts = null) {
   const contentType = req.headers['content-type'] || '';
   const boundary = contentType.split('boundary=')[1];
 
@@ -169,7 +199,7 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
   const entityId = entityIdPart.data.toString('utf8');
 
   // Validate permissions once (applies to all files)
-  const validation = validateEntityAccess(entityType, userRole, userId, entityId, isAdmin, 'POST');
+  const validation = await validateEntityAccessForRequest(client, orgId, entityType, userId, entityId, isAdmin, 'POST');
   if (!validation.valid) {
     return { status: 403, body: { error: validation.error } };
   }
@@ -227,17 +257,27 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
       // Get entity name for file naming (cache after first lookup)
       if (entityName === null) {
         if (entityType === 'student') {
-          const { data: student, error: studentError } = await tenantClient.from('Students').select('name').eq('id', entityId).single();
+          const { data: student, error: studentError } = await withOrgScope(client, 'students', orgId)
+            .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
+            .eq('id', entityId)
+            .single();
           if (studentError) {
             console.error('Failed to fetch student name:', { entityId, error: studentError.message });
           }
-          entityName = student?.name || 'Unknown';
+          entityName = [
+            student?.client_profile?.first_name,
+            student?.client_profile?.middle_name,
+            student?.client_profile?.last_name,
+          ].filter(Boolean).join(' ') || 'Unknown';
         } else if (entityType === 'instructor') {
-          const { data: instructor, error: instructorError } = await tenantClient.from('Instructors').select('name').eq('id', entityId).single();
+          const { data: instructor, error: instructorError } = await withOrgScope(client, 'Employees', orgId)
+            .select('first_name, last_name')
+            .eq('id', entityId)
+            .maybeSingle();
           if (instructorError) {
             console.error('Failed to fetch instructor name:', { entityId, error: instructorError.message });
           }
-          entityName = instructor?.name || 'Unknown';
+          entityName = [instructor?.first_name, instructor?.last_name].filter(Boolean).join(' ') || 'Unknown';
         } else {
           entityName = '';
         }
@@ -253,8 +293,7 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
       let definitionName = null;
       if (definitionId) {
         const settingsKey = entityType === 'instructor' ? 'instructor_document_definitions' : 'document_definitions';
-        const { data: settingsRow } = await tenantClient
-          .from('Settings')
+        const { data: settingsRow } = await withOrgScope(client, 'Settings', orgId)
           .select('settings_value')
           .eq('key', settingsKey)
           .single();
@@ -271,9 +310,9 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
       // Load storage profile (cache after first lookup)
       if (storageProfile === null) {
         const { data: orgSettings } = await supabase
-          .from('org_settings')
+          .from('organizations')
           .select('storage_profile')
-          .eq('org_id', orgId)
+          .eq('id', orgId)
           .single();
 
         if (!orgSettings?.storage_profile) {
@@ -331,15 +370,14 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
       };
 
       // Insert into Documents table first to get auto-generated UUID
-      const { data: insertedDoc, error: insertError } = await tenantClient
-        .from('Documents')
+      const { data: insertedDoc, error: insertError } = await withOrgScope(client, 'Documents', orgId)
         .insert([tempDocRecord])
         .select()
         .single();
 
       if (insertError || !insertedDoc) {
         console.error('Document insert error:', insertError);
-        errors.push({ fileName, error: 'insert_failed', details: insertError?.message });
+        errors.push({ fileName, error: 'insert_failed' });
         continue;
       }
 
@@ -360,14 +398,13 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
       } catch (err) {
         console.error('Storage upload error:', err);
         // Rollback: delete the document record
-        await tenantClient.from('Documents').delete().eq('id', fileId);
-        errors.push({ fileName, error: 'upload_failed', details: err.message });
+        await withOrgScope(client, 'Documents', orgId).delete().eq('id', fileId);
+        errors.push({ fileName, error: 'upload_failed' });
         continue;
       }
 
       // Update the document with the correct path and URL
-      const { error: updateError } = await tenantClient
-        .from('Documents')
+      const { error: updateError } = await withOrgScope(client, 'Documents', orgId)
         .update({ 
           path: storagePath,
           url: uploadResult.url 
@@ -382,8 +419,8 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
         } catch (cleanupErr) {
           console.error('Cleanup error after failed path update:', cleanupErr);
         }
-        await tenantClient.from('Documents').delete().eq('id', fileId);
-        errors.push({ fileName, error: 'path_update_failed', details: updateError.message });
+        await withOrgScope(client, 'Documents', orgId).delete().eq('id', fileId);
+        errors.push({ fileName, error: 'path_update_failed' });
         continue;
       }
 
@@ -427,7 +464,7 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
 
     } catch (err) {
       console.error(`Error processing file ${fileName}:`, err);
-      errors.push({ fileName, error: 'processing_failed', details: err.message });
+      errors.push({ fileName, error: 'processing_failed' });
     }
   }
 
@@ -449,7 +486,7 @@ async function handlePost(req, supabase, tenantClient, orgId, userId, userEmail,
 /**
  * PUT - Update document metadata
  */
-async function handlePut(req, supabase, tenantClient, orgId, userId, userEmail, userRole, isAdmin) {
+async function handlePut(req, supabase, client, orgId, userId, userEmail, userRole, isAdmin) {
   let documentId = req.params?.id;
   
   // Fallback: extract from URL if params not populated
@@ -472,8 +509,7 @@ async function handlePut(req, supabase, tenantClient, orgId, userId, userEmail, 
   const { name, relevant_date, expiration_date, resolved } = req.body;
 
   // Fetch existing document
-  const { data: existingDoc, error: fetchError } = await tenantClient
-    .from('Documents')
+  const { data: existingDoc, error: fetchError } = await withOrgScope(client, 'Documents', orgId)
     .select('*')
     .eq('id', documentId)
     .single();
@@ -483,7 +519,15 @@ async function handlePut(req, supabase, tenantClient, orgId, userId, userEmail, 
   }
 
   // Validate permissions
-  const validation = validateEntityAccess(existingDoc.entity_type, userRole, userId, existingDoc.entity_id, isAdmin, 'DELETE');
+  const validation = await validateEntityAccessForRequest(
+    client,
+    orgId,
+    existingDoc.entity_type,
+    userId,
+    existingDoc.entity_id,
+    isAdmin,
+    'PUT',
+  );
   if (!validation.valid) {
     return { status: 403, body: { error: validation.error } };
   }
@@ -517,28 +561,25 @@ async function handlePut(req, supabase, tenantClient, orgId, userId, userEmail, 
   updates.updated_at = new Date().toISOString();
 
   // Update document
-  const { error: updateError } = await tenantClient
-    .from('Documents')
+  const { error: updateError } = await withOrgScope(client, 'Documents', orgId)
     .update(updates)
     .eq('id', documentId);
 
   if (updateError) {
     console.error('Document update error:', updateError);
-    return { status: 500, body: { error: 'update_failed', details: updateError.message } };
+    return trackedResult(500, { error: 'update_failed' }, updateError, {
+      action: 'update_document_metadata',
+      orgId,
+      userId,
+      documentId,
+      entityType: existingDoc.entity_type,
+      entityId: existingDoc.entity_id,
+      table: 'Documents',
+      operation: 'update',
+    });
   }
 
   // Audit log
-  console.log('[DEBUG] Preparing audit log for document update', {
-    hasOrgId: !!orgId,
-    hasUserId: !!userId,
-    hasUserEmail: !!userEmail,
-    hasUserRole: !!userRole,
-    orgId,
-    userId,
-    userEmail,
-    userRole
-  });
-  
   await logAuditEvent(supabase, {
     orgId,
     userId,
@@ -562,7 +603,7 @@ async function handlePut(req, supabase, tenantClient, orgId, userId, userEmail, 
 /**
  * DELETE - Remove document
  */
-async function handleDelete(req, supabase, tenantClient, orgId, userId, userEmail, userRole, isAdmin, env) {
+async function handleDelete(req, supabase, client, orgId, userId, userEmail, userRole, isAdmin, env) {
   let documentId = req.params?.id;
   
   // Fallback: extract from URL if params not populated
@@ -582,11 +623,8 @@ async function handleDelete(req, supabase, tenantClient, orgId, userId, userEmai
     return { status: 400, body: { error: 'document_id_required' } };
   }
 
-  console.log('[DEBUG] handleDelete: Processing deletion');
-
   // Fetch existing document
-  const { data: existingDoc, error: fetchError } = await tenantClient
-    .from('Documents')
+  const { data: existingDoc, error: fetchError } = await withOrgScope(client, 'Documents', orgId)
     .select('*')
     .eq('id', documentId)
     .single();
@@ -600,16 +638,24 @@ async function handleDelete(req, supabase, tenantClient, orgId, userId, userEmai
     return { status: 403, body: { error: 'admin_required' } };
   }
 
-  const validation = validateEntityAccess(existingDoc.entity_type, userRole, userId, existingDoc.entity_id, isAdmin);
+  const validation = await validateEntityAccessForRequest(
+    client,
+    orgId,
+    existingDoc.entity_type,
+    userId,
+    existingDoc.entity_id,
+    isAdmin,
+    'DELETE',
+  );
   if (!validation.valid) {
     return { status: 403, body: { error: validation.error } };
   }
 
   // Load storage profile
   const { data: orgSettings } = await supabase
-    .from('org_settings')
+    .from('organizations')
     .select('storage_profile')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .single();
 
   if (!orgSettings?.storage_profile) {
@@ -633,7 +679,15 @@ async function handleDelete(req, supabase, tenantClient, orgId, userId, userEmai
     }
   } catch (err) {
     console.error('Storage driver initialization error:', err);
-    return { status: 500, body: { error: 'storage_init_failed' } };
+    return trackedResult(500, { error: 'storage_init_failed' }, err, {
+      action: 'initialize_storage_driver',
+      orgId,
+      userId,
+      documentId,
+      entityType: existingDoc.entity_type,
+      entityId: existingDoc.entity_id,
+      storageMode: storageProfile?.mode || null,
+    });
   }
 
   // Delete from storage
@@ -641,18 +695,36 @@ async function handleDelete(req, supabase, tenantClient, orgId, userId, userEmai
     await driver.delete(existingDoc.path);
   } catch (err) {
     console.error('Storage deletion error:', err);
-    // Continue with database deletion even if storage fails
+    return trackedResult(502, { error: 'storage_delete_failed' }, err, {
+      action: 'delete_storage_object',
+      orgId,
+      userId,
+      documentId,
+      entityType: existingDoc.entity_type,
+      entityId: existingDoc.entity_id,
+      path: existingDoc.path || null,
+      storageMode: storageProfile?.mode || null,
+    });
   }
 
   // Delete from Documents table
-  const { error: deleteError } = await tenantClient
-    .from('Documents')
+  const { error: deleteError } = await withOrgScope(client, 'Documents', orgId)
     .delete()
     .eq('id', documentId);
 
   if (deleteError) {
     console.error('Document deletion error:', deleteError);
-    return { status: 500, body: { error: 'delete_failed', details: deleteError.message } };
+    return trackedResult(500, { error: 'delete_failed' }, deleteError, {
+      action: 'delete_document_record',
+      orgId,
+      userId,
+      documentId,
+      entityType: existingDoc.entity_type,
+      entityId: existingDoc.entity_id,
+      table: 'Documents',
+      operation: 'delete',
+      storageDeleted: true,
+    });
   }
 
   // Audit log
@@ -678,6 +750,10 @@ async function handleDelete(req, supabase, tenantClient, orgId, userId, userEmai
 }
 
 export default async function handler(context, req) {
+  let trackingSupabase = null;
+  let trackingOrgId = null;
+  let trackingUserId = null;
+
   try {
     const method = req.method;
 
@@ -693,7 +769,7 @@ export default async function handler(context, req) {
         }
       } catch (err) {
         console.error('Failed to parse JSON body:', err.message);
-        return respond(context, 400, { error: 'invalid_json_body', details: err.message });
+        return respond(context, 400, { error: 'invalid_json_body' });
       }
     }
 
@@ -710,11 +786,12 @@ export default async function handler(context, req) {
       };
       console.error('[ERROR] Missing Supabase admin credentials', errorDetails);
       context.log?.error?.('documents missing Supabase admin credentials', errorDetails);
-      return respond(context, 500, { error: 'server_misconfigured', message: 'Missing Supabase credentials', debug: errorDetails });
+      return respond(context, 500, { error: 'server_misconfigured' });
     }
 
     // Auth check
     const supabase = createSupabaseAdminClient(adminConfig);
+    trackingSupabase = supabase;
 
     const authorization = resolveBearerAuthorization(req);
     if (!authorization?.token) {
@@ -728,14 +805,15 @@ export default async function handler(context, req) {
       authResult = await supabase.auth.getUser(token);
     } catch (err) {
       console.error('Token verification threw exception:', err.message);
-      return respond(context, 401, { error: 'invalid_token', details: err.message });
+      return respond(context, 401, { error: 'invalid_token' });
     }
     
     if (authResult.error || !authResult?.data?.user?.id) {
-      return respond(context, 401, { error: 'invalid_token', details: authResult.error?.message });
+      return respond(context, 401, { error: 'invalid_token' });
     }
 
     const userId = authResult.data.user.id;
+    trackingUserId = userId;
     const userEmail = authResult.data.user.email;
     
     // Validate email exists (required for audit logging)
@@ -749,8 +827,7 @@ export default async function handler(context, req) {
         fullUserObject: JSON.stringify(authResult.data.user, null, 2)
       });
       return respond(context, 401, { 
-        error: 'invalid_token', 
-        details: 'User email required for audit logging' 
+        error: 'invalid_token'
       });
     }
 
@@ -780,6 +857,7 @@ export default async function handler(context, req) {
     if (!orgId) {
       return respond(context, 400, { error: 'org_id_required' });
     }
+    trackingOrgId = orgId;
 
     // Step 7: Verify membership
     let role;
@@ -792,7 +870,19 @@ export default async function handler(context, req) {
         orgId,
         userId,
       });
-      return respond(context, 500, { error: 'failed_to_verify_membership', details: membershipError?.message });
+      return respondTrackedError(context, req, supabase, {
+        status: 500,
+        message: 'failed_to_verify_membership',
+        orgId,
+        userId,
+        error: membershipError,
+        metadata: {
+          endpoint: 'documents',
+          action: 'ensure_membership',
+          orgId,
+          userId,
+        },
+      });
     }
 
     if (!role) {
@@ -803,36 +893,50 @@ export default async function handler(context, req) {
     const userRole = role;
     const isAdmin = ['admin', 'owner'].includes(userRole);
 
-    // Step 8: Get tenant client
-    const tenantResult = await resolveTenantClient(context, supabase, env, orgId);
-    if (tenantResult.error) {
-      console.error('Tenant client resolution failed:', tenantResult.error);
-      return respond(context, 424, { error: 'tenant_not_configured', details: tenantResult.error });
-    }
-    const tenantClient = tenantResult.client;
-
     // Route to handler
     let result;
     if (method === 'GET') {
-      result = await handleGet(req, supabase, tenantClient, orgId, userId, userRole, isAdmin);
+      result = await handleGet(req, supabase, supabase, orgId, userId, userRole, isAdmin);
     } else if (method === 'POST') {
-      result = await handlePost(req, supabase, tenantClient, orgId, userId, userEmail, userRole, isAdmin, context, env, multipartParts);
+      result = await handlePost(req, supabase, supabase, orgId, userId, userEmail, userRole, isAdmin, context, env, multipartParts);
     } else if (method === 'PUT') {
-      result = await handlePut(req, supabase, tenantClient, orgId, userId, userEmail, userRole, isAdmin);
+      result = await handlePut(req, supabase, supabase, orgId, userId, userEmail, userRole, isAdmin);
     } else if (method === 'DELETE') {
-      result = await handleDelete(req, supabase, tenantClient, orgId, userId, userEmail, userRole, isAdmin, env);
+      result = await handleDelete(req, supabase, supabase, orgId, userId, userEmail, userRole, isAdmin, env);
     } else {
       return respond(context, 405, { error: 'method_not_allowed' });
     }
     
+    if (result.status >= 500) {
+      const message = result.body?.message || result.body?.error || 'internal_server_error';
+      return respondTrackedError(context, req, supabase, {
+        status: result.status,
+        message,
+        orgId,
+        userId,
+        error: result.tracking?.error || new Error(message),
+        metadata: {
+          endpoint: 'documents',
+          ...(result.tracking?.metadata || {}),
+          response_body: result.body,
+        },
+      });
+    }
+
     return respond(context, result.status, result.body);
   } catch (error) {
     console.error('Unhandled error in documents API:', error);
-    context.log?.error?.('Documents API crashed:', error);
-    return respond(context, 500, { 
-      error: 'internal_server_error', 
-      message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    context.log?.error?.('Documents API crashed:', {
+      message: error?.message,
+      stack: error?.stack,
+    });
+    return respondTrackedError(context, req, trackingSupabase, {
+      status: 500,
+      message: 'internal_server_error',
+      orgId: trackingOrgId,
+      userId: trackingUserId,
+      error,
+      metadata: { endpoint: 'documents', action: 'unhandled_endpoint_failure' },
     });
   }
 }

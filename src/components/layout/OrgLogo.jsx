@@ -32,6 +32,7 @@ export default function OrgLogo({ className = '' }) {
       try {
         const data = await authenticatedFetch(`org-logo?org_id=${encodeURIComponent(activeOrgId)}`, {
           method: 'GET',
+          params: { v: refreshKey },
         });
         setLogoUrl(data?.logo_url || null);
       } catch (error) {
@@ -47,8 +48,9 @@ export default function OrgLogo({ className = '' }) {
 
   useEffect(() => {
     // Listen for logo update events
-    const handleLogoUpdate = () => {
-      setRefreshKey(prev => prev + 1);
+    const handleLogoUpdate = (event) => {
+      const nextRefreshKey = Number(event?.detail?.refreshKey);
+      setRefreshKey(Number.isFinite(nextRefreshKey) && nextRefreshKey > 0 ? nextRefreshKey : Date.now());
     };
 
     window.addEventListener('org-logo-updated', handleLogoUpdate);

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Employees - Option D Hybrid</title>
+    <style>
+      :root{
+        --bg:#f5f7fb;--bg-top:#eef4ff;--card:#ffffff;--line:#d9e0eb;--ink:#162033;--muted:#667388;
+        --blue:#4b5bdc;--blue-soft:#edf1ff;--green:#15926a;--amber:#b7791f;--red:#cf5367;
+        --shadow:0 24px 56px -42px rgba(15,23,42,.35);
+      }
+      *{box-sizing:border-box}
+      body{margin:0;font-family:"Segoe UI",Tahoma,sans-serif;color:var(--ink);background:linear-gradient(180deg,var(--bg-top) 0%, var(--bg) 22%, var(--bg) 100%)}
+      .shell{max-width:1280px;margin:0 auto;padding:28px 20px 42px}
+      .page-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:20px}
+      .page-title{font-size:36px;font-weight:800;margin:0 0 6px;letter-spacing:-0.02em}
+      .page-subtitle{margin:0;color:var(--muted);font-size:16px}
+      .actions,.filters,.header-actions,.chips,.stats{display:flex;gap:10px;flex-wrap:wrap}
+      .btn{border:1px solid var(--line);background:#fff;border-radius:14px;padding:11px 14px;font-weight:700;color:var(--ink)}
+      .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+      .layout{display:grid;grid-template-columns:300px 1fr;gap:18px}
+      .panel{background:var(--card);border:1px solid var(--line);border-radius:26px;box-shadow:var(--shadow)}
+      .sidebar{padding:16px}
+      .search{width:100%;border:1px solid var(--line);border-radius:16px;padding:12px 14px;margin-bottom:12px;background:#fff}
+      .filters{margin-bottom:12px}
+      .filter{background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 12px;font-size:13px;font-weight:700}
+      .filter.active{background:var(--blue-soft);color:var(--blue);border-color:#cfd7ff}
+      .employee{padding:14px;border:1px solid transparent;border-radius:20px;margin-bottom:10px;background:linear-gradient(180deg,#fff 0%,#fbfcff 100%)}
+      .employee.active{border-color:#cfd8f5;background:linear-gradient(180deg,#ffffff 0%,#f6f8ff 100%)}
+      .employee-name{font-weight:800}
+      .employee-meta{color:var(--muted);font-size:13px;margin-top:5px}
+      .chips{margin-top:10px}
+      .chip{padding:5px 10px;border-radius:999px;font-size:12px;font-weight:700}
+      .chip.blue{background:var(--blue-soft);color:var(--blue)}
+      .chip.green{background:#e9f8f1;color:var(--green)}
+      .chip.amber{background:#fff4e4;color:var(--amber)}
+      .chip.red{background:#ffe8ec;color:var(--red)}
+      .workspace{display:grid;gap:16px}
+      .hero{padding:22px;display:flex;justify-content:space-between;gap:18px;align-items:flex-start;background:linear-gradient(180deg,#ffffff 0%,#f9fbff 100%)}
+      .hero-main{display:flex;gap:16px;align-items:flex-start}
+      .avatar{width:72px;height:72px;border-radius:22px;display:grid;place-items:center;background:linear-gradient(135deg,#4b5bdc,#7b8aff);color:#fff;font-size:28px;font-weight:800}
+      .employee-title{font-size:30px;font-weight:800;margin:0 0 6px}
+      .employee-sub{color:var(--muted);margin:0;line-height:1.6}
+      .stats{margin-top:14px}
+      .stat{min-width:140px;flex:1;border:1px solid var(--line);border-radius:18px;padding:14px;background:#fbfcff}
+      .stat-value{font-size:28px;font-weight:800}
+      .stat-label{color:var(--muted);font-size:13px}
+      .grid{display:grid;grid-template-columns:1.05fr .95fr;gap:16px}
+      .card{padding:18px}
+      .card h2{margin:0 0 12px;font-size:18px;font-weight:800}
+      .row{display:flex;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid #edf1f7}
+      .row:last-child{border-bottom:none}
+      .label{color:var(--muted);font-size:13px}
+      .value{font-weight:700}
+      .list{display:grid;gap:10px}
+      .list-item{border:1px solid var(--line);border-radius:18px;background:#fbfcff;padding:13px 14px}
+      .list-item strong{display:block;margin-bottom:4px}
+      .callout{margin-top:12px;border-radius:18px;border:1px solid #f1d9ab;background:#fff8ea;padding:12px 14px;color:#885c00;line-height:1.6}
+      @media (max-width:1080px){.layout{grid-template-columns:1fr}.grid{grid-template-columns:1fr}}
+      @media (max-width:720px){.page-head,.hero{flex-direction:column}}
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="page-head">
+        <div>
+          <h1 class="page-title">עובדים</h1>
+          <p class="page-subtitle">רוסטר נוח לניווט בצד, סביבת עבודה מלאה לעובד בצד השני, עם טון עיצובי רגוע יותר שמתאים לשפה של Reinex.</p>
+        </div>
+        <div class="actions">
+          <button class="btn primary">עובד חדש</button>
+          <button class="btn">הזמן משתמש</button>
+          <button class="btn">יצוא לרו"ח</button>
+        </div>
+      </section>
+
+      <section class="layout">
+        <aside class="panel sidebar">
+          <input class="search" value="חיפוש עובד, טלפון, תפקיד..." />
+          <div class="filters">
+            <button class="filter active">הכל</button>
+            <button class="filter">מדריכים</button>
+            <button class="filter">משרד</button>
+            <button class="filter">ללא משתמש</button>
+          </div>
+
+          <article class="employee active">
+            <div class="employee-name">יוסי ישראלי</div>
+            <div class="employee-meta">מדריך • משתמש מחובר • פעיל</div>
+            <div class="chips">
+              <span class="chip blue">רכיבה טיפולית</span>
+              <span class="chip green">4 שיעורים היום</span>
+            </div>
+          </article>
+
+          <article class="employee">
+            <div class="employee-name">דנה כהן</div>
+            <div class="employee-meta">עובדת משרד • ללא משתמש</div>
+            <div class="chips">
+              <span class="chip amber">חסר טלפון</span>
+            </div>
+          </article>
+
+          <article class="employee">
+            <div class="employee-name">רוני לוי</div>
+            <div class="employee-meta">מדריכה • חופשה מתוכננת</div>
+            <div class="chips">
+              <span class="chip red">23.3 - 27.3</span>
+            </div>
+          </article>
+        </aside>
+
+        <section class="workspace">
+          <div class="panel hero">
+            <div class="hero-main">
+              <div class="avatar">יי</div>
+              <div>
+                <h2 class="employee-title">יוסי ישראלי</h2>
+                <p class="employee-sub">מדריך • 050-1234567 • yossi@clinic.co.il • התחלה: 01.09.2024</p>
+                <div class="chips">
+                  <span class="chip blue">משתמש מחובר</span>
+                  <span class="chip blue">רכיבה טיפולית</span>
+                  <span class="chip blue">הידרותרפיה</span>
+                </div>
+                <div class="stats">
+                  <div class="stat"><div class="stat-value">4</div><div class="stat-label">שיעורים היום</div></div>
+                  <div class="stat"><div class="stat-value">11</div><div class="stat-label">השבוע</div></div>
+                  <div class="stat"><div class="stat-value">2</div><div class="stat-label">חופשות מתוכננות</div></div>
+                </div>
+              </div>
+            </div>
+            <div class="header-actions">
+              <button class="btn primary">עריכת פרטים</button>
+              <button class="btn">שלח WhatsApp</button>
+              <button class="btn">ניהול חופשות</button>
+              <button class="btn">דוח עובד</button>
+            </div>
+          </div>
+
+          <div class="grid">
+            <div class="panel card">
+              <h2>פרטי עובד וגישה</h2>
+              <div class="row"><div><div class="label">שם מלא</div><div class="value">יוסי ישראלי</div></div><div>ערוך</div></div>
+              <div class="row"><div><div class="label">טלפון</div><div class="value">050-1234567</div></div><div>צור קשר</div></div>
+              <div class="row"><div><div class="label">חשבון משתמש</div><div class="value">מחובר למשתמש פעיל</div></div><div>נהל</div></div>
+              <div class="row"><div><div class="label">תאריך התחלה</div><div class="value">01.09.2024</div></div><div>תיעוד</div></div>
+              <div class="row"><div><div class="label">סוגי שירות</div><div class="value">רכיבה טיפולית, הידרותרפיה</div></div><div>ערוך</div></div>
+            </div>
+
+            <div class="panel card">
+              <h2>תקשורת ופעולות מהירות</h2>
+              <div class="list">
+                <div class="list-item"><strong>WhatsApp</strong>שלח סיכום יומי, שבועי או הודעה חופשית.</div>
+                <div class="list-item"><strong>דוא"ל / טלפון</strong>פעולת תקשורת מהירה מתוך הכרטיס.</div>
+                <div class="list-item"><strong>יצוא לרו"ח</strong>אזור עתידי לדוח מסודר, בלי לדחוף את כל הפיננסים למסך כבר עכשיו.</div>
+              </div>
+            </div>
+
+            <div class="panel card">
+              <h2>שיעורים מתוזמנים והושלמו</h2>
+              <div class="list">
+                <div class="list-item"><strong>09:00 - דניאל אברהם</strong>רכיבה טיפולית • מתוכנן</div>
+                <div class="list-item"><strong>11:30 - נועה בן עמי</strong>הידרותרפיה • הושלם</div>
+                <div class="list-item"><strong>14:00 - רוני דדון</strong>רכיבה טיפולית • מתוכנן</div>
+              </div>
+            </div>
+
+            <div class="panel card">
+              <h2>חופשות, חריגים ופיננסים עתידיים</h2>
+              <div class="list">
+                <div class="list-item"><strong>חופשה קרובה</strong>25.03 - 27.03 • חופשה משפחתית</div>
+                <div class="list-item"><strong>הערת הנה"ח</strong>עדיין לא קיים במערכת, אך זה המקום הנכון להצגה</div>
+              </div>
+              <div class="callout">זהו הלב של ההצעה ההיברידית: ממשק עשיר ומעשי כמו A, אבל שקט, נקי ומחושב יותר כמו C.</div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

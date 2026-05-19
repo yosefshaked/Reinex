@@ -5,12 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EnhancedDialogHeader } from '@/components/ui/DialogHeader';
-import { PlugZap, Sparkles, Users, ListChecks, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase } from 'lucide-react';
-import SetupAssistant from '@/components/settings/SetupAssistant.jsx';
-import OrgMembersCard from '@/components/settings/OrgMembersCard.jsx';
-import SessionFormManager from '@/components/settings/SessionFormManager.jsx';
-import ServiceManager from '@/components/settings/ServiceManager.jsx';
-import InstructorManagementHub from '@/components/settings/instructor-management/InstructorManagementHub.jsx';
+import { Sparkles, ClipboardList, ShieldCheck, Tag, EyeOff, HardDrive, FileText, Briefcase, History } from 'lucide-react';
+import LocalExportImportManager from '@/components/settings/LocalExportImportManager.jsx';
 import BackupManager from '@/components/settings/BackupManager.jsx';
 import LogoManager from '@/components/settings/LogoManager.jsx';
 import TagsManager from '@/components/settings/TagsManager.jsx';
@@ -19,6 +15,8 @@ import StorageSettingsCard from '@/components/settings/StorageSettingsCard.jsx';
 import DocumentRulesManager from '@/components/settings/DocumentRulesManager.jsx';
 import MyInstructorDocuments from '@/components/settings/MyInstructorDocuments.jsx';
 import OrgDocumentsManager from '@/components/settings/OrgDocumentsManager.jsx';
+import AuditLogViewer from '@/components/settings/AuditLogViewer.jsx';
+import BillingSettingsWorkspace from '@/features/finance/components/BillingSettingsWorkspace.jsx';
 import { fetchSettingsValue } from '@/features/settings/api/settings.js';
 import { upsertSetting } from '@/features/settings/api/settings.js';
 import { OnboardingCard } from '@/features/onboarding/components/OnboardingCard.jsx';
@@ -26,24 +24,44 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 
+const DEFAULT_BILLING_POLICY = {
+  attended: true,
+  no_show: false,
+  cancelled_student: false,
+  cancelled_clinic: false,
+};
+
+const DEFAULT_INSTRUCTOR_EARNINGS_POLICY = {
+  attended: true,
+  no_show: true,
+  cancelled_student: false,
+  cancelled_clinic: false,
+};
+
 export default function Settings() {
-  const { activeOrg, activeOrgHasConnection, tenantClientReady, activeOrgId, enableDirectory, disableDirectory, refreshOrganizations } = useOrg();
+  const { activeOrg, activeOrgId, refreshOrganizations } = useOrg();
   const { authClient, user, loading, session } = useSupabase();
+  const orgReady = Boolean(session && activeOrgId);
   const membershipRole = activeOrg?.membership?.role ?? null;
   const normalizedRole = typeof membershipRole === 'string' ? membershipRole.trim().toLowerCase() : '';
   const canManageSessionForm = normalizedRole === 'admin' || normalizedRole === 'owner';
-  const setupDialogAutoOpenRef = useRef(!activeOrgHasConnection);
-  const [selectedModule, setSelectedModule] = useState(null); // 'setup' | 'orgMembers' | 'sessionForm' | 'services' | 'instructors' | 'backup' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments'
-  const [backupEnabled, setBackupEnabled] = useState(false);
+  const orgIdSyncCompletedRef = useRef(new Set());
+  const orgIdSyncInFlightRef = useRef(new Set());
+  const [selectedModule, setSelectedModule] = useState(null); // 'backup' | 'localExport' | 'logo' | 'tags' | 'studentVisibility' | 'storage' | 'documents' | 'orgDocuments' | 'myDocuments' | 'auditLogs' | 'billingSettings'
+  const [localExportEnabled, setLocalExportEnabled] = useState(false);
   const [logoEnabled, setLogoEnabled] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
   const [orgDocsVisibility, setOrgDocsVisibility] = useState(false);
   const [refreshingPermissions, setRefreshingPermissions] = useState(false);
   const [isInstructor, setIsInstructor] = useState(false);
+  const [billingPolicy, setBillingPolicy] = useState(DEFAULT_BILLING_POLICY);
+  const [instructorEarningsPolicy, setInstructorEarningsPolicy] = useState(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
+  const [savingBillingPolicy, setSavingBillingPolicy] = useState(false);
 
-  // Fetch backup permissions and initialize if empty using the proper RPC function
+  // Fetch organization feature permissions and initialize if empty using the proper RPC function.
   useEffect(() => {
     if (!activeOrgId || !authClient) return;
+    let isCancelled = false;
     
     const fetchAndInitializePermissions = async () => {
       try {
@@ -52,9 +70,10 @@ export default function Settings() {
         const { data: permissions, error: initError } = await authClient
           .rpc('initialize_org_permissions', { p_org_id: activeOrgId });
         
+        if (isCancelled) return;
         if (initError) {
           console.error('Error initializing permissions:', initError);
-          setBackupEnabled(false);
+          setLocalExportEnabled(false);
           setLogoEnabled(false);
           setStorageEnabled(false);
           return;
@@ -72,34 +91,39 @@ export default function Settings() {
           }
         }
         
-        setBackupEnabled(permissions?.backup_local_enabled === true);
+        if (isCancelled) return;
+        setLocalExportEnabled(permissions?.backup_local_enabled === true);
         setLogoEnabled(permissions?.logo_enabled === true);
         // Storage is enabled if storage_access_level is not false (can be byos_only, managed_only, or all)
         setStorageEnabled(permissions?.storage_access_level && permissions.storage_access_level !== false);
       } catch (err) {
         console.error('Error in permissions initialization:', err);
-        setBackupEnabled(false);
-        setLogoEnabled(false);
-        setStorageEnabled(false);
+        if (!isCancelled) {
+          setLocalExportEnabled(false);
+          setLogoEnabled(false);
+          setStorageEnabled(false);
+        }
       }
     };
     
     fetchAndInitializePermissions();
+    return () => { isCancelled = true; };
   }, [activeOrgId, authClient, refreshOrganizations]);
 
   // Check if current user is an instructor (with caching)
   useEffect(() => {
-    if (!user?.id || !session || !tenantClientReady || !activeOrgId) {
+    if (!user?.id || !orgReady) {
       console.log('[Settings] Instructor check skipped:', {
         userId: user?.id,
         hasSession: !!session,
-        tenantClientReady,
+        orgReady,
         activeOrgId
       });
       setIsInstructor(false);
       return;
     }
 
+    let isCancelled = false;
     const checkInstructorStatus = async () => {
       const cacheKey = `instructor_status_${activeOrgId}_${user.id}`;
       
@@ -111,7 +135,7 @@ export default function Settings() {
           const age = Date.now() - timestamp;
           if (age < 5 * 60 * 1000) { // 5 minutes
             console.log('[Settings] Using cached instructor status:', cachedValue);
-            setIsInstructor(cachedValue);
+            if (!isCancelled) setIsInstructor(cachedValue);
             return;
           }
         }
@@ -130,6 +154,7 @@ export default function Settings() {
           },
         });
 
+        if (isCancelled) return;
         if (response.ok) {
           const instructors = await response.json();
           console.log('[Settings] Instructors response:', {
@@ -141,7 +166,7 @@ export default function Settings() {
           const isInstructorRecord = Array.isArray(instructors) && 
             instructors.some(instructor => instructor.id === user.id);
           console.log('[Settings] Is instructor:', isInstructorRecord);
-          setIsInstructor(isInstructorRecord);
+          if (!isCancelled) setIsInstructor(isInstructorRecord);
           
           // Cache the result
           try {
@@ -154,27 +179,29 @@ export default function Settings() {
           }
         } else {
           console.log('[Settings] Instructors API failed:', response.status, response.statusText);
-          setIsInstructor(false);
+          if (!isCancelled) setIsInstructor(false);
         }
       } catch (error) {
         console.error('[Settings] Error checking instructor status:', error);
-        setIsInstructor(false);
+        if (!isCancelled) setIsInstructor(false);
       }
     };
 
     checkInstructorStatus();
-  }, [user?.id, session, tenantClientReady, activeOrgId]);
+    return () => { isCancelled = true; };
+  }, [user?.id, session, activeOrgId, orgReady]);
 
   // Fetch org documents visibility setting
   useEffect(() => {
     const isAdmin = normalizedRole === 'admin' || normalizedRole === 'owner';
     
-    if (!session || !activeOrgId || !activeOrgHasConnection || isAdmin) {
+    if (!session || !activeOrgId || isAdmin) {
       // Admins always see the card, so set to true for them
       setOrgDocsVisibility(isAdmin);
       return;
     }
 
+    let isCancelled = false;
     const loadVisibility = async () => {
       try {
         const response = await fetchSettingsValue({
@@ -182,57 +209,135 @@ export default function Settings() {
           orgId: activeOrgId,
           key: 'org_documents_member_visibility',
         });
-        setOrgDocsVisibility(response?.value === true || response?.value === 'true');
+        if (!isCancelled) setOrgDocsVisibility(response?.value === true || response?.value === 'true');
       } catch (error) {
         console.error('Failed to load org docs visibility:', error);
-        setOrgDocsVisibility(false);
+        if (!isCancelled) setOrgDocsVisibility(false);
       }
     };
 
     loadVisibility();
-  }, [session, activeOrgId, activeOrgHasConnection, normalizedRole]);
+    return () => { isCancelled = true; };
+  }, [session, activeOrgId, normalizedRole]);
 
   // Save org_id to Settings table for migration script
   useEffect(() => {
-    if (!session || !activeOrgId || !activeOrgHasConnection) return;
+    if (!session || !activeOrgId) return;
+
+    const completedSet = orgIdSyncCompletedRef.current;
+    const inFlightSet = orgIdSyncInFlightRef.current;
+
+    if (completedSet.has(activeOrgId) || inFlightSet.has(activeOrgId)) {
+      return;
+    }
+
+    inFlightSet.add(activeOrgId);
+    let isCancelled = false;
 
     const saveOrgId = async () => {
       try {
-        await upsertSetting({
+        const existingOrgIdSetting = await fetchSettingsValue({
           session,
           orgId: activeOrgId,
           key: '_system_org_id',
-          value: activeOrgId,
         });
-        console.log('[Settings] Org ID saved to Settings table:', activeOrgId);
+
+        if (isCancelled) {
+          return;
+        }
+
+        const existingValue = typeof existingOrgIdSetting?.value === 'string'
+          ? existingOrgIdSetting.value.trim()
+          : existingOrgIdSetting?.value;
+
+        const shouldUpsert = !existingOrgIdSetting?.exists || existingValue !== activeOrgId;
+
+        if (shouldUpsert) {
+          await upsertSetting({
+            session,
+            orgId: activeOrgId,
+            key: '_system_org_id',
+            value: activeOrgId,
+          });
+
+          if (!isCancelled) {
+            console.log('[Settings] Org ID saved to Settings table:', activeOrgId);
+          }
+        } else {
+          console.log('[Settings] Org ID already synced in Settings table:', activeOrgId);
+        }
+
+        if (!isCancelled) {
+          completedSet.add(activeOrgId);
+        }
       } catch (error) {
         // Silently fail - this is a helper for migration, not critical for app functionality
         console.warn('[Settings] Failed to save org_id to Settings:', error);
+      } finally {
+        inFlightSet.delete(activeOrgId);
       }
     };
 
     saveOrgId();
-  }, [session, activeOrgId, activeOrgHasConnection]);
+
+    return () => {
+      isCancelled = true;
+      inFlightSet.delete(activeOrgId);
+    };
+  }, [session, activeOrgId]);
 
   useEffect(() => {
-    if (activeOrgHasConnection) {
-      setupDialogAutoOpenRef.current = false;
-  // close any open module dialog
-  setSelectedModule(null);
+    if (!session || !activeOrgId || !canManageSessionForm) {
+      setBillingPolicy(DEFAULT_BILLING_POLICY);
+      setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
       return;
     }
-    if (!setupDialogAutoOpenRef.current) {
-      setupDialogAutoOpenRef.current = true;
-      setSelectedModule('setup');
-    }
-  }, [activeOrgHasConnection]);
+
+    let cancelled = false;
+    const loadBillingPolicy = async () => {
+      try {
+        const [billingResponse, instructorResponse] = await Promise.all([
+          fetchSettingsValue({
+            session,
+            orgId: activeOrgId,
+            key: 'billing_consumption_policy',
+          }),
+          fetchSettingsValue({
+            session,
+            orgId: activeOrgId,
+            key: 'instructor_earnings_policy',
+          }),
+        ]);
+        if (!cancelled) {
+          setBillingPolicy({
+            ...DEFAULT_BILLING_POLICY,
+            ...(billingResponse?.value && typeof billingResponse.value === 'object' ? billingResponse.value : {}),
+          });
+          setInstructorEarningsPolicy({
+            ...DEFAULT_INSTRUCTOR_EARNINGS_POLICY,
+            ...(instructorResponse?.value && typeof instructorResponse.value === 'object'
+              ? instructorResponse.value
+              : {}),
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load billing policy in settings', error);
+        if (!cancelled) {
+          setBillingPolicy(DEFAULT_BILLING_POLICY);
+          setInstructorEarningsPolicy(DEFAULT_INSTRUCTOR_EARNINGS_POLICY);
+        }
+      }
+    };
+
+    void loadBillingPolicy();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, activeOrgId, canManageSessionForm]);
 
   const handleModuleDialogChange = (open) => {
     if (!open) {
       setSelectedModule(null);
-      if (!activeOrgHasConnection) {
-        setupDialogAutoOpenRef.current = true;
-      }
     }
   };
 
@@ -244,9 +349,9 @@ export default function Settings() {
     try {
       // Get current permissions
       const { data: orgSettings, error: fetchError } = await authClient
-        .from('org_settings')
+        .from('organizations')
         .select('permissions')
-        .eq('org_id', activeOrgId)
+        .eq('id', activeOrgId)
         .single();
       
       if (fetchError) {
@@ -277,11 +382,11 @@ export default function Settings() {
         }
       }
       
-      // Update org_settings with merged permissions
+      // Update organizations with merged permissions
       const { error: updateError } = await authClient
-        .from('org_settings')
+        .from('organizations')
         .update({ permissions: mergedPermissions })
-        .eq('org_id', activeOrgId);
+        .eq('id', activeOrgId);
       
       if (updateError) {
         console.error('Error updating permissions:', updateError);
@@ -292,7 +397,7 @@ export default function Settings() {
       console.log('Permissions merged successfully (missing permissions added, existing preserved)');
       
       // Update local state
-      setBackupEnabled(mergedPermissions?.backup_local_enabled === true);
+      setLocalExportEnabled(mergedPermissions?.backup_local_enabled === true);
       setLogoEnabled(mergedPermissions?.logo_enabled === true);
       setStorageEnabled(mergedPermissions?.storage_access_level && mergedPermissions.storage_access_level !== false);
       
@@ -311,17 +416,33 @@ export default function Settings() {
     }
   };
 
-  // Wake control DB directory fetch only while Team Members dialog is open
-  useEffect(() => {
-    if (selectedModule === 'orgMembers') {
-      enableDirectory?.();
-    } else {
-      disableDirectory?.();
+  const handleSaveBillingPolicy = async () => {
+    if (!session || !activeOrgId || !canManageSessionForm) {
+      return;
     }
-    return () => {
-      disableDirectory?.();
-    };
-  }, [selectedModule, enableDirectory, disableDirectory]);
+
+    setSavingBillingPolicy(true);
+    try {
+      await upsertSetting({
+        session,
+        orgId: activeOrgId,
+        key: 'billing_consumption_policy',
+        value: billingPolicy,
+      });
+      await upsertSetting({
+        session,
+        orgId: activeOrgId,
+        key: 'instructor_earnings_policy',
+        value: instructorEarningsPolicy,
+      });
+      toast.success('מדיניות החיוב נשמרה.');
+    } catch (error) {
+      console.error('Failed to save billing policy from settings', error);
+      toast.error('שמירת מדיניות החיוב נכשלה.');
+    } finally {
+      setSavingBillingPolicy(false);
+    }
+  };
 
   if (loading || !authClient) {
     return (
@@ -346,7 +467,7 @@ export default function Settings() {
       contentClassName="space-y-md md:space-y-lg"
     >
 
-        <Card className="w-full border-0 bg-white/90 shadow-lg" dir="rtl">
+        <Card className="w-full border-0 bg-white/90 shadow-lg">
           <CardHeader className="border-b border-slate-200 space-y-xs">
             <div className="flex items-center justify-between">
               <div className="space-y-xs">
@@ -402,156 +523,13 @@ export default function Settings() {
         </Card>
 
         {/* Onboarding Tour Card - Available to all users */}
-        <div className="w-full" dir="rtl">
+        <div className="w-full">
           <OnboardingCard />
         </div>
 
         {/* Selector grid - only visible to admin/owner */}
         {canManageSessionForm && (
-        <div className="grid w-full gap-4 sm:gap-5 md:grid-cols-2 lg:grid-cols-3" dir="rtl">
-          {/* Setup Assistant Card */}
-          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
-            <CardHeader className="space-y-2 pb-3 flex-1">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="rounded-lg bg-blue-100 p-2 text-blue-600 transition-colors group-hover:bg-blue-600 group-hover:text-white">
-                    <PlugZap className="h-5 w-5" aria-hidden="true" />
-                  </div>
-                  <CardTitle className="text-lg font-bold text-slate-900">
-                    חיבור Supabase
-                  </CardTitle>
-                </div>
-                <Badge className={activeOrgHasConnection ? 'bg-emerald-100 text-emerald-700 border-0' : 'bg-amber-100 text-amber-800 border-0'}>
-                  {activeOrgHasConnection ? 'פעיל' : 'נדרש'}
-                </Badge>
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                הגדרת מפתחות Supabase, בדיקת חיבור, והרצת סקריפט הגדרה אוטומטית
-              </p>
-            </CardHeader>
-            <CardContent className="pt-0 mt-auto">
-              <Button 
-                size="sm" 
-                className="w-full gap-2 bg-blue-600 hover:bg-blue-700" 
-                onClick={() => { setSelectedModule('setup'); }}
-              >
-                <PlugZap className="h-4 w-4" /> פתיחת אשף הגדרה
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Team Members Card */}
-          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
-            <CardHeader className="space-y-2 pb-3 flex-1">
-              <div className="flex items-start gap-2">
-                <div className="rounded-lg bg-purple-100 p-2 text-purple-600 transition-colors group-hover:bg-purple-600 group-hover:text-white">
-                  <Users className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <CardTitle className="text-lg font-bold text-slate-900">
-                  ניהול חברי צוות
-                </CardTitle>
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                הזמנת משתמשים חדשים, ניהול הרשאות, והסרת חברי צוות מהארגון
-              </p>
-            </CardHeader>
-            <CardContent className="pt-0 mt-auto">
-              <Button 
-                size="sm" 
-                className="w-full gap-2" 
-                onClick={() => setSelectedModule('orgMembers')} 
-                disabled={!canManageSessionForm}
-                variant={!canManageSessionForm ? 'secondary' : 'default'}
-              >
-                <Users className="h-4 w-4" /> ניהול חברי צוות
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Session Form Card */}
-          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
-            <CardHeader className="space-y-2 pb-3 flex-1">
-              <div className="flex items-start gap-2">
-                <div className="rounded-lg bg-emerald-100 p-2 text-emerald-600 transition-colors group-hover:bg-emerald-600 group-hover:text-white">
-                  <ClipboardList className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <CardTitle className="text-lg font-bold text-slate-900">
-                  טופס שאלות מפגש
-                </CardTitle>
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                הגדרת שאלות מותאמות אישית לתיעוד מפגשים ומעקב אחר התקדמות תלמידים
-              </p>
-            </CardHeader>
-            <CardContent className="pt-0 mt-auto">
-              <Button 
-                size="sm" 
-                className="w-full gap-2" 
-                onClick={() => setSelectedModule('sessionForm')} 
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
-              >
-                <ClipboardList className="h-4 w-4" /> ניהול שאלות
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Services Card */}
-          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
-            <CardHeader className="space-y-2 pb-3 flex-1">
-              <div className="flex items-start gap-2">
-                <div className="rounded-lg bg-orange-100 p-2 text-orange-600 transition-colors group-hover:bg-orange-600 group-hover:text-white">
-                  <ListChecks className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <CardTitle className="text-lg font-bold text-slate-900">
-                  ניהול שירותים
-                </CardTitle>
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                הוספת וניהול רשימת השירותים הזמינים למשתמשי הארגון
-              </p>
-            </CardHeader>
-            <CardContent className="pt-0 mt-auto">
-              <Button 
-                size="sm" 
-                className="w-full gap-2" 
-                onClick={() => setSelectedModule('services')} 
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
-              >
-                <ListChecks className="h-4 w-4" /> ניהול שירותים
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Instructors Card */}
-          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
-            <CardHeader className="space-y-2 pb-3 flex-1">
-              <div className="flex items-start gap-2">
-                <div className="rounded-lg bg-indigo-100 p-2 text-indigo-600 transition-colors group-hover:bg-indigo-600 group-hover:text-white">
-                  <Users className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <CardTitle className="text-lg font-bold text-slate-900">
-                  ניהול מדריכים
-                </CardTitle>
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
-                הוספה, עריכה והשבתת מדריכים המשויכים לארגון
-              </p>
-            </CardHeader>
-            <CardContent className="pt-0 mt-auto">
-              <Button 
-                size="sm" 
-                className="w-full gap-2" 
-                onClick={() => setSelectedModule('instructors')} 
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
-              >
-                <Users className="h-4 w-4" /> ניהול מדריכים
-              </Button>
-          </CardContent>
-        </Card>
-
+        <div className="grid w-full gap-4 sm:gap-5 md:grid-cols-2 lg:grid-cols-3">
           {/* Student Visibility Card */}
           <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
             <CardHeader className="space-y-2 pb-3 flex-1">
@@ -572,35 +550,62 @@ export default function Settings() {
                 size="sm"
                 className="w-full gap-2"
                 onClick={() => setSelectedModule('studentVisibility')}
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+                disabled={!canManageSessionForm || !orgReady}
+                variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
               >
                 <EyeOff className="h-4 w-4" /> ניהול תצוגת תלמידים
               </Button>
             </CardContent>
           </Card>
 
-          {/* Backup & Restore Card */}
+          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
+            <CardHeader className="space-y-2 pb-3 flex-1">
+              <div className="flex items-start gap-2">
+                <div className="rounded-lg bg-indigo-100 p-2 text-indigo-600 transition-colors group-hover:bg-indigo-600 group-hover:text-white">
+                  <Briefcase className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <CardTitle className="text-lg font-bold text-slate-900">
+                  חיובים וגורמים מממנים
+                </CardTitle>
+              </div>
+              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
+                מדיניות חיוב שיעורים, הגדרת גורמים מממנים ומסלולי מימון קבועים.
+              </p>
+            </CardHeader>
+            <CardContent className="pt-0 mt-auto">
+              <Button
+                size="sm"
+                className="w-full gap-2"
+                onClick={() => setSelectedModule('billingSettings')}
+                disabled={!canManageSessionForm || !orgReady}
+                variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
+              >
+                <Briefcase className="h-4 w-4" /> פתיחת הגדרות חיוב
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Local Export & Import Card */}
           <Card className={`group relative w-full overflow-hidden border-0 shadow-md transition-all duration-200 flex flex-col ${
-            backupEnabled ? 'bg-white/80 hover:shadow-xl hover:scale-[1.02]' : 'bg-slate-50 opacity-75'
+            localExportEnabled ? 'bg-white/80 hover:shadow-xl hover:scale-[1.02]' : 'bg-slate-50 opacity-75'
           }`}>
             <CardHeader className="space-y-2 pb-3 flex-1">
               <div className="flex items-start gap-2">
                 <div className={`rounded-lg p-2 transition-colors ${
-                  backupEnabled 
+                  localExportEnabled 
                     ? 'bg-slate-100 text-slate-700 group-hover:bg-slate-700 group-hover:text-white' 
                     : 'bg-slate-200 text-slate-400'
                 }`}>
                   <ShieldCheck className="h-5 w-5" aria-hidden="true" />
                 </div>
-                <CardTitle className={`text-lg font-bold ${backupEnabled ? 'text-slate-900' : 'text-slate-500'}`}>
-                  גיבוי ושחזור
+                <CardTitle className={`text-lg font-bold ${localExportEnabled ? 'text-slate-900' : 'text-slate-500'}`}>
+                  ייצוא וייבוא מקומי
                 </CardTitle>
               </div>
-              <p className={`text-sm leading-relaxed min-h-[2.5rem] ${backupEnabled ? 'text-slate-600' : 'text-slate-500'}`}>
-                {backupEnabled 
-                  ? 'יצירת קובץ גיבוי מוצפן של נתוני הארגון ושחזור מגיבוי קיים'
-                  : 'גיבוי אינו זמין. נא לפנות לתמיכה על מנת לבחון הפעלת הפונקציה'
+              <p className={`text-sm leading-relaxed min-h-[2.5rem] ${localExportEnabled ? 'text-slate-600' : 'text-slate-500'}`}>
+                {localExportEnabled 
+                  ? 'כלי עזר לייצוא JSON מקומי ולייבוא לא הרסני של נתוני הארגון'
+                  : 'ייצוא/ייבוא מקומי אינו זמין. נא לפנות לתמיכה על מנת לבחון הפעלת הפונקציה'
                 }
               </p>
             </CardHeader>
@@ -608,14 +613,42 @@ export default function Settings() {
               <Button 
                 size="sm" 
                 className="w-full gap-2" 
-                onClick={() => setSelectedModule('backup')} 
-                disabled={!canManageSessionForm || !backupEnabled}
-                variant={(!canManageSessionForm || !backupEnabled) ? 'secondary' : 'default'}
+                onClick={() => setSelectedModule('localExport')} 
+                disabled={!canManageSessionForm || !localExportEnabled}
+                variant={(!canManageSessionForm || !localExportEnabled) ? 'secondary' : 'default'}
               >
-                <ShieldCheck className="h-4 w-4" /> ניהול גיבויים
+                <ShieldCheck className="h-4 w-4" /> ניהול ייצוא/ייבוא
               </Button>
             </CardContent>
           </Card>
+
+          {localExportEnabled ? (
+            <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 flex flex-col hover:scale-[1.02] hover:shadow-xl">
+              <CardHeader className="space-y-2 pb-3 flex-1">
+                <div className="flex items-start gap-2">
+                  <div className="rounded-lg bg-cyan-100 p-2 text-cyan-600 transition-colors group-hover:bg-cyan-600 group-hover:text-white">
+                    <HardDrive className="h-5 w-5" aria-hidden="true" />
+                  </div>
+                  <CardTitle className="text-lg font-bold text-slate-900">
+                    גיבויים ושחזור
+                  </CardTitle>
+                </div>
+                <p className="min-h-[2.5rem] text-sm leading-relaxed text-slate-600">
+                  צפייה בגיבויים מוצפנים ושחזור additive של הארגון.
+                </p>
+              </CardHeader>
+              <CardContent className="mt-auto pt-0">
+                <Button
+                  size="sm"
+                  className="w-full gap-2"
+                  onClick={() => setSelectedModule('backup')}
+                  disabled={!canManageSessionForm}
+                >
+                  <HardDrive className="h-4 w-4" /> ניהול גיבויים
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {/* Custom Logo Card */}
           <Card className={`group relative w-full overflow-hidden border-0 shadow-md transition-all duration-200 flex flex-col ${
@@ -674,8 +707,8 @@ export default function Settings() {
                 size="sm" 
                 className="w-full gap-2" 
                 onClick={() => setSelectedModule('tags')} 
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+                disabled={!canManageSessionForm || !orgReady}
+                variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
               >
                 <Tag className="h-4 w-4" /> ניהול תגיות וסיווגים
               </Button>
@@ -719,6 +752,34 @@ export default function Settings() {
             </CardContent>
           </Card>
 
+          {/* Audit Log Card */}
+          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
+            <CardHeader className="space-y-2 pb-3 flex-1">
+              <div className="flex items-start gap-2">
+                <div className="rounded-lg bg-indigo-100 p-2 text-indigo-600 transition-colors group-hover:bg-indigo-600 group-hover:text-white">
+                  <History className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <CardTitle className="text-lg font-bold text-slate-900">
+                  יומן ביקורת
+                </CardTitle>
+              </div>
+              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
+                צפייה ביומן פעולות ארגוני לצורכי בקרה, אבטחה ומעקב שינויים.
+              </p>
+            </CardHeader>
+            <CardContent className="pt-0 mt-auto">
+              <Button
+                size="sm"
+                className="w-full gap-2"
+                onClick={() => setSelectedModule('auditLogs')}
+                disabled={!activeOrgId || !session}
+                variant={(!activeOrgId || !session) ? 'secondary' : 'default'}
+              >
+                <History className="h-4 w-4" /> צפייה ביומן ביקורת
+              </Button>
+            </CardContent>
+          </Card>
+
           {/* Document Rules Manager Card */}
           <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02] flex flex-col">
             <CardHeader className="space-y-2 pb-3 flex-1">
@@ -739,8 +800,8 @@ export default function Settings() {
                 size="sm" 
                 className="w-full gap-2" 
                 onClick={() => setSelectedModule('documents')} 
-                disabled={!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady}
-                variant={(!canManageSessionForm || !activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+                disabled={!canManageSessionForm || !orgReady}
+                variant={(!canManageSessionForm || !orgReady) ? 'secondary' : 'default'}
               >
                 <FileText className="h-4 w-4" /> ניהול מסמכים נדרשים
               </Button>
@@ -768,20 +829,51 @@ export default function Settings() {
                 size="sm" 
                 className="w-full gap-2" 
                 onClick={() => setSelectedModule('orgDocuments')} 
-                disabled={!activeOrgHasConnection || !tenantClientReady}
-                variant={(!activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+                disabled={!orgReady}
+                variant={(!orgReady) ? 'secondary' : 'default'}
               >
                 <Briefcase className="h-4 w-4" /> ניהול מסמכי ארגון
               </Button>
             </CardContent>
           </Card>
           )}
+
+          {/* Session Form Card (Future Feature) */}
+          <Card className="group relative w-full overflow-hidden border-0 bg-slate-50 shadow-md transition-all duration-200 flex flex-col opacity-85">
+            <CardHeader className="space-y-2 pb-3 flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2">
+                  <div className="rounded-lg bg-emerald-100 p-2 text-emerald-600">
+                    <ClipboardList className="h-5 w-5" aria-hidden="true" />
+                  </div>
+                  <CardTitle className="text-lg font-bold text-slate-900">
+                    טופס שאלות מפגש
+                  </CardTitle>
+                </div>
+                <Badge className="bg-amber-100 text-amber-800 border-0">פיצ׳ר עתידי</Badge>
+              </div>
+              <p className="text-sm text-slate-600 leading-relaxed min-h-[2.5rem]">
+                יתווסף מחדש בעתיד כחלק ממודל דוחות/מפגשים של Reinex או אינטגרציה עם TutTiud.
+              </p>
+            </CardHeader>
+            <CardContent className="pt-0 mt-auto">
+              <Button
+                size="sm"
+                className="w-full gap-2"
+                disabled
+                variant="secondary"
+                title="פיצ׳ר עתידי"
+              >
+                <ClipboardList className="h-4 w-4" /> יתווסף בהמשך
+              </Button>
+            </CardContent>
+          </Card>
         </div>
         )}
 
         {/* Instructor Documents Card - visible to any user who is an instructor (outside admin-only section) */}
-        {isInstructor && activeOrgHasConnection && tenantClientReady && (
-          <Card dir="rtl" className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02]">
+        {isInstructor && orgReady && (
+          <Card className="group relative w-full overflow-hidden border-0 bg-white/80 shadow-md transition-all duration-200 hover:shadow-xl hover:scale-[1.02]">
             <CardHeader className="space-y-2 pb-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -808,8 +900,8 @@ export default function Settings() {
                   console.log('[Settings] Opening myDocuments modal');
                   setSelectedModule('myDocuments');
                 }}
-                disabled={!activeOrgHasConnection || !tenantClientReady}
-                variant={(!activeOrgHasConnection || !tenantClientReady) ? 'secondary' : 'default'}
+                disabled={!orgReady}
+                variant={(!orgReady) ? 'secondary' : 'default'}
               >
                 <FileText className="h-4 w-4" />
                 ניהול המסמכים שלי
@@ -823,35 +915,31 @@ export default function Settings() {
           <DialogContent hideDefaultClose className="max-w-5xl max-h-[90vh] p-0 gap-0 overflow-hidden bg-white border border-slate-200 shadow-2xl">
             <EnhancedDialogHeader
               icon={
-                selectedModule === 'setup' ? <PlugZap /> :
-                selectedModule === 'orgMembers' ? <Users /> :
-                selectedModule === 'sessionForm' ? <ClipboardList /> :
-                selectedModule === 'services' ? <ListChecks /> :
-                selectedModule === 'instructors' ? <Users /> :
-                selectedModule === 'backup' ? <ShieldCheck /> :
+                selectedModule === 'localExport' ? <ShieldCheck /> :
+                  selectedModule === 'backup' ? <HardDrive /> :
                 selectedModule === 'logo' ? <Sparkles /> :
                 selectedModule === 'tags' ? <Tag /> :
                 selectedModule === 'studentVisibility' ? <EyeOff /> :
                 selectedModule === 'storage' ? <HardDrive /> :
+                selectedModule === 'billingSettings' ? <Briefcase /> :
                 selectedModule === 'documents' ? <FileText /> :
                 selectedModule === 'orgDocuments' ? <Briefcase /> :
                 selectedModule === 'myDocuments' ? <FileText /> :
+                selectedModule === 'auditLogs' ? <History /> :
                 null
               }
               title={
-                selectedModule === 'setup' ? 'חיבור Supabase' :
-                selectedModule === 'orgMembers' ? 'ניהול חברי צוות' :
-                selectedModule === 'sessionForm' ? 'טופס שאלות מפגש' :
-                selectedModule === 'services' ? 'ניהול שירותים' :
-                selectedModule === 'instructors' ? 'ניהול מדריכים' :
-                selectedModule === 'backup' ? 'גיבוי ושחזור' :
+                selectedModule === 'localExport' ? 'ייצוא וייבוא מקומי' :
+                  selectedModule === 'backup' ? 'גיבויים ושחזור' :
                 selectedModule === 'logo' ? 'לוגו מותאם אישית' :
                 selectedModule === 'tags' ? 'ניהול תגיות וסיווגים' :
                 selectedModule === 'studentVisibility' ? 'תצוגת תלמידים לא פעילים' :
                 selectedModule === 'storage' ? 'הגדרות אחסון' :
+                selectedModule === 'billingSettings' ? 'חיובים וגורמים מממנים' :
                 selectedModule === 'documents' ? 'ניהול מסמכים' :
                 selectedModule === 'orgDocuments' ? 'מסמכי הארגון' :
                 selectedModule === 'myDocuments' ? 'המסמכים שלי' :
+                selectedModule === 'auditLogs' ? 'יומן ביקורת' :
                 ''
               }
               onClose={() => setSelectedModule(null)}
@@ -865,35 +953,8 @@ export default function Settings() {
             {/* Content area with padding and scroll */}
             <div className="overflow-y-auto px-6 py-6 max-h-[calc(90vh-80px)] bg-slate-50/30">
               <div className="mx-auto max-w-4xl">
-                {selectedModule === 'setup' && (
-                  <SetupAssistant />
-                )}
-                {selectedModule === 'orgMembers' && (
-                  <OrgMembersCard />
-                )}
-                {selectedModule === 'sessionForm' && (
-                  <SessionFormManager
-                    session={session}
-                    orgId={activeOrgId}
-                    activeOrgHasConnection={activeOrgHasConnection}
-                    tenantClientReady={tenantClientReady}
-                  />
-                )}
-                {selectedModule === 'services' && (
-                  <ServiceManager
-                    session={session}
-                    orgId={activeOrgId}
-                    activeOrgHasConnection={activeOrgHasConnection}
-                    tenantClientReady={tenantClientReady}
-                  />
-                )}
-                {selectedModule === 'instructors' && (
-                  <InstructorManagementHub
-                    session={session}
-                    orgId={activeOrgId}
-                    activeOrgHasConnection={activeOrgHasConnection}
-                    tenantClientReady={tenantClientReady}
-                  />
+                {selectedModule === 'localExport' && (
+                  <LocalExportImportManager session={session} orgId={activeOrgId} />
                 )}
                 {selectedModule === 'backup' && (
                   <BackupManager session={session} orgId={activeOrgId} />
@@ -908,11 +969,21 @@ export default function Settings() {
                   <StudentVisibilitySettings
                     session={session}
                     orgId={activeOrgId}
-                    activeOrgHasConnection={activeOrgHasConnection}
                   />
                 )}
                 {selectedModule === 'storage' && (
                   <StorageSettingsCard session={session} orgId={activeOrgId} />
+                )}
+                {selectedModule === 'billingSettings' && (
+                  <BillingSettingsWorkspace
+                    billingPolicy={billingPolicy}
+                    setBillingPolicy={setBillingPolicy}
+                    instructorPolicy={instructorEarningsPolicy}
+                    setInstructorPolicy={setInstructorEarningsPolicy}
+                    canMutateBillingPolicy={canManageSessionForm}
+                    savingPolicy={savingBillingPolicy}
+                    onSaveBillingPolicy={handleSaveBillingPolicy}
+                  />
                 )}
                 {selectedModule === 'documents' && (
                   <DocumentRulesManager session={session} orgId={activeOrgId} />
@@ -922,6 +993,9 @@ export default function Settings() {
                 )}
                 {selectedModule === 'myDocuments' && (
                   <MyInstructorDocuments session={session} orgId={activeOrgId} userId={user?.id} />
+                )}
+                {selectedModule === 'auditLogs' && (
+                  <AuditLogViewer session={session} orgId={activeOrgId} />
                 )}
               </div>
             </div>

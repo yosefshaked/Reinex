@@ -8,9 +8,17 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
   UUID_PATTERN,
 } from '../_shared/org-bff.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+
+function respondStudentsCheckIdError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+  });
+}
 
 export default async function (context, req) {
   const method = String(req.method || 'GET').toUpperCase();
@@ -29,7 +37,7 @@ export default async function (context, req) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('students-check-id missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig, {
@@ -41,11 +49,11 @@ export default async function (context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('students-check-id failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -53,8 +61,14 @@ export default async function (context, req) {
   const orgId = resolveOrgId(req, body);
 
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
+
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId,
+    metadata: { endpoint: 'students-check-id' },
+  });
 
   let role;
   try {
@@ -65,7 +79,9 @@ export default async function (context, req) {
       orgId,
       userId,
     });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
+    return respondStudentsCheckIdError(context, 500, 'failed_to_verify_membership', membershipError, {
+      action: 'verify_membership',
+    });
   }
 
   if (!role) {
@@ -75,21 +91,18 @@ export default async function (context, req) {
   // All org members can check for duplicate national IDs to prevent data quality issues
   // Non-admin members cannot create students, so this is a read-only validation check
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
-  const nationalId = normalizeString(req?.query?.national_id || req?.query?.nationalId || '');
+  const identityNumber = normalizeString(
+    req?.query?.identity_number || req?.query?.identityNumber || req?.query?.national_id || req?.query?.nationalId || '',
+  );
   context.log?.info?.('[students-check-id] Request received', {
-    nationalId,
-    hasNationalId: !!nationalId,
+    identityNumber,
+    hasIdentityNumber: !!identityNumber,
     orgId,
     userId,
   });
 
-  if (!nationalId) {
-    context.log?.info?.('[students-check-id] Empty national ID, returning exists=false');
+  if (!identityNumber) {
+    context.log?.info?.('[students-check-id] Empty identity number, returning exists=false');
     return respond(context, 200, { exists: false });
   }
 
@@ -97,23 +110,40 @@ export default async function (context, req) {
   const excludeId = excludeIdRaw && UUID_PATTERN.test(excludeIdRaw) ? excludeIdRaw : '';
 
   context.log?.info?.('[students-check-id] Query params', {
-    nationalId,
+    identityNumber,
     excludeId: excludeId || 'none',
     hasExcludeId: !!excludeId,
   });
 
-  let query = tenantClient
-    .from('Students')
-    .select('id, name, national_id, is_active')
-    .eq('national_id', nationalId)
+  let profileQuery = withOrgScope(supabase, 'client_profiles', orgId)
+    .select('id, first_name, last_name, identity_number, is_active')
+    .eq('identity_number', identityNumber)
     .limit(1);
 
   if (excludeId) {
-    query = query.neq('id', excludeId);
+    const { data: excludedStudent, error: excludedStudentError } = await withOrgScope(supabase, 'students', orgId)
+      .select('id, client_profile_id')
+      .eq('id', excludeId)
+      .maybeSingle();
+
+    if (excludedStudentError) {
+      context.log?.error?.('[students-check-id] Failed to resolve excluded student profile', {
+        message: excludedStudentError.message,
+        excludeId,
+      });
+      return respondStudentsCheckIdError(context, 500, 'failed_to_validate_identity_number', excludedStudentError, {
+        action: 'resolve_excluded_student_profile',
+        exclude_id: excludeId,
+      });
+    }
+
+    if (excludedStudent?.client_profile_id) {
+      profileQuery = profileQuery.neq('id', excludedStudent.client_profile_id);
+    }
     context.log?.info?.('[students-check-id] Excluding student ID from search', { excludeId });
   }
 
-  const { data, error } = await query.maybeSingle();
+  const { data: profile, error } = await profileQuery.maybeSingle();
 
   if (error) {
     context.log?.error?.('[students-check-id] Database query failed', {
@@ -121,30 +151,60 @@ export default async function (context, req) {
       code: error.code,
       details: error.details,
       orgId,
-      nationalId,
+      identityNumber,
     });
-    return respond(context, 500, { message: 'failed_to_validate_national_id' });
+    return respondStudentsCheckIdError(context, 500, 'failed_to_validate_identity_number', error, {
+      action: 'query_identity_number',
+      exclude_id: excludeId || null,
+    });
   }
 
-  if (!data) {
+  if (!profile) {
     context.log?.info?.('[students-check-id] No duplicate found', {
-      nationalId,
+      identityNumber,
       excludeId: excludeId || 'none',
       result: 'exists=false',
     });
     return respond(context, 200, { exists: false });
   }
 
+  const { data: student, error: studentError } = await withOrgScope(supabase, 'students', orgId)
+    .select('id, client_profile_id')
+    .eq('client_profile_id', profile.id)
+    .maybeSingle();
+
+  if (studentError) {
+    context.log?.error?.('[students-check-id] Failed to resolve student by client profile', {
+      message: studentError.message,
+      clientProfileId: profile.id,
+    });
+    return respondStudentsCheckIdError(context, 500, 'failed_to_validate_identity_number', studentError, {
+      action: 'resolve_student_by_client_profile',
+      client_profile_id: profile.id,
+    });
+  }
+
   context.log?.info?.('[students-check-id] Duplicate found', {
-    nationalId,
+    identityNumber,
     excludeId: excludeId || 'none',
     duplicateStudent: {
-      id: data.id,
-      name: data.name,
-      is_active: data.is_active,
+      id: student?.id || null,
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      is_active: profile.is_active,
     },
     result: 'exists=true',
   });
 
-  return respond(context, 200, { exists: true, student: data });
+  return respond(context, 200, {
+    exists: true,
+    student: {
+      id: student?.id || null,
+      client_profile_id: profile.id,
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      identity_number: profile.identity_number,
+      is_active: profile.is_active,
+    },
+  });
 }

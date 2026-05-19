@@ -7,7 +7,6 @@ if (IS_DEV) {
   console.debug('[runtime/config] module evaluated');
 }
 
-const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const CACHE = new Map();
 
 let currentConfig = null;
@@ -84,12 +83,14 @@ export async function activateConfig(rawConfig, options = {}) {
   const sanitized = sanitizeConfig(rawConfig, options.source || rawConfig?.source || 'manual');
 
   if (!sanitized) {
-    throw new MissingRuntimeConfigError('supabase_url ו-anon_key נדרשים להפעלת החיבור.');
+    throw new MissingRuntimeConfigError('נדרשים ערכי supabaseUrl ו-supabaseAnonKey להפעלת החיבור.');
   }
 
   const normalized = {
     supabaseUrl: sanitized.supabaseUrl,
     supabaseAnonKey: sanitized.supabaseAnonKey,
+    posthogKey: sanitized.posthogKey || '',
+    posthogHost: sanitized.posthogHost || '',
     source: sanitized.source || options.source || 'manual',
     orgId: options.orgId ?? null,
   };
@@ -99,6 +100,8 @@ export async function activateConfig(rawConfig, options = {}) {
   currentConfig = {
     supabaseUrl: normalized.supabaseUrl,
     supabaseAnonKey: normalized.supabaseAnonKey,
+    posthogKey: normalized.posthogKey,
+    posthogHost: normalized.posthogHost,
     source: normalized.source,
     orgId: normalized.orgId,
   };
@@ -114,6 +117,8 @@ export async function activateConfig(rawConfig, options = {}) {
     window.__RUNTIME_CONFIG__ = {
       supabaseUrl: currentConfig.supabaseUrl,
       supabaseAnonKey: currentConfig.supabaseAnonKey,
+      posthogKey: currentConfig.posthogKey,
+      posthogHost: currentConfig.posthogHost,
       source: currentConfig.source,
       orgId: currentConfig.orgId,
     };
@@ -123,6 +128,8 @@ export async function activateConfig(rawConfig, options = {}) {
   notifyListeners(activatedListeners, {
     supabaseUrl: currentConfig.supabaseUrl,
     supabaseAnonKey: currentConfig.supabaseAnonKey,
+    posthogKey: currentConfig.posthogKey,
+    posthogHost: currentConfig.posthogHost,
     source: currentConfig.source,
     orgId: currentConfig.orgId,
   });
@@ -160,6 +167,8 @@ export function getCurrentConfig() {
   return {
     supabaseUrl: currentConfig.supabaseUrl,
     supabaseAnonKey: currentConfig.supabaseAnonKey,
+    posthogKey: currentConfig.posthogKey || '',
+    posthogHost: currentConfig.posthogHost || '',
     source: currentConfig.source || null,
     orgId: currentConfig.orgId || null,
   };
@@ -195,10 +204,14 @@ function sanitizeConfig(raw, source = 'api') {
   if (!raw || typeof raw !== 'object') {
     return undefined;
   }
-  const supabaseUrl = raw.supabaseUrl || raw.supabase_url;
-  const supabaseAnonKey = raw.supabaseAnonKey || raw.supabase_anon_key || raw.anon_key;
+  const supabaseUrl = raw.supabaseUrl;
+  const supabaseAnonKey = raw.supabaseAnonKey;
+  const posthogKey = raw.posthogKey ?? raw.posthog_key ?? '';
+  const posthogHost = raw.posthogHost ?? raw.posthog_host ?? '';
   const trimmedUrl = typeof supabaseUrl === 'string' ? supabaseUrl.trim() : '';
   const trimmedKey = typeof supabaseAnonKey === 'string' ? supabaseAnonKey.trim() : '';
+  const trimmedPosthogKey = typeof posthogKey === 'string' ? posthogKey.trim() : '';
+  const trimmedPosthogHost = typeof posthogHost === 'string' ? posthogHost.trim() : '';
 
   if (!trimmedUrl || !trimmedKey) {
     return undefined;
@@ -207,19 +220,10 @@ function sanitizeConfig(raw, source = 'api') {
   return {
     supabaseUrl: trimmedUrl,
     supabaseAnonKey: trimmedKey,
+    posthogKey: trimmedPosthogKey,
+    posthogHost: trimmedPosthogHost,
     source,
   };
-}
-
-function getStoredOrgId() {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  try {
-    return window.localStorage.getItem(ACTIVE_ORG_STORAGE_KEY);
-  } catch {
-    return null;
-  }
 }
 
 function buildTokenPreview(token) {
@@ -268,10 +272,7 @@ export function getRuntimeConfigDiagnostics() {
   return { ...lastDiagnostics };
 }
 
-function buildCacheKey(scope, orgId) {
-  if (scope === 'org') {
-    return `org:${orgId || 'none'}`;
-  }
+function buildCacheKey() {
   return 'app';
 }
 
@@ -297,7 +298,7 @@ async function ensureJsonResponse(response, orgId, scope, accessToken, endpoint)
     friendlyMessage =
       `הפונקציה ${endpointLabel} החזירה ${response.status} ללא JSON. ודא שסיפקת כותרת x-functions-key תקינה או שה- authLevel של הפונקציה הוא "anonymous".`;
   } else if (response.status === 404) {
-    friendlyMessage = `הפונקציה ${endpointLabel} החזירה 404 ללא JSON. ודא שהנתיב קיים ומחזיר supabase_url ו-anon_key.`;
+    friendlyMessage = `הפונקציה ${endpointLabel} החזירה 404 ללא JSON. ודא שהנתיב קיים ומחזיר supabaseUrl ו-supabaseAnonKey.`;
   }
 
   updateDiagnostics({
@@ -322,54 +323,15 @@ async function ensureJsonResponse(response, orgId, scope, accessToken, endpoint)
 }
 
 export async function loadRuntimeConfig(options = {}) {
-  const { accessToken = null, orgId: explicitOrgId = undefined, force = false } = options;
-  const scope = accessToken ? 'org' : 'app';
-  const targetOrgId = scope === 'org' ? explicitOrgId ?? getStoredOrgId() : null;
-  const cacheKey = buildCacheKey(scope, targetOrgId);
+  const { force = false } = options;
+  const cacheKey = buildCacheKey();
 
   if (!force && CACHE.has(cacheKey)) {
     return CACHE.get(cacheKey);
   }
 
   const headers = { Accept: 'application/json' };
-  let endpoint = '/api/config';
-
-  if (scope === 'org') {
-    if (!targetOrgId) {
-      updateDiagnostics({
-        orgId: null,
-        status: null,
-        scope,
-        ok: false,
-        error: 'missing-org',
-        accessToken,
-        body: null,
-        bodyIsJson: false,
-      });
-      throw new MissingRuntimeConfigError('לא נמצא ארגון פעיל לטעינת מפתחות Supabase.');
-    }
-
-    if (!accessToken) {
-      updateDiagnostics({
-        orgId: targetOrgId,
-        status: null,
-        scope,
-        ok: false,
-        error: 'missing-token',
-        accessToken,
-        body: null,
-        bodyIsJson: false,
-      });
-      throw new MissingRuntimeConfigError('נדרשת כניסה מחדש כדי לאמת את בקשת מפתחות הארגון.');
-    }
-
-    const bearerHeader = `Bearer ${accessToken}`;
-    headers.authorization = bearerHeader;
-    headers.Authorization = bearerHeader;
-    headers['x-supabase-authorization'] = bearerHeader;
-    headers['X-Supabase-Authorization'] = bearerHeader;
-    endpoint = `/api/org/${encodeURIComponent(targetOrgId)}/keys`;
-  }
+  const endpoint = '/api/config';
 
   let response;
   try {
@@ -380,12 +342,12 @@ export async function loadRuntimeConfig(options = {}) {
     });
   } catch {
     updateDiagnostics({
-      orgId: targetOrgId,
+      orgId: null,
       status: null,
-      scope,
+      scope: 'app',
       ok: false,
       error: 'network-failure',
-      accessToken,
+      accessToken: null,
       body: null,
       bodyIsJson: false,
       endpoint,
@@ -395,7 +357,7 @@ export async function loadRuntimeConfig(options = {}) {
     );
   }
 
-  await ensureJsonResponse(response, targetOrgId, scope, accessToken, endpoint);
+  await ensureJsonResponse(response, null, 'app', null, endpoint);
 
   let rawBodyText = '';
   try {
@@ -411,12 +373,12 @@ export async function loadRuntimeConfig(options = {}) {
       payload = JSON.parse(trimmedBody);
     } catch {
       updateDiagnostics({
-        orgId: targetOrgId,
+        orgId: null,
         status: response.status,
-        scope,
+        scope: 'app',
         ok: false,
         error: 'invalid-json',
-        accessToken,
+        accessToken: null,
         body: null,
         bodyIsJson: false,
         endpoint,
@@ -433,31 +395,17 @@ export async function loadRuntimeConfig(options = {}) {
   }
 
   if (!response.ok) {
-    let serverMessage;
-
-    if (scope === 'org') {
-      if (response.status === 404) {
-        serverMessage = 'לא נמצא ארגון או שאין הרשאה';
-      } else if (response.status === 401 || response.status === 403) {
-        serverMessage = 'פג תוקף כניסה/חסר Bearer';
-      } else if (response.status >= 500) {
-        serverMessage = 'שגיאת שרת בעת טעינת מפתחות הארגון.';
-      } else {
-        serverMessage = `טעינת מפתחות הארגון נכשלה (סטטוס ${response.status}).`;
-      }
-    } else {
-      serverMessage = typeof payload?.error === 'string'
-        ? payload.error
-        : `טעינת ההגדרות נכשלה (סטטוס ${response.status}).`;
-    }
+    const serverMessage = typeof payload?.error === 'string'
+      ? payload.error
+      : `טעינת ההגדרות נכשלה (סטטוס ${response.status}).`;
 
     updateDiagnostics({
-      orgId: targetOrgId,
+      orgId: null,
       status: response.status,
-      scope,
+      scope: 'app',
       ok: false,
       error: serverMessage,
-      accessToken,
+      accessToken: null,
       body: payload,
       bodyIsJson: typeof payload === 'object' && payload !== null,
       endpoint,
@@ -471,22 +419,22 @@ export async function loadRuntimeConfig(options = {}) {
     throw asError(error);
   }
 
-  const sanitized = sanitizeConfig(payload, scope === 'org' ? 'org-api' : 'api');
+  const sanitized = sanitizeConfig(payload, 'api');
   if (!sanitized) {
     updateDiagnostics({
-      orgId: targetOrgId,
+      orgId: null,
       status: response.status,
-      scope,
+      scope: 'app',
       ok: false,
       error: 'missing-keys',
-      accessToken,
+      accessToken: null,
       body: payload,
       bodyIsJson: typeof payload === 'object' && payload !== null,
       endpoint,
       bodyText: rawBodyText,
     });
     const error = new MissingRuntimeConfigError(
-      `הפונקציה ${endpoint} לא סיפקה supabase_url ו-anon_key.`,
+      `הפונקציה ${endpoint} לא סיפקה supabaseUrl ו-supabaseAnonKey.`,
     );
     error.status = response.status;
     error.body = payload;
@@ -497,16 +445,16 @@ export async function loadRuntimeConfig(options = {}) {
 
   const normalized = {
     ...sanitized,
-    orgId: scope === 'org' ? targetOrgId || null : null,
+    orgId: null,
   };
 
   updateDiagnostics({
-    orgId: targetOrgId,
+    orgId: null,
     status: response.status,
-    scope,
+    scope: 'app',
     ok: true,
     error: null,
-    accessToken,
+    accessToken: null,
     body: payload,
     bodyIsJson: typeof payload === 'object' && payload !== null,
     endpoint,
@@ -514,9 +462,7 @@ export async function loadRuntimeConfig(options = {}) {
   });
 
   CACHE.set(cacheKey, normalized);
-  if (scope === 'app') {
-    await activateConfig(normalized, { source: normalized.source || 'api', orgId: null });
-  }
+  await activateConfig(normalized, { source: normalized.source || 'api', orgId: null });
 
   return normalized;
 }
@@ -525,8 +471,8 @@ function hasPreloadedConfig(raw) {
   if (!raw || typeof raw !== 'object') {
     return false;
   }
-  const supabaseUrl = raw.supabaseUrl || raw.supabase_url;
-  const supabaseAnonKey = raw.supabaseAnonKey || raw.supabase_anon_key || raw.anon_key;
+  const supabaseUrl = raw.supabaseUrl;
+  const supabaseAnonKey = raw.supabaseAnonKey;
   return Boolean(
     typeof supabaseUrl === 'string' && supabaseUrl.trim() &&
     typeof supabaseAnonKey === 'string' && supabaseAnonKey.trim(),

@@ -87,6 +87,44 @@ export function ComplianceHeatmap() {
     return []
   }, [instructors])
 
+  // Normalize a session object to its hour slot string (HH:00)
+  const getHourSlot = useCallback((session) => {
+    if (!session) return null
+    const t = session.time
+    if (typeof t === 'string' && /^\d{2}:\d{2}/.test(t)) {
+      return `${t.slice(0, 2)}:00`
+    }
+    const m = Number(session.timeMinutes)
+    if (Number.isFinite(m)) {
+      const h = Math.floor(m / 60)
+      return `${String(h).padStart(2, '0')}:00`
+    }
+    return null
+  }, [])
+
+  // Rebuild the selected cell from fresh data so the drawer reflects current status
+  const rebuildSelectedCell = useCallback((days, targetDate, targetTimeSlot) => {
+    if (!days || !targetDate || !targetTimeSlot) return null
+    const day = days.find(d => d?.date === targetDate)
+    if (!day) return null
+    const sessionsInSlot = day.sessions?.filter(s => getHourSlot(s) === targetTimeSlot) || []
+    const total = sessionsInSlot.length
+    const documented = sessionsInSlot.filter(s => s.status === 'complete').length
+    const upcoming = sessionsInSlot.filter(s => s.status === 'upcoming').length
+    const missing = sessionsInSlot.filter(s => s.status === 'missing').length
+
+    return {
+      date: targetDate,
+      timeSlot: targetTimeSlot,
+      total,
+      documented,
+      upcoming,
+      missing,
+      sessions: sessionsInSlot,
+      complianceRate: total - upcoming > 0 ? (documented / (total - upcoming)) * 100 : null,
+    }
+  }, [getHourSlot])
+
   useEffect(() => {
     const now = new Date()
     const actualWeekStart = startOfWeek(now, { locale: he, weekStartsOn: 0 })
@@ -119,6 +157,16 @@ export function ComplianceHeatmap() {
       }
     })()
   }, [activeOrg?.id, currentWeekStart, selectedInstructorId])
+
+  // Separate effect: rebuild selected cell when data changes (but drawer is still open)
+  useEffect(() => {
+    if (selectedCell && data?.days && selectedCell.date && selectedCell.timeSlot) {
+      const refreshed = rebuildSelectedCell(data.days, selectedCell.date, selectedCell.timeSlot)
+      if (refreshed && JSON.stringify(refreshed) !== JSON.stringify(selectedCell)) {
+        setSelectedCell(refreshed)
+      }
+    }
+  }, [data, selectedCell, rebuildSelectedCell])
 
   useEffect(() => {
     if (!isMobile) {
@@ -287,13 +335,19 @@ export function ComplianceHeatmap() {
         weekStart: format(currentWeekStart, 'yyyy-MM-dd'),
       })
       setData(result)
+
+      // If drawer is open, refresh its cell data from the new payload
+      if (selectedCell && result?.days) {
+        const refreshed = rebuildSelectedCell(result.days, selectedCell.date, selectedCell.timeSlot)
+        setSelectedCell(refreshed)
+      }
     } catch (err) {
       console.error('Failed to refresh compliance data:', err)
       setError(err.message)
     } finally {
       setIsLoading(false)
     }
-  }, [activeOrg?.id, currentWeekStart])
+  }, [activeOrg?.id, currentWeekStart, selectedCell, rebuildSelectedCell])
 
   function handleDetailDocCreated() {
     // Modal now stays open with success state - refresh data but don't close modal
@@ -314,7 +368,7 @@ export function ComplianceHeatmap() {
           </div>
           {viewMode === 'heatmap' ? (
             isMobile ? (
-              <div className="flex flex-col gap-3 w-full max-w-xs text-right">
+              <div className="flex flex-col gap-3 w-full max-w-xs text-end">
                 <div>
                   <label htmlFor="heatmap-date-picker" className="mb-2 block text-sm font-medium text-foreground">
                     בחר יום להצגה
@@ -327,7 +381,7 @@ export function ComplianceHeatmap() {
                   />
                 </div>
                 {isAdmin && (loadingInstructors || normalizedInstructors) && (
-                  <div dir="rtl">
+                  <div>
                     <label htmlFor="instructor-filter" className="mb-2 block text-sm font-medium text-foreground">
                       סינון לפי מדריך
                     </label>
@@ -376,7 +430,7 @@ export function ComplianceHeatmap() {
             )
           ) : null}
           {viewMode === 'heatmap' && isAdmin && !isMobile && (loadingInstructors || normalizedInstructors) && (
-            <div className="w-48" dir="rtl">
+            <div className="w-48">
               <Select value={selectedInstructorId} onValueChange={setSelectedInstructorId} disabled={loadingInstructors}>
                 <SelectTrigger>
                   <SelectValue placeholder="בחר מדריך" />
@@ -416,7 +470,7 @@ export function ComplianceHeatmap() {
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="border-b-2 border-border">
-                      <th className="sticky right-0 bg-surface px-4 py-3 text-right font-semibold text-sm">
+                      <th className="sticky end-0 bg-surface px-4 py-3 text-end font-semibold text-sm">
                         שעה
                       </th>
                       {displayedDays.map(day => {
@@ -424,7 +478,7 @@ export function ComplianceHeatmap() {
                         const dayName = format(dateObj, 'EEEE', { locale: he })
                         const shortDate = format(dateObj, 'dd.MM', { locale: he })
                         return (
-                          <th key={day.date} className="px-3 py-3 text-center border-r border-border min-w-[150px]">
+                          <th key={day.date} className="px-3 py-3 text-center border-e border-border min-w-[150px]">
                             <div className="flex flex-col gap-2">
                               <div className="font-semibold text-base">{dayName}</div>
                               <div className="text-xs text-muted-foreground">{shortDate}</div>
@@ -445,14 +499,14 @@ export function ComplianceHeatmap() {
                   <tbody>
                     {heatmapData.grid.map((row, idx) => (
                       <tr key={row.timeSlot} className={idx % 2 === 0 ? 'bg-muted/20' : ''}>
-                        <td className="sticky right-0 bg-surface px-4 py-3 text-right font-medium text-sm border-b border-border">
+                        <td className="sticky end-0 bg-surface px-4 py-3 text-end font-medium text-sm border-b border-border">
                           {row.timeSlot}
                         </td>
                         {displayedDays.map(day => {
                           const dayCell = row.days.find(cell => cell.date === day.date)
                           if (!dayCell || dayCell.total === 0) {
                             return (
-                              <td key={`${row.timeSlot}-${day.date}`} className="px-3 py-3 text-center border-r border-b border-border">
+                              <td key={`${row.timeSlot}-${day.date}`} className="px-3 py-3 text-center border-e border-b border-border">
                                 <div className="text-muted-foreground text-sm py-4">-</div>
                               </td>
                             )
@@ -460,14 +514,14 @@ export function ComplianceHeatmap() {
                           return (
                             <td
                               key={`${row.timeSlot}-${day.date}`}
-                              className="px-3 py-3 text-center border-r border-b border-border"
+                              className="px-3 py-3 text-center border-e border-b border-border"
                             >
                               <button
                                 onClick={() => handleCellClick(row.timeSlot, dayCell)}
                                 className="relative w-full rounded-lg border-2 p-4 transition-all hover:scale-105 hover:shadow-lg cursor-pointer bg-card text-foreground"
                               >
                                 <div
-                                  className="absolute right-0 top-0 bottom-0 w-1.5 rounded-r-lg"
+                                  className="absolute end-0 top-0 bottom-0 w-1.5 rounded-e-lg"
                                   style={{ backgroundColor: getStripeColor(dayCell.complianceRate, dayCell.total) }}
                                   aria-hidden
                                 />
@@ -507,7 +561,7 @@ export function ComplianceHeatmap() {
                   </tbody>
                   <tfoot>
                     <tr className="border-t-2 border-border bg-muted/30">
-                      <td className="sticky right-0 bg-muted/30 px-4 py-3 text-right font-semibold text-sm">
+                      <td className="sticky end-0 bg-muted/30 px-4 py-3 text-end font-semibold text-sm">
                         סה"כ יומי
                       </td>
                       {displayedDays.map(day => {
@@ -519,7 +573,7 @@ export function ComplianceHeatmap() {
                           : null
 
                         return (
-                          <td key={day.date} className="px-4 py-3 text-center border-r border-border font-semibold text-sm">
+                          <td key={day.date} className="px-4 py-3 text-center border-e border-border font-semibold text-sm">
                             <div className="flex flex-col gap-1">
                               <div>{documented}/{totalSessions}</div>
                               {rate !== null && <div className="text-xs">{rate}%</div>}
@@ -554,7 +608,7 @@ export function ComplianceHeatmap() {
           )
         ) : (
           <div className="space-y-4">
-            <div className="flex flex-col gap-3 text-right md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-3 text-end md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">תצוגת יום מפורטת</p>
                 <h3 className="text-2xl font-bold text-foreground">{detailDateLabel || '—'}</h3>

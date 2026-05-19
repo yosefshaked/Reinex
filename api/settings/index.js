@@ -8,7 +8,7 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { normalizeSessionFormConfigValue } from '../_shared/settings-utils.js';
 import { ensureOrgPermissions } from '../_shared/permissions-utils.js';
@@ -18,8 +18,6 @@ import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit
 const SETTINGS_DIAGNOSTIC_CHECKS = new Set([
   'Table "Settings" exists',
   'RLS enabled on "Settings"',
-  'Policy "Allow full access to authenticated users on Settings" exists',
-  // Backward-compat naming (if a tenant has an older diagnostics function)
   'Policy "Allow full access to authenticated users on Settings" on "Settings" exists',
 ]);
 
@@ -49,9 +47,8 @@ function isSchemaOrPolicyError(error) {
   return false;
 }
 
-async function verifySettingsInfrastructure(context, tenantClient) {
-  const { data, error } = await tenantClient
-    .schema('public')
+async function verifySettingsInfrastructure(context, client) {
+  const { data, error } = await client
     .rpc('setup_assistant_diagnostics');
 
   if (error) {
@@ -91,9 +88,9 @@ async function verifySettingsInfrastructure(context, tenantClient) {
   return null;
 }
 
-async function mapSettingsError(context, tenantClient, error, fallbackMessage) {
+async function mapSettingsError(context, client, error, fallbackMessage) {
   if (isSchemaOrPolicyError(error)) {
-    const infrastructureError = await verifySettingsInfrastructure(context, tenantClient);
+    const infrastructureError = await verifySettingsInfrastructure(context, client);
     if (infrastructureError) {
       return infrastructureError;
     }
@@ -248,7 +245,7 @@ function extractSessionFormVersion(value) {
   return 0;
 }
 
-async function applySessionFormVersioning(tenantClient, entries, existingSettings = null) {
+async function applySessionFormVersioning(client, orgId, entries, existingSettings = null) {
   const targetIndex = entries.findIndex((entry) => entry.key === 'session_form_config');
   if (targetIndex === -1) {
     return { entries };
@@ -263,8 +260,7 @@ async function applySessionFormVersioning(tenantClient, entries, existingSetting
   if (existingSettings && existingSettings.has('session_form_config')) {
     existingData = existingSettings.get('session_form_config');
   } else {
-    const { data, error } = await tenantClient
-      .from('Settings')
+    const { data, error } = await withOrgScope(client, 'Settings', orgId)
       .select('settings_value')
       .eq('key', 'session_form_config')
       .maybeSingle();
@@ -318,7 +314,7 @@ export default async function (context, req) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('settings missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const env = readEnv(context);
@@ -336,12 +332,12 @@ export default async function (context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('settings failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
     context.log?.warn?.('settings token did not resolve to user');
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -350,7 +346,7 @@ export default async function (context, req) {
   const orgId = resolveOrgId(req, body);
 
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   let role;
@@ -373,11 +369,6 @@ export default async function (context, req) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, supabase, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   const query = req?.query ?? {};
 
   if (method === 'GET') {
@@ -390,8 +381,7 @@ export default async function (context, req) {
 
     const requestedKeys = collectKeysFromQuery(query);
     const includeMeta = query.include_metadata === '1' || query.include_metadata === 'true';
-    let builder = tenantClient
-      .from('Settings')
+    let builder = withOrgScope(supabase, 'Settings', orgId)
       .select(includeMeta ? 'key, settings_value, metadata' : 'key, settings_value');
 
     if (requestedKeys.length) {
@@ -402,7 +392,7 @@ export default async function (context, req) {
 
     if (error) {
       context.log?.error?.('settings fetch failed', { message: error.message });
-      const mapped = await mapSettingsError(context, tenantClient, error, 'failed_to_fetch_settings');
+      const mapped = await mapSettingsError(context, supabase, error, 'failed_to_fetch_settings');
       return respond(context, mapped.status, mapped.body);
     }
 
@@ -434,15 +424,15 @@ export default async function (context, req) {
   if (method === 'POST') {
     let payload = normalizeSettingsObject(body);
     if (!payload) {
-      return respond(context, 400, { message: 'invalid settings payload' });
+      return respond(context, 400, { message: 'invalid_settings_payload' });
     }
 
-    const sessionFormResult = await applySessionFormVersioning(tenantClient, payload);
+    const sessionFormResult = await applySessionFormVersioning(supabase, orgId, payload);
     if (sessionFormResult.error) {
       if (sessionFormResult.error === 'failed_to_load_session_form_config' && sessionFormResult.supabaseError) {
         const mapped = await mapSettingsError(
           context,
-          tenantClient,
+          supabase,
           sessionFormResult.supabaseError,
           'failed_to_load_session_form_config',
         );
@@ -477,8 +467,7 @@ export default async function (context, req) {
         const incomingMap = incoming.preconfigured_answers && typeof incoming.preconfigured_answers === 'object' ? incoming.preconfigured_answers : {};
 
         // Fetch existing metadata to merge
-        const { data: existingRow } = await tenantClient
-          .from('Settings')
+        const { data: existingRow } = await withOrgScope(supabase, 'Settings', orgId)
           .select('metadata')
           .eq('key', 'session_form_config')
           .maybeSingle();
@@ -514,13 +503,12 @@ export default async function (context, req) {
       // continue without blocking the update
     }
 
-    const { error } = await tenantClient
-      .from('Settings')
-      .upsert(payload, { onConflict: 'key' });
+    const { error } = await withOrgScope(supabase, 'Settings', orgId)
+      .upsert(payload, { onConflict: 'org_id,key' });
 
     if (error) {
       context.log?.error?.('settings upsert failed', { message: error.message });
-      const mapped = await mapSettingsError(context, tenantClient, error, 'failed_to_update_settings');
+      const mapped = await mapSettingsError(context, supabase, error, 'failed_to_update_settings');
       return respond(context, mapped.status, mapped.body);
     }
 
@@ -547,18 +535,17 @@ export default async function (context, req) {
   if (method === 'PUT' || method === 'PATCH') {
     let payload = normalizeSettingsObject(body);
     if (!payload) {
-      return respond(context, 400, { message: 'invalid settings payload' });
+      return respond(context, 400, { message: 'invalid_settings_payload' });
     }
 
     const keys = payload.map((entry) => entry.key);
-    const { data: existing, error: existingError } = await tenantClient
-      .from('Settings')
+    const { data: existing, error: existingError } = await withOrgScope(supabase, 'Settings', orgId)
       .select('key, settings_value')
       .in('key', keys);
 
     if (existingError) {
       context.log?.error?.('settings lookup failed before update', { message: existingError.message });
-      const mapped = await mapSettingsError(context, tenantClient, existingError, 'failed_to_update_settings');
+      const mapped = await mapSettingsError(context, supabase, existingError, 'failed_to_update_settings');
       return respond(context, mapped.status, mapped.body);
     }
 
@@ -581,12 +568,12 @@ export default async function (context, req) {
       return respond(context, 404, { message: 'settings_not_found', keys: missingKeys });
     }
 
-    const sessionFormResult = await applySessionFormVersioning(tenantClient, payload, existingMap);
+    const sessionFormResult = await applySessionFormVersioning(supabase, orgId, payload, existingMap);
     if (sessionFormResult.error) {
       if (sessionFormResult.error === 'failed_to_load_session_form_config' && sessionFormResult.supabaseError) {
         const mapped = await mapSettingsError(
           context,
-          tenantClient,
+          supabase,
           sessionFormResult.supabaseError,
           'failed_to_load_session_form_config',
         );
@@ -619,8 +606,7 @@ export default async function (context, req) {
         const incoming = target.metadata && typeof target.metadata === 'object' ? target.metadata : {};
         const incomingMap = incoming.preconfigured_answers && typeof incoming.preconfigured_answers === 'object' ? incoming.preconfigured_answers : {};
 
-        const { data: existingRow } = await tenantClient
-          .from('Settings')
+        const { data: existingRow } = await withOrgScope(supabase, 'Settings', orgId)
           .select('metadata')
           .eq('key', 'session_form_config')
           .maybeSingle();
@@ -652,13 +638,12 @@ export default async function (context, req) {
       context.log?.error?.('settings metadata processing failed', { message: metaError?.message });
     }
 
-    const { error } = await tenantClient
-      .from('Settings')
-      .upsert(payload, { onConflict: 'key' });
+    const { error } = await withOrgScope(supabase, 'Settings', orgId)
+      .upsert(payload, { onConflict: 'org_id,key' });
 
     if (error) {
       context.log?.error?.('settings update failed', { message: error.message });
-      const mapped = await mapSettingsError(context, tenantClient, error, 'failed_to_update_settings');
+      const mapped = await mapSettingsError(context, supabase, error, 'failed_to_update_settings');
       return respond(context, mapped.status, mapped.body);
     }
 
@@ -688,18 +673,17 @@ export default async function (context, req) {
     const keys = Array.from(new Set([...keysFromBody, ...keysFromQuery]));
 
     if (!keys.length) {
-      return respond(context, 400, { message: 'missing settings keys' });
+      return respond(context, 400, { message: 'missing_settings_keys' });
     }
 
-    const { data, error } = await tenantClient
-      .from('Settings')
+    const { data, error } = await withOrgScope(supabase, 'Settings', orgId)
       .delete()
       .in('key', keys)
       .select('key');
 
     if (error) {
       context.log?.error?.('settings delete failed', { message: error.message });
-      const mapped = await mapSettingsError(context, tenantClient, error, 'failed_to_delete_settings');
+      const mapped = await mapSettingsError(context, supabase, error, 'failed_to_delete_settings');
       return respond(context, mapped.status, mapped.body);
     }
 

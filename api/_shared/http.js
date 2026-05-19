@@ -136,6 +136,10 @@ export function json(status, body, extraHeaders = {}) {
   const headers = {
     'content-type': 'application/json',
     'Content-Type': 'application/json',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), clipboard-read=(), clipboard-write=(self)',
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
     ...extraHeaders,
   };
 

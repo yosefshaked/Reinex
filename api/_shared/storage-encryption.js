@@ -9,7 +9,7 @@
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { resolveEncryptionSecret, deriveEncryptionKey } from './org-bff.js';
+import { getEncryptionConfig, getEncryptionKeyCandidates } from './org-bff.js';
 
 /**
  * Encrypt BYOS configuration
@@ -147,17 +147,17 @@ export function encryptStorageProfile(storageProfile, env) {
     return storageProfile;
   }
 
-  const encryptionSecret = resolveEncryptionSecret(env);
+  const { current: encryptionSecret } = getEncryptionConfig(env);
   if (!encryptionSecret) {
     throw new Error('Encryption secret not configured');
   }
 
-  const encryptionKey = deriveEncryptionKey(encryptionSecret);
-  if (!encryptionKey) {
+  const keyCandidate = getEncryptionKeyCandidates({ SECURITY_ENCRYPTION_SECRET: encryptionSecret })[0];
+  if (!keyCandidate?.key) {
     throw new Error('Failed to derive encryption key');
   }
 
-  const encryptedByos = encryptByosConfig(storageProfile.byos, encryptionKey);
+  const encryptedByos = encryptByosConfig(storageProfile.byos, keyCandidate.key);
 
   return {
     ...storageProfile,
@@ -181,17 +181,25 @@ export function decryptStorageProfile(storageProfile, env) {
     return storageProfile;
   }
 
-  const encryptionSecret = resolveEncryptionSecret(env);
-  if (!encryptionSecret) {
+  const keyCandidates = getEncryptionKeyCandidates(env);
+  if (!keyCandidates.length) {
     throw new Error('Encryption secret not configured');
   }
 
-  const encryptionKey = deriveEncryptionKey(encryptionSecret);
-  if (!encryptionKey) {
-    throw new Error('Failed to derive encryption key');
+  let decryptedByos = null;
+  let lastError = null;
+  for (const candidate of keyCandidates) {
+    try {
+      decryptedByos = decryptByosConfig(storageProfile.byos, candidate.key);
+      break;
+    } catch (error) {
+      lastError = error;
+    }
   }
 
-  const decryptedByos = decryptByosConfig(storageProfile.byos, encryptionKey);
+  if (!decryptedByos) {
+    throw lastError || new Error('Failed to decrypt BYOS credentials');
+  }
 
   return {
     ...storageProfile,

@@ -250,13 +250,13 @@ export default function ResubmitRejectedReportDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-right flex items-center gap-2">
+          <DialogTitle className="text-end flex items-center gap-2">
             <RotateCcw className="h-5 w-5" />
             שליחה מחדש של דיווח שנדחה
           </DialogTitle>
-          <DialogDescription className="text-right">
+          <DialogDescription className="text-end">
             תוכל לערוך את כל פרטי הדיווח ותוכן המפגש לפני שליחה מחדש
           </DialogDescription>
         </DialogHeader>
@@ -276,12 +276,12 @@ export default function ResubmitRejectedReportDialog({
           {/* Form Fields */}
           <div className="space-y-3">
             <div>
-              <Label htmlFor="name" className="block text-right mb-1">
+              <Label htmlFor="name" className="block text-end mb-1">
                 שם התלמיד <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="name"
-                dir="rtl"
+               
                 value={formData.name}
                 onChange={(e) => handleInputChange('name', e.target.value)}
                 placeholder="הזן שם"
@@ -290,14 +290,14 @@ export default function ResubmitRejectedReportDialog({
             </div>
 
             <div>
-              <Label htmlFor="reason" className="block text-right mb-1">
+              <Label htmlFor="reason" className="block text-end mb-1">
                 סיבה <span className="text-red-500">*</span>
               </Label>
               <Select
                 value={formData.reason}
                 onValueChange={(value) => handleInputChange('reason', value)}
               >
-                <SelectTrigger id="reason" dir="rtl">
+                <SelectTrigger id="reason">
                   <SelectValue placeholder="בחר סיבה" />
                 </SelectTrigger>
                 <SelectContent>
@@ -312,12 +312,12 @@ export default function ResubmitRejectedReportDialog({
 
             {formData.reason === 'other' && (
               <div>
-                <Label htmlFor="reasonOther" className="block text-right mb-1">
+                <Label htmlFor="reasonOther" className="block text-end mb-1">
                   פירוט הסיבה
                 </Label>
                 <Textarea
                   id="reasonOther"
-                  dir="rtl"
+                 
                   value={formData.reasonOther}
                   onChange={(e) => handleInputChange('reasonOther', e.target.value)}
                   placeholder="פרט את הסיבה"
@@ -328,7 +328,7 @@ export default function ResubmitRejectedReportDialog({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="date" className="block text-right mb-1 flex items-center gap-1">
+                <Label htmlFor="date" className="text-end mb-1 flex items-center gap-1">
                   <Calendar className="h-4 w-4" />
                   תאריך <span className="text-red-500">*</span>
                 </Label>
@@ -342,7 +342,7 @@ export default function ResubmitRejectedReportDialog({
               </div>
 
               <div>
-                <Label htmlFor="time" className="block text-right mb-1 flex items-center gap-1">
+                <Label htmlFor="time" className="text-end mb-1 flex items-center gap-1">
                   <Clock className="h-4 w-4" />
                   שעה <span className="text-red-500">*</span>
                 </Label>
@@ -358,12 +358,12 @@ export default function ResubmitRejectedReportDialog({
             </div>
 
             <div>
-              <Label htmlFor="service" className="block text-right mb-1">
+              <Label htmlFor="service" className="block text-end mb-1">
                 שירות
               </Label>
               <Input
                 id="service"
-                dir="rtl"
+               
                 value={formData.service}
                 onChange={(e) => handleInputChange('service', e.target.value)}
                 placeholder="שם השירות (אופציונלי)"
@@ -379,7 +379,7 @@ export default function ResubmitRejectedReportDialog({
             </div>
           ) : questions.length > 0 ? (
             <div className="space-y-3 pt-4 border-t">
-              <h3 className="font-semibold text-sm text-right">תוכן הדיווח</h3>
+              <h3 className="font-semibold text-sm text-end">תוכן הדיווח</h3>
               {questions.map((question) => {
                 const questionKey = question.key || question.id;
                 const questionLabel = question.label || question.question || questionKey;
@@ -389,13 +389,13 @@ export default function ResubmitRejectedReportDialog({
 
                 return (
                   <div key={questionKey}>
-                    <Label htmlFor={`q-${questionKey}`} className="block text-right mb-1">
+                    <Label htmlFor={`q-${questionKey}`} className="block text-end mb-1">
                       {questionLabel}
                     </Label>
                     {question.type === 'textarea' ? (
                       <Textarea
                         id={`q-${questionKey}`}
-                        dir="rtl"
+                       
                         value={currentValue}
                         onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
                         placeholder="הזן תשובה"
@@ -406,7 +406,7 @@ export default function ResubmitRejectedReportDialog({
                         value={currentValue}
                         onValueChange={(value) => handleAnswerChange(questionKey, value)}
                       >
-                        <SelectTrigger id={`q-${questionKey}`} dir="rtl">
+                        <SelectTrigger id={`q-${questionKey}`}>
                           <SelectValue placeholder="בחר תשובה" />
                         </SelectTrigger>
                         <SelectContent>
@@ -421,7 +421,7 @@ export default function ResubmitRejectedReportDialog({
                       <Input
                         id={`q-${questionKey}`}
                         type={question.type === 'number' ? 'number' : question.type === 'date' ? 'date' : 'text'}
-                        dir="rtl"
+                       
                         value={currentValue}
                         onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
                         placeholder="הזן תשובה"
@@ -435,16 +435,16 @@ export default function ResubmitRejectedReportDialog({
 
           {/* Admin Notes */}
           <div className="space-y-2 pt-4 border-t">
-            <Label htmlFor="adminNotes" className="block text-right flex items-center gap-2">
+            <Label htmlFor="adminNotes" className="text-end flex items-center gap-2">
               <MessageSquare className="h-4 w-4" />
               הערות למנהל
             </Label>
-            <p className="text-xs text-muted-foreground text-right">
+            <p className="text-xs text-muted-foreground text-end">
               הערות אלו יהיו נראות רק למנהל בדף הדיווחים הממתינים ולא יופיעו בפרופיל התלמיד
             </p>
             <Textarea
               id="adminNotes"
-              dir="rtl"
+             
               value={formData.adminNotes}
               onChange={(e) => handleInputChange('adminNotes', e.target.value)}
               placeholder="הוסף הערות למנהל (אופציונלי)"

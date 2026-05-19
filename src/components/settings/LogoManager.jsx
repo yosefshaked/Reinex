@@ -19,6 +19,7 @@ export default function LogoManager({ session, orgId }) {
   const [logoUrl, setLogoUrl] = useState(null);
   const [logoUrlInput, setLogoUrlInput] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const canAct = Boolean(session && orgId);
 
@@ -31,6 +32,7 @@ export default function LogoManager({ session, orgId }) {
       try {
         const data = await authenticatedFetch(`org-logo?org_id=${encodeURIComponent(orgId)}`, {
           method: 'GET',
+          params: { v: refreshKey },
         });
         setLogoUrl(data?.logo_url || null);
       } catch (error) {
@@ -42,7 +44,7 @@ export default function LogoManager({ session, orgId }) {
     };
 
     fetchLogo();
-  }, [canAct, orgId]);
+  }, [canAct, orgId, refreshKey]);
 
   const handleSave = useCallback(async () => {
     if (!canAct) return;
@@ -78,7 +80,9 @@ export default function LogoManager({ session, orgId }) {
       setSaveState(REQUEST.idle);
       
       // Notify other components to refresh the logo
-      window.dispatchEvent(new CustomEvent('org-logo-updated'));
+      const nextRefreshKey = Date.now();
+      setRefreshKey(nextRefreshKey);
+      window.dispatchEvent(new CustomEvent('org-logo-updated', { detail: { refreshKey: nextRefreshKey } }));
     } catch (error) {
       console.error('Save logo failed', error);
       
@@ -108,7 +112,9 @@ export default function LogoManager({ session, orgId }) {
       setDeleteState(REQUEST.idle);
       
       // Notify other components to refresh the logo
-      window.dispatchEvent(new CustomEvent('org-logo-updated'));
+      const nextRefreshKey = Date.now();
+      setRefreshKey(nextRefreshKey);
+      window.dispatchEvent(new CustomEvent('org-logo-updated', { detail: { refreshKey: nextRefreshKey } }));
     } catch (error) {
       console.error('Delete logo failed', error);
       toast.error(error?.message || 'הסרת הלוגו נכשלה');
@@ -117,7 +123,7 @@ export default function LogoManager({ session, orgId }) {
   }, [canAct, orgId, logoUrl]);
 
   return (
-    <Card className="w-full border-0 shadow-lg bg-white/80" dir="rtl">
+    <Card className="w-full border-0 shadow-lg bg-white/80">
       <CardHeader className="border-b border-slate-200 space-y-xs">
         <CardTitle className="text-base font-semibold text-slate-900 sm:text-lg md:text-xl flex items-center gap-xs">
           <Image className="h-5 w-5 text-slate-700" />

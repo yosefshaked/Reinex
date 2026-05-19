@@ -25,12 +25,18 @@ import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import {
   ensureMembership,
+  normalizeString,
   readEnv,
   respond,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 import crypto from 'crypto';
 import multipart from 'parse-multipart-data';
+
+function buildEmployeeName(row) {
+  return [row?.first_name, row?.middle_name, row?.last_name].filter(Boolean).join(' ').trim();
+}
 
 /**
  * Validate entity type
@@ -83,21 +89,22 @@ function parseMultipartData(req) {
 /**
  * Get entity names for duplicates based on entity type
  */
-async function getEntityNames(tenantClient, entityType, entityIds) {
+async function getEntityNames(client, entityType, entityIds, orgId) {
   if (entityType === 'student') {
-    const { data: students } = await tenantClient
-      .from('Students')
-      .select('id, name')
+    const { data: students } = await withOrgScope(client, 'students', orgId)
+      .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
       .in('id', entityIds);
-    return new Map((students || []).map(s => [s.id, s.name]));
+    return new Map((students || []).map((row) => [
+      row.id,
+      [row?.client_profile?.first_name, row?.client_profile?.middle_name, row?.client_profile?.last_name].filter(Boolean).join(' ') || 'Unknown',
+    ]));
   }
   
   if (entityType === 'instructor') {
-    const { data: instructors } = await tenantClient
-      .from('Instructors')
-      .select('id, name')
+    const { data: instructors } = await withOrgScope(client, 'Employees', orgId)
+      .select('id, first_name, middle_name, last_name')
       .in('id', entityIds);
-    return new Map((instructors || []).map(i => [i.id, i.name]));
+    return new Map((instructors || []).map((row) => [row.id, buildEmployeeName(row) || 'Unknown']));
   }
   
   // Organization - org_id is self-identifying, no lookup needed
@@ -107,7 +114,7 @@ async function getEntityNames(tenantClient, entityType, entityIds) {
 /**
  * Validate permissions for entity type and user
  */
-async function validateEntityPermissions(entityType, entityId, userId, isAdmin) {
+async function validateEntityPermissions(client, entityType, entityId, userId, isAdmin, orgId) {
   // Student documents: All org members can see duplicates across all students
   if (entityType === 'student') {
     return true; // All org members can check
@@ -118,8 +125,16 @@ async function validateEntityPermissions(entityType, entityId, userId, isAdmin) 
     if (isAdmin) {
       return true;
     }
-    // Non-admin can only check their own instructor record
-    return entityId === userId;
+    const { data: instructorRow, error } = await withOrgScope(client, 'Employees', orgId)
+      .select('id, user_id')
+      .eq('id', entityId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return normalizeString(instructorRow?.user_id) === normalizeString(userId);
   }
   
   // Organization documents: Admin/owner only
@@ -155,7 +170,7 @@ export default async function (context, req) {
     context.log?.warn?.('documents-check: invalid entity_type', { entityType });
     return respond(context, 400, { 
       message: 'invalid_entity_type',
-      details: 'entity_type must be: student, instructor, or organization'
+      details: 'entity_type_must_be_student_instructor_or_organization'
     });
   }
 
@@ -163,7 +178,7 @@ export default async function (context, req) {
     context.log?.warn?.('documents-check: missing entity_id', { entityType });
     return respond(context, 400, { 
       message: 'missing_entity_id',
-      details: 'entity_id (student/instructor UUID or org_id) is required'
+      details: 'entity_id_student_instructor_uuid_or_org_id_is_required'
     });
   }
 
@@ -258,8 +273,18 @@ export default async function (context, req) {
 
   const isAdmin = role === 'admin' || role === 'owner';
 
-  // Validate permissions for this entity type
-  const hasPermission = await validateEntityPermissions(entityType, entityId, userId, isAdmin);
+  let hasPermission;
+  try {
+    hasPermission = await validateEntityPermissions(controlClient, entityType, entityId, userId, isAdmin, orgId);
+  } catch (permissionError) {
+    context.log?.error?.('documents-check: failed to validate entity permissions', {
+      message: permissionError?.message,
+      entityType,
+      entityId,
+    });
+    return respond(context, 500, { message: 'failed_to_validate_permissions' });
+  }
+
   if (!hasPermission) {
     context.log?.warn?.('documents-check: insufficient permissions', {
       entityType,
@@ -267,26 +292,15 @@ export default async function (context, req) {
       userId: userId.substring(0, 8) + '...',
       isAdmin,
     });
-    
+
     let message = 'forbidden';
     if (entityType === 'instructor') {
       message = 'can_only_check_own_files';
     } else if (entityType === 'organization') {
       message = 'admin_only';
     }
-    
-    return respond(context, 403, { message });
-  }
 
-  // Get tenant client
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(
-    context,
-    controlClient,
-    env,
-    orgId
-  );
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
+    return respond(context, 403, { message });
   }
 
   // Calculate file hash
@@ -294,8 +308,7 @@ export default async function (context, req) {
   context.log?.info?.('📄 [DOCUMENTS-CHECK] Hash calculated', { hash: fileHash });
 
   // Query Documents table for duplicates
-  const { data: allDocuments, error: documentsError } = await tenantClient
-    .from('Documents')
+  const { data: allDocuments, error: documentsError } = await withOrgScope(controlClient, 'Documents', orgId)
     .select('id, name, uploaded_at, entity_id, hash')
     .eq('entity_type', entityType)
     .eq('hash', fileHash);
@@ -305,17 +318,20 @@ export default async function (context, req) {
       message: documentsError.message,
       code: documentsError.code,
     });
-    return respond(context, 500, { 
+    return respondTrackedError(context, req, controlClient, {
+      status: 500,
       message: 'failed_to_check_duplicates',
-      error: documentsError.message,
+      orgId,
+      userId,
+      error: documentsError,
+      metadata: { entity_type: entityType, entity_id: entityId },
     });
   }
 
   // Filter results based on permissions
   let filtersDocuments = allDocuments || [];
   if (entityType === 'instructor' && !isAdmin) {
-    // Non-admin instructors only see their own duplicates
-    filtersDocuments = filtersDocuments.filter(doc => doc.entity_id === userId);
+    filtersDocuments = filtersDocuments.filter(doc => doc.entity_id === entityId);
   }
   if (entityType === 'organization') {
     // Organization duplicates are scoped to this org already (by entity_id filter above)
@@ -326,7 +342,7 @@ export default async function (context, req) {
   const duplicates = [];
   if (filtersDocuments.length > 0) {
     const entityIds = [...new Set(filtersDocuments.map(doc => doc.entity_id))];
-    const nameMap = await getEntityNames(tenantClient, entityType, entityIds);
+    const nameMap = await getEntityNames(controlClient, entityType, entityIds, orgId);
 
     for (const doc of filtersDocuments) {
       const entityName = entityType === 'organization' 

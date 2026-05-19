@@ -1,18 +1,105 @@
-import React, { useEffect, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import React, { useEffect, useState } from "react"
+import { useNavigate } from 'react-router-dom'
+import { AlertTriangle, ArrowLeft, Loader2, UsersRound } from 'lucide-react'
 
 import Card from "@/components/ui/CustomCard.jsx"
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { useAccount } from '@/account/AccountContext.jsx'
 import { useAuth } from "@/auth/AuthContext.jsx"
 import { useOrg } from "@/org/OrgContext.jsx"
-import { useSupabase } from "@/context/SupabaseContext.jsx"
-import { useSessionModal } from "@/features/sessions/context/SessionModalContext.jsx"
 import { useInstructors } from "@/hooks/useOrgData.js"
-import { ComplianceHeatmap } from "@/features/dashboard/components/ComplianceHeatmap.jsx"
+import { authenticatedFetch } from '@/lib/api-client.js'
+import { formatCurrency } from '@/lib/currency.js'
+
+const TASK_PRIORITY_RANK = {
+  low: 1,
+  medium: 2,
+  high: 3,
+  critical: 4,
+}
+
+const TASK_PRIORITY_LABEL = {
+  low: 'נמוכה',
+  medium: 'בינונית',
+  high: 'גבוהה',
+  critical: 'קריטית',
+}
+
+function resolveTaskKindLabel(task) {
+  const taskType = typeof task?.task_type === 'string' ? task.task_type.trim().toLowerCase() : ''
+  switch (taskType) {
+    case 'hmo_claim_submission':
+      return 'הגשת תביעות גורם מממן'
+    case 'calendar_correction_paid_claim_block':
+      return 'תיקוני יומן חסומים'
+    default:
+      return task?.title?.trim() || taskType || 'משימות מערכת'
+  }
+}
+
+function formatTaskTimestamp(value) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toLocaleString('he-IL', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
+function groupDashboardTasks(tasks = []) {
+  const groups = new Map()
+
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    const taskType = typeof task?.task_type === 'string' ? task.task_type.trim().toLowerCase() : ''
+    const groupKey = taskType || `fallback:${task?.title || task?.id || Math.random()}`
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        key: groupKey,
+        taskType,
+        label: resolveTaskKindLabel(task),
+        count: 0,
+        topPriority: 'low',
+        latestCreatedAt: null,
+        latestDescription: '',
+        actionPath: task?.action_path || '',
+      })
+    }
+
+    const group = groups.get(groupKey)
+    group.count += 1
+
+    const priority = typeof task?.priority === 'string' ? task.priority.trim().toLowerCase() : 'low'
+    if ((TASK_PRIORITY_RANK[priority] || 0) > (TASK_PRIORITY_RANK[group.topPriority] || 0)) {
+      group.topPriority = priority
+    }
+
+    const createdAt = task?.created_at || null
+    if (!group.latestCreatedAt || new Date(createdAt).getTime() > new Date(group.latestCreatedAt).getTime()) {
+      group.latestCreatedAt = createdAt
+      group.latestDescription = task?.description || ''
+    }
+
+    if (!group.actionPath && task?.action_path) {
+      group.actionPath = task.action_path
+    }
+  }
+
+  return Array.from(groups.values()).sort((left, right) => {
+    const priorityDiff = (TASK_PRIORITY_RANK[right.topPriority] || 0) - (TASK_PRIORITY_RANK[left.topPriority] || 0)
+    if (priorityDiff !== 0) return priorityDiff
+    return new Date(right.latestCreatedAt || 0).getTime() - new Date(left.latestCreatedAt || 0).getTime()
+  })
+}
 
 /**
  * Build greeting with proper fallback chain:
  * 1. Instructor name (from tenant DB Instructors table)
- * 2. Profile full_name (from control DB profiles table)
+ * 2. Account profile name (from control DB profiles table)
  * 3. Auth metadata display name (from Supabase Auth user_metadata)
  * 4. Email address 
  */
@@ -51,37 +138,28 @@ function buildGreeting(instructorName, profileName, authName, email) {
 
 export default function DashboardPage() {
   const { user, session } = useAuth()
-  const { activeOrg, activeOrgId, activeOrgHasConnection, tenantClientReady } = useOrg()
-  const { authClient } = useSupabase()
-  const { openSessionModal } = useSessionModal()
+  const { account } = useAccount()
+  const { activeOrgId, activeOrg } = useOrg()
+  const navigate = useNavigate()
   const [instructorName, setInstructorName] = useState(null)
-  const [profileName, setProfileName] = useState(null)
+  const [dashboardTasks, setDashboardTasks] = useState([])
+  const [waitingListMatches, setWaitingListMatches] = useState(null)
+  const [isLoadingTasks, setIsLoadingTasks] = useState(false)
+  const [isLoadingWaitingMatches, setIsLoadingWaitingMatches] = useState(false)
+  const [tasksError, setTasksError] = useState(null)
+  const [waitingMatchesError, setWaitingMatchesError] = useState(null)
+  const [billingOverview, setBillingOverview] = useState(null)
+
+  const membershipRole = typeof activeOrg?.membership?.role === 'string'
+    ? activeOrg.membership.role.trim().toLowerCase()
+    : 'member'
+  const canManageAll = membershipRole === 'admin' || membershipRole === 'owner' || membershipRole === 'office'
 
   const { instructors } = useInstructors({
-    enabled: Boolean(user?.id && activeOrgId && tenantClientReady && activeOrgHasConnection && session),
+    enabled: Boolean(user?.id && activeOrgId && session),
     orgId: activeOrgId,
     session,
   })
-
-  const membershipRole = activeOrg?.membership?.role
-  const { studentsLink, studentsTitle, studentsDescription } = useMemo(() => {
-    const normalizedRole = typeof membershipRole === "string" ? membershipRole.toLowerCase() : "member"
-    const isAdminRole = normalizedRole === "admin" || normalizedRole === "owner"
-
-    if (isAdminRole) {
-      return {
-        studentsLink: "/admin/students",
-        studentsTitle: "ניהול תלמידים",
-        studentsDescription: "מעבר לרשימת כלל התלמידים בארגון",
-      }
-    }
-
-    return {
-      studentsLink: "/my-students",
-      studentsTitle: "התלמידים שלי",
-      studentsDescription: "מעבר לרשימת התלמידים המשויכים אליך",
-    }
-  }, [membershipRole])
 
   // Resolve instructor name from hook data
   useEffect(() => {
@@ -93,46 +171,301 @@ export default function DashboardPage() {
     }
   }, [user?.id, instructors])
 
-  // Fetch profile name from control DB profiles table
   useEffect(() => {
-    if (!user?.id || !authClient) {
+    if (!canManageAll || !activeOrgId || !session) {
+      setDashboardTasks([])
       return
     }
 
     let isMounted = true
 
-    async function fetchProfileName() {
+    async function fetchDashboardTasks() {
+      setIsLoadingTasks(true)
+      setTasksError(null)
       try {
-        const { data, error } = await authClient
-          .from('profiles')
-          .select('full_name')
-          .eq('id', user.id)
-          .maybeSingle()
-        
+        const payload = await authenticatedFetch('dashboard-tasks', {
+          params: {
+            org_id: activeOrgId,
+            status: 'open',
+          },
+          session,
+        })
         if (!isMounted) return
-
-        if (error) {
-          console.error('Failed to fetch profile name:', error)
-          return
-        }
-
-        if (data?.full_name) {
-          setProfileName(data.full_name)
-        }
+        setDashboardTasks(Array.isArray(payload?.entries) ? payload.entries : [])
       } catch (error) {
-        console.error('Failed to fetch profile name:', error)
-        // Silently fail - will fall back to auth name or email
+        if (!isMounted) return
+        setTasksError(error?.message || 'טעינת משימות הדשבורד נכשלה.')
+      } finally {
+        if (isMounted) {
+          setIsLoadingTasks(false)
+        }
       }
     }
 
-    fetchProfileName()
+    fetchDashboardTasks()
 
     return () => {
       isMounted = false
     }
-  }, [user?.id, authClient])
+  }, [activeOrgId, canManageAll, session])
 
-  const greeting = buildGreeting(instructorName, profileName, user?.name, user?.email)
+  useEffect(() => {
+    if (!canManageAll || !activeOrgId || !session) {
+      setWaitingListMatches(null)
+      return
+    }
+
+    let isMounted = true
+
+    async function fetchWaitingListMatches() {
+      setIsLoadingWaitingMatches(true)
+      setWaitingMatchesError(null)
+      try {
+        const payload = await authenticatedFetch('waiting-list-matches', {
+          params: {
+            org_id: activeOrgId,
+            scope: 'dashboard',
+          },
+          session,
+        })
+        if (!isMounted) return
+        setWaitingListMatches(payload || null)
+      } catch (error) {
+        if (!isMounted) return
+        setWaitingMatchesError(error?.message || 'טעינת התאמות רשימת ההמתנה נכשלה.')
+      } finally {
+        if (isMounted) {
+          setIsLoadingWaitingMatches(false)
+        }
+      }
+    }
+
+    fetchWaitingListMatches()
+
+    return () => {
+      isMounted = false
+    }
+  }, [activeOrgId, canManageAll, session])
+
+  useEffect(() => {
+    if (!canManageAll || !activeOrgId || !session) {
+      setBillingOverview(null)
+      return
+    }
+
+    let isMounted = true
+    const now = new Date()
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+
+    async function fetchBillingOverview() {
+      try {
+        const payload = await authenticatedFetch('billing', {
+          params: { org_id: activeOrgId, start_date: monthStart, end_date: monthEnd },
+          session,
+        })
+        if (!isMounted) return
+        const summaries = Array.isArray(payload?.student_summaries) ? payload.student_summaries : []
+        setBillingOverview({
+          studentCount: summaries.length,
+          lessonChargeTotal: summaries.reduce((sum, row) => sum + Number(row?.lesson_charge_total || 0), 0),
+          hmoChargeTotal: summaries.reduce((sum, row) => sum + Number(row?.hmo_charge_total || 0), 0),
+          activeAuthorizationCount: summaries.reduce((sum, row) => sum + (Array.isArray(row?.authorizations) ? row.authorizations.length : 0), 0),
+        })
+      } catch {
+        // Non-critical — dashboard billing summary is best-effort
+        if (isMounted) setBillingOverview(null)
+      }
+    }
+
+    fetchBillingOverview()
+    return () => { isMounted = false }
+  }, [activeOrgId, canManageAll, session])
+
+  function renderWaitingListMatches() {
+    if (!canManageAll || !activeOrgId || !session) {
+      return null
+    }
+
+    const capacityCount = Number(waitingListMatches?.summary?.capacity?.matchable_entries) || 0
+    const clearSpaceCount = Number(waitingListMatches?.summary?.clear_space?.matchable_entries) || 0
+    const urgentCount = Number(waitingListMatches?.summary?.priority_entries) || 0
+    const oldestWaitDays = Number(waitingListMatches?.summary?.oldest_wait_days) || 0
+
+    return (
+      <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <UsersRound className="h-4 w-4 text-emerald-700" />
+              <h2 className="text-base font-semibold text-neutral-900">התאמות מרשימת ההמתנה</h2>
+            </div>
+            <p className="mt-1 text-sm text-neutral-600">התאמות חיות לשיבוץ ידני בתבניות.</p>
+          </div>
+          {urgentCount > 0 ? <Badge variant="destructive">{urgentCount} דחופים</Badge> : null}
+        </div>
+
+        {waitingMatchesError && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {waitingMatchesError}
+          </div>
+        )}
+
+        {isLoadingWaitingMatches ? (
+          <div className="mt-4 flex items-center gap-2 text-sm text-neutral-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            בודק התאמות...
+          </div>
+        ) : capacityCount === 0 && clearSpaceCount === 0 ? (
+          <div className="mt-4 rounded-xl border border-dashed border-neutral-200 p-4 text-sm text-neutral-500">
+            אין כרגע התאמות זמינות מרשימת ההמתנה.
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+              <div className="text-sm font-medium text-emerald-950">ממתינים שאפשר לצרף לקבוצה קיימת</div>
+              <div className="mt-2 text-2xl font-semibold text-emerald-950">{capacityCount}</div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => navigate('/calendar/templates?waiting_matches=1&mode=capacity')}
+              >
+                <ArrowLeft className="ms-1 h-4 w-4" />
+                פתח
+              </Button>
+            </div>
+            <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-4">
+              <div className="text-sm font-medium text-sky-950">ממתינים שמתאימים לשיבוץ נפרד</div>
+              <div className="mt-2 text-2xl font-semibold text-sky-950">{clearSpaceCount}</div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => navigate('/calendar/templates?waiting_matches=1&mode=clear_space')}
+              >
+                <ArrowLeft className="ms-1 h-4 w-4" />
+                פתח
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {oldestWaitDays > 0 ? (
+          <p className="mt-3 text-xs text-neutral-500">ההמתנה הארוכה ביותר עם התאמה: {oldestWaitDays} ימים.</p>
+        ) : null}
+      </Card>
+    )
+  }
+
+  function renderDashboardTasks() {
+    if (!canManageAll) {
+      return null
+    }
+
+    if (!activeOrgId || !session) {
+      return null
+    }
+
+    const groupedTasks = groupDashboardTasks(dashboardTasks)
+
+    return (
+      <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-neutral-900">משימות פעולה</h2>
+            <p className="text-sm text-neutral-600">פעולות שנפתחו אוטומטית ודורשות טיפול אנושי.</p>
+          </div>
+          <Badge variant="outline">{dashboardTasks.length} פתוחות</Badge>
+        </div>
+
+        {tasksError && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {tasksError}
+          </div>
+        )}
+
+        {isLoadingTasks ? (
+          <div className="mt-4 flex items-center gap-2 text-sm text-neutral-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            טוען משימות...
+          </div>
+        ) : dashboardTasks.length === 0 ? (
+          <div className="mt-4 rounded-xl border border-dashed border-neutral-200 p-4 text-sm text-neutral-500">
+            אין כרגע משימות פתוחות.
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {groupedTasks.map((group) => (
+              <div key={group.key} className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-amber-950">
+                      <AlertTriangle className="h-4 w-4" />
+                      <span className="font-medium">{group.label}</span>
+                      <Badge className="bg-white text-amber-900 border-amber-200">{TASK_PRIORITY_LABEL[group.topPriority] || group.topPriority}</Badge>
+                    </div>
+                    <p className="text-sm text-amber-900/85">
+                      יש {group.count} משימות פתוחות עבור {group.label}.
+                    </p>
+                    {group.latestDescription && (
+                      <p className="text-xs text-amber-900/75">
+                        דוגמה אחרונה: {group.latestDescription}
+                      </p>
+                    )}
+                    {group.latestCreatedAt && (
+                      <p className="text-xs text-amber-900/65">
+                        עדכון אחרון: {formatTaskTimestamp(group.latestCreatedAt)}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {group.actionPath && (
+                      <Button variant="outline" size="sm" onClick={() => navigate(group.actionPath)}>
+                        <ArrowLeft className="ms-1 h-4 w-4" />
+                        פתח
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    )
+  }
+
+  function renderBillingOverview() {
+    if (!canManageAll || !billingOverview) return null
+    return (
+      <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+        <h2 className="text-base font-semibold text-neutral-900">סיכום חיובים — החודש הנוכחי</h2>
+        <p className="mt-1 text-sm text-neutral-600">מבט מהיר על פעילות הכספים של החודש.</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs text-slate-600">תלמידים במעקב</div>
+            <div className="mt-1 text-2xl font-bold text-zinc-900">{billingOverview.studentCount}</div>
+          </div>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <div className="text-xs text-emerald-700">חיובי שיעורים בחודש</div>
+            <div className="mt-1 text-2xl font-bold text-emerald-950">{formatCurrency(billingOverview.lessonChargeTotal)}</div>
+          </div>
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+            <div className="text-xs text-indigo-700">חיוב מול גורם מממן בחודש</div>
+            <div className="mt-1 text-2xl font-bold text-indigo-950">{formatCurrency(billingOverview.hmoChargeTotal)}</div>
+          </div>
+          <div className="rounded-xl border border-violet-200 bg-violet-50 p-4">
+            <div className="text-xs text-violet-700">אישורי גורם מממן פעילים</div>
+            <div className="mt-1 text-2xl font-bold text-violet-950">{billingOverview.activeAuthorizationCount}</div>
+          </div>
+        </div>
+      </Card>
+    )
+  }
+
+  const greeting = buildGreeting(instructorName, account?.displayName, user?.name, user?.email)
 
   return (
     <div
@@ -153,50 +486,15 @@ export default function DashboardPage() {
             </div>
           </header>
 
-          {/* Quick action cards */}
-          <div className="grid grid-cols-1 gap-lg pb-xl md:grid-cols-2">
-            <Link to={studentsLink} className="group focus-visible:outline-none">
-              <Card
-                className="group h-full cursor-pointer rounded-2xl border border-border bg-surface p-lg text-right shadow-sm transition hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg group-focus-visible:ring-2 group-focus-visible:ring-primary/40"
-              >
-                <h2 className="text-2xl font-semibold text-foreground group-hover:text-primary">
-                  {studentsTitle}
-                </h2>
-                <p className="mt-sm text-neutral-600">
-                  {studentsDescription}
-                </p>
-              </Card>
-            </Link>
+          {renderDashboardTasks()}
+          {renderWaitingListMatches()}
+          {renderBillingOverview()}
 
-            <button
-              type="button"
-              onClick={() => openSessionModal?.()}
-              className="group focus-visible:outline-none"
-              aria-label="פתיחת טופס רישום מפגש חדש"
-            >
-              <Card
-                className="group h-full cursor-pointer rounded-2xl border border-border bg-surface p-lg text-right shadow-sm transition hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg group-focus-visible:ring-2 group-focus-visible:ring-primary/40"
-              >
-                <h2 className="text-2xl font-semibold text-foreground group-hover:text-primary">
-                  תיעוד מפגש חדש
-                </h2>
-                <p className="mt-sm text-neutral-600">
-                  פתיחת טופס התיעוד בדיוק כמו לחצן הפלוס המרכזי.
-                </p>
-              </Card>
-            </button>
-          </div>
-
-          {/* Weekly compliance - mobile */}
-          {tenantClientReady && activeOrgHasConnection ? (
-          <ComplianceHeatmap />
-          ) : (
-            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <p className="text-sm text-muted-foreground">
-                לוח מעקב התיעודים השבועי יהיה זמין לאחר יצירת חיבור למסד הנתונים של הארגון.
-              </p>
-            </Card>
-          )}
+          <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+            <p className="text-sm text-muted-foreground">
+              אזור מפת המעקב הוסר זמנית מהדשבורד עד להחזרת המודול בגרסה מעודכנת.
+            </p>
+          </Card>
         </div>
       </div>
 
@@ -212,48 +510,15 @@ export default function DashboardPage() {
             </div>
           </header>
 
-          <div className="grid grid-cols-2 gap-lg">
-            <Link to={studentsLink} className="group focus-visible:outline-none">
-              <Card
-                className="group h-full cursor-pointer rounded-2xl border border-border bg-surface p-lg text-right shadow-sm transition hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg group-focus-visible:ring-2 group-focus-visible:ring-primary/40"
-              >
-                <h2 className="text-2xl font-semibold text-foreground group-hover:text-primary">
-                  {studentsTitle}
-                </h2>
-                <p className="mt-sm text-neutral-600">
-                  {studentsDescription}
-                </p>
-              </Card>
-            </Link>
+          {renderDashboardTasks()}
+          {renderWaitingListMatches()}
+          {renderBillingOverview()}
 
-            <button
-              type="button"
-              onClick={() => openSessionModal?.()}
-              className="group focus-visible:outline-none"
-              aria-label="פתיחת טופס רישום מפגש חדש"
-            >
-              <Card
-                className="group h-full cursor-pointer rounded-2xl border border-border bg-surface p-lg text-right shadow-sm transition hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg group-focus-visible:ring-2 group-focus-visible:ring-primary/40"
-              >
-                <h2 className="text-2xl font-semibold text-foreground group-hover:text-primary">
-                  תיעוד מפגש חדש
-                </h2>
-                <p className="mt-sm text-neutral-600">
-                  פתיחת טופס התיעוד בדיוק כמו לחצן הפלוס המרכזי.
-                </p>
-              </Card>
-            </button>
-          </div>
-
-          {tenantClientReady && activeOrgHasConnection ? (
-          <ComplianceHeatmap />
-          ) : (
-            <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
-              <p className="text-sm text-muted-foreground">
-                לוח מעקב התיעודים השבועי יהיה זמין לאחר יצירת חיבור למסד הנתונים של הארגון.
-              </p>
-            </Card>
-          )}
+          <Card className="rounded-2xl border border-border bg-surface p-lg shadow-sm">
+            <p className="text-sm text-muted-foreground">
+              אזור מפת המעקב הוסר זמנית מהדשבורד עד להחזרת המודול בגרסה מעודכנת.
+            </p>
+          </Card>
         </div>
       </div>
     </div>

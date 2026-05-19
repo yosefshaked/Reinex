@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   XCircle,
 } from 'lucide-react';
+import { useAccount } from '@/account/AccountContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { acceptInvitation, declineInvitation, getInvitationByToken } from '@/api/invitations.js';
 import { buildInvitationSearch, extractRegistrationTokens } from '@/lib/invite-tokens.js';
@@ -26,6 +27,7 @@ export default function AcceptInvitePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { status: authStatus, session, user, signOut } = useAuth();
+  const { needsSetup, isDisabled } = useAccount();
   const { refreshOrganizations, selectOrg } = useOrg();
 
   const { invitationTokenKey, invitationTokenValue } = useMemo(
@@ -93,6 +95,20 @@ export default function AcceptInvitePage() {
       },
     });
   }, [authStatus, session, invitationTokenKey, invitationTokenValue, navigate]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    if (isDisabled) {
+      navigate('/account/reactivate', { replace: true });
+      return;
+    }
+    if (needsSetup) {
+      const returnTo = `/accept-invite${location.search || ''}`;
+      navigate(`/account/setup?returnTo=${encodeURIComponent(returnTo)}`, { replace: true });
+    }
+  }, [session, isDisabled, needsSetup, navigate, location.search]);
 
   const invitationEmail = invitation?.email || '';
   const normalizedInvitationEmail = invitationEmail.toLowerCase();
@@ -173,7 +189,7 @@ export default function AcceptInvitePage() {
   };
 
   const renderLoading = () => (
-    <div className="p-8 space-y-6 text-right">
+    <div className="p-8 space-y-6 text-end">
       <div className="flex items-center justify-end gap-3 text-blue-600">
         <div className="w-10 h-10 rounded-full border-2 border-blue-200 flex items-center justify-center">
           <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
@@ -190,7 +206,7 @@ export default function AcceptInvitePage() {
   );
 
   const renderError = () => (
-    <div className="p-8 space-y-6 text-right">
+    <div className="p-8 space-y-6 text-end">
       <div className="bg-red-50 border border-red-200 text-red-800 rounded-2xl px-4 py-3" role="alert">
         {loadError}
       </div>
@@ -201,7 +217,7 @@ export default function AcceptInvitePage() {
   );
 
   const renderMismatch = () => (
-    <div className="p-8 space-y-6 text-right">
+    <div className="p-8 space-y-6 text-end">
       <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-2xl px-4 py-3 flex items-start gap-3" role="alert">
         <AlertCircle className="w-5 h-5 mt-0.5" aria-hidden="true" />
         <div className="space-y-1">
@@ -224,7 +240,7 @@ export default function AcceptInvitePage() {
   );
 
   const renderPending = () => (
-    <div className="p-8 space-y-6 text-right">
+    <div className="p-8 space-y-6 text-end">
       <div className="space-y-2">
         <p className="text-sm text-blue-500 font-medium">{organizationName}</p>
         <h2 className="text-2xl font-bold text-slate-900">ברוך הבא{user?.name ? `, ${user.name}` : ''}!</h2>
@@ -261,7 +277,7 @@ export default function AcceptInvitePage() {
   );
 
   const renderAccepted = () => (
-    <div className="p-8 space-y-6 text-right">
+    <div className="p-8 space-y-6 text-end">
       <div className="flex items-center justify-end gap-3 text-green-600">
         <CheckCircle2 className="w-8 h-8" aria-hidden="true" />
         <div>
@@ -283,7 +299,7 @@ export default function AcceptInvitePage() {
   );
 
   const renderInvalid = () => (
-    <div className="p-8 space-y-6 text-right">
+    <div className="p-8 space-y-6 text-end">
       <div className="bg-slate-100 border border-slate-200 text-slate-700 rounded-2xl px-4 py-3 flex items-start gap-3" role="status">
         <AlertCircle className="w-5 h-5 mt-0.5" aria-hidden="true" />
         <div className="space-y-1">
@@ -329,9 +345,9 @@ export default function AcceptInvitePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-200 flex items-center justify-center px-4 py-12" dir="rtl">
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-200 flex items-center justify-center px-4 py-12">
       <div className="max-w-2xl w-full bg-white shadow-xl rounded-3xl overflow-hidden border border-slate-100">
-        <div className="bg-gradient-to-l from-blue-500 to-indigo-500 p-6 text-right text-white">
+        <div className="bg-gradient-to-l from-blue-500 to-indigo-500 p-6 text-end text-white">
           <div className="flex items-center justify-center gap-3">
             <ShieldCheck className="w-10 h-10" />
             <div className="text-center">

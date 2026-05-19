@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Date Picker Suggestion 03</title>
+  <style>
+    :root {
+      --bg: #f3f6fb;
+      --card: #fff;
+      --line: #d9e2ee;
+      --text: #152136;
+      --muted: #728097;
+      --primary: #3a7a57;
+      --primary-soft: #ecf8f1;
+      --indigo: #5564e8;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 30px;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background:
+        radial-gradient(circle at right top, rgba(85,100,232,0.12), transparent 22rem),
+        linear-gradient(180deg, #fafcff 0%, var(--bg) 100%);
+      color: var(--text);
+    }
+
+    .app {
+      max-width: 1220px;
+      margin: 0 auto;
+      background: var(--card);
+      border: 1px solid rgba(217, 226, 238, 0.8);
+      border-radius: 34px;
+      box-shadow: 0 22px 46px rgba(32, 50, 93, 0.1);
+      overflow: hidden;
+    }
+
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 24px 28px;
+      border-bottom: 1px solid #eef2f6;
+    }
+
+    .left,
+    .right,
+    .center-nav {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .control {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 16px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: default;
+      white-space: nowrap;
+    }
+
+    .control.primary {
+      background: var(--indigo);
+      border-color: var(--indigo);
+      color: #fff;
+    }
+
+    .center {
+      position: relative;
+      flex: 1;
+      display: flex;
+      justify-content: center;
+    }
+
+    .navigator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px;
+      border-radius: 24px;
+      border: 1px solid #e4ebf5;
+      background: linear-gradient(180deg, #fff 0%, #fafcff 100%);
+      box-shadow: 0 12px 30px rgba(28, 45, 90, 0.08);
+    }
+
+    .title-button {
+      min-width: 420px;
+      padding: 12px 18px;
+      border-radius: 18px;
+      background: var(--primary-soft);
+      text-align: center;
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    .title-button small {
+      display: block;
+      margin-top: 4px;
+      font-size: 11px;
+      color: #4f8b6a;
+      font-weight: 600;
+    }
+
+    .popover {
+      position: absolute;
+      top: calc(100% + 14px);
+      width: 430px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: 0 30px 58px rgba(22, 39, 78, 0.16);
+      overflow: hidden;
+    }
+
+    .popover-head {
+      padding: 18px 18px 14px;
+      border-bottom: 1px solid #eef2f6;
+      background: linear-gradient(180deg, #fff 0%, #f9fbff 100%);
+    }
+
+    .segment {
+      display: inline-flex;
+      gap: 6px;
+      padding: 4px;
+      border-radius: 999px;
+      background: #f4f7fb;
+      border: 1px solid #e5ebf4;
+      margin-bottom: 14px;
+    }
+
+    .segment span {
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .segment .active {
+      background: #fff;
+      color: var(--text);
+      box-shadow: 0 4px 10px rgba(36, 50, 90, 0.08);
+    }
+
+    .month-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .month-nav {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+    }
+
+    .weekdays,
+    .days {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 8px;
+      padding: 14px 18px 18px;
+    }
+
+    .weekdays {
+      padding-bottom: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .day {
+      height: 48px;
+      border-radius: 16px;
+      background: #f8fbff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      font-size: 14px;
+    }
+
+    .day .range {
+      position: absolute;
+      inset-inline: 4px;
+      bottom: 4px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(58,122,87,0.14);
+    }
+
+    .day.anchor {
+      background: linear-gradient(180deg, #3a7a57 0%, #2d6246 100%);
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .day.anchor .range {
+      background: rgba(255,255,255,0.35);
+    }
+
+    .day.muted {
+      color: #a6b2c3;
+      background: #fcfdff;
+    }
+
+    .content {
+      height: 560px;
+      background:
+        linear-gradient(90deg, transparent 0 15%, rgba(225, 231, 241, 0.9) 15% 15.2%, transparent 15.2%),
+        repeating-linear-gradient(180deg, #ffffff 0 58px, #f4f7fb 58px 59px);
+      position: relative;
+    }
+
+    .legend {
+      position: absolute;
+      top: 24px;
+      inset-inline-start: 24px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.94);
+      border: 1px solid var(--line);
+      padding: 12px 14px;
+      max-width: 360px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="top">
+      <div class="left">
+        <div class="control primary">שיעור חדש</div>
+        <div class="control">יצירה מתבניות</div>
+      </div>
+
+      <div class="center">
+        <div class="center-nav navigator">
+          <div class="control">◀</div>
+          <div class="control">היום</div>
+          <div class="title-button">
+            20 באפריל 2026 - 26 באפריל 2026
+            <small>במצב שבוע, בחירת יום מגדירה את השבוע סביבו</small>
+          </div>
+          <div class="control">▶</div>
+        </div>
+
+        <div class="popover">
+          <div class="popover-head">
+            <div class="segment">
+              <span>יום בודד</span>
+              <span class="active">שבוע סביב התאריך</span>
+            </div>
+            <div class="month-bar">
+              <div class="month-nav">▶</div>
+              <strong>אפריל 2026</strong>
+              <div class="month-nav">◀</div>
+            </div>
+          </div>
+          <div class="weekdays">
+            <div>א'</div><div>ב'</div><div>ג'</div><div>ד'</div><div>ה'</div><div>ו'</div><div>ש'</div>
+          </div>
+          <div class="days">
+            <div class="day muted">29</div><div class="day muted">30</div><div class="day muted">31</div><div class="day">1</div><div class="day">2</div><div class="day">3</div><div class="day">4</div>
+            <div class="day">5<div class="range"></div></div><div class="day">6<div class="range"></div></div><div class="day">7<div class="range"></div></div><div class="day">8</div><div class="day">9</div><div class="day">10</div><div class="day">11</div>
+            <div class="day">12</div><div class="day">13</div><div class="day">14</div><div class="day">15</div><div class="day">16</div><div class="day">17</div><div class="day">18</div>
+            <div class="day">19<div class="range"></div></div><div class="day anchor">20<div class="range"></div></div><div class="day">21<div class="range"></div></div><div class="day">22<div class="range"></div></div><div class="day">23<div class="range"></div></div><div class="day">24<div class="range"></div></div><div class="day">25<div class="range"></div></div>
+            <div class="day">26<div class="range"></div></div><div class="day">27</div><div class="day">28</div><div class="day">29</div><div class="day">30</div><div class="day muted">1</div><div class="day muted">2</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="right">
+        <div class="control">יום</div>
+        <div class="control primary">שבוע</div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="legend">
+        הדוגמה הזאת מכוונת למצב שבוע. היא מציגה לא רק את היום שנבחר אלא גם את טווח השבוע שייווצר ממנו,
+        כדי שלא תהיה קפיצה "מפתיעה" כשבוחרים תאריך מתוך ה-picker.
+      </div>
+    </div>
+  </div>
+</body>
+</html>

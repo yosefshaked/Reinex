@@ -83,22 +83,19 @@ function resolveNextIdentifier(used, generator) {
 
 export const INSTRUCTOR_COLOR_BANK = DEFAULT_COLOR_BANK;
 
-export async function ensureInstructorColors(tenantClient, { context, columns = 'id, metadata' } = {}) {
+export async function ensureInstructorColors(
+  tenantClient,
+  { context, columns = 'id, metadata', table = 'Instructors' } = {},
+) {
   const selectColumns = typeof columns === 'string' && columns.trim() ? columns : 'id, metadata';
+  const targetTable = typeof table === 'string' && table.trim() ? table.trim() : 'Instructors';
 
   let query = tenantClient
-    .from('Instructors')
+    .from(targetTable)
     .select(selectColumns);
 
-  // The Instructors table does not guarantee a created_at column across tenants. When
-  // ordering by a non-existent column Supabase responds with HTTP 400, which surfaces as
-  // `failed_to_prepare_instructors` in the weekly compliance endpoint. Prefer deterministic
-  // ordering by `name` when it is part of the requested projection and always fall back to
-  // the primary key to keep color assignments stable without triggering schema errors.
-  if (selectColumns.includes('name')) {
-    query = query.order('name', { ascending: true, nullsFirst: false });
-  }
-
+  // Tenant schemas are not consistent about human-readable name columns. Prefer the primary
+  // key only here so color assignment stays deterministic without depending on legacy shapes.
   query = query.order('id', { ascending: true, nullsFirst: false });
 
   const { data, error } = await query;
@@ -144,7 +141,7 @@ export async function ensureInstructorColors(tenantClient, { context, columns = 
   if (updates.length) {
     for (const { instructor, metadata } of updates) {
       const { error: updateError } = await tenantClient
-        .from('Instructors')
+        .from(targetTable)
         .update({ metadata })
         .eq('id', instructor.id);
 

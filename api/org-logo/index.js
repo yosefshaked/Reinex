@@ -23,7 +23,7 @@ export default async function (context, req) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('org-logo missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
@@ -34,11 +34,11 @@ export default async function (context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('org-logo failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
@@ -55,7 +55,7 @@ export default async function (context, req) {
   
   const orgId = resolveOrgId(req, body);
   if (!orgId) {
-    return respond(context, 400, { message: 'invalid org id' });
+    return respond(context, 400, { message: 'invalid_org_id' });
   }
 
   // Membership (admin/owner)
@@ -74,9 +74,9 @@ export default async function (context, req) {
   // GET: Anyone in the org can fetch the logo
   if (req.method === 'GET') {
     const { data: orgSettings, error } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .select('logo_url, permissions')
-      .eq('org_id', orgId)
+      .eq('id', orgId)
       .maybeSingle();
 
     if (error) {
@@ -106,9 +106,9 @@ export default async function (context, req) {
 
   // Check permissions
   const { data: orgSettings, error: permError } = await supabase
-    .from('org_settings')
+    .from('organizations')
     .select('permissions')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .maybeSingle();
 
   if (permError) {
@@ -138,11 +138,11 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid_logo_url' });
     }
 
-    // Store logo_url in org_settings
+    // Store logo_url in organizations
     const { error: updateError } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .update({ logo_url: logoUrl, updated_at: new Date().toISOString() })
-      .eq('org_id', orgId);
+      .eq('id', orgId);
 
     if (updateError) {
       context.log?.error?.('org-logo failed to save logo_url', { message: updateError.message });
@@ -169,9 +169,9 @@ export default async function (context, req) {
   // DELETE: Remove logo
   if (req.method === 'DELETE') {
     const { error: deleteError } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .update({ logo_url: null, updated_at: new Date().toISOString() })
-      .eq('org_id', orgId);
+      .eq('id', orgId);
 
     if (deleteError) {
       context.log?.error?.('org-logo failed to delete logo_url', { message: deleteError.message });

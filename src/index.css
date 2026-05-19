@@ -85,6 +85,9 @@
     @apply bg-background text-foreground;
   }
   html { font-size: calc(16px * var(--a11y-font-scale, 1)); }
+  th, td {
+    text-align: start;
+  }
 }
 
 /* Mobile nav invisible hit-area — expands touch target without visual change */

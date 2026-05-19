@@ -7,7 +7,7 @@ import { CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp } from 'luci
 
 const FIELD_LABELS = {
   name: 'שם',
-  national_id: 'תעודת זהות',
+  identity_number: 'תעודת זהות',
   contact_name: 'שם איש קשר',
   contact_phone: 'טלפון איש קשר',
   assigned_instructor_id: 'מדריך משויך',
@@ -71,7 +71,7 @@ function ChangeRow({ field, oldValue, newValue, instructors }) {
   const formattedNew = formatFieldValue(field, newValue, instructors);
 
   return (
-    <div className="grid grid-cols-[auto_1fr_1fr] gap-3 py-2 text-sm" dir="rtl">
+    <div className="grid grid-cols-[auto_1fr_1fr] gap-3 py-2 text-sm">
       <div className="font-semibold text-neutral-700 min-w-[120px]">{fieldLabel}:</div>
       <div className="text-neutral-600">
         <div className="flex items-center gap-2">
@@ -109,8 +109,8 @@ function StudentPreviewCard({ preview, selected, onToggle, instructors }) {
         />
         <Label
           htmlFor={`preview-${preview.student_id}`}
-          className="flex-1 cursor-pointer text-right"
-          dir="rtl"
+          className="flex-1 cursor-pointer text-end"
+         
         >
           <div className="flex items-center justify-between gap-2">
             <div className="flex-1">
@@ -208,7 +208,7 @@ export default function DataMaintenancePreview({
   };
 
   return (
-    <div className="space-y-4" dir="rtl">
+    <div className="space-y-4">
       {/* Summary Stats */}
       <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
         <div className="flex flex-wrap items-center gap-4 text-sm">
@@ -240,7 +240,7 @@ export default function DataMaintenancePreview({
             indeterminate={someSelected}
             onCheckedChange={handleToggleAll}
           />
-          <Label htmlFor="select-all" className="flex-1 cursor-pointer text-right font-medium">
+          <Label htmlFor="select-all" className="flex-1 cursor-pointer text-end font-medium">
             בחר הכל ({selectedCount} מתוך {previewsWithChanges.length})
           </Label>
         </div>

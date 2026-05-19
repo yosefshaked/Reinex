@@ -25,7 +25,7 @@
  */
 export async function logAuditEvent(supabaseClient, params) {
   const {
-    orgId,
+    orgId = null,
     userId,
     userEmail,
     userRole,
@@ -37,34 +37,92 @@ export async function logAuditEvent(supabaseClient, params) {
     metadata = null,
   } = params;
 
-  if (!orgId || !userId || !userEmail || !userRole || !actionType || !actionCategory) {
+  if (!userId || !userEmail || !userRole || !actionType || !actionCategory) {
     throw new Error('Missing required audit log parameters');
   }
 
-  // Use the RPC function for logging
-  const { data, error } = await supabaseClient.rpc('log_audit_event', {
-    p_org_id: orgId,
-    p_user_id: userId,
-    p_user_email: userEmail,
-    p_user_role: userRole,
-    p_action_type: actionType,
-    p_action_category: actionCategory,
-    p_resource_type: resourceType,
-    p_resource_id: resourceId,
-    p_details: details,
-    p_metadata: metadata,
-  });
+  // Determine retention category: system_admin and security actions are critical.
+  const retentionCategory =
+    String(actionCategory).startsWith('admin') ||
+    actionCategory === 'security' ||
+    actionCategory === 'admin_control'
+      ? 'critical'
+      : 'standard';
+
+  const { data, error } = await supabaseClient
+    .from('audit_log')
+    .insert({
+      org_id: orgId || null,
+      actor_user_id: userId,
+      actor_email: userEmail,
+      actor_role: userRole,
+      event_type: actionType,
+      action_category: actionCategory,
+      retention_category: retentionCategory,
+      resource_type: resourceType || null,
+      resource_id: resourceId ? String(resourceId) : null,
+      details: details || null,
+      metadata: metadata || null,
+    })
+    .select('id')
+    .single();
 
   if (error) {
-    // Log the error but don't fail the request
-    console.error('Failed to log audit event', {
-      actionType,
-      error: error.message,
-    });
+    console.error('Failed to log audit event', { actionType, error: error.message });
     return null;
   }
 
-  return data;
+  return data?.id ?? null;
+}
+
+export async function logSystemAuditEvent(supabaseClient, params) {
+  const {
+    orgId = null,
+    actionType,
+    actionCategory,
+    resourceType = null,
+    resourceId = null,
+    details = null,
+    metadata = null,
+    systemEmail = 'system@reinex.local',
+    systemRole = 'system',
+  } = params;
+
+  if (!actionType || !actionCategory) {
+    throw new Error('Missing required audit log parameters');
+  }
+
+  const retentionCategory =
+    String(actionCategory).startsWith('admin') ||
+    actionCategory === 'security' ||
+    actionCategory === 'admin_control'
+      ? 'critical'
+      : 'standard';
+
+  const { data, error } = await supabaseClient
+    .from('audit_log')
+    .insert({
+      org_id: orgId || null,
+      actor_user_id: null,
+      actor_email: systemEmail,
+      actor_role: systemRole,
+      event_type: actionType,
+      action_category: actionCategory,
+      retention_category: retentionCategory,
+      resource_type: resourceType || null,
+      resource_id: resourceId ? String(resourceId) : null,
+      details: details || null,
+      metadata: metadata || null,
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('Failed to log system audit event', { actionType, error: error.message });
+    return null;
+  }
+
+  return data?.id ?? null;
 }
 
 /**
@@ -87,12 +145,35 @@ export const AUDIT_ACTIONS = {
   
   // Membership
   MEMBER_INVITED: 'member.invited',
+  MEMBER_LINKED_TO_EMPLOYEE: 'member.linked_to_employee',
   MEMBER_REMOVED: 'member.removed',
   MEMBER_ROLE_CHANGED: 'member.role_changed',
+  INVITATION_RESENT: 'invitation.resent',
+  INVITATION_ACCEPTED: 'invitation.accepted',
+  INVITATION_DECLINED: 'invitation.declined',
+  INVITATION_EXPIRED: 'invitation.expired',
+  INVITATION_SEND_FAILED: 'invitation.send_failed',
+  INVITATION_REVOKED: 'invitation.revoked',
+
+  // Account
+  ACCOUNT_PROFILE_UPDATED: 'account.profile_updated',
+  ACCOUNT_SETUP_COMPLETED: 'account.setup_completed',
+  ACCOUNT_DEACTIVATED: 'account.deactivated',
+  ACCOUNT_REACTIVATED: 'account.reactivated',
+  ACCOUNT_DEACTIVATION_BLOCKED: 'account.deactivation_blocked',
+  ACCOUNT_REACTIVATION_BLOCKED: 'account.reactivation_blocked',
   
   // Backup
   BACKUP_CREATED: 'backup.created',
   BACKUP_RESTORED: 'backup.restored',
+
+  // Local export/import
+  LOCAL_EXPORT_STARTED: 'local_export_started',
+  LOCAL_EXPORT_COMPLETED: 'local_export_completed',
+  LOCAL_EXPORT_FAILED: 'local_export_failed',
+  LOCAL_IMPORT_ANALYZED: 'local_import_analyzed',
+  LOCAL_IMPORT_APPLIED: 'local_import_applied',
+  LOCAL_IMPORT_FAILED: 'local_import_failed',
   
   // Files
   FILE_UPLOADED: 'file.uploaded',
@@ -103,18 +184,43 @@ export const AUDIT_ACTIONS = {
   // Sessions
   SESSION_CREATED: 'session.created',
   SESSION_RESOLVED: 'session.resolved',
+  SESSION_DELETED: 'session.deleted',
+  CALENDAR_INSTANCE_CREATED: 'calendar.instance_created',
+  CALENDAR_INSTANCE_UPDATED: 'calendar.instance_updated',
+  CALENDAR_INSTANCE_CANCELLED: 'calendar.instance_cancelled',
+
+  // Calendar Templates
+  TEMPLATE_CREATED: 'template.created',
+  TEMPLATE_UPDATED: 'template.updated',
+  TEMPLATE_DEACTIVATED: 'template.deactivated',
+  TEMPLATE_REACTIVATED: 'template.reactivated',
+  TEMPLATE_OVERRIDE_CREATED: 'template.override_created',
+  TEMPLATE_OVERRIDE_DELETED: 'template.override_deleted',
+  CALENDAR_GENERATION_DRY_RUN: 'calendar.generation_dry_run',
+  CALENDAR_GENERATION_APPLIED: 'calendar.generation_applied',
   
   // Students
   STUDENT_CREATED: 'student.created',
   STUDENT_UPDATED: 'student.updated',
   STUDENT_DELETED: 'student.deleted',
   STUDENTS_BULK_UPDATE: 'students.bulk_update',
+  STUDENT_LESSONS_BULK_CANCELLED: 'student.lessons_bulk_cancelled',
   
   // Instructors
   INSTRUCTOR_CREATED: 'instructor.created',
   INSTRUCTOR_UPDATED: 'instructor.updated',
   INSTRUCTOR_DELETED: 'instructor.deleted',
   
+  // Forms
+  FORM_TEMPLATE_CREATED: 'form_template.created',
+  FORM_TEMPLATE_UPDATED: 'form_template.updated',
+  FORM_TEMPLATE_PUBLISHED: 'form_template.published',
+  FORM_TEMPLATE_DELETED: 'form_template.deleted',
+  FORM_SUBMISSION_INITIATED: 'form_submission.initiated',
+  FORM_SUBMISSION_RESENT: 'form_submission.resent',
+  FORM_SUBMISSION_COMPLETED: 'form_submission.completed',
+  WAITING_LIST_INTAKE_INVITE_SENT: 'waiting_list_intake.invite_sent',
+
   // Settings
   SETTINGS_UPDATED: 'settings.updated',
   LOGO_UPDATED: 'logo.updated',
@@ -128,11 +234,15 @@ export const AUDIT_CATEGORIES = {
   PERMISSIONS: 'permissions',
   MEMBERSHIP: 'membership',
   BACKUP: 'backup',
+  LOCAL_DATA_PORTABILITY: 'local_data_portability',
   SETTINGS: 'settings',
   FILES: 'files',
   SESSIONS: 'sessions',
   STUDENTS: 'students',
   INSTRUCTORS: 'instructors',
+  CALENDAR: 'calendar',
+  FORMS: 'forms',
+  ACCOUNT: 'account',
 };
 
 /**

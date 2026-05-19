@@ -1,0 +1,280 @@
+/* eslint-env node */
+import { resolveBearerAuthorization } from '../_shared/http.js';
+import { logAuditEvent } from '../_shared/audit-log.js';
+import {
+  createSupabaseAdminClient,
+  readSupabaseAdminConfig,
+} from '../_shared/supabase-admin.js';
+import { buildAccountDisplayName } from '../_shared/account-profile.js';
+import { ensureSystemAdmin, normalizeString, parseRequestBody, readEnv, respond } from '../_shared/org-bff.js';
+
+/**
+ * POST /api/system-admin-impersonation-start
+ *
+ * Body: { target_email: string, reason: string, duration_minutes?: number,
+ *         target_org_id?: string }
+ *
+ * Response: { session_id, hashed_token, target_user_id, target_email,
+ *             target_name, target_org_id, target_org_name, expires_at }
+ *
+ * Client uses `hashed_token` with `supabase.auth.verifyOtp({ token_hash, type: 'magiclink' })`
+ * to swap the browser session to the target user.
+ */
+
+const DEFAULT_DURATION_MINUTES = 30;
+const MAX_DURATION_MINUTES = 240;
+
+function resolveDurationMinutes(raw) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_DURATION_MINUTES;
+  return Math.min(Math.round(parsed), MAX_DURATION_MINUTES);
+}
+
+function sanitizeInet(raw) {
+  if (!raw) return null;
+  const candidate = String(raw).split(',')[0].trim();
+  // Strip IPv6 zone IDs (e.g. "fe80::1%eth0") and port suffixes (e.g. "1.2.3.4:5678")
+  const stripped = candidate.replace(/%[^\s]*$/, '').replace(/:\d+$/, '');
+  // Accept plain IPv4 (1.2.3.4) or any IPv6 (contains colons or is hex-with-dots)
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(stripped)) return stripped;
+  if (/^[0-9a-fA-F:]{2,}$/.test(stripped)) return stripped;
+  // IPv4-mapped IPv6 like ::ffff:1.2.3.4
+  if (/^::ffff:\d{1,3}(\.\d{1,3}){3}$/i.test(stripped)) return stripped;
+  return null;
+}
+
+function extractForensicContext(req) {
+  const headers = req?.headers || {};
+  const ipRaw = headers['x-forwarded-for'] || headers['x-real-ip'] || '';
+  const ip = typeof ipRaw === 'string' ? sanitizeInet(ipRaw) : null;
+  const userAgent = typeof headers['user-agent'] === 'string' ? headers['user-agent'] : null;
+  return { ip, userAgent };
+}
+
+async function lookupTargetUser(supabase, email) {
+  // auth.users is the source of truth for email — profiles has no email column.
+  // listUsers({ filter }) does a text search on email+phone across all pages;
+  // we scan up to 5 pages of 200 to find an exact match.
+  const normalizedEmail = email.toLowerCase();
+
+  let authUser = null;
+  for (let page = 1; page <= 5 && !authUser; page += 1) {
+    const { data, error } = await supabase.auth.admin.listUsers({
+      page,
+      perPage: 200,
+      filter: normalizedEmail,
+    });
+    if (error) {
+      throw Object.assign(new Error('target_lookup_failed'), { statusCode: 500, cause: error });
+    }
+    const users = Array.isArray(data?.users) ? data.users : [];
+    if (users.length === 0) break;
+    authUser = users.find((u) => String(u.email || '').toLowerCase() === normalizedEmail) || null;
+    // Stop early if the server returned fewer results than a full page.
+    if (users.length < 200) break;
+  }
+
+  if (!authUser) return null;
+
+  // Enrich with profile-derived display name (best-effort; failure is non-fatal).
+  let profile = null;
+  try {
+    const { data } = await supabase
+      .from('profiles')
+      .select('first_name, last_name')
+      .eq('id', authUser.id)
+      .maybeSingle();
+    profile = data || null;
+  } catch { /* ignore — auth user found; name is optional */ }
+
+  return {
+    id: authUser.id,
+    email: authUser.email,
+    full_name: buildAccountDisplayName({
+      profile,
+      authUser,
+      email: authUser.email,
+    }) || null,
+  };
+}
+
+async function lookupOrg(supabase, orgId) {
+  if (!orgId) return null;
+  const { data } = await supabase
+    .from('organizations')
+    .select('id, name')
+    .eq('id', orgId)
+    .maybeSingle();
+  return data || null;
+}
+
+export default async function adminImpersonationStart(context, req) {
+  const method = String(req.method || 'GET').toUpperCase();
+  if (method !== 'POST') {
+    return respond(context, 405, { message: 'method_not_allowed' });
+  }
+
+  const env = readEnv(context);
+  const adminConfig = readSupabaseAdminConfig(env);
+
+  if (!adminConfig.supabaseUrl || !adminConfig.serviceRoleKey) {
+    context.log?.error?.('system-admin-impersonation-start: missing supabase admin credentials');
+    return respond(context, 500, { message: 'server_misconfigured' });
+  }
+
+  const authorization = resolveBearerAuthorization(req);
+  if (!authorization?.token) {
+    return respond(context, 401, { message: 'missing_bearer_token' });
+  }
+
+  const supabase = createSupabaseAdminClient(adminConfig);
+
+  let admin;
+  try {
+    admin = await ensureSystemAdmin(req, supabase, authorization, { context });
+  } catch (error) {
+    return respond(context, error?.statusCode || 403, { message: error?.message || 'forbidden' });
+  }
+
+  let body = {};
+  try {
+    body = await parseRequestBody(req);
+  } catch {
+    return respond(context, 400, { message: 'invalid_json_body' });
+  }
+
+  const targetEmail = normalizeString(body?.target_email).toLowerCase();
+  const reason = normalizeString(body?.reason);
+  const targetOrgId = normalizeString(body?.target_org_id);
+  const durationMinutes = resolveDurationMinutes(body?.duration_minutes);
+
+  if (!targetEmail) {
+    return respond(context, 400, { message: 'target_email_required' });
+  }
+  if (reason.length < 3) {
+    return respond(context, 400, { message: 'reason_required', min_length: 3 });
+  }
+  if (targetEmail.toLowerCase() === String(admin.email || '').toLowerCase()) {
+    return respond(context, 400, { message: 'cannot_impersonate_self' });
+  }
+
+  // Resolve target profile + optional org.
+  let targetUser;
+  try {
+    targetUser = await lookupTargetUser(supabase, targetEmail);
+  } catch (error) {
+    context.log?.error?.('system-admin-impersonation-start: lookup failed', { message: error?.message });
+    return respond(context, 500, { message: 'target_lookup_failed' });
+  }
+
+  if (!targetUser) {
+    return respond(context, 404, { message: 'target_user_not_found' });
+  }
+
+  const org = await lookupOrg(supabase, targetOrgId).catch(() => null);
+
+  // Generate a magic-link hashed_token the client will redeem locally via verifyOtp.
+  let linkData;
+  try {
+    const result = await supabase.auth.admin.generateLink({
+      type: 'magiclink',
+      email: targetUser.email,
+    });
+    if (result.error) throw result.error;
+    linkData = result.data;
+  } catch (error) {
+    context.log?.error?.('system-admin-impersonation-start: generateLink failed', { message: error?.message });
+    return respond(context, 500, { message: 'generate_link_failed' });
+  }
+
+  const hashedToken = linkData?.properties?.hashed_token;
+  if (!hashedToken) {
+    return respond(context, 500, { message: 'generate_link_missing_token' });
+  }
+
+  const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000).toISOString();
+  const { ip, userAgent } = extractForensicContext(req);
+
+  // Record the session. If the impersonation_sessions table is missing we
+  // surface a clear error (501) rather than silently failing — the SSOT
+  // setup script at src/lib/setup-sql.js must be applied against the DB.
+  let sessionRow;
+  try {
+    const { data, error } = await supabase
+      .from('impersonation_sessions')
+      .insert({
+        admin_user_id: admin.userId,
+        admin_email: admin.email,
+        target_user_id: targetUser.id,
+        target_email: targetUser.email,
+        target_org_id: org?.id || null,
+        target_org_name: org?.name || null,
+        reason,
+        status: 'active',
+        expires_at: expiresAt,
+        ip,
+        user_agent: userAgent,
+      })
+      .select('id, started_at, expires_at')
+      .single();
+
+    if (error) {
+      context.log?.error?.('system-admin-impersonation-start: insert error detail', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      });
+      if (String(error.code) === '42P01') {
+        return respond(context, 501, {
+          message: 'impersonation_table_missing',
+          hint: 'Run the SSOT setup script at src/lib/setup-sql.js against your database',
+        });
+      }
+      throw error;
+    }
+    sessionRow = data;
+  } catch (error) {
+    context.log?.error?.('system-admin-impersonation-start: session insert failed', { message: error?.message });
+    return respond(context, 500, { message: 'session_insert_failed' });
+  }
+
+  // Audit the start. Failure of audit does not fail the request — but we do
+  // capture the audit event id on the session row so every session is
+  // correlatable to a single audit entry.
+  try {
+    await logAuditEvent(supabase, {
+      orgId: org?.id || null,
+      userId: admin.userId,
+      userEmail: admin.email,
+      userRole: 'system_admin',
+      actionType: 'system_admin.impersonation_started',
+      actionCategory: 'admin_control',
+      resourceType: 'impersonation',
+      resourceId: sessionRow.id,
+      details: {
+        session_id: sessionRow.id,
+        target_user_id: targetUser.id,
+        target_email: targetUser.email,
+        target_org_id: org?.id || null,
+        reason,
+        duration_minutes: durationMinutes,
+      },
+      metadata: { source: 'system-admin-impersonation-start', ip, user_agent: userAgent },
+    });
+  } catch (err) {
+    context.log?.warn?.('system-admin-impersonation-start: audit log failed', { message: err?.message });
+  }
+
+  return respond(context, 200, {
+    session_id: sessionRow.id,
+    hashed_token: hashedToken,
+    target_user_id: targetUser.id,
+    target_email: targetUser.email,
+    target_name: targetUser.full_name,
+    target_org_id: org?.id || null,
+    target_org_name: org?.name || null,
+    started_at: sessionRow.started_at,
+    expires_at: sessionRow.expires_at,
+  });
+}

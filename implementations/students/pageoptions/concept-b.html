@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Concept B — The Feed / Timeline View</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Heebo', sans-serif; }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            border: '#e4e4e7',
+            muted: { DEFAULT: '#f4f4f5', foreground: '#71717a' },
+            accent: { DEFAULT: '#f4f4f5', foreground: '#18181b' },
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-zinc-100 text-zinc-900 min-h-screen">
+
+  <!-- Top Navbar -->
+  <nav class="sticky top-0 z-50 bg-white border-b border-border px-6 py-3 flex items-center justify-between shadow-sm">
+    <div class="flex items-center gap-3">
+      <button class="text-sm text-muted-foreground hover:text-zinc-700 transition flex items-center gap-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
+        חזרה
+      </button>
+      <span class="text-muted-foreground">/</span>
+      <span class="text-sm font-semibold">דני לוי</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="inline-flex items-center gap-2 rounded-md bg-zinc-900 text-white px-4 py-2 text-sm font-medium hover:bg-zinc-800 transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536M9 11l6-6 3 3-6 6H9v-3z"/></svg>
+        עריכה
+      </button>
+      <button class="inline-flex items-center gap-1 rounded-md border border-border bg-white px-3 py-2 text-sm font-medium hover:bg-accent transition">
+        ⋯
+      </button>
+    </div>
+  </nav>
+
+  <div class="max-w-2xl mx-auto px-4 py-6 space-y-0">
+
+    <!-- ===================== STICKY PROFILE HEADER ===================== -->
+    <div class="bg-white rounded-xl border border-border p-6 shadow-sm">
+      <div class="flex items-center gap-4">
+        <div class="w-14 h-14 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 text-white flex items-center justify-center text-xl font-bold shrink-0 shadow-md">דל</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <h1 class="text-xl font-bold">דני לוי</h1>
+            <span class="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 text-xs font-medium">פעיל</span>
+          </div>
+          <p class="text-sm text-muted-foreground">ת.ז. 012345678 · גיל 7 · מדריכה: יעל כהן</p>
+        </div>
+      </div>
+      <!-- Medical Alerts Banner -->
+      <div class="mt-4 flex gap-2 flex-wrap">
+        <div class="flex items-center gap-1.5 rounded-lg bg-red-50 border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700">
+          <span>🚨</span> אלרגיה לבוטנים
+        </div>
+        <div class="flex items-center gap-1.5 rounded-lg bg-amber-50 border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700">
+          <span>⚠️</span> אסתמה
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== TABS ===================== -->
+    <div class="sticky top-[57px] z-40 bg-zinc-100 pt-4 pb-2">
+      <div class="bg-white rounded-lg border border-border p-1 flex gap-0.5 shadow-sm">
+        <button class="flex-1 py-2 text-sm font-medium rounded-md bg-zinc-900 text-white transition">סקירה</button>
+        <button class="flex-1 py-2 text-sm font-medium rounded-md text-muted-foreground hover:bg-accent transition">לוח שיעורים</button>
+        <button class="flex-1 py-2 text-sm font-medium rounded-md text-muted-foreground hover:bg-accent transition">היסטוריה</button>
+        <button class="flex-1 py-2 text-sm font-medium rounded-md text-muted-foreground hover:bg-accent transition">מסמכים</button>
+        <button class="flex-1 py-2 text-sm font-medium rounded-md text-muted-foreground hover:bg-accent transition">כספים</button>
+        <button class="flex-1 py-2 text-sm font-medium rounded-md text-muted-foreground hover:bg-accent transition">טפסים</button>
+      </div>
+    </div>
+
+    <!-- ===================== FEED CARDS ===================== -->
+    <div class="space-y-4 pt-2">
+
+      <!-- Feed Card: Urgent — Next Lesson -->
+      <div class="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+        <div class="bg-blue-50 border-b border-blue-100 px-5 py-2.5 flex items-center gap-2">
+          <span class="text-blue-600">📅</span>
+          <span class="text-sm font-semibold text-blue-800">השיעור הבא — מחר</span>
+          <span class="mr-auto text-xs text-blue-500 font-medium">בעוד 18 שעות</span>
+        </div>
+        <div class="p-5">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center text-2xl">🏊</div>
+            <div class="flex-1">
+              <p class="font-semibold">שחייה טיפולית</p>
+              <p class="text-sm text-muted-foreground">יום שלישי, 21/01/2026 · 16:00–16:45</p>
+              <p class="text-sm text-muted-foreground">מדריכה: יעל כהן · בריכה A</p>
+            </div>
+          </div>
+          <div class="mt-3 flex gap-2">
+            <button class="rounded-md bg-blue-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-blue-700 transition">סמן נוכחות</button>
+            <button class="rounded-md border border-border px-4 py-1.5 text-sm font-medium hover:bg-accent transition">בטל שיעור</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feed Card: Guardian -->
+      <div class="bg-white rounded-xl border border-border shadow-sm p-5">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="text-violet-600">👤</span>
+          <h3 class="text-sm font-semibold text-zinc-700">אפוטרופוס ראשי</h3>
+        </div>
+        <div class="flex items-center gap-4">
+          <div class="w-11 h-11 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center font-bold">רל</div>
+          <div class="flex-1 min-w-0">
+            <p class="font-medium">רחל לוי <span class="text-xs text-muted-foreground font-normal">(אם)</span></p>
+            <div class="flex gap-4 text-sm text-muted-foreground mt-0.5">
+              <span dir="ltr">052-9876543 📞</span>
+              <span dir="ltr">rachel@example.com ✉</span>
+            </div>
+          </div>
+          <button class="text-sm text-blue-600 hover:underline shrink-0">התקשר</button>
+        </div>
+      </div>
+
+      <!-- Feed Card: Personal Details -->
+      <div class="bg-white rounded-xl border border-border shadow-sm p-5">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="text-zinc-500">📋</span>
+          <h3 class="text-sm font-semibold text-zinc-700">פרטים אישיים</h3>
+        </div>
+        <div class="grid grid-cols-2 gap-y-3 gap-x-6 text-sm">
+          <div>
+            <p class="text-xs text-muted-foreground">שם מלא</p>
+            <p class="font-medium">דני לוי</p>
+          </div>
+          <div>
+            <p class="text-xs text-muted-foreground">תעודת זהות</p>
+            <p class="font-medium">012345678</p>
+          </div>
+          <div>
+            <p class="text-xs text-muted-foreground">תאריך לידה</p>
+            <p class="font-medium">15/03/2018 (גיל 7)</p>
+          </div>
+          <div>
+            <p class="text-xs text-muted-foreground">טלפון</p>
+            <p class="font-medium" dir="ltr">050-1234567</p>
+          </div>
+          <div>
+            <p class="text-xs text-muted-foreground">אימייל</p>
+            <p class="font-medium" dir="ltr">dani@example.com</p>
+          </div>
+          <div>
+            <p class="text-xs text-muted-foreground">שיטת התראה</p>
+            <p class="font-medium">SMS + אימייל</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feed Card: Weekly Schedule -->
+      <div class="bg-white rounded-xl border border-border shadow-sm p-5">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="text-emerald-600">🗓</span>
+          <h3 class="text-sm font-semibold text-zinc-700">לוח שבועי קבוע</h3>
+        </div>
+        <div class="space-y-3">
+          <div class="flex items-center gap-3 p-3 rounded-lg bg-gray-50">
+            <div class="w-10 h-10 rounded-md bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold">ג׳</div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium">שחייה טיפולית</p>
+              <p class="text-xs text-muted-foreground">16:00–16:45 · יעל כהן</p>
+            </div>
+            <span class="text-xs text-emerald-600 font-medium">קבוע</span>
+          </div>
+          <div class="flex items-center gap-3 p-3 rounded-lg bg-gray-50">
+            <div class="w-10 h-10 rounded-md bg-green-100 text-green-600 flex items-center justify-center text-sm font-bold">ה׳</div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium">פיזיותרפיה</p>
+              <p class="text-xs text-muted-foreground">10:00–10:45 · משה דוד</p>
+            </div>
+            <span class="text-xs text-emerald-600 font-medium">קבוע</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feed Card: Financial Overview -->
+      <div class="bg-white rounded-xl border border-border shadow-sm p-5">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="text-amber-600">💰</span>
+          <h3 class="text-sm font-semibold text-zinc-700">סיכום כספי</h3>
+        </div>
+        <div class="grid grid-cols-3 gap-3 text-center">
+          <div class="rounded-lg bg-emerald-50 p-3">
+            <p class="text-xl font-bold text-emerald-700">₪2,400</p>
+            <p class="text-xs text-emerald-600 mt-0.5">יתרת זכות</p>
+          </div>
+          <div class="rounded-lg bg-zinc-50 p-3">
+            <p class="text-xl font-bold">12</p>
+            <p class="text-xs text-muted-foreground mt-0.5">השיעורים החודש</p>
+          </div>
+          <div class="rounded-lg bg-amber-50 p-3">
+            <p class="text-xl font-bold text-amber-700">₪200</p>
+            <p class="text-xs text-amber-600 mt-0.5">חוב פתוח</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feed Card: Notes -->
+      <div class="bg-white rounded-xl border border-border shadow-sm p-5">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-zinc-400">📝</span>
+          <h3 class="text-sm font-semibold text-zinc-700">הערות פנימיות</h3>
+          <span class="text-xs text-muted-foreground mr-auto">עודכן 10/03/2026</span>
+        </div>
+        <p class="text-sm text-zinc-600 leading-relaxed">דני מגיב יפה לשחייה טיפולית. מומלץ להמשיך 2 פעמים בשבוע. יש לשים לב לרגישות בעור לאחר כלור — להודיע להורה אם יש תגובה.</p>
+        <p class="text-xs text-muted-foreground mt-2">— יעל כהן, מדריכת שחייה</p>
+      </div>
+
+      <!-- Feed Card: Tags -->
+      <div class="bg-white rounded-xl border border-border shadow-sm p-5">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-zinc-400">🏷</span>
+          <h3 class="text-sm font-semibold text-zinc-700">תגיות</h3>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <span class="inline-flex items-center rounded-full bg-blue-50 text-blue-700 px-3 py-1.5 text-xs font-medium">שחייה טיפולית</span>
+          <span class="inline-flex items-center rounded-full bg-purple-50 text-purple-700 px-3 py-1.5 text-xs font-medium">קופ״ח מכבי</span>
+          <span class="inline-flex items-center rounded-full bg-teal-50 text-teal-700 px-3 py-1.5 text-xs font-medium">פיזיותרפיה</span>
+          <span class="inline-flex items-center rounded-full bg-orange-50 text-orange-700 px-3 py-1.5 text-xs font-medium">ביטוח לאומי</span>
+        </div>
+      </div>
+
+    </div><!-- /feed -->
+
+    <div class="h-8"></div>
+  </div>
+</body>
+</html>

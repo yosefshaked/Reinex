@@ -283,13 +283,13 @@ export default function TagsManager() {
     <>
       <Card>
         <CardHeader>
-          <div className="flex flex-row-reverse items-center justify-between gap-4">
-            <div className="flex-1 text-right">
-              <CardTitle className="flex items-center gap-2 justify-end mb-1">
+          <div className="flex flex-row items-center justify-between gap-4">
+            <div className="flex-1">
+              <CardTitle className="flex items-center gap-2 mb-1">
                 <span>ניהול תגיות וסיווגים</span>
                 <Icon className="h-5 w-5" />
               </CardTitle>
-              <CardDescription className="text-right">ניהול תגיות לתלמידים וסיווגים למדריכים</CardDescription>
+              <CardDescription>ניהול תגיות לתלמידים וסיווגים למדריכים</CardDescription>
             </div>
             <Button onClick={openAddDialog} size="sm" className="gap-2 shrink-0">
               <Plus className="h-4 w-4" />
@@ -298,7 +298,7 @@ export default function TagsManager() {
           </div>
           
           {/* Mode toggle buttons */}
-          <div className="flex gap-2 mt-4" dir="rtl">
+          <div className="flex gap-2 mt-4">
             <Button
               variant={mode === 'tags' ? 'default' : 'outline'}
               size="sm"
@@ -321,8 +321,8 @@ export default function TagsManager() {
         </CardHeader>
         <CardContent className="space-y-4">
           {error && (
-            <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2" role="alert" dir="rtl">
-              <span className="flex-1 text-right">{error}</span>
+            <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2" role="alert">
+              <span className="flex-1">{error}</span>
               <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
             </div>
           )}
@@ -338,7 +338,7 @@ export default function TagsManager() {
                 <div
                   key={item.id}
                   className="group flex items-center justify-between p-3 rounded-lg border bg-card/90 hover:bg-accent/40 transition-colors focus-within:ring-2 focus-within:ring-primary/30"
-                  dir="rtl"
+                 
                 >
                   <div className="flex items-center gap-2">
                     <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -384,9 +384,9 @@ export default function TagsManager() {
                 : `צור ${entityLabel} חדש${mode === 'tags' ? 'ה' : ''} לסיווג ${entityContext}.`}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleSaveTag} className="space-y-4" dir="rtl">
+          <form onSubmit={handleSaveTag} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="tag-name" className="text-right block">
+              <Label htmlFor="tag-name" className="block">
                 שם {entityLabel}
               </Label>
               <Input
@@ -397,8 +397,7 @@ export default function TagsManager() {
                 placeholder={mode === 'tags' ? 'לדוגמה: תלמיד חדש' : 'לדוגמה: מטפל'}
                 required
                 disabled={actionLoading}
-                dir="rtl"
-                className="text-right"
+               
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
@@ -406,11 +405,11 @@ export default function TagsManager() {
                   }
                 }}
               />
-              <p className="text-xs text-muted-foreground text-right">השם יוצג בתפריטים ושדות בחירת {entityLabelPlural}.</p>
+              <p className="text-xs text-muted-foreground">השם יוצג בתפריטים ושדות בחירת {entityLabelPlural}.</p>
             </div>
 
             {actionError && (
-              <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 text-right flex items-start gap-2" role="alert">
+              <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2" role="alert">
                 <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
                 <span>{actionError}</span>
               </div>
@@ -430,16 +429,16 @@ export default function TagsManager() {
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={closeDeleteDialog}>
-        <AlertDialogContent dir="rtl">
+        <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-right">האם למחוק את ה{entityLabel} "{tagToDelete?.name}"?</AlertDialogTitle>
-            <AlertDialogDescription className="text-right">
+            <AlertDialogTitle>האם למחוק את ה{entityLabel} "{tagToDelete?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
               פעולה זו תמחק את ה{entityLabel} מהמערכת ותסיר {mode === 'tags' ? 'אותה מכל התלמידים שמתויגים בה' : 'אותו מכל המדריכים המסווגים בו'}. לא ניתן לשחזר את הפעולה.
             </AlertDialogDescription>
           </AlertDialogHeader>
           
           {deleteError && (
-            <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 text-right flex items-start gap-2" role="alert">
+            <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2" role="alert">
               <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
               <span>{deleteError}</span>
             </div>

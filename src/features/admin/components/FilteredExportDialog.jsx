@@ -82,7 +82,7 @@ export function FilteredExportDialog({ open, onClose, instructors = [], tags = [
 
   return (
     <Dialog open={open} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-xl" dir="rtl">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>ייצוא תלמידים מסונן</DialogTitle>
         </DialogHeader>
@@ -90,7 +90,7 @@ export function FilteredExportDialog({ open, onClose, instructors = [], tags = [
         <div className="space-y-4 py-4">
           {/* Day Filter */}
           <div className="space-y-2">
-            <Label className="block text-right">סינון לפי יום</Label>
+            <Label className="block text-end">סינון לפי יום</Label>
             <DayOfWeekSelect
               value={selectedDay}
               onChange={setSelectedDay}
@@ -102,7 +102,7 @@ export function FilteredExportDialog({ open, onClose, instructors = [], tags = [
           {/* Instructor Filter */}
           {instructors.length > 0 && (
             <div className="space-y-2">
-              <Label className="block text-right">סינון לפי מדריך</Label>
+              <Label className="block text-end">סינון לפי מדריך</Label>
               <div className="max-h-40 overflow-y-auto rounded-md border p-2 space-y-2">
                 {instructors.map(instructor => (
                   <div key={instructor.id} className="flex items-center gap-2 justify-end">
@@ -118,7 +118,7 @@ export function FilteredExportDialog({ open, onClose, instructors = [], tags = [
                 ))}
               </div>
               {selectedInstructors.length > 0 && (
-                <p className="text-xs text-muted-foreground text-right">
+                <p className="text-xs text-muted-foreground text-end">
                   נבחרו {selectedInstructors.length} מדריכים
                 </p>
               )}
@@ -128,7 +128,7 @@ export function FilteredExportDialog({ open, onClose, instructors = [], tags = [
           {/* Tag Filter */}
           {tags.length > 0 && (
             <div className="space-y-2">
-              <Label className="block text-right">סינון לפי תגיות</Label>
+              <Label className="block text-end">סינון לפי תגיות</Label>
               <div className="max-h-40 overflow-y-auto rounded-md border p-2 space-y-2">
                 {tags.map(tag => (
                   <div key={tag.id} className="flex items-center gap-2 justify-end">
@@ -144,7 +144,7 @@ export function FilteredExportDialog({ open, onClose, instructors = [], tags = [
                 ))}
               </div>
               {selectedTags.length > 0 && (
-                <p className="text-xs text-muted-foreground text-right">
+                <p className="text-xs text-muted-foreground text-end">
                   נבחרו {selectedTags.length} תגיות
                 </p>
               )}
@@ -152,7 +152,7 @@ export function FilteredExportDialog({ open, onClose, instructors = [], tags = [
           )}
 
           {!hasFilters && (
-            <p className="text-sm text-muted-foreground text-right bg-muted/50 p-3 rounded-md">
+            <p className="text-sm text-muted-foreground text-end bg-muted/50 p-3 rounded-md">
               בחר לפחות מסנן אחד כדי לייצא תלמידים מסוימים
             </p>
           )}
@@ -172,7 +172,7 @@ export function FilteredExportDialog({ open, onClose, instructors = [], tags = [
           >
             {isExporting ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin ml-2" />
+                <Loader2 className="h-4 w-4 animate-spin ms-2" />
                 מייצא...
               </>
             ) : (

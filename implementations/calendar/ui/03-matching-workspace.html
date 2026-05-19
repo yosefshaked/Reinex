@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calendar UI Suggestion 03</title>
+  <style>
+    :root { --bg:#eff3f8; --panel:#fff; --line:#d8deeb; --text:#142034; --muted:#69758d; --blue:#276dff; --violet:#6157ff; --green:#1ea868; --shadow:0 20px 46px -28px rgba(31,41,55,.35); }
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#eef2f7,#f7f9fd);font-family:"Segoe UI",Tahoma,sans-serif;color:var(--text)} .page{max-width:1600px;margin:0 auto;padding:24px}
+    .hero{display:flex;justify-content:space-between;align-items:end;margin-bottom:16px} .hero h1{margin:0;font-size:2rem} .hero p{margin:8px 0 0;color:var(--muted)} .tools{display:flex;gap:10px}
+    .btn{padding:11px 15px;border-radius:14px;border:1px solid var(--line);background:white;font-weight:700;box-shadow:var(--shadow)} .btn.primary{background:linear-gradient(135deg,var(--violet),var(--blue));color:white;border-color:transparent}
+    .layout{display:grid;grid-template-columns:1fr 340px;gap:18px} .panel{background:rgba(255,255,255,.9);border:1px solid rgba(216,222,235,.95);border-radius:24px;box-shadow:var(--shadow);overflow:hidden}
+    .calendar-head{display:grid;grid-template-columns:auto 1fr auto;align-items:center;padding:16px 18px;border-bottom:1px solid var(--line)} .calendar-head .title{text-align:center;font-size:1.15rem;font-weight:800}
+    .mini-pills{display:flex;gap:8px;flex-wrap:wrap} .pill{padding:8px 11px;border:1px solid var(--line);background:#fbfcff;border-radius:999px;font-size:.82rem;color:var(--muted)} .pill.active{background:#edf4ff;color:#2458c4;border-color:#cddfff}
+    .grid{display:grid;grid-template-columns:88px repeat(3,1fr);min-height:840px} .head{padding:14px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);font-weight:800;text-align:center;background:#f8faff} .head small{display:block;color:var(--muted);font-weight:600;margin-top:5px}
+    .times,.col{position:relative;border-left:1px solid var(--line)} .hour{height:76px;border-bottom:1px solid var(--line);display:flex;justify-content:center;padding-top:8px;background:#fbfcff}
+    .gridlines{position:absolute;inset:0;background-image:linear-gradient(to bottom,transparent 0,transparent 37px,rgba(179,190,210,.48) 37px,transparent 38px),linear-gradient(to bottom,transparent 0,transparent 75px,rgba(214,220,232,.84) 75px,transparent 76px);background-size:100% 38px,100% 76px}
+    .out{position:absolute;left:0;right:0;background:repeating-linear-gradient(135deg,rgba(148,163,184,.06) 0,rgba(148,163,184,.06) 8px,rgba(255,255,255,.18) 8px,rgba(255,255,255,.18) 16px),linear-gradient(180deg,rgba(246,248,252,.84),rgba(240,244,249,.9))} .in{position:absolute;left:10px;right:10px;border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(236,245,255,.98));box-shadow:inset 0 0 0 1px rgba(74,122,229,.14)}
+    .lesson{position:absolute;left:12px;right:12px;border-radius:18px;padding:10px 12px;background:linear-gradient(135deg,#4d88f8,#2f73ec);color:white;font-weight:800;box-shadow:0 18px 28px -18px rgba(37,83,183,.82)} .lesson small{display:block;margin-top:5px;font-size:.77rem;opacity:.94} .lesson.warn{outline:3px solid rgba(255,184,0,.4)}
+    .sidebar{padding:16px} .section{margin-bottom:18px} .section h3{margin:0 0 10px;font-size:1rem} .card{border:1px solid var(--line);border-radius:18px;padding:12px;background:white;margin-bottom:10px} .card strong{display:block;margin-bottom:6px} .card .meta{color:var(--muted);font-size:.86rem;line-height:1.45}
+    .tag{display:inline-flex;padding:4px 9px;border-radius:999px;font-size:.72rem;font-weight:700;margin-bottom:8px} .tag.blue{background:#eaf2ff;color:#2557c5} .tag.green{background:#eafaf1;color:#147a4b} .tag.amber{background:#fff4df;color:#8a5700}
+    .action-row{display:flex;gap:8px;flex-wrap:wrap} .mini-btn{padding:8px 10px;border-radius:12px;border:1px solid var(--line);background:#fbfcff;font-size:.8rem;font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="hero"><div><h1>לוח זמנים</h1><p>הצעה 3: לוח + פאנל החלטות. טוב במיוחד אם היומן צריך לעבוד יחד עם חריגות והמתנות.</p></div><div class="tools"><button class="btn">תבניות</button><button class="btn primary">+ שיעור חדש</button></div></div>
+    <div class="layout">
+      <section class="panel">
+        <div class="calendar-head"><div class="mini-pills"><span class="pill active">יום</span><span class="pill">שבוע</span><span class="pill">רק מדריכים פעילים</span></div><div class="title">יום רביעי, 25 במרץ 2026</div><div class="mini-pills"><span class="pill">‹</span><span class="pill active">היום</span><span class="pill">›</span></div></div>
+        <div class="grid">
+          <div class="head"></div><div class="head">מדריך<small>משבצות פתוחות: 2</small></div><div class="head">שקד יוסף<small>חריגה פעילה: 1</small></div><div class="head">יוסף ישראל<small>רשימת המתנה: 3</small></div>
+          <div class="times"><div class="hour">14:00</div><div class="hour">15:00</div><div class="hour">16:00</div><div class="hour">17:00</div><div class="hour">18:00</div><div class="hour">19:00</div><div class="hour">20:00</div><div class="hour">21:00</div></div>
+          <div class="col"><div class="gridlines"></div><div class="out" style="top:0;height:220px;"></div><div class="in" style="top:220px;height:340px;"></div><div class="out" style="top:560px;height:210px;"></div><div class="lesson" style="top:412px;">רכיבה טיפולית • בדיקה בדיקה +1<small>17:00–17:45</small></div></div>
+          <div class="col"><div class="gridlines"></div><div class="out" style="top:0;height:320px;"></div><div class="in" style="top:320px;height:270px;"></div><div class="out" style="top:590px;height:180px;"></div><div class="lesson warn" style="top:508px;">נועם שחר +1 • רכיבה טיפולית<small>18:00–18:45 • חריגה</small></div></div>
+          <div class="col"><div class="gridlines"></div><div class="out" style="top:0;height:130px;"></div><div class="in" style="top:130px;height:470px;"></div><div class="out" style="top:600px;height:170px;"></div></div>
+        </div>
+      </section>
+      <aside class="panel sidebar">
+        <div class="section"><h3>מה נבחר כרגע</h3><div class="card"><span class="tag amber">חריגה</span><strong>נועם שחר +1 • רכיבה טיפולית</strong><div class="meta">18:00–18:45, מחוץ לחלון הזמינות. אפשר לאשר, להזיז או לפתוח תיקון זמינות.</div><div class="action-row" style="margin-top:10px;"><button class="mini-btn">פתח שיעור</button><button class="mini-btn">תקן זמינות</button></div></div></div>
+        <div class="section"><h3>פעולות מהירות</h3><div class="card"><span class="tag blue">התאמה</span><strong>מקום פנוי בתבנית קיימת</strong><div class="meta">לשקד יוסף יש מקום פנוי ב-16:30 עבור רכיבה טיפולית.</div></div><div class="card"><span class="tag green">זמינות</span><strong>חלון חדש פנוי הערב</strong><div class="meta">יוסף ישראל פנוי בין 19:00 ל-20:00 ומותאם לשירות.</div></div></div>
+        <div class="section"><h3>למה הכיוון הזה טוב</h3><div class="card"><div class="meta">זה כיוון מתאים אם היומן הוא לא רק תצוגה, אלא תחנת עבודה: בחירת שיעור, טיפול בחריגה, שיבוץ מהמתנה ותיקון זמינות, הכל באותו מסך.</div></div></div>
+      </aside>
+    </div>
+  </div>
+</body>
+</html>

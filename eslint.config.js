@@ -92,6 +92,9 @@ export default defineConfig([
           '@aws-sdk/',
           '@azure/',
           '@sparticuz/chromium',
+          'archiver',
+          'parse-multipart-data',
+          'puppeteer-core',
         ],
       }],
       'import/named': 'off', // Azure/AWS SDKs cause false positives

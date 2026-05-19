@@ -16,11 +16,12 @@ import {
   readEnv,
   respond,
   resolveOrgId,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
 import { decryptStorageProfile } from '../_shared/storage-encryption.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 import archiver from 'archiver';
 
 export default async function (context, req) {
@@ -89,9 +90,9 @@ export default async function (context, req) {
 
   // Get storage profile
   const { data: orgSettings, error: settingsError } = await controlClient
-    .from('org_settings')
+    .from('organizations')
     .select('storage_profile, permissions')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .maybeSingle();
 
   if (settingsError) {
@@ -113,28 +114,15 @@ export default async function (context, req) {
     if (accessLevel !== 'read_only_grace') {
       return respond(context, 403, { 
         message: 'storage_disconnected',
-        details: 'Storage is disconnected and grace period has ended. Files are no longer available.'
+        details: 'storage_is_disconnected_and_grace_period_has_ended_files_are_no_longer_available'
       });
     }
   }
   // BYOS bulk download always allowed (user owns storage)
 
-  // Get tenant client to fetch all student files
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(
-    context,
-    controlClient,
-    env,
-    orgId
-  );
-
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   // Fetch all students
-  const { data: students, error: studentsError } = await tenantClient
-    .from('Students')
-    .select('id, name');
+  const { data: students, error: studentsError } = await withOrgScope(controlClient, 'students', orgId)
+    .select('id, client_profile:client_profiles(first_name, middle_name, last_name)');
 
   if (studentsError) {
     context.log.error('Failed to fetch students', { message: studentsError.message });
@@ -142,8 +130,7 @@ export default async function (context, req) {
   }
 
   // Fetch all student documents from Documents table
-  const { data: documents, error: documentsError } = await tenantClient
-    .from('Documents')
+  const { data: documents, error: documentsError } = await withOrgScope(controlClient, 'Documents', orgId)
     .select('*')
     .eq('entity_type', 'student');
 
@@ -159,7 +146,7 @@ export default async function (context, req) {
     allFiles.push({
       ...doc,
       student_id: doc.entity_id,
-      student_name: student?.name || 'Unknown',
+      student_name: [student?.client_profile?.first_name, student?.client_profile?.middle_name, student?.client_profile?.last_name].filter(Boolean).join(' ') || 'Unknown',
     });
   }
 
@@ -184,9 +171,13 @@ export default async function (context, req) {
     }
   } catch (driverError) {
     context.log.error('Failed to create storage driver', { message: driverError?.message });
-    return respond(context, 500, { 
-      message: 'storage_driver_error', 
-      details: driverError.message 
+    return respondTrackedError(context, req, controlClient, {
+      status: 500,
+      message: 'storage_driver_error',
+      orgId,
+      userId,
+      error: driverError,
+      metadata: { storage_mode: decryptedProfile?.mode },
     });
   }
 

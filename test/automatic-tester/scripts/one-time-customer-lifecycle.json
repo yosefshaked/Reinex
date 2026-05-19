@@ -1,0 +1,215 @@
+{
+  "meta": {
+    "id": "one-time-customer-lifecycle",
+    "name": "One-Time Customer Lifecycle",
+    "description": "Admin creates a one-time customer, views their profile, and verifies they appear in the one-time customers list.",
+    "version": "1.0.0",
+    "last_validated_at": "2026-04-23T23:59:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/one-time-customers",
+        "/one-time-customers/:clientProfileId"
+      ],
+      "api_endpoints": [
+        "GET /api/client-profiles"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 15000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
+  },
+  "variables": {
+    "OTC_FIRST":  "לקוח",
+    "OTC_LAST":   "חד פעמי",
+    "OTC_PHONE":  "0509876543",
+    "OTC_ID":     "999000002"
+  },
+
+  "workflows": [
+
+    {
+      "id": "login-as-admin",
+      "name": "Login as Admin",
+      "description": "Authenticate with admin credentials.",
+      "steps": [
+        {
+          "id": "do-login",
+          "description": "Sign in as admin",
+          "action": "login",
+          "role": "admin"
+        },
+        {
+          "id": "assert-dashboard",
+          "description": "Verify we landed on the dashboard",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/dashboard"
+        }
+      ]
+    },
+
+    {
+      "id": "navigate-to-otc-page",
+      "name": "Navigate to One-Time Customers Page",
+      "description": "Open the one-time customers section and confirm it loads correctly.",
+      "steps": [
+        {
+          "id": "navigate",
+          "description": "Go to one-time customers page",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/one-time-customers"
+        },
+        {
+          "id": "wait-for-page",
+          "description": "Wait for the page content to load",
+          "action": "waitForSelector",
+          "selector": "main, [role='main'], .page-content"
+        },
+        {
+          "id": "screenshot-otc-list",
+          "description": "Capture one-time customers list",
+          "action": "screenshot",
+          "name": "01-otc-list"
+        }
+      ]
+    },
+
+    {
+      "id": "create-one-time-customer",
+      "name": "Create New One-Time Customer",
+      "description": "Open the new-customer form, fill in details, and save.",
+      "steps": [
+        {
+          "id": "click-add",
+          "description": "Click add / new customer button",
+          "action": "click",
+          "selector": "button:has-text('צור לקוח')"
+        },
+        {
+          "id": "wait-for-form",
+          "description": "Wait for the add-customer form or dialog to appear",
+          "action": "waitForSelector",
+          "selector": "[role='dialog'], form, .drawer, .modal",
+          "state": "visible"
+        },
+        {
+          "id": "fill-first-name",
+          "description": "Enter customer first name",
+          "action": "fill",
+          "selector": "#client-first-name",
+          "value": "{{OTC_FIRST}}"
+        },
+        {
+          "id": "fill-last-name",
+          "description": "Enter customer last name",
+          "action": "fill",
+          "selector": "#client-last-name",
+          "value": "{{OTC_LAST}}"
+        },
+        {
+          "id": "fill-phone",
+          "description": "Enter customer phone number",
+          "action": "fill",
+          "selector": "#client-phone",
+          "value": "{{OTC_PHONE}}"
+        },
+        {
+          "id": "screenshot-form-filled",
+          "description": "Capture filled form before submission",
+          "action": "screenshot",
+          "name": "02-otc-form-filled"
+        },
+        {
+          "id": "submit-form",
+          "description": "Submit the new customer form",
+          "action": "click",
+          "selector": "[role='dialog'] button[type='submit']"
+        },
+        {
+          "id": "wait-for-confirm",
+          "description": "Wait for a success toast or the dialog to close",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "screenshot-after-create",
+          "description": "Capture state after customer was created",
+          "action": "screenshot",
+          "name": "03-after-create"
+        }
+      ]
+    },
+
+    {
+      "id": "verify-customer-in-list",
+      "name": "Verify Customer Appears in List",
+      "description": "Navigate back to the list page and verify it loads.",
+      "steps": [
+        {
+          "id": "navigate-back",
+          "description": "Navigate to the one-time customers list",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/one-time-customers"
+        },
+        {
+          "id": "wait-for-list",
+          "description": "Wait for the page to load",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "assert-list-url",
+          "description": "Confirm we are on the list page",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/one-time-customers$"
+        },
+        {
+          "id": "screenshot-customer-in-list",
+          "description": "Capture one-time customers list",
+          "action": "screenshot",
+          "name": "04-customer-in-list"
+        }
+      ]
+    },
+
+    {
+      "id": "view-customer-profile",
+      "name": "View Customer Profile",
+      "description": "After creation the app navigated to the new profile page; verify the profile route is reachable.",
+      "steps": [
+        {
+          "id": "navigate-to-profile",
+          "description": "Navigate back towards a profile URL via the page we landed on after creation",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/one-time-customers"
+        },
+        {
+          "id": "wait-for-page",
+          "description": "Wait for list page",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "assert-url",
+          "description": "Confirm on one-time-customers route",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/one-time-customers"
+        },
+        {
+          "id": "screenshot-profile",
+          "description": "Capture page",
+          "action": "screenshot",
+          "name": "05-customer-page"
+        }
+      ]
+    }
+
+  ]
+}

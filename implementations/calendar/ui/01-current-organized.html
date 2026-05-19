@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calendar UI Suggestion 01</title>
+  <style>
+    :root { --bg:#f3f5fb; --panel:#fff; --line:#d9e0ee; --text:#172033; --muted:#66728a; --primary:#5d5fe8; --primary-2:#417ef5; --soft:#edf3ff; --shadow:0 18px 40px -28px rgba(31,41,55,.35); }
+    * { box-sizing:border-box; }
+    body { margin:0; background:linear-gradient(180deg,#eef2f9 0%,#f7f8fc 100%); color:var(--text); font-family:"Segoe UI",Tahoma,sans-serif; }
+    .page { max-width:1440px; margin:0 auto; padding:28px; }
+    .header { display:grid; grid-template-columns:auto 1fr auto; gap:18px; align-items:center; margin-bottom:18px; }
+    .title h1 { margin:0; font-size:2.1rem; line-height:1; }
+    .title p { margin:10px 0 0; color:var(--muted); font-size:.98rem; }
+    .actions,.view-switch,.chip-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .btn { border:1px solid var(--line); background:white; color:var(--text); padding:12px 16px; border-radius:14px; font-size:.95rem; font-weight:600; box-shadow:var(--shadow); }
+    .btn.primary { background:linear-gradient(135deg,var(--primary),var(--primary-2)); color:white; border-color:transparent; }
+    .btn.soft { background:#f6f8fc; }
+    .toolbar { background:rgba(255,255,255,.78); border:1px solid rgba(217,224,238,.9); border-radius:22px; padding:14px 16px; display:grid; grid-template-columns:auto 1fr auto; gap:16px; align-items:center; backdrop-filter:blur(14px); box-shadow:var(--shadow); margin-bottom:18px; }
+    .date-nav { display:flex; align-items:center; gap:12px; justify-content:center; font-weight:700; font-size:1.2rem; }
+    .chip { padding:8px 12px; border-radius:999px; font-size:.82rem; border:1px solid var(--line); background:white; color:var(--muted); }
+    .chip.active { background:var(--soft); color:#2452b8; border-color:#c8dafc; }
+    .workspace { background:white; border:1px solid var(--line); border-radius:28px; overflow:hidden; box-shadow:var(--shadow); }
+    .calendar-top { display:grid; grid-template-columns:110px repeat(3,1fr); border-bottom:1px solid var(--line); background:linear-gradient(180deg,#fbfcff 0%,#f4f7fc 100%); }
+    .calendar-top div { padding:18px 16px; border-left:1px solid var(--line); font-weight:800; font-size:1.25rem; text-align:center; }
+    .calendar { display:grid; grid-template-columns:110px repeat(3,1fr); min-height:780px; position:relative; }
+    .time-col,.day-col { position:relative; border-left:1px solid var(--line); }
+    .time-mark { height:74px; border-bottom:1px solid var(--line); color:#21304c; display:flex; align-items:flex-start; justify-content:center; padding-top:6px; font-size:1.1rem; background:#fbfcff; }
+    .lane { position:absolute; inset:0; background-image:linear-gradient(to bottom,transparent 0,transparent 36px,rgba(167,181,208,.5) 36px,transparent 37px),linear-gradient(to bottom,transparent 0,transparent 73px,rgba(204,212,226,.85) 73px,transparent 74px); background-size:100% 37px,100% 74px; }
+    .available { position:absolute; left:10px; right:10px; border-radius:18px; background:linear-gradient(180deg,rgba(255,255,255,.88),rgba(238,245,255,.94)),linear-gradient(140deg,rgba(59,130,246,.04),rgba(14,165,233,.07)); box-shadow:inset 0 0 0 1px rgba(96,165,250,.15); }
+    .unavailable { position:absolute; left:0; right:0; background:repeating-linear-gradient(135deg,rgba(148,163,184,.06) 0,rgba(148,163,184,.06) 8px,rgba(255,255,255,.14) 8px,rgba(255,255,255,.14) 16px),linear-gradient(180deg,rgba(248,250,252,.74),rgba(241,245,249,.82)); }
+    .event { position:absolute; left:14px; right:14px; min-height:54px; background:linear-gradient(135deg,#4c88f7,#2c73ea); color:white; border-radius:18px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 16px 26px -20px rgba(40,85,178,.8); font-size:.92rem; font-weight:700; }
+    .legend { display:flex; gap:18px; align-items:center; padding:16px 20px; border-top:1px solid var(--line); background:#fbfcff; color:var(--muted); font-size:.88rem; }
+    .swatch { width:34px; height:14px; border-radius:999px; display:inline-block; vertical-align:middle; margin-left:8px; border:1px solid rgba(0,0,0,.04); }
+    .swatch.available { background:linear-gradient(180deg,#fff,#eaf3ff); }
+    .swatch.unavailable { background:repeating-linear-gradient(135deg,rgba(148,163,184,.1) 0,rgba(148,163,184,.1) 6px,rgba(255,255,255,.2) 6px,rgba(255,255,255,.2) 12px),#f4f6fa; }
+    .swatch.event-color { background:linear-gradient(135deg,#4c88f7,#2c73ea); }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div class="title"><h1>לוח זמנים</h1><p>הצעה 1: המבנה הקיים, רק מסודר, רגוע וברור יותר</p></div>
+      <div class="actions"><button class="btn primary">+ שיעור חדש</button><button class="btn soft">יצירה מתבניות</button><button class="btn soft">תבניות</button></div>
+      <div class="view-switch"><button class="btn soft">שבוע</button><button class="btn primary">יום</button></div>
+    </div>
+    <div class="toolbar">
+      <div class="chip-row"><span class="chip active">היום</span><span class="chip">זמינות</span><span class="chip">חריגים</span></div>
+      <div class="date-nav"><span>‹</span><span>יום רביעי, 25 במרץ 2026</span><span>›</span></div>
+      <div class="chip-row"><span class="chip active">מדריכים זמינים: 3</span><span class="chip">חריגות פתוחות: 2</span></div>
+    </div>
+    <div class="workspace">
+      <div class="calendar-top"><div></div><div>מדריך</div><div>שקד יוסף</div><div>יוסף ישראל</div></div>
+      <div class="calendar">
+        <div class="time-col">
+          <div class="time-mark">14:00</div><div class="time-mark">15:00</div><div class="time-mark">16:00</div><div class="time-mark">17:00</div><div class="time-mark">18:00</div><div class="time-mark">19:00</div><div class="time-mark">20:00</div><div class="time-mark">21:00</div><div class="time-mark">22:00</div>
+        </div>
+        <div class="day-col">
+          <div class="lane"></div><div class="unavailable" style="top:0;height:180px;"></div><div class="available" style="top:180px;height:280px;"></div><div class="unavailable" style="top:460px;height:206px;"></div><div class="available" style="top:666px;height:120px;"></div>
+          <div class="event" style="top:406px;">רכיבה טיפולית • נועם שחר +1 <span>17:00</span></div><div class="event" style="top:517px;">רכיבה טיפולית • בדיקה בדיקה +1 <span>18:00</span></div>
+        </div>
+        <div class="day-col"><div class="lane"></div><div class="unavailable" style="top:0;height:245px;"></div><div class="available" style="top:245px;height:210px;"></div><div class="unavailable" style="top:455px;height:211px;"></div><div class="available" style="top:666px;height:120px;"></div></div>
+        <div class="day-col"><div class="lane"></div><div class="unavailable" style="top:0;height:120px;"></div><div class="available" style="top:120px;height:365px;"></div><div class="unavailable" style="top:485px;height:181px;"></div><div class="available" style="top:666px;height:120px;"></div></div>
+      </div>
+      <div class="legend"><span><span class="swatch available"></span>זמינות רגילה</span><span><span class="swatch unavailable"></span>מחוץ לזמינות, אפשרי רק כחריגה</span><span><span class="swatch event-color"></span>שיעור מתוכנן</span></div>
+    </div>
+  </div>
+</body>
+</html>

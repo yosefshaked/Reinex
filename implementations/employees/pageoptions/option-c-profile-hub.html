@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Employees - Option C</title>
+    <style>
+      :root{
+        --bg:#f3f6fb;--card:#fff;--line:#dbe3ef;--ink:#172033;--muted:#687386;
+        --blue:#2c64ea;--soft:#e9f1ff;--green:#15986b;--amber:#b97a18;
+      }
+      *{box-sizing:border-box} body{margin:0;font-family:"Segoe UI",Tahoma,sans-serif;background:linear-gradient(180deg,#f7fbff 0%,#f3f6fb 100%);color:var(--ink)}
+      .shell{max-width:1100px;margin:0 auto;padding:28px 20px 48px}
+      .hero,.tabs,.panel{background:var(--card);border:1px solid var(--line);border-radius:24px;box-shadow:0 18px 44px -38px rgba(15,23,42,.45)}
+      .hero{padding:24px;margin-bottom:18px}
+      .header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}
+      .identity{display:flex;gap:16px}
+      .avatar{width:84px;height:84px;border-radius:26px;background:linear-gradient(135deg,#2c64ea,#76a1ff);display:grid;place-items:center;color:#fff;font-size:30px;font-weight:800}
+      h1{margin:0 0 6px;font-size:34px}
+      .muted{color:var(--muted)}
+      .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+      .chip{padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700;background:var(--soft);color:var(--blue)}
+      .actions{display:flex;gap:10px;flex-wrap:wrap}
+      .btn{padding:11px 14px;border-radius:14px;border:1px solid var(--line);background:#fff;font-weight:700}
+      .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+      .tabs{display:flex;gap:8px;padding:10px;margin-bottom:18px}
+      .tab{padding:12px 16px;border-radius:14px;border:1px solid transparent;font-weight:700}
+      .tab.active{background:var(--soft);color:var(--blue);border-color:#cfe0ff}
+      .grid{display:grid;grid-template-columns:1fr .92fr;gap:16px}
+      .panel{padding:18px}
+      .panel h2{margin:0 0 12px;font-size:18px}
+      .field,.item{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #edf1f7}
+      .field:last-child,.item:last-child{border-bottom:none}
+      .label{font-size:13px;color:var(--muted)}
+      .value{font-weight:700}
+      .list{display:grid;gap:10px}
+      .cardline{padding:12px 14px;border:1px solid var(--line);border-radius:16px;background:#fbfcff}
+      .note{padding:12px 14px;border-radius:16px;background:#fff6e8;border:1px solid #f0d5a3;color:#8b5f00}
+      @media (max-width: 900px){.grid{grid-template-columns:1fr}.header{flex-direction:column}.identity{flex-direction:column}}
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="header">
+          <div class="identity">
+            <div class="avatar">דכ</div>
+            <div>
+              <h1>דנה כהן</h1>
+              <div class="muted">עובדת משרד • ללא משתמש • התחלה 15.03.2026</div>
+              <div class="chips">
+                <span class="chip">ללא משתמש</span>
+                <span class="chip">קליטה חדשה</span>
+                <span class="chip">דורש השלמת פרטים</span>
+              </div>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn primary">עריכת פרטים</button>
+            <button class="btn">שלח WhatsApp</button>
+            <button class="btn">שלח הזמנה</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="tabs">
+        <div class="tab active">פרופיל</div>
+        <div class="tab">שיעורים ופעילות</div>
+        <div class="tab">חופשות</div>
+        <div class="tab">דוחות ופיננסים</div>
+        <div class="tab">תקשורת</div>
+      </section>
+
+      <section class="grid">
+        <div class="panel">
+          <h2>פרטי עובד</h2>
+          <div class="field"><div><div class="label">שם פרטי</div><div class="value">דנה</div></div><div>ערוך</div></div>
+          <div class="field"><div><div class="label">שם משפחה</div><div class="value">כהן</div></div><div>ערוך</div></div>
+          <div class="field"><div><div class="label">טלפון</div><div class="value">לא הוזן</div></div><div>השלם</div></div>
+          <div class="field"><div><div class="label">דוא"ל</div><div class="value">dana@clinic.co.il</div></div><div>ערוך</div></div>
+          <div class="field"><div><div class="label">סוג עובד</div><div class="value">משרד</div></div><div>שנה</div></div>
+          <div class="field"><div><div class="label">תאריך התחלה</div><div class="value">15.03.2026</div></div><div>תיעוד</div></div>
+          <div class="field"><div><div class="label">חשבון משתמש</div><div class="value">לא מחובר</div></div><div>הזמן</div></div>
+        </div>
+
+        <div class="panel">
+          <h2>בלוקי פעולה</h2>
+          <div class="list">
+            <div class="cardline"><strong>תקשורת</strong><div class="muted">WhatsApp, טלפון, דוא"ל, תיעוד שיחה</div></div>
+            <div class="cardline"><strong>חופשות</strong><div class="muted">בקשות, אישורים, היעדרויות, מסמכים</div></div>
+            <div class="cardline"><strong>שיעורים</strong><div class="muted">עבר ועתיד, מסונן לפי עובד</div></div>
+            <div class="cardline"><strong>רו"ח ופיננסים</strong><div class="muted">Placeholder עתידי לשכר, יצוא ודוחות</div></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>שיעורים עתידיים והושלמו</h2>
+          <div class="item"><div><div class="value">אין שיעורים</div><div class="label">עובדת משרד, לכן החלק נשאר זמין אך ריק</div></div><div>—</div></div>
+          <div class="note">זה יתרון של כיוון Profile Hub: אותו מבנה מתאים גם למדריכים וגם לעובדי משרד, רק התוכן משתנה.</div>
+        </div>
+
+        <div class="panel">
+          <h2>היסטוריה וקליטה</h2>
+          <div class="item"><div><div class="value">15.03</div><div class="label">נוצר רישום עובד</div></div><div>מערכת</div></div>
+          <div class="item"><div><div class="value">16.03</div><div class="label">עודכן דוא"ל</div></div><div>משרד</div></div>
+          <div class="item"><div><div class="value">חסר</div><div class="label">טלפון, משתמש, מסמכי קליטה</div></div><div>לטיפול</div></div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

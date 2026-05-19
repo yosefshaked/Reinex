@@ -175,7 +175,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="mr-3 text-sm text-slate-600">טוען נתונים...</span>
+        <span className="me-3 text-sm text-slate-600">טוען נתונים...</span>
       </div>
     );
   }
@@ -189,24 +189,24 @@ export default function DirectoryView({ session, orgId, canLoad }) {
   }
 
   return (
-    <Tabs defaultValue="active" className="w-full" dir="rtl">
+    <Tabs defaultValue="active" className="w-full">
       <TabsList className="grid w-full grid-cols-3 mb-4 h-auto">
         <TabsTrigger value="active" className="flex-col gap-1 py-2 whitespace-normal break-words">
           <div className="flex flex-col items-center gap-1">
-            <span className="text-xs sm:text-sm text-center">מדריכים פעילים</span>
-            <Badge variant="secondary" className="text-xs sm:mr-2">{activeInstructors.length}</Badge>
+            <span className="text-xs sm:text-sm text-center">עובדים פעילים</span>
+            <Badge variant="secondary" className="text-xs sm:me-2">{activeInstructors.length}</Badge>
           </div>
         </TabsTrigger>
         <TabsTrigger value="inactive" className="flex-col gap-1 py-2 whitespace-normal break-words">
           <div className="flex flex-col items-center gap-1">
-            <span className="text-xs sm:text-sm text-center">מדריכים מושבתים</span>
-            <Badge variant="secondary" className="text-xs sm:mr-2">{inactiveInstructors.length}</Badge>
+            <span className="text-xs sm:text-sm text-center">עובדים מושבתים</span>
+            <Badge variant="secondary" className="text-xs sm:me-2">{inactiveInstructors.length}</Badge>
           </div>
         </TabsTrigger>
         <TabsTrigger value="members" className="flex-col gap-1 py-2 whitespace-normal break-words">
           <div className="flex flex-col items-center gap-1">
             <span className="text-xs sm:text-sm text-center">חברי ארגון</span>
-            <Badge variant="secondary" className="text-xs sm:mr-2">{nonInstructorMembers.length}</Badge>
+            <Badge variant="secondary" className="text-xs sm:me-2">{nonInstructorMembers.length}</Badge>
           </div>
         </TabsTrigger>
       </TabsList>
@@ -214,7 +214,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
       {/* Active Instructors Tab */}
       <TabsContent value="active" className="space-y-2">
         {activeInstructors.length === 0 ? (
-          <p className="text-center text-sm text-muted-foreground py-8">אין מדריכים פעילים.</p>
+          <p className="text-center text-sm text-muted-foreground py-8">אין עובדים פעילים.</p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto overflow-x-visible">
             {activeInstructors.map((instructor) => (
@@ -239,9 +239,9 @@ export default function DirectoryView({ session, orgId, canLoad }) {
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-                  <div className="flex flex-row-reverse sm:flex-row items-center gap-1 w-full sm:w-auto">
+                  <div className="flex flex-row items-center gap-1 w-full sm:w-auto">
                     <InfoTooltip 
-                      message="להגדרת סוגי מדריכים: הגדרות ← ניהול תגיות וסיווגים"
+                      message="להגדרת סיווגי עובדים: הגדרות ← ניהול תגיות וסיווגים"
                       side="top"
                     />
                     <div className="flex-1 sm:min-w-60">
@@ -264,17 +264,17 @@ export default function DirectoryView({ session, orgId, canLoad }) {
                                   ) : null;
                                 })
                               ) : (
-                                <span className="text-muted-foreground text-sm">בחר סוגי מדריך...</span>
+                                <span className="text-muted-foreground text-sm">בחר סיווגים...</span>
                               )}
                             </div>
-                            <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            <ChevronDown className="ms-2 h-4 w-4 shrink-0 opacity-50" />
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className="w-64 p-0" align="start">
                           <div className="max-h-64 overflow-y-auto p-1">
                             {typeOptions.length === 0 ? (
                               <div className="py-6 text-center text-sm text-muted-foreground">
-                                אין סוגי מדריכים זמינים
+                                אין סיווגים זמינים
                               </div>
                             ) : (
                               typeOptions.map((option) => {
@@ -334,7 +334,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
       {/* Inactive Instructors Tab */}
       <TabsContent value="inactive" className="space-y-2">
         {inactiveInstructors.length === 0 ? (
-          <p className="text-center text-sm text-muted-foreground py-8">אין מדריכים מושבתים.</p>
+          <p className="text-center text-sm text-muted-foreground py-8">אין עובדים מושבתים.</p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {inactiveInstructors.map((instructor) => (
@@ -378,7 +378,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
       <TabsContent value="members" className="space-y-2">
         {nonInstructorMembers.length === 0 ? (
           <p className="text-center text-sm text-muted-foreground py-8">
-            כל חברי הארגון הם כבר מדריכים.
+            כל חברי הארגון הם כבר עובדים.
           </p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -410,7 +410,7 @@ export default function DirectoryView({ session, orgId, canLoad }) {
                   className="gap-2 h-10 w-full sm:w-auto"
                 >
                   <UserPlus className="h-4 w-4" />
-                  הפוך למדריך
+                  הפוך לעובד
                 </Button>
               </div>
             ))}

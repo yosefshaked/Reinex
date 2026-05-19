@@ -15,10 +15,15 @@ import {
   isAdminRole,
   readEnv,
   respond,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 import crypto from 'crypto';
 import multipart from 'parse-multipart-data';
+
+function buildEmployeeName(row) {
+  return [row?.first_name, row?.middle_name, row?.last_name].filter(Boolean).join(' ').trim();
+}
 
 /**
  * Calculate MD5 hash of file content for duplicate detection
@@ -99,7 +104,7 @@ export default async function (context, req) {
     context.log?.info?.('✅ [INSTRUCTOR-CHECK] Multipart parsed', { partsCount: parts?.length });
   } catch (error) {
     context.log?.error?.('❌ [INSTRUCTOR-CHECK] Failed to parse multipart', { message: error?.message });
-    return respond(context, 400, { message: 'invalid_multipart_data', error: error?.message });
+    return respond(context, 400, { message: 'invalid_multipart_data' });
   }
 
   // Extract fields
@@ -138,27 +143,34 @@ export default async function (context, req) {
   const isAdmin = isAdminRole(role);
 
   // Permission check: Non-admin users can only check their own files
-  if (!isAdmin && instructorId !== userId) {
-    return respond(context, 403, { 
-      message: 'forbidden',
-      details: 'You can only check files for your own instructor record'
-    });
+  if (!isAdmin) {
+    const { data: instructorRow, error: instructorError } = await withOrgScope(controlClient, 'Employees', orgId)
+      .select('id, user_id')
+      .eq('id', instructorId)
+      .maybeSingle();
+
+    if (instructorError) {
+      context.log?.error?.('instructor-files-check failed to load instructor for permission check', {
+        message: instructorError.message,
+      });
+      return respond(context, 500, { message: 'failed_to_validate_permissions' });
+    }
+
+    if (instructorRow?.user_id !== userId) {
+      return respond(context, 403, {
+        message: 'forbidden',
+        details: 'you_can_only_check_files_for_your_own_instructor_record',
+      });
+    }
   }
 
   // Calculate file hash
   const fileHash = calculateFileHash(filePart.data);
   context.log?.info?.('🔐 [INSTRUCTOR-CHECK] Hash calculated', { hash: fileHash });
 
-  // Get tenant client
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   // Check for duplicate files in Documents table
   // Admins can see all instructor duplicates, non-admins only their own
-  let documentsQuery = tenantClient
-    .from('Documents')
+  let documentsQuery = withOrgScope(controlClient, 'Documents', orgId)
     .select('id, name, uploaded_at, entity_id, hash')
     .eq('entity_type', 'instructor')
     .eq('hash', fileHash);
@@ -175,9 +187,13 @@ export default async function (context, req) {
       message: documentsError.message,
       code: documentsError.code,
     });
-    return respond(context, 500, { 
+    return respondTrackedError(context, req, controlClient, {
+      status: 500,
       message: 'failed_to_check_duplicates',
-      error: documentsError.message,
+      orgId,
+      userId,
+      error: documentsError,
+      metadata: { entity_type: 'instructor', instructor_id: instructorId },
     });
   }
 
@@ -185,12 +201,11 @@ export default async function (context, req) {
   const duplicates = [];
   if (allDocuments && allDocuments.length > 0) {
     const instructorIds = [...new Set(allDocuments.map(doc => doc.entity_id))];
-    const { data: instructors } = await tenantClient
-      .from('Instructors')
-      .select('id, name')
+    const { data: instructors } = await withOrgScope(controlClient, 'Employees', orgId)
+      .select('id, first_name, middle_name, last_name')
       .in('id', instructorIds);
 
-    const instructorMap = new Map((instructors || []).map(i => [i.id, i.name]));
+    const instructorMap = new Map((instructors || []).map((row) => [row.id, buildEmployeeName(row) || 'Unknown']));
 
     for (const doc of allDocuments) {
       duplicates.push({

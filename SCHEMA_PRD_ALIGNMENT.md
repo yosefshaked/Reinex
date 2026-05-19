@@ -79,6 +79,9 @@ This document maps each requirement from **Reinex-PRD.md** (Therapeutic Riding &
 | PRD Requirement | Table/Field | Notes |
 |---|---|---|
 | Basic profile | `students.first_name`, `.middle_name`, `.last_name`, `.date_of_birth` | ✓ |
+| Identity number (unique identifier) | `students.identity_number` | Planned unique index; optional only if business rules allow |
+| Student phone (independent/adult) | `students.phone` | Optional |
+| Student email (independent/adult) | `students.email` | Optional |
 | Guardian linkage | `student_guardians` (M2M relationship) | ✓ Supports multiple guardians |
 | notes_internal | `students.notes_internal` | ✓ |
 | default_notification_method | `students.default_notification_method` | ✓ Enum: whatsapp, email |
@@ -145,7 +148,18 @@ This document maps each requirement from **Reinex-PRD.md** (Therapeutic Riding &
 |---|---|---|
 | lesson_instance_id | `consumption_entries.lesson_participant_id` | ✓ (via lesson_participants) |
 | amount_charged | `consumption_entries.amount_charged` | ✓ Numeric |
-| remaining_balance | View: `commitment_balances` | ✓ Calculated from commitment total - SUM(consumed) |
+| student_balance_after_charge | Query: commitments + consumption_entries | ✓ Computed at query-time (no materialized/precomputed table) |
+
+### Balance Transfers (§7.3)
+| PRD Requirement | Table/Field | Notes |
+|---|---|---|
+| source student debit | `consumption_entries.student_id` | ✓ Student whose balance is reduced |
+| target student credit | `commitments.student_id` | ✓ Student whose balance is increased |
+| amount | `commitments.total_amount` + `consumption_entries.amount_charged` | ✓ Same transfer amount on paired rows |
+| source commitment ownership | `consumption_entries.commitment_id` → source student's `commitments.id` | ✓ Enforced by trigger |
+| cross-student linkage | `commitments.transfer_ref` = `consumption_entries.transfer_ref` | ✓ Neutral transfer pair key |
+| lesson linkage optionality | `consumption_entries.lesson_participant_id` nullable | ✓ Required for lesson source_type, optional for transfer |
+| reason + audit metadata | `commitments.metadata`, `consumption_entries.metadata` | ✓ Full audit trail in metadata |
 
 ---
 

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Concept C — The Compact ERM</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Heebo', sans-serif; }
+    /* Tighter line-height for density */
+    .dense { line-height: 1.3; }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            border: '#d4d4d8',
+            muted: { DEFAULT: '#f4f4f5', foreground: '#71717a' },
+            accent: { DEFAULT: '#f4f4f5', foreground: '#18181b' },
+          },
+          fontSize: {
+            '2xs': '0.65rem',
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-white text-zinc-900 min-h-screen text-sm">
+
+  <!-- Compact top bar -->
+  <header class="sticky top-0 z-50 bg-zinc-800 text-white px-4 py-2 flex items-center justify-between text-xs">
+    <div class="flex items-center gap-2">
+      <button class="hover:text-zinc-300 transition">&rarr; רשימה</button>
+      <span class="text-zinc-500">|</span>
+      <span class="font-semibold">דני לוי</span>
+      <span class="text-zinc-400">012345678</span>
+      <span class="bg-emerald-500 text-white rounded px-1.5 py-0.5 text-2xs font-semibold">פעיל</span>
+      <span class="bg-red-500 text-white rounded px-1.5 py-0.5 text-2xs font-semibold">אלרגיה</span>
+      <span class="bg-amber-500 text-white rounded px-1.5 py-0.5 text-2xs font-semibold">אסתמה</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded text-xs transition">עריכה</button>
+      <button class="bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded text-xs transition">פעולות ▾</button>
+    </div>
+  </header>
+
+  <!-- Tabs: compact underline -->
+  <div class="border-b border-border bg-zinc-50 px-4">
+    <nav class="flex gap-0 text-xs -mb-px">
+      <button class="px-3 py-2 border-b-2 border-blue-600 text-blue-700 font-semibold">סקירה</button>
+      <button class="px-3 py-2 border-b-2 border-transparent text-muted-foreground hover:text-zinc-700 transition">לוח שיעורים</button>
+      <button class="px-3 py-2 border-b-2 border-transparent text-muted-foreground hover:text-zinc-700 transition">היסטוריה</button>
+      <button class="px-3 py-2 border-b-2 border-transparent text-muted-foreground hover:text-zinc-700 transition">מסמכים</button>
+      <button class="px-3 py-2 border-b-2 border-transparent text-muted-foreground hover:text-zinc-700 transition">כספים</button>
+      <button class="px-3 py-2 border-b-2 border-transparent text-muted-foreground hover:text-zinc-700 transition">טפסים</button>
+    </nav>
+  </div>
+
+  <!-- ===================== MAIN LAYOUT: Sidebar + Content ===================== -->
+  <div class="flex min-h-[calc(100vh-80px)]">
+
+    <!-- LEFT SIDEBAR: Key Stats -->
+    <aside class="w-56 shrink-0 border-l border-border bg-zinc-50 p-3 space-y-3 dense overflow-y-auto">
+
+      <!-- Quick Stats -->
+      <div>
+        <h4 class="text-2xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">סטטיסטיקות</h4>
+        <div class="grid grid-cols-2 gap-1.5">
+          <div class="bg-white border border-border rounded p-2 text-center">
+            <p class="text-lg font-bold">12</p>
+            <p class="text-2xs text-muted-foreground">שיעורים/חודש</p>
+          </div>
+          <div class="bg-white border border-border rounded p-2 text-center">
+            <p class="text-lg font-bold">48</p>
+            <p class="text-2xs text-muted-foreground">סה״כ שיעורים</p>
+          </div>
+          <div class="bg-white border border-border rounded p-2 text-center">
+            <p class="text-lg font-bold text-emerald-600">₪2,400</p>
+            <p class="text-2xs text-muted-foreground">יתרה</p>
+          </div>
+          <div class="bg-white border border-border rounded p-2 text-center">
+            <p class="text-lg font-bold text-amber-600">₪200</p>
+            <p class="text-2xs text-muted-foreground">חוב</p>
+          </div>
+        </div>
+      </div>
+
+      <hr class="border-border" />
+
+      <!-- Guardian Quick View -->
+      <div>
+        <h4 class="text-2xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">אפוטרופוס</h4>
+        <p class="font-medium text-xs">רחל לוי <span class="text-muted-foreground font-normal">(אם)</span></p>
+        <p class="text-xs text-muted-foreground" dir="ltr">052-9876543</p>
+        <p class="text-xs text-muted-foreground" dir="ltr">rachel@example.com</p>
+      </div>
+
+      <hr class="border-border" />
+
+      <!-- Next Lesson -->
+      <div>
+        <h4 class="text-2xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">שיעור קרוב</h4>
+        <p class="font-medium text-xs">שחייה — יעל כהן</p>
+        <p class="text-xs text-muted-foreground">יום ג׳ 21/01 · 16:00</p>
+      </div>
+
+      <hr class="border-border" />
+
+      <!-- Tags -->
+      <div>
+        <h4 class="text-2xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">תגיות</h4>
+        <div class="flex flex-wrap gap-1">
+          <span class="rounded bg-blue-100 text-blue-700 px-1.5 py-0.5 text-2xs font-medium">שחייה טיפולית</span>
+          <span class="rounded bg-purple-100 text-purple-700 px-1.5 py-0.5 text-2xs font-medium">קופ״ח מכבי</span>
+          <span class="rounded bg-teal-100 text-teal-700 px-1.5 py-0.5 text-2xs font-medium">פיזיותרפיה</span>
+          <span class="rounded bg-orange-100 text-orange-700 px-1.5 py-0.5 text-2xs font-medium">ביטוח לאומי</span>
+        </div>
+      </div>
+
+      <hr class="border-border" />
+
+      <!-- Medical Flags -->
+      <div>
+        <h4 class="text-2xs font-semibold text-red-500 uppercase tracking-wider mb-1.5">⚠ דגלים רפואיים</h4>
+        <ul class="space-y-1 text-xs">
+          <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>אלרגיה לבוטנים</li>
+          <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>אסתמה</li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 p-4 space-y-4 overflow-y-auto">
+
+      <!-- Row 1: Personal Details + Schedule (side-by-side) -->
+      <div class="grid grid-cols-2 gap-4">
+
+        <!-- Personal Details -->
+        <section>
+          <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">פרטים אישיים</h3>
+          <div class="bg-white border border-border rounded">
+            <table class="w-full text-xs">
+              <tbody>
+                <tr class="border-b border-border/50">
+                  <td class="py-1.5 px-3 text-muted-foreground w-28">שם מלא</td>
+                  <td class="py-1.5 px-3 font-medium">דני לוי</td>
+                </tr>
+                <tr class="border-b border-border/50">
+                  <td class="py-1.5 px-3 text-muted-foreground">ת.ז.</td>
+                  <td class="py-1.5 px-3 font-medium">012345678</td>
+                </tr>
+                <tr class="border-b border-border/50">
+                  <td class="py-1.5 px-3 text-muted-foreground">תאריך לידה</td>
+                  <td class="py-1.5 px-3 font-medium">15/03/2018 (7)</td>
+                </tr>
+                <tr class="border-b border-border/50">
+                  <td class="py-1.5 px-3 text-muted-foreground">טלפון</td>
+                  <td class="py-1.5 px-3 font-medium" dir="ltr">050-1234567</td>
+                </tr>
+                <tr class="border-b border-border/50">
+                  <td class="py-1.5 px-3 text-muted-foreground">אימייל</td>
+                  <td class="py-1.5 px-3 font-medium" dir="ltr">dani@example.com</td>
+                </tr>
+                <tr>
+                  <td class="py-1.5 px-3 text-muted-foreground">התראות</td>
+                  <td class="py-1.5 px-3 font-medium">SMS + אימייל</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Weekly Schedule -->
+        <section>
+          <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">לוח שבועי</h3>
+          <div class="bg-white border border-border rounded">
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="bg-zinc-50 border-b border-border text-muted-foreground">
+                  <th class="text-right py-1.5 px-3 font-medium">יום</th>
+                  <th class="text-right py-1.5 px-3 font-medium">שעה</th>
+                  <th class="text-right py-1.5 px-3 font-medium">שירות</th>
+                  <th class="text-right py-1.5 px-3 font-medium">מדריך/ה</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="border-b border-border/50">
+                  <td class="py-1.5 px-3 font-medium">ג׳</td>
+                  <td class="py-1.5 px-3">16:00–16:45</td>
+                  <td class="py-1.5 px-3">שחייה</td>
+                  <td class="py-1.5 px-3">יעל כהן</td>
+                </tr>
+                <tr>
+                  <td class="py-1.5 px-3 font-medium">ה׳</td>
+                  <td class="py-1.5 px-3">10:00–10:45</td>
+                  <td class="py-1.5 px-3">פיזיותרפיה</td>
+                  <td class="py-1.5 px-3">משה דוד</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- Row 2: Notes (full width) -->
+      <section>
+        <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">הערות פנימיות</h3>
+        <div class="bg-white border border-border rounded p-3">
+          <p class="text-xs text-zinc-700 leading-relaxed">דני מגיב יפה לשחייה טיפולית. מומלץ להמשיך 2 פעמים בשבוע. יש לשים לב לרגישות בעור לאחר כלור — להודיע להורה אם יש תגובה.</p>
+          <p class="text-2xs text-muted-foreground mt-1.5">עודכן 10/03/2026 · יעל כהן</p>
+        </div>
+      </section>
+
+      <!-- Row 3: Recent Activity (compact table) -->
+      <section>
+        <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">פעילות אחרונה</h3>
+        <div class="bg-white border border-border rounded">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="bg-zinc-50 border-b border-border text-muted-foreground">
+                <th class="text-right py-1.5 px-3 font-medium">תאריך</th>
+                <th class="text-right py-1.5 px-3 font-medium">פעולה</th>
+                <th class="text-right py-1.5 px-3 font-medium">פרטים</th>
+                <th class="text-right py-1.5 px-3 font-medium">ע״י</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-b border-border/50">
+                <td class="py-1.5 px-3 text-muted-foreground">17/03/2026</td>
+                <td class="py-1.5 px-3"><span class="bg-emerald-100 text-emerald-700 rounded px-1.5 py-0.5 text-2xs font-medium">נוכחות</span></td>
+                <td class="py-1.5 px-3">שחייה — הגיע</td>
+                <td class="py-1.5 px-3">יעל כהן</td>
+              </tr>
+              <tr class="border-b border-border/50">
+                <td class="py-1.5 px-3 text-muted-foreground">15/03/2026</td>
+                <td class="py-1.5 px-3"><span class="bg-blue-100 text-blue-700 rounded px-1.5 py-0.5 text-2xs font-medium">עדכון</span></td>
+                <td class="py-1.5 px-3">עדכון הערות פנימיות</td>
+                <td class="py-1.5 px-3">יעל כהן</td>
+              </tr>
+              <tr class="border-b border-border/50">
+                <td class="py-1.5 px-3 text-muted-foreground">12/03/2026</td>
+                <td class="py-1.5 px-3"><span class="bg-amber-100 text-amber-700 rounded px-1.5 py-0.5 text-2xs font-medium">חיוב</span></td>
+                <td class="py-1.5 px-3">חיוב ₪200 — שחייה</td>
+                <td class="py-1.5 px-3">מערכת</td>
+              </tr>
+              <tr class="border-b border-border/50">
+                <td class="py-1.5 px-3 text-muted-foreground">10/03/2026</td>
+                <td class="py-1.5 px-3"><span class="bg-emerald-100 text-emerald-700 rounded px-1.5 py-0.5 text-2xs font-medium">נוכחות</span></td>
+                <td class="py-1.5 px-3">פיזיותרפיה — הגיע</td>
+                <td class="py-1.5 px-3">משה דוד</td>
+              </tr>
+              <tr>
+                <td class="py-1.5 px-3 text-muted-foreground">08/03/2026</td>
+                <td class="py-1.5 px-3"><span class="bg-red-100 text-red-700 rounded px-1.5 py-0.5 text-2xs font-medium">ביטול</span></td>
+                <td class="py-1.5 px-3">שחייה — ביטול (מחלה)</td>
+                <td class="py-1.5 px-3">רחל לוי</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</body>
+</html>

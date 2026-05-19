@@ -1,0 +1,306 @@
+{
+  "meta": {
+    "id": "student-lifecycle",
+    "name": "Student Lifecycle",
+    "description": "Full lifecycle: admin pre-creates a student via API, creates a waiting-list entry by searching the combobox, verifies the entry, verifies the student appears in the roster, and views the student profile.",
+    "version": "1.2.0",
+    "last_validated_at": "2026-04-25T00:00:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/waiting-list",
+        "/students-list",
+        "/students/:id/:tab?"
+      ],
+      "api_endpoints": [
+        "POST /api/students-list",
+        "GET /api/waiting-list",
+        "GET /api/students-list"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 20000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
+  },
+  "variables": {
+    "STUDENT_FIRST": "טסט",
+    "STUDENT_LAST":  "אוטומטי",
+    "STUDENT_ID":    "999000001",
+    "STUDENT_PHONE": "0501234567"
+  },
+
+  "workflows": [
+
+    {
+      "id": "login-as-admin",
+      "name": "Login as Admin",
+      "description": "Sign in with the admin account and land on the dashboard.",
+      "steps": [
+        {
+          "id": "do-login",
+          "description": "Sign in with admin credentials",
+          "action": "login",
+          "role": "admin"
+        },
+        {
+          "id": "assert-dashboard",
+          "description": "Verify we are on the dashboard",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/dashboard"
+        },
+        {
+          "id": "screenshot-dashboard",
+          "description": "Capture dashboard state",
+          "action": "screenshot",
+          "name": "01-dashboard"
+        }
+      ]
+    },
+
+    {
+      "id": "create-waiting-list-entry",
+      "name": "Create Waiting-List Entry",
+      "description": "Pre-creates the student via API (so they appear in the client-profiles list on page load), then opens the waiting list, clicks 'רשומה חדשה', searches for the student in the combobox, selects a service, and saves the entry.",
+      "steps": [
+        {
+          "id": "create-student-via-api",
+          "description": "Create the student via POST /api/students-list so they are in clientProfiles when the page loads",
+          "action": "apiCall",
+          "method": "POST",
+          "endpoint": "/api/students-list",
+          "body": {
+            "first_name": "{{STUDENT_FIRST}}",
+            "last_name":  "{{STUDENT_LAST}}",
+            "identity_number": "{{STUDENT_ID}}",
+            "phone": "{{STUDENT_PHONE}}"
+          },
+          "ignoreStatus": [409]
+        },
+        {
+          "id": "navigate-waiting-list",
+          "description": "Go to the waiting list page (fresh load ensures client-profiles includes the new student)",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/waiting-list"
+        },
+        {
+          "id": "wait-for-page",
+          "description": "Wait for waiting list page to load",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']",
+          "state": "visible"
+        },
+        {
+          "id": "screenshot-waiting-list",
+          "description": "Capture waiting list before adding entry",
+          "action": "screenshot",
+          "name": "02-waiting-list"
+        },
+        {
+          "id": "click-new-entry",
+          "description": "Click the 'רשומה חדשה' button to open the create dialog",
+          "action": "click",
+          "selector": "button:has-text('רשומה חדשה')"
+        },
+        {
+          "id": "wait-for-entry-dialog",
+          "description": "Wait for the new-entry dialog to open",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "visible"
+        },
+        {
+          "id": "click-student-combobox",
+          "description": "Click the student combobox to focus it and open the dropdown",
+          "action": "click",
+          "selector": "#waiting-student"
+        },
+        {
+          "id": "type-student-name",
+          "description": "Type the student first name to filter the combobox options",
+          "action": "type",
+          "selector": "#waiting-student",
+          "value": "{{STUDENT_FIRST}}"
+        },
+        {
+          "id": "wait-for-student-option",
+          "description": "Wait for the matching student option to appear in the dropdown",
+          "action": "waitForSelector",
+          "selector": "[role='option']:has-text('{{STUDENT_FIRST}}')",
+          "state": "visible"
+        },
+        {
+          "id": "click-student-option",
+          "description": "Click the student option to select them — this calls commitOption → handleStudentChange with a valid clientProfileId",
+          "action": "click",
+          "selector": "[role='option']:has-text('{{STUDENT_FIRST}}')",
+          "first": true
+        },
+        {
+          "id": "screenshot-student-selected",
+          "description": "Capture the form after student is selected",
+          "action": "screenshot",
+          "name": "03-student-selected"
+        },
+        {
+          "id": "click-service-select",
+          "description": "Open the service selector dropdown",
+          "action": "click",
+          "selector": "#waiting-service"
+        },
+        {
+          "id": "wait-for-service-options",
+          "description": "Wait for service options to appear",
+          "action": "waitForSelector",
+          "selector": "[role='option']",
+          "state": "visible"
+        },
+        {
+          "id": "select-first-service",
+          "description": "Click the first available service option",
+          "action": "click",
+          "selector": "[role='option']",
+          "first": true
+        },
+        {
+          "id": "screenshot-entry-with-service",
+          "description": "Capture the entry form with student and service filled",
+          "action": "screenshot",
+          "name": "04-entry-with-service"
+        },
+        {
+          "id": "submit-entry",
+          "description": "Submit the waiting-list entry with 'שמירה'",
+          "action": "click",
+          "selector": "[role='dialog'] button:has-text('שמירה')"
+        },
+        {
+          "id": "wait-for-dialog-close",
+          "description": "Wait for the dialog to close after successful save",
+          "action": "waitForSelector",
+          "selector": "[role='dialog']",
+          "state": "hidden"
+        },
+        {
+          "id": "screenshot-after-entry-created",
+          "description": "Capture waiting list after entry was created",
+          "action": "screenshot",
+          "name": "05-entry-created"
+        }
+      ]
+    },
+
+    {
+      "id": "verify-waiting-list-entry",
+      "name": "Verify Entry Appears in Waiting List",
+      "description": "Navigate to the waiting list and confirm the new entry card is visible.",
+      "steps": [
+        {
+          "id": "navigate-waiting-list",
+          "description": "Return to the waiting list",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/waiting-list"
+        },
+        {
+          "id": "wait-for-page",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "assert-entry-visible",
+          "description": "Confirm the new student's entry card is visible in the queue",
+          "action": "assert",
+          "type": "visible",
+          "selector": "button:has-text('{{STUDENT_FIRST}}')"
+        },
+        {
+          "id": "screenshot-entry-in-list",
+          "description": "Capture the waiting list showing the new entry",
+          "action": "screenshot",
+          "name": "06-entry-in-waiting-list"
+        }
+      ]
+    },
+
+    {
+      "id": "verify-student-in-roster",
+      "name": "Verify Student Appears in Roster",
+      "description": "Navigate to the students list and confirm the newly created student is visible.",
+      "steps": [
+        {
+          "id": "navigate-students-list",
+          "description": "Go to the students list page",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/students-list"
+        },
+        {
+          "id": "wait-for-table",
+          "description": "Wait for the students table to load",
+          "action": "waitForSelector",
+          "selector": "table"
+        },
+        {
+          "id": "assert-student-in-roster",
+          "description": "Confirm the student row is visible in the table",
+          "action": "assert",
+          "type": "visible",
+          "selector": "tr:has-text('{{STUDENT_FIRST}}')"
+        },
+        {
+          "id": "screenshot-student-in-roster",
+          "description": "Capture the students list showing the new student",
+          "action": "screenshot",
+          "name": "07-student-in-roster"
+        }
+      ]
+    },
+
+    {
+      "id": "view-student-profile",
+      "name": "View Student Profile",
+      "description": "Click into the student's profile from the roster and verify the profile page loads.",
+      "steps": [
+        {
+          "id": "navigate-students-list",
+          "description": "Ensure we are on the students list",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/students-list"
+        },
+        {
+          "id": "wait-for-table",
+          "action": "waitForSelector",
+          "selector": "table"
+        },
+        {
+          "id": "click-student-link",
+          "description": "Click the student's name link to open the profile",
+          "action": "click",
+          "selector": "tr:has-text('{{STUDENT_FIRST}}') a"
+        },
+        {
+          "id": "wait-for-profile-url",
+          "description": "Wait for the profile URL to contain /students/",
+          "action": "waitForURL",
+          "pattern": "#/students/"
+        },
+        {
+          "id": "assert-student-name-on-profile",
+          "description": "Confirm student name appears in the page heading",
+          "action": "assert",
+          "type": "visible",
+          "selector": "h1:has-text('{{STUDENT_FIRST}}')"
+        },
+        {
+          "id": "screenshot-profile",
+          "description": "Capture the student profile page",
+          "action": "screenshot",
+          "name": "08-student-profile"
+        }
+      ]
+    }
+
+  ]
+}

@@ -1,69 +1,131 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Users, Calendar, BarChart3, Shield, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Users, Calendar, Shield, Smartphone, ListChecks, CreditCard, FileText, Loader2 } from 'lucide-react';
 import { AccessibilityProvider } from '@/features/accessibility/AccessibilityProvider.jsx';
 import AccessibilityButton from '@/features/accessibility/AccessibilityButton.jsx';
 
+const features = [
+  {
+    icon: Calendar,
+    title: 'תזמון לפי תבנית שבועית',
+    description: 'הגדירו תבנית פעם אחת, והמערכת תייצר את כל המפגשים אוטומטית — שבוע אחרי שבוע.',
+  },
+  {
+    icon: ListChecks,
+    title: 'רישום נוכחות ומעקב',
+    description: 'רישום מהיר של מי הגיע ומי לא, ומעקב ויזואלי על רצף ההתמדה של כל לקוח.',
+  },
+  {
+    icon: CreditCard,
+    title: 'חבילות תשלום וחיוב',
+    description: 'מכירת חבילות שיעורים מראש, ניכוי אוטומטי עם כל מפגש, וכיסוי קופות חולים.',
+  },
+  {
+    icon: Users,
+    title: 'ניהול לקוחות ופרופילים',
+    description: 'פרטי קשר, שיוך מדריך, לוח זמנים אישי וכל היסטוריית המפגשים — בפרופיל מרוכז אחד.',
+  },
+  {
+    icon: Smartphone,
+    title: 'גישה מכל מכשיר',
+    description: 'ממשק מותאם לנייד ולדסקטופ. מדריכים רושמים נוכחות מהשטח, אדמין מנהל ממשרד.',
+  },
+  {
+    icon: Shield,
+    title: 'אבטחה ובקרות גישה',
+    description: 'הפרדה מלאה בין ארגונים, הרשאות לפי תפקיד, וטפסים עם אימות OTP לאיסוף מידע מלקוחות.',
+  },
+];
+
+const useCases = [
+  {
+    icon: Users,
+    title: 'מרכזי רכיבה טיפולית',
+    description: 'ניהול מטופלים, שיוך למדריכים, מעקב נוכחות, תיעוד מפגשים וכיסוי קופות חולים.',
+  },
+  {
+    icon: FileText,
+    title: 'קליניקות ומרפאות',
+    description: 'תורים שבועיים קבועים, טפסים מותאמים, חבילות טיפול ורשימות המתנה מנוהלות.',
+  },
+  {
+    icon: Calendar,
+    title: 'חוגים וסטודיוס',
+    description: 'תבניות שבועיות חוזרות, מעקב נוכחות לקבוצה, חיוב לפי חבילה ויצירת מפגשים אוטומטית.',
+  },
+];
+
+const INPUT_CLASS =
+  'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50';
+
 export default function LandingPage() {
   const navigate = useNavigate();
+  const [formData, setFormData] = useState({
+    name: '',
+    orgName: '',
+    email: '',
+    phone: '',
+    message: '',
+    website: '', // honeypot
+  });
+  const [formStatus, setFormStatus] = useState('idle'); // 'idle' | 'submitting' | 'success' | 'error'
+  const [formError, setFormError] = useState('');
 
-  const features = [
-    {
-      icon: Users,
-      title: 'ניהול תלמידים',
-      description: 'מעקב מלא אחר כל תלמיד ותלמידה, כולל פרטי קשר, מדריך מקצועי ותזמון המפגשים האישי',
-    },
-    {
-      icon: Calendar,
-      title: 'תיעוד מפגשים',
-      description: 'רישום מהיר ונוח של מפגשי הדרכה עם טפסים מותאמים אישית לצרכים שלכם',
-    },
-    {
-      icon: BarChart3,
-      title: 'דוחות ותובנות - בשלבי פיתוח',
-      description: 'ניתוח נתונים מתקדם, דוחות מפורטים ומעקב אחר התקדמות לאורך זמן',
-    },
-    {
-      icon: Shield,
-      title: 'אבטחה ופרטיות',
-      description: 'הגנה מלאה על מידע רגיש עם הצפנה, גיבויים ובקרת גישה נוחה',
-    },
-    {
-      icon: Sparkles,
-      title: 'ממשק נוח וידידותי',
-      description: 'עיצוב מודרני ואינטואיטיבי המותאם לעברית ולשימוש יומיומי',
-    },
-    {
-      icon: CheckCircle2,
-      title: 'פיתוח מתמשך',
-      description: 'חסר לכם משהו במערכת? זה הזמן לשתף אותנו ולהשפיע על הכיוונים העתידיים',
-    },
-  ];
+  const handleFormChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
 
-  const benefits = [
-    'חיסכון משמעותי בזמן ניהול',
-    'מעקב אחר כל מפגש והתקדמות',
-    'עמידה בתנאים מקצועיים ורגולטוריים',
-    'גישה מכל מקום ומכל מכשיר',
-    'התאמה אישית לצרכי הארגון',
-    'עדכונים ושיפורים רציפים',
-  ];
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setFormStatus('submitting');
+    setFormError('');
+    try {
+      const response = await fetch('/api/contact-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formData.name,
+          org_name: formData.orgName,
+          email: formData.email,
+          phone: formData.phone,
+          message: formData.message,
+          website: formData.website,
+        }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 429) {
+          setFormError('כתובת האימייל הזאת כבר שלחה בקשה לאחרונה. נחזור אליכם בהקדם.');
+        } else {
+          setFormError(data.message || 'שגיאה בשליחה. אנא נסו שוב מאוחר יותר.');
+        }
+        setFormStatus('error');
+        return;
+      }
+      setFormStatus('success');
+    } catch {
+      setFormError('שגיאה בשליחה. אנא נסו שוב מאוחר יותר.');
+      setFormStatus('error');
+    }
+  };
 
   return (
     <AccessibilityProvider>
-      <div className="min-h-screen bg-gradient-to-b from-primary/5 to-background" dir="rtl">
+      <div className="min-h-screen bg-gradient-to-b from-primary/5 to-background">
         {/* Accessibility Button */}
-        <div className="fixed bottom-4 left-4 z-50">
+        <div className="fixed bottom-4 start-4 z-50">
           <AccessibilityButton />
         </div>
 
         {/* Header */}
-        <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container mx-auto flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
             <div className="flex items-center gap-2">
-              <img src="/icon.svg" alt="Reinex" className="h-8 w-8" />
+              <img src="/icon.svg" alt="ריינקס" className="h-8 w-8" />
               <span className="text-xl font-bold text-primary">Reinex</span>
             </div>
             <Button onClick={() => navigate('/login')} className="gap-2">
@@ -72,253 +134,259 @@ export default function LandingPage() {
           </div>
         </header>
 
-      {/* Hero Section */}
-      <section className="container mx-auto px-4 py-16 sm:px-6 sm:py-24 lg:px-8">
-        <div className="text-center">
-          <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl md:text-6xl">
-            מערכת ניהול הדרכה
-            <br />
-            <span className="text-primary">חכמה ויעילה</span>
-          </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-lg text-neutral-600 sm:text-xl">
-            Reinex היא הפלטפורמה המתקדמת לניהול תלמידים, תיעוד מפגשים ומעקב אחר התקדמות.
-            כל מה שצוות ההדרכה שלכם צריך, במקום אחד.
-          </p>
-          <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:justify-center">
-            <Button size="lg" onClick={() => navigate('/login')} className="gap-2 text-lg">
-              <span>התחילו עכשיו</span>
-            </Button>
-            <Button size="lg" variant="outline" onClick={() => {
-              document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' });
-            }} className="text-lg">
-              למידע נוסף
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section id="features" className="container mx-auto px-4 py-16 sm:px-6 lg:px-8">
-        <div className="text-center">
-          <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            כל מה שצריך לניהול מוצלח
-          </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-lg text-neutral-600">
-            מערכת מקיפה עם כלים מתקדמים לכל היבט של המפגשים
-          </p>
-        </div>
-
-        <div className="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-          {features.map((feature, index) => (
-            <Card key={index} className="border-2 transition-all hover:border-primary/50 hover:shadow-lg">
-              <CardContent className="p-6">
-                <div className="flex items-start gap-4">
-                  <div className="rounded-lg bg-primary/10 p-3">
-                    <feature.icon className="h-6 w-6 text-primary" />
-                  </div>
-                  <div className="flex-1 text-right">
-                    <h3 className="text-lg font-semibold text-foreground">{feature.title}</h3>
-                    <p className="mt-2 text-sm text-neutral-600">{feature.description}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </section>
-
-      {/* Screenshots Section */}
-      <section className="container mx-auto px-4 py-16 sm:px-6 lg:px-8">
-        <div className="text-center">
-          <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            הצצה למערכת
-          </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-lg text-neutral-600">
-            המערכת שלנו נמצאת כרגע בשלבי בדיקות מוקדמים עם ארגונים נבחרים
-          </p>
-        </div>
-
-        <div className="mt-12 space-y-16">
-          {/* Dashboard Preview */}
-          <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
-            <div className="order-2 text-right lg:order-1">
-              <h3 className="text-2xl font-bold text-foreground">לוח בקרה ראשי</h3>
-              <p className="mt-4 text-lg text-neutral-600">
-                נגישות נוחה לחלקיה המרכזיים של המערכת - מבט על התלמידים ותיעוד מפגש חדש.
-              </p>
-              <ul className="mt-6 space-y-2 text-sm text-neutral-600">
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
-                  <span>גישה מהירה לפונקציות הנפוצות ביותר</span>
-                </li>
-              </ul>
-            </div>
-            <div className="order-1 lg:order-2">
-              <div className="overflow-hidden rounded-lg border-2 border-primary/20 bg-neutral-100 shadow-2xl">
-                <div className="aspect-video flex items-center justify-center bg-gradient-to-br from-primary/5 to-primary/10">
-                  <div className="text-center">
-                    <BarChart3 className="mx-auto h-16 w-16 text-primary/40" />
-                    <p className="mt-4 text-sm text-neutral-500">תמונת מסך: לוח הבקרה הראשי</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Student Management Preview */}
-          <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
-            <div className="order-2 text-right lg:order-2">
-              <h3 className="text-2xl font-bold text-foreground">ניהול תלמידים מתקדם</h3>
-              <p className="mt-4 text-lg text-neutral-600">
-                ממשק ניהול תלמידים אינטואיטיבי עם חיפוש מהיר, סינון לפי מדריך או יום בשבוע,
-                ותצוגה ברורה עם כל הפרטים החשובים.
-              </p>
-              <ul className="mt-6 space-y-2 text-sm text-neutral-600">
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
-                  <span>חיפוש וסינון מתקדמים לאיתור מהיר</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
-                  <span>עריכה והוספה פשוטה של תלמידים חדשים</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
-                  <span>שיוך מדריכים ולוחות זמנים מותאמים אישית</span>
-                </li>
-              </ul>
-            </div>
-            <div className="order-1 lg:order-1">
-              <div className="overflow-hidden rounded-lg border-2 border-primary/20 bg-neutral-100 shadow-2xl">
-                <div className="aspect-video flex items-center justify-center bg-gradient-to-br from-primary/5 to-primary/10">
-                  <div className="text-center">
-                    <Users className="mx-auto h-16 w-16 text-primary/40" />
-                    <p className="mt-4 text-sm text-neutral-500">תמונת מסך: ניהול תלמידים</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Session Recording Preview */}
-          <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
-            <div className="order-2 text-right lg:order-1">
-              <h3 className="text-2xl font-bold text-foreground">תיעוד מפגשים מהיר ונוח</h3>
-              <p className="mt-4 text-lg text-neutral-600">
-                תיעוד מפגש בכמה קליקים - בחירת תלמיד, מילוי שאלות מותאמות אישית, ושמירה מיידית.
-                כל המידע במקום אחד ונגיש.
-              </p>
-              <ul className="mt-6 space-y-2 text-sm text-neutral-600">
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
-                  <span>טפסים מותאמים אישית לפי צרכי הארגון</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
-                  <span>שאלות מגוונות: טקסט חופשי, בחירה מרובה, דירוג ועוד</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
-                  <span>הכינו תשובות מוכנות מראש לחיסכון בזמן</span>
-                </li>
-              </ul>
-            </div>
-            <div className="order-1 lg:order-2">
-              <div className="overflow-hidden rounded-lg border-2 border-primary/20 bg-neutral-100 shadow-2xl">
-                <div className="aspect-video flex items-center justify-center bg-gradient-to-br from-primary/5 to-primary/10">
-                  <div className="text-center">
-                    <Calendar className="mx-auto h-16 w-16 text-primary/40" />
-                    <p className="mt-4 text-sm text-neutral-500">תמונת מסך: רישום מפגש חדש</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Beta Notice */}
-        <div className="mt-16 rounded-lg border border-primary/30 bg-primary/5 p-6 text-center">
-          <Shield className="mx-auto h-12 w-12 text-primary" />
-          <h3 className="mt-4 text-xl font-bold text-foreground">בדיקות מוקדמות בסביבה אמיתית</h3>
-          <p className="mx-auto mt-2 max-w-2xl text-neutral-600">
-            המערכת שלנו נמצאת כעת בשלבי פיילוט עם ארגונים נבחרים. אנחנו אוספים משוב, משפרים ומוסיפים תכונות חדשות באופן שוטף.
-            תמונות המסך הן הדמיות - הממשק האמיתי זמין עם כניסה למערכת.
-          </p>
-        </div>
-      </section>
-
-      {/* Benefits Section */}
-      <section className="bg-primary/5 py-16">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Hero */}
+        <section className="container mx-auto px-4 py-16 sm:px-6 sm:py-24 lg:px-8">
           <div className="text-center">
-            <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-              למה לבחור ב-Reinex?
-            </h2>
-            <p className="mx-auto mt-4 max-w-2xl text-lg text-neutral-600">
-              הצטרפו לארגונים שכבר משתמשים במערכת שלנו
+            <Badge variant="outline" className="mb-6 px-4 py-1.5 text-sm font-medium">
+              ניהול מפגשים | רישום נוכחות | חבילות וחיוב
+            </Badge>
+            <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl md:text-6xl">
+              ניהול מסודר
+              <br />
+              <span className="text-primary">למרכזים עם לקוחות קבועים</span>
+            </h1>
+            <p className="mx-auto mt-6 max-w-2xl text-lg text-neutral-600 sm:text-xl">
+              ריינקס מרכזת את כל מה שקורה בין המפגש לחשבונית — לוחות זמנים שבועיים, רישום נוכחות, חבילות תשלום ורשימות המתנה — במקום אחד.
             </p>
+            <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:justify-center">
+              <Button size="lg" onClick={() => navigate('/login')} className="gap-2 text-lg">
+                <span>כניסה למערכת</span>
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => document.getElementById('capabilities')?.scrollIntoView({ behavior: 'smooth' })}
+                className="text-lg"
+              >
+                מה המערכת עושה?
+              </Button>
+            </div>
           </div>
+        </section>
 
-          <div className="mx-auto mt-12 max-w-3xl">
-            <div className="grid gap-4 sm:grid-cols-2">
-              {benefits.map((benefit, index) => (
-                <div key={index} className="flex items-center gap-3 rounded-lg bg-background p-4 shadow-sm">
-                  <CheckCircle2 className="h-5 w-5 flex-shrink-0 text-primary" />
-                  <span className="text-sm font-medium text-foreground">{benefit}</span>
-                </div>
+        {/* Who Is This For */}
+        <section className="bg-muted/30 py-16">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="text-center">
+              <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+                מתאים לכל ארגון שעובד עם לקוחות קבועים
+              </h2>
+              <p className="mx-auto mt-4 max-w-2xl text-lg text-neutral-600">
+                מרכזי רכיבה טיפולית, קליניקות, חוגים — כולם עובדים לפי אותו מבנה: לקוחות קבועים, מפגשים חוזרים, תשלומים ומעקב.
+              </p>
+            </div>
+            <div className="mt-12 grid gap-8 sm:grid-cols-3">
+              {useCases.map((uc, i) => (
+                <Card key={i} className="border-2 transition-all hover:border-primary/50 hover:shadow-lg">
+                  <CardContent className="p-6">
+                    <div className="flex items-start gap-4">
+                      <div className="rounded-lg bg-primary/10 p-3">
+                        <uc.icon className="h-6 w-6 text-primary" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-lg font-semibold text-foreground">{uc.title}</h3>
+                        <p className="mt-2 text-sm text-neutral-600">{uc.description}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               ))}
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* CTA Section */}
-      <section className="container mx-auto px-4 py-16 sm:px-6 sm:py-24 lg:px-8">
-        <div className="rounded-2xl bg-primary px-6 py-16 text-center shadow-xl sm:px-12">
-          <h2 className="text-3xl font-bold text-white sm:text-4xl">
-            מוכנים להתחיל?
-          </h2>
-          <p className="mx-auto mt-4 max-w-xl text-lg text-primary-foreground/90">
-            הצטרפו למערכת עוד היום והתחילו לנהל את ההדרכה שלכם בצורה החכמה ביותר
-          </p>
-          <div className="mt-8">
-            <Button
-              size="lg"
-              variant="secondary"
-              onClick={() => navigate('/login')}
-              className="gap-2 text-lg shadow-lg hover:shadow-xl"
-            >
-              <span>כניסה למערכת</span>
-            </Button>
+        {/* Core Capabilities */}
+        <section id="capabilities" className="container mx-auto px-4 py-16 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+              מה המערכת עושה בפועל
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-lg text-neutral-600">
+              כלים שמכסים את המחזור המלא — מהזמנת מפגש ועד לתשלום
+            </p>
           </div>
-        </div>
-      </section>
+          <div className="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+            {features.map((feature, index) => (
+              <Card key={index} className="border-2 transition-all hover:border-primary/50 hover:shadow-lg">
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <div className="rounded-lg bg-primary/10 p-3">
+                      <feature.icon className="h-6 w-6 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold text-foreground">{feature.title}</h3>
+                      <p className="mt-2 text-sm text-neutral-600">{feature.description}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </section>
 
-      {/* Footer */}
-      <footer className="border-t bg-neutral-50 py-8">
-        <div className="container mx-auto px-4 text-center sm:px-6 lg:px-8">
-          <div className="flex items-center justify-center gap-2 text-neutral-600">
-            <img src="/icon.svg" alt="Reinex" className="h-6 w-6" />
-            <span className="font-semibold">Reinex</span>
-            <span className="text-neutral-400">•</span>
-            <span className="text-sm">מערכת ניהול מפגשים מתקדמת</span>
+        {/* Contact Form */}
+        <section className="bg-primary/5 py-16">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-2xl">
+              <div className="rounded-2xl bg-background p-8 shadow-lg ring-1 ring-border">
+                <h2 className="text-center text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+                  הגישה למערכת על פי הזמנה
+                </h2>
+                <p className="mx-auto mt-4 max-w-xl text-center text-lg text-neutral-600">
+                  ריינקס עובדת כרגע עם קבוצה נבחרת של ארגונים. אם אתם מרכז, קליניקה או חוג המחפשים כלי ניהול מסודר — מלאו את הטופס ונחזור אליכם.
+                </p>
+
+                {formStatus === 'success' ? (
+                  <div className="mt-8 rounded-xl border border-green-200 bg-green-50 p-6 text-center">
+                    <p className="text-lg font-semibold text-green-800">תודה! נחזור אליכם בהקדם.</p>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSubmit} className="mt-8 space-y-4" noValidate>
+                    {/* Honeypot — hidden from humans, bots fill it in */}
+                    <input
+                      name="website"
+                      type="text"
+                      value={formData.website}
+                      onChange={handleFormChange}
+                      tabIndex={-1}
+                      autoComplete="off"
+                      aria-hidden="true"
+                      className="absolute h-0 w-0 overflow-hidden opacity-0 pointer-events-none"
+                    />
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label htmlFor="contact-name" className="mb-1 block text-sm font-medium text-foreground">
+                          שם מלא *
+                        </label>
+                        <input
+                          id="contact-name"
+                          name="name"
+                          type="text"
+                          required
+                          value={formData.name}
+                          onChange={handleFormChange}
+                          className={INPUT_CLASS}
+                          placeholder="ישראל ישראלי"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="contact-org" className="mb-1 block text-sm font-medium text-foreground">
+                          ארגון / מרכז *
+                        </label>
+                        <input
+                          id="contact-org"
+                          name="orgName"
+                          type="text"
+                          required
+                          value={formData.orgName}
+                          onChange={handleFormChange}
+                          className={INPUT_CLASS}
+                          placeholder="מרכז רכיבה טיפולית"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label htmlFor="contact-email" className="mb-1 block text-sm font-medium text-foreground">
+                          אימייל *
+                        </label>
+                        <input
+                          id="contact-email"
+                          name="email"
+                          type="email"
+                          required
+                          value={formData.email}
+                          onChange={handleFormChange}
+                          className={INPUT_CLASS}
+                          placeholder="israel@example.com"
+                          dir="ltr"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="contact-phone" className="mb-1 block text-sm font-medium text-foreground">
+                          טלפון
+                        </label>
+                        <input
+                          id="contact-phone"
+                          name="phone"
+                          type="tel"
+                          value={formData.phone}
+                          onChange={handleFormChange}
+                          className={INPUT_CLASS}
+                          placeholder="050-0000000"
+                          dir="ltr"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label htmlFor="contact-message" className="mb-1 block text-sm font-medium text-foreground">
+                        הודעה קצרה
+                      </label>
+                      <textarea
+                        id="contact-message"
+                        name="message"
+                        rows={3}
+                        value={formData.message}
+                        onChange={handleFormChange}
+                        className={`${INPUT_CLASS} resize-none`}
+                        placeholder="ספרו לנו קצת על הארגון שלכם..."
+                      />
+                    </div>
+
+                    {formStatus === 'error' && (
+                      <p className="text-sm text-destructive">{formError}</p>
+                    )}
+
+                    <Button
+                      type="submit"
+                      size="lg"
+                      className="w-full gap-2 text-lg"
+                      disabled={formStatus === 'submitting'}
+                    >
+                      {formStatus === 'submitting' ? (
+                        <>
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                          <span>שולח...</span>
+                        </>
+                      ) : (
+                        <span>שלחו בקשה</span>
+                      )}
+                    </Button>
+                  </form>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="mt-4 flex flex-wrap justify-center gap-6">
-            <a href="https://thepcrunners.com/he/privacy-policy" aria-label='מדיניות הפרטיות' className="text-sm text-neutral-600 underline hover:text-neutral-800">
-              מדיניות פרטיות
-            </a>
-            <a href="https://thepcrunners.com/he/usage-policy" aria-label='תנאי השימוש' className="text-sm text-neutral-600 underline hover:text-neutral-800">
-              תנאי שימוש
-            </a>
-            <a href="https://thepcrunners.com/he/accessibility-policy" aria-label='מדיניות נגישות' className="text-sm text-neutral-600 underline hover:text-neutral-800">
-              מדיניות נגישות
-            </a>
+        </section>
+
+        {/* Footer */}
+        <footer className="border-t bg-neutral-50 py-8">
+          <div className="container mx-auto px-4 text-center sm:px-6 lg:px-8">
+            <div className="flex items-center justify-center gap-2 text-neutral-600">
+              <img src="/icon.svg" alt="ריינקס" className="h-6 w-6" />
+              <span className="font-semibold">Reinex</span>
+              <span className="text-neutral-400">•</span>
+              <span className="text-sm">מערכת ניהול מפגשים</span>
+            </div>
+            <div className="mt-4 flex flex-wrap justify-center gap-6">
+              <a href="#/legal/privacy" aria-label="מדיניות הפרטיות" className="text-sm text-neutral-600 underline hover:text-neutral-800">
+                מדיניות פרטיות
+              </a>
+              <a href="#/legal/terms" aria-label="תנאי השימוש" className="text-sm text-neutral-600 underline hover:text-neutral-800">
+                תנאי שימוש
+              </a>
+              <a href="#/legal/accessibility" aria-label="מדיניות נגישות" className="text-sm text-neutral-600 underline hover:text-neutral-800">
+                מדיניות נגישות
+              </a>
+            </div>
+            <p className="mt-4 text-sm text-neutral-500">
+              © {new Date().getFullYear()} ריינקס. כל הזכויות שמורות.
+            </p>
           </div>
-          <p className="mt-4 text-sm text-neutral-500">
-            © {new Date().getFullYear()} Reinex ThePCRunners. כל הזכויות שמורות.
-          </p>
-        </div>
-      </footer>
+        </footer>
       </div>
     </AccessibilityProvider>
   );

@@ -1,5 +1,64 @@
 import { getAuthClient } from '@/lib/supabase-manager.js';
 
+const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
+const COMMON_API_ERROR_MESSAGES = {
+  admin_or_owner_required: 'נדרשות הרשאות מנהל או בעלים.',
+  admin_required: 'נדרשות הרשאות מנהל.',
+  client_profile_not_found: 'הלקוח לא נמצא.',
+  database_error: 'אירעה שגיאה בגישה לנתונים. נסו שוב.',
+  document_not_found: 'המסמך לא נמצא.',
+  employee_not_found: 'העובד לא נמצא.',
+  failed_to_load_settings: 'טעינת ההגדרות נכשלה. נסו שוב.',
+  failed_to_verify_membership: 'לא הצלחנו לבדוק את ההרשאות שלכם כרגע. נסו שוב.',
+  forbidden: 'אין לכם הרשאה לבצע את הפעולה.',
+  form_not_found: 'הטופס לא נמצא.',
+  form_not_published: 'הטופס עדיין לא פורסם.',
+  internal_error: 'אירעה שגיאה פנימית. נסו שוב.',
+  internal_server_error: 'אירעה שגיאה פנימית. נסו שוב.',
+  invalid_date: 'התאריך אינו תקין.',
+  invalid_date_range: 'טווח התאריכים אינו תקין.',
+  invalid_email: 'כתובת האימייל אינה תקינה.',
+  invalid_json_body: 'הבקשה אינה תקינה.',
+  invalid_org_id: 'הארגון שנבחר אינו תקין.',
+  invalid_or_expired_token: 'ההתחברות פגה. התחברו מחדש ונסו שוב.',
+  invalid_phone: 'מספר הטלפון אינו תקין.',
+  invalid_service_id: 'השירות שנבחר אינו תקין.',
+  invalid_status: 'הסטטוס שנבחר אינו תקין.',
+  invalid_student_id: 'התלמיד שנבחר אינו תקין.',
+  invalid_token: 'ההתחברות פגה. התחברו מחדש ונסו שוב.',
+  invite_not_found: 'ההזמנה לא נמצאה.',
+  invitation_not_pending: 'ההזמנה כבר טופלה.',
+  lesson_charge_reversal_must_use_calendar: 'חיוב שיעור מתעדכן דרך שינוי סטטוס השיעור ביומן. עדכנו את הנוכחות או הביטול שם כדי לשמור על התאמה בין היומן ללדר.',
+  lesson_instance_not_found: 'השיעור לא נמצא.',
+  lesson_template_not_found: 'התבנית לא נמצאה.',
+  method_not_allowed: 'הפעולה אינה נתמכת במסך הזה.',
+  missing_bearer: 'ההתחברות פגה. התחברו מחדש ונסו שוב.',
+  missing_bearer_token: 'ההתחברות פגה. התחברו מחדש ונסו שוב.',
+  missing_email: 'חסרה כתובת אימייל.',
+  missing_employee_id: 'חסר עובד לביצוע הפעולה.',
+  missing_instance_id: 'חסר שיעור לביצוע הפעולה.',
+  missing_org_id: 'חסר ארגון לביצוע הפעולה.',
+  missing_orgid: 'חסר ארגון לביצוע הפעולה.',
+  missing_service_id: 'חסר שירות לביצוע הפעולה.',
+  missing_updates: 'לא נשלחו שינויים לעדכון.',
+  not_a_member: 'אין לכם גישה לארגון הזה.',
+  permission_denied: 'אין לכם הרשאה לבצע את הפעולה.',
+  server_misconfigured: 'המערכת לא מוגדרת כראוי. פנו לתמיכה.',
+  storage_disconnected: 'חיבור האחסון מנותק.',
+  storage_not_configured: 'האחסון עדיין לא הוגדר.',
+  student_not_found: 'התלמיד לא נמצא.',
+  table_not_found: 'חסרה טבלת נתונים. יש להריץ את סקריפט ההתקנה.',
+  user_not_found: 'המשתמש לא נמצא.',
+};
+
+function getActiveOrgId() {
+  try {
+    return window.localStorage.getItem(ACTIVE_ORG_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
 async function resolveBearerToken() {
   const authClient = getAuthClient();
   const { data, error } = await authClient.auth.getSession();
@@ -17,7 +76,23 @@ async function resolveBearerToken() {
   return token;
 }
 
-function createAuthorizationHeaders(customHeaders = {}, bearer, { includeJsonContentType = false } = {}) {
+function resolveTokenFromOverrides(session, accessToken) {
+  const overrideToken = typeof accessToken === 'string' && accessToken.trim()
+    ? accessToken.trim()
+    : null;
+  if (overrideToken) {
+    return { token: overrideToken, source: 'accessToken' };
+  }
+
+  const sessionToken = session?.access_token;
+  if (typeof sessionToken === 'string' && sessionToken.trim()) {
+    return { token: sessionToken.trim(), source: 'session' };
+  }
+
+  return { token: null, source: 'none' };
+}
+
+function createAuthorizationHeaders(customHeaders = {}, bearer, { includeJsonContentType = false, orgId = '' } = {}) {
   const headers = includeJsonContentType
     ? { 'Content-Type': 'application/json', ...customHeaders }
     : { ...customHeaders };
@@ -28,16 +103,48 @@ function createAuthorizationHeaders(customHeaders = {}, bearer, { includeJsonCon
   headers['x-supabase-authorization'] = bearer;
   headers['x-supabase-auth'] = bearer;
 
+  if (orgId) {
+    headers['x-org-id'] = orgId;
+  }
+
   return headers;
 }
 
+function buildApiErrorMessage(payload, status, fallback = 'An API error occurred') {
+  const errorId = payload?.error_id || payload?.support_code || '';
+  if (status >= 500 && errorId) {
+    return `הפעולה נכשלה. קוד תמיכה: ${errorId}`;
+  }
+  const code = payload?.message || payload?.error || payload?.details || payload?.description || payload?.title || '';
+  return COMMON_API_ERROR_MESSAGES[code] || code || fallback;
+}
+
+function decorateApiError(error, payload, status) {
+  error.status = status;
+  if (payload) {
+    error.data = payload;
+  }
+  const code = payload?.message || payload?.error || payload?.details || payload?.description || payload?.title || null;
+  if (code) {
+    error.code = code;
+    error.apiCode = code;
+  }
+  const errorId = payload?.error_id || payload?.support_code || null;
+  if (errorId) {
+    error.error_id = errorId;
+    error.supportCode = errorId;
+  }
+  return error;
+}
+
 export async function authenticatedFetch(path, { session: _session, accessToken: _accessToken, ...options } = {}) {
-  void _session; void _accessToken;
-  const token = await resolveBearerToken();
+  const resolved = resolveTokenFromOverrides(_session, _accessToken);
+  const token = resolved.token || await resolveBearerToken();
   const bearer = `Bearer ${token}`;
+  const orgId = getActiveOrgId();
 
   const { headers: customHeaders = {}, body, params, ...rest } = options;
-  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: true });
+  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: true, orgId });
 
   let requestBody = body;
   if (requestBody && typeof requestBody === 'object' && !(requestBody instanceof FormData)) {
@@ -87,36 +194,24 @@ export async function authenticatedFetch(path, { session: _session, accessToken:
   }
 
   if (!response.ok) {
-    const message = payload?.message || payload?.error || payload?.code || 'An API error occurred';
-
-    const error = new Error(message);
-    error.status = response.status;
-    error.url = url;
-    if (payload) {
-      error.data = payload;
-    }
-
-    // eslint-disable-next-line no-console
-    console.error('[api-client] Request failed', {
-      url,
-      method: rest?.method || 'GET',
-      status: response.status,
+    throw decorateApiError(
+      new Error(buildApiErrorMessage(payload, response.status)),
       payload,
-    });
-
-    throw error;
+      response.status,
+    );
   }
 
   return payload;
 }
 
 export async function authenticatedFetchBlob(path, { session: _session, accessToken: _accessToken, ...options } = {}) {
-  void _session; void _accessToken;
-  const token = await resolveBearerToken();
+  const resolved = resolveTokenFromOverrides(_session, _accessToken);
+  const token = resolved.token || await resolveBearerToken();
   const bearer = `Bearer ${token}`;
+  const orgId = getActiveOrgId();
 
   const { headers: customHeaders = {}, params, ...rest } = options;
-  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: false });
+  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: false, orgId });
 
   const normalizedPath = String(path || '')
     .replace(/^\/+/, '')
@@ -149,34 +244,31 @@ export async function authenticatedFetchBlob(path, { session: _session, accessTo
   });
 
   if (!response.ok) {
-    let message = 'An API error occurred';
+    let payload = null;
     try {
       const text = await response.text();
-      const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === 'object') {
-        message = parsed.message || parsed.error || parsed.code || message;
-      }
+      payload = JSON.parse(text);
     } catch {
       // Ignore parse errors
     }
-    const error = new Error(message);
-    error.status = response.status;
-    error.url = url;
-    // eslint-disable-next-line no-console
-    console.error('[api-client] Blob request failed', { url, status: response.status, message });
-    throw error;
+    throw decorateApiError(
+      new Error(buildApiErrorMessage(payload, response.status)),
+      payload,
+      response.status,
+    );
   }
 
   return response.blob();
 }
 
 export async function authenticatedFetchText(path, { session: _session, accessToken: _accessToken, ...options } = {}) {
-  void _session; void _accessToken;
-  const token = await resolveBearerToken();
+  const resolved = resolveTokenFromOverrides(_session, _accessToken);
+  const token = resolved.token || await resolveBearerToken();
   const bearer = `Bearer ${token}`;
+  const orgId = getActiveOrgId();
 
   const { headers: customHeaders = {}, params, ...rest } = options;
-  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: false });
+  const headers = createAuthorizationHeaders(customHeaders, bearer, { includeJsonContentType: false, orgId });
 
   const normalizedPath = String(path || '')
     .replace(/^\/+/, '')
@@ -211,22 +303,18 @@ export async function authenticatedFetchText(path, { session: _session, accessTo
   const text = await response.text();
 
   if (!response.ok) {
-    let message = 'An API error occurred';
+    let payload = null;
     try {
-      const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === 'object') {
-        message = parsed.message || parsed.error || parsed.code || message;
-      }
+      payload = JSON.parse(text);
     } catch {
       // ignore JSON parsing failures
     }
 
-    const error = new Error(message);
-    error.status = response.status;
-    error.url = url;
-    // eslint-disable-next-line no-console
-    console.error('[api-client] Text request failed', { url, status: response.status, message });
-    throw error;
+    throw decorateApiError(
+      new Error(buildApiErrorMessage(payload, response.status)),
+      payload,
+      response.status,
+    );
   }
 
   return text;

@@ -1,5 +1,5 @@
 Security Policy
-  At ThePCRunners, we take the security of our Reinex project seriously. 
+  At ThePCRunners, we take the security of our TutTiud-Refactored project seriously. 
   Although this codebase is open source, it powers a production service that is carefully protected. 
   We appreciate the community's efforts in identifying potential security issues and ask 
   that you follow our responsible disclosure guidelines outlined below.
@@ -23,7 +23,7 @@ Reporting a Vulnerability
   responsibly in line with this policy.
 
 Project Security Practices
-  We design and maintain Reinex with a strong security posture, implementing multiple layers of protection:
+  We design and maintain TutTiud-Refactored with a strong security posture, implementing multiple layers of protection:
     •	Row Level Security (RLS): Our project uses Supabase with RLS enabled on database tables. This means the database 
       itself enforces strict access control, ensuring users can only read or modify data they are authorized to access. 
       RLS provides an extra defense-in-depth, guarding data even if an application bug arises.
@@ -43,7 +43,7 @@ Project Security Practices
       Code changes are reviewed, and tests are in place for critical functionality. By keeping libraries up-to-date and 
       reviewing code for security implications, we aim to catch issues early and maintain a robust security standard.
 Notes for Contributors
-  Contributors to Reinex are key to keeping the project secure. If you are contributing code or documentation, 
+  Contributors to TutTiud-Refactored are key to keeping the project secure. If you are contributing code or documentation, 
   please keep the following best practices in mind:
     •	Never Commit Secrets: Ensure that API keys, passwords, or any confidential tokens are not hard-coded or committed to the repository. 
       Use environment variables or configuration files (added to .gitignore) for any secret values. Double-check that you don’t accidentally 
@@ -69,5 +69,5 @@ Notes for Contributors
     •	Test Your Changes: Where possible, write tests for new features, especially for any security-related functionality. For instance, if adding 
       a new API route, consider adding tests for permission scenarios (authorized vs unauthorized access). This helps catch any permission oversights 
       before they make it into production.
-By following these guidelines, you help protect our users and ensure that Reinex remains a secure and trusted application. Thank you to 
+By following these guidelines, you help protect our users and ensure that TutTiud-Refactored remains a secure and trusted application. Thank you to 
 all contributors and researchers for your efforts in keeping our project safe. Together, we uphold a strong security posture while continuing to improve the platform.

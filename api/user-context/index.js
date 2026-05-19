@@ -1,25 +1,19 @@
 /* eslint-env node */
-import process from 'node:process';
-import { json, resolveBearerAuthorization } from '../_shared/http.js';
+import { resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
-
-function readEnv(context) {
-  return (context?.env && typeof context.env === 'object') ? context.env : (process.env ?? {});
-}
+import { readEnv, respond as _respond } from '../_shared/org-bff.js';
 
 function respond(context, status, body, extraHeaders = {}) {
-  const response = json(status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
-  context.res = response;
-  return response;
+  return _respond(context, status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
 }
 
-function mapOrganizationRecord(record, membership, connection) {
+function mapOrganizationRecord(record, membership) {
   if (!record || !membership) {
     return null;
   }
 
   // Strip sensitive credentials from storage profile for non-admin users
-  let storageProfile = connection?.storageProfile ?? null;
+  let storageProfile = record.storage_profile ?? null;
   const userRole = membership?.role || 'member';
   const isAdmin = userRole === 'admin' || userRole === 'owner';
   
@@ -51,8 +45,6 @@ function mapOrganizationRecord(record, membership, connection) {
     verified_at: record.verified_at || null,
     created_at: record.created_at,
     updated_at: record.updated_at,
-    dedicated_key_saved_at: record.dedicated_key_saved_at || null,
-    has_connection: Boolean(connection?.supabaseUrl && connection?.supabaseAnonKey),
     membership: {
       id: membership.id,
       org_id: membership.org_id,
@@ -60,9 +52,7 @@ function mapOrganizationRecord(record, membership, connection) {
       user_id: membership.user_id,
       created_at: membership.created_at,
     },
-    permissions: connection?.permissions ?? {},
-    org_settings_metadata: connection?.metadata ?? null,
-    org_settings_updated_at: connection?.updatedAt ?? null,
+    permissions: record.permissions ?? {},
     storage_profile: storageProfile,
   };
 }
@@ -103,13 +93,13 @@ export default async function userContext(context, req) {
   }
 
   if (String(req.method || 'GET').toUpperCase() !== 'GET') {
-    return respond(context, 405, { message: 'method not allowed' });
+    return respond(context, 405, { message: 'method_not_allowed' });
   }
 
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('user-context missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing_bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);
@@ -119,17 +109,41 @@ export default async function userContext(context, req) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.error?.('user-context getUser failed', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   if (authResult.error || !authResult.data?.user?.id) {
     context.log?.warn?.('user-context token could not be resolved');
-    return respond(context, 401, { message: 'invalid or expired token' });
+    return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
   const userId = authResult.data.user.id;
   const userEmail = typeof authResult.data.user.email === 'string'
     ? authResult.data.user.email.toLowerCase()
+    : null;
+
+  let profileResponse;
+  try {
+    profileResponse = await supabase
+      .from('profiles')
+      .select('can_create_organizations, max_owned_organizations, is_system_admin')
+      .eq('id', userId)
+      .maybeSingle();
+  } catch (error) {
+    context.log?.error?.('user-context profile query failed', { message: error?.message, userId });
+    return respond(context, 500, { message: 'failed_to_load_profile' });
+  }
+
+  if (profileResponse.error) {
+    const status = profileResponse.error.status || 500;
+    context.log?.error?.('user-context profile query error', { status, userId });
+    return respond(context, status, { message: 'failed_to_load_profile' });
+  }
+
+  const profile = profileResponse.data || {};
+  const canCreateOrganizations = Boolean(profile.is_system_admin || profile.can_create_organizations);
+  const maxOwnedOrganizations = Number.isInteger(profile.max_owned_organizations)
+    ? profile.max_owned_organizations
     : null;
 
   let membershipsResponse;
@@ -153,19 +167,19 @@ export default async function userContext(context, req) {
     }
   } catch (error) {
     context.log?.error?.('user-context primary queries failed', { message: error?.message, userId });
-    return respond(context, 500, { message: 'failed to load memberships' });
+    return respond(context, 500, { message: 'failed_to_load_memberships' });
   }
 
   if (membershipsResponse.error) {
     const status = membershipsResponse.error.status || 500;
     context.log?.error?.('user-context memberships query error', { status, userId });
-    return respond(context, status, { message: 'failed to load memberships' });
+    return respond(context, status, { message: 'failed_to_load_memberships' });
   }
 
   if (invitesResponse.error) {
     const status = invitesResponse.error.status || 500;
     context.log?.error?.('user-context invites query error', { status, userId });
-    return respond(context, status, { message: 'failed to load invitations' });
+    return respond(context, status, { message: 'failed_to_load_invitations' });
   }
 
   const memberships = Array.isArray(membershipsResponse.data) ? membershipsResponse.data : [];
@@ -184,7 +198,6 @@ export default async function userContext(context, req) {
   }
 
   let organizationsResponse = { data: [], error: null };
-  let settingsResponse = { data: [], error: null };
 
   if (orgIds.size > 0) {
     const idsArray = Array.from(orgIds);
@@ -192,58 +205,29 @@ export default async function userContext(context, req) {
       organizationsResponse = await supabase
         .from('organizations')
         .select(
-          'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at, dedicated_key_saved_at',
+          'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at, permissions, storage_profile',
         )
         .in('id', idsArray);
-
-      settingsResponse = await supabase
-        .from('org_settings')
-        .select('org_id, supabase_url, anon_key, metadata, updated_at, permissions, storage_profile')
-        .in('org_id', idsArray);
     } catch (error) {
       context.log?.error?.('user-context enrichment queries failed', { message: error?.message, userId });
-      return respond(context, 500, { message: 'failed to load organizations' });
+      return respond(context, 500, { message: 'failed_to_load_organizations' });
     }
 
     if (organizationsResponse.error) {
       const status = organizationsResponse.error.status || 500;
       context.log?.error?.('user-context organizations query error', { status, userId });
-      return respond(context, status, { message: 'failed to load organizations' });
-    }
-
-    if (settingsResponse.error) {
-      context.log?.warn?.('user-context settings query error', {
-        status: settingsResponse.error.status || 500,
-        userId,
-      });
+      return respond(context, status, { message: 'failed_to_load_organizations' });
     }
   }
 
   const organizationsData = Array.isArray(organizationsResponse.data) ? organizationsResponse.data : [];
-  const settingsData = Array.isArray(settingsResponse.data) ? settingsResponse.data : [];
 
   const organizationMap = new Map(organizationsData.map((org) => [org.id, org]));
-  const connectionMap = new Map(
-    settingsData
-      .filter((record) => record?.org_id)
-      .map((record) => [
-        record.org_id,
-        {
-          supabaseUrl: record.supabase_url || '',
-          supabaseAnonKey: record.anon_key || '',
-          metadata: record.metadata ?? null,
-          updatedAt: record.updated_at || null,
-          permissions: record.permissions ?? {},
-          storageProfile: record.storage_profile ?? null,
-        },
-      ]),
-  );
 
   const normalizedOrganizations = memberships
     .map((membership) => {
       const organization = organizationMap.get(membership.org_id);
-      const connection = connectionMap.get(membership.org_id);
-      return mapOrganizationRecord(organization, membership, connection);
+      return mapOrganizationRecord(organization, membership);
     })
     .filter(Boolean);
 
@@ -254,8 +238,6 @@ export default async function userContext(context, req) {
     })
     .filter(Boolean);
 
-  const connectionsPayload = Object.fromEntries(connectionMap.entries());
-
   context.log?.info?.('user-context loaded memberships', {
     userId,
     membershipCount: normalizedOrganizations.length,
@@ -265,6 +247,7 @@ export default async function userContext(context, req) {
   return respond(context, 200, {
     organizations: normalizedOrganizations,
     incomingInvites: normalizedInvites,
-    connections: connectionsPayload,
+    canCreateOrganizations,
+    maxOwnedOrganizations,
   });
 }

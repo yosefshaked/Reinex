@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Employees - Option A</title>
+    <style>
+      :root{
+        --bg:#f4f6fb;--panel:#fff;--line:#d9dfeb;--ink:#121826;--muted:#6b7280;
+        --blue:#2f6fed;--blue-soft:#eaf1ff;--green:#169b62;--amber:#c47a15;--red:#dc4c64;
+      }
+      *{box-sizing:border-box} body{margin:0;font-family:"Segoe UI",Tahoma,sans-serif;background:var(--bg);color:var(--ink)}
+      .layout{display:grid;grid-template-columns:320px 1fr;min-height:100vh}
+      .sidebar{background:#eef3ff;border-inline-start:1px solid var(--line);padding:20px 18px}
+      .content{padding:24px}
+      .title{font-size:30px;font-weight:800;margin:0 0 6px}
+      .subtitle{margin:0 0 18px;color:var(--muted)}
+      .toolbar,.filters,.quick-actions,.cards,.two-col,.stats{display:flex;gap:12px;flex-wrap:wrap}
+      .toolbar{margin-bottom:16px}
+      .btn{border:1px solid var(--line);background:#fff;padding:11px 14px;border-radius:14px;font-weight:700}
+      .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+      .search{width:100%;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:#fff;margin-bottom:12px}
+      .card,.employee-row,.panel,.mini{background:var(--panel);border:1px solid var(--line);border-radius:20px;box-shadow:0 18px 40px -34px rgba(15,23,42,.45)}
+      .employee-row{padding:14px;margin-bottom:10px}
+      .employee-row.active{outline:2px solid rgba(47,111,237,.18);background:linear-gradient(180deg,#fff 0%,#f8fbff 100%)}
+      .name{font-weight:800}
+      .meta{color:var(--muted);font-size:13px;margin-top:4px}
+      .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+      .chip{padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700}
+      .chip.blue{background:var(--blue-soft);color:var(--blue)}
+      .chip.green{background:#eaf8f1;color:var(--green)}
+      .chip.amber{background:#fff4e5;color:var(--amber)}
+      .chip.red{background:#ffe8ec;color:var(--red)}
+      .hero{display:flex;justify-content:space-between;align-items:flex-start;background:linear-gradient(135deg,#fff 0%,#f4f8ff 100%);padding:22px 24px;margin-bottom:16px}
+      .hero-main{display:flex;gap:16px;align-items:flex-start}
+      .avatar{width:68px;height:68px;border-radius:20px;background:linear-gradient(135deg,#2f6fed,#6998ff);color:#fff;display:grid;place-items:center;font-size:24px;font-weight:800}
+      .section-title{font-size:18px;font-weight:800;margin:0 0 12px}
+      .panel{padding:18px}
+      .stats{margin:16px 0}
+      .mini{padding:14px;min-width:160px;flex:1}
+      .value{font-size:28px;font-weight:800}
+      .label{font-size:13px;color:var(--muted)}
+      .two-col{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
+      .list{display:grid;gap:10px}
+      .item{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:16px;background:#fbfcff}
+      .item .small{font-size:13px;color:var(--muted)}
+      .timeline{display:grid;gap:12px}
+      .timeline-item{display:grid;grid-template-columns:88px 1fr;gap:12px}
+      .time{font-weight:800;color:var(--blue)}
+      .callout{padding:12px 14px;border-radius:16px;background:#fff8e8;border:1px solid #f2d8a6;color:#8a5a00}
+      @media (max-width: 1100px){.layout{grid-template-columns:1fr}.two-col{grid-template-columns:1fr}.sidebar{border-inline-start:none;border-bottom:1px solid var(--line)}}
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <h1 class="title">עובדים</h1>
+        <p class="subtitle">רוסטר ארגוני + סביבת עבודה לעובד</p>
+        <input class="search" value="חיפוש עובד, טלפון, תפקיד..." />
+        <div class="filters">
+          <button class="btn primary">הכל</button>
+          <button class="btn">מדריכים</button>
+          <button class="btn">משרד</button>
+          <button class="btn">ללא משתמש</button>
+        </div>
+
+        <div style="margin-top:14px">
+          <div class="employee-row active">
+            <div class="name">יוסי ישראלי</div>
+            <div class="meta">מדריך • משתמש מחובר • פעיל</div>
+            <div class="chips">
+              <span class="chip blue">רכיבה טיפולית</span>
+              <span class="chip green">היום 4 שיעורים</span>
+            </div>
+          </div>
+          <div class="employee-row">
+            <div class="name">דנה כהן</div>
+            <div class="meta">משרד • ללא משתמש</div>
+            <div class="chips">
+              <span class="chip amber">צריך הזמנה</span>
+            </div>
+          </div>
+          <div class="employee-row">
+            <div class="name">רוני לוי</div>
+            <div class="meta">מדריכה • משתמש מחובר • בחופשה</div>
+            <div class="chips">
+              <span class="chip red">חופשה 23.3 - 27.3</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <div class="toolbar">
+          <button class="btn primary">עובד חדש</button>
+          <button class="btn">הזמן משתמש</button>
+          <button class="btn">יצוא לרואה חשבון</button>
+          <button class="btn">דו"ח חודשי</button>
+        </div>
+
+        <section class="hero card">
+          <div class="hero-main">
+            <div class="avatar">יי</div>
+            <div>
+              <div class="chips" style="margin-top:0;margin-bottom:8px">
+                <span class="chip blue">מדריך</span>
+                <span class="chip green">פעיל</span>
+                <span class="chip blue">משתמש מחובר</span>
+              </div>
+              <h2 class="title" style="font-size:32px;margin-bottom:2px">יוסי ישראלי</h2>
+              <div class="subtitle" style="margin-bottom:10px">050-1234567 • yossi@clinic.co.il • התחלה: 01.09.2024</div>
+              <div class="chips">
+                <span class="chip blue">עובד #EMP-014</span>
+                <span class="chip blue">רכיבה טיפולית</span>
+                <span class="chip blue">הידרותרפיה</span>
+              </div>
+            </div>
+          </div>
+          <div class="quick-actions">
+            <button class="btn primary">עריכת פרטים</button>
+            <button class="btn">שלח WhatsApp</button>
+            <button class="btn">קבע חופשה</button>
+            <button class="btn">פתח דוח</button>
+          </div>
+        </section>
+
+        <section class="stats">
+          <div class="mini">
+            <div class="value">4</div>
+            <div class="label">שיעורים היום</div>
+          </div>
+          <div class="mini">
+            <div class="value">11</div>
+            <div class="label">שיעורים השבוע</div>
+          </div>
+          <div class="mini">
+            <div class="value">2</div>
+            <div class="label">ימי חופשה מתוכננים</div>
+          </div>
+          <div class="mini">
+            <div class="value">1</div>
+            <div class="label">חריג פיננסי עתידי</div>
+          </div>
+        </section>
+
+        <section class="two-col">
+          <div class="list">
+            <div class="panel">
+              <h3 class="section-title">פרטי עובד וניהול משתמש</h3>
+              <div class="item"><div><strong>שם מלא</strong><div class="small">יוסי ישראלי</div></div><div>ערוך</div></div>
+              <div class="item"><div><strong>טלפון</strong><div class="small">050-1234567</div></div><div>WhatsApp</div></div>
+              <div class="item"><div><strong>קישור משתמש</strong><div class="small">מחובר לחשבון פעיל</div></div><div>נהל גישה</div></div>
+              <div class="item"><div><strong>תאריך התחלה</strong><div class="small">01.09.2024</div></div><div>תיעוד</div></div>
+            </div>
+
+            <div class="panel">
+              <h3 class="section-title">חופשות והיעדרויות</h3>
+              <div class="item"><div><strong>חופשה מתוכננת</strong><div class="small">25.03 - 27.03 • חופשה משפחתית</div></div><div>ערוך</div></div>
+              <div class="item"><div><strong>חופשה קודמת</strong><div class="small">11.02 • יום מחלה</div></div><div>פתח</div></div>
+              <div class="callout">כאן כדאי להוסיף בעתיד גם יתרות חופשה, אישורים ומסמכים.</div>
+            </div>
+
+            <div class="panel">
+              <h3 class="section-title">שיעורים מתוזמנים והושלמו</h3>
+              <div class="item"><div><strong>09:00</strong><div class="small">דניאל אברהם • רכיבה טיפולית • מתוכנן</div></div><div>פתח שיעור</div></div>
+              <div class="item"><div><strong>11:30</strong><div class="small">נועה בן עמי • הידרותרפיה • הושלם</div></div><div>פתח שיעור</div></div>
+              <div class="item"><div><strong>14:00</strong><div class="small">רוני דדון • רכיבה טיפולית • מתוכנן</div></div><div>פתח שיעור</div></div>
+            </div>
+          </div>
+
+          <div class="timeline">
+            <div class="panel">
+              <h3 class="section-title">תקשורת מהירה</h3>
+              <div class="item"><div><strong>WhatsApp</strong><div class="small">שלח סיכום יומי / שבועי</div></div><div>שלח</div></div>
+              <div class="item"><div><strong>טלפון</strong><div class="small">חיוג מהיר או העתקה</div></div><div>העתק</div></div>
+              <div class="item"><div><strong>דוא"ל</strong><div class="small">שליחת הודעה או פתיחת לקוח מייל</div></div><div>פתח</div></div>
+            </div>
+
+            <div class="panel">
+              <h3 class="section-title">ציר פעילות</h3>
+              <div class="timeline-item"><div class="time">היום</div><div class="item"><div><strong>נשלח סיכום יומי</strong><div class="small">למספר 050-1234567</div></div></div></div>
+              <div class="timeline-item"><div class="time">אתמול</div><div class="item"><div><strong>עודכן טלפון</strong><div class="small">על ידי משרד</div></div></div></div>
+              <div class="timeline-item"><div class="time">18.03</div><div class="item"><div><strong>שויך למשתמש</strong><div class="small">חשבון פעיל בארגון</div></div></div></div>
+            </div>
+
+            <div class="panel">
+              <h3 class="section-title">פיננסים ודיווחים</h3>
+              <div class="item"><div><strong>סיכום חודשי</strong><div class="small">Placeholder לעתיד</div></div><div>בקרוב</div></div>
+              <div class="item"><div><strong>יצוא לרו"ח</strong><div class="small">ייצוא קובץ מסודר</div></div><div>בקרוב</div></div>
+              <div class="callout">כאן נכון לשלב בעתיד דוח תשלומים, שעות, ביטולים, no-show וחריגים לחשבונאות.</div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

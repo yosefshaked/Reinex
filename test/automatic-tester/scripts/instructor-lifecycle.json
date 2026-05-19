@@ -1,0 +1,200 @@
+{
+  "meta": {
+    "id": "instructor-lifecycle",
+    "name": "Instructor Lifecycle",
+    "description": "Admin views the instructor roster. Then the instructor logs in, views their dashboard and assigned students, and navigates to their calendar.",
+    "version": "1.0.0",
+    "last_validated_at": "2026-04-23T23:59:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/employees",
+        "/dashboard",
+        "/calendar",
+        "/students-list"
+      ],
+      "api_endpoints": [
+        "GET /api/instructors",
+        "GET /api/calendar",
+        "GET /api/students-list"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 15000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
+  },
+  "variables": {},
+
+  "workflows": [
+
+    {
+      "id": "admin-views-instructors",
+      "name": "Admin Views Instructor Roster",
+      "description": "Admin logs in and navigates to the employees / instructors page.",
+      "steps": [
+        {
+          "id": "do-login",
+          "description": "Sign in as admin",
+          "action": "login",
+          "role": "admin"
+        },
+        {
+          "id": "navigate-employees",
+          "description": "Navigate to the employees/instructors page",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/employees"
+        },
+        {
+          "id": "wait-for-page",
+          "description": "Wait for the employees page to render",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "screenshot-employees",
+          "description": "Capture the instructor roster",
+          "action": "screenshot",
+          "name": "01-employee-roster"
+        },
+        {
+          "id": "assert-page-heading",
+          "description": "Confirm the employees page heading is present",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/employees"
+        }
+      ]
+    },
+
+    {
+      "id": "instructor-login",
+      "name": "Instructor Logs In",
+      "description": "Switch to an instructor account. The session resets so the login belongs to the instructor only.",
+      "resetSession": true,
+      "steps": [
+        {
+          "id": "do-login",
+          "description": "Sign in as instructor",
+          "action": "login",
+          "role": "instructor"
+        },
+        {
+          "id": "assert-dashboard",
+          "description": "Confirm instructor lands on the dashboard",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/dashboard"
+        },
+        {
+          "id": "screenshot-instructor-dashboard",
+          "description": "Capture the instructor's dashboard",
+          "action": "screenshot",
+          "name": "02-instructor-dashboard"
+        }
+      ]
+    },
+
+    {
+      "id": "instructor-views-students",
+      "name": "Instructor Views Their Students",
+      "description": "Instructor navigates to the students list (which is filtered to their own students).",
+      "steps": [
+        {
+          "id": "navigate-students",
+          "description": "Navigate to students list",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/students-list"
+        },
+        {
+          "id": "wait-for-list",
+          "description": "Wait for the students list to render",
+          "action": "waitForSelector",
+          "selector": "main, [role='main'], table, ul, .student-list"
+        },
+        {
+          "id": "assert-url",
+          "description": "Confirm we are on the students list page",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/students-list"
+        },
+        {
+          "id": "screenshot-my-students",
+          "description": "Capture instructor's student list",
+          "action": "screenshot",
+          "name": "03-instructor-students"
+        }
+      ]
+    },
+
+    {
+      "id": "instructor-views-calendar",
+      "name": "Instructor Views Their Calendar",
+      "description": "Instructor opens the weekly lesson calendar and confirms it loads.",
+      "steps": [
+        {
+          "id": "navigate-calendar",
+          "description": "Navigate to the calendar page",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/calendar"
+        },
+        {
+          "id": "wait-for-calendar",
+          "description": "Wait for the calendar widget to render",
+          "action": "waitForSelector",
+          "selector": ".fc, [class*='calendar'], [class*='rbc-'], table[role='grid']"
+        },
+        {
+          "id": "screenshot-calendar",
+          "description": "Capture the instructor calendar",
+          "action": "screenshot",
+          "name": "04-instructor-calendar"
+        },
+        {
+          "id": "assert-calendar-visible",
+          "description": "Confirm calendar cells are visible",
+          "action": "assert",
+          "type": "visible",
+          "selector": ".fc, [class*='calendar'], [class*='rbc-'], table[role='grid']"
+        }
+      ]
+    },
+
+    {
+      "id": "instructor-views-account",
+      "name": "Instructor Views Account Profile",
+      "description": "Instructor visits their account page and confirms their profile details are shown.",
+      "steps": [
+        {
+          "id": "navigate-account",
+          "description": "Navigate to the account page",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/account"
+        },
+        {
+          "id": "wait-for-account",
+          "description": "Wait for account page content",
+          "action": "waitForSelector",
+          "selector": "main, form, [class*='account']"
+        },
+        {
+          "id": "assert-account-url",
+          "description": "Confirm we are on the account page",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/account"
+        },
+        {
+          "id": "screenshot-account",
+          "description": "Capture instructor account page",
+          "action": "screenshot",
+          "name": "05-instructor-account"
+        }
+      ]
+    }
+
+  ]
+}

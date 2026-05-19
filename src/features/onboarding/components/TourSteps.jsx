@@ -32,7 +32,7 @@ export const adminTourSteps = [
   {
     element: 'body',
     popover: {
-      title: 'ברוכים הבאים ל-Reinex! 👋',
+      title: 'ברוכים הבאים לריינקס! 👋',
       description: 'מערכת לניהול ותיעוד מפגשים עם תלמידים. בואו נעשה סיור קצר כדי להכיר את התכונות העיקריות.',
       side: 'over',
       align: 'center',
@@ -42,7 +42,7 @@ export const adminTourSteps = [
     element: selectVisible('[data-tour="dashboard"]'),
     popover: {
       title: 'מסך ראשי',
-      description: 'מסך הבית שלכם - מכאן תוכלו להתחיל לתעד מפגשים ולגשת לרשימת התלמידים.',
+      description: 'מסך הבית שלכם - מכאן תוכלו לראות את הסטטוס הכללי ולעבור דרך התפריט הימני לכל המסכים המרכזיים.',
       side: 'top',
       align: 'center',
     },
@@ -51,7 +51,7 @@ export const adminTourSteps = [
     element: selectVisible('[data-tour="admin-students"]'),
     popover: {
       title: 'ניהול תלמידים',
-      description: 'כאן תוכלו לנהל את רשימת התלמידים, להוסיף תלמידים חדשים ולצפות בפרטיהם.',
+      description: 'לחצו על פריט התפריט הזה כדי לנהל את רשימת התלמידים, להוסיף תלמידים חדשים ולצפות בפרטיהם.',
       side: 'top',
       align: 'center',
     },
@@ -60,7 +60,7 @@ export const adminTourSteps = [
     element: selectVisible('[data-tour="fab-button"]'),
     popover: {
       title: 'הוספת מפגש חדש',
-      description: 'לחצו על כפתור ה-"+" כדי להוסיף מפגש חדש. תוכלו לתעד שם את פרטי המפגש.',
+      description: 'לחצו על הכפתור בתפריט הימני כדי לפתוח טופס רישום מפגש חדש ולתעד את פרטי המפגש.',
       side: 'top',
       align: 'center',
     },
@@ -89,7 +89,7 @@ export const memberTourSteps = [
   {
     element: 'body',
     popover: {
-      title: 'ברוכים הבאים ל-Reinex! 👋',
+      title: 'ברוכים הבאים לריינקס! 👋',
       description: 'מערכת לתיעוד ומעקב אחר המפגשים שלכם עם תלמידים. בואו נעשה סיור קצר כדי להכיר את המערכת.',
       side: 'over',
       align: 'center',
@@ -99,7 +99,7 @@ export const memberTourSteps = [
     element: selectVisible('[data-tour="dashboard"]'),
     popover: {
       title: 'מסך ראשי',
-      description: 'מסך הבית שלכם - מכאן תוכלו להתחיל לתעד מפגשים ולגשת לרשימת התלמידים שלכם.',
+      description: 'מסך הבית שלכם - מכאן תוכלו לראות את הסטטוס הכללי ולעבור דרך התפריט הימני למסכים המרכזיים.',
       side: 'top',
       align: 'center',
     },
@@ -108,7 +108,7 @@ export const memberTourSteps = [
     element: selectVisible('[data-tour="my-students"]'),
     popover: {
       title: 'התלמידים שלי',
-      description: 'כאן תוכלו לצפות ברשימת התלמידים שלכם ולמעקב אחר ההתקדמות שלהם.',
+      description: 'לחצו על פריט התפריט הזה כדי לצפות ברשימת התלמידים שלכם ולעקוב אחר ההתקדמות שלהם.',
       side: 'top',
       align: 'center',
     },
@@ -117,7 +117,7 @@ export const memberTourSteps = [
     element: selectVisible('[data-tour="fab-button"]'),
     popover: {
       title: 'הוספת מפגש חדש',
-      description: 'לחצו על כפתור ה-"+" כדי להוסיף מפגש חדש עם תלמיד. תוכלו לתעד שם את פרטי המפגש.',
+      description: 'לחצו על הכפתור בתפריט הימני כדי לפתוח טופס רישום מפגש חדש עם תלמיד.',
       side: 'top',
       align: 'center',
     },

@@ -30,7 +30,7 @@ export default function PhoneField({
         required={required}
         disabled={disabled}
         dir="ltr"
-        className={cn('text-left placeholder:text-right', className)}
+        className={cn('text-start placeholder:text-end', className)}
       />
     </FormField>
   );

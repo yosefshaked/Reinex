@@ -37,7 +37,7 @@ function normalizePolicy(value) {
   return normalizedTypes.length ? { enabled_types: normalizedTypes } : DEFAULT_POLICY;
 }
 
-function EmploymentScopeSettings({ session, orgId, activeOrgHasConnection }) {
+function EmploymentScopeSettings({ session, orgId }) {
   const [policy, setPolicy] = useState(DEFAULT_POLICY);
   const [initialPolicy, setInitialPolicy] = useState(DEFAULT_POLICY);
   const [isLoading, setIsLoading] = useState(true);
@@ -48,7 +48,7 @@ function EmploymentScopeSettings({ session, orgId, activeOrgHasConnection }) {
     let cancelled = false;
 
     const loadPolicy = async () => {
-      if (!activeOrgHasConnection || !session || !orgId) {
+      if (!session || !orgId) {
         setPolicy(DEFAULT_POLICY);
         setInitialPolicy(DEFAULT_POLICY);
         setIsLoading(false);
@@ -88,7 +88,7 @@ function EmploymentScopeSettings({ session, orgId, activeOrgHasConnection }) {
     return () => {
       cancelled = true;
     };
-  }, [activeOrgHasConnection, session, orgId]);
+  }, [session, orgId]);
 
   const enabledTypes = useMemo(
     () => (policy.enabled_types ? [...policy.enabled_types] : []),
@@ -121,11 +121,6 @@ function EmploymentScopeSettings({ session, orgId, activeOrgHasConnection }) {
   };
 
   const handleSave = async () => {
-    if (!activeOrgHasConnection) {
-      toast.error('השלם את חיבור ה-Supabase לפני שמירה.');
-      return;
-    }
-
     if (!session) {
       toast.error('נדרש להתחבר מחדש לפני שמירת ההגדרות.');
       return;
@@ -164,7 +159,7 @@ function EmploymentScopeSettings({ session, orgId, activeOrgHasConnection }) {
       <CardHeader className="border-b">
         <CardTitle className="text-xl font-semibold text-slate-900">היקף משרה</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4" dir="rtl">
+      <CardContent className="space-y-4">
         {isLoading ? (
           <div className="space-y-3">
             <Skeleton className="h-6 w-1/2" />

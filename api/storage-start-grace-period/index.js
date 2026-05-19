@@ -112,14 +112,14 @@ export default async function (context, req) {
 
   // Get current org settings
   const { data: orgSettings, error: fetchError } = await supabase
-    .from('org_settings')
+    .from('organizations')
     .select('storage_profile, permissions')
-    .eq('org_id', orgId)
+    .eq('id', orgId)
     .maybeSingle();
 
   if (fetchError) {
     context.log.error('Failed to fetch org settings', { message: fetchError.message });
-    return respond(context, 500, { message: 'failed_to_fetch_org_settings' });
+    return respond(context, 500, { message: 'failed_to_fetch_organization_settings' });
   }
 
   if (!orgSettings?.storage_profile?.mode) {
@@ -138,13 +138,13 @@ export default async function (context, req) {
   };
 
   const { error: updateError } = await supabase
-    .from('org_settings')
+    .from('organizations')
     .update({
       permissions: updatedPermissions,
       storage_grace_ends_at: graceEndsAt.toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq('org_id', orgId);
+    .eq('id', orgId);
 
   if (updateError) {
     context.log.error('Failed to start grace period', {

@@ -1,18 +1,36 @@
 // src/context/SupabaseContext.jsx
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { createDataClient, getAuthClient } from '../lib/supabase-manager.js';
+import { getAuthClient } from '../lib/supabase-manager.js';
 import { onConfigActivated, onConfigCleared } from '../runtime/config.js';
 import { useRuntimeConfig } from '../runtime/RuntimeConfigContext.jsx';
 
 const SupabaseContext = createContext(undefined);
 
+function mergeSessionReference(previousSession, nextSession) {
+  if (!previousSession || !nextSession) {
+    return nextSession ?? null;
+  }
+
+  const previousUserId = previousSession?.user?.id || null;
+  const nextUserId = nextSession?.user?.id || null;
+  if (!previousUserId || !nextUserId || previousUserId !== nextUserId) {
+    return nextSession;
+  }
+
+  Object.keys(previousSession).forEach((key) => {
+    if (!(key in nextSession)) {
+      delete previousSession[key];
+    }
+  });
+
+  Object.assign(previousSession, nextSession);
+  return previousSession;
+}
+
 export const SupabaseProvider = ({ children }) => {
-  console.log('[DEBUG 5] SupabaseProvider rendering.');
   const runtimeConfig = useRuntimeConfig();
   const [authClient, setAuthClient] = useState(null);
   const [session, setSession] = useState(null);
-  const [activeOrg, setActiveOrg] = useState(null);
-  const [dataClient, setDataClient] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const normalizedConfig = useMemo(() => {
@@ -47,10 +65,7 @@ export const SupabaseProvider = ({ children }) => {
       try {
         const client = getAuthClient();
         setAuthClient((previous) => (previous === client ? previous : client));
-      } catch (error) {
-        if (import.meta?.env?.DEV) {
-          console.debug('[SupabaseProvider] auth client not ready yet', error);
-        }
+      } catch {
         setAuthClient(null);
         setSession(null);
         setLoading(true);
@@ -122,7 +137,7 @@ export const SupabaseProvider = ({ children }) => {
 
     const { data } = authClient.auth.onAuthStateChange((_event, nextSession) => {
       if (isMounted) {
-        setSession(nextSession);
+        setSession((previousSession) => mergeSessionReference(previousSession, nextSession));
       }
     });
 
@@ -138,24 +153,13 @@ export const SupabaseProvider = ({ children }) => {
     };
   }, [authClient]);
 
-  useEffect(() => {
-    if (activeOrg) {
-      const newClient = createDataClient(activeOrg);
-      setDataClient(newClient);
-    } else {
-      setDataClient(null);
-    }
-  }, [activeOrg]);
-
   const value = useMemo(() => ({
     authClient,
-    dataClient,
     session,
     user: session?.user ?? null,
-    activeOrg,
-    setActiveOrg,
+    activeOrg: null,
     loading: loading || !authClient,
-  }), [authClient, dataClient, session, activeOrg, loading]);
+  }), [authClient, session, loading]);
 
   return (
     <SupabaseContext.Provider value={value}>

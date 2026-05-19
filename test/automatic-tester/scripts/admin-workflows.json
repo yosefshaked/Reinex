@@ -1,0 +1,304 @@
+{
+  "meta": {
+    "id": "admin-workflows",
+    "name": "Admin Core Workflows",
+    "description": "Smoke-tests the most important admin-only pages and flows: dashboard tasks, calendar, forms builder, financials, settings, and audit log.",
+    "version": "1.0.0",
+    "last_validated_at": "2026-04-23T23:59:00Z",
+    "author": "claude-ai",
+    "dependencies": {
+      "routes": [
+        "/dashboard",
+        "/calendar",
+        "/calendar/templates",
+        "/forms",
+        "/financials",
+        "/Settings",
+        "/employees",
+        "/services"
+      ],
+      "api_endpoints": [
+        "GET /api/dashboard-tasks",
+        "GET /api/calendar",
+        "GET /api/forms",
+        "GET /api/billing",
+        "GET /api/settings",
+        "GET /api/instructors"
+      ]
+    }
+  },
+  "config": {
+    "timeout_ms": 15000,
+    "screenshot_on_failure": true,
+    "continue_on_step_failure": false,
+    "continue_on_workflow_failure": true
+  },
+  "variables": {},
+
+  "workflows": [
+
+    {
+      "id": "login-admin",
+      "name": "Login as Admin",
+      "steps": [
+        {
+          "id": "do-login",
+          "description": "Sign in with admin credentials",
+          "action": "login",
+          "role": "admin"
+        },
+        {
+          "id": "assert-dashboard",
+          "description": "Confirm landing on dashboard",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/dashboard"
+        },
+        {
+          "id": "screenshot",
+          "action": "screenshot",
+          "name": "01-dashboard"
+        }
+      ]
+    },
+
+    {
+      "id": "dashboard-tasks",
+      "name": "Dashboard — Task Queue and Compliance",
+      "description": "Verify the dashboard renders its main widgets: task queue and compliance heatmap.",
+      "steps": [
+        {
+          "id": "navigate",
+          "description": "Navigate to dashboard",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/dashboard"
+        },
+        {
+          "id": "wait-for-content",
+          "description": "Wait for any main dashboard content to appear",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "wait-for-api",
+          "description": "Wait for dashboard tasks API response",
+          "action": "waitForNetwork",
+          "pattern": "/api/dashboard-tasks"
+        },
+        {
+          "id": "screenshot-tasks",
+          "description": "Capture dashboard with task queue loaded",
+          "action": "screenshot",
+          "name": "02-dashboard-tasks"
+        }
+      ]
+    },
+
+    {
+      "id": "calendar-view",
+      "name": "Calendar — Weekly View",
+      "description": "Open the calendar and confirm the weekly grid renders.",
+      "steps": [
+        {
+          "id": "navigate",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/calendar"
+        },
+        {
+          "id": "wait-for-calendar",
+          "description": "Wait for calendar grid to appear",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "assert-calendar",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/calendar"
+        },
+        {
+          "id": "screenshot",
+          "action": "screenshot",
+          "name": "03-calendar"
+        }
+      ]
+    },
+
+    {
+      "id": "calendar-templates",
+      "name": "Calendar — Lesson Templates",
+      "description": "Open the template manager page.",
+      "steps": [
+        {
+          "id": "navigate",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/calendar/templates"
+        },
+        {
+          "id": "wait-for-page",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "assert-url",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/calendar/templates"
+        },
+        {
+          "id": "screenshot",
+          "action": "screenshot",
+          "name": "04-calendar-templates"
+        }
+      ]
+    },
+
+    {
+      "id": "forms-builder",
+      "name": "Forms Builder — List View",
+      "description": "Open the forms list page and confirm it loads.",
+      "steps": [
+        {
+          "id": "navigate",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/forms"
+        },
+        {
+          "id": "wait-for-page",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "wait-for-api",
+          "description": "Wait for forms API to respond",
+          "action": "waitForNetwork",
+          "pattern": "/api/forms"
+        },
+        {
+          "id": "assert-url",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/forms"
+        },
+        {
+          "id": "screenshot",
+          "action": "screenshot",
+          "name": "05-forms-list"
+        }
+      ]
+    },
+
+    {
+      "id": "financials",
+      "name": "Financials — Summary Page",
+      "description": "Open the financials page and verify it loads without error.",
+      "steps": [
+        {
+          "id": "navigate",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/financials"
+        },
+        {
+          "id": "wait-for-page",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "assert-url",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/financials"
+        },
+        {
+          "id": "screenshot",
+          "action": "screenshot",
+          "name": "06-financials"
+        }
+      ]
+    },
+
+    {
+      "id": "services",
+      "name": "Services — List View",
+      "description": "View the list of service types.",
+      "steps": [
+        {
+          "id": "navigate",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/services"
+        },
+        {
+          "id": "wait-for-page",
+          "action": "waitForSelector",
+          "selector": "main, [role='main']"
+        },
+        {
+          "id": "assert-url",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/services"
+        },
+        {
+          "id": "screenshot",
+          "action": "screenshot",
+          "name": "07-services"
+        }
+      ]
+    },
+
+    {
+      "id": "settings",
+      "name": "Settings — Organisation Configuration",
+      "description": "Open the settings page and verify it renders.",
+      "steps": [
+        {
+          "id": "navigate",
+          "action": "navigate",
+          "url": "{{BASE_URL}}/#/Settings"
+        },
+        {
+          "id": "wait-for-page",
+          "action": "waitForSelector",
+          "selector": "main, [role='main'], form"
+        },
+        {
+          "id": "assert-url",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/Settings"
+        },
+        {
+          "id": "screenshot",
+          "action": "screenshot",
+          "name": "08-settings"
+        }
+      ]
+    },
+
+    {
+      "id": "logout",
+      "name": "Logout",
+      "description": "Sign out and verify we are redirected to the login page.",
+      "steps": [
+        {
+          "id": "do-logout",
+          "description": "Clear session and navigate to login",
+          "action": "logout"
+        },
+        {
+          "id": "assert-login-page",
+          "description": "Confirm we are back on the login page",
+          "action": "assert",
+          "type": "url",
+          "pattern": "#/login"
+        },
+        {
+          "id": "screenshot",
+          "action": "screenshot",
+          "name": "09-logged-out"
+        }
+      ]
+    }
+
+  ]
+}

@@ -32,6 +32,44 @@ function extractValue(candidate, keys) {
   return undefined;
 }
 
+function readPublicSupabaseUrl(source) {
+  return (
+    extractValue(source, ['supabaseUrl', 'SUPABASE_URL']) ??
+    extractValue(source, ['APP_CONTROL_DB_URL', 'APP_SUPABASE_URL', 'VITE_APP_SUPABASE_URL', 'VITE_SUPABASE_URL']) ??
+    null
+  );
+}
+
+function readPublicSupabaseAnonKey(source) {
+  return (
+    extractValue(source, ['supabaseAnonKey', 'anonKey', 'anon_key', 'SUPABASE_ANON_KEY']) ??
+    extractValue(source, ['APP_CONTROL_DB_ANON_KEY', 'APP_SUPABASE_ANON_KEY', 'VITE_APP_SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY']) ??
+    null
+  );
+}
+
+export function readSupabasePublicConfig(source = {}, overrides = {}) {
+  const mergedSource = normalizeSource(source);
+  const envSource = normalizeSource(process?.env);
+  const overrideSource = normalizeSource(overrides);
+
+  const supabaseUrl =
+    readPublicSupabaseUrl(overrideSource) ??
+    readPublicSupabaseUrl(mergedSource) ??
+    readPublicSupabaseUrl(envSource);
+
+  const anonKey =
+    readPublicSupabaseAnonKey(overrideSource) ??
+    readPublicSupabaseAnonKey(mergedSource) ??
+    readPublicSupabaseAnonKey(envSource);
+
+  return { supabaseUrl, anonKey };
+}
+
+export function isSupabasePublicConfigValid(config) {
+  return Boolean(config?.supabaseUrl && config?.anonKey);
+}
+
 export function readSupabaseAdminConfig(source = {}, overrides = {}) {
   const mergedSource = normalizeSource(source);
   const envSource = normalizeSource(process?.env);

@@ -27,8 +27,8 @@ describe('loadRuntimeConfig', () => {
         },
         async json() {
           return {
-            supabase_url: 'https://example-org.supabase.co',
-            anon_key: 'anon-key-123',
+            supabaseUrl: 'https://example-org.supabase.co',
+            supabaseAnonKey: 'anon-key-123',
           };
         },
       };

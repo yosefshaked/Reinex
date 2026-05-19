@@ -1,70 +1,34 @@
 /* eslint-env node */
-import process from 'node:process';
-import { createClient } from '@supabase/supabase-js';
-import { json, resolveBearerAuthorization } from '../_shared/http.js';
-
-const ADMIN_CLIENT_OPTIONS = {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-    detectSessionInUrl: false,
-  },
-  global: {
-    headers: {
-      Accept: 'application/json',
-    },
-  },
-};
-
-
-function readEnv(context) {
-  if (context?.env && typeof context.env === 'object') {
-    return context.env;
-  }
-  return process.env ?? {};
-}
-
-function selectStringCandidate(source, key) {
-  if (!source) {
-    return '';
-  }
-  const value = source[key];
-  if (typeof value === 'string' && value.trim()) {
-    return value.trim();
-  }
-  return '';
-}
+import { resolveBearerAuthorization } from '../_shared/http.js';
+import { readEnv, respond as _respond } from '../_shared/org-bff.js';
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { getAuthUsersByIds } from '../_shared/auth-users.js';
+import { buildAccountDisplayName } from '../_shared/account-profile.js';
+import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
 
 function resolveAdminConfig(context) {
-  const env = readEnv(context);
-  const fallbackEnv = process.env ?? {};
-  const url =
-    selectStringCandidate(env, 'APP_CONTROL_DB_URL') ||
-    selectStringCandidate(fallbackEnv, 'APP_CONTROL_DB_URL');
-  const key =
-    selectStringCandidate(env, 'APP_CONTROL_DB_SERVICE_ROLE_KEY') ||
-    selectStringCandidate(fallbackEnv, 'APP_CONTROL_DB_SERVICE_ROLE_KEY');
-  return { url, key };
-}
-
-function createAdminClient(url, key) {
-  return createClient(url, key, ADMIN_CLIENT_OPTIONS);
+  return readSupabaseAdminConfig(readEnv(context));
 }
 
 function getAdminClient(context) {
   const config = resolveAdminConfig(context);
-  if (!config.url || !config.key) {
+  if (!config.supabaseUrl || !config.serviceRoleKey) {
     return { client: null, error: new Error('missing_admin_credentials') };
   }
-  // Create a fresh admin client per request to avoid lingering connections
-  const client = createAdminClient(config.url, config.key);
-  return { client, error: null };
+  return { client: createSupabaseAdminClient(config), error: null };
 }
 
 function respond(context, status, body, extraHeaders = {}) {
-  const response = json(status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
-  context.res = response;
-  return response;
+  return _respond(context, status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
+}
+
+async function respondTrackedDirectoryError(context, status, message, error, metadata = {}) {
+  return respondTracked(context, status, { message }, undefined, {
+    error,
+    metadata,
+    orgId: metadata.orgId || null,
+    userId: metadata.userId || metadata.actorUserId || null,
+  });
 }
 
 function normalizeUuid(value) {
@@ -85,7 +49,7 @@ function normalizeUuid(value) {
 async function getAuthenticatedUser(context, req, supabase) {
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    respond(context, 401, { message: 'missing bearer' });
+    respond(context, 401, { message: 'missing_bearer' });
     return null;
   }
   let authResult;
@@ -93,11 +57,11 @@ async function getAuthenticatedUser(context, req, supabase) {
     authResult = await supabase.auth.getUser(authorization.token);
   } catch (error) {
     context.log?.warn?.('directory failed to validate bearer token', { message: error?.message });
-    respond(context, 401, { message: 'invalid or expired token' });
+    respond(context, 401, { message: 'invalid_or_expired_token' });
     return null;
   }
   if (authResult.error || !authResult.data?.user?.id) {
-    respond(context, 401, { message: 'invalid or expired token' });
+    respond(context, 401, { message: 'invalid_or_expired_token' });
     return null;
   }
   const user = authResult.data.user;
@@ -121,7 +85,13 @@ async function requireOrgMembership(context, supabase, orgId, userId) {
       userId,
       message: membershipResult.error.message,
     });
-    respond(context, 500, { message: 'failed to verify membership' });
+    await respondTrackedDirectoryError(context, 500, 'failed_to_verify_membership', membershipResult.error, {
+      action: 'verify_membership',
+      orgId,
+      userId,
+      table: 'org_memberships',
+      operation: 'select',
+    });
     return null;
   }
 
@@ -170,7 +140,13 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
 
     if (membershipsResult.error) {
       logSupabaseQueryFailure(context, req, userId, 'fetching membership rows', membershipsResult.error);
-      respond(context, 500, { message: 'failed to load members' });
+      await respondTrackedDirectoryError(context, 500, 'failed_to_load_members', membershipsResult.error, {
+        action: 'fetch_membership_rows',
+        orgId,
+        userId,
+        table: 'org_memberships',
+        operation: 'select',
+      });
       return null;
     }
 
@@ -184,30 +160,74 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
     );
 
     let profiles = [];
+    let authUsersById = new Map();
     if (userIds.length > 0) {
       const profilesResult = await supabase
         .from('profiles')
-        .select('id, email, full_name')
+        .select('id, first_name, last_name, phone')
         .in('id', userIds);
 
       if (profilesResult.error) {
         logSupabaseQueryFailure(context, req, userId, 'fetching member profiles', profilesResult.error);
-        respond(context, 500, { message: 'failed to load members' });
+        await respondTrackedDirectoryError(context, 500, 'failed_to_load_members', profilesResult.error, {
+          action: 'fetch_member_profiles',
+          orgId,
+          userId,
+          memberCount: userIds.length,
+          table: 'profiles',
+          operation: 'select',
+        });
         return null;
       }
 
       profiles = Array.isArray(profilesResult.data) ? profilesResult.data : [];
+
+      try {
+        authUsersById = await getAuthUsersByIds(supabase, userIds);
+      } catch (error) {
+        logSupabaseQueryFailure(context, req, userId, 'fetching member auth users', error);
+        await respondTrackedDirectoryError(context, 500, 'failed_to_load_members', error, {
+          action: 'fetch_member_auth_users',
+          orgId,
+          userId,
+          memberCount: userIds.length,
+          provider: 'supabase_auth_admin',
+        });
+        return null;
+      }
     }
 
     const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
 
     return memberships.map((membership) => ({
       ...membership,
-      profile: profileMap.get(membership.user_id) ?? null,
+      profile: (() => {
+        const profile = profileMap.get(membership.user_id) ?? null;
+        const authUser = authUsersById.get(membership.user_id) ?? null;
+        if (!profile && !authUser) {
+          return null;
+        }
+        return {
+          id: membership.user_id,
+          first_name: profile?.first_name || null,
+          last_name: profile?.last_name || null,
+          full_name: buildAccountDisplayName({
+            profile,
+            authUser,
+            email: authUser?.email,
+          }) || null,
+          email: typeof authUser?.email === 'string' ? authUser.email.toLowerCase() : null,
+          phone: profile?.phone || null,
+        };
+      })(),
     }));
   } catch (error) {
     logSupabaseQueryFailure(context, req, userId, 'fetching members', error);
-    respond(context, 500, { message: 'failed to load members' });
+    await respondTrackedDirectoryError(context, 500, 'failed_to_load_members', error, {
+      action: 'fetch_org_members',
+      orgId,
+      userId,
+    });
     return null;
   }
 }
@@ -225,14 +245,24 @@ async function fetchPendingInvitations(context, req, supabase, orgId, userId) {
 
     if (result.error) {
       logSupabaseQueryFailure(context, req, userId, 'fetching invitations', result.error);
-      respond(context, 500, { message: 'failed to load invitations' });
+      await respondTrackedDirectoryError(context, 500, 'failed_to_load_invitations', result.error, {
+        action: 'fetch_pending_invitations',
+        orgId,
+        userId,
+        table: 'org_invitations',
+        operation: 'select',
+      });
       return null;
     }
 
     return Array.isArray(result.data) ? result.data : [];
   } catch (error) {
     logSupabaseQueryFailure(context, req, userId, 'fetching invitations', error);
-    respond(context, 500, { message: 'failed to load invitations' });
+    await respondTrackedDirectoryError(context, 500, 'failed_to_load_invitations', error, {
+      action: 'fetch_pending_invitations',
+      orgId,
+      userId,
+    });
     return null;
   }
 }
@@ -241,7 +271,7 @@ export default async function directory(context, req) {
   const { client: supabase, error } = getAdminClient(context);
   if (error || !supabase) {
     context.log?.error?.('directory missing admin credentials', { message: error?.message });
-    respond(context, 500, { message: 'missing admin credentials' });
+    respond(context, 500, { message: 'missing_admin_credentials' });
     return;
   }
 
@@ -252,9 +282,15 @@ export default async function directory(context, req) {
 
   const orgId = normalizeUuid(req.query?.orgId ?? req.query?.org_id);
   if (!orgId) {
-    respond(context, 400, { message: 'missing orgId' });
+    respond(context, 400, { message: 'missing_orgid' });
     return;
   }
+
+  attachErrorTracking(context, req, supabase, {
+    orgId,
+    userId: authUser.id,
+    metadata: { endpoint: 'directory' },
+  });
 
   const membership = await requireOrgMembership(context, supabase, orgId, authUser.id);
   if (!membership) {

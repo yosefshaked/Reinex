@@ -14,8 +14,9 @@ import {
   ensureMembership,
   readEnv,
   respond,
-  resolveTenantClient,
+  withOrgScope,
 } from '../_shared/org-bff.js';
+import { respondTrackedError } from '../_shared/error-events.js';
 import crypto from 'crypto';
 import multipart from 'parse-multipart-data';
 
@@ -124,7 +125,7 @@ export default async function (context, req) {
       bodyType: typeof req.body,
       isBuffer: Buffer.isBuffer(req.body),
     });
-    return respond(context, 400, { message: 'invalid_multipart_data', error: error?.message });
+    return respond(context, 400, { message: 'invalid_multipart_data' });
   }
 
   // Extract fields
@@ -161,15 +162,8 @@ export default async function (context, req) {
   // Calculate file hash
   const fileHash = calculateFileHash(filePart.data);
 
-  // Get tenant client
-  const { client: tenantClient, error: tenantError } = await resolveTenantClient(context, controlClient, env, orgId);
-  if (tenantError) {
-    return respond(context, tenantError.status, tenantError.body);
-  }
-
   // Check for duplicate files across ALL students in Documents table
-  const { data: allDocuments, error: documentsError } = await tenantClient
-    .from('Documents')
+  const { data: allDocuments, error: documentsError } = await withOrgScope(controlClient, 'Documents', orgId)
     .select('id, name, uploaded_at, entity_id, hash')
     .eq('entity_type', 'student')
     .eq('hash', fileHash);
@@ -182,9 +176,13 @@ export default async function (context, req) {
       hint: documentsError.hint,
       orgId,
     });
-    return respond(context, 500, { 
+    return respondTrackedError(context, req, controlClient, {
+      status: 500,
       message: 'failed_to_check_duplicates',
-      error: documentsError.message,
+      orgId,
+      userId,
+      error: documentsError,
+      metadata: { entity_type: 'student' },
     });
   }
 
@@ -192,12 +190,14 @@ export default async function (context, req) {
   const duplicates = [];
   if (allDocuments && allDocuments.length > 0) {
     const studentIds = [...new Set(allDocuments.map(doc => doc.entity_id))];
-    const { data: students } = await tenantClient
-      .from('Students')
-      .select('id, name')
+    const { data: students } = await withOrgScope(controlClient, 'students', orgId)
+      .select('id, client_profile:client_profiles(first_name, middle_name, last_name)')
       .in('id', studentIds);
 
-    const studentMap = new Map((students || []).map(s => [s.id, s.name]));
+    const studentMap = new Map((students || []).map((row) => [
+      row.id,
+      [row?.client_profile?.first_name, row?.client_profile?.middle_name, row?.client_profile?.last_name].filter(Boolean).join(' ') || 'Unknown',
+    ]));
 
     for (const doc of allDocuments) {
       duplicates.push({

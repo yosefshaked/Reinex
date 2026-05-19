@@ -13,10 +13,24 @@
  */
 
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
-import { ensureMembership, resolveTenantClient, readEnv, respond } from '../_shared/org-bff.js';
+import { ensureMembership, withOrgScope, readEnv, respond } from '../_shared/org-bff.js';
 import { getStorageDriver } from '../cross-platform/storage-drivers/index.js';
 import { resolveBearerAuthorization } from '../_shared/http.js';
 import { decryptStorageProfile } from '../_shared/storage-encryption.js';
+import { respondTrackedError } from '../_shared/error-events.js';
+
+async function canAccessInstructorDocument(supabase, orgId, employeeId, userId) {
+  const { data: employee, error } = await withOrgScope(supabase, 'Employees', orgId)
+    .select('id, user_id')
+    .eq('id', employeeId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || 'failed_to_verify_entity_access');
+  }
+
+  return Boolean(employee && employee.user_id === userId);
+}
 
 export default async function handler(context, req) {
   context.log?.info?.('[DOCUMENTS-DOWNLOAD] Request started', {
@@ -26,6 +40,12 @@ export default async function handler(context, req) {
     headers: Object.keys(req.headers || {})
   });
 
+  let supabase = null;
+  let userId = null;
+  let documentIdForTracking = null;
+  let orgIdForTracking = null;
+  let previewForTracking = false;
+
   try {
     if (req.method !== 'GET') {
       return respond(context, 405, { error: 'method_not_allowed' });
@@ -33,6 +53,9 @@ export default async function handler(context, req) {
 
     const { document_id, org_id, preview } = req.query;
     const isPreview = preview === 'true';
+    documentIdForTracking = document_id || null;
+    orgIdForTracking = org_id || null;
+    previewForTracking = isPreview;
 
     context.log?.info?.('[DOCUMENTS-DOWNLOAD] Parsed parameters', {
       document_id,
@@ -42,7 +65,7 @@ export default async function handler(context, req) {
     });
 
     if (!document_id || !org_id) {
-      return respond(context, 400, { error: 'document_id and org_id required' });
+      return respond(context, 400, { error: 'document_id_and_org_id_required' });
     }
 
     // Read environment and create Supabase admin client
@@ -55,7 +78,7 @@ export default async function handler(context, req) {
     }
 
     // Auth check
-    const supabase = createSupabaseAdminClient(adminConfig);
+    supabase = createSupabaseAdminClient(adminConfig);
     const authorization = resolveBearerAuthorization(req);
     if (!authorization?.token) {
       return respond(context, 401, { error: 'missing_auth' });
@@ -67,7 +90,7 @@ export default async function handler(context, req) {
       return respond(context, 401, { error: 'invalid_token' });
     }
 
-    const userId = authResult.data.user.id;
+    userId = authResult.data.user.id;
 
     // Membership check
     let role;
@@ -89,18 +112,11 @@ export default async function handler(context, req) {
     const userRole = role;
     const isAdmin = ['admin', 'owner'].includes(userRole);
 
-    // Get tenant client
-    const tenantResult = await resolveTenantClient(context, supabase, env, org_id);
-    if (tenantResult.error) {
-      return respond(context, 424, { error: 'tenant_not_configured', details: tenantResult.error });
-    }
-    const tenantClient = tenantResult.client;
-
     // Get storage profile
     const { data: orgSettings, error: orgSettingsError } = await supabase
-      .from('org_settings')
+      .from('organizations')
       .select('storage_profile')
-      .eq('org_id', org_id)
+      .eq('id', org_id)
       .single();
 
     if (orgSettingsError || !orgSettings) {
@@ -108,7 +124,7 @@ export default async function handler(context, req) {
         error: orgSettingsError?.message,
         org_id
       });
-      return respond(context, 424, { error: 'org_settings_not_found' });
+      return respond(context, 424, { error: 'organization_settings_not_found' });
     }
 
     // Fetch document
@@ -118,8 +134,7 @@ export default async function handler(context, req) {
       schema: 'public'
     });
 
-    const { data: document, error: fetchError } = await tenantClient
-      .from('Documents')
+    const { data: document, error: fetchError } = await withOrgScope(supabase, 'Documents', org_id)
       .select('*')
       .eq('id', document_id)
       .single();
@@ -150,8 +165,7 @@ export default async function handler(context, req) {
     // Permission validation
     if (document.entity_type === 'organization' && !isAdmin) {
       // Check org_documents_member_visibility setting (stored as bare boolean)
-      const { data: visibilitySetting } = await tenantClient
-        .from('Settings')
+      const { data: visibilitySetting } = await withOrgScope(supabase, 'Settings', org_id)
         .select('settings_value')
         .eq('key', 'org_documents_member_visibility')
         .single();
@@ -162,8 +176,24 @@ export default async function handler(context, req) {
       }
     }
 
-    if (document.entity_type === 'instructor' && !isAdmin && userId !== document.entity_id) {
-      return respond(context, 403, { error: 'permission_denied' });
+    if (document.entity_type === 'instructor' && !isAdmin) {
+      let canAccess = false;
+      try {
+        canAccess = await canAccessInstructorDocument(supabase, org_id, document.entity_id, userId);
+      } catch (error) {
+        context.log?.error?.('documents-download failed to verify instructor document access', {
+          message: error.message,
+          org_id,
+          document_id,
+          entity_id: document.entity_id,
+          userId,
+        });
+        return respond(context, 500, { error: 'failed_to_verify_entity_access' });
+      }
+
+      if (!canAccess) {
+        return respond(context, 403, { error: 'permission_denied' });
+      }
     }
 
     // Load storage profile
@@ -250,11 +280,16 @@ export default async function handler(context, req) {
     } catch (driverError) {
       context.log?.error?.('Failed to generate download URL', { 
         message: driverError?.message,
+        stack: driverError?.stack,
         mode: decryptedProfile.mode
       });
-      return respond(context, 500, { 
-        error: 'failed_to_generate_download_url', 
-        details: driverError.message 
+      return respondTrackedError(context, req, supabase, {
+        status: 500,
+        message: 'failed_to_generate_download_url',
+        orgId: org_id,
+        userId,
+        error: driverError,
+        metadata: { document_id, storage_mode: decryptedProfile.mode, disposition_type: dispositionType },
       });
     }
 
@@ -277,10 +312,13 @@ export default async function handler(context, req) {
       message: error.message,
       stack: error.stack
     });
-    return respond(context, 500, { 
-      error: 'internal_error', 
-      details: error.message,
-      type: error.name 
+    return respondTrackedError(context, req, supabase, {
+      status: 500,
+      message: 'internal_error',
+      orgId: orgIdForTracking,
+      userId,
+      error,
+      metadata: { document_id: documentIdForTracking, preview: previewForTracking },
     });
   }
 }

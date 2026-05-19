@@ -17,6 +17,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const REQUEST_STATE = {
   idle: 'idle',
@@ -35,6 +45,7 @@ export default function DocumentRulesManager({ session, orgId }) {
   const [definitions, setDefinitions] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ name: '', is_mandatory: false, target_tags: [], target_instructor_types: [], isNew: false });
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
   
   const { tagOptions: rawTagOptions, loadingTags, loadTags } = useStudentTags();
   const { typeOptions: rawTypeOptions, loadingTypes, loadTypes } = useInstructorTypes();
@@ -178,9 +189,14 @@ export default function DocumentRulesManager({ session, orgId }) {
   }, [editingId, editForm.isNew]);
 
   const handleDelete = useCallback((id) => {
-    if (!confirm('האם למחוק מסמך זה? פעולה זו אינה ניתנת לביטול.')) return;
     setDefinitions((prev) => prev.filter((d) => d.id !== id));
   }, []);
+
+  const confirmDelete = useCallback(() => {
+    if (!pendingDeleteId) return;
+    handleDelete(pendingDeleteId);
+    setPendingDeleteId(null);
+  }, [handleDelete, pendingDeleteId]);
 
   const handleAddTag = useCallback((tagId) => {
     if (!tagId || editForm.target_tags.includes(tagId)) return;
@@ -218,7 +234,7 @@ export default function DocumentRulesManager({ session, orgId }) {
 
   if (loadState === REQUEST_STATE.loading) {
     return (
-      <Card dir="rtl">
+      <Card>
         <CardContent className="p-8 text-center">
           <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-slate-400" />
           <p className="text-sm text-slate-600">טוען הגדרות מסמכים...</p>
@@ -229,7 +245,7 @@ export default function DocumentRulesManager({ session, orgId }) {
 
   if (loadState === REQUEST_STATE.error) {
     return (
-      <Card dir="rtl">
+      <Card>
         <CardContent className="p-8 text-center">
           <AlertCircle className="h-8 w-8 mx-auto mb-2 text-red-500" />
           <p className="text-sm text-red-600">שגיאה בטעינת הגדרות המסמכים</p>
@@ -239,7 +255,7 @@ export default function DocumentRulesManager({ session, orgId }) {
   }
 
   return (
-    <Card dir="rtl">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <FileText className="h-5 w-5" />
@@ -300,14 +316,14 @@ export default function DocumentRulesManager({ session, orgId }) {
                   // Edit Mode
                   <div className="space-y-3">
                     <div>
-                      <Label htmlFor={`name-${def.id}`} className="block text-right">שם המסמך</Label>
+                      <Label htmlFor={`name-${def.id}`} className="block">שם המסמך</Label>
                       <Input
                         id={`name-${def.id}`}
                         value={editForm.name}
                         onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
                         placeholder="לדוגמה: אישור רפואי"
                         className="mt-1"
-                        dir="rtl"
+                       
                       />
                     </div>
                     <div className="flex items-center gap-2">
@@ -322,14 +338,14 @@ export default function DocumentRulesManager({ session, orgId }) {
                     {/* Tag/Type Selector - Conditional based on target type */}
                     {targetType === 'students' ? (
                       <div>
-                        <Label className="block text-right mb-2">תגיות יעד (אופציונלי)</Label>
-                        <p className="text-xs text-slate-500 mb-2 text-right">
+                        <Label className="block mb-2">תגיות יעד (אופציונלי)</Label>
+                        <p className="text-xs text-slate-500 mb-2">
                           אם לא נבחרו תגיות, המסמך יחול על כל התלמידים
                         </p>
                         
                         {/* Selected Tags */}
                         {editForm.target_tags.length > 0 && (
-                          <div className="flex flex-wrap gap-2 mb-2" dir="rtl">
+                          <div className="flex flex-wrap gap-2 mb-2">
                             {editForm.target_tags.map((tagId) => (
                               <Badge key={tagId} variant="secondary" className="gap-1">
                                 <Tag className="h-3 w-3" />
@@ -348,7 +364,7 @@ export default function DocumentRulesManager({ session, orgId }) {
                         
                         {/* Tag Dropdown */}
                         <Select onValueChange={handleAddTag} value="">
-                          <SelectTrigger dir="rtl">
+                          <SelectTrigger>
                             <SelectValue placeholder="הוסף תגית..." />
                           </SelectTrigger>
                           <SelectContent>
@@ -372,14 +388,14 @@ export default function DocumentRulesManager({ session, orgId }) {
                       </div>
                     ) : (
                       <div>
-                        <Label className="block text-right mb-2">סוגי מדריכים יעד (אופציונלי)</Label>
-                        <p className="text-xs text-slate-500 mb-2 text-right">
+                        <Label className="block mb-2">סוגי מדריכים יעד (אופציונלי)</Label>
+                        <p className="text-xs text-slate-500 mb-2">
                           אם לא נבחרו סוגים, המסמך יחול על כל המדריכים
                         </p>
                         
                         {/* Selected Types */}
                         {editForm.target_instructor_types.length > 0 && (
-                          <div className="flex flex-wrap gap-2 mb-2" dir="rtl">
+                          <div className="flex flex-wrap gap-2 mb-2">
                             {editForm.target_instructor_types.map((typeId) => (
                               <Badge key={typeId} variant="secondary" className="gap-1">
                                 <Briefcase className="h-3 w-3" />
@@ -398,7 +414,7 @@ export default function DocumentRulesManager({ session, orgId }) {
                         
                         {/* Type Dropdown */}
                         <Select onValueChange={handleAddType} value="">
-                          <SelectTrigger dir="rtl">
+                          <SelectTrigger>
                             <SelectValue placeholder="הוסף סוג מדריך..." />
                           </SelectTrigger>
                           <SelectContent>
@@ -482,7 +498,7 @@ export default function DocumentRulesManager({ session, orgId }) {
                       <Button size="sm" variant="ghost" onClick={() => handleEdit(def)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleDelete(def.id)}>
+                      <Button size="sm" variant="ghost" onClick={() => setPendingDeleteId(def.id)}>
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     </div>
@@ -516,6 +532,20 @@ export default function DocumentRulesManager({ session, orgId }) {
           </Button>
         </div>
       </CardContent>
+      <AlertDialog open={Boolean(pendingDeleteId)} onOpenChange={(open) => !open && setPendingDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>מחיקת מסמך</AlertDialogTitle>
+            <AlertDialogDescription>
+              האם למחוק מסמך זה? פעולה זו אינה ניתנת לביטול.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>מחק</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

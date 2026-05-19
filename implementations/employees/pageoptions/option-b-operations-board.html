@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Employees - Option B</title>
+    <style>
+      :root{
+        --bg:#f5f7fb;--card:#fff;--line:#dbe1eb;--ink:#16202f;--muted:#667085;
+        --blue:#3559e0;--green:#119a68;--amber:#b7791f;--red:#d2485f;--soft:#eef4ff;
+      }
+      *{box-sizing:border-box} body{margin:0;font-family:"Segoe UI",Tahoma,sans-serif;background:var(--bg);color:var(--ink)}
+      .shell{max-width:1280px;margin:0 auto;padding:24px}
+      .top{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:18px}
+      .title{font-size:34px;font-weight:800;margin:0}
+      .sub{color:var(--muted);margin-top:6px}
+      .actions,.filters,.kanban,.stack{display:flex;gap:12px;flex-wrap:wrap}
+      .btn{border:1px solid var(--line);background:#fff;padding:11px 14px;border-radius:14px;font-weight:700}
+      .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+      .filters{margin-bottom:18px}
+      .search{min-width:280px;flex:1;padding:12px 14px;border-radius:14px;border:1px solid var(--line)}
+      .kanban{align-items:flex-start}
+      .col{flex:1;min-width:290px;background:#edf2fb;border:1px solid var(--line);border-radius:24px;padding:14px}
+      .col h2{margin:0 0 12px;font-size:18px}
+      .ticket{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 20px 50px -40px rgba(15,23,42,.45)}
+      .row{display:flex;justify-content:space-between;gap:10px}
+      .name{font-weight:800}
+      .muted{color:var(--muted);font-size:13px}
+      .chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+      .chip{padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700}
+      .blue{background:#e8efff;color:var(--blue)}
+      .green{background:#e7f8f1;color:var(--green)}
+      .amber{background:#fff4e2;color:var(--amber)}
+      .red{background:#ffe6ea;color:var(--red)}
+      .stack{margin-top:12px}
+      .mini{flex:1;min-width:120px;background:#f8fbff;border:1px solid var(--line);border-radius:16px;padding:10px}
+      .value{font-size:22px;font-weight:800}
+      .small-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+      .small-actions .btn{padding:8px 10px;font-size:13px;border-radius:12px}
+      @media (max-width: 900px){.top{flex-direction:column;align-items:stretch}}
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="top">
+        <div>
+          <h1 class="title">עובדים - לוח תפעולי</h1>
+          <div class="sub">כיוון שמתאים לצוות משרד שרוצה לראות חריגים, חופשות, שיעורים ופעולות מהירות במקום אחד.</div>
+        </div>
+        <div class="actions">
+          <button class="btn primary">עובד חדש</button>
+          <button class="btn">ייצוא לרו"ח</button>
+          <button class="btn">דו"ח שבועי</button>
+        </div>
+      </section>
+
+      <section class="filters">
+        <input class="search" value="חיפוש עובד, טלפון, סטטוס או חריג..." />
+        <button class="btn">מדריכים</button>
+        <button class="btn">משרד</button>
+        <button class="btn">עם משתמש</button>
+        <button class="btn">ללא משתמש</button>
+      </section>
+
+      <section class="kanban">
+        <div class="col">
+          <h2>דורש טיפול היום</h2>
+          <article class="ticket">
+            <div class="row"><div class="name">דנה כהן</div><div class="chip amber">ללא משתמש</div></div>
+            <div class="muted">עובדת משרד • התחלה 15.03.2026</div>
+            <div class="chips">
+              <span class="chip red">חסר טלפון</span>
+              <span class="chip amber">צריך הזמנה</span>
+            </div>
+            <div class="small-actions">
+              <button class="btn">עריכת פרטים</button>
+              <button class="btn">שלח הזמנה</button>
+              <button class="btn">WhatsApp</button>
+            </div>
+          </article>
+          <article class="ticket">
+            <div class="row"><div class="name">רוני לוי</div><div class="chip red">חופשה קרובה</div></div>
+            <div class="muted">מדריכה • 23.03 - 27.03</div>
+            <div class="chips">
+              <span class="chip amber">4 שיעורים דורשים שיבוץ</span>
+            </div>
+            <div class="small-actions">
+              <button class="btn">ניהול חופשה</button>
+              <button class="btn">צפה בשיעורים</button>
+            </div>
+          </article>
+        </div>
+
+        <div class="col">
+          <h2>עובדים פעילים</h2>
+          <article class="ticket">
+            <div class="row"><div class="name">יוסי ישראלי</div><div class="chip green">פעיל</div></div>
+            <div class="muted">מדריך • משתמש מחובר • 050-1234567</div>
+            <div class="stack">
+              <div class="mini"><div class="value">4</div><div class="muted">שיעורים היום</div></div>
+              <div class="mini"><div class="value">11</div><div class="muted">השבוע</div></div>
+              <div class="mini"><div class="value">2</div><div class="muted">הושלמו</div></div>
+            </div>
+            <div class="small-actions">
+              <button class="btn">WhatsApp</button>
+              <button class="btn">לוח שיעורים</button>
+              <button class="btn">פרופיל</button>
+            </div>
+          </article>
+          <article class="ticket">
+            <div class="row"><div class="name">מיכל עזרא</div><div class="chip green">פעילה</div></div>
+            <div class="muted">משרד • משתמש מחובר</div>
+            <div class="chips">
+              <span class="chip blue">דיווחי גבייה</span>
+              <span class="chip blue">שירות לקוחות</span>
+            </div>
+            <div class="small-actions">
+              <button class="btn">צור קשר</button>
+              <button class="btn">ערוך</button>
+            </div>
+          </article>
+        </div>
+
+        <div class="col">
+          <h2>פיננסים, דוחות וחשבות</h2>
+          <article class="ticket">
+            <div class="row"><div class="name">דו"ח לרואה חשבון</div><div class="chip blue">Future</div></div>
+            <div class="muted">סיכום שעות, שיעורים, ביטולים, no-show וחריגים לחודש</div>
+            <div class="small-actions">
+              <button class="btn">יצוא חודשי</button>
+              <button class="btn">חריגים</button>
+            </div>
+          </article>
+          <article class="ticket">
+            <div class="row"><div class="name">בקרת תאריכי התחלה</div><div class="chip amber">Review</div></div>
+            <div class="muted">2 עובדים ללא תיעוד מלא של התחלה / מסמכי קליטה</div>
+            <div class="small-actions">
+              <button class="btn">פתח רשימה</button>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

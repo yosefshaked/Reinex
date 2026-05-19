@@ -1,11 +1,12 @@
 import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext.jsx';
+import { useAccount } from '@/account/AccountContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 
 function LoadingScreen() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50" dir="rtl">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
       <div className="flex flex-col items-center gap-4 text-slate-600">
         <div className="w-12 h-12 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin" aria-hidden="true" />
         <p className="text-sm font-medium">טוען...</p>
@@ -16,7 +17,8 @@ function LoadingScreen() {
 
 export default function AuthGuard() {
   const { status: authStatus, session } = useAuth();
-  const { status: orgStatus, activeOrgHasConnection } = useOrg();
+  const { status: accountStatus, needsSetup, isDisabled } = useAccount();
+  const { status: orgStatus, activeOrgId } = useOrg();
   const location = useLocation();
 
   if (authStatus === 'loading') {
@@ -37,6 +39,20 @@ export default function AuthGuard() {
     );
   }
 
+  if (accountStatus === 'loading' || accountStatus === 'idle') {
+    return <LoadingScreen />;
+  }
+
+  if (isDisabled && location.pathname !== '/account/reactivate') {
+    return <Navigate to="/account/reactivate" replace />;
+  }
+
+  const exemptFromSetup = location.pathname === '/account/setup' || location.pathname === '/account/reactivate';
+  if (needsSetup && !exemptFromSetup) {
+    const returnTo = `${location.pathname}${location.search || ''}`;
+    return <Navigate to={`/account/setup?returnTo=${encodeURIComponent(returnTo)}`} replace />;
+  }
+
   if (orgStatus === 'loading' || orgStatus === 'idle') {
     return <LoadingScreen />;
   }
@@ -52,7 +68,9 @@ export default function AuthGuard() {
     return <Outlet />;
   }
 
-  if (!requiresOrgCreation && !requiresOrgSelection && !activeOrgHasConnection && location.pathname !== '/Settings') {
+  const isSystemAdminRoute = location.pathname.startsWith('/system-admin');
+
+  if (!requiresOrgCreation && !requiresOrgSelection && !activeOrgId && location.pathname !== '/Settings' && !isSystemAdminRoute) {
     return <Navigate to="/Settings" replace />;
   }
 

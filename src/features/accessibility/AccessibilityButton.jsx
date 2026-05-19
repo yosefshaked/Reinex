@@ -31,7 +31,7 @@ export default function AccessibilityButton() {
           <AccessibilityIcon className="h-5 w-5" aria-hidden="true" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-64 text-right" sideOffset={8}>
+      <PopoverContent align="end" className="w-64 text-end" sideOffset={8}>
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">גודל טקסט</span>

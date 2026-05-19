@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Concept E — The Minimalist / Apple-Inspired</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@200;300;400;500;600;700&display=swap');
+    body { font-family: 'Heebo', sans-serif; }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            border: '#e5e5e5',
+            muted: { DEFAULT: '#fafafa', foreground: '#a3a3a3' },
+          },
+          fontWeight: {
+            thin: '200',
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-white text-neutral-900 min-h-screen">
+
+  <!-- Minimal top bar -->
+  <nav class="sticky top-0 z-50 bg-white/90 backdrop-blur-lg px-8 py-4 flex items-center justify-between">
+    <button class="text-sm text-neutral-400 hover:text-neutral-600 transition">← חזרה לתלמידים</button>
+    <div class="flex items-center gap-3">
+      <button class="text-sm text-neutral-500 hover:text-neutral-900 transition">עריכה</button>
+      <span class="text-neutral-200">|</span>
+      <button class="text-sm text-neutral-500 hover:text-neutral-900 transition">פעולות</button>
+    </div>
+  </nav>
+
+  <main class="max-w-4xl mx-auto px-8 py-10">
+
+    <!-- ===================== HERO HEADER ===================== -->
+    <div class="text-center py-10">
+      <div class="w-24 h-24 rounded-full bg-neutral-100 text-neutral-400 flex items-center justify-center text-4xl font-thin mx-auto mb-6">דל</div>
+      <h1 class="text-4xl font-light tracking-tight">דני לוי</h1>
+      <p class="text-base text-neutral-400 mt-2 font-light">גיל 7 · ת.ז. 012345678</p>
+      <div class="flex justify-center gap-3 mt-4">
+        <span class="inline-flex items-center rounded-full bg-emerald-50 text-emerald-600 px-3 py-1 text-xs font-medium">פעיל</span>
+        <span class="inline-flex items-center rounded-full bg-red-50 text-red-500 px-3 py-1 text-xs font-medium">אלרגיה לבוטנים</span>
+        <span class="inline-flex items-center rounded-full bg-amber-50 text-amber-500 px-3 py-1 text-xs font-medium">אסתמה</span>
+      </div>
+    </div>
+
+    <!-- ===================== TABS ===================== -->
+    <div class="flex justify-center mb-12">
+      <div class="inline-flex gap-0 bg-neutral-100 rounded-full p-1">
+        <button class="px-5 py-2 text-sm font-medium rounded-full bg-white text-neutral-900 shadow-sm transition">סקירה</button>
+        <button class="px-5 py-2 text-sm font-medium rounded-full text-neutral-400 hover:text-neutral-600 transition">לוח שיעורים</button>
+        <button class="px-5 py-2 text-sm font-medium rounded-full text-neutral-400 hover:text-neutral-600 transition">היסטוריה</button>
+        <button class="px-5 py-2 text-sm font-medium rounded-full text-neutral-400 hover:text-neutral-600 transition">מסמכים</button>
+        <button class="px-5 py-2 text-sm font-medium rounded-full text-neutral-400 hover:text-neutral-600 transition">כספים</button>
+        <button class="px-5 py-2 text-sm font-medium rounded-full text-neutral-400 hover:text-neutral-600 transition">טפסים</button>
+      </div>
+    </div>
+
+    <!-- ===================== OVERVIEW TAB CONTENT ===================== -->
+    <div class="space-y-14">
+
+      <!-- Section: Next Lesson -->
+      <section>
+        <div class="rounded-2xl bg-neutral-50 p-8">
+          <p class="text-xs text-neutral-400 uppercase tracking-widest font-medium mb-4">השיעור הבא</p>
+          <div class="flex items-start gap-5">
+            <div class="w-14 h-14 rounded-2xl bg-white shadow-sm flex items-center justify-center text-2xl">🏊</div>
+            <div class="flex-1">
+              <p class="text-xl font-medium">שחייה טיפולית</p>
+              <p class="text-neutral-400 mt-1">יום שלישי, 21 בינואר 2026</p>
+              <p class="text-neutral-400">16:00 – 16:45 · יעל כהן</p>
+            </div>
+            <div class="text-left shrink-0 pt-1">
+              <p class="text-neutral-400 text-sm">בעוד</p>
+              <p class="text-3xl font-light text-neutral-900">18<span class="text-base text-neutral-400 mr-1">שעות</span></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Personal Details -->
+      <section>
+        <p class="text-xs text-neutral-400 uppercase tracking-widest font-medium mb-6">פרטים אישיים</p>
+        <div class="grid grid-cols-2 gap-y-8 gap-x-12">
+          <div>
+            <p class="text-neutral-400 text-sm">שם מלא</p>
+            <p class="text-lg font-medium mt-0.5">דני לוי</p>
+          </div>
+          <div>
+            <p class="text-neutral-400 text-sm">תעודת זהות</p>
+            <p class="text-lg font-medium mt-0.5">012345678</p>
+          </div>
+          <div>
+            <p class="text-neutral-400 text-sm">תאריך לידה</p>
+            <p class="text-lg font-medium mt-0.5">15 במרץ 2018</p>
+          </div>
+          <div>
+            <p class="text-neutral-400 text-sm">טלפון</p>
+            <p class="text-lg font-medium mt-0.5" dir="ltr">050-123-4567</p>
+          </div>
+          <div>
+            <p class="text-neutral-400 text-sm">אימייל</p>
+            <p class="text-lg font-medium mt-0.5" dir="ltr">dani@example.com</p>
+          </div>
+          <div>
+            <p class="text-neutral-400 text-sm">שיטת התראה</p>
+            <p class="text-lg font-medium mt-0.5">SMS + אימייל</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Thin divider -->
+      <div class="h-px bg-neutral-100"></div>
+
+      <!-- Section: Guardian -->
+      <section>
+        <p class="text-xs text-neutral-400 uppercase tracking-widest font-medium mb-6">אפוטרופוס</p>
+        <div class="flex items-center gap-5">
+          <div class="w-14 h-14 rounded-full bg-neutral-100 text-neutral-400 flex items-center justify-center text-xl font-light">רל</div>
+          <div class="flex-1">
+            <p class="text-lg font-medium">רחל לוי</p>
+            <p class="text-neutral-400">אם</p>
+          </div>
+          <div class="text-left space-y-1">
+            <p class="text-sm text-neutral-400" dir="ltr">052-987-6543</p>
+            <p class="text-sm text-neutral-400" dir="ltr">rachel@example.com</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Thin divider -->
+      <div class="h-px bg-neutral-100"></div>
+
+      <!-- Section: Weekly Schedule -->
+      <section>
+        <p class="text-xs text-neutral-400 uppercase tracking-widest font-medium mb-6">לוח שבועי</p>
+        <div class="space-y-4">
+          <div class="flex items-center gap-5 p-5 rounded-2xl bg-neutral-50">
+            <div class="w-12 h-12 rounded-xl bg-white shadow-sm flex flex-col items-center justify-center">
+              <span class="text-xs font-semibold text-neutral-600">ג׳</span>
+            </div>
+            <div class="flex-1">
+              <p class="font-medium">שחייה טיפולית</p>
+              <p class="text-sm text-neutral-400">16:00 – 16:45</p>
+            </div>
+            <p class="text-sm text-neutral-400">יעל כהן</p>
+          </div>
+          <div class="flex items-center gap-5 p-5 rounded-2xl bg-neutral-50">
+            <div class="w-12 h-12 rounded-xl bg-white shadow-sm flex flex-col items-center justify-center">
+              <span class="text-xs font-semibold text-neutral-600">ה׳</span>
+            </div>
+            <div class="flex-1">
+              <p class="font-medium">פיזיותרפיה</p>
+              <p class="text-sm text-neutral-400">10:00 – 10:45</p>
+            </div>
+            <p class="text-sm text-neutral-400">משה דוד</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Thin divider -->
+      <div class="h-px bg-neutral-100"></div>
+
+      <!-- Section: Financial -->
+      <section>
+        <p class="text-xs text-neutral-400 uppercase tracking-widest font-medium mb-6">כספים</p>
+        <div class="grid grid-cols-4 gap-6 text-center">
+          <div>
+            <p class="text-3xl font-light text-neutral-900">12</p>
+            <p class="text-sm text-neutral-400 mt-1">שיעורים החודש</p>
+          </div>
+          <div>
+            <p class="text-3xl font-light text-emerald-500">₪2,400</p>
+            <p class="text-sm text-neutral-400 mt-1">יתרת זכות</p>
+          </div>
+          <div>
+            <p class="text-3xl font-light text-amber-500">₪200</p>
+            <p class="text-sm text-neutral-400 mt-1">חוב פתוח</p>
+          </div>
+          <div>
+            <p class="text-3xl font-light text-neutral-900">48</p>
+            <p class="text-sm text-neutral-400 mt-1">סה״כ שיעורים</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Thin divider -->
+      <div class="h-px bg-neutral-100"></div>
+
+      <!-- Section: Notes -->
+      <section>
+        <p class="text-xs text-neutral-400 uppercase tracking-widest font-medium mb-4">הערות</p>
+        <blockquote class="text-lg font-light text-neutral-600 leading-relaxed border-r-2 border-neutral-200 pr-5">
+          דני מגיב יפה לשחייה טיפולית. מומלץ להמשיך 2 פעמים בשבוע. יש לשים לב לרגישות בעור לאחר כלור — להודיע להורה אם יש תגובה.
+        </blockquote>
+        <p class="text-sm text-neutral-300 mt-3">יעל כהן · 10 במרץ 2026</p>
+      </section>
+
+      <!-- Thin divider -->
+      <div class="h-px bg-neutral-100"></div>
+
+      <!-- Section: Tags -->
+      <section class="pb-16">
+        <p class="text-xs text-neutral-400 uppercase tracking-widest font-medium mb-4">תגיות</p>
+        <div class="flex flex-wrap gap-2">
+          <span class="rounded-full bg-neutral-100 text-neutral-600 px-4 py-1.5 text-sm font-light">שחייה טיפולית</span>
+          <span class="rounded-full bg-neutral-100 text-neutral-600 px-4 py-1.5 text-sm font-light">קופ״ח מכבי</span>
+          <span class="rounded-full bg-neutral-100 text-neutral-600 px-4 py-1.5 text-sm font-light">פיזיותרפיה</span>
+          <span class="rounded-full bg-neutral-100 text-neutral-600 px-4 py-1.5 text-sm font-light">ביטוח לאומי</span>
+        </div>
+      </section>
+
+    </div>
+
+  </main>
+</body>
+</html>
