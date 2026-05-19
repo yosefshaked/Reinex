@@ -567,12 +567,7 @@ export default function StudentsPage() {
         <div className="rounded-xl bg-red-50 p-lg text-center text-red-700" role="alert">
           {errorMessage || 'טעינת רשימת התלמידים נכשלה. נסו שוב מאוחר יותר.'}
         </div>
-      ) : isLoading ? (
-        <div className="flex items-center justify-center gap-sm rounded-xl bg-neutral-50 p-lg text-neutral-600" role="status">
-          <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
-          <span>טוען את רשימת התלמידים...</span>
-        </div>
-      ) : isSuccess ? (
+      ) : (canFetch && filtersRestored) ? (
         <Card className="w-full">
           <CardHeader className="space-y-sm">
             <div className="flex items-center justify-between">
@@ -649,7 +644,12 @@ export default function StudentsPage() {
           </CardHeader>
 
           <CardContent className="p-0">
-            {hasNoResults ? (
+            {isLoading ? (
+              <div className="flex items-center justify-center gap-sm p-lg text-neutral-600" role="status">
+                <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+                <span>טוען את רשימת התלמידים...</span>
+              </div>
+            ) : hasNoResults ? (
               <div className="p-lg text-center text-neutral-600">
                 לא נמצאו תלמידים התואמים את הסינון.
               </div>

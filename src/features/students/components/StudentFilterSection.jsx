@@ -74,7 +74,7 @@ export function StudentFilterSection({
             placeholder="חיפוש לפי שם, טלפון, תעודת זהות..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="pe-9 text-end"
+            className="pe-9"
            
           />
         </div>
