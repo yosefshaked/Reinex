@@ -26,6 +26,7 @@ const SYSTEM_TABLES = new Set([
   'admin_data',
   'error_events',
   'email_log',
+  'contact_requests',
 ]);
 
 /**
