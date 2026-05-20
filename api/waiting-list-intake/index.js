@@ -28,7 +28,7 @@ import {
 } from '../_shared/forms-runtime.js';
 import {
   createOrReuseClientProfile,
-  createOrReuseGuardian,
+  createOrReuseGuardianByParts,
   upsertClientGuardianLink,
   findClientProfileByIdentityNumber,
 } from '../_shared/client-profiles.js';
@@ -923,9 +923,10 @@ async function loadPublicInvite(context, req, { controlClient }) {
     prospect: {
       client_profile_id: clientProfile?.id || null,
       student_id: submission.student_id || null,
-      student_first_name: clientProfile?.first_name || '',
-      student_last_name: clientProfile?.last_name || '',
+      student_first_name: normalizeString(routingRow?.metadata?.student_first_name) || clientProfile?.first_name || '',
+      student_last_name: normalizeString(routingRow?.metadata?.student_last_name) || clientProfile?.last_name || '',
       contact_name: normalizeString(submissionMetadata.contact_name) || '',
+      contact_last_name: normalizeString(submissionMetadata.contact_last_name) || '',
       contact_relationship: normalizeGuardianRelationship(submissionMetadata.contact_relationship, { allowEmpty: true }),
       identity_number: clientProfile?.identity_number || '',
       phone: clientProfile?.phone || '',
@@ -1044,6 +1045,7 @@ async function submitPublicInvite(context, req, { controlClient }) {
   const studentFirstName = normalizeString(intake?.student_first_name || intake?.studentFirstName);
   const studentLastName = normalizeString(intake?.student_last_name || intake?.studentLastName);
   const contactName = normalizeString(intake?.contact_name || intake?.contactName);
+  const contactLastName = normalizeString(intake?.contact_last_name || intake?.contactLastName) || null;
   const contactRelationship = normalizeGuardianRelationship(intake?.contact_relationship ?? intake?.contactRelationship, { allowEmpty: true });
   const phone = normalizePhone(intake?.phone);
   const email = normalizeEmail(intake?.email);
@@ -1071,6 +1073,7 @@ async function submitPublicInvite(context, req, { controlClient }) {
 
   const allowAdditionalServices = Boolean(currentSubmissionMetadata.allow_additional_services);
   const effectiveContactName = contactRelationship === 'self' ? null : contactName;
+  const effectiveContactLastName = contactRelationship === 'self' ? null : (contactLastName || null);
   const effectiveHmoApprovalStatus = paymentPathIntent === 'hmo' ? requestedHmoApprovalStatus : null;
   const effectiveHmoProviderName = paymentPathIntent === 'hmo' ? requestedHmoProviderName : null;
   if (paymentPathIntent === 'hmo' && !effectiveHmoProviderName) {
@@ -1177,9 +1180,10 @@ async function submitPublicInvite(context, req, { controlClient }) {
   let guardianResult = null;
   if (contactRelationship !== 'self') {
     try {
-      guardianResult = await createOrReuseGuardian(client, {
+      guardianResult = await createOrReuseGuardianByParts(client, {
         orgId,
-        contactName,
+        firstName: contactName,
+        lastName: contactLastName,
         phone,
         email,
       });
@@ -1254,6 +1258,7 @@ async function submitPublicInvite(context, req, { controlClient }) {
           student_first_name: studentFirstName,
           student_last_name: studentLastName,
           contact_name: effectiveContactName,
+          contact_last_name: effectiveContactLastName,
           contact_relationship: contactRelationship,
           phone: phone || null,
           email: email || null,
@@ -1490,6 +1495,7 @@ async function submitPublicInvite(context, req, { controlClient }) {
   });
 }
 
+
 export default async function waitingListIntake(context, req) {
   const method = String(req.method || 'GET').toUpperCase();
   const action = normalizeString(context?.bindingData?.action).toLowerCase();
@@ -1512,6 +1518,7 @@ export default async function waitingListIntake(context, req) {
   if (method === 'GET' && (!action || action === 'load')) {
     return loadPublicInvite(context, req, { controlClient });
   }
+
 
   if (method === 'POST' && action === 'submit') {
     return submitPublicInvite(context, req, { controlClient });

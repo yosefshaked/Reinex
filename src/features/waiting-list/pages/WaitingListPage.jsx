@@ -453,6 +453,7 @@ export default function WaitingListPage() {
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteFormValues, setInviteFormValues] = useState(buildInitialInviteForm());
   const [inviteError, setInviteError] = useState('');
+  const [foundStudentByIdNumber, setFoundStudentByIdNumber] = useState(null);
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
   const [inviteMigrating, setInviteMigrating] = useState(false);
   const [inviteResult, setInviteResult] = useState(null);
@@ -774,6 +775,7 @@ export default function WaitingListPage() {
       formId: defaultFormId,
     });
     setInviteError('');
+    setFoundStudentByIdNumber(null);
     setInviteResult(null);
   }, [waitingListForms]);
 
@@ -1791,6 +1793,14 @@ export default function WaitingListPage() {
                     </div>
                   ) : null}
 
+                  {foundStudentByIdNumber && (
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                      <span className="font-medium">תלמיד/ה קיים/ת במערכת: </span>
+                      {[foundStudentByIdNumber.first_name, foundStudentByIdNumber.last_name].filter(Boolean).join(' ')}
+                      {' — '}הפרטים מולאו אוטומטית. ניתן לשנות לפי הצורך.
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <TextField
                       id="waiting-list-student-first-name"
@@ -1816,7 +1826,23 @@ export default function WaitingListPage() {
                       name="identityNumber"
                       label="מספר זהות"
                       value={inviteFormValues.identityNumber}
-                      onChange={(event) => setInviteFormValues((prev) => ({ ...prev, identityNumber: event.target.value.replace(/\D/g, '') }))}
+                      onChange={(event) => {
+                        const id = event.target.value.replace(/\D/g, '');
+                        const match = id ? clientProfiles.find((p) => p.identity_number === id) : null;
+                        setFoundStudentByIdNumber(match || null);
+                        if (match) {
+                          setInviteFormValues((prev) => ({
+                            ...prev,
+                            identityNumber: id,
+                            studentFirstName: match.first_name || '',
+                            studentLastName: match.last_name || '',
+                            phone: match.phone || '',
+                            email: match.email || '',
+                          }));
+                        } else {
+                          setInviteFormValues((prev) => ({ ...prev, identityNumber: id }));
+                        }
+                      }}
                       required
                     />
                     <SelectField

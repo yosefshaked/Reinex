@@ -14,7 +14,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function splitContactName(value) {
+export function splitContactName(value) {
   const normalized = normalizeString(value);
   if (!normalized) return { firstName: '', lastName: '' };
   const parts = normalized.split(/\s+/).filter(Boolean);
@@ -270,6 +270,64 @@ export async function createOrReuseGuardian(tenantClient, { orgId, contactName, 
     beforeState: null,
     afterState: data,
   };
+}
+
+/**
+ * Like createOrReuseGuardian but accepts pre-split first_name / last_name
+ * instead of a full contactName string. Looks up by phone before inserting,
+ * so calling it multiple times with the same phone (e.g. in a bulk-create loop)
+ * is safe — only one guardian record is ever created.
+ */
+export async function createOrReuseGuardianByParts(tenantClient, { orgId, firstName, lastName, phone, email }) {
+  if (!UUID_PATTERN.test(String(orgId || ''))) {
+    throw new Error('invalid_org_id');
+  }
+
+  const normalizedPhone = validateIsraeliPhone(phone);
+  const normalizedEmail = coerceEmail(email);
+
+  // Look up by phone first, then fall back to email
+  let existingId = null;
+
+  if (normalizedPhone.valid && normalizedPhone.value) {
+    const { data, error } = await withOrgScope(tenantClient, 'guardians', orgId)
+      .select('id')
+      .eq('phone', normalizedPhone.value)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`failed_to_lookup_guardian:${error.message}`);
+    if (data?.id) existingId = data.id;
+  }
+
+  if (!existingId && normalizedEmail.valid && normalizedEmail.value) {
+    const { data, error } = await withOrgScope(tenantClient, 'guardians', orgId)
+      .select('id')
+      .eq('email', normalizedEmail.value)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`failed_to_lookup_guardian:${error.message}`);
+    if (data?.id) existingId = data.id;
+  }
+
+  if (existingId) {
+    return { guardianId: existingId, action: 'reused_existing' };
+  }
+
+  const { data, error } = await withOrgScope(tenantClient, 'guardians', orgId)
+    .insert({
+      first_name: firstName,
+      last_name: lastName || null,
+      phone: normalizedPhone.value || null,
+      email: normalizedEmail.value || null,
+    })
+    .select('id')
+    .single();
+
+  if (error || !data?.id) {
+    throw new Error(`failed_to_create_guardian:${error?.message || 'unknown_error'}`);
+  }
+
+  return { guardianId: data.id, action: 'created' };
 }
 
 export async function upsertClientGuardianLink(tenantClient, { orgId, clientProfileId, guardianId, relationship }) {

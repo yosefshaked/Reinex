@@ -75,6 +75,7 @@ function buildWaitingListEvaluationAnswers(intakeValues, customAnswers) {
     wl_identity_number: intakeValues?.identityNumber || '',
     wl_contact_relationship: intakeValues?.contactRelationship || '',
     wl_contact_name: intakeValues?.contactRelationship === 'self' ? '' : (intakeValues?.contactName || ''),
+    wl_contact_last_name: intakeValues?.contactRelationship === 'self' ? '' : (intakeValues?.contactLastName || ''),
     wl_phone: intakeValues?.phone || '',
     wl_email: intakeValues?.email || '',
     wl_additional_service_ids: Array.isArray(intakeValues?.additionalServiceIds) ? intakeValues.additionalServiceIds : [],
@@ -238,6 +239,7 @@ export default function SubmitFormPage() {
     studentFirstName: '',
     studentLastName: '',
     contactName: '',
+    contactLastName: '',
     contactRelationship: '',
     identityNumber: '',
     phone: '',
@@ -342,6 +344,7 @@ export default function SubmitFormPage() {
           studentFirstName: String(payload?.prospect?.student_first_name || ''),
           studentLastName: String(payload?.prospect?.student_last_name || ''),
           contactName: String(payload?.prospect?.contact_name || ''),
+          contactLastName: String(payload?.prospect?.contact_last_name || ''),
           contactRelationship: String(payload?.prospect?.contact_relationship || ''),
           identityNumber: String(payload?.prospect?.identity_number || ''),
           phone: String(payload?.prospect?.phone || ''),
@@ -472,6 +475,7 @@ export default function SubmitFormPage() {
               student_first_name: intakeValues.studentFirstName,
               student_last_name: intakeValues.studentLastName,
               contact_name: intakeValues.contactRelationship === 'self' ? '' : intakeValues.contactName,
+              contact_last_name: intakeValues.contactRelationship === 'self' ? '' : intakeValues.contactLastName,
               contact_relationship: intakeValues.contactRelationship,
               identity_number: intakeValues.identityNumber,
               phone: intakeValues.phone,
@@ -778,6 +782,7 @@ export default function SubmitFormPage() {
                               ...prev,
                               contactRelationship: e.target.value,
                               contactName: e.target.value === 'self' ? '' : prev.contactName,
+                              contactLastName: e.target.value === 'self' ? '' : prev.contactLastName,
                             }))}
                           >
                             {CONTACT_RELATIONSHIP_OPTIONS.map((option) => (
@@ -791,18 +796,30 @@ export default function SubmitFormPage() {
                       </div>
 
                       {intakeValues.contactRelationship && intakeValues.contactRelationship !== 'self' && (
-                        <div className="mt-4 space-y-2">
-                          <RequiredLabel htmlFor="invite-contact-name" required>שם איש קשר / אפוטרופוס</RequiredLabel>
-                          <Input
-                            id="invite-contact-name"
-                            value={intakeValues.contactName}
-                            onChange={(e) => setIntakeValues((prev) => ({ ...prev, contactName: e.target.value }))}
-                            placeholder="שם איש קשר"
-                            className={getPublicInputClass(Boolean(showInviteValidation && inviteValidationErrors.contactName))}
-                          />
-                          {showInviteValidation && inviteValidationErrors.contactName ? (
-                            <p className="text-xs text-red-600">{inviteValidationErrors.contactName}</p>
-                          ) : null}
+                        <div className="mt-4 grid grid-cols-2 gap-3">
+                          <div className="space-y-2">
+                            <RequiredLabel htmlFor="invite-contact-name" required>שם פרטי איש קשר</RequiredLabel>
+                            <Input
+                              id="invite-contact-name"
+                              value={intakeValues.contactName}
+                              onChange={(e) => setIntakeValues((prev) => ({ ...prev, contactName: e.target.value }))}
+                              placeholder="שם פרטי"
+                              className={getPublicInputClass(Boolean(showInviteValidation && inviteValidationErrors.contactName))}
+                            />
+                            {showInviteValidation && inviteValidationErrors.contactName ? (
+                              <p className="text-xs text-red-600">{inviteValidationErrors.contactName}</p>
+                            ) : null}
+                          </div>
+                          <div className="space-y-2">
+                            <RequiredLabel htmlFor="invite-contact-last-name">שם משפחה</RequiredLabel>
+                            <Input
+                              id="invite-contact-last-name"
+                              value={intakeValues.contactLastName}
+                              onChange={(e) => setIntakeValues((prev) => ({ ...prev, contactLastName: e.target.value }))}
+                              placeholder="שם משפחה (רשות)"
+                              className={getPublicInputClass()}
+                            />
+                          </div>
                         </div>
                       )}
                     </div>

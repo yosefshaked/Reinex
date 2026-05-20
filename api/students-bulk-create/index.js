@@ -22,7 +22,7 @@ import {
 } from '../_shared/student-validation.js';
 import { parseCsv } from '../_shared/csv.js';
 import { logAuditEvent, AUDIT_ACTIONS, AUDIT_CATEGORIES } from '../_shared/audit-log.js';
-import { createOrReuseClientProfile, upsertClientGuardianLink } from '../_shared/client-profiles.js';
+import { createOrReuseClientProfile, createOrReuseGuardianByParts, upsertClientGuardianLink } from '../_shared/client-profiles.js';
 
 const MAX_ROWS = 500;
 
@@ -636,21 +636,22 @@ export default async function handler(context, req) {
       let guardianId = null;
 
       if (candidate.guardianAction === 'create') {
-        const { data: newGuardian, error: guardianCreateError } = await withOrgScope(supabase, 'guardians', orgId)
-          .insert({
-            first_name: candidate.guardianFirstName,
-            last_name: candidate.guardianLastName,
+        // createOrReuseGuardianByParts does a phone lookup before inserting, so
+        // if a previous row in this batch already created this guardian it is
+        // reused automatically — no duplicate inserts possible.
+        try {
+          const result = await createOrReuseGuardianByParts(supabase, {
+            orgId,
+            firstName: candidate.guardianFirstName,
+            lastName: candidate.guardianLastName,
             phone: candidate.guardianPhone,
-          })
-          .select('id')
-          .single();
-
-        if (guardianCreateError || !newGuardian?.id) {
+          });
+          guardianId = result.guardianId;
+        } catch (guardianCreateError) {
           context.log?.error?.('students-bulk-create failed to create guardian', { message: guardianCreateError?.message, orgId });
           failures.push(formatFailure({ lineNumber, name: displayName, code: 'guardian_create_failed', message: 'יצירת אפוטרופוס נכשלה.' }));
           continue;
         }
-        guardianId = newGuardian.id;
 
       } else if (candidate.guardianAction === 'link_existing') {
         guardianId = candidate.existingGuardianId;
