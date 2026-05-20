@@ -18,6 +18,7 @@ import AddStudentForm, { AddStudentFormFooter } from '@/features/admin/component
 import EditStudentModal from '@/features/admin/components/EditStudentModal.jsx';
 import DataMaintenanceModal from '@/features/admin/components/DataMaintenanceModal.jsx';
 import { DataMaintenanceMenu } from '@/features/admin/components/DataMaintenanceMenu.jsx';
+import BulkCreateModal from '@/features/admin/components/BulkCreateModal.jsx';
 import { StudentFilterSection } from '@/features/students/components/StudentFilterSection.jsx';
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { DAY_NAMES, formatDefaultTime } from '@/features/students/utils/schedule.js';
@@ -68,6 +69,7 @@ export default function StudentsPage() {
   const [updateError, setUpdateError] = useState('');
   const [addSubmitDisabled, setAddSubmitDisabled] = useState(false);
   const [isMaintenanceOpen, setIsMaintenanceOpen] = useState(false);
+  const [isBulkCreateOpen, setIsBulkCreateOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [dayFilter, setDayFilter] = useState(null);
   const [tagFilter, setTagFilter] = useState('');
@@ -613,6 +615,7 @@ export default function StudentsPage() {
                       instructors={instructors}
                       tags={tagOptions}
                       onImportClick={() => setIsMaintenanceOpen(true)}
+                      onBulkCreateClick={() => setIsBulkCreateOpen(true)}
                       onImportCompleted={handleMaintenanceCompleted}
                     />
                     <Button onClick={handleOpenAddDialog} className="gap-2">
@@ -941,6 +944,16 @@ export default function StudentsPage() {
         <DataMaintenanceModal
           open={isMaintenanceOpen}
           onClose={() => setIsMaintenanceOpen(false)}
+          orgId={activeOrgId}
+          onRefresh={handleMaintenanceCompleted}
+        />
+      )}
+
+      {/* Admin-only: Bulk Create Modal */}
+      {isAdmin && (
+        <BulkCreateModal
+          open={isBulkCreateOpen}
+          onClose={() => setIsBulkCreateOpen(false)}
           orgId={activeOrgId}
           onRefresh={handleMaintenanceCompleted}
         />

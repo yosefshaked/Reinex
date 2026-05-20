@@ -8,6 +8,9 @@ import { Megaphone } from 'lucide-react';
  * variant="header"  → compact inline chip shown inside the app header.
  *                     Renders nothing when no banner is active, so the
  *                     header layout is unaffected.
+ *
+ * Clicking the banner toggles between truncated and expanded text.
+ * Hovering shows the full text via the native title tooltip.
  */
 
 function useBanner() {
@@ -38,17 +41,26 @@ function useBanner() {
 
 export default function AnnouncementBanner() {
   const { active, text } = useBanner();
+  const [expanded, setExpanded] = React.useState(false);
 
   if (!active || !text) return null;
 
   return (
-    <div
+    <button
+      type="button"
       role="status"
       aria-live="polite"
-      className="flex min-w-0 max-w-sm items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1"
+      title={text}
+      onClick={() => setExpanded((v) => !v)}
+      dir="auto"
+      className={`flex min-w-0 items-start gap-1.5 border border-amber-200 bg-amber-50 px-3 py-1 transition-all hover:bg-amber-100 ${
+        expanded ? 'max-w-md rounded-lg' : 'max-w-sm cursor-pointer rounded-full'
+      }`}
     >
-      <Megaphone className="h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden="true" />
-      <span className="truncate text-xs font-medium text-amber-800">{text}</span>
-    </div>
+      <Megaphone className="h-3.5 w-3.5 shrink-0 text-amber-600 mt-0.5" aria-hidden="true" />
+      <span className={`text-xs font-medium text-amber-800 ${expanded ? 'whitespace-normal break-words' : 'truncate'}`}>
+        {text}
+      </span>
+    </button>
   );
 }

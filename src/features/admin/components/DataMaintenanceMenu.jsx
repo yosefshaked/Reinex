@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Download, FileText, AlertTriangle, Filter, Upload, Info } from 'lucide-react';
+import { Download, FileText, AlertTriangle, Filter, Upload, Info, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import {
   DropdownMenu,
@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { FilteredExportDialog } from './FilteredExportDialog';
 import { DataMaintenanceHelpDialog } from './DataMaintenanceHelpDialog';
 
-export function DataMaintenanceMenu({ onImportClick, instructors = [], tags = [] }) {
+export function DataMaintenanceMenu({ onImportClick, onBulkCreateClick, instructors = [], tags = [] }) {
   const [isDownloading, setIsDownloading] = useState(false);
   const [showFilteredDialog, setShowFilteredDialog] = useState(false);
   const [showHelpDialog, setShowHelpDialog] = useState(false);
@@ -131,11 +131,19 @@ export function DataMaintenanceMenu({ onImportClick, instructors = [], tags = []
         <DropdownMenuSeparator />
         <DropdownMenuLabel>ייבוא נתונים</DropdownMenuLabel>
         
+        <DropdownMenuItem onClick={onBulkCreateClick} className="gap-2 cursor-pointer">
+          <UserPlus className="h-4 w-4 text-green-600" />
+          <div className="flex flex-col items-start">
+            <span className="font-medium">ייבוא תלמידים חדשים</span>
+            <span className="text-xs text-muted-foreground">צור תלמידים חדשים מקובץ CSV</span>
+          </div>
+        </DropdownMenuItem>
+
         <DropdownMenuItem onClick={onImportClick} className="gap-2 cursor-pointer">
-          <Upload className="h-4 w-4 text-green-600" />
+          <Upload className="h-4 w-4 text-blue-600" />
           <div className="flex flex-col items-start">
             <span className="font-medium">ייבוא עדכונים</span>
-            <span className="text-xs text-muted-foreground">העלאת קובץ CSV מעודכן</span>
+            <span className="text-xs text-muted-foreground">עדכון תלמידים קיימים מ-CSV</span>
           </div>
         </DropdownMenuItem>
       </DropdownMenuContent>

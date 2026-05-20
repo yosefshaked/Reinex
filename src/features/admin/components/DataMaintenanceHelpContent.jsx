@@ -20,15 +20,15 @@ export function DataMaintenanceHelpContent() {
             התחלה מהירה
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-end">
-          <ol className="list-decimal list-inside space-y-1.5 text-sm pe-4">
+        <CardContent className="space-y-2">
+          <ol className="list-decimal list-inside space-y-1.5 text-sm">
             <li><strong>ייצאו</strong> - בחרו "ייצוא כל התלמידים" או סינון מסוים</li>
             <li><strong>ערכו באקסל</strong> - פתחו הקובץ ושנו מה שצריך (אל תגעו בעמודת UUID)</li>
             <li><strong>שמרו כ-CSV</strong> - File → Save As → CSV (UTF-8)</li>
             <li><strong>ייבאו</strong> - בחרו "ייבוא עדכונים" והעלו את הקובץ</li>
             <li><strong>אשרו שינויים</strong> - בדקו את התצוגה המקדימה, בטלו שינויים לא רצויים, ואשרו</li>
           </ol>
-          <p className="text-xs text-green-600 font-medium mt-3 pe-4">
+          <p className="text-xs text-green-600 font-medium mt-3">
             ✅ תצוגה מקדימה - רואים בדיוק מה משתנה לפני האישור. בטוחים ושקופים!
           </p>
         </CardContent>
@@ -42,7 +42,7 @@ export function DataMaintenanceHelpContent() {
             אפשרויות ייצוא
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 text-end text-sm">
+        <CardContent className="space-y-3 text-sm">
           <div className="flex items-start gap-2">
             <FileText className="h-4 w-4 text-primary mt-0.5 shrink-0" />
             <div>
@@ -75,8 +75,8 @@ export function DataMaintenanceHelpContent() {
             טיפים חשובים לאקסל
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-end">
-          <ul className="list-disc list-inside space-y-1.5 text-sm pe-4 text-blue-900">
+        <CardContent className="space-y-2">
+          <ul className="list-disc list-inside space-y-1.5 text-sm text-blue-900">
             <li>
               <strong className="text-green-700">תאים ריקים = ללא שינוי!</strong>
               {' '}אם אתם לא רוצים לעדכן שדה מסוים, פשוט תשאירו את התא ריק.
@@ -109,8 +109,8 @@ export function DataMaintenanceHelpContent() {
             תצוגה מקדימה חכמה
           </CardTitle>
         </CardHeader>
-        <CardContent className="text-end">
-          <ul className="list-disc list-inside space-y-1 text-sm pe-4 text-green-900">
+        <CardContent>
+          <ul className="list-disc list-inside space-y-1 text-sm text-green-900">
             <li><strong>רואים הכל לפני השינוי</strong> - ערך נוכחי מול ערך חדש לכל שדה</li>
             <li><strong>בחירה סלקטיבית</strong> - תוכלו לבטל שינויים בודדים או תלמידים ספציפיים</li>
             <li><strong>הרחבה/כיווץ</strong> - לחצו על כל תלמיד לראות פירוט מלא של השינויים</li>
@@ -128,8 +128,8 @@ export function DataMaintenanceHelpContent() {
             מגבלות חשובות
           </CardTitle>
         </CardHeader>
-        <CardContent className="text-end">
-          <ul className="list-disc list-inside space-y-1 text-sm pe-4 text-amber-900">
+        <CardContent>
+          <ul className="list-disc list-inside space-y-1 text-sm text-amber-900">
             <li><strong>מקסימום 2000 שורות</strong> בייבוא אחד</li>
             <li><strong>מספרי זהות ייחודיים</strong> - כפילויות נחסמות</li>
             <li><strong>מדריכים לא פעילים</strong> - לא ניתן לשבץ מדריך שהושבת במערכת</li>
@@ -155,7 +155,7 @@ export function DataMaintenanceHelpContent() {
             </CardHeader>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <CardContent className="space-y-4 text-end pt-0">
+            <CardContent className="space-y-4 pt-0">
               <div>
                 <p className="font-semibold text-sm mb-1">למה נוצרה התכונה?</p>
                 <p className="text-sm text-muted-foreground">
@@ -165,7 +165,7 @@ export function DataMaintenanceHelpContent() {
               </div>
               <div>
                 <p className="font-semibold text-sm mb-1">תלמידים עם בעיות - מה מזוהה?</p>
-                <ul className="list-disc list-inside space-y-0.5 text-sm pe-4 text-muted-foreground">
+                <ul className="list-disc list-inside space-y-0.5 text-sm text-muted-foreground">
                   <li>חסר מספר תעודת זהות</li>
                   <li>חסר מדריך משובץ או מדריך לא פעיל</li>
                   <li>התנגשות בלוח זמנים (2+ תלמידים פעילים, אותו מדריך/יום/שעה)</li>
@@ -176,7 +176,7 @@ export function DataMaintenanceHelpContent() {
               </div>
               <div>
                 <p className="font-semibold text-sm mb-1">תכונות ייבוא מתקדמות</p>
-                <ul className="list-disc list-inside space-y-0.5 text-sm pe-4 text-muted-foreground">
+                <ul className="list-disc list-inside space-y-0.5 text-sm text-muted-foreground">
                   <li><strong>תצוגה מקדימה אינטראקטיבית:</strong> רואים כל שינוי לפני שהוא קורה - ערך ישן (אדום) לעומת ערך חדש (ירוק)</li>
                   <li><strong>בחירה סלקטיבית:</strong> אפשר לבטל שינויים לתלמידים ספציפיים, רק מה שנבחר יעודכן</li>
                   <li>המערכת מזהה רק שדות ששונו ומעדכנת אותם בלבד</li>
