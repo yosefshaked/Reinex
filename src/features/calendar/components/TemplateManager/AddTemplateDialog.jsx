@@ -112,6 +112,7 @@ export function AddTemplateDialog({
   });
 
   const [error, setError] = useState(null);
+  const [requiredFormWarnings, setRequiredFormWarnings] = useState(null);
   const activeServices = useMemo(
     () => (services || []).filter((s) => s?.is_active === true),
     [services],
@@ -205,6 +206,7 @@ export function AddTemplateDialog({
         valid_until: '',
       });
       setError(null);
+      setRequiredFormWarnings(null);
     }
   }, [open, defaultInstructorId, defaultDayOfWeek, defaultClientProfileId, defaultStudentId, defaultServiceId, defaultTimeOfDay, defaultDurationMinutes]);
 
@@ -373,8 +375,8 @@ export function AddTemplateDialog({
   }, [existingTemplatesByStudentId]);
   const hasExistingTemplatesWarning = Object.keys(activeExistingTemplatesByStudentId).length > 0;
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  async function handleSubmit(e, { acknowledgeRequiredFormWarnings = false } = {}) {
+    e?.preventDefault();
     setError(null);
 
     const hasStudents = selectedStudents.length > 0;
@@ -431,7 +433,14 @@ export function AddTemplateDialog({
       valid_from: formData.valid_from,
       valid_until: formData.valid_until || null,
       waiting_list_entry_id: waitingListEntryId || null,
+      ...(acknowledgeRequiredFormWarnings ? { acknowledge_required_form_warnings: true } : {}),
     });
+
+    // Soft gate: API returns 200 with required_form_warnings when forms are missing but enforcement is 'warn'
+    if (createdTemplate?.required_form_warnings?.length > 0) {
+      setRequiredFormWarnings(createdTemplate.required_form_warnings);
+      return;
+    }
 
     if (apiError) {
       setError(
@@ -846,6 +855,27 @@ export function AddTemplateDialog({
             </div>
           </div>
 
+          {/* Required form warnings — soft gate, user must acknowledge to proceed */}
+          {requiredFormWarnings?.length > 0 && (
+            <Alert className="border-amber-300 bg-amber-50 text-amber-900">
+              <AlertCircle className="h-4 w-4 text-amber-600" />
+              <AlertDescription className="space-y-2">
+                <p className="font-medium">טפסי חובה חסרים לתלמידים הבאים:</p>
+                <ul className="list-disc ps-4 space-y-0.5 text-sm">
+                  {requiredFormWarnings.map((w, i) => {
+                    const student = selectedStudents.find((s) => s.id === w.student_id);
+                    return (
+                      <li key={i}>
+                        {student ? personName(student) : w.student_id} — {w.label}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="text-sm">ניתן ליצור את התבנית בכל זאת ולשלוח את הטפסים לאחר מכן.</p>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Error */}
           {error && (
             <Alert variant="destructive">
@@ -858,22 +888,43 @@ export function AddTemplateDialog({
             <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               ביטול
             </Button>
-            <Button
-              type="submit"
-              disabled={
-                isSubmitting
-                || !formData.day_of_week
-                || !formData.time_of_day
-                || !selectedServiceHasValidDuration
-                || availableTimeSlots.length === 0
-                || missingCapability
-                || missingAvailability
-                || outsideAvailability
-              }
-            >
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
-              צור תבנית
-            </Button>
+            {requiredFormWarnings?.length > 0 ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setRequiredFormWarnings(null)}
+                  disabled={isSubmitting}
+                >
+                  חזרה
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => handleSubmit(null, { acknowledgeRequiredFormWarnings: true })}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
+                  צור תבנית בכל זאת
+                </Button>
+              </>
+            ) : (
+              <Button
+                type="submit"
+                disabled={
+                  isSubmitting
+                  || !formData.day_of_week
+                  || !formData.time_of_day
+                  || !selectedServiceHasValidDuration
+                  || availableTimeSlots.length === 0
+                  || missingCapability
+                  || missingAvailability
+                  || outsideAvailability
+                }
+              >
+                {isSubmitting && <Loader2 className="h-4 w-4 animate-spin ms-2" />}
+                צור תבנית
+              </Button>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>

@@ -191,8 +191,8 @@ function buildTemplateSelect() {
     'updated_at',
     'metadata',
     'instructor:Employees(id, first_name, middle_name, last_name, email)',
-    'service:Services(id, name, duration_minutes, color)',
-    'participants:lesson_template_participants(id, student_id, student:students(id, client_profile_id, client_profile:client_profiles(id, first_name, middle_name, last_name)))',
+    'service:Services(id, name, duration_minutes, color, required_forms)',
+    'participants:lesson_template_participants(id, student_id, student:students(id, client_profile_id, client_profile:client_profiles(id, first_name, middle_name, last_name, phone, email)))',
   ].join(',');
 }
 
@@ -210,6 +210,8 @@ function normalizeTemplateParticipant(row) {
           first_name: profile?.first_name || '',
           middle_name: profile?.middle_name || null,
           last_name: profile?.last_name || '',
+          phone: profile?.phone || '',
+          email: profile?.email || '',
         }
       : null,
   };
@@ -289,7 +291,7 @@ async function loadServiceForTemplate(client, orgId, serviceId, { requireActive 
   }
 
   let query = withOrgScope(client, 'Services', orgId)
-    .select('id, duration_minutes, is_active')
+    .select('id, duration_minutes, is_active, required_forms')
     .eq('id', serviceId);
 
   if (requireActive) {
@@ -377,6 +379,32 @@ async function rollbackCreatedTemplate(context, client, orgId, templateId, detai
   }
 
   return { ok: true, error: null };
+}
+
+async function resolveClientProfileIdsForStudents(client, orgId, studentIds) {
+  if (!studentIds.length) return {};
+  const { data, error } = await withOrgScope(client, 'students', orgId)
+    .select('id, client_profile_id')
+    .in('id', studentIds);
+  if (error) throw error;
+  const map = {};
+  (data || []).forEach((row) => {
+    if (row.id && row.client_profile_id) map[row.id] = row.client_profile_id;
+  });
+  return map;
+}
+
+async function checkRequiredFormSubmittedForEnrollment(client, orgId, { clientProfileId, formId, serviceId }) {
+  const { data, error } = await withOrgScope(client, 'form_submissions', orgId)
+    .select('id')
+    .eq('client_profile_id', clientProfileId)
+    .eq('form_id', formId)
+    .eq('service_id', serviceId)
+    .contains('metadata', { workflow_kind: 'required_form', workflow_status: 'submitted' })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data?.id);
 }
 
 export default async function lessonTemplates(context, req) {
@@ -808,6 +836,59 @@ export default async function lessonTemplates(context, req) {
         message: instructorSlotConflict.code,
         conflicting_template_ids: (instructorSlotConflict.templates || []).map((template) => template.id).filter(Boolean),
       });
+    }
+
+    // Required-form compliance check
+    const requiredForms = Array.isArray(selectedService?.required_forms) ? selectedService.required_forms : [];
+    if (requiredForms.length > 0 && allStudentIds.length > 0) {
+      const acknowledgeWarnings = Boolean(body?.acknowledge_required_form_warnings);
+      try {
+        const clientProfileMap = await resolveClientProfileIdsForStudents(supabase, orgId, allStudentIds);
+        const hardBlocks = [];
+        const warnings = [];
+        for (const sid of allStudentIds) {
+          const cpId = clientProfileMap[sid];
+          if (!cpId) continue;
+          for (const rf of requiredForms) {
+            if (!rf?.form_id) continue;
+            const submitted = await checkRequiredFormSubmittedForEnrollment(supabase, orgId, {
+              clientProfileId: cpId,
+              formId: rf.form_id,
+              serviceId,
+            });
+            if (!submitted) {
+              const entry = {
+                student_id: sid,
+                client_profile_id: cpId,
+                form_id: rf.form_id,
+                label: rf.label || 'טופס חובה',
+              };
+              if (rf.enforcement === 'block') {
+                hardBlocks.push(entry);
+              } else {
+                warnings.push(entry);
+              }
+            }
+          }
+        }
+        if (hardBlocks.length > 0) {
+          return respond(context, 409, {
+            message: 'required_form_missing',
+            hard_blocks: hardBlocks,
+            warnings,
+          });
+        }
+        if (warnings.length > 0 && !acknowledgeWarnings) {
+          return respond(context, 200, { required_form_warnings: warnings });
+        }
+      } catch (complianceError) {
+        // Non-blocking: log and proceed (compliance check failure should not block enrollment)
+        context.log?.warn?.('lesson-templates failed required-form compliance check, proceeding', {
+          message: complianceError?.message,
+          serviceId,
+          studentIds: allStudentIds,
+        });
+      }
     }
 
     const { data, error } = await withOrgScope(supabase, 'lesson_templates', orgId)

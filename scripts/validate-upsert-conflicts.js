@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { SETUP_SQL_SCRIPT } from '../src/lib/setup-sql.js';
 
 const root = process.cwd();
+const setupSql = String(SETUP_SQL_SCRIPT || '');
 
 const API_DIR = path.join(root, 'api');
 const JS_FILE_PATTERN = /\.js$/i;
@@ -158,10 +160,54 @@ function validateLeaveLedgerWritesAreScoped() {
   return errors;
 }
 
+// Cross-check: every conflict key registered in EXPECTED_CONFLICTS_BY_TABLE
+// must have a matching CREATE UNIQUE INDEX or UNIQUE constraint in setup-sql.
+// This catches the 42P10 class of bugs before they reach a live database.
+function buildColPattern(cols) {
+  return cols.split(',').map((c) => `"?${c.trim()}"?`).join('\\s*,\\s*');
+}
+
+function validateConflictIndexesExistInSql() {
+  const errs = [];
+
+  for (const [table, expectedList] of Object.entries(EXPECTED_CONFLICTS_BY_TABLE)) {
+    for (const rawColumns of expectedList) {
+      const cols = normalizeConflictValue(rawColumns);
+      const colPattern = buildColPattern(cols);
+      const columnList = cols.split(',').map((c) => c.trim());
+      const escapedTable = table.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      const hasIndex = new RegExp(
+        `CREATE UNIQUE INDEX\\s+(?:IF NOT EXISTS\\s+)?\\w+\\s+ON\\s+public\\.(?:"?${escapedTable}"?)\\s*\\(\\s*${colPattern}\\s*\\)`,
+        'i',
+      ).test(setupSql);
+
+      const hasConstraint = new RegExp(
+        `ALTER TABLE\\s+public\\.(?:"?${escapedTable}"?)[\\s\\S]{0,800}?UNIQUE\\s*(?:USING INDEX|\\(\\s*${colPattern}\\s*\\))`,
+        'i',
+      ).test(setupSql);
+
+      const hasPrimaryKey = columnList.length === 1 && new RegExp(
+        `CREATE TABLE IF NOT EXISTS\\s+public\\.(?:"?${escapedTable}"?)[\\s\\S]{0,2000}?"?${columnList[0]}"?[^\\n]*(PRIMARY KEY)`,
+        'i',
+      ).test(setupSql);
+
+      if (!hasIndex && !hasConstraint && !hasPrimaryKey) {
+        errs.push(
+          `Table '${table}' uses onConflict='${cols}' but no matching CREATE UNIQUE INDEX, UNIQUE constraint, or PRIMARY KEY was found in setup-sql.js. Without this the ON CONFLICT upsert will fail at runtime with 42P10.`,
+        );
+      }
+    }
+  }
+
+  return errs;
+}
+
 const errors = [
   ...validateWithOrgScopeUpserts(),
   ...validateClientGuardiansUpsert(),
   ...validateLeaveLedgerWritesAreScoped(),
+  ...validateConflictIndexesExistInSql(),
 ];
 
 if (errors.length > 0) {

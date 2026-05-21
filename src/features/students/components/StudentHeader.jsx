@@ -36,6 +36,7 @@ export default function StudentHeader({
   isUpdating = false,
   onEdit,
   onSuspend,
+  requiredFormsCompliance = [],
 }) {
   const navigate = useNavigate();
   const { session } = useSupabase();
@@ -54,14 +55,28 @@ export default function StudentHeader({
     [displayStudent?.medical_flags],
   );
 
-  const alertPills = useMemo(
-    () => medicalFlags.map((flag, index) => ({
-      key: `${flag}-${index}`,
+  const hasMissingRequiredForms = useMemo(
+    () => Array.isArray(requiredFormsCompliance) && requiredFormsCompliance.some((e) => e.status !== 'submitted'),
+    [requiredFormsCompliance],
+  );
+
+  const alertPills = useMemo(() => {
+    const pills = medicalFlags.map((flag, index) => ({
+      key: `medical-${flag}-${index}`,
       label: flag,
       icon: <AlertCircle className="h-3 w-3" />,
-    })),
-    [medicalFlags],
-  );
+    }));
+    if (hasMissingRequiredForms) {
+      pills.push({
+        key: 'required-forms-missing',
+        label: 'טופס חובה חסר',
+        icon: <AlertCircle className="h-3 w-3" />,
+        className: 'border-amber-300 bg-amber-50 text-amber-800',
+        onClick: () => navigate(`/students/${student?.id}/forms`),
+      });
+    }
+    return pills;
+  }, [hasMissingRequiredForms, medicalFlags, navigate, student?.id]);
 
   const loadSummary = useCallback(async () => {
     if (!student?.id || !session || !activeOrgId) return;

@@ -230,6 +230,9 @@ export default function SubmitFormPage() {
   const [answers, setAnswers] = useState({});
   const [customValidationErrors, setCustomValidationErrors] = useState({});
   const [inviteToken, setInviteToken] = useState('');
+  const [inviteFlow, setInviteFlow] = useState('');
+  const [inviteServiceName, setInviteServiceName] = useState('');
+  const [inviteRequiredFormLabel, setInviteRequiredFormLabel] = useState('');
   const [inviteConfig, setInviteConfig] = useState({
     primaryServiceId: '',
     allowAdditionalServices: false,
@@ -263,23 +266,32 @@ export default function SubmitFormPage() {
 
   const title = useMemo(() => {
     if (step === 'done') return 'הטופס נשלח בהצלחה';
-    if (step === 'form') return submissionMode === 'invite' ? (formName || 'טופס הצטרפות לרשימת המתנה') : 'מילוי טופס';
+    if (step === 'form') {
+      if (submissionMode === 'invite') return formName || (inviteFlow === 'required_form' ? 'טופס חובה' : 'טופס הצטרפות לרשימת המתנה');
+      return 'מילוי טופס';
+    }
     return 'אימות פרטי תלמיד';
-  }, [formName, step, submissionMode]);
+  }, [formName, inviteFlow, step, submissionMode]);
 
   const description = useMemo(() => {
     if (step === 'done') return 'תודה רבה, הטופס התקבל במערכת.';
-    if (step === 'form') return submissionMode === 'invite' ? (formDescription || 'נא למלא את פרטי ההמתנה ולשלוח.') : 'נא למלא את כל הפרטים הנדרשים ולשלוח.';
+    if (step === 'form') {
+      if (submissionMode === 'invite') {
+        if (inviteFlow === 'required_form') return formDescription || 'נא למלא את הטופס ולשלוח.';
+        return formDescription || 'נא למלא את פרטי ההמתנה ולשלוח.';
+      }
+      return 'נא למלא את כל הפרטים הנדרשים ולשלוח.';
+    }
     return 'הזן מזהה גישה וקוד אימות כדי להמשיך.';
-  }, [formDescription, step, submissionMode]);
+  }, [formDescription, inviteFlow, step, submissionMode]);
 
   const inviteValidationErrors = useMemo(
-    () => (submissionMode === 'invite' ? validateInviteIntake(intakeValues) : {}),
-    [intakeValues, submissionMode],
+    () => (submissionMode === 'invite' && inviteFlow !== 'required_form' ? validateInviteIntake(intakeValues) : {}),
+    [intakeValues, inviteFlow, submissionMode],
   );
   const visibilityEvaluationAnswers = useMemo(
-    () => (submissionMode === 'invite' ? buildWaitingListEvaluationAnswers(intakeValues, answers) : answers),
-    [answers, intakeValues, submissionMode],
+    () => (submissionMode === 'invite' && inviteFlow !== 'required_form' ? buildWaitingListEvaluationAnswers(intakeValues, answers) : answers),
+    [answers, intakeValues, inviteFlow, submissionMode],
   );
   const visibleCustomSections = useMemo(
     () => getVisibleSections(formSchema, visibilityRules, visibilityEvaluationAnswers),
@@ -319,14 +331,16 @@ export default function SubmitFormPage() {
       setShowInviteValidation(false);
       setSubmissionMode('invite');
       try {
-        const response = await fetch(`/api/waiting-list-intake/load?invite=${encodeURIComponent(invite)}`);
+        const response = await fetch(`/api/invite-load?invite=${encodeURIComponent(invite)}`);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
           throw new Error(resolvePublicApiErrorMessage(payload, response.status, mapInviteLoadErrorMessage));
         }
         if (cancelled) return;
 
+        const flow = String(payload?.flow || '');
         setInviteToken(String(payload?.invite_token || invite));
+        setInviteFlow(flow);
         setSubmissionId(String(payload?.submission_id || ''));
         const normalizedSchema = normalizeFormSchema(payload?.form_schema || {});
         setFormSchema(normalizedSchema);
@@ -334,29 +348,43 @@ export default function SubmitFormPage() {
         setAnswers(buildInitialAnswers(normalizedSchema));
         setFormName(String(payload?.form_name || ''));
         setFormDescription(String(payload?.form_description || ''));
-        setInviteConfig({
-          primaryServiceId: String(payload?.intake_config?.primary_service_id || ''),
-          allowAdditionalServices: Boolean(payload?.intake_config?.allow_additional_services),
-          serviceOptions: Array.isArray(payload?.intake_config?.service_options) ? payload.intake_config.service_options : [],
-        });
-        setIntakeValues((prev) => ({
-          ...prev,
-          studentFirstName: String(payload?.prospect?.student_first_name || ''),
-          studentLastName: String(payload?.prospect?.student_last_name || ''),
-          contactName: String(payload?.prospect?.contact_name || ''),
-          contactLastName: String(payload?.prospect?.contact_last_name || ''),
-          contactRelationship: String(payload?.prospect?.contact_relationship || ''),
-          identityNumber: String(payload?.prospect?.identity_number || ''),
-          phone: String(payload?.prospect?.phone || ''),
-          email: String(payload?.prospect?.email || ''),
-          paymentPathIntent: 'unsure',
-          hmoApprovalStatus: '',
-          hmoProviderName: '',
-          preferredDays: [],
-          preferredTimesByDay: {},
-          additionalServiceIds: [],
-          notes: '',
-        }));
+
+        if (flow === 'required_form') {
+          setInviteServiceName(String(payload?.service_name || ''));
+          setInviteRequiredFormLabel(String(payload?.required_form_label || ''));
+          setIntakeValues((prev) => ({
+            ...prev,
+            studentFirstName: String(payload?.prospect?.first_name || ''),
+            studentLastName: String(payload?.prospect?.last_name || ''),
+            identityNumber: String(payload?.prospect?.identity_number || ''),
+            phone: String(payload?.prospect?.phone || ''),
+            email: String(payload?.prospect?.email || ''),
+          }));
+        } else {
+          setInviteConfig({
+            primaryServiceId: String(payload?.intake_config?.primary_service_id || ''),
+            allowAdditionalServices: Boolean(payload?.intake_config?.allow_additional_services),
+            serviceOptions: Array.isArray(payload?.intake_config?.service_options) ? payload.intake_config.service_options : [],
+          });
+          setIntakeValues((prev) => ({
+            ...prev,
+            studentFirstName: String(payload?.prospect?.student_first_name || ''),
+            studentLastName: String(payload?.prospect?.student_last_name || ''),
+            contactName: String(payload?.prospect?.contact_name || ''),
+            contactLastName: String(payload?.prospect?.contact_last_name || ''),
+            contactRelationship: String(payload?.prospect?.contact_relationship || ''),
+            identityNumber: String(payload?.prospect?.identity_number || ''),
+            phone: String(payload?.prospect?.phone || ''),
+            email: String(payload?.prospect?.email || ''),
+            paymentPathIntent: 'unsure',
+            hmoApprovalStatus: '',
+            hmoProviderName: '',
+            preferredDays: [],
+            preferredTimesByDay: {},
+            additionalServiceIds: [],
+            notes: '',
+          }));
+        }
         setStep('form');
       } catch (loadError) {
         if (!cancelled) {
@@ -445,6 +473,41 @@ export default function SubmitFormPage() {
   const handleSubmitForm = async () => {
     const nextCustomValidationErrors = validateVisibleAnswers(visibleCustomSections, answers);
     setCustomValidationErrors(nextCustomValidationErrors);
+
+    if (submissionMode === 'invite' && inviteFlow === 'required_form') {
+      if (!inviteToken) {
+        setError('חסר מזהה קישור, נא לפתוח את הקישור מחדש.');
+        return;
+      }
+      if (Object.keys(nextCustomValidationErrors).length > 0) {
+        setError('יש להשלים את כל השאלות הנדרשות לפני שליחת הטופס.');
+        return;
+      }
+
+      setSubmitLoading(true);
+      setError('');
+
+      try {
+        const response = await fetch('/api/student-required-forms/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ invite_token: inviteToken, answers: answers || {} }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(resolvePublicApiErrorMessage(payload, response.status, mapInviteSubmitErrorMessage));
+        }
+        setSuccessMessage('טופס החובה הוגש בהצלחה!');
+        setStep('done');
+        return;
+      } catch (submitError) {
+        console.error('Required form submit failed', submitError);
+        setError(submitError?.message || mapInviteSubmitErrorMessage());
+      } finally {
+        setSubmitLoading(false);
+      }
+      return;
+    }
 
     if (submissionMode === 'invite') {
       if (!inviteToken) {
@@ -698,7 +761,22 @@ export default function SubmitFormPage() {
 
             {step === 'form' && (
               <div className="space-y-5">
-                {submissionMode === 'invite' && (
+                {submissionMode === 'invite' && inviteFlow === 'required_form' && (
+                  <div className="rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-slate-50 p-5 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
+                        <ClipboardList className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-base font-semibold text-slate-900">{inviteRequiredFormLabel || 'טופס חובה'}</h3>
+                        {inviteServiceName ? (
+                          <p className="text-sm text-slate-600">שירות: <strong>{inviteServiceName}</strong></p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {submissionMode === 'invite' && inviteFlow !== 'required_form' && (
                   <div className="space-y-5">
                     <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-5 shadow-sm">
                       <div className="flex items-start gap-3">

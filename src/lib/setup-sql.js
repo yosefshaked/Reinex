@@ -1095,6 +1095,10 @@ CREATE TABLE IF NOT EXISTS public."Services" (
   CONSTRAINT Services_default_customer_charge_amount_non_negative_check CHECK ("default_customer_charge_amount" IS NULL OR "default_customer_charge_amount" >= 0)
 );
 
+-- Migration: add required_forms config column to Services
+ALTER TABLE public."Services"
+  ADD COLUMN IF NOT EXISTS required_forms jsonb NOT NULL DEFAULT '[]'::jsonb;
+
 
 -- -----------------------------------------------------------------
 -- public.RateHistory (rate tracking per employee/service/date)
@@ -1311,6 +1315,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS instructor_service_capabilities_employee_servi
 
 CREATE INDEX IF NOT EXISTS instructor_service_capabilities_employee_id_idx
   ON public.instructor_service_capabilities (org_id, employee_id);
+
+-- Migration: promote unique index to a named constraint so ON CONFLICT upsert works
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'instructor_service_capabilities_org_employee_service_uniq'
+    AND conrelid = 'public.instructor_service_capabilities'::regclass
+  ) THEN
+    IF EXISTS (
+      SELECT 1 FROM pg_indexes
+      WHERE schemaname = 'public'
+      AND indexname = 'instructor_service_capabilities_employee_service_uidx'
+    ) THEN
+      ALTER TABLE public.instructor_service_capabilities
+        ADD CONSTRAINT instructor_service_capabilities_org_employee_service_uniq
+        UNIQUE USING INDEX instructor_service_capabilities_employee_service_uidx;
+    ELSE
+      ALTER TABLE public.instructor_service_capabilities
+        ADD CONSTRAINT instructor_service_capabilities_org_employee_service_uniq
+        UNIQUE (org_id, employee_id, service_id);
+    END IF;
+  END IF;
+END $$;
 
 -- -----------------------------------------------------------------
 -- public.lesson_templates
@@ -2296,7 +2324,7 @@ CREATE TABLE IF NOT EXISTS public.forms (
   updated_at timestamptz NOT NULL DEFAULT now(),
   is_active boolean NOT NULL DEFAULT true,
   metadata jsonb NULL,
-  CONSTRAINT forms_form_usage_check CHECK (form_usage IN ('general','waiting_list_intake'))
+  CONSTRAINT forms_form_usage_check CHECK (form_usage IN ('general','waiting_list_intake','required_form'))
 );
 
 
@@ -2304,6 +2332,12 @@ CREATE TABLE IF NOT EXISTS public.forms (
 UPDATE public.forms
 SET form_usage = COALESCE(NULLIF(form_usage, ''), 'general')
 WHERE form_usage IS NULL OR form_usage = '';
+
+-- Migration: expand form_usage to include required_form
+ALTER TABLE public.forms
+  DROP CONSTRAINT IF EXISTS forms_form_usage_check,
+  ADD CONSTRAINT forms_form_usage_check
+    CHECK (form_usage IN ('general','waiting_list_intake','required_form'));
 
 
 CREATE INDEX IF NOT EXISTS forms_is_active_idx ON public.forms (org_id, is_active);
@@ -2411,6 +2445,13 @@ CREATE INDEX IF NOT EXISTS form_submissions_student_id_idx
 
 CREATE INDEX IF NOT EXISTS form_submissions_submitted_by_guardian_id_idx
   ON public.form_submissions (org_id, submitted_by_guardian_id) WHERE submitted_by_guardian_id IS NOT NULL;
+
+-- Migration: add service_id to form_submissions for required-form compliance queries
+ALTER TABLE public.form_submissions
+  ADD COLUMN IF NOT EXISTS service_id uuid NULL REFERENCES public."Services"(id);
+
+CREATE INDEX IF NOT EXISTS form_submissions_service_id_idx
+  ON public.form_submissions (org_id, service_id) WHERE service_id IS NOT NULL;
 
 -- -----------------------------------------------------------------
 -- public.otp_challenges

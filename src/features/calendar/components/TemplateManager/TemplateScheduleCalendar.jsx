@@ -4,7 +4,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import resourceTimeGridPlugin from '@fullcalendar/resource-timegrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import heLocale from '@fullcalendar/core/locales/he';
-import { Clock, Loader2, User } from 'lucide-react';
+import { AlertCircle, Clock, Loader2, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -242,7 +242,7 @@ function buildResources({ instructors, templates, showInactive, showUnavailable,
     }));
 }
 
-function buildTemplateEvents({ templates, showInactive, waitingListTemplateMatches }) {
+function buildTemplateEvents({ templates, showInactive, waitingListTemplateMatches, missingFormsMap }) {
   return (templates || [])
     .filter((template) => template?.id && template?.instructor_employee_id)
     .filter((template) => showInactive || template.is_active !== false)
@@ -253,6 +253,7 @@ function buildTemplateEvents({ templates, showInactive, waitingListTemplateMatch
       const duration = Number(template.duration_minutes) || 60;
       const end = addMinutesLocalDateTime(start, duration);
       const bucket = waitingListTemplateMatches?.[template.id] || null;
+      const missingForms = missingFormsMap?.[template.id] || [];
       return {
         id: `template-${template.id}`,
         start,
@@ -265,6 +266,8 @@ function buildTemplateEvents({ templates, showInactive, waitingListTemplateMatch
           template,
           matchBucket: bucket,
           waitingCount: Number(bucket?.count) || 0,
+          missingForms,
+          missingFormsCount: missingForms.length,
         },
       };
     })
@@ -312,7 +315,7 @@ function buildClearSpaceEvents(candidates) {
 }
 
 function TemplateEventContent({ event }) {
-  const { kind, previewKind, template, waitingCount } = event.extendedProps || {};
+  const { kind, previewKind, template, waitingCount, missingFormsCount } = event.extendedProps || {};
   if (kind === 'service_drop' || previewKind === 'service_drop') {
     return (
       <div className="reinex-template-clear-space-card">
@@ -344,9 +347,17 @@ function TemplateEventContent({ event }) {
           <User className="h-3 w-3 shrink-0" />
           <span>{getTemplateStudentName(template)}</span>
         </div>
-        {waitingCount > 0 ? (
-          <Badge className="reinex-template-event-card__badge">{waitingCount} ממתינים</Badge>
-        ) : null}
+        <div className="flex items-center gap-1">
+          {missingFormsCount > 0 ? (
+            <Badge className="reinex-template-event-card__missing-forms-badge cursor-pointer gap-0.5 bg-amber-100 text-amber-800 hover:bg-amber-200 border-amber-200">
+              <AlertCircle className="h-2.5 w-2.5" />
+              {missingFormsCount}
+            </Badge>
+          ) : null}
+          {waitingCount > 0 ? (
+            <Badge className="reinex-template-event-card__badge">{waitingCount} ממתינים</Badge>
+          ) : null}
+        </div>
       </div>
       <div className="reinex-template-event-card__service">{getServiceName(template)}</div>
       <div className="reinex-template-event-card__time">
@@ -382,12 +393,14 @@ export function TemplateScheduleCalendar({
   showWaitingListMatches,
   waitingListTemplateMatches,
   waitingListCandidates,
+  missingFormsMap,
   isLoading = false,
   onTemplateClick,
   onSlotClick,
   onExternalServiceDrop,
   onUnavailableSlot,
   onWaitingListMatchClick,
+  onMissingFormsClick,
 }) {
   const calendarRef = useRef(null);
   const resources = useMemo(
@@ -403,6 +416,7 @@ export function TemplateScheduleCalendar({
       templates,
       showInactive,
       waitingListTemplateMatches: showWaitingListMatches ? waitingListTemplateMatches : {},
+      missingFormsMap,
     });
     if (!showWaitingListMatches) {
       return templateEvents;
@@ -411,7 +425,7 @@ export function TemplateScheduleCalendar({
       ...templateEvents,
       ...buildClearSpaceEvents(waitingListCandidates),
     ];
-  }, [showInactive, showWaitingListMatches, templates, waitingListCandidates, waitingListTemplateMatches]);
+  }, [missingFormsMap, showInactive, showWaitingListMatches, templates, waitingListCandidates, waitingListTemplateMatches]);
   const initialDate = viewMode === 'day' ? DAY_DATE_BY_TOKEN[selectedDay] || TEMPLATE_WEEK_START : TEMPLATE_WEEK_START;
   const initialView = viewMode === 'day' ? 'resourceTimeGridDay' : 'resourceTimeGridWeek';
 
@@ -557,6 +571,12 @@ export function TemplateScheduleCalendar({
                   instructor: info.event.getResources?.()?.[0]?.extendedProps?.instructor || null,
                   dayOfWeek: normalizeDayToken(info.event.start?.getDay?.()),
                 });
+                return;
+              }
+
+              const missingFormsCount = info.event.extendedProps?.missingFormsCount || 0;
+              if (missingFormsCount > 0 && info.jsEvent?.target?.closest?.('.reinex-template-event-card__missing-forms-badge')) {
+                onMissingFormsClick?.(info.event.extendedProps.template, info.event.extendedProps.missingForms);
                 return;
               }
 

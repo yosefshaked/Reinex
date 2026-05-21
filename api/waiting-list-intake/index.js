@@ -15,7 +15,6 @@ import {
   respond,
   withOrgScope,
 } from '../_shared/org-bff.js';
-import { sendAndLogBrevoEmail } from '../_shared/email-log.js';
 import {
   buildSharedBlockMap,
   collectSharedBlockIds,
@@ -32,9 +31,16 @@ import {
   upsertClientGuardianLink,
   findClientProfileByIdentityNumber,
 } from '../_shared/client-profiles.js';
-import { resolvePublicAppBaseUrl } from '../_shared/public-app-url.js';
 import { normalizePreferredTimesToGrid } from '../_shared/time-grid.js';
 import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+import {
+  getNowIso,
+  getFutureIso,
+  buildInviteLink,
+  loadInviteRoutingByCategory,
+  findActiveRoutingBySubmission,
+  sendInviteEmail,
+} from '../_shared/form-routing.js';
 
 const ROUTING_CATEGORY = 'waiting_list_intake';
 const DEFAULT_INVITE_TTL_MINUTES = 10080;
@@ -157,40 +163,6 @@ function selectedDaysCoveredByRanges(preferredDays, preferredTimes) {
   return preferredDays.every((day) => coveredDays.has(day));
 }
 
-function resolveSubmitBaseUrl(req, env) {
-  return resolvePublicAppBaseUrl(req, env, { fallback: 'https://reinex.app' });
-}
-
-function buildInviteLink(req, env, inviteToken) {
-  const baseUrl = resolveSubmitBaseUrl(req, env);
-  const params = new URLSearchParams();
-  params.set('invite', inviteToken);
-  return `${baseUrl}/#/submit?${params.toString()}`;
-}
-
-function getNowIso() {
-  return new Date().toISOString();
-}
-
-function getFutureIso(minutes) {
-  return new Date(Date.now() + (minutes * 60 * 1000)).toISOString();
-}
-
-function formatInviteDeadline(value) {
-  if (!value) return '';
-  try {
-    return new Intl.DateTimeFormat('he-IL', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Asia/Jerusalem',
-    }).format(new Date(value));
-  } catch {
-    return String(value);
-  }
-}
 
 function parseInviteTtlMinutes(raw) {
   const parsed = Number(raw);
@@ -248,64 +220,12 @@ async function listActiveServices(client, orgId) {
   return Array.isArray(data) ? data : [];
 }
 
-function buildEmailText({ formName, inviteUrl, expiresAt }) {
-  const formattedDeadline = formatInviteDeadline(expiresAt);
-  return [
-    'שלום,',
-    '',
-    `שמחים שיצרתם איתנו קשר.`,
-    '',
-    `כדי שנוכל לקדם את ההצטרפות, נשמח שתמלאו את ${formName || 'טופס רשימת המתנה'} בקישור הבא:`,
-    inviteUrl,
-    '',
-    formattedDeadline ? `הקישור זמין עד ${formattedDeadline}.` : '',
-    '',
-    'אם יש שאלות, אפשר להשיב להודעה הזו ונשמח לעזור.',
-  ].join('\n');
+function loadInviteRouting(controlClient, inviteToken) {
+  return loadInviteRoutingByCategory(controlClient, inviteToken, ROUTING_CATEGORY);
 }
 
-function buildEmailHtml({ formName, inviteUrl, expiresAt }) {
-  const formattedDeadline = formatInviteDeadline(expiresAt);
-  return [
-    '<div dir="rtl" style="font-family:Arial,sans-serif;line-height:1.7;color:#0f172a">',
-    '<p>שלום,</p>',
-    '<p>שמחים שיצרתם איתנו קשר.</p>',
-    `<p>כדי שנוכל לקדם את ההצטרפות, נשמח שתמלאו את <strong>${formName || 'טופס רשימת המתנה'}</strong> בקישור הבא:</p>`,
-    `<p><a href="${inviteUrl}" style="color:#2563eb">${inviteUrl}</a></p>`,
-    formattedDeadline ? `<p>הקישור זמין עד <strong>${formattedDeadline}</strong>.</p>` : '',
-    '<p>אם יש שאלות, אפשר להשיב להודעה הזו ונשמח לעזור.</p>',
-    '</div>',
-  ].filter(Boolean).join('');
-}
-
-async function loadInviteRouting(controlClient, inviteToken) {
-  if (!UUID_PATTERN.test(inviteToken)) return null;
-  const nowIso = getNowIso();
-  const { data, error } = await controlClient
-    .from('active_routing')
-    .select('id, org_id, routing_info, expires_at, metadata')
-    .eq('id', inviteToken)
-    .eq('category', ROUTING_CATEGORY)
-    .gt('expires_at', nowIso)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
-}
-
-async function findActiveInviteRoutingBySubmission(controlClient, submissionId) {
-  if (!UUID_PATTERN.test(String(submissionId || ''))) return null;
-  const nowIso = getNowIso();
-  const { data, error } = await controlClient
-    .from('active_routing')
-    .select('id, org_id, routing_info, expires_at, metadata')
-    .eq('category', ROUTING_CATEGORY)
-    .contains('routing_info', { submission_id: submissionId })
-    .gt('expires_at', nowIso)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
+function findActiveInviteRoutingBySubmission(controlClient, submissionId) {
+  return findActiveRoutingBySubmission(controlClient, submissionId, ROUTING_CATEGORY);
 }
 
 async function findPendingIntakeSubmission(client, orgId, { clientProfileId, formId, primaryServiceId, allowAdditionalServices }) {
@@ -571,12 +491,14 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
 
         if (deliveryMethod === 'email') {
           try {
-            await sendAndLogBrevoEmail(controlClient, {
-              to: email,
-              subject: `${form.name || 'טופס רשימת המתנה'} - קישור למילוי`,
-              textContent: buildEmailText({ formName: form.name, inviteUrl, expiresAt: existingRouting.expires_at || null }),
-              htmlContent: buildEmailHtml({ formName: form.name, inviteUrl, expiresAt: existingRouting.expires_at || null }),
-            }, { env }, context, { emailType: 'waiting_list', orgId });
+            await sendInviteEmail(controlClient, env, context, {
+              toEmail: email,
+              formName: form.name || 'טופס רשימת המתנה',
+              inviteUrl,
+              expiresAt: existingRouting.expires_at || null,
+              emailType: 'waiting_list',
+              orgId,
+            });
             responseBody.delivery_status = 'sent';
           } catch (error) {
             context.log?.warn?.('waiting-list-intake email resend failed for reused invite; returning manual fallback', {
@@ -765,12 +687,14 @@ async function sendInvite(context, req, { controlClient, env, orgId, userId, use
 
   if (deliveryMethod === 'email') {
     try {
-      await sendAndLogBrevoEmail(controlClient, {
-        to: email,
-        subject: `${form.name || 'טופס רשימת המתנה'} - קישור למילוי`,
-        textContent: buildEmailText({ formName: form.name, inviteUrl, expiresAt }),
-        htmlContent: buildEmailHtml({ formName: form.name, inviteUrl, expiresAt }),
-      }, { env }, context, { emailType: 'waiting_list', orgId });
+      await sendInviteEmail(controlClient, env, context, {
+        toEmail: email,
+        formName: form.name || 'טופס רשימת המתנה',
+        inviteUrl,
+        expiresAt,
+        emailType: 'waiting_list',
+        orgId,
+      });
       responseBody.delivery_status = 'sent';
     } catch (error) {
       context.log?.warn?.('waiting-list-intake email send failed; returning invite for manual fallback', {
