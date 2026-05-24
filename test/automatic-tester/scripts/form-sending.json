@@ -2,9 +2,9 @@
   "meta": {
     "id": "form-sending",
     "name": "Form Sending",
-    "description": "Tests sending forms from every entry point in the app: student header (WhatsApp), student forms tab (email), one-time customers (WhatsApp), and service-required forms.",
-    "version": "1.1.0",
-    "last_validated_at": "2026-05-24T10:45:25Z",
+    "description": "Tests sending forms from every entry point in the app: student header (WhatsApp), student forms tab (email), one-time customers (WhatsApp), and service-required forms with shared contact resolution.",
+    "version": "1.2.0",
+    "last_validated_at": "2026-05-24T13:51:46Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -244,7 +244,7 @@
         {
           "id": "send-required-form",
           "action": "apiCall",
-          "description": "Send the required form invite by WhatsApp for the test student",
+          "description": "Send the required form invite by WhatsApp for the test student, relying on shared contact resolution rather than an explicit phone override",
           "method": "POST",
           "endpoint": "/api/student-required-forms/send",
           "body": {
@@ -253,8 +253,7 @@
             "form_id": "{{REQUIRED_FORM_ID}}",
             "client_profile_id": "{{STUDENT_CLIENT_PROFILE_ID}}",
             "student_id": "{{STUDENT_UUID}}",
-            "delivery_method": "whatsapp",
-            "phone": "{{STUDENT_PHONE}}"
+            "delivery_method": "whatsapp"
           },
           "stores": [
             { "variable": "REQUIRED_FORM_INVITE_TOKEN", "field": "invite_token" },

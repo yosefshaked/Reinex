@@ -1090,6 +1090,7 @@ CREATE TABLE IF NOT EXISTS public."Services" (
   "color" text,
   "is_active" boolean NOT NULL DEFAULT true,
   "metadata" jsonb,
+  "required_forms" jsonb NOT NULL DEFAULT '[]'::jsonb,
   CONSTRAINT "Services_pkey" PRIMARY KEY ("id"),
   CONSTRAINT Services_payment_model_check CHECK ("payment_model" IS NULL OR "payment_model" IN ('fixed_rate', 'per_student')),
   CONSTRAINT Services_default_customer_charge_amount_non_negative_check CHECK ("default_customer_charge_amount" IS NULL OR "default_customer_charge_amount" >= 0)
@@ -1310,8 +1311,21 @@ SET availability_windows = '[]'::jsonb
 WHERE availability_windows IS NULL;
 
 
-CREATE UNIQUE INDEX IF NOT EXISTS instructor_service_capabilities_employee_service_uidx
-  ON public.instructor_service_capabilities (org_id, employee_id, service_id);
+-- Only create the staging index if the named constraint does not already exist.
+-- On first run: index is created here, then promoted to the constraint below (and renamed).
+-- On re-run: the constraint (and its backing index under the constraint name) already exist,
+-- so this block is skipped — preventing a redundant standalone unique index.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'instructor_service_capabilities_org_employee_service_uniq'
+      AND conrelid = 'public.instructor_service_capabilities'::regclass
+  ) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS instructor_service_capabilities_employee_service_uidx
+      ON public.instructor_service_capabilities (org_id, employee_id, service_id);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS instructor_service_capabilities_employee_id_idx
   ON public.instructor_service_capabilities (org_id, employee_id);
@@ -1507,7 +1521,6 @@ CREATE TABLE IF NOT EXISTS public.lesson_instances (
   CONSTRAINT lesson_instances_instructor_employee_id_fkey FOREIGN KEY (instructor_employee_id) REFERENCES public."Employees"(id),
   CONSTRAINT lesson_instances_service_id_fkey FOREIGN KEY (service_id) REFERENCES public."Services"(id),
   CONSTRAINT lesson_instances_applied_override_id_fkey FOREIGN KEY (applied_override_id) REFERENCES public.lesson_template_overrides(id),
-  CONSTRAINT lesson_instances_status_check CHECK (status IN ('scheduled','completed','cancelled')),
   CONSTRAINT lesson_instances_documentation_status_check CHECK (documentation_status IN ('undocumented','documented')),
   CONSTRAINT lesson_instances_created_source_check CHECK (created_source IN ('weekly_generation','one_time','manual_reschedule','migration'))
 );
@@ -1538,6 +1551,10 @@ END $$;
 
 ALTER TABLE public.lesson_instances
   DROP CONSTRAINT IF EXISTS lesson_instances_status_check;
+
+ALTER TABLE public.lesson_instances
+  ADD CONSTRAINT lesson_instances_status_check
+  CHECK (status IN ('scheduled', 'completed', 'cancelled'));
 
 DO $$
 BEGIN
@@ -5565,7 +5582,7 @@ CREATE TABLE IF NOT EXISTS public.ledger_accounts (
   CONSTRAINT ledger_accounts_target_check CHECK (
     (account_type = 'student' AND student_id IS NOT NULL AND hmo_provider_id IS NULL)
     OR (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL)
-    OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL)
+    OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL AND client_profile_id IS NULL)
   )
 );
 
@@ -5648,7 +5665,7 @@ BEGIN
     INTO v_invalid_count
   FROM public.ledger_accounts account
   WHERE NOT (
-    (account.account_type = 'student' AND account.student_id IS NOT NULL AND account.client_profile_id IS NOT NULL AND account.hmo_provider_id IS NULL)
+    (account.account_type = 'student' AND account.student_id IS NOT NULL AND account.hmo_provider_id IS NULL)
     OR (account.account_type = 'client_profile' AND account.client_profile_id IS NOT NULL AND account.student_id IS NULL AND account.hmo_provider_id IS NULL)
     OR (account.account_type = 'hmo_provider' AND account.hmo_provider_id IS NOT NULL AND account.student_id IS NULL AND account.client_profile_id IS NULL)
   );
@@ -5679,7 +5696,7 @@ ALTER TABLE public.ledger_accounts
 ALTER TABLE public.ledger_accounts
   ADD CONSTRAINT ledger_accounts_target_check
   CHECK (
-    (account_type = 'student' AND student_id IS NOT NULL AND client_profile_id IS NOT NULL AND hmo_provider_id IS NULL)
+    (account_type = 'student' AND student_id IS NOT NULL AND hmo_provider_id IS NULL)
     OR (account_type = 'client_profile' AND client_profile_id IS NOT NULL AND student_id IS NULL AND hmo_provider_id IS NULL)
     OR (account_type = 'hmo_provider' AND hmo_provider_id IS NOT NULL AND student_id IS NULL AND client_profile_id IS NULL)
   );
@@ -5711,7 +5728,7 @@ CREATE TABLE IF NOT EXISTS public.hmo_invoice_batches (
   hmo_provider_id uuid NOT NULL REFERENCES public.hmo_providers(id) ON DELETE RESTRICT,
   period_start date NULL,
   period_end date NULL,
-  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'issued', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'closed', 'cancelled')),
+  status text NOT NULL DEFAULT 'draft',
   total_amount integer NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
   paid_amount integer NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
   external_reference text NULL,
@@ -5753,7 +5770,7 @@ CREATE TABLE IF NOT EXISTS public.hmo_invoice_batch_items (
   expected_amount integer NOT NULL DEFAULT 0 CHECK (expected_amount >= 0),
   expected_unit_count integer NOT NULL DEFAULT 1 CHECK (expected_unit_count > 0),
   paid_amount integer NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
-  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'submitted', 'acknowledged', 'partially_paid', 'paid', 'disputed', 'cancelled')),
+  status text NOT NULL DEFAULT 'draft',
   lesson_participant_id uuid NULL REFERENCES public.lesson_participants(id) ON DELETE SET NULL,
   hmo_authorization_id uuid NULL REFERENCES public.hmo_authorizations(id) ON DELETE SET NULL,
   hmo_provider_id uuid NULL REFERENCES public.hmo_providers(id) ON DELETE SET NULL,

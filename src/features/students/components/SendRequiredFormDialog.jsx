@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, Mail, MessageCircle, ExternalLink } from 'lucide-react';
 import {
   Dialog,
@@ -18,16 +18,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { resolveApiErrorMessage } from '@/lib/error-support.js';
-
-function normalizeWaPhone(value) {
-  const digits = String(value || '').replace(/[^\d]/g, '');
-  if (!digits) return '';
-  if (digits.startsWith('00')) return digits.slice(2);
-  if (digits.startsWith('972')) return digits;
-  if (digits.startsWith('0')) return `972${digits.slice(1)}`;
-  if (digits.length === 9 && digits.startsWith('5')) return `972${digits}`;
-  return digits;
-}
+import { normalizeFormDeliveryPhone, resolveSubjectFormDeliveryContact } from '@/features/forms/lib/delivery-contact.js';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -43,7 +34,7 @@ function formatDateTime(value) {
 }
 
 function buildWhatsAppInviteLink(phone, inviteUrl, formLabel) {
-  const normalizedPhone = normalizeWaPhone(phone);
+  const normalizedPhone = normalizeFormDeliveryPhone(phone);
   const message = [
     'שלום,',
     '',
@@ -91,6 +82,7 @@ export default function SendRequiredFormDialog({
   onSent,
   student = null,
   clientProfile = null,
+  participant = null,
   serviceId = '',
   formId = '',
   requiredFormLabel = 'טופס חובה',
@@ -114,10 +106,14 @@ export default function SendRequiredFormDialog({
     }
   }, [open]);
 
-  const phone = String(clientProfile?.phone || student?.phone || '');
-  const email = String(clientProfile?.email || student?.email || '');
-  const clientProfileId = String(clientProfile?.id || student?.client_profile_id || '');
-  const studentId = String(student?.id || '');
+  const deliveryContact = useMemo(
+    () => resolveSubjectFormDeliveryContact({ student, clientProfile, participant }),
+    [clientProfile, participant, student],
+  );
+  const phone = String(deliveryContact.phone || '');
+  const email = String(deliveryContact.email || '');
+  const clientProfileId = String(clientProfile?.id || participant?.client_profile_id || participant?.student?.client_profile_id || student?.client_profile_id || '');
+  const studentId = String(student?.id || participant?.student_id || participant?.student?.id || '');
 
   const canSend = Boolean(clientProfileId && serviceId && formId && activeOrgId && session);
 
@@ -194,9 +190,7 @@ export default function SendRequiredFormDialog({
     }
   };
 
-  const subjectName = [clientProfile?.first_name, clientProfile?.last_name].filter(Boolean).join(' ')
-    || [student?.first_name, student?.last_name].filter(Boolean).join(' ')
-    || 'הלקוח/ה';
+  const subjectName = deliveryContact.name || 'הלקוח/ה';
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose?.(); }}>

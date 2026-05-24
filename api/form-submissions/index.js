@@ -32,6 +32,7 @@ import {
   resolveSchemaWithSharedBlocks,
 } from '../_shared/forms-runtime.js';
 import { resolvePublicAppBaseUrl } from '../_shared/public-app-url.js';
+import { resolveClientProfileDeliveryDestination } from '../_shared/form-delivery-destination.js';
 const OTP_DIGITS = 6;
 const OTP_TTL_MINUTES = 15;
 const ROUTING_CATEGORY = 'form_submission';
@@ -85,10 +86,6 @@ function generateOtp() {
 
 function normalizeIdentityNumber(value) {
   return String(value || '').replace(/\D/g, '').trim();
-}
-
-function normalizePhone(value) {
-  return String(value || '').replace(/[^\d]/g, '').trim();
 }
 
 function normalizeJsonObject(value, fallback = {}) {
@@ -254,45 +251,6 @@ function resolveFormVersionMetadata(formRecord, { suffix = '' } = {}) {
     [`published_version${keySuffix}`]: Number.isFinite(publishedVersion) ? publishedVersion : null,
     [`published_at_snapshot${keySuffix}`]: normalizeString(metadata.published_at || formRecord?.published_at) || null,
   };
-}
-
-async function resolveSubmissionDestination(client, orgId, clientProfileId, deliveryMethod) {
-  if (!UUID_PATTERN.test(String(clientProfileId || ''))) {
-    return '';
-  }
-
-  const { data: clientProfile, error: profileError } = await withOrgScope(client, 'client_profiles', orgId)
-    .select('id, phone, email')
-    .eq('id', clientProfileId)
-    .maybeSingle();
-
-  if (profileError) throw profileError;
-  if (!clientProfile) return '';
-
-  const { data: guardianLink, error: guardianLinkError } = await withOrgScope(client, 'client_guardians', orgId)
-    .select('guardian_id, is_primary')
-    .eq('client_profile_id', clientProfileId)
-    .order('is_primary', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (guardianLinkError) throw guardianLinkError;
-
-  let guardian = null;
-  if (guardianLink?.guardian_id) {
-    const { data: guardianRow, error: guardianError } = await withOrgScope(client, 'guardians', orgId)
-      .select('id, phone, email')
-      .eq('id', guardianLink.guardian_id)
-      .maybeSingle();
-    if (guardianError) throw guardianError;
-    guardian = guardianRow || null;
-  }
-
-  if (deliveryMethod === 'whatsapp') {
-    return normalizePhone(clientProfile.phone) || normalizePhone(guardian?.phone);
-  }
-
-  return normalizeString(clientProfile.email || guardian?.email).toLowerCase();
 }
 
 function withOtpSubjectFilter(query, { clientProfileId, studentId }) {
@@ -1285,7 +1243,7 @@ async function initiateSubmission(context, req, { controlClient, env, orgId, use
 
   let destination = '';
   try {
-    destination = await resolveSubmissionDestination(controlClient, orgId, subject.clientProfileId, deliveryMethod);
+    ({ destination } = await resolveClientProfileDeliveryDestination(controlClient, orgId, subject.clientProfileId, deliveryMethod));
     if (!destination) {
       return respond(context, 400, { message: deliveryMethod === 'whatsapp' ? 'client_phone_missing' : 'client_email_missing' });
     }
@@ -1548,7 +1506,7 @@ async function resendSubmission(context, req, { controlClient, env, orgId, userI
 
   let destination = '';
   try {
-    destination = await resolveSubmissionDestination(controlClient, orgId, subject.clientProfileId, deliveryMethod);
+    ({ destination } = await resolveClientProfileDeliveryDestination(controlClient, orgId, subject.clientProfileId, deliveryMethod));
     if (!destination) {
       return respond(context, 400, { message: deliveryMethod === 'whatsapp' ? 'client_phone_missing' : 'client_email_missing' });
     }

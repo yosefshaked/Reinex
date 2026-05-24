@@ -10,6 +10,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import SendRequiredFormDialog from '@/features/students/components/SendRequiredFormDialog.jsx';
+import { resolveSubjectFormDeliveryContact } from '@/features/forms/lib/delivery-contact.js';
 
 function formatDateTime(value) {
   if (!value) return null;
@@ -79,11 +80,11 @@ export default function TemplateMissingFormsDialog({
     onClose?.();
   }
 
-  // Build a lookup from client_profile_id → participant student data
+  // Build a lookup from client_profile_id to the full participant contact shape.
   const participantsByClientProfile = {};
   for (const p of template?.participants || []) {
-    const cpId = p?.student?.client_profile_id;
-    if (cpId) participantsByClientProfile[cpId] = p.student;
+    const cpId = p?.client_profile_id || p?.student?.client_profile_id || p?.client_profile?.id;
+    if (cpId) participantsByClientProfile[cpId] = p;
   }
 
   const serviceName = template?.service?.name || '';
@@ -105,8 +106,9 @@ export default function TemplateMissingFormsDialog({
 
           <div className="space-y-3 py-1">
             {missingFormsEntries.map((entry, i) => {
-              const student = participantsByClientProfile[entry.client_profile_id] || null;
-              const studentName = [student?.first_name, student?.last_name].filter(Boolean).join(' ') || '—';
+              const participant = participantsByClientProfile[entry.client_profile_id] || null;
+              const contact = resolveSubjectFormDeliveryContact({ participant });
+              const studentName = contact.name || '—';
 
               return (
                 <div
@@ -143,7 +145,7 @@ export default function TemplateMissingFormsDialog({
                     size="sm"
                     variant="outline"
                     className="gap-1.5 text-xs h-7"
-                    onClick={() => setSendTarget({ entry, student })}
+                    onClick={() => setSendTarget({ entry, participant })}
                   >
                     <Send className="h-3 w-3" />
                     {entry.last_sent_at ? 'שלח שוב' : 'שלח טופס'}
@@ -163,14 +165,9 @@ export default function TemplateMissingFormsDialog({
             setSendTarget(null);
             onSent?.();
           }}
-          student={sendTarget.student ? { id: sendTarget.student.id } : null}
-          clientProfile={sendTarget.student ? {
-            id: sendTarget.entry.client_profile_id,
-            first_name: sendTarget.student.first_name || '',
-            last_name: sendTarget.student.last_name || '',
-            phone: sendTarget.student.phone || '',
-            email: sendTarget.student.email || '',
-          } : null}
+          student={sendTarget.participant?.student || null}
+          clientProfile={sendTarget.participant?.client_profile || null}
+          participant={sendTarget.participant || null}
           serviceId={sendTarget.entry.service_id}
           formId={sendTarget.entry.form_id}
           requiredFormLabel={sendTarget.entry.required_form_label || sendTarget.entry.form_name}

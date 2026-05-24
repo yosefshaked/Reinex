@@ -229,6 +229,90 @@ function normalizeTemplateRecord(template) {
   };
 }
 
+async function attachPrimaryGuardiansToTemplateRecords(client, orgId, records, context) {
+  const rows = Array.isArray(records) ? records : [];
+  const clientProfileIds = Array.from(new Set(
+    rows.flatMap((template) => (
+      Array.isArray(template?.participants)
+        ? template.participants.map((participant) => participant?.student?.client_profile_id).filter(Boolean)
+        : []
+    )),
+  ));
+
+  if (!clientProfileIds.length) return rows;
+
+  let guardianLinks = [];
+  try {
+    const { data, error } = await withOrgScope(client, 'client_guardians', orgId)
+      .select('client_profile_id, guardian_id, relationship, is_primary, created_at')
+      .in('client_profile_id', clientProfileIds)
+      .order('client_profile_id', { ascending: true })
+      .order('is_primary', { ascending: false })
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    guardianLinks = Array.isArray(data) ? data : [];
+  } catch (error) {
+    context?.log?.warn?.('lesson-templates failed to fetch template participant guardian links', { message: error?.message });
+    return rows;
+  }
+
+  const primaryLinkByClientProfile = new Map();
+  for (const link of guardianLinks) {
+    if (!link?.client_profile_id || !link?.guardian_id || primaryLinkByClientProfile.has(link.client_profile_id)) continue;
+    primaryLinkByClientProfile.set(link.client_profile_id, link);
+  }
+
+  const guardianIds = Array.from(new Set(
+    Array.from(primaryLinkByClientProfile.values()).map((link) => link.guardian_id).filter(Boolean),
+  ));
+  if (!guardianIds.length) return rows;
+
+  const guardiansById = new Map();
+  try {
+    const { data, error } = await withOrgScope(client, 'guardians', orgId)
+      .select('id, first_name, middle_name, last_name, phone, email')
+      .in('id', guardianIds);
+
+    if (error) throw error;
+    for (const guardian of data || []) {
+      if (guardian?.id) guardiansById.set(guardian.id, guardian);
+    }
+  } catch (error) {
+    context?.log?.warn?.('lesson-templates failed to fetch template participant guardians', { message: error?.message });
+    return rows;
+  }
+
+  return rows.map((template) => ({
+    ...template,
+    participants: Array.isArray(template?.participants)
+      ? template.participants.map((participant) => {
+          const clientProfileId = participant?.student?.client_profile_id;
+          const link = clientProfileId ? primaryLinkByClientProfile.get(clientProfileId) : null;
+          const guardian = link?.guardian_id ? guardiansById.get(link.guardian_id) : null;
+          if (!guardian || !participant?.student) return participant;
+
+          return {
+            ...participant,
+            student: {
+              ...participant.student,
+              primary_guardian: {
+                id: guardian.id,
+                first_name: guardian.first_name,
+                middle_name: guardian.middle_name,
+                last_name: guardian.last_name,
+                phone: guardian.phone ?? null,
+                email: guardian.email ?? null,
+                relationship: link.relationship ?? null,
+                is_primary: link.is_primary ?? true,
+              },
+            },
+          };
+        })
+      : [],
+  }));
+}
+
 function isDuplicateTemplateConstraintError(error) {
   const code = normalizeString(error?.code);
   if (code === '23P01' || code === '23505') {
@@ -501,7 +585,12 @@ export default async function lessonTemplates(context, req) {
         return tracked500('failed_to_load_lesson_templates', error);
       }
 
-      const rows = (Array.isArray(data) ? [...data] : []).map(normalizeTemplateRecord);
+      const rows = await attachPrimaryGuardiansToTemplateRecords(
+        supabase,
+        orgId,
+        (Array.isArray(data) ? [...data] : []).map(normalizeTemplateRecord),
+        context,
+      );
       rows.sort(compareTemplatesByDayAndTime);
 
       return respond(context, 200, rows);
@@ -576,7 +665,13 @@ export default async function lessonTemplates(context, req) {
       return tracked500('failed_to_load_lesson_templates', error);
     }
 
-    return respond(context, 200, (Array.isArray(data) ? data : []).map(normalizeTemplateRecord));
+    const rows = await attachPrimaryGuardiansToTemplateRecords(
+      supabase,
+      orgId,
+      (Array.isArray(data) ? data : []).map(normalizeTemplateRecord),
+      context,
+    );
+    return respond(context, 200, rows);
   }
 
   if (!isAdmin) {

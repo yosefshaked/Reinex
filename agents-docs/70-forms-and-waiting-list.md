@@ -26,6 +26,7 @@
 - Builder-side schema helpers in [`../src/features/forms/lib/form-schema.js`](../src/features/forms/lib/form-schema.js)
 - Runtime schema helpers in [`../api/_shared/forms-runtime.js`](../api/_shared/forms-runtime.js)
 - `resolvePublicFormState`, `prepareAnswersForStorage`, `evaluateAlertFlags`, `materializeSchemaForSnapshot`
+- Delivery contact helpers: frontend `resolveSubjectFormDeliveryContact` / `normalizeFormDeliveryPhone` in [`../src/features/forms/lib/delivery-contact.js`](../src/features/forms/lib/delivery-contact.js), backend `resolveClientProfileDeliveryDestination` in [`../api/_shared/form-delivery-destination.js`](../api/_shared/form-delivery-destination.js). Use these instead of hand-reading `student.phone` or `clientProfile.phone`; form sends must fall back through client profile and primary guardian consistently.
 - Shared block helpers: `buildSharedBlockMap`, `collectSharedBlockIds`, `resolveSchemaWithSharedBlocks`
 - Waiting-list/client-profile helpers in [`../api/_shared/client-profiles.js`](../api/_shared/client-profiles.js)
 - `sendBrevoEmail`

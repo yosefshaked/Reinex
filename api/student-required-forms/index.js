@@ -34,6 +34,7 @@ import {
   createInviteRouting,
   sendInviteEmail,
 } from '../_shared/form-routing.js';
+import { resolveClientProfileDeliveryDestination } from '../_shared/form-delivery-destination.js';
 
 const ROUTING_CATEGORY = 'required_form';
 const WORKFLOW_KIND = 'required_form';
@@ -49,10 +50,6 @@ function normalizeUuid(value) {
 function normalizeDeliveryMethod(value) {
   const normalized = normalizeString(value).toLowerCase();
   return DELIVERY_METHODS.has(normalized) ? normalized : '';
-}
-
-function normalizePhone(value) {
-  return String(value || '').replace(/[^\d]/g, '').trim();
 }
 
 function normalizeEmail(value) {
@@ -175,16 +172,14 @@ async function sendRequiredForm(context, req, { controlClient, env, orgId, userI
   const clientProfileId = normalizeUuid(body?.client_profile_id || body?.clientProfileId);
   const studentId = normalizeUuid(body?.student_id || body?.studentId) || null;
   const deliveryMethod = normalizeDeliveryMethod(body?.delivery_method || body?.deliveryMethod);
-  const phone = normalizePhone(body?.phone);
-  const email = normalizeEmail(body?.email);
+  const requestedPhone = body?.phone;
+  const requestedEmail = normalizeEmail(body?.email);
   const ttlMinutes = parseInviteTtlMinutes(body?.expires_in_minutes ?? body?.expiresInMinutes);
 
   if (!serviceId) return respond(context, 400, { message: 'invalid_service_id' });
   if (!formId) return respond(context, 400, { message: 'invalid_form_id' });
   if (!clientProfileId) return respond(context, 400, { message: 'invalid_client_profile_id' });
   if (!deliveryMethod) return respond(context, 400, { message: 'invalid_delivery_method' });
-  if (deliveryMethod === 'whatsapp' && !phone) return respond(context, 400, { message: 'missing_phone' });
-  if (deliveryMethod === 'email' && !email) return respond(context, 400, { message: 'missing_email' });
 
   const client = controlClient;
 
@@ -219,6 +214,31 @@ async function sendRequiredForm(context, req, { controlClient, env, orgId, userI
     context.log?.error?.('student-required-forms failed to load client profile', { message: cpError?.message, clientProfileId });
     return respond(context, 404, { message: 'client_profile_not_found' });
   }
+
+  let phone = '';
+  let email = '';
+  try {
+    const resolvedDestination = await resolveClientProfileDeliveryDestination(client, orgId, clientProfileId, deliveryMethod, {
+      preferredPhone: requestedPhone,
+      preferredEmail: requestedEmail,
+      clientProfile,
+    });
+    if (deliveryMethod === 'whatsapp') {
+      phone = resolvedDestination.destination;
+    } else {
+      email = resolvedDestination.destination;
+    }
+  } catch (destinationError) {
+    context.log?.error?.('student-required-forms failed resolving delivery destination', {
+      message: destinationError?.message,
+      clientProfileId,
+      deliveryMethod,
+    });
+    return respond(context, 500, { message: 'failed_to_resolve_destination' });
+  }
+
+  if (deliveryMethod === 'whatsapp' && !phone) return respond(context, 400, { message: 'missing_phone' });
+  if (deliveryMethod === 'email' && !email) return respond(context, 400, { message: 'missing_email' });
 
   const nowIso = getNowIso();
   const correlationId = randomUUID();
