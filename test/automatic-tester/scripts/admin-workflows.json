@@ -3,8 +3,8 @@
     "id": "admin-workflows",
     "name": "Admin Core Workflows",
     "description": "Smoke-tests the most important admin-only pages and flows: dashboard tasks, calendar, forms builder, financials, settings, and audit log.",
-    "version": "1.0.0",
-    "last_validated_at": "2026-04-23T23:59:00Z",
+    "version": "1.0.1",
+    "last_validated_at": "2026-05-24T10:45:25Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [

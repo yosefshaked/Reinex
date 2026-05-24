@@ -3,8 +3,8 @@
     "id": "student-lifecycle",
     "name": "Student Lifecycle",
     "description": "Full lifecycle: admin pre-creates a student via API, creates a waiting-list entry by searching the combobox, verifies the entry, verifies the student appears in the roster, and views the student profile.",
-    "version": "1.2.0",
-    "last_validated_at": "2026-04-25T00:00:00Z",
+    "version": "1.2.1",
+    "last_validated_at": "2026-05-24T10:28:54Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [

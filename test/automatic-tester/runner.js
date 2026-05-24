@@ -99,6 +99,7 @@ const env = {
   INSTRUCTOR_EMAIL:   process.env.INSTRUCTOR_EMAIL   || '',
   INSTRUCTOR_PASSWORD:process.env.INSTRUCTOR_PASSWORD|| '',
   TEST_ORG_ID:        process.env.TEST_ORG_ID        || '',
+  SUPABASE_URL:       process.env.SUPABASE_URL       || '',
   SERVICE_ROLE_KEY:   process.env.SERVICE_ROLE_KEY   || '',
 };
 

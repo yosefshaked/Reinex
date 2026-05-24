@@ -2,9 +2,9 @@
   "meta": {
     "id": "form-sending",
     "name": "Form Sending",
-    "description": "Tests sending forms from every entry point in the app: student header (WhatsApp), student forms tab (email), and one-time customers (WhatsApp).",
-    "version": "1.0.0",
-    "last_validated_at": "2026-04-29T00:00:00Z",
+    "description": "Tests sending forms from every entry point in the app: student header (WhatsApp), student forms tab (email), one-time customers (WhatsApp), and service-required forms.",
+    "version": "1.1.0",
+    "last_validated_at": "2026-05-24T10:45:25Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -14,9 +14,13 @@
       "api_endpoints": [
         "POST /api/forms",
         "PUT /api/forms/:id",
+        "POST /api/services",
         "POST /api/students-list",
         "GET /api/students-list",
-        "POST /api/client-profiles"
+        "POST /api/client-profiles",
+        "POST /api/student-required-forms/send",
+        "GET /api/student-required-forms/load",
+        "POST /api/student-required-forms/submit"
       ]
     }
   },
@@ -33,6 +37,9 @@
     "STUDENT_PHONE": "0501234500",
     "STUDENT_EMAIL": "autotest.student@reinex-test.local",
     "FORM_NAME": "טופס בדיקה אוטומטי",
+    "REQUIRED_FORM_NAME": "טופס חובה בדיקה אוטומטי",
+    "REQUIRED_SERVICE_NAME": "שירות טופס חובה אוטומטי",
+    "REQUIRED_FORM_LABEL": "אישור חובה אוטומטי",
     "CLIENT_FIRST": "לקוח",
     "CLIENT_LAST": "חד פעמי",
     "CLIENT_PHONE": "0501234599",
@@ -112,7 +119,10 @@
           "method": "GET",
           "endpoint": "/api/students-list?org_id={{TEST_ORG_ID}}&q={{STUDENT_ID}}",
           "store": "STUDENT_UUID",
-          "storeField": "0.id"
+          "storeField": "0.id",
+          "stores": [
+            { "variable": "STUDENT_CLIENT_PROFILE_ID", "field": "0.client_profile_id" }
+          ]
         },
         {
           "id": "ensure-student-email",
@@ -161,6 +171,115 @@
             "delivery_method": "whatsapp"
           },
           "ignoreStatus": [400, 409, 500, 502]
+        }
+      ]
+    },
+    {
+      "id": "api-setup-required-form",
+      "name": "API – Create and publish a required-form template",
+      "description": "Creates a required-form template and publishes it so it can be attached to a service.",
+      "steps": [
+        {
+          "id": "create-required-form",
+          "action": "apiCall",
+          "description": "Create a required-form template",
+          "method": "POST",
+          "endpoint": "/api/forms",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "name": "{{REQUIRED_FORM_NAME}}",
+            "form_usage": "required_form"
+          },
+          "store": "REQUIRED_FORM_ID",
+          "storeField": "id"
+        },
+        {
+          "id": "publish-required-form",
+          "action": "apiCall",
+          "description": "Publish the required form so invite delivery can use the canonical published schema",
+          "method": "PUT",
+          "endpoint": "/api/forms/{{REQUIRED_FORM_ID}}",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "action": "publish"
+          }
+        }
+      ]
+    },
+    {
+      "id": "api-setup-required-service",
+      "name": "API – Create a service with a required form",
+      "description": "Creates a service whose required_forms config points at the published required-form template.",
+      "steps": [
+        {
+          "id": "create-required-service",
+          "action": "apiCall",
+          "description": "Create a service with a required form attached",
+          "method": "POST",
+          "endpoint": "/api/services",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "name": "{{REQUIRED_SERVICE_NAME}}",
+            "duration_minutes": 45,
+            "payment_model": "fixed_rate",
+            "required_forms": [
+              {
+                "form_id": "{{REQUIRED_FORM_ID}}",
+                "label": "{{REQUIRED_FORM_LABEL}}",
+                "enforcement": "warn",
+                "allow_resubmit": true
+              }
+            ]
+          },
+          "store": "REQUIRED_SERVICE_ID",
+          "storeField": "id"
+        }
+      ]
+    },
+    {
+      "id": "required-form-send-submit-api",
+      "name": "Required form send and public submit",
+      "description": "Exercises the service-required form flow: send invite, load public invite, and submit through the required-form public endpoint.",
+      "steps": [
+        {
+          "id": "send-required-form",
+          "action": "apiCall",
+          "description": "Send the required form invite by WhatsApp for the test student",
+          "method": "POST",
+          "endpoint": "/api/student-required-forms/send",
+          "body": {
+            "org_id": "{{TEST_ORG_ID}}",
+            "service_id": "{{REQUIRED_SERVICE_ID}}",
+            "form_id": "{{REQUIRED_FORM_ID}}",
+            "client_profile_id": "{{STUDENT_CLIENT_PROFILE_ID}}",
+            "student_id": "{{STUDENT_UUID}}",
+            "delivery_method": "whatsapp",
+            "phone": "{{STUDENT_PHONE}}"
+          },
+          "stores": [
+            { "variable": "REQUIRED_FORM_INVITE_TOKEN", "field": "invite_token" },
+            { "variable": "REQUIRED_FORM_SUBMISSION_ID", "field": "submission_id" }
+          ]
+        },
+        {
+          "id": "load-required-form-invite",
+          "action": "apiCall",
+          "description": "Load the public required-form invite payload",
+          "method": "GET",
+          "endpoint": "/api/student-required-forms/load?invite={{REQUIRED_FORM_INVITE_TOKEN}}",
+          "store": "REQUIRED_FORM_INVITE_FLOW",
+          "storeField": "flow"
+        },
+        {
+          "id": "submit-required-form",
+          "action": "apiCall",
+          "description": "Submit the required form through the public invite endpoint",
+          "method": "POST",
+          "endpoint": "/api/student-required-forms/submit",
+          "body": {
+            "invite_token": "{{REQUIRED_FORM_INVITE_TOKEN}}",
+            "answers": {}
+          }
         }
       ]
     },

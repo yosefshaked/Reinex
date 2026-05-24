@@ -3,8 +3,8 @@
     "id": "hmo-claiming",
     "name": "HMO Claiming – End to End",
     "description": "Full HMO claiming flow: create provider + track → assign authorization to student → create lesson → mark attended → open financials claims tab → create draft batch → submit batch.",
-    "version": "1.0.0",
-    "last_validated_at": "2026-05-11T00:00:00Z",
+    "version": "1.0.1",
+    "last_validated_at": "2026-05-24T10:28:54Z",
     "author": "claude-ai",
     "dependencies": {
       "routes": [
@@ -96,7 +96,7 @@
           "action": "apiCall",
           "description": "Direct Supabase INSERT to set base_rate=0 capability for the service – bypasses the PostgREST onConflict constraint issue in local dev. Ignores 409 if the row already exists.",
           "method": "POST",
-          "endpoint": "http://127.0.0.1:54331/rest/v1/instructor_service_capabilities",
+          "endpoint": "{{SUPABASE_URL}}/rest/v1/instructor_service_capabilities",
           "headers": {
             "apikey": "{{SERVICE_ROLE_KEY}}",
             "Prefer": "return=minimal"

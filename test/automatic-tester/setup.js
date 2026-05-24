@@ -1108,6 +1108,7 @@ function writeEnvFile(config) {
     '',
     `TEST_ORG_ID=${config.orgId}`,
     '',
+    `SUPABASE_URL=${config.supabaseUrl}`,
     `SERVICE_ROLE_KEY=${config.serviceRoleKey}`,
     '',
     `DEFAULT_BROWSER=chromium`,
@@ -1186,6 +1187,7 @@ async function main() {
     instructorEmail: TEST_USERS.find(u => u.key === 'instructor').email,
     password:        PASSWORD,
     orgId:           '',
+    supabaseUrl,
     serviceRoleKey,
   });
 
@@ -1269,6 +1271,7 @@ async function main() {
     instructorEmail: TEST_USERS.find(u => u.key === 'instructor').email,
     password:        PASSWORD,
     orgId,
+    supabaseUrl,
     serviceRoleKey,
   });
 

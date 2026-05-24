@@ -47,7 +47,7 @@ function normalizeOptionalJson(value) {
 function normalizeFormUsage(value) {
   const normalized = normalizeString(value).toLowerCase();
   if (!normalized) return '';
-  return normalized === 'waiting_list_intake' ? normalized : normalized === 'general' ? normalized : '';
+  return ['general', 'waiting_list_intake', 'required_form'].includes(normalized) ? normalized : '';
 }
 
 function normalizeSelectionMode(value) {
