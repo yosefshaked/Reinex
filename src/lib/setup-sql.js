@@ -3776,12 +3776,13 @@ BEGIN
     RAISE EXCEPTION 'invalid_org_id: x-org-id header is not a valid UUID';
   END;
 
-  -- Verify the caller is a member of the requested org
+  -- Verify the caller is an active member of the requested org
   IF NOT EXISTS (
     SELECT 1
     FROM public.org_memberships
     WHERE org_id = v_org_id
       AND user_id = auth.uid()
+      AND is_active = true
   ) THEN
     RAISE EXCEPTION 'forbidden: user is not a member of org %', v_org_id;
   END IF;

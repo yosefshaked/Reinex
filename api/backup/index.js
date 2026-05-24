@@ -1,4 +1,6 @@
 /* eslint-env node */
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { createSingleClient, readEnv, respond } from '../_shared/org-bff.js';
 import {
   encryptBackup,
@@ -39,7 +41,9 @@ export default async function backupRun(context, req) {
     }
 
     const suppliedServiceKey = getHeaderValue(req, SERVICE_KEY_HEADER);
-    if (!suppliedServiceKey || suppliedServiceKey !== expectedServiceKey) {
+    const left = createHash('sha256').update(String(suppliedServiceKey || ''), 'utf8').digest();
+    const right = createHash('sha256').update(String(expectedServiceKey), 'utf8').digest();
+    if (!suppliedServiceKey || !timingSafeEqual(Buffer.from(left), Buffer.from(right))) {
       return respond(context, 401, { message: 'unauthorized' });
     }
 
