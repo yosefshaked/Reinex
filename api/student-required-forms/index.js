@@ -25,10 +25,9 @@ import {
   resolvePublicFormState,
   resolveSchemaWithSharedBlocks,
 } from '../_shared/forms-runtime.js';
-import { attachErrorTracking, respondTracked } from '../_shared/error-events.js';
+import { attachErrorTracking } from '../_shared/error-events.js';
 import {
   getNowIso,
-  getFutureIso,
   buildInviteLink,
   loadInviteRoutingByCategory,
   findActiveRoutingBySubmission,
@@ -141,22 +140,6 @@ async function findPendingRequiredFormSubmission(client, orgId, { clientProfileI
     .maybeSingle();
   if (error) throw error;
   return data || null;
-}
-
-async function checkRequiredFormSubmitted(client, orgId, { clientProfileId, formId, serviceId }) {
-  if (!UUID_PATTERN.test(String(clientProfileId || '')) || !UUID_PATTERN.test(String(formId || '')) || !UUID_PATTERN.test(String(serviceId || ''))) {
-    return false;
-  }
-  const { data, error } = await withOrgScope(client, 'form_submissions', orgId)
-    .select('id')
-    .eq('client_profile_id', clientProfileId)
-    .eq('form_id', formId)
-    .eq('service_id', serviceId)
-    .contains('metadata', { workflow_kind: WORKFLOW_KIND, workflow_status: 'submitted' })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return Boolean(data?.id);
 }
 
 async function writeTenantAudit(context, client, params) {

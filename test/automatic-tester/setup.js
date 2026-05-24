@@ -19,7 +19,7 @@
  */
 
 import { execSync, spawnSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { writeFile as writeFileAsync } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -385,7 +385,8 @@ async function checkColumnExistsREST(supabaseUrl, serviceKey, table, column) {
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       // PGRST204 = column not found in schema cache
-      return !(body?.code === 'PGRST204' || body?.code === 'PGRST116');
+      // 42703 = PostgreSQL undefined_column
+      return !(body?.code === 'PGRST204' || body?.code === 'PGRST116' || body?.code === '42703');
     }
     return true;
   } catch {
@@ -532,7 +533,7 @@ async function applySchema(supabaseUrl, serviceKey) {
     );
 
     // Cleanup temp file
-    try { execSync(`rm -f "${tmpPath}"`); } catch { /* Windows: ignore */ }
+    try { rmSync(tmpPath, { force: true }); } catch { /* ignore cleanup errors */ }
 
     if (result.status === 0) {
       ok('Schema applied via Supabase CLI');
@@ -707,18 +708,18 @@ async function findExistingTestOrg(supabaseUrl, serviceKey) {
   }
 }
 
-async function ensureOrgSetupComplete(supabaseUrl, serviceKey, orgId) {
+async function ensureOrgVerified(supabaseUrl, serviceKey, orgId) {
   const now = new Date().toISOString();
   const res = await fetch(`${supabaseUrl}/rest/v1/organizations?id=eq.${orgId}`, {
     method: 'PATCH',
     headers: supabaseHeaders(serviceKey, { 'Prefer': 'return=minimal' }),
-    body: JSON.stringify({ setup_completed: true, updated_at: now }),
+    body: JSON.stringify({ verified_at: now, updated_at: now }),
   });
   if (!res.ok) {
     const text = await res.text();
-    warn(`Could not set setup_completed=true on org: ${res.status} ${text.slice(0, 200)}`);
+    warn(`Could not set verified_at on org: ${res.status} ${text.slice(0, 200)}`);
   } else {
-    ok('Organisation setup_completed = true');
+    ok('Organisation verified_at set');
   }
 }
 
@@ -726,7 +727,7 @@ async function createOrg(supabaseUrl, serviceKey, adminUserId) {
   const existing = await findExistingTestOrg(supabaseUrl, serviceKey);
   if (existing) {
     ok(`Organisation already exists  ${C.grey('(id: ' + existing.slice(0, 8) + '...)')}`);
-    await ensureOrgSetupComplete(supabaseUrl, serviceKey, existing);
+    await ensureOrgVerified(supabaseUrl, serviceKey, existing);
     return existing;
   }
 
@@ -735,7 +736,7 @@ async function createOrg(supabaseUrl, serviceKey, adminUserId) {
   const res = await supabaseUpsert(supabaseUrl, serviceKey, '/rest/v1/organizations', {
     name: TEST_ORG_NAME,
     slug,
-    setup_completed: true,
+    verified_at: now,
     created_by: adminUserId,
     created_at: now,
     updated_at: now,
@@ -780,25 +781,50 @@ async function deleteTestOrg(supabaseUrl, serviceKey) {
 
 // ─── HTTP API availability check ─────────────────────────────────────────
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 3000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
- * Quick check: can we reach the Supabase HTTP API (Kong) from this machine?
+ * Quick check: can we reach the Supabase HTTP API paths used by setup?
  * On Windows with Docker Desktop + WSL2, port-forwarding sometimes silently
  * drops HTTP traffic even though the port appears open in netstat.
+ *
+ * PostgREST may be healthy while Auth is degraded. In that case the setup user
+ * creation step would fail later, so include an Auth admin probe up front.
  *
  * @returns {Promise<boolean>}
  */
 async function isHttpApiWorking(supabaseUrl, serviceKey) {
   try {
-    const ctrl  = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3000);
-    const res = await fetch(`${supabaseUrl}/rest/v1/`, {
+    await fetchWithTimeout(`${supabaseUrl}/rest/v1/`, {
       headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
-      signal: ctrl.signal,
     });
-    clearTimeout(timer);
-    // Any real HTTP response (even 4xx) means Kong is reachable
-    return true;
-  } catch {
+  } catch (error) {
+    warn(`PostgREST probe failed: ${error?.message || error}`);
+    return false;
+  }
+
+  try {
+    const res = await fetchWithTimeout(`${supabaseUrl}/auth/v1/admin/users?per_page=1`, {
+      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+    });
+    if (res.ok) return true;
+
+    const body = await res.text().catch(() => '');
+    warn(`Auth admin probe failed: HTTP ${res.status} ${body.slice(0, 160)}`);
+    return false;
+  } catch (error) {
+    warn(`Auth admin probe failed: ${error?.message || error}`);
     return false;
   }
 }
@@ -906,21 +932,21 @@ function findOrCreateOrgViaSQL(dbContainer, adminUserId) {
 
   if (orgId) {
     ok(`Organisation already exists  ${C.grey('(id: ' + orgId.slice(0, 8) + '...)')}`);
-    // Ensure setup_completed = true
+    // Ensure the org is marked ready with the current verified_at flag.
     psqlQuery(dbContainer,
-      `UPDATE public.organizations SET setup_completed = true, updated_at = NOW()
+      `UPDATE public.organizations SET verified_at = NOW(), updated_at = NOW()
         WHERE id = '${e(orgId)}';`
     );
-    ok('Organisation setup_completed = true');
+    ok('Organisation verified_at set');
     return orgId;
   }
 
   const slug = TEST_ORG_NAME.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   orgId = psqlQuery(
     dbContainer,
-    `INSERT INTO public.organizations (name, slug, setup_completed, created_by, created_at, updated_at)
+    `INSERT INTO public.organizations (name, slug, verified_at, created_by, created_at, updated_at)
       VALUES (
-        '${e(TEST_ORG_NAME)}', '${e(slug)}', true,
+        '${e(TEST_ORG_NAME)}', '${e(slug)}', NOW(),
         '${e(adminUserId)}', NOW(), NOW()
       ) RETURNING id::text;`
   ).trim();
