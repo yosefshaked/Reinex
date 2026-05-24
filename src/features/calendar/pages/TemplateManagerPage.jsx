@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Plus, ArrowRight, Loader2, SlidersHorizontal, Sparkles, UsersRound } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import ErrorSupportCode from '@/components/ui/ErrorSupportCode.jsx';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
@@ -608,6 +609,7 @@ export default function TemplateManagerPage() {
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-destructive">
           <p className="text-base font-semibold">אירעה שגיאה בטעינת הנתונים.</p>
           <p className="mt-1 text-sm">נסו לרענן את הדף. אם הבעיה חוזרת, פנו לתמיכה.</p>
+          <ErrorSupportCode error={errorMsg} />
         </div>
       )}
 

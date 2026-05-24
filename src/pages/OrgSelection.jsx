@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Building2, LogOut, Users } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { mapSupabaseError } from '@/org/errors.js';
@@ -175,7 +176,7 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
               placeholder="למשל: מרכז הספורט העירוני"
               autoFocus
             />
-            {error ? <p className="text-xs text-red-600">{error}</p> : null}
+            {error ? <ErrorMessageText error={error} className="text-xs text-red-600" supportClassName="text-red-600" /> : null}
           </div>
           <div className="flex items-center justify-end gap-2">
             <Button type="button" variant="ghost" onClick={onClose} disabled={isSubmitting}>

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, CornerUpLeft, Info, Loader2, Plus, X } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet.jsx';

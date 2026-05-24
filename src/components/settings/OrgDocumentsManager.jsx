@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { 
   FileText, 
   Upload, 
@@ -728,7 +728,7 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
   }, [session, orgId, updateDocument, fetchDocuments]);
 
   // Handle delete
-  const handleDelete = useCallback(async (documentId, documentName) => {
+  const handleDelete = useCallback(async (documentId) => {
     if (!session || !orgId) return;
 
     setDeleteState(REQUEST_STATE.loading);
@@ -756,9 +756,9 @@ export default function OrgDocumentsManager({ session, orgId, membershipRole }) 
 
   const confirmDelete = useCallback(async () => {
     if (!deleteDialogDocument?.id) return;
-    const { id, name } = deleteDialogDocument;
+    const { id } = deleteDialogDocument;
     setDeleteDialogDocument(null);
-    await handleDelete(id, name);
+    await handleDelete(id);
   }, [deleteDialogDocument, handleDelete]);
 
   // Handle download

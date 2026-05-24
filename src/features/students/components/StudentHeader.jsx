@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, Copy, Loader2, Pause, Pencil, Play, Send } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import ProfileMasterStrip from '@/components/ui/ProfileMasterStrip.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { fetchStudentById, updateStudentStatus } from '@/features/students/api/students.js';

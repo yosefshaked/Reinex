@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { Megaphone, LogOut, PanelRightOpen, PanelRightClose, RefreshCw, UserCog, X } from "lucide-react"
-import { Toaster, toast } from "sonner"
+import { Toaster } from "@/components/ui/sonner.jsx"
+import { toast } from "@/lib/toast.jsx"
 
 import OrgSelectionBanner from "@/components/OrgSelectionBanner.jsx"
 import ChangelogModal from "@/components/ChangelogModal"

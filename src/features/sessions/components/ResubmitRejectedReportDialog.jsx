@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Calendar, Clock, RotateCcw, Loader2, MessageSquare } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import {
   Dialog,
   DialogContent,

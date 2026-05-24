@@ -13,10 +13,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { resolveApiErrorMessage } from '@/lib/error-support.js';
 
 function normalizeWaPhone(value) {
   const digits = String(value || '').replace(/[^\d]/g, '');
@@ -186,7 +187,7 @@ export default function SendRequiredFormDialog({
       toast.success('קישור הוכן. אפשר לשלוח בוואטסאפ.');
     } catch (error) {
       console.error('Failed to send required form', error);
-      const errorCode = error?.data?.message || error?.message;
+      const errorCode = resolveApiErrorMessage(error);
       toast.error(mapSendErrorMessage(errorCode));
     } finally {
       setSubmitting(false);

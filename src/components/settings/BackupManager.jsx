@@ -1,5 +1,5 @@
 import React from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { AlertTriangle, HardDrive, Loader2, RotateCw, ShieldCheck } from 'lucide-react';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { Button } from '@/components/ui/button';

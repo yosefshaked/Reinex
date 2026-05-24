@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Briefcase, Calendar, Mail, Trash2, UserRound } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client';
 import { toShekel, toAgorot } from '@/lib/currency.js';
 import CapabilityCompensationFields from './CapabilityCompensationFields.jsx';

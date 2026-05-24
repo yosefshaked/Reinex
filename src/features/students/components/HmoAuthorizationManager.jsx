@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Pencil, Plus } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,6 +15,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import CurrencyInput from '@/components/ui/CurrencyInput.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { resolveApiErrorMessage } from '@/lib/error-support.js';
 import { formatCurrency, isValidCurrencyInput, toAgorot, toShekel } from '@/lib/currency.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
@@ -334,7 +335,7 @@ export default function HmoAuthorizationManager({
       toast.success(form.id ? 'האישור עודכן וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.' : 'האישור נוצר וחיובי השיעורים הרלוונטיים עודכנו אוטומטית.');
     } catch (error) {
       console.error('Failed to save HMO authorization', error);
-      toast.error(mapAuthorizationErrorMessage(error?.data?.message || error?.message));
+      toast.error(mapAuthorizationErrorMessage(resolveApiErrorMessage(error)));
     } finally {
       setSaving(false);
     }

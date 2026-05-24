@@ -6,7 +6,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { normalizeMembershipRole, isAdminRole } from '@/features/students/utils/endpoints.js';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { updateStudentFromForm } from '@/features/students/api/students.js';
 import EditStudentModal from '@/features/admin/components/EditStudentModal.jsx';
 import StudentHeader from '@/features/students/components/StudentHeader.jsx';

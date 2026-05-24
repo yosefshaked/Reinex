@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Link2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client';
 
 function getMemberLabel(member) {

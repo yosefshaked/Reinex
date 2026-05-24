@@ -4,7 +4,9 @@ import { he } from 'date-fns/locale'
 import { useNavigate } from 'react-router-dom'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import ErrorSupportCode from '@/components/ui/ErrorSupportCode.jsx'
 import { fetchWeeklyComplianceView } from '@/api/weekly-compliance'
+import { resolveDisplayErrorMessage } from '@/lib/error-support.js'
 
 export function DayTimelineView({ orgId, date, onBack }) {
   const [data, setData] = useState(null)
@@ -25,7 +27,7 @@ export function DayTimelineView({ orgId, date, onBack }) {
         setData(result)
       } catch (err) {
         console.error('Failed to load day data:', err)
-        setError(err.message)
+        setError(err)
       } finally {
         setIsLoading(false)
       }
@@ -162,7 +164,8 @@ export function DayTimelineView({ orgId, date, onBack }) {
         ) : error ? (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-lg text-destructive">
             <p className="text-base font-semibold">אירעה שגיאה בטעינת הנתונים.</p>
-            <p className="mt-xs text-sm">{error}</p>
+            <p className="mt-xs text-sm">{resolveDisplayErrorMessage(error, 'נסו לרענן את הדף או לחזור מאוחר יותר.')}</p>
+            <ErrorSupportCode error={error} />
           </div>
         ) : !timelineData ? (
           <p className="text-sm text-muted-foreground">אין נתונים להצגה ליום זה</p>

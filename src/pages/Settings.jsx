@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

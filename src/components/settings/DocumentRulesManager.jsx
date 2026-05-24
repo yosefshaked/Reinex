@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { FileText, Plus, Trash2, Pencil, Loader2, AlertCircle, Tag, X, Users, Briefcase } from 'lucide-react';
 import { fetchSettingsValue, upsertSettings } from '@/features/settings/api/settings.js';
 import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';

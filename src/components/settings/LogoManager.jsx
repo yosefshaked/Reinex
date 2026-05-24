@@ -3,7 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { Image, Trash2, Loader2, AlertCircle, Link as LinkIcon } from 'lucide-react';
 import { authenticatedFetch } from '@/lib/api-client.js';
 

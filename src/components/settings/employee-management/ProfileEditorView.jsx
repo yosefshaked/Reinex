@@ -4,7 +4,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar.jsx';
 import { Loader2, Search, ChevronLeft, Save } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client';
 import { useInstructorTypes } from '@/features/instructors/hooks/useInstructorTypes.js';
 import { useInstructors } from '@/hooks/useOrgData.js';

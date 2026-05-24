@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { CheckCircle2, Loader2, Lock } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';

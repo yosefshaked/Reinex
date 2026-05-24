@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/auth/AuthContext';
 import { useOrg } from '@/org/OrgContext';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
+import { createSupportAwareApiError } from '@/lib/error-support.js';
 
 /**
  * Hook for managing guardians (parents, legal representatives)
@@ -35,14 +36,14 @@ export function useGuardians() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Failed to fetch guardians: ${response.status}`);
+        throw createSupportAwareApiError(errorData, response.status, `Failed to fetch guardians: ${response.status}`);
       }
 
       const data = await response.json();
       setGuardians(data.guardians || []);
     } catch (err) {
       console.error('[useGuardians] Fetch error:', err);
-      setError(err.message);
+      setError(err);
       setGuardians([]);
     } finally {
       setIsLoading(false);
@@ -76,7 +77,7 @@ export function useGuardians() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Failed to create guardian: ${response.status}`);
+        throw createSupportAwareApiError(errorData, response.status, `Failed to create guardian: ${response.status}`);
       }
 
       const data = await response.json();

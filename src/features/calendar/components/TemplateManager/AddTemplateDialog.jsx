@@ -13,7 +13,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { DAY_OPTIONS, normalizeDayToken } from '@/lib/day-of-week.js';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import {
   buildAvailabilityTimeSlots,
   getAvailabilityDayTokens,

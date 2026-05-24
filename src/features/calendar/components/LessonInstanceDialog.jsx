@@ -11,7 +11,8 @@ import { useOrg } from '@/org/OrgContext';
 import { useServices } from '@/hooks/useOrgData';
 import { useCalendarInstructors } from '../hooks/useCalendar';
 import { authenticatedFetch } from '@/lib/api-client.js';
-import { toast } from 'sonner';
+import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js';
+import { toast } from '@/lib/toast.jsx';
 import { Pencil, X, Check, XCircle, Loader2, AlertCircle, AlertTriangle, UserPlus, RotateCcw, Users } from 'lucide-react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Textarea } from '../../../components/ui/textarea';
@@ -193,6 +194,10 @@ function getDisplayParticipants(instance) {
 }
 
 function resolveMutationError(error) {
+  const supportMessage = resolveApiErrorMessage(error);
+  if (extractSupportCode(supportMessage)) {
+    return supportMessage;
+  }
   if (error?.message === 'missing_instructor_service_capability') {
     return 'למדריך/ה שנבחר/ה אין יכולת שירות פעילה עבור השירות הזה.';
   }
@@ -223,7 +228,7 @@ function resolveMutationError(error) {
   if (error?.message === 'failed_to_build_status_change_preview') {
     return 'לא ניתן היה לבנות תצוגה מקדימה לשינוי הסטטוס.';
   }
-  const cancellationConflictMessage = error?.data?.message || error?.message;
+  const cancellationConflictMessage = resolveApiErrorMessage(error);
   if (cancellationConflictMessage === 'instance_cancelled_has_attended_participants') {
     const names = Array.isArray(error?.data?.attended_participants)
       ? error.data.attended_participants.map((participant) => participant?.name).filter(Boolean)

@@ -1,4 +1,5 @@
 import React from 'react';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
 import { Label } from '@/components/ui/label';
 
 export default function FormField({
@@ -36,7 +37,14 @@ export default function FormField({
         <p id={descriptionId} className="text-xs text-neutral-500 text-start">{description}</p>
       ) : null}
       {error ? (
-        <p id={errorId} className="text-sm text-red-600 text-start" role="alert" aria-live="polite">{error}</p>
+        <ErrorMessageText
+          id={errorId}
+          error={error}
+          className="text-sm text-red-600 text-start"
+          supportClassName="text-red-600"
+          role="alert"
+          aria-live="polite"
+        />
       ) : null}
     </div>
   );

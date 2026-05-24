@@ -6,6 +6,7 @@ import { he } from 'date-fns/locale'
 
 import Card from '@/components/ui/CustomCard.jsx'
 import { Button } from '@/components/ui/button.jsx'
+import ErrorSupportCode from '@/components/ui/ErrorSupportCode.jsx'
 import { fetchWeeklyComplianceView } from '@/api/weekly-compliance.js'
 import InstructorLegend from './InstructorLegend.jsx'
 
@@ -309,6 +310,7 @@ export default function ModernWeeklyCalendar({ orgId }) {
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-lg text-destructive">
             <p className="text-base font-semibold">אירעה שגיאה בטעינת הנתונים.</p>
             <p className="mt-xs text-sm">נסו לרענן את הדף או לחזור מאוחר יותר.</p>
+            <ErrorSupportCode error={error} />
           </div>
         ) : null}
 

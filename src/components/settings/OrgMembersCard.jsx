@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertTriangle, Check, Clock, MailPlus, Pencil, RefreshCw, Trash2, UserMinus, X } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createInvitation, listPendingInvitations, revokeInvitation as revokeInvitationRequest } from '@/api/invitations.js';

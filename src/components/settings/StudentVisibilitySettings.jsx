@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { fetchSettingsValue, upsertSetting } from '@/features/settings/api/settings.js';
 
 const SETTING_KEY = 'instructors_can_view_inactive_students';

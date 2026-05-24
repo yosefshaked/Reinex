@@ -1,6 +1,8 @@
 import * as React from "react"
 import { cva } from "class-variance-authority";
 
+import ErrorSupportCode from "@/components/ui/ErrorSupportCode.jsx"
+import { extractSupportCode, stripSupportCode } from "@/lib/error-support.js"
 import { cn } from "@/lib/utils"
 
 const alertVariants = cva(
@@ -36,12 +38,20 @@ const AlertTitle = React.forwardRef(({ className, ...props }, ref) => (
 ))
 AlertTitle.displayName = "AlertTitle"
 
-const AlertDescription = React.forwardRef(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn("text-sm [&_p]:leading-relaxed", className)}
-    {...props} />
-))
+const AlertDescription = React.forwardRef(({ className, children, ...props }, ref) => {
+  const supportCode = typeof children === "string" ? extractSupportCode(children) : ""
+  const content = supportCode ? stripSupportCode(children) : children
+
+  return (
+    <div
+      ref={ref}
+      className={cn("text-sm [&_p]:leading-relaxed", className)}
+      {...props}>
+      {content}
+      {supportCode ? <ErrorSupportCode code={supportCode} /> : null}
+    </div>
+  )
+})
 AlertDescription.displayName = "AlertDescription"
 
 export { Alert, AlertTitle, AlertDescription }

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { useAccount } from '@/account/AccountContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import AccountProfileForm from '@/features/account/components/AccountProfileForm.jsx';

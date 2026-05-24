@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, UserCheck, UserPlus, Search, X } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,6 +14,7 @@ import { useStudentTags } from '@/features/students/hooks/useStudentTags.js';
 import { assignLooseSession, createAndAssignLooseSession } from '@/features/sessions/api/loose-sessions.js';
 import AddStudentForm from '@/features/admin/components/AddStudentForm.jsx';
 import { mapLooseSessionError } from '@/lib/error-mapping.js';
+import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js';
 import { DAY_NAMES } from '@/features/students/utils/schedule.js';
 import { formatStudentName } from '@/features/students/utils/name-utils.js';
 
@@ -159,8 +161,10 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
     } catch (err) {
       console.error('Failed to assign loose session', err);
       setState(REQUEST_STATE.error);
-      const serverMessage = err?.data?.message || err?.message || '';
-      const friendly = mapLooseSessionError(serverMessage, 'assign', 'שיוך הדיווח נכשל.');
+      const serverMessage = resolveApiErrorMessage(err);
+      const friendly = extractSupportCode(serverMessage)
+        ? serverMessage
+        : mapLooseSessionError(serverMessage, 'assign', 'שיוך הדיווח נכשל.');
       setError(friendly);
     }
   };
@@ -187,8 +191,10 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
       console.error('Failed to create and assign loose session', err);
       setState(REQUEST_STATE.error);
 
-      const serverMessage = err?.data?.message || err?.message || '';
-      const friendly = mapLooseSessionError(serverMessage, 'create', 'יצירת התלמיד ושיוך הדיווח נכשלו.');
+      const serverMessage = resolveApiErrorMessage(err);
+      const friendly = extractSupportCode(serverMessage)
+        ? serverMessage
+        : mapLooseSessionError(serverMessage, 'create', 'יצירת התלמיד ושיוך הדיווח נכשלו.');
       setError(friendly);
     } finally {
       setState(REQUEST_STATE.idle);
@@ -401,7 +407,7 @@ export default function ResolvePendingReportDialog({ open, onClose, report, mode
 
               {error && (
                 <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700 text-end">
-                  {error}
+                  <ErrorMessageText error={error} supportClassName="text-red-700" />
                 </div>
               )}
 

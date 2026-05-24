@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { authenticatedFetch } from '@/lib/api-client.js'
+import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js'
 import { AlertTriangle, Loader2, Lock, ShieldAlert } from 'lucide-react'
 import { getParticipantDisplayName } from '../utils/participantDisplay.js'
 
@@ -58,8 +59,11 @@ function formatCurrencyDelta(amount) {
 }
 
 function resolveCorrectionErrorMessage(error, participantsById = new Map()) {
-  const code = error?.data?.message || error?.message || ''
+  const code = resolveApiErrorMessage(error)
   const details = error?.data?.details || {}
+  if (extractSupportCode(code)) {
+    return code
+  }
   const blockingNames = Array.isArray(details?.participant_ids)
     ? details.participant_ids
       .map((participantId) => participantsById.get(participantId))
@@ -94,7 +98,7 @@ function resolveCorrectionErrorMessage(error, participantsById = new Map()) {
     return `${code}: ${details.participant_ids.length} משתתפים דורשים טיפול.`
   }
 
-  return error?.data?.message || error?.message || 'יצירת תצוגת מקדימה נכשלה.'
+  return resolveApiErrorMessage(error, 'יצירת תצוגת מקדימה נכשלה.')
 }
 
 export function LockedCorrectionPanel({ instance, orgId, forceOpen = false, onApplied }) {

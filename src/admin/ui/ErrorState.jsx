@@ -1,6 +1,8 @@
 import React from 'react';
 import { AlertOctagon, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import ErrorSupportCode from '@/components/ui/ErrorSupportCode.jsx';
+import { resolveDisplayErrorMessage } from '@/lib/error-support.js';
 import { cn } from '@/lib/utils';
 
 export default function ErrorState({
@@ -11,10 +13,11 @@ export default function ErrorState({
   retryLabel = 'Retry',
   className,
 }) {
-  const message =
+  const message = resolveDisplayErrorMessage(
     description ||
-    (error instanceof Error ? error.message : typeof error === 'string' ? error : null) ||
-    'An unexpected error occurred while loading this view.';
+      (error instanceof Error ? error.message : typeof error === 'string' ? error : null),
+    'An unexpected error occurred while loading this view.',
+  );
   return (
     <div
       className={cn(
@@ -27,6 +30,7 @@ export default function ErrorState({
       </div>
       <h3 className="mt-3 text-sm font-semibold text-rose-900">{title}</h3>
       <p className="mt-1 max-w-md text-sm text-rose-800/80">{message}</p>
+      <ErrorSupportCode error={description || error} className="mx-auto text-rose-800" />
       {onRetry ? (
         <Button variant="outline" size="sm" onClick={onRetry} className="mt-4">
           <RefreshCw className="mr-2 h-3.5 w-3.5" />

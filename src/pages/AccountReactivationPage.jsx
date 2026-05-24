@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RotateCcw } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { Button } from '@/components/ui/button';
 import { useAccount } from '@/account/AccountContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';

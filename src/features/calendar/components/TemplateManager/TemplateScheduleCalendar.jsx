@@ -12,7 +12,7 @@ import { DAY_OPTIONS, dayLabel, normalizeDayToken } from '@/lib/day-of-week.js';
 import { getAvailabilityWindowsForDay, isWithinAvailabilityWindows, timeToMinutes } from '@/lib/instructor-availability.js';
 import { cn } from '@/lib/utils';
 import { ceilClockTimeToGrid } from '@/lib/time-grid.js';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import '../reinex-fullcalendar.css';
 import './template-schedule-calendar.css';
 

@@ -13,10 +13,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { resolveApiErrorMessage } from '@/lib/error-support.js';
 
 function normalizeWaPhone(value) {
   const digits = String(value || '').replace(/[^\d]/g, '');
@@ -215,7 +216,7 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
       toast.success('קוד אימות נוצר. אפשר לשלוח בוואטסאפ.');
     } catch (error) {
       console.error('Failed to initiate form submission', error);
-      const errorCode = error?.data?.message || error?.message;
+      const errorCode = resolveApiErrorMessage(error);
       toast.error(mapSendFormErrorMessage(errorCode));
     } finally {
       setSubmitting(false);
@@ -242,7 +243,7 @@ export default function SendFormDialog({ open, onOpenChange, student = null, cli
       await loadTemplates();
     } catch (error) {
       console.error('Failed to migrate publish structure', error);
-      const errorCode = error?.data?.message || error?.message;
+      const errorCode = resolveApiErrorMessage(error);
       toast.error(mapSendFormErrorMessage(errorCode));
     } finally {
       setMigrating(false);

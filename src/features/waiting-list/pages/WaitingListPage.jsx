@@ -29,10 +29,11 @@ import { cn } from '@/lib/utils';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
+import { extractSupportCode, resolveApiErrorMessage } from '@/lib/error-support.js';
 import { normalizeMembershipRole, isAdminOrOffice, isAdminRole } from '@/features/students/utils/endpoints.js';
 import AddStudentForm, { AddStudentFormFooter } from '@/features/admin/components/AddStudentForm.jsx';
 import ReadOnlyFormAnswersPreview from '@/features/forms/components/ReadOnlyFormAnswersPreview.jsx';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { toAgorot } from '@/lib/currency.js';
 import { normalizePreferredTimeRangeToGrid, ceilClockTimeToGrid } from '@/lib/time-grid.js';
 
@@ -125,6 +126,9 @@ function buildInviteWhatsappMessage({ inviteUrl, expiresAt, serviceName, student
 }
 
 function mapWaitingListInviteErrorMessage(code) {
+  if (extractSupportCode(code)) {
+    return code;
+  }
   switch (String(code || '').trim()) {
     case 'missing_form_id':
     case 'missing_student_first_name':
@@ -398,6 +402,9 @@ function getHmoApprovalLabel(meta) {
 }
 
 function mapWaitingListSuggestionsErrorMessage(code) {
+  if (extractSupportCode(code)) {
+    return code;
+  }
   switch (String(code || '').trim()) {
     case 'waiting_list_entry_not_found':
       return 'רשומת ההמתנה כבר אינה זמינה. אפשר לרענן את התור ולבחור רשומה אחרת.';
@@ -678,7 +685,7 @@ export default function WaitingListPage() {
       } catch (error) {
         if (!cancelled) {
           setSuggestions([]);
-          setSuggestionsError(mapWaitingListSuggestionsErrorMessage(error?.data?.message || error?.message));
+          setSuggestionsError(mapWaitingListSuggestionsErrorMessage(resolveApiErrorMessage(error)));
           setSuggestionsMeta({ blockingReason: '', fixTargets: [] });
         }
       } finally {
@@ -851,7 +858,7 @@ export default function WaitingListPage() {
       }
       await loadEntries();
     } catch (error) {
-      const errorCode = error?.data?.message || error?.message;
+      const errorCode = resolveApiErrorMessage(error);
       setInviteError(mapWaitingListInviteErrorMessage(errorCode));
     } finally {
       setInviteSubmitting(false);
@@ -879,7 +886,7 @@ export default function WaitingListPage() {
       toast.success('מיגרציית מבנה הפרסום הושלמה');
       await loadWaitingListForms();
     } catch (error) {
-      const errorCode = error?.data?.message || error?.message;
+      const errorCode = resolveApiErrorMessage(error);
       setInviteError(mapWaitingListInviteErrorMessage(errorCode));
     } finally {
       setInviteMigrating(false);
@@ -1016,7 +1023,7 @@ export default function WaitingListPage() {
       }
       setIsAddStudentOpen(false);
     } catch (error) {
-      const apiMessage = error?.data?.message || error?.message;
+      const apiMessage = resolveApiErrorMessage(error);
       const apiCode = error?.data?.error || error?.data?.code || error?.code;
       let message = 'הוספת תלמיד נכשלה.';
       if (apiCode === 'identity_number_duplicate' || apiMessage === 'duplicate_identity_number') {
@@ -1165,9 +1172,9 @@ export default function WaitingListPage() {
       }
     } catch (error) {
       if (showLoadingToast) {
-        toast.error(error?.data?.message || error?.message || 'עדכון רשומת ההמתנה נכשל.', { id: toastId });
+        toast.error(resolveApiErrorMessage(error, 'עדכון רשומת ההמתנה נכשל.'), { id: toastId });
       } else {
-        toast.error(error?.data?.message || error?.message || 'עדכון רשומת ההמתנה נכשל.');
+        toast.error(resolveApiErrorMessage(error, 'עדכון רשומת ההמתנה נכשל.'));
       }
     }
   }, [activeOrgId, session]);

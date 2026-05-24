@@ -1,4 +1,5 @@
 import React from 'react';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import SystemAdminModuleShell from './SystemAdminModuleShell.jsx';
 
@@ -105,7 +106,9 @@ export default function GlobalSettingsView() {
       }
     >
       {error ? (
-        <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          <ErrorMessageText error={error} className="text-sm text-rose-700" supportClassName="text-rose-700" />
+        </div>
       ) : null}
 
       <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

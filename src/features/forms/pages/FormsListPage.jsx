@@ -4,6 +4,7 @@ import { Plus, FileText, Loader2, AlertCircle, MoreHorizontal, Trash2, Eye } fro
 import PageLayout from '@/components/ui/PageLayout.jsx';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -24,7 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
@@ -35,6 +36,13 @@ function getDraftDefaultsByUsage(usage) {
     return {
       name: 'טופס הצטרפות לרשימת המתנה',
       description: 'טופס ציבורי לאיסוף פרטי מתעניין/ת והעברה אוטומטית לרשימת ההמתנה.',
+    };
+  }
+
+  if (usage === 'required_form') {
+    return {
+      name: 'טופס חובה חדש',
+      description: 'טופס חובה המשויך לשירות ונשלח לתלמידים לפני שיבוץ או השתתפות.',
     };
   }
 
@@ -95,7 +103,8 @@ export default function FormsListPage() {
     setNewName((prev) => {
       const generalDefaults = getDraftDefaultsByUsage('general');
       const waitingListDefaults = getDraftDefaultsByUsage('waiting_list_intake');
-      if (!prev.trim() || prev === generalDefaults.name || prev === waitingListDefaults.name) {
+      const requiredFormDefaults = getDraftDefaultsByUsage('required_form');
+      if (!prev.trim() || prev === generalDefaults.name || prev === waitingListDefaults.name || prev === requiredFormDefaults.name) {
         return defaults.name;
       }
       return prev;
@@ -103,7 +112,8 @@ export default function FormsListPage() {
     setNewDescription((prev) => {
       const generalDefaults = getDraftDefaultsByUsage('general');
       const waitingListDefaults = getDraftDefaultsByUsage('waiting_list_intake');
-      if (!prev.trim() || prev === generalDefaults.description || prev === waitingListDefaults.description) {
+      const requiredFormDefaults = getDraftDefaultsByUsage('required_form');
+      if (!prev.trim() || prev === generalDefaults.description || prev === waitingListDefaults.description || prev === requiredFormDefaults.description) {
         return defaults.description;
       }
       return prev;
@@ -171,7 +181,9 @@ export default function FormsListPage() {
   }
 
   function getUsageLabel(value) {
-    return value === 'waiting_list_intake' ? 'טופס רשימת המתנה' : 'טופס כללי';
+    if (value === 'waiting_list_intake') return 'טופס רשימת המתנה';
+    if (value === 'required_form') return 'טופס חובה';
+    return 'טופס כללי';
   }
 
   if (loading && forms.length === 0) {
@@ -193,7 +205,7 @@ export default function FormsListPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center gap-3 p-12 text-center">
             <AlertCircle className="h-8 w-8 text-red-500" />
-            <p className="text-sm text-red-600">{error}</p>
+            <ErrorMessageText error={error} className="text-sm text-red-600" supportClassName="text-red-600" />
             <Button variant="outline" size="sm" onClick={loadForms}>
               נסה שוב
             </Button>
@@ -289,7 +301,7 @@ export default function FormsListPage() {
                     {form.description || '—'}
                   </TableCell>
                   <TableCell className="text-center">
-                    <Badge variant={form.form_usage === 'waiting_list_intake' ? 'default' : 'outline'}>
+                    <Badge variant={form.form_usage === 'waiting_list_intake' ? 'default' : form.form_usage === 'required_form' ? 'secondary' : 'outline'}>
                       {getUsageLabel(form.form_usage)}
                     </Badge>
                   </TableCell>
@@ -376,6 +388,7 @@ export default function FormsListPage() {
                 <SelectContent>
                   <SelectItem value="general">טופס כללי</SelectItem>
                   <SelectItem value="waiting_list_intake">טופס רשימת המתנה</SelectItem>
+                  <SelectItem value="required_form">טופס חובה</SelectItem>
                 </SelectContent>
               </Select>
             </div>

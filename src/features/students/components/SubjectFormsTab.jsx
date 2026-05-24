@@ -18,7 +18,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import SendFormDialog from '@/features/students/components/SendFormDialog.jsx';
 import ResendOtpDialog from '@/features/students/components/ResendOtpDialog.jsx';
 import SendRequiredFormDialog from '@/features/students/components/SendRequiredFormDialog.jsx';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { findQuestionLabel, normalizeFormSchema } from '@/features/forms/lib/form-schema.js';
 
 const WAITING_LIST_RELATIONSHIP_LABELS = {

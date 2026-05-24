@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardCopy, ClipboardCheck, Skull, TriangleAlert } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';

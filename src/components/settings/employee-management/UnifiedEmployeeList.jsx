@@ -25,7 +25,7 @@ import {
   UserPlus,
   UserX,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { authenticatedFetch } from '@/lib/api-client';
 import { useInstructors, useServices } from '@/hooks/useOrgData.js';
 import { cn } from '@/lib/utils';

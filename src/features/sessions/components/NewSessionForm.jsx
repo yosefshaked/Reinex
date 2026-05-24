@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils.js';
 import DayOfWeekSelect from '@/components/ui/DayOfWeekSelect.jsx';
 import PreanswersPickerDialog from './PreanswersPickerDialog.jsx';
 import { useLooseReportNameSuggestions } from '@/features/sessions/hooks/useLooseReportNameSuggestions.js';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
 
 export default function NewSessionForm({
   students = [],
@@ -1074,7 +1075,7 @@ export default function NewSessionForm({
 
       {error ? (
         <div className="rounded-lg bg-red-50 p-md text-sm text-red-700 text-end" role="alert">
-          {error}
+          <ErrorMessageText error={error} supportClassName="text-red-700" />
         </div>
       ) : null}
 

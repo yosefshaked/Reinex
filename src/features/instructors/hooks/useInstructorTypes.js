@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast.jsx';
 import { fetchSettingsValue, upsertSettings } from '@/features/settings/api/settings.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';

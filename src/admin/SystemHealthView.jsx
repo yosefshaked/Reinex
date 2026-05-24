@@ -1,4 +1,5 @@
 import React from 'react';
+import ErrorMessageText from '@/components/ui/ErrorMessageText.jsx';
 import { authenticatedFetch } from '@/lib/api-client.js';
 
 const HEALTH_ROUTE_CANDIDATES = ['system-admin-health', 'system-admin-health/'];
@@ -216,7 +217,9 @@ export default function SystemHealthView() {
       </div>
 
       {state.error ? (
-        <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{state.error}</p>
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          <ErrorMessageText error={state.error} className="text-sm text-rose-700" supportClassName="text-rose-700" />
+        </div>
       ) : null}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
